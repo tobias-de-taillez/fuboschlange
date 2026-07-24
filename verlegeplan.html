@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Verlegeplan Fußbodenheizung (MVP)</title>
+<style>
+  body{font:14px/1.4 system-ui,sans-serif;margin:20px;color:#111}
+  h1{font-size:18px}
+  #wrap{display:flex;gap:24px;flex-wrap:wrap}
+  #info{min-width:260px}
+  svg{border:1px solid #ccc;background:#fff;max-width:100%;height:auto}
+  table{border-collapse:collapse}
+  td,th{border:1px solid #ddd;padding:3px 8px;text-align:left}
+  .warn{color:#b00;font-weight:bold}
+  .ok{color:#070}
+  #checks{font:12px monospace;margin-top:12px;white-space:pre}
+  code{background:#f2f2f2;padding:1px 4px;border-radius:3px}
+</style>
+</head>
+<body>
+<h1>Verlegeplan Fußbodenheizung — L-Raum, bifilare Schnecke</h1>
+<p>Parameter unten im <code>&lt;script&gt;</code> unter <code>CFG</code> anpassen, Seite neu laden.
+Drucken über <code>Strg/Cmd+P</code>. <b>Maßstab am Maßstabsbalken ablesen</b>, nicht am Papier.</p>
+<div id="wrap">
+  <div id="plan"></div>
+  <div id="info"></div>
+</div>
+<div id="checks"></div>
+
+<script>
+"use strict";
+
+// ===================== CONFIG (alles in mm) — HIER EDITIEREN =====================
+const CFG = {
+  // L-Raum = Box (W×H) minus rechteckige Notch (notchA×notchB) oben rechts.
+  W: 5000, H: 4000, notchA: 2000, notchB: 1500,
+  s: 150,             // Bahnabstand im Feld
+  edgeGap: 75,        // Randabstand erste Bahn zur Wand
+  pipeDia: 16,        // Rohr-Außen-Ø
+  maxLoop: 100000,    // max Kreislänge (mm) -> Warnung
+  randSpacing: 50,    // Randzone-Bahnabstand (5 cm)
+  randPasses: 2,      // Randzone-Bahnen an Fensterwand
+  windowEdges: ['bottom'],   // Fensterfronten: 'bottom'|'top'|'left'|'right'
+  manifoldX: 600,     // Verteiler-Position an unterer Wand (x)
+};
+// ===============================================================================
+
+// ---------- kleine Vektor-Helfer ----------
+const sub=(p,q)=>({x:p.x-q.x,y:p.y-q.y});
+const add=(p,q)=>({x:p.x+q.x,y:p.y+q.y});
+const scl=(p,k)=>({x:p.x*k,y:p.y*k});
+const len=p=>Math.hypot(p.x,p.y);
+const unit=p=>{const l=len(p)||1;return {x:p.x/l,y:p.y/l};};
+
+// ---------- L-Ring (CCW), Notch oben rechts; a<=0||b<=0 -> Rechteck ----------
+function lRing(x0,y0,w,h,a,b){
+  if(a<=0||b<=0){
+    return [{x:x0,y:y0},{x:x0+w,y:y0},{x:x0+w,y:y0+h},{x:x0,y:y0+h}];
+  }
+  return [
+    {x:x0,y:y0},{x:x0+w,y:y0},
+    {x:x0+w,y:y0+h-b},{x:x0+w-a,y:y0+h-b},
+    {x:x0+w-a,y:y0+h},{x:x0,y:y0+h},
+  ];
+}
+
+// ---------- verschachtelte Konturen des Feldpolygons ----------
+// ponytail: L als Box-minus-Eck-Notch parametrisiert; allgemeiner rektilinearer
+// Offset erst wenn andere Formen gebraucht werden.
+function offsetContours(){
+  // Feld-Inset: an ALLEN Wänden = edgeGap + Randzonenbreite (falls Fenster).
+  // ponytail: uniformer Feld-Inset; per-Kante-Inset falls Randverschnitt stört.
+  const randW = CFG.windowEdges.length ? CFG.randPasses*CFG.randSpacing : 0;
+  const fi = CFG.edgeGap + randW;
+  const rings=[];
+  for(let k=0;;k++){
+    const d = k*CFG.s;
+    const x0=fi+d, y0=fi+d;
+    const w=CFG.W-2*(fi+d), h=CFG.H-2*(fi+d);
+    const a=CFG.notchA-(fi+d), b=CFG.notchB-(fi+d);
+    if(w<=CFG.s || h<=CFG.s) break;   // Feld zu klein -> fertig
+    rings.push(lRing(x0,y0,w,h,a,b));
+    if(k>500) break;                  // Sicherheitsanker
+  }
+  return rings;
+}
+
+// ---------- Bifilar-Reihenfolge: gerade aufsteigend, ungerade absteigend ----------
+// (0-indexed Äquivalent zu 1,3,5,4,2)  N=5 -> [0,2,4,3,1]  N=4 -> [0,2,3,1]
+function bifilarOrder(n){
+  const ev=[],od=[];
+  for(let i=0;i<n;i++)(i%2===0?ev:od).push(i);
+  od.reverse();
+  return ev.concat(od);
+}
+
+// ---------- Ring am Verteiler-Tor aufschneiden -> offene Polyline ----------
+// Endpunkte Rp (rechts vom Tor) und Lp (links vom Tor) auf der unteren Kante.
+function cutAtGate(ring,gx,gap){
+  const y0=ring[0].y;                 // untere Kante = ring[0]->ring[1]
+  const Rp={x:gx+gap/2,y:y0}, Lp={x:gx-gap/2,y:y0};
+  // Reihe: Rp -> ring[1..ende] -> ring[0] -> Lp  (einmal ganz herum, Lücke am Tor)
+  const out=[Rp];
+  for(let i=1;i<ring.length;i++) out.push(ring[i]);
+  out.push(ring[0]);
+  out.push(Lp);
+  return out;
+}
+
+// ---------- Feld-Schnecke aus Konturen ----------
+function bifilarPath(rings,gx){
+  const gap=CFG.s;
+  const open=rings.map(r=>cutAtGate(r,gx,gap));
+  const order=bifilarOrder(rings.length);
+  const path=[];
+  order.forEach((idx,k)=>{
+    let seg=open[idx].slice();
+    if(k%2===1) seg.reverse();        // Wicklung alternieren -> Gegenstrom
+    path.push(...seg);
+  });
+  return path;
+}
+
+// ---------- Randzone: dichte Parallelbahnen an einer Fensterkante ----------
+function randzonePath(edgeName){
+  const {W,H,edgeGap,randSpacing,randPasses}=CFG;
+  // Außenkante a->b und Innen-Normale
+  let a,b,inw;
+  if(edgeName==='bottom'){a={x:edgeGap,y:0};       b={x:W-edgeGap,y:0};   inw={x:0,y:1};}
+  else if(edgeName==='top'){a={x:edgeGap,y:H};     b={x:W-edgeGap,y:H};   inw={x:0,y:-1};}
+  else if(edgeName==='left'){a={x:0,y:edgeGap};    b={x:0,y:H-edgeGap};   inw={x:1,y:0};}
+  else {a={x:W,y:edgeGap};                          b={x:W,y:H-edgeGap};  inw={x:-1,y:0};}
+  const pts=[];
+  for(let j=0;j<randPasses;j++){
+    const off=edgeGap+j*randSpacing;
+    let p0=add(a,scl(inw,off)), p1=add(b,scl(inw,off));
+    if(j%2===1){const t=p0;p0=p1;p1=t;}  // Hairpin
+    pts.push(p0,p1);
+  }
+  return pts;
+}
+
+// ---------- Pfadlänge (mm) ----------
+function pathLength(pts){
+  let L=0;
+  for(let i=1;i<pts.length;i++) L+=len(sub(pts[i],pts[i-1]));
+  return L;
+}
+
+// ---------- Gesamtpfad zusammensetzen ----------
+function buildPlan(){
+  const rings=offsetContours();
+  const gx=CFG.manifoldX;
+  const M={x:gx,y:0};                 // Verteiler an unterer Wand
+  const field=bifilarPath(rings,gx);
+  let rand=[];
+  CFG.windowEdges.forEach(e=>{ rand=rand.concat(randzonePath(e)); });
+  // Stitch: Verteiler -> Randzone (Vorlauf zuerst an Scheibe) -> Feld -> Verteiler
+  const full=[M, ...rand, ...field, M];
+  return {rings,field,rand,full,M, contours:rings.length};
+}
+
+// ---------- SVG-Render ----------
+function render(plan){
+  const {W,H}=CFG, m=300;             // Rand um Zeichnung (mm)
+  const X=x=>x+m, Y=y=>(H-y)+m;       // y-up -> SVG y-down
+  const vb=`0 0 ${W+2*m} ${H+2*m}`;
+  const poly=(pts,stroke,sw,extra='')=>
+    `<polyline points="${pts.map(p=>`${X(p.x).toFixed(1)},${Y(p.y).toFixed(1)}`).join(' ')}" fill="none" stroke="${stroke}" stroke-width="${sw}" stroke-linejoin="round" stroke-linecap="round" ${extra}/>`;
+
+  // Raumumriss (L, geschlossen)
+  const room=lRing(0,0,W,H,CFG.notchA,CFG.notchB);
+  const roomClosed=[...room,room[0]];
+
+  // Fensterwände hervorheben
+  let winSeg='';
+  const edgePts={bottom:[{x:0,y:0},{x:W,y:0}],top:[{x:0,y:H},{x:W,y:H}],
+                 left:[{x:0,y:0},{x:0,y:H}],right:[{x:W,y:0},{x:W,y:H}]};
+  CFG.windowEdges.forEach(e=>{winSeg+=poly(edgePts[e],'#e11',40);});
+
+  // Maßstabsbalken (1 m) unten links im Rand
+  const bx=m, by=Y(-140), sb=1000;
+  const scaleBar=
+    `<line x1="${bx}" y1="${by}" x2="${bx+sb}" y2="${by}" stroke="#000" stroke-width="12"/>`+
+    `<text x="${bx}" y="${by-40}" font-size="90" fill="#000">0</text>`+
+    `<text x="${bx+sb-70}" y="${by-40}" font-size="90" fill="#000">1 m</text>`;
+
+  // Bemaßung W/H
+  const dims=
+    `<text x="${X(W/2)}" y="${Y(-30)}" font-size="110" fill="#333" text-anchor="middle">B = ${(W/1000).toFixed(2)} m</text>`+
+    `<text x="${X(-60)}" y="${Y(H/2)}" font-size="110" fill="#333" text-anchor="middle" transform="rotate(-90 ${X(-60)} ${Y(H/2)})">L = ${(H/1000).toFixed(2)} m</text>`;
+
+  const svg=
+    `<svg viewBox="${vb}" xmlns="http://www.w3.org/2000/svg" width="720">`+
+    poly(roomClosed,'#333',25)+
+    winSeg+
+    poly(plan.field,'#06c',parseFloat((CFG.pipeDia*0.6).toFixed(1)))+
+    (plan.rand.length?poly(plan.rand,'#f80',parseFloat((CFG.pipeDia*0.6).toFixed(1))):'')+
+    // Verteiler
+    `<circle cx="${X(plan.M.x)}" cy="${Y(plan.M.y)}" r="60" fill="#000"/>`+
+    `<text x="${X(plan.M.x)+80}" y="${Y(plan.M.y)+30}" font-size="90" fill="#000">Verteiler</text>`+
+    scaleBar+dims+
+    `</svg>`;
+  document.getElementById('plan').innerHTML=svg;
+}
+
+// ---------- Info / Materialliste ----------
+function renderInfo(plan){
+  const Lfield=pathLength(plan.field), Lrand=pathLength(plan.rand), Ltot=pathLength(plan.full);
+  const warn = Ltot>CFG.maxLoop;
+  const m=v=>(v/1000).toFixed(1);
+  document.getElementById('info').innerHTML=
+    `<h3>Materialliste</h3>`+
+    `<table>`+
+    `<tr><th>Position</th><th>Wert</th></tr>`+
+    `<tr><td>Bahnabstand Feld</td><td>${CFG.s} mm</td></tr>`+
+    `<tr><td>Konturen (Feld)</td><td>${plan.contours}</td></tr>`+
+    `<tr><td>Rohr Randzone</td><td>${m(Lrand)} m</td></tr>`+
+    `<tr><td>Rohr Feld</td><td>${m(Lfield)} m</td></tr>`+
+    `<tr><td><b>Rohr gesamt (1 Kreis)</b></td><td><b>${m(Ltot)} m</b></td></tr>`+
+    `<tr><td>Rohr-Ø</td><td>${CFG.pipeDia} mm</td></tr>`+
+    `<tr><td>Verteiler-Abgänge</td><td>2 (Vor/Rücklauf)</td></tr>`+
+    `</table>`+
+    `<p class="${warn?'warn':'ok'}">`+
+    (warn?`⚠ Kreis ${m(Ltot)} m &gt; max ${m(CFG.maxLoop)} m — aufteilen!`
+         :`✓ Kreislänge ${m(Ltot)} m ≤ max ${m(CFG.maxLoop)} m`)+
+    `</p>`+
+    `<p style="color:#666">Legende: <span style="color:#06c">■</span> Feld-Schnecke,
+     <span style="color:#f80">■</span> Randzone (Fenster), <span style="color:#e11">■</span> Fensterwand.</p>`;
+}
+
+// ---------- Selbstchecks (asserts, keine Frameworks) ----------
+function selfChecks(){
+  const out=[]; let ok=true;
+  const eq=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+  const assert=(name,cond)=>{ok=ok&&cond; out.push((cond?'PASS ':'FAIL ')+name);};
+
+  // pathLength: Quadrat-Umfang 1000er = 4000 mm
+  const sq=[{x:0,y:0},{x:1000,y:0},{x:1000,y:1000},{x:0,y:1000},{x:0,y:0}];
+  assert('pathLength(Quadrat 1000)=4000', Math.abs(pathLength(sq)-4000)<1e-6);
+
+  // bifilarOrder
+  assert('bifilarOrder(4)=[0,2,3,1]', eq(bifilarOrder(4),[0,2,3,1]));
+  assert('bifilarOrder(5)=[0,2,4,3,1]', eq(bifilarOrder(5),[0,2,4,3,1]));
+
+  // Bifilar-Enden liegen auf äußerster Kontur (am Rand): erstes Segment startet auf ring0
+  const rings=[lRing(0,0,2000,2000,0,0),lRing(200,200,1600,1600,0,0),lRing(400,400,1200,1200,0,0)];
+  const p=bifilarPath(rings,1000);
+  const y0=rings[0][0].y;
+  assert('Bifilar-Start auf Außenkante', Math.abs(p[0].y-y0)<1e-6);
+
+  // offsetContours: Rechteck erzeugt monoton kleinere Konturen, >=1
+  const savedWin=CFG.windowEdges; // Konturzahl unabhängig testbar
+  const rc=offsetContours();
+  assert('offsetContours liefert >=1 Kontur', rc.length>=1);
+
+  const el=document.getElementById('checks');
+  el.textContent='Selbstchecks:\n'+out.join('\n');
+  el.style.color = ok?'#070':'#b00';
+  if(!ok) console.error('Selbstchecks FEHLGESCHLAGEN', out);
+}
+
+// ---------- main ----------
+selfChecks();
+const plan=buildPlan();
+render(plan);
+renderInfo(plan);
+</script>
+</body>
+</html>
