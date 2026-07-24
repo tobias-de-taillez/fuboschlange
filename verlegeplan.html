@@ -196,24 +196,25 @@ const randWidth=()=>S.windowEdges.length ? S.randPasses*S.randSpacing : 0;
 const LANE=()=>Math.max(25,S.pipeDia*1.6);          // Spurabstand im Korridor
 const laneCount=()=>3*Math.max(1,curLoopCount);     // Vorlauf/Rücklauf/Übergang je Kreis
 const corridorW=()=>laneCount()*LANE();
-// lane -1 = wandnaher Kanal unter allem (Rechteck->Rechteck-Übergänge)
-const laneY=i=>i<0 ? S.edgeGap*0.4 : S.edgeGap+randWidth()+(i+0.5)*LANE();
+// lane -1 = Übergangskanal für Rechteck->Rechteck-Verbinder. Liegt ZWISCHEN
+// Randzone und Korridor: unterhalb der Randzone würde jeder Verbinder die
+// Fensterbahnen durchstoßen.
+const laneY=i=>i<0 ? S.edgeGap+randWidth()-LANE()/2
+                   : S.edgeGap+randWidth()+(i+0.5)*LANE();
 let curLoopCount=1;                                 // von autofit gesetzt (Korridorbreite)
 const fieldInset=()=>S.edgeGap+randWidth()+corridorW();
 
-// verschachtelte Rechteck-Konturen. rect: {x0,y0,w,h}
-// ponytail: uniformer Feld-Inset; per-Kante-Inset falls Verschnitt stört.
-function contours(rect){
-  const fi = fieldInset();
-  const rings=[];
-  for(let k=0;k<500;k++){
-    const d=fi+k*S.s, w=rect.w-2*d, h=rect.h-2*d;
-    // 2*s: ein Ring braucht Platz für Hin- UND Rückweg. Flachere Ringe entarten
-    // (Ober-/Unterkante kollabieren) und die Ring-Sprünge treffen fremde Bahnen.
-    if(w<=2*S.s||h<=2*S.s) break;
-    rings.push(rectRing(rect.x0+d,rect.y0+d,w,h));
+// Echte Bahnenzahl: Probe-Linie quer durchs Rechteck, gezählt wird jedes
+// Rohr, das sie schneidet (nur Feldbahnen, Korridor/Kanal unterhalb ignoriert).
+function passCount(field,rect){
+  const px=rect.x0+rect.w/2+S.s*0.6;          // neben dem Torkanal in der Mitte
+  const yMin=fieldInset()-1;
+  let n=0;
+  for(let i=0;i<field.length-1;i++){
+    const a=field[i],b=field[i+1];
+    if((a.x-px)*(b.x-px)<0 && Math.min(a.y,b.y)>yMin) n++;
   }
-  return rings;
+  return n;
 }
 
 // Bifilar-Reihenfolge (nur noch für Selbstchecks / Doku der Verlegelogik)
@@ -370,7 +371,7 @@ function buildLoops(groups){
   const M=snappedManifold();
   const detour = M.y > fieldInset();          // Verteiler nicht an unterer Wand
 
-  // Stufe 1: Felder + Randzonen (noch ohne Anbindung)
+  // Stufe 1: Felder (noch ohne Randzone/Anbindung)
   const raw=groups.map((rects,gi)=>{
     let field=[], joins=[];
     rects.forEach(r=>{                                    // Rechtecke in Serie
@@ -379,24 +380,52 @@ function buildLoops(groups){
       if(field.length) joins.push({at:field.length,from:field[field.length-1],to:sp[0]});
       field=field.concat(sp);
     });
-    let rand=[];                                          // Randzone global an Kreis 0
-    if(gi===0) S.windowEdges.forEach(e=>{ rand=rand.concat(randzonePath(e)); });
-    const head = rand.length?rand[0]:field[0];
-    const tail = field.length?field[field.length-1]:(rand.length?rand[rand.length-1]:null);
-    return {gi,rects,field,rand,joins,head,tail};
+    return {gi,rects,field,joins,rand:[]};
   });
 
-  // Stufe 2: Spuren nach Distanz zum Verteiler — der NÄCHSTE Anschluss bekommt die
-  // innerste Spur. So muss keine Stichleitung über eine fremde Spur steigen
-  // => Leitungen verschiedener Kreise kreuzen sich nicht.
+  // Randzone dem Kreis mit dem anker-fernsten Feld-Eintritt zuordnen: dessen
+  // Steigleitung aus dem Korridor liegt außerhalb aller fremden Korridor-Spans
+  // und kreuzt daher nichts. (Vorlauf geht weiterhin zuerst an die Scheibe.)
+  const wallX = M.x<S.W/2 ? 0 : S.W;
+  const anchor = detour ? wallX : M.x;
+  if(S.windowEdges.length){
+    let owner=-1,best=-1;
+    raw.forEach((r,i)=>{ if(r.field.length){
+      const d=Math.abs(r.field[0].x-anchor); if(d>best){best=d;owner=i;} }});
+    if(owner<0&&raw.length) owner=0;
+    if(owner>=0) S.windowEdges.forEach(e=>{ raw[owner].rand=raw[owner].rand.concat(randzonePath(e)); });
+  }
+  raw.forEach(r=>{
+    r.head = r.rand.length?r.rand[0]:r.field[0];
+    r.tail = r.field.length?r.field[r.field.length-1]:(r.rand.length?r.rand[r.rand.length-1]:null);
+  });
+
+  // Stufe 2: Spur-Vergabe so, dass keine Stichleitung über eine fremde Spur muss.
+  // Verteiler unten: fernstes Ziel -> innerste Spur (Spans um M.x schachteln sich).
+  // Detour (Seiten-/Oberwand): die Wand-Vertikale läuft bei x=laneY(lane); das
+  // WANDNÄCHSTE Ziel braucht die WANDNÄCHSTE Spur, sonst schneidet die Vertikale
+  // eines inneren Anschlusses die Korridor-Horizontalen der äußeren.
   const conns=[];
   raw.forEach(r=>{
     if(!r.head) return;
     conns.push({r,kind:'in',t:r.head});
-    if(r.rand.length&&r.field.length) conns.push({r,kind:'mid',t:r.field[0]});
+    if(r.rand.length&&r.field.length)
+      conns.push({r,kind:'mid',t:r.field[0],src:r.rand[r.rand.length-1]});
     conns.push({r,kind:'out',t:r.tail});
   });
-  conns.sort((a,b)=>Math.abs(b.t.x-M.x)-Math.abs(a.t.x-M.x));
+  // Fern -> innerste Spur (Spans schachteln sich um M.x). Ausnahme im Detour-Fall:
+  // Anschlüsse, die die Ecke an der Detour-Wand berühren (Randzonen-Anschluss),
+  // müssen UNTER alle Wand-Vertikalen — und untereinander: je weiter ihre
+  // Horizontale reicht, desto innerer die Spur. Sonst durchsticht jede
+  // Wand-Vertikale die weit reichende Ecken-Horizontale.
+  const laneKey=c=>{
+    if(detour){
+      const near=Math.min(Math.abs(c.t.x-wallX), c.src?Math.abs(c.src.x-wallX):Infinity);
+      if(near<fieldInset()) return -1e9-Math.abs(c.t.x-wallX);   // Reach absteigend
+    }
+    return -Math.abs(c.t.x-M.x);
+  };
+  conns.sort((a,b)=>laneKey(a)-laneKey(b));
   const laneOf={};
   conns.forEach((c,i)=>{ c.lane=Math.min(i,laneCount()-1); laneOf[c.r.gi+'/'+c.kind+'/'+(c.join?c.join.at:'')]=c.lane; });
 
@@ -415,7 +444,7 @@ function buildLoops(groups){
     const mid = (r.rand.length&&r.field.length)
       ? routeVia(r.rand[r.rand.length-1],r.field[0],L('mid'),false).slice(1,-1) : [];
     const pts=[...leadIn.slice(0,-1),...r.rand,...mid,...field,...leadOut.slice(1)];
-    const rings=r.rects.reduce((a,x)=>a+contours(x).length,0);
+    const rings=r.rects.reduce((a,x)=>a+passCount(field,x),0);   // echte Bahnenzahl
     return {pts, field, rand:r.rand, leadIn, leadOut, mid, rings, length:fillet(pts,S.bendRadius).length};
   }).filter(l=>l.pts.length>1);
 }
@@ -526,7 +555,7 @@ function renderResults(plan){
     card('Rohr gesamt',m(total),'m')+
     card('Bahnabstand',S.s,'mm')+
     card('Biegeradius',S.bendRadius,'mm')+
-    card('Konturen',contoursSum,'Bahnen');
+    card('Bahnen',contoursSum,'im Feld');
 
   let rows=plan.loops.map((l,i)=>{
     const ok=l.length<=S.maxLoop;
