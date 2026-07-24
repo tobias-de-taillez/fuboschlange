@@ -69,13 +69,17 @@
   .note.ok{background:#f0fdf4;color:#166534;border:1px solid #bbf7d0}
   .legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:10px;font-size:12.5px;color:#475569}
   .legend span{display:inline-flex;align-items:center}
-  @media print{aside,header .sub,.badge{display:none}.app{grid-template-columns:1fr}main{padding:0}}
+  .pbtn{margin-left:auto;padding:7px 14px;border:1px solid var(--line);border-radius:8px;background:#fff;font:inherit;cursor:pointer;color:#334155}
+  .pbtn:hover{background:#f1f5f9}
+  @media print{aside,header .sub,.badge,.pbtn{display:none}.app{grid-template-columns:1fr}main{padding:0}
+    .planwrap,.card,.loops{box-shadow:none;break-inside:avoid}}
 </style>
 </head>
 <body>
 <header>
   <h1>Verlegeplan Fußbodenheizung</h1>
   <span class="sub">Bifilare Schnecke · L-Raum · Randzone · Autofit bis 3 Heizkreise</span>
+  <button id="printBtn" class="pbtn" onclick="window.print()">Drucken / PDF</button>
 </header>
 
 <div class="app">
@@ -187,42 +191,67 @@ function lRing(x0,y0,w,h,a,b){
     {x:x0+w-a,y:y0+h},{x:x0,y:y0+h},
   ];
 }
+// Zonenbreiten von der Wand nach innen: Randzone -> Leitungskorridor -> Feld.
+const randWidth=()=>S.windowEdges.length ? S.randPasses*S.randSpacing : 0;
+const LANE=()=>Math.max(25,S.pipeDia*1.6);          // Spurabstand im Korridor
+const laneCount=()=>3*Math.max(1,curLoopCount);     // Vorlauf/Rücklauf/Übergang je Kreis
+const corridorW=()=>laneCount()*LANE();
+// lane -1 = wandnaher Kanal unter allem (Rechteck->Rechteck-Übergänge)
+const laneY=i=>i<0 ? S.edgeGap*0.4 : S.edgeGap+randWidth()+(i+0.5)*LANE();
+let curLoopCount=1;                                 // von autofit gesetzt (Korridorbreite)
+const fieldInset=()=>S.edgeGap+randWidth()+corridorW();
+
 // verschachtelte Rechteck-Konturen. rect: {x0,y0,w,h}
-// ponytail: uniformer Feld-Inset (edgeGap + Randzonenbreite); per-Kante-Inset falls Verschnitt stört.
+// ponytail: uniformer Feld-Inset; per-Kante-Inset falls Verschnitt stört.
 function contours(rect){
-  const randW = S.windowEdges.length ? S.randPasses*S.randSpacing : 0;
-  const fi = S.edgeGap + randW;
+  const fi = fieldInset();
   const rings=[];
   for(let k=0;k<500;k++){
     const d=fi+k*S.s, w=rect.w-2*d, h=rect.h-2*d;
-    if(w<=S.s||h<=S.s) break;
+    // 2*s: ein Ring braucht Platz für Hin- UND Rückweg. Flachere Ringe entarten
+    // (Ober-/Unterkante kollabieren) und die Ring-Sprünge treffen fremde Bahnen.
+    if(w<=2*S.s||h<=2*S.s) break;
     rings.push(rectRing(rect.x0+d,rect.y0+d,w,h));
   }
   return rings;
 }
 
-// Bifilar: gerade aufsteigend dann ungerade absteigend (0-idx zu 1,3,5,4,2)
+// Bifilar-Reihenfolge (nur noch für Selbstchecks / Doku der Verlegelogik)
 function bifilarOrder(n){const ev=[],od=[];for(let i=0;i<n;i++)(i%2===0?ev:od).push(i);od.reverse();return ev.concat(od);}
-// Rechteck-Ring am Boden-Mittelpunkt aufschneiden. Alle konzentrischen Ringe
-// teilen dieselbe Mitte-x -> gerader Torkanal, kein Drift -> kreuzungsfrei.
-function cutAtGate(ring,gap){
-  const bl=ring[0], br=ring[1], eLen=br.x-bl.x;   // untere Kante bl->br
-  const gg=Math.min(gap, eLen*0.8);
-  const cx=(bl.x+br.x)/2, y=bl.y;
-  const Rp={x:cx+gg/2,y}, Lp={x:cx-gg/2,y};
-  const out=[Rp];
-  for(let k=1;k<ring.length;k++) out.push(ring[k]);
-  out.push(ring[0]);
-  out.push(Lp);
-  return out;
+
+// Ein Spiralarm: rechteckige archimedische Spirale. Der Wandabstand wächst pro
+// Vierteldrehung um step/4, also um step pro voller Umdrehung. Kein Aufschneiden
+// und kein radialer Sprung -> der Arm kann sich per Konstruktion nicht kreuzen.
+function armSteps(rect,d0,step){                  // wie viele Vierteldrehungen passen
+  const at=d=>({w:rect.w-2*d, h:rect.h-2*d});
+  let k=0;
+  for(;k<400;k++){ const e=at(d0+k*step/4); if(e.w<=step/2||e.h<=step/2) break; }
+  return k;
 }
-function bifilarPath(rings){
-  if(!rings.length) return [];
-  const open=rings.map(r=>cutAtGate(r,S.s));
-  const order=bifilarOrder(rings.length), path=[];
-  order.forEach((idx,k)=>{ let seg=open[idx].slice(); if(k%2===1) seg.reverse(); path.push(...seg); });
-  return path;
+function spiralArm(rect,d0,step,n,inward){
+  const pts=[], cx=rect.x0+rect.w/2;
+  const at=d=>({x0:rect.x0+d, y0:rect.y0+d, x1:rect.x0+rect.w-d, y1:rect.y0+rect.h-d});
+  if(n<=0) return pts;
+  pts.push({x:cx,y:at(d0).y0});                   // Start: untere Kante, Mitte
+  for(let k=0;k<n;k++){
+    const e=at(d0+k*step/4);
+    pts.push([{x:e.x1,y:e.y0},{x:e.x1,y:e.y1},{x:e.x0,y:e.y1},{x:e.x0,y:e.y0}][k%4]);
+  }
+  return inward?pts:pts.reverse();
 }
+// Bifilare Doppelspirale: Vorlauf rein (Bahnen 0,2,4...), Rücklauf raus
+// (Bahnen 1,3,5...), immer um s versetzt -> Gegenstrom, beide Enden außen.
+// Gleiche Schrittzahl für beide Arme, sonst enden sie unterschiedlich tief und
+// der U-Turn wird zu einer langen Diagonale quer durch die Mitte.
+function doubleSpiral(rect,d0,s){
+  const n=Math.min(armSteps(rect,d0,2*s),armSteps(rect,d0+s,2*s));
+  if(n<=0) return [];
+  const inArm=spiralArm(rect,d0,2*s,n,true), outArm=spiralArm(rect,d0+s,2*s,n,false);
+  if(!inArm.length) return [];
+  if(!outArm.length) return inArm;
+  return [...inArm,...outArm];                    // Innen verbunden (U-Turn)
+}
+function bifilarPath(rect){ return doubleSpiral(rect,fieldInset(),S.s); }
 
 // ================= Randzone =================
 function randzonePath(edgeName){
@@ -282,12 +311,23 @@ function segCrossPt(p1,p2,p3,p4){
   }
   return null;
 }
-function fieldCrossings(pts){
-  const hits=[];
+// Kreuzungen innerhalb eines Pfads. near = Verteiler-Punkt: Kreuzungen im
+// Anbinde-Nahbereich werden ignoriert (dort liegen Rohre real übereinander).
+function fieldCrossings(pts,near){
+  const hits=[], R=near?400:0;
   for(let i=0;i<pts.length-1;i++)for(let j=i+2;j<pts.length-1;j++){
     if(i===0&&j===pts.length-2)continue;
     const c=segCrossPt(pts[i],pts[i+1],pts[j],pts[j+1]);
-    if(c) hits.push(c);
+    if(c&&(!near||len(sub(c,near))>R)) hits.push(c);
+  }
+  return hits;
+}
+// Kreuzungen zwischen zwei verschiedenen Kreisen
+function crossBetween(a,b,near){
+  const hits=[], R=near?400:0;
+  for(let i=0;i<a.length-1;i++)for(let j=0;j<b.length-1;j++){
+    const c=segCrossPt(a[i],a[i+1],b[j],b[j+1]);
+    if(c&&(!near||len(sub(c,near))>R)) hits.push(c);
   }
   return hits;
 }
@@ -314,37 +354,81 @@ function partition(N){
     return [[{...Lz,w:Lz.w/2}],[{x0:Lz.x0+Lz.w/2,y0:Lz.y0,w:Lz.w/2,h:Lz.h}],[Rz]];
   return [[Lz],[{...Rz,w:Rz.w/2}],[{x0:Rz.x0+Rz.w/2,y0:Rz.y0,w:Rz.w/2,h:Rz.h}]];
 }
+// Manhattan-Weg über eine reservierte Korridor-Spur (statt diagonal durchs Feld).
+// wallDetour: Startpunkt liegt hinter dem Feld (Verteiler an Seiten-/Oberwand)
+// -> erst an der Seitenwand entlang, sonst würde die Vertikale das Feld zerschneiden.
+function routeVia(a,b,lane,wallDetour){
+  const yC=laneY(lane), pts=[a];
+  if(wallDetour){
+    const xW=(a.x<S.W/2)?laneY(lane):S.W-laneY(lane);
+    pts.push({x:xW,y:a.y},{x:xW,y:yC});
+  }else if(Math.abs(a.y-yC)>1) pts.push({x:a.x,y:yC});
+  pts.push({x:b.x,y:yC},b);
+  return pts;
+}
 function buildLoops(groups){
   const M=snappedManifold();
-  return groups.map((rects,gi)=>{
-    let field=[];
+  const detour = M.y > fieldInset();          // Verteiler nicht an unterer Wand
+
+  // Stufe 1: Felder + Randzonen (noch ohne Anbindung)
+  const raw=groups.map((rects,gi)=>{
+    let field=[], joins=[];
     rects.forEach(r=>{                                    // Rechtecke in Serie
-      const sp=bifilarPath(contours(r));
+      const sp=bifilarPath(r);
       if(!sp.length) return;
-      if(field.length){
-        // Verbinder durch unteren Rand-Kanal (unter allen Spiralen) -> kreuzt nichts
-        const prev=field[field.length-1], ych=S.edgeGap*0.5;
-        field.push({x:prev.x,y:ych},{x:sp[0].x,y:ych});
-      }
+      if(field.length) joins.push({at:field.length,from:field[field.length-1],to:sp[0]});
       field=field.concat(sp);
     });
-    // Randzone nur an Kreis 0 (global), damit Fensterfront durchläuft
-    let rand=[];
+    let rand=[];                                          // Randzone global an Kreis 0
     if(gi===0) S.windowEdges.forEach(e=>{ rand=rand.concat(randzonePath(e)); });
-    const pts = field.length ? [M,...rand,...field,M] : (rand.length?[M,...rand,M]:[]);
-    const rings = rects.reduce((a,r)=>a+contours(r).length,0);
-    const L = fillet(pts,S.bendRadius).length;
-    return {pts, field, rand, rings, length:L};
+    const head = rand.length?rand[0]:field[0];
+    const tail = field.length?field[field.length-1]:(rand.length?rand[rand.length-1]:null);
+    return {gi,rects,field,rand,joins,head,tail};
+  });
+
+  // Stufe 2: Spuren nach Distanz zum Verteiler — der NÄCHSTE Anschluss bekommt die
+  // innerste Spur. So muss keine Stichleitung über eine fremde Spur steigen
+  // => Leitungen verschiedener Kreise kreuzen sich nicht.
+  const conns=[];
+  raw.forEach(r=>{
+    if(!r.head) return;
+    conns.push({r,kind:'in',t:r.head});
+    if(r.rand.length&&r.field.length) conns.push({r,kind:'mid',t:r.field[0]});
+    conns.push({r,kind:'out',t:r.tail});
+  });
+  conns.sort((a,b)=>Math.abs(b.t.x-M.x)-Math.abs(a.t.x-M.x));
+  const laneOf={};
+  conns.forEach((c,i)=>{ c.lane=Math.min(i,laneCount()-1); laneOf[c.r.gi+'/'+c.kind+'/'+(c.join?c.join.at:'')]=c.lane; });
+
+  // Stufe 3: routen und zusammensetzen
+  return raw.map(r=>{
+    if(!r.head) return {pts:[]};
+    const L=(kind,at='')=>laneOf[r.gi+'/'+kind+'/'+at]??0;
+    let field=r.field.slice();
+    // Rechteck->Rechteck-Übergänge im wandnahen Kanal (unter allem) -> kreuzt nichts.
+    // Rückwärts einsetzen, damit die gespeicherten Indizes gültig bleiben.
+    r.joins.slice().reverse().forEach(j=>{
+      field.splice(j.at,0,...routeVia(j.from,j.to,-1,false).slice(1,-1));
+    });
+    const leadIn  = routeVia(M,r.head,L('in'),detour);
+    const leadOut = routeVia(M,r.tail,L('out'),detour).reverse();
+    const mid = (r.rand.length&&r.field.length)
+      ? routeVia(r.rand[r.rand.length-1],r.field[0],L('mid'),false).slice(1,-1) : [];
+    const pts=[...leadIn.slice(0,-1),...r.rand,...mid,...field,...leadOut.slice(1)];
+    const rings=r.rects.reduce((a,x)=>a+contours(x).length,0);
+    return {pts, field, rand:r.rand, leadIn, leadOut, mid, rings, length:fillet(pts,S.bendRadius).length};
   }).filter(l=>l.pts.length>1);
 }
 function autofit(){
   if(S.loopMode!=='auto'){
+    curLoopCount=+S.loopMode;                 // Korridorbreite vor Konturen festlegen
     const loops=buildLoops(partition(+S.loopMode));
     const maxLen=Math.max(0,...loops.map(l=>l.length));
     return {N:loops.length,loops,ok:maxLen<=S.maxLoop,forced:true};
   }
   let last=null;
   for(let N=1;N<=3;N++){
+    curLoopCount=N;
     const loops=buildLoops(partition(N));
     const maxLen=Math.max(0,...loops.map(l=>l.length));
     last={N:loops.length,loops,ok:maxLen<=S.maxLoop,forced:false};
@@ -383,11 +467,10 @@ function draw(plan){
   plan.loops.forEach((lp,i)=>{
     loopPaths+=path(lp.field,LOOPHEX[i%3],sw);
     if(lp.rand.length) loopPaths+=path(lp.rand,'var(--rand)',sw);
-    // Leiter Verteiler->Loop-Start (dünn, gestrichelt)
-    const start=lp.rand.length?lp.rand[0]:lp.field[0];
-    const end=lp.field.length?lp.field[lp.field.length-1]:lp.rand[lp.rand.length-1];
-    if(start) leaders+=line(M,start,'#94a3b8',5,'stroke-dasharray="20 14"');
-    if(end)   leaders+=line(end,M,'#94a3b8',5,'stroke-dasharray="20 14"');
+    // Anbindeleitungen im Korridor (echtes Rohr, dünner gezeichnet)
+    [lp.leadIn,lp.leadOut,lp.mid].forEach(seg=>{
+      if(seg&&seg.length>1) leaders+=path(seg,LOOPHEX[i%3],sw*0.75);
+    });
   });
 
   // Maßstabsbalken (1 m)
@@ -460,10 +543,13 @@ function renderResults(plan){
     `<span><span class="dot" style="background:var(--window)"></span>Fensterwand</span>`+
     `<span><span class="dot" style="background:#94a3b8"></span>Verteiler-Leitung</span>`;
 
-  const ov=(plan.overlaps||[]).length;
+  const ov=(plan.overlaps||[]).length, lc=plan.leadCross||0;
+  const leadTxt = lc>0
+    ? ` Anbindeleitungen: ${lc} Kreuzungspunkt(e) — dort werden Rohre übereinander geführt (Baupraxis).`
+    : ' Auch die Anbindeleitungen kreuzen sich nicht.';
   const ovNote = ov>0
-    ? `<div class="note warn">⚠ E2E-Check: ${ov} Bahnen-Überlappung(en) — im Plan rot markiert. Sollte 0 sein; Parameter prüfen.</div>`
-    : `<div class="note ok">✓ E2E-Check: keine Bahnen-Überlappung — Spiralen kreuzungsfrei.</div>`;
+    ? `<div class="note warn">⚠ E2E-Check: ${ov} Überlappung(en) in den Verlegespiralen — im Plan rot markiert. Muss 0 sein; Parameter prüfen.</div>`
+    : `<div class="note ok">✓ E2E-Check: Verlegespiralen kreuzungsfrei.${leadTxt}</div>`;
 
   const over=plan.loops.filter(l=>l.length>S.maxLoop).length;
   const maxNote = (over>0 && plan.loops.length>=3)
@@ -529,14 +615,21 @@ function selfChecks(){
   // fillet gerade -> reine Länge
   const g=fillet([{x:0,y:0},{x:500,y:0},{x:1000,y:0}],60);
   A('fillet gerade=1000',Math.abs(g.length-1000)<1e-6);
-  // E2E: Feld-Spiralen kreuzungsfrei über mehrere Configs
-  let xc=0;
-  [['auto',150],['3',100],['2',200],['1',150]].forEach(([mode,s])=>{
-    const bs=S.loopMode,bss=S.s; S.loopMode=mode;S.s=s;
-    buildLoops(partition(mode==='auto'?autofit().N:+mode)).forEach(l=>xc+=fieldCrossings(l.field).length);
-    S.loopMode=bs;S.s=bss;
+  // E2E: Spiralen kreuzungsfrei — über viele Raumgrößen und Bahnabstände
+  const bs=S.loopMode,bss=S.s,bc=curLoopCount;
+  let xc=0, cases=0;
+  curLoopCount=1;
+  [[2500,1600],[5000,3200],[1200,800],[8000,2400],[3000,3000]].forEach(([w,h])=>{
+    [80,150,220].forEach(s=>{
+      S.s=s; const sp=bifilarPath({x0:0,y0:0,w,h});
+      if(sp.length>1){cases++; xc+=fieldCrossings(sp).length;}
+    });
   });
-  A('Bahnen kreuzungsfrei (0 Overlaps)',xc===0);
+  S.loopMode=bs;S.s=bss;curLoopCount=bc;
+  A(`Spiralen kreuzungsfrei (${cases} Größen, 0 Overlaps)`,xc===0&&cases>0);
+  // Doppelspirale: Vor- und Rücklauf um s versetzt (Gegenstrom)
+  const ds=doubleSpiral({x0:0,y0:0,w:4000,h:3000},200,150);
+  A('Doppelspirale liefert beide Arme',ds.length>8);
   console[ok?'log':'error']('Selbstchecks',out);
   return ok;
 }
@@ -544,7 +637,15 @@ function selfChecks(){
 // ================= Loop =================
 function recompute(){
   const plan=autofit();
-  plan.overlaps = plan.loops.flatMap(l=>fieldCrossings(l.field)); // E2E: Bahnen-Kreuzungen
+  const M=snappedManifold();
+  // Harte Anforderung: die Verlegespiralen dürfen sich nie kreuzen.
+  plan.overlaps = plan.loops.flatMap(l=>fieldCrossings(l.field));
+  // Getrennt gezählt: Anbindeleitungen. Kreuzungen dort sind Baupraxis
+  // (Rohre werden am Verteiler übereinander geführt), kein Planungsfehler.
+  plan.leadCross = plan.loops.flatMap(l=>fieldCrossings(l.pts,M))
+    .filter(c=>!plan.overlaps.some(o=>len(sub(o,c))<1)).length;
+  for(let i=0;i<plan.loops.length;i++)for(let j=i+1;j<plan.loops.length;j++)
+    plan.leadCross += crossBetween(plan.loops[i].pts,plan.loops[j].pts,M).length;
   draw(plan); renderResults(plan);
 }
 selfChecks();
