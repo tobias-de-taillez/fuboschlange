@@ -187,42 +187,38 @@ function lRing(x0,y0,w,h,a,b){
     {x:x0+w-a,y:y0+h},{x:x0,y:y0+h},
   ];
 }
-// verschachtelte Konturen einer Zone. zone: {type:'L'|'rect', ...}
+// verschachtelte Rechteck-Konturen. rect: {x0,y0,w,h}
 // ponytail: uniformer Feld-Inset (edgeGap + Randzonenbreite); per-Kante-Inset falls Verschnitt stört.
-function contours(zone){
+function contours(rect){
   const randW = S.windowEdges.length ? S.randPasses*S.randSpacing : 0;
   const fi = S.edgeGap + randW;
   const rings=[];
   for(let k=0;k<500;k++){
-    const d=fi+k*S.s;
-    let ring;
-    if(zone.type==='L'){
-      const w=S.W-2*d, h=S.H-2*d, a=S.notchA-d, b=S.notchB-d;
-      if(w<=S.s||h<=S.s) break;
-      ring=lRing(d,d,w,h,a,b);
-    }else{
-      const w=zone.w-2*d, h=zone.h-2*d;
-      if(w<=S.s||h<=S.s){ if(k===0){/*Zone zu schmal*/} break; }
-      ring=rectRing(zone.x0+d,zone.y0+d,w,h);
-    }
-    rings.push(ring);
+    const d=fi+k*S.s, w=rect.w-2*d, h=rect.h-2*d;
+    if(w<=S.s||h<=S.s) break;
+    rings.push(rectRing(rect.x0+d,rect.y0+d,w,h));
   }
   return rings;
 }
 
 // Bifilar: gerade aufsteigend dann ungerade absteigend (0-idx zu 1,3,5,4,2)
 function bifilarOrder(n){const ev=[],od=[];for(let i=0;i<n;i++)(i%2===0?ev:od).push(i);od.reverse();return ev.concat(od);}
-function cutAtGate(ring,gate,gap){
-  const n=ring.length, g=nearestOnRing(gate,ring);
-  const Rp=add(g.pt,scl(g.dir,gap/2)), Lp=add(g.pt,scl(g.dir,-gap/2));
+// Rechteck-Ring am Boden-Mittelpunkt aufschneiden. Alle konzentrischen Ringe
+// teilen dieselbe Mitte-x -> gerader Torkanal, kein Drift -> kreuzungsfrei.
+function cutAtGate(ring,gap){
+  const bl=ring[0], br=ring[1], eLen=br.x-bl.x;   // untere Kante bl->br
+  const gg=Math.min(gap, eLen*0.8);
+  const cx=(bl.x+br.x)/2, y=bl.y;
+  const Rp={x:cx+gg/2,y}, Lp={x:cx-gg/2,y};
   const out=[Rp];
-  for(let k=1;k<=n;k++) out.push(ring[(g.i+k)%n]);
+  for(let k=1;k<ring.length;k++) out.push(ring[k]);
+  out.push(ring[0]);
   out.push(Lp);
   return out;
 }
-function bifilarPath(rings,gate){
+function bifilarPath(rings){
   if(!rings.length) return [];
-  const gap=S.s, open=rings.map(r=>cutAtGate(r,gate,gap));
+  const open=rings.map(r=>cutAtGate(r,S.s));
   const order=bifilarOrder(rings.length), path=[];
   order.forEach((idx,k)=>{ let seg=open[idx].slice(); if(k%2===1) seg.reverse(); path.push(...seg); });
   return path;
@@ -276,43 +272,80 @@ function fillet(pts,r){
   return {ops,length};
 }
 
-// ================= Zonen / Loops / Autofit =================
-function zonesFor(N){
-  const xN=S.W-S.notchA, hasNotch=S.notchA>0&&S.notchB>0;
-  if(N===1||!hasNotch) return [{type:'L'}];
-  const left={type:'rect',x0:0,y0:0,w:xN,h:S.H};
-  const right={type:'rect',x0:xN,y0:0,w:S.notchA,h:S.H-S.notchB};
-  if(N===2) return [left,right];
-  // N===3: größere Zone vertikal halbieren
-  const aL=left.w*left.h, aR=right.w*right.h;
-  if(aL>=aR){const hw=left.w/2;return [
-    {type:'rect',x0:0,y0:0,w:hw,h:S.H},{type:'rect',x0:hw,y0:0,w:xN-hw,h:S.H},right];}
-  const hw=right.w/2;return [
-    left,{type:'rect',x0:xN,y0:0,w:hw,h:S.H-S.notchB},{type:'rect',x0:xN+hw,y0:0,w:S.notchA-hw,h:S.H-S.notchB}];
+// ================= Overlap-Check (E2E: kreuzen sich Bahnen?) =================
+function segCrossPt(p1,p2,p3,p4){
+  const d=(a,b,c)=>(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);
+  const d1=d(p3,p4,p1),d2=d(p3,p4,p2),d3=d(p1,p2,p3),d4=d(p1,p2,p4);
+  if(((d1>0&&d2<0)||(d1<0&&d2>0))&&((d3>0&&d4<0)||(d3<0&&d4>0))){
+    const t=d1/(d1-d2);
+    return {x:p1.x+t*(p2.x-p1.x), y:p1.y+t*(p2.y-p1.y)};
+  }
+  return null;
 }
-function buildLoops(zones){
+function fieldCrossings(pts){
+  const hits=[];
+  for(let i=0;i<pts.length-1;i++)for(let j=i+2;j<pts.length-1;j++){
+    if(i===0&&j===pts.length-2)continue;
+    const c=segCrossPt(pts[i],pts[i+1],pts[j],pts[j+1]);
+    if(c) hits.push(c);
+  }
+  return hits;
+}
+
+// ================= Zonen / Loops / Autofit =================
+// L in Basis-Rechtecke zerlegen (linker hoher Teil + rechter niedriger Teil).
+function rectsOfL(){
+  const xN=S.W-S.notchA, hasNotch=S.notchA>0&&S.notchB>0;
+  if(!hasNotch) return [{x0:0,y0:0,w:S.W,h:S.H}];
+  return [{x0:0,y0:0,w:xN,h:S.H},{x0:xN,y0:0,w:S.notchA,h:S.H-S.notchB}];
+}
+// Aufteilung in N Heizkreise; jeder Kreis = Liste von Rechtecken (in Serie verlegt).
+function partition(N){
+  const base=rectsOfL();
+  if(N<=1) return [base];                                   // 1 Kreis, alle Rechtecke
+  if(base.length===1){                                      // reines Rechteck -> N Streifen
+    const r=base[0], loops=[];
+    for(let i=0;i<N;i++) loops.push([{x0:r.x0+i*r.w/N,y0:r.y0,w:r.w/N,h:r.h}]);
+    return loops;
+  }
+  if(N===2) return [[base[0]],[base[1]]];
+  const [Lz,Rz]=base;                                       // N===3: größeres Rechteck halbieren
+  if(Lz.w*Lz.h>=Rz.w*Rz.h)
+    return [[{...Lz,w:Lz.w/2}],[{x0:Lz.x0+Lz.w/2,y0:Lz.y0,w:Lz.w/2,h:Lz.h}],[Rz]];
+  return [[Lz],[{...Rz,w:Rz.w/2}],[{x0:Rz.x0+Rz.w/2,y0:Rz.y0,w:Rz.w/2,h:Rz.h}]];
+}
+function buildLoops(groups){
   const M=snappedManifold();
-  const loops=zones.map((zone,zi)=>{
-    const rings=contours(zone);
-    const field=bifilarPath(rings,M);
-    // Randzone nur an Loop 0 (global), damit Fensterfront durchläuft
+  return groups.map((rects,gi)=>{
+    let field=[];
+    rects.forEach(r=>{                                    // Rechtecke in Serie
+      const sp=bifilarPath(contours(r));
+      if(!sp.length) return;
+      if(field.length){
+        // Verbinder durch unteren Rand-Kanal (unter allen Spiralen) -> kreuzt nichts
+        const prev=field[field.length-1], ych=S.edgeGap*0.5;
+        field.push({x:prev.x,y:ych},{x:sp[0].x,y:ych});
+      }
+      field=field.concat(sp);
+    });
+    // Randzone nur an Kreis 0 (global), damit Fensterfront durchläuft
     let rand=[];
-    if(zi===0) S.windowEdges.forEach(e=>{ rand=rand.concat(randzonePath(e)); });
+    if(gi===0) S.windowEdges.forEach(e=>{ rand=rand.concat(randzonePath(e)); });
     const pts = field.length ? [M,...rand,...field,M] : (rand.length?[M,...rand,M]:[]);
+    const rings = rects.reduce((a,r)=>a+contours(r).length,0);
     const L = fillet(pts,S.bendRadius).length;
-    return {pts, field, rand, rings:rings.length, length:L};
+    return {pts, field, rand, rings, length:L};
   }).filter(l=>l.pts.length>1);
-  return loops;
 }
 function autofit(){
   if(S.loopMode!=='auto'){
-    const N=+S.loopMode; const loops=buildLoops(zonesFor(N));
+    const loops=buildLoops(partition(+S.loopMode));
     const maxLen=Math.max(0,...loops.map(l=>l.length));
     return {N:loops.length,loops,ok:maxLen<=S.maxLoop,forced:true};
   }
   let last=null;
   for(let N=1;N<=3;N++){
-    const loops=buildLoops(zonesFor(N));
+    const loops=buildLoops(partition(N));
     const maxLen=Math.max(0,...loops.map(l=>l.length));
     last={N:loops.length,loops,ok:maxLen<=S.maxLoop,forced:false};
     if(last.ok) return last;
@@ -369,10 +402,14 @@ function draw(plan){
     `<text x="${X(W/2)}" y="${Y(-m*0.2)}" font-size="105" text-anchor="middle">${(W/1000).toFixed(2)} m</text>`+
     `<text x="${X(-m*0.35)}" y="${Y(H/2)}" font-size="105" text-anchor="middle" transform="rotate(-90 ${X(-m*0.35)} ${Y(H/2)})">${(H/1000).toFixed(2)} m</text></g>`;
 
+  // Overlap-Marker (rot) — sollten nie erscheinen (E2E-Check)
+  const marks=(plan.overlaps||[]).map(p=>
+    `<circle cx="${X(p.x)}" cy="${Y(p.y)}" r="75" fill="none" stroke="#dc2626" stroke-width="16"/>`).join('');
+
   const svg=`<svg viewBox="0 0 ${W+2*m} ${H+2*m}" xmlns="http://www.w3.org/2000/svg" id="svg">`+
     `<rect x="0" y="0" width="${W+2*m}" height="${H+2*m}" fill="#fff"/>`+
     `<polygon points="${roomClosed.map(p=>PP(p)).join(' ')}" fill="#f8fafc" stroke="#334155" stroke-width="22" stroke-linejoin="round"/>`+
-    winSeg+leaders+loopPaths+
+    winSeg+leaders+loopPaths+marks+
     `<circle cx="${X(M.x)}" cy="${Y(M.y)}" r="55" fill="#0f172a"/>`+
     `<circle cx="${X(M.x)}" cy="${Y(M.y)}" r="26" fill="#fff"/>`+
     `<text x="${X(M.x)}" y="${Y(M.y)-90}" font-size="82" fill="#0f172a" text-anchor="middle" font-family="system-ui">Verteiler</text>`+
@@ -423,14 +460,19 @@ function renderResults(plan){
     `<span><span class="dot" style="background:var(--window)"></span>Fensterwand</span>`+
     `<span><span class="dot" style="background:#94a3b8"></span>Verteiler-Leitung</span>`;
 
+  const ov=(plan.overlaps||[]).length;
+  const ovNote = ov>0
+    ? `<div class="note warn">⚠ E2E-Check: ${ov} Bahnen-Überlappung(en) — im Plan rot markiert. Sollte 0 sein; Parameter prüfen.</div>`
+    : `<div class="note ok">✓ E2E-Check: keine Bahnen-Überlappung — Spiralen kreuzungsfrei.</div>`;
+
   const over=plan.loops.filter(l=>l.length>S.maxLoop).length;
-  const note=document.getElementById('notes');
-  if(over>0 && plan.loops.length>=3)
-    note.innerHTML=`<div class="note warn">⚠ ${over} Kreis(e) über Max ${m(S.maxLoop)} m — auch mit 3 Kreisen nicht lösbar. Bahnabstand erhöhen oder Fläche reduzieren.</div>`;
-  else if(over>0)
-    note.innerHTML=`<div class="note warn">⚠ ${over} Kreis(e) über Max ${m(S.maxLoop)} m. „Auto“ wählen oder mehr Kreise.</div>`;
-  else
-    note.innerHTML=`<div class="note ok">✓ Alle Kreise ≤ Max ${m(S.maxLoop)} m. Materialbedarf: ${m(total)} m Rohr Ø${S.pipeDia} mm.</div>`;
+  const maxNote = (over>0 && plan.loops.length>=3)
+    ? `<div class="note warn">⚠ ${over} Kreis(e) über Max ${m(S.maxLoop)} m — auch mit 3 Kreisen nicht lösbar. Bahnabstand erhöhen oder Fläche reduzieren.</div>`
+    : over>0
+    ? `<div class="note warn">⚠ ${over} Kreis(e) über Max ${m(S.maxLoop)} m. „Auto“ wählen oder mehr Kreise.</div>`
+    : `<div class="note ok">✓ Alle Kreise ≤ Max ${m(S.maxLoop)} m. Materialbedarf: ${m(total)} m Rohr Ø${S.pipeDia} mm.</div>`;
+
+  document.getElementById('notes').innerHTML = ovNote + maxNote;
 }
 const card=(k,v,unit)=>`<div class="card"><div class="k">${k}</div><div class="v">${v} <small>${unit}</small></div></div>`;
 
@@ -487,12 +529,24 @@ function selfChecks(){
   // fillet gerade -> reine Länge
   const g=fillet([{x:0,y:0},{x:500,y:0},{x:1000,y:0}],60);
   A('fillet gerade=1000',Math.abs(g.length-1000)<1e-6);
+  // E2E: Feld-Spiralen kreuzungsfrei über mehrere Configs
+  let xc=0;
+  [['auto',150],['3',100],['2',200],['1',150]].forEach(([mode,s])=>{
+    const bs=S.loopMode,bss=S.s; S.loopMode=mode;S.s=s;
+    buildLoops(partition(mode==='auto'?autofit().N:+mode)).forEach(l=>xc+=fieldCrossings(l.field).length);
+    S.loopMode=bs;S.s=bss;
+  });
+  A('Bahnen kreuzungsfrei (0 Overlaps)',xc===0);
   console[ok?'log':'error']('Selbstchecks',out);
   return ok;
 }
 
 // ================= Loop =================
-function recompute(){ const plan=autofit(); draw(plan); renderResults(plan); }
+function recompute(){
+  const plan=autofit();
+  plan.overlaps = plan.loops.flatMap(l=>fieldCrossings(l.field)); // E2E: Bahnen-Kreuzungen
+  draw(plan); renderResults(plan);
+}
 selfChecks();
 initUI();
 recompute();
