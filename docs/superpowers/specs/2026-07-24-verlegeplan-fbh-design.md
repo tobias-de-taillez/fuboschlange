@@ -20,8 +20,11 @@ einmalig, kein Server, kein Online-Service.
 
 Eine einzige selbst-enthaltene HTML-Datei (`verlegeplan.html`). Kein Server,
 keine Dependencies, kein Build. Öffnen im Browser → Plan wird gerendert.
-Parameter stehen als Konstanten oben in der Datei; ändern → Datei neu laden.
-Druck/PDF über den Browser (`Strg+P`).
+
+Bedienung über ein Control-Panel mit Live-Render (Raummaße, Bahnabstand,
+Biegeradius, Randzone, Fensterwände, Kreiszahl/Autofit, Verteiler). Der
+Verteiler wird per Klick auf den Plan gesetzt und auf die nächste Wand
+gesnappt. Druck/PDF über den Button bzw. `Strg+P`.
 
 Verworfen: Python+matplotlib (mehr Setup, kein Live-Angucken). Fallback nur bei
 Bedarf: `clipper2-js` lokal vendored für Polygon-Offset, falls der handgerollte
@@ -47,42 +50,56 @@ Reihenfolge = auch die empfohlene Bau-Reihenfolge. Der Rohrpfad ist am Ende
 EINE Polyline (Punktliste in mm). Länge, Materialliste und Zeichnung fallen
 danach billig raus.
 
-### 1. `offsetContours(poly, s, edgeGap)` → Kontur[]
-`poly` ist das **Feldpolygon** = Raum, an markierten Fensterwänden um die
-Randzonen-Streifenbreite (`randPasses × randSpacing`) eingerückt, an unmarkierten
-Wänden um `edgeGap`. So kollidiert das Feld nicht mit der Randzone (Schritt 3/4).
-Verschachtelte Konturen nach innen: erste Kontur an der Feldpolygon-Kante,
-dann jeweils `s` weiter innen. Handgerollter rektilinearer Inward-Offset.
-Das L bleibt beim Schrumpfen einfach zusammenhängend — genau ein
-Topologie-Event, wenn der kurze Schenkel verschwindet (L wird zu Rechteck,
-schrumpft weiter). Keine Insel-Aufspaltung → handgerollt bounded.
+### 1. Zerlegung in Rechtecke — `rectsOfL()` / `partition(N)`
+Das rohe L wird **nie** spiraliert. Es wird in Rechtecke zerlegt (linker hoher
+Teil + rechter niedriger Teil); jeder Heizkreis ist eine Liste von Rechtecken,
+die in Serie verlegt werden.
 
-**Degenerations-Check:** ist `s` groß gegen die kurze Schenkelbreite, entstehen
-nur 1–2 Konturen → Schnecke degeneriert → Warnung ausgeben.
+Grund (aus der Implementierung gelernt): Konturen eines L haben keine gemeinsame
+Mitte. Jeder Torkanal driftet dadurch beim Schrumpfen und die Verbinder
+schneiden die Spirale. Rechtecke haben eine gemeinsame Mitte — Problem
+verschwindet per Konstruktion.
 
-### 2. `bifilarPath(contours)` → Punkt[]
-Gegenstrom-Durchlauf. Konturen 1 (außen) … N (innen).
-**Reihenfolge: ungerade aufsteigend, dann gerade absteigend.**
-- N=5 → `1,3,5,4,2`
-- N=4 → `1,3,4,2`
+Zonenbreiten von der Wand nach innen: **Randzone → Leitungskorridor → Feld**.
+`fieldInset = edgeGap + randPasses×randSpacing + korridorBreite`.
 
-Wicklungssinn auf alternierenden Konturen umkehren, damit die Verbinder sich
-nicht kreuzen. Ergebnis: radiale Richtung wechselt zwischen benachbarten
-Konturen (Vor/Rücklauf verschachtelt = Gegenstrom), beide Enden landen
-nebeneinander am Rand nahe dem Verteiler. Die Kontur-Sprünge (1→3, 4→2) liegen
-an einem "Schnitt" nahe dem Verteiler — dieser Hals ist die eine enge Stelle
-und ist Standard, nicht überoptimieren.
+### 2. `doubleSpiral(rect, d0, s)` → Punkt[]
+Echte bifilare Doppelspirale, **keine aufgeschnittenen Ringe**:
+- Vorlauf-Arm spiralt nach innen, Bahnen bei `d0, d0+2s, d0+4s, …`
+- Rücklauf-Arm spiralt nach außen, Bahnen bei `d0+s, d0+3s, …`
+- Beide Arme innen per U-Turn verbunden, beide Enden liegen außen.
+
+Jeder Arm ist eine rechteckige archimedische Spirale: der Wandabstand wächst pro
+Vierteldrehung um `step/4`. Es wird nichts aufgeschnitten und es gibt keinen
+radialen Sprung → **ein Arm kann sich per Konstruktion nicht selbst kreuzen**,
+und die Arme liegen konstant `s` auseinander → sie kreuzen einander nie.
+
+Beide Arme laufen gleich tief (`min` der Schrittzahlen), sonst entartet der
+U-Turn zu einer langen Diagonale quer durch die Raummitte.
+
+**Verworfen (war der Bug):** Ringe einzeln aufschneiden und radial verbinden.
+Alle Ring-Öffnungen liegen auf derselben x-Linie, dadurch läuft der Sprung von
+Ring k zu k+2 exakt durch den Endpunkt von Ring k+1. Der Fehler war latent und
+schlug nur bei bestimmten Raumgrößen zu.
 
 ### 3. `randzone(windowEdges, randSpacing, randPasses)` → Punkt[]
 Entlang jeder markierten Fensterkante `randPasses` dichte Parallelbahnen im
 Abstand `randSpacing` (5 cm). **Vorlauf zuerst an die Scheibe** — heißestes
 Wasser dort → treibt Konvektion an der Glasfläche, bricht den Kaltluftabfall.
 
-### 4. Stitch → eine Polyline
-`Verteiler → Randzone → Feld-Schnecke → zurück zum Verteiler.` Endpunkte mit
-kurzen Verbindern koppeln. Das Feldpolygon ist um die Randzonen-Streifenbreite
-von den markierten Wänden eingerückt, damit Randzone und Feld-Außenkontur nicht
-kollidieren.
+### 4. Stitch + Leitungsführung → eine Polyline
+`Verteiler → Randzone → Feld-Schnecke → zurück zum Verteiler.`
+
+Anbindeleitungen laufen **nicht** diagonal durchs Feld, sondern Manhattan-artig
+durch einen reservierten **Randkorridor**, jede auf einer eigenen Spur
+(`routeVia`). Spurvergabe nach Distanz: der Anschluss, der dem Verteiler am
+nächsten liegt, bekommt die **innerste** Spur. Dadurch muss keine Stichleitung
+über eine fremde Spur steigen. Liegt der Verteiler nicht an der unteren Wand,
+führt der Weg zuerst an der Seitenwand entlang, sonst zerschneidet die
+Vertikale das Feld.
+
+Rechteck-zu-Rechteck-Übergänge innerhalb eines Kreises laufen im wandnahen
+Kanal unter allem.
 
 ### 5. `pathLength(path, maxLoop)` → { meter, warn }
 Summe der Segmentlängen. Warnung wenn `meter > maxLoop`.
@@ -114,20 +131,29 @@ Add-when: der Nutzer fragt danach.
 
 ## Testing
 
-Non-triviale Logik → je ein `assert`-Selbstcheck (kein Framework):
+Non-triviale Logik → je ein `assert`-Selbstcheck (kein Framework), läuft beim
+Laden der Seite und loggt in die Konsole:
 
-- `bifilarPath`: für N=4 und N=5 die erwartete Kontur-Reihenfolge prüfen
-  (`1,3,4,2` bzw. `1,3,5,4,2`) und dass beide Enden auf der äußeren Kontur/am
-  Rand liegen.
-- `pathLength`: bekannte Polyline (z.B. Rechteck-Umfang) → bekannte Länge.
-- `offsetContours`: auf einem Rechteck erzeugt konzentrische Rechtecke im
-  Abstand `s`; Anzahl Konturen = erwartet.
+- `fillet`: 90°-Ecke mit r=100 → Länge exakt `1800 + 100·π/2` (analytische
+  Bogenlänge, nicht Polyline-Näherung). Gerade Punktfolge → reine Streckenlänge.
+- `bifilarOrder`: N=4 → `[0,2,3,1]`, N=5 → `[0,2,4,3,1]`.
+- **Kreuzungsfreiheit**: Spiralen über mehrere Raumgrößen × Bahnabstände →
+  0 Selbstschnitte. Das ist die harte Anforderung des Tools.
+- `doubleSpiral` liefert beide Arme.
 
-Selbstcheck läuft beim Laden der Seite (Konsole) oder als kleiner Sicht-Block.
+### Laufender E2E-Check in der UI
+Bei **jedem** Render wird geprüft und im Plan/Status ausgewiesen:
+- **Spiralen-Überlappungen** → harter Fehler, rote Marker im Plan. Muss 0 sein.
+- **Anbindeleitungs-Kreuzungen** → getrennt gezählt, kein Fehler: dort werden
+  Rohre am Verteiler übereinander geführt (Baupraxis).
+
+Verifiziert: 0 Spiralen-Kreuzungen über 168 Raumgrößen und alle 672
+Parameter-Kombinationen (Bahnabstand × Kreis-Modus × Verteiler-Position ×
+Notch-Form).
 
 ## Bau-Reihenfolge (Risiko zuerst)
 
-1. `offsetContours` + `bifilarPath` → aufs echte L rendern und **angucken**.
+1. `partition` + `doubleSpiral` → aufs echte L rendern und **angucken**.
    Hier bricht die Geometrie. Ist visuell, also hinschauen.
 2. Randzone dazu.
 3. Länge, Materialliste, Maßstabsbalken, Bemaßung — fallen billig raus.
