@@ -2,269 +2,500 @@
 <html lang="de">
 <head>
 <meta charset="utf-8">
-<title>Verlegeplan Fußbodenheizung (MVP)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Verlegeplan Fußbodenheizung</title>
 <style>
-  body{font:14px/1.4 system-ui,sans-serif;margin:20px;color:#111}
-  h1{font-size:18px}
-  #wrap{display:flex;gap:24px;flex-wrap:wrap}
-  #info{min-width:260px}
-  svg{border:1px solid #ccc;background:#fff;max-width:100%;height:auto}
-  table{border-collapse:collapse}
-  td,th{border:1px solid #ddd;padding:3px 8px;text-align:left}
-  .warn{color:#b00;font-weight:bold}
-  .ok{color:#070}
-  #checks{font:12px monospace;margin-top:12px;white-space:pre}
-  code{background:#f2f2f2;padding:1px 4px;border-radius:3px}
+  :root{
+    --bg:#f4f6f9; --panel:#fff; --ink:#1f2933; --muted:#64748b; --line:#e2e8f0;
+    --accent:#2563eb; --warn:#dc2626; --ok:#16a34a;
+    --loop0:#2563eb; --loop1:#7c3aed; --loop2:#0891b2;
+    --rand:#f59e0b; --window:#ef4444;
+    --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.06);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;color:var(--ink);background:var(--bg)}
+  header{padding:14px 20px;background:var(--panel);border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0;font-weight:650}
+  header .sub{color:var(--muted);font-size:12.5px}
+  .app{display:grid;grid-template-columns:1fr;gap:0;align-items:start}
+  @media(min-width:700px){
+    .app{grid-template-columns:320px 1fr}
+    aside{position:sticky;top:0;height:calc(100vh - 52px);overflow:auto}
+    main{min-width:0}
+  }
+
+  /* ---- Panel ---- */
+  aside{background:var(--panel);border-right:1px solid var(--line);padding:16px}
+  .grp{margin-bottom:18px}
+  .grp h2{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 10px}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:8px 0}
+  .row label{font-size:13px;color:#334155}
+  .row input[type=number]{width:88px}
+  input[type=number]{padding:6px 8px;border:1px solid var(--line);border-radius:8px;font:inherit;background:#fff;text-align:right}
+  input[type=number]:focus{outline:2px solid #bfdbfe;border-color:var(--accent)}
+  .rng{display:flex;flex-direction:column;gap:4px;margin:10px 0}
+  .rng .top{display:flex;justify-content:space-between;font-size:13px}
+  .rng .val{color:var(--accent);font-variant-numeric:tabular-nums;font-weight:600}
+  input[type=range]{width:100%;accent-color:var(--accent)}
+  .chips{display:flex;gap:6px;flex-wrap:wrap}
+  .chip{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid var(--line);border-radius:999px;cursor:pointer;user-select:none;font-size:12.5px;background:#fff}
+  .chip input{display:none}
+  .chip.on{background:#fef3c7;border-color:var(--rand);color:#92400e}
+  .seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .seg button{flex:1;padding:7px 0;border:0;background:#fff;cursor:pointer;font:inherit;color:#475569}
+  .seg button.on{background:var(--accent);color:#fff}
+  .hint{font-size:12px;color:var(--muted);margin:6px 0 0}
+
+  /* ---- Main ---- */
+  main{padding:18px}
+  .planwrap{background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:12px;position:relative}
+  .planwrap svg{width:100%;height:auto;display:block;cursor:crosshair;touch-action:none}
+  .badge{position:absolute;top:16px;right:16px;background:#0f172a;color:#fff;font-size:11px;padding:4px 9px;border-radius:999px;opacity:.85}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-top:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;box-shadow:var(--shadow)}
+  .card .k{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .card .v{font-size:22px;font-weight:680;margin-top:2px;font-variant-numeric:tabular-nums}
+  .card .v small{font-size:13px;font-weight:500;color:var(--muted)}
+  .loops{margin-top:14px;background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);overflow:hidden}
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:9px 14px;text-align:left;border-bottom:1px solid var(--line);font-size:13px}
+  th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:600}
+  tr:last-child td{border-bottom:0}
+  .dot{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:7px;vertical-align:middle}
+  .pill{font-size:11.5px;padding:2px 8px;border-radius:999px;font-weight:600}
+  .pill.ok{background:#dcfce7;color:#166534}.pill.bad{background:#fee2e2;color:#991b1b}
+  .note{margin-top:12px;padding:10px 14px;border-radius:10px;font-size:13px}
+  .note.warn{background:#fef2f2;color:#991b1b;border:1px solid #fecaca}
+  .note.ok{background:#f0fdf4;color:#166534;border:1px solid #bbf7d0}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:10px;font-size:12.5px;color:#475569}
+  .legend span{display:inline-flex;align-items:center}
+  @media print{aside,header .sub,.badge{display:none}.app{grid-template-columns:1fr}main{padding:0}}
 </style>
 </head>
 <body>
-<h1>Verlegeplan Fußbodenheizung — L-Raum, bifilare Schnecke</h1>
-<p>Parameter unten im <code>&lt;script&gt;</code> unter <code>CFG</code> anpassen, Seite neu laden.
-Drucken über <code>Strg/Cmd+P</code>. <b>Maßstab am Maßstabsbalken ablesen</b>, nicht am Papier.</p>
-<div id="wrap">
-  <div id="plan"></div>
-  <div id="info"></div>
+<header>
+  <h1>Verlegeplan Fußbodenheizung</h1>
+  <span class="sub">Bifilare Schnecke · L-Raum · Randzone · Autofit bis 3 Heizkreise</span>
+</header>
+
+<div class="app">
+  <aside id="panel">
+    <div class="grp">
+      <h2>Raum (mm)</h2>
+      <div class="row"><label>Breite</label><input type="number" id="W" step="50"></div>
+      <div class="row"><label>Höhe</label><input type="number" id="H" step="50"></div>
+      <div class="row"><label>Notch Breite</label><input type="number" id="notchA" step="50"></div>
+      <div class="row"><label>Notch Höhe</label><input type="number" id="notchB" step="50"></div>
+      <p class="hint">L = Rechteck minus Ausschnitt oben rechts. Notch 0 = volles Rechteck.</p>
+    </div>
+
+    <div class="grp">
+      <h2>Verlegung</h2>
+      <div class="rng"><div class="top"><span>Bahnabstand</span><span class="val" id="sVal"></span></div><input type="range" id="s" min="75" max="300" step="5"></div>
+      <div class="rng"><div class="top"><span>Biegeradius</span><span class="val" id="brVal"></span></div><input type="range" id="bendRadius" min="20" max="120" step="5"></div>
+      <div class="row"><label>Rohr-Ø</label><input type="number" id="pipeDia" step="1"></div>
+      <div class="row"><label>Randabstand</label><input type="number" id="edgeGap" step="5"></div>
+    </div>
+
+    <div class="grp">
+      <h2>Randzone (Fenster)</h2>
+      <div class="row"><label>Bahnabstand</label><input type="number" id="randSpacing" step="5"></div>
+      <div class="row"><label>Bahnen</label><input type="number" id="randPasses" min="0" max="4" step="1"></div>
+      <div class="chips" id="winChips">
+        <label class="chip"><input type="checkbox" value="bottom">Unten</label>
+        <label class="chip"><input type="checkbox" value="top">Oben</label>
+        <label class="chip"><input type="checkbox" value="left">Links</label>
+        <label class="chip"><input type="checkbox" value="right">Rechts</label>
+      </div>
+    </div>
+
+    <div class="grp">
+      <h2>Heizkreise</h2>
+      <div class="row"><label>Max Kreislänge (m)</label><input type="number" id="maxLoopM" step="5"></div>
+      <div class="seg" id="loopSeg">
+        <button data-n="auto" class="on">Auto</button>
+        <button data-n="1">1</button>
+        <button data-n="2">2</button>
+        <button data-n="3">3</button>
+      </div>
+      <p class="hint">Auto: kleinste Kreiszahl, bei der jeder Kreis ≤ Max bleibt.</p>
+    </div>
+
+    <div class="grp">
+      <h2>Verteiler</h2>
+      <p class="hint" id="mfHint">Auf den Plan klicken zum Setzen. Wird auf nächste Wand gesnappt.</p>
+      <div class="row"><label>x</label><input type="number" id="mfx" step="10"></div>
+      <div class="row"><label>y</label><input type="number" id="mfy" step="10"></div>
+    </div>
+  </aside>
+
+  <main>
+    <div class="planwrap">
+      <div class="badge" id="badge"></div>
+      <div id="plan"></div>
+      <div class="legend" id="legend"></div>
+    </div>
+    <div class="cards" id="cards"></div>
+    <div class="loops" id="loops"></div>
+    <div id="notes"></div>
+  </main>
 </div>
-<div id="checks"></div>
 
 <script>
 "use strict";
-
-// ===================== CONFIG (alles in mm) — HIER EDITIEREN =====================
-const CFG = {
-  // L-Raum = Box (W×H) minus rechteckige Notch (notchA×notchB) oben rechts.
-  W: 5000, H: 4000, notchA: 2000, notchB: 1500,
-  s: 150,             // Bahnabstand im Feld
-  edgeGap: 75,        // Randabstand erste Bahn zur Wand
-  pipeDia: 16,        // Rohr-Außen-Ø
-  maxLoop: 100000,    // max Kreislänge (mm) -> Warnung
-  randSpacing: 50,    // Randzone-Bahnabstand (5 cm)
-  randPasses: 2,      // Randzone-Bahnen an Fensterwand
-  windowEdges: ['bottom'],   // Fensterfronten: 'bottom'|'top'|'left'|'right'
-  manifoldX: 600,     // Verteiler-Position an unterer Wand (x)
+// ================= State / Defaults (mm) =================
+const S = {
+  W:8000, H:3200, notchA:3000, notchB:1000,
+  s:150, bendRadius:60, pipeDia:16, edgeGap:75,
+  randSpacing:50, randPasses:2, windowEdges:['bottom'],
+  maxLoop:100000, loopMode:'auto',
+  manifold:{x:1000,y:0},
 };
-// ===============================================================================
 
-// ---------- kleine Vektor-Helfer ----------
+// ================= Vektor-Helfer =================
 const sub=(p,q)=>({x:p.x-q.x,y:p.y-q.y});
 const add=(p,q)=>({x:p.x+q.x,y:p.y+q.y});
 const scl=(p,k)=>({x:p.x*k,y:p.y*k});
+const dot=(p,q)=>p.x*q.x+p.y*q.y;
 const len=p=>Math.hypot(p.x,p.y);
 const unit=p=>{const l=len(p)||1;return {x:p.x/l,y:p.y/l};};
 
-// ---------- L-Ring (CCW), Notch oben rechts; a<=0||b<=0 -> Rechteck ----------
-function lRing(x0,y0,w,h,a,b){
-  if(a<=0||b<=0){
-    return [{x:x0,y:y0},{x:x0+w,y:y0},{x:x0+w,y:y0+h},{x:x0,y:y0+h}];
+function nearestOnSeg(p,a,b){
+  const ab=sub(b,a), l2=dot(ab,ab)||1;
+  const t=Math.max(0,Math.min(1,dot(sub(p,a),ab)/l2));
+  const pt=add(a,scl(ab,t));
+  return {pt,d:len(sub(p,pt)),dir:unit(ab)};
+}
+function nearestOnRing(p,ring){
+  let best=null;
+  for(let i=0;i<ring.length;i++){
+    const r=nearestOnSeg(p,ring[i],ring[(i+1)%ring.length]);
+    if(!best||r.d<best.d) best={i,...r};
   }
+  return best;
+}
+
+// ================= Geometrie: Konturen =================
+// Rechteck-Ring CCW (Boden zuerst: [0]->[1])
+const rectRing=(x0,y0,w,h)=>[{x:x0,y:y0},{x:x0+w,y:y0},{x:x0+w,y:y0+h},{x:x0,y:y0+h}];
+// L-Ring CCW, Notch oben rechts; a<=0||b<=0 -> Rechteck
+function lRing(x0,y0,w,h,a,b){
+  if(a<=0||b<=0) return rectRing(x0,y0,w,h);
   return [
     {x:x0,y:y0},{x:x0+w,y:y0},
     {x:x0+w,y:y0+h-b},{x:x0+w-a,y:y0+h-b},
     {x:x0+w-a,y:y0+h},{x:x0,y:y0+h},
   ];
 }
-
-// ---------- verschachtelte Konturen des Feldpolygons ----------
-// ponytail: L als Box-minus-Eck-Notch parametrisiert; allgemeiner rektilinearer
-// Offset erst wenn andere Formen gebraucht werden.
-function offsetContours(){
-  // Feld-Inset: an ALLEN Wänden = edgeGap + Randzonenbreite (falls Fenster).
-  // ponytail: uniformer Feld-Inset; per-Kante-Inset falls Randverschnitt stört.
-  const randW = CFG.windowEdges.length ? CFG.randPasses*CFG.randSpacing : 0;
-  const fi = CFG.edgeGap + randW;
+// verschachtelte Konturen einer Zone. zone: {type:'L'|'rect', ...}
+// ponytail: uniformer Feld-Inset (edgeGap + Randzonenbreite); per-Kante-Inset falls Verschnitt stört.
+function contours(zone){
+  const randW = S.windowEdges.length ? S.randPasses*S.randSpacing : 0;
+  const fi = S.edgeGap + randW;
   const rings=[];
-  for(let k=0;;k++){
-    const d = k*CFG.s;
-    const x0=fi+d, y0=fi+d;
-    const w=CFG.W-2*(fi+d), h=CFG.H-2*(fi+d);
-    const a=CFG.notchA-(fi+d), b=CFG.notchB-(fi+d);
-    if(w<=CFG.s || h<=CFG.s) break;   // Feld zu klein -> fertig
-    rings.push(lRing(x0,y0,w,h,a,b));
-    if(k>500) break;                  // Sicherheitsanker
+  for(let k=0;k<500;k++){
+    const d=fi+k*S.s;
+    let ring;
+    if(zone.type==='L'){
+      const w=S.W-2*d, h=S.H-2*d, a=S.notchA-d, b=S.notchB-d;
+      if(w<=S.s||h<=S.s) break;
+      ring=lRing(d,d,w,h,a,b);
+    }else{
+      const w=zone.w-2*d, h=zone.h-2*d;
+      if(w<=S.s||h<=S.s){ if(k===0){/*Zone zu schmal*/} break; }
+      ring=rectRing(zone.x0+d,zone.y0+d,w,h);
+    }
+    rings.push(ring);
   }
   return rings;
 }
 
-// ---------- Bifilar-Reihenfolge: gerade aufsteigend, ungerade absteigend ----------
-// (0-indexed Äquivalent zu 1,3,5,4,2)  N=5 -> [0,2,4,3,1]  N=4 -> [0,2,3,1]
-function bifilarOrder(n){
-  const ev=[],od=[];
-  for(let i=0;i<n;i++)(i%2===0?ev:od).push(i);
-  od.reverse();
-  return ev.concat(od);
-}
-
-// ---------- Ring am Verteiler-Tor aufschneiden -> offene Polyline ----------
-// Endpunkte Rp (rechts vom Tor) und Lp (links vom Tor) auf der unteren Kante.
-function cutAtGate(ring,gx,gap){
-  const y0=ring[0].y;                 // untere Kante = ring[0]->ring[1]
-  const Rp={x:gx+gap/2,y:y0}, Lp={x:gx-gap/2,y:y0};
-  // Reihe: Rp -> ring[1..ende] -> ring[0] -> Lp  (einmal ganz herum, Lücke am Tor)
+// Bifilar: gerade aufsteigend dann ungerade absteigend (0-idx zu 1,3,5,4,2)
+function bifilarOrder(n){const ev=[],od=[];for(let i=0;i<n;i++)(i%2===0?ev:od).push(i);od.reverse();return ev.concat(od);}
+function cutAtGate(ring,gate,gap){
+  const n=ring.length, g=nearestOnRing(gate,ring);
+  const Rp=add(g.pt,scl(g.dir,gap/2)), Lp=add(g.pt,scl(g.dir,-gap/2));
   const out=[Rp];
-  for(let i=1;i<ring.length;i++) out.push(ring[i]);
-  out.push(ring[0]);
+  for(let k=1;k<=n;k++) out.push(ring[(g.i+k)%n]);
   out.push(Lp);
   return out;
 }
-
-// ---------- Feld-Schnecke aus Konturen ----------
-function bifilarPath(rings,gx){
-  const gap=CFG.s;
-  const open=rings.map(r=>cutAtGate(r,gx,gap));
-  const order=bifilarOrder(rings.length);
-  const path=[];
-  order.forEach((idx,k)=>{
-    let seg=open[idx].slice();
-    if(k%2===1) seg.reverse();        // Wicklung alternieren -> Gegenstrom
-    path.push(...seg);
-  });
+function bifilarPath(rings,gate){
+  if(!rings.length) return [];
+  const gap=S.s, open=rings.map(r=>cutAtGate(r,gate,gap));
+  const order=bifilarOrder(rings.length), path=[];
+  order.forEach((idx,k)=>{ let seg=open[idx].slice(); if(k%2===1) seg.reverse(); path.push(...seg); });
   return path;
 }
 
-// ---------- Randzone: dichte Parallelbahnen an einer Fensterkante ----------
+// ================= Randzone =================
 function randzonePath(edgeName){
-  const {W,H,edgeGap,randSpacing,randPasses}=CFG;
-  // Außenkante a->b und Innen-Normale
+  const {W,H,edgeGap,randSpacing,randPasses}=S;
   let a,b,inw;
-  if(edgeName==='bottom'){a={x:edgeGap,y:0};       b={x:W-edgeGap,y:0};   inw={x:0,y:1};}
-  else if(edgeName==='top'){a={x:edgeGap,y:H};     b={x:W-edgeGap,y:H};   inw={x:0,y:-1};}
-  else if(edgeName==='left'){a={x:0,y:edgeGap};    b={x:0,y:H-edgeGap};   inw={x:1,y:0};}
-  else {a={x:W,y:edgeGap};                          b={x:W,y:H-edgeGap};  inw={x:-1,y:0};}
+  if(edgeName==='bottom'){a={x:edgeGap,y:0};b={x:W-edgeGap,y:0};inw={x:0,y:1};}
+  else if(edgeName==='top'){a={x:edgeGap,y:H};b={x:W-edgeGap,y:H};inw={x:0,y:-1};}
+  else if(edgeName==='left'){a={x:0,y:edgeGap};b={x:0,y:H-edgeGap};inw={x:1,y:0};}
+  else{a={x:W,y:edgeGap};b={x:W,y:H-edgeGap};inw={x:-1,y:0};}
   const pts=[];
   for(let j=0;j<randPasses;j++){
     const off=edgeGap+j*randSpacing;
-    let p0=add(a,scl(inw,off)), p1=add(b,scl(inw,off));
-    if(j%2===1){const t=p0;p0=p1;p1=t;}  // Hairpin
+    let p0=add(a,scl(inw,off)),p1=add(b,scl(inw,off));
+    if(j%2===1){const t=p0;p0=p1;p1=t;}
     pts.push(p0,p1);
   }
   return pts;
 }
 
-// ---------- Pfadlänge (mm) ----------
-function pathLength(pts){
-  let L=0;
-  for(let i=1;i<pts.length;i++) L+=len(sub(pts[i],pts[i-1]));
-  return L;
+// ================= Fillet: Ecken runden + korrekte Bogenlänge =================
+// Gibt {ops, length}. Bogenlänge = r * Ablenkwinkel (analytisch, nicht Polyline-Näherung).
+function fillet(pts,r){
+  const ops=[]; let length=0;
+  if(!pts.length) return {ops,length};
+  ops.push({kind:'move',to:pts[0]});
+  if(pts.length===1) return {ops,length};
+  let prev=pts[0];
+  for(let i=1;i<pts.length-1;i++){
+    const a=pts[i-1],v=pts[i],b=pts[i+1];
+    const din=unit(sub(v,a)),dout=unit(sub(b,v));
+    const dotv=Math.max(-1,Math.min(1,dot(din,dout)));
+    const defl=Math.acos(dotv);                 // 0..pi
+    const cross=din.x*dout.y-din.y*dout.x;
+    if(defl<1e-3||Math.abs(cross)<1e-9){ continue; } // gerade -> Punkt weg
+    let rr=r, t=rr/Math.tan((Math.PI-defl)/2);
+    const maxT=Math.min(len(sub(v,a)),len(sub(v,b)))*0.5;
+    // ponytail: ~180°-Kehren als scharfer Punkt (t->0); echte U-Bogen erst wenn nötig.
+    if(!isFinite(t)||t>maxT){ t=Math.max(0,maxT); rr=t*Math.tan((Math.PI-defl)/2); }
+    if(t<1e-6){ continue; }
+    const pin=add(v,scl(din,-t)), pout=add(v,scl(dout,t));
+    ops.push({kind:'line',to:pin}); length+=len(sub(pin,prev));
+    ops.push({kind:'arc',to:pout,r:rr,cw:cross<0}); length+=rr*defl;
+    prev=pout;
+  }
+  const last=pts[pts.length-1];
+  ops.push({kind:'line',to:last}); length+=len(sub(last,prev));
+  return {ops,length};
 }
 
-// ---------- Gesamtpfad zusammensetzen ----------
-function buildPlan(){
-  const rings=offsetContours();
-  const gx=CFG.manifoldX;
-  const M={x:gx,y:0};                 // Verteiler an unterer Wand
-  const field=bifilarPath(rings,gx);
-  let rand=[];
-  CFG.windowEdges.forEach(e=>{ rand=rand.concat(randzonePath(e)); });
-  // Stitch: Verteiler -> Randzone (Vorlauf zuerst an Scheibe) -> Feld -> Verteiler
-  const full=[M, ...rand, ...field, M];
-  return {rings,field,rand,full,M, contours:rings.length};
+// ================= Zonen / Loops / Autofit =================
+function zonesFor(N){
+  const xN=S.W-S.notchA, hasNotch=S.notchA>0&&S.notchB>0;
+  if(N===1||!hasNotch) return [{type:'L'}];
+  const left={type:'rect',x0:0,y0:0,w:xN,h:S.H};
+  const right={type:'rect',x0:xN,y0:0,w:S.notchA,h:S.H-S.notchB};
+  if(N===2) return [left,right];
+  // N===3: größere Zone vertikal halbieren
+  const aL=left.w*left.h, aR=right.w*right.h;
+  if(aL>=aR){const hw=left.w/2;return [
+    {type:'rect',x0:0,y0:0,w:hw,h:S.H},{type:'rect',x0:hw,y0:0,w:xN-hw,h:S.H},right];}
+  const hw=right.w/2;return [
+    left,{type:'rect',x0:xN,y0:0,w:hw,h:S.H-S.notchB},{type:'rect',x0:xN+hw,y0:0,w:S.notchA-hw,h:S.H-S.notchB}];
+}
+function buildLoops(zones){
+  const M=snappedManifold();
+  const loops=zones.map((zone,zi)=>{
+    const rings=contours(zone);
+    const field=bifilarPath(rings,M);
+    // Randzone nur an Loop 0 (global), damit Fensterfront durchläuft
+    let rand=[];
+    if(zi===0) S.windowEdges.forEach(e=>{ rand=rand.concat(randzonePath(e)); });
+    const pts = field.length ? [M,...rand,...field,M] : (rand.length?[M,...rand,M]:[]);
+    const L = fillet(pts,S.bendRadius).length;
+    return {pts, field, rand, rings:rings.length, length:L};
+  }).filter(l=>l.pts.length>1);
+  return loops;
+}
+function autofit(){
+  if(S.loopMode!=='auto'){
+    const N=+S.loopMode; const loops=buildLoops(zonesFor(N));
+    const maxLen=Math.max(0,...loops.map(l=>l.length));
+    return {N:loops.length,loops,ok:maxLen<=S.maxLoop,forced:true};
+  }
+  let last=null;
+  for(let N=1;N<=3;N++){
+    const loops=buildLoops(zonesFor(N));
+    const maxLen=Math.max(0,...loops.map(l=>l.length));
+    last={N:loops.length,loops,ok:maxLen<=S.maxLoop,forced:false};
+    if(last.ok) return last;
+  }
+  return last; // best effort (über Limit)
+}
+function snappedManifold(){
+  const room=lRing(0,0,S.W,S.H,S.notchA,S.notchB);
+  return nearestOnRing(S.manifold,room).pt;
 }
 
-// ---------- SVG-Render ----------
-function render(plan){
-  const {W,H}=CFG, m=300;             // Rand um Zeichnung (mm)
-  const X=x=>x+m, Y=y=>(H-y)+m;       // y-up -> SVG y-down
-  const vb=`0 0 ${W+2*m} ${H+2*m}`;
-  const poly=(pts,stroke,sw,extra='')=>
-    `<polyline points="${pts.map(p=>`${X(p.x).toFixed(1)},${Y(p.y).toFixed(1)}`).join(' ')}" fill="none" stroke="${stroke}" stroke-width="${sw}" stroke-linejoin="round" stroke-linecap="round" ${extra}/>`;
+// ================= Render =================
+const LOOPCOL=['var(--loop0)','var(--loop1)','var(--loop2)'];
+const LOOPHEX=['#2563eb','#7c3aed','#0891b2'];
+function draw(plan){
+  const {W,H}=S, m=Math.max(400,S.s*3);
+  const X=x=>x+m, Y=y=>(H-y)+m;
+  const PP=p=>`${X(p.x).toFixed(1)} ${Y(p.y).toFixed(1)}`;
+  const opsToD=ops=>ops.map(o=>o.kind==='move'?`M ${PP(o.to)}`:o.kind==='line'?`L ${PP(o.to)}`
+      :`A ${o.r.toFixed(1)} ${o.r.toFixed(1)} 0 0 ${o.cw?0:1} ${PP(o.to)}`).join(' ');
+  const path=(pts,stroke,sw)=>pts.length<2?'':`<path d="${opsToD(fillet(pts,S.bendRadius).ops)}" fill="none" stroke="${stroke}" stroke-width="${sw}" stroke-linejoin="round" stroke-linecap="round"/>`;
+  const line=(a,b,stroke,sw,dash='')=>`<line x1="${X(a.x)}" y1="${Y(a.y)}" x2="${X(b.x)}" y2="${Y(b.y)}" stroke="${stroke}" stroke-width="${sw}" ${dash}/>`;
 
-  // Raumumriss (L, geschlossen)
-  const room=lRing(0,0,W,H,CFG.notchA,CFG.notchB);
+  const room=lRing(0,0,W,H,S.notchA,S.notchB);
   const roomClosed=[...room,room[0]];
+  const sw=Math.max(6,S.pipeDia*0.55);
 
-  // Fensterwände hervorheben
-  let winSeg='';
-  const edgePts={bottom:[{x:0,y:0},{x:W,y:0}],top:[{x:0,y:H},{x:W,y:H}],
-                 left:[{x:0,y:0},{x:0,y:H}],right:[{x:W,y:0},{x:W,y:H}]};
-  CFG.windowEdges.forEach(e=>{winSeg+=poly(edgePts[e],'#e11',40);});
+  // Fensterwände
+  const edgePts={bottom:[{x:0,y:0},{x:W,y:0}],top:[{x:0,y:H},{x:W,y:H}],left:[{x:0,y:0},{x:0,y:H}],right:[{x:W,y:0},{x:W,y:H}]};
+  let winSeg=S.windowEdges.map(e=>line(edgePts[e][0],edgePts[e][1],'var(--window)',34)).join('');
 
-  // Maßstabsbalken (1 m) unten links im Rand
-  const bx=m, by=Y(-140), sb=1000;
-  const scaleBar=
-    `<line x1="${bx}" y1="${by}" x2="${bx+sb}" y2="${by}" stroke="#000" stroke-width="12"/>`+
-    `<text x="${bx}" y="${by-40}" font-size="90" fill="#000">0</text>`+
-    `<text x="${bx+sb-70}" y="${by-40}" font-size="90" fill="#000">1 m</text>`;
+  // Loops (Feld gefillt) + Randzone + Verteiler-Leitungen
+  const M=snappedManifold();
+  let loopPaths='', leaders='';
+  plan.loops.forEach((lp,i)=>{
+    loopPaths+=path(lp.field,LOOPHEX[i%3],sw);
+    if(lp.rand.length) loopPaths+=path(lp.rand,'var(--rand)',sw);
+    // Leiter Verteiler->Loop-Start (dünn, gestrichelt)
+    const start=lp.rand.length?lp.rand[0]:lp.field[0];
+    const end=lp.field.length?lp.field[lp.field.length-1]:lp.rand[lp.rand.length-1];
+    if(start) leaders+=line(M,start,'#94a3b8',5,'stroke-dasharray="20 14"');
+    if(end)   leaders+=line(end,M,'#94a3b8',5,'stroke-dasharray="20 14"');
+  });
 
-  // Bemaßung W/H
-  const dims=
-    `<text x="${X(W/2)}" y="${Y(-30)}" font-size="110" fill="#333" text-anchor="middle">B = ${(W/1000).toFixed(2)} m</text>`+
-    `<text x="${X(-60)}" y="${Y(H/2)}" font-size="110" fill="#333" text-anchor="middle" transform="rotate(-90 ${X(-60)} ${Y(H/2)})">L = ${(H/1000).toFixed(2)} m</text>`;
+  // Maßstabsbalken (1 m)
+  const bx=X(0), by=Y(-m*0.55), sb=1000;
+  const scaleBar=`<g font-family="system-ui"><line x1="${bx}" y1="${by}" x2="${bx+sb}" y2="${by}" stroke="#0f172a" stroke-width="10"/>`+
+    `<line x1="${bx}" y1="${by-18}" x2="${bx}" y2="${by+18}" stroke="#0f172a" stroke-width="8"/>`+
+    `<line x1="${bx+sb}" y1="${by-18}" x2="${bx+sb}" y2="${by+18}" stroke="#0f172a" stroke-width="8"/>`+
+    `<text x="${bx+sb/2}" y="${by-34}" font-size="90" fill="#0f172a" text-anchor="middle">1 m</text></g>`;
 
-  const svg=
-    `<svg viewBox="${vb}" xmlns="http://www.w3.org/2000/svg" width="720">`+
-    poly(roomClosed,'#333',25)+
-    winSeg+
-    poly(plan.field,'#06c',parseFloat((CFG.pipeDia*0.6).toFixed(1)))+
-    (plan.rand.length?poly(plan.rand,'#f80',parseFloat((CFG.pipeDia*0.6).toFixed(1))):'')+
-    // Verteiler
-    `<circle cx="${X(plan.M.x)}" cy="${Y(plan.M.y)}" r="60" fill="#000"/>`+
-    `<text x="${X(plan.M.x)+80}" y="${Y(plan.M.y)+30}" font-size="90" fill="#000">Verteiler</text>`+
-    scaleBar+dims+
-    `</svg>`;
+  // Bemaßung
+  const dims=`<g font-family="system-ui" fill="#475569">`+
+    `<text x="${X(W/2)}" y="${Y(-m*0.2)}" font-size="105" text-anchor="middle">${(W/1000).toFixed(2)} m</text>`+
+    `<text x="${X(-m*0.35)}" y="${Y(H/2)}" font-size="105" text-anchor="middle" transform="rotate(-90 ${X(-m*0.35)} ${Y(H/2)})">${(H/1000).toFixed(2)} m</text></g>`;
+
+  const svg=`<svg viewBox="0 0 ${W+2*m} ${H+2*m}" xmlns="http://www.w3.org/2000/svg" id="svg">`+
+    `<rect x="0" y="0" width="${W+2*m}" height="${H+2*m}" fill="#fff"/>`+
+    `<polygon points="${roomClosed.map(p=>PP(p)).join(' ')}" fill="#f8fafc" stroke="#334155" stroke-width="22" stroke-linejoin="round"/>`+
+    winSeg+leaders+loopPaths+
+    `<circle cx="${X(M.x)}" cy="${Y(M.y)}" r="55" fill="#0f172a"/>`+
+    `<circle cx="${X(M.x)}" cy="${Y(M.y)}" r="26" fill="#fff"/>`+
+    `<text x="${X(M.x)}" y="${Y(M.y)-90}" font-size="82" fill="#0f172a" text-anchor="middle" font-family="system-ui">Verteiler</text>`+
+    scaleBar+dims+`</svg>`;
   document.getElementById('plan').innerHTML=svg;
+  document.getElementById('svg').addEventListener('pointerdown',onPlanClick);
 }
 
-// ---------- Info / Materialliste ----------
-function renderInfo(plan){
-  const Lfield=pathLength(plan.field), Lrand=pathLength(plan.rand), Ltot=pathLength(plan.full);
-  const warn = Ltot>CFG.maxLoop;
+// ================= Klick -> Verteiler setzen =================
+function onPlanClick(e){
+  const svg=e.currentTarget;
+  const p=svg.createSVGPoint(); p.x=e.clientX; p.y=e.clientY;
+  const loc=p.matrixTransform(svg.getScreenCTM().inverse());
+  const m=Math.max(400,S.s*3);
+  S.manifold={x:loc.x-m, y:S.H-(loc.y-m)};
+  const snap=snappedManifold();
+  document.getElementById('mfx').value=Math.round(snap.x);
+  document.getElementById('mfy').value=Math.round(snap.y);
+  recompute();
+}
+
+// ================= Ergebnis-UI =================
+function renderResults(plan){
+  const total=plan.loops.reduce((a,l)=>a+l.length,0);
+  const contoursSum=plan.loops.reduce((a,l)=>a+l.rings,0);
   const m=v=>(v/1000).toFixed(1);
-  document.getElementById('info').innerHTML=
-    `<h3>Materialliste</h3>`+
-    `<table>`+
-    `<tr><th>Position</th><th>Wert</th></tr>`+
-    `<tr><td>Bahnabstand Feld</td><td>${CFG.s} mm</td></tr>`+
-    `<tr><td>Konturen (Feld)</td><td>${plan.contours}</td></tr>`+
-    `<tr><td>Rohr Randzone</td><td>${m(Lrand)} m</td></tr>`+
-    `<tr><td>Rohr Feld</td><td>${m(Lfield)} m</td></tr>`+
-    `<tr><td><b>Rohr gesamt (1 Kreis)</b></td><td><b>${m(Ltot)} m</b></td></tr>`+
-    `<tr><td>Rohr-Ø</td><td>${CFG.pipeDia} mm</td></tr>`+
-    `<tr><td>Verteiler-Abgänge</td><td>2 (Vor/Rücklauf)</td></tr>`+
-    `</table>`+
-    `<p class="${warn?'warn':'ok'}">`+
-    (warn?`⚠ Kreis ${m(Ltot)} m &gt; max ${m(CFG.maxLoop)} m — aufteilen!`
-         :`✓ Kreislänge ${m(Ltot)} m ≤ max ${m(CFG.maxLoop)} m`)+
-    `</p>`+
-    `<p style="color:#666">Legende: <span style="color:#06c">■</span> Feld-Schnecke,
-     <span style="color:#f80">■</span> Randzone (Fenster), <span style="color:#e11">■</span> Fensterwand.</p>`;
+  document.getElementById('badge').textContent=`${plan.loops.length} Heizkreis${plan.loops.length>1?'e':''} · ${m(total)} m`;
+
+  document.getElementById('cards').innerHTML=
+    card('Heizkreise',plan.loops.length,plan.forced?'fest':'autofit')+
+    card('Rohr gesamt',m(total),'m')+
+    card('Bahnabstand',S.s,'mm')+
+    card('Biegeradius',S.bendRadius,'mm')+
+    card('Konturen',contoursSum,'Bahnen');
+
+  let rows=plan.loops.map((l,i)=>{
+    const ok=l.length<=S.maxLoop;
+    return `<tr><td><span class="dot" style="background:${LOOPHEX[i%3]}"></span>Kreis ${i+1}</td>`+
+      `<td>${m(l.length)} m</td><td>${l.rings} Bahnen</td>`+
+      `<td><span class="pill ${ok?'ok':'bad'}">${ok?'≤ Max':'> Max'}</span></td></tr>`;
+  }).join('');
+  document.getElementById('loops').innerHTML=
+    `<table><thead><tr><th>Kreis</th><th>Rohrlänge</th><th>Feld</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>`;
+
+  document.getElementById('legend').innerHTML=
+    plan.loops.map((l,i)=>`<span><span class="dot" style="background:${LOOPHEX[i%3]}"></span>Kreis ${i+1}</span>`).join('')+
+    `<span><span class="dot" style="background:var(--rand)"></span>Randzone</span>`+
+    `<span><span class="dot" style="background:var(--window)"></span>Fensterwand</span>`+
+    `<span><span class="dot" style="background:#94a3b8"></span>Verteiler-Leitung</span>`;
+
+  const over=plan.loops.filter(l=>l.length>S.maxLoop).length;
+  const note=document.getElementById('notes');
+  if(over>0 && plan.loops.length>=3)
+    note.innerHTML=`<div class="note warn">⚠ ${over} Kreis(e) über Max ${m(S.maxLoop)} m — auch mit 3 Kreisen nicht lösbar. Bahnabstand erhöhen oder Fläche reduzieren.</div>`;
+  else if(over>0)
+    note.innerHTML=`<div class="note warn">⚠ ${over} Kreis(e) über Max ${m(S.maxLoop)} m. „Auto“ wählen oder mehr Kreise.</div>`;
+  else
+    note.innerHTML=`<div class="note ok">✓ Alle Kreise ≤ Max ${m(S.maxLoop)} m. Materialbedarf: ${m(total)} m Rohr Ø${S.pipeDia} mm.</div>`;
+}
+const card=(k,v,unit)=>`<div class="card"><div class="k">${k}</div><div class="v">${v} <small>${unit}</small></div></div>`;
+
+// ================= Bindings =================
+function bindNumber(id,key,scale=1){
+  const el=document.getElementById(id); el.value=S[key]/scale;
+  el.addEventListener('input',()=>{const v=parseFloat(el.value); if(!isNaN(v)){S[key]=v*scale; recompute();}});
+}
+function bindRange(id,key,valId){
+  const el=document.getElementById(id), out=document.getElementById(valId);
+  el.value=S[key]; out.textContent=S[key]+' mm';
+  el.addEventListener('input',()=>{S[key]=+el.value; out.textContent=el.value+' mm'; recompute();});
+}
+function initUI(){
+  bindNumber('W','W');bindNumber('H','H');bindNumber('notchA','notchA');bindNumber('notchB','notchB');
+  bindNumber('pipeDia','pipeDia');bindNumber('edgeGap','edgeGap');
+  bindNumber('randSpacing','randSpacing');bindNumber('randPasses','randPasses');
+  bindNumber('maxLoopM','maxLoop',1000);
+  bindRange('s','s','sVal');bindRange('bendRadius','bendRadius','brVal');
+  bindNumber('mfx','manifold'); // overwritten below
+  // manifold x/y felder
+  const mfx=document.getElementById('mfx'),mfy=document.getElementById('mfy');
+  const sm=snappedManifold(); mfx.value=Math.round(sm.x); mfy.value=Math.round(sm.y);
+  const setMf=()=>{S.manifold={x:parseFloat(mfx.value)||0,y:parseFloat(mfy.value)||0};recompute();};
+  mfx.oninput=setMf; mfy.oninput=setMf;
+  // fenster chips
+  document.querySelectorAll('#winChips input').forEach(cb=>{
+    cb.checked=S.windowEdges.includes(cb.value);
+    cb.closest('.chip').classList.toggle('on',cb.checked);
+    cb.addEventListener('change',()=>{
+      cb.closest('.chip').classList.toggle('on',cb.checked);
+      S.windowEdges=[...document.querySelectorAll('#winChips input:checked')].map(x=>x.value);
+      recompute();
+    });
+  });
+  // loop segment
+  document.querySelectorAll('#loopSeg button').forEach(b=>{
+    b.addEventListener('click',()=>{
+      document.querySelectorAll('#loopSeg button').forEach(x=>x.classList.remove('on'));
+      b.classList.add('on'); S.loopMode=b.dataset.n; recompute();
+    });
+  });
 }
 
-// ---------- Selbstchecks (asserts, keine Frameworks) ----------
+// ================= Selbstchecks =================
 function selfChecks(){
-  const out=[]; let ok=true;
-  const eq=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
-  const assert=(name,cond)=>{ok=ok&&cond; out.push((cond?'PASS ':'FAIL ')+name);};
-
-  // pathLength: Quadrat-Umfang 1000er = 4000 mm
-  const sq=[{x:0,y:0},{x:1000,y:0},{x:1000,y:1000},{x:0,y:1000},{x:0,y:0}];
-  assert('pathLength(Quadrat 1000)=4000', Math.abs(pathLength(sq)-4000)<1e-6);
-
-  // bifilarOrder
-  assert('bifilarOrder(4)=[0,2,3,1]', eq(bifilarOrder(4),[0,2,3,1]));
-  assert('bifilarOrder(5)=[0,2,4,3,1]', eq(bifilarOrder(5),[0,2,4,3,1]));
-
-  // Bifilar-Enden liegen auf äußerster Kontur (am Rand): erstes Segment startet auf ring0
-  const rings=[lRing(0,0,2000,2000,0,0),lRing(200,200,1600,1600,0,0),lRing(400,400,1200,1200,0,0)];
-  const p=bifilarPath(rings,1000);
-  const y0=rings[0][0].y;
-  assert('Bifilar-Start auf Außenkante', Math.abs(p[0].y-y0)<1e-6);
-
-  // offsetContours: Rechteck erzeugt monoton kleinere Konturen, >=1
-  const savedWin=CFG.windowEdges; // Konturzahl unabhängig testbar
-  const rc=offsetContours();
-  assert('offsetContours liefert >=1 Kontur', rc.length>=1);
-
-  const el=document.getElementById('checks');
-  el.textContent='Selbstchecks:\n'+out.join('\n');
-  el.style.color = ok?'#070':'#b00';
-  if(!ok) console.error('Selbstchecks FEHLGESCHLAGEN', out);
+  const out=[]; let ok=true; const eq=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+  const A=(n,c)=>{ok=ok&&c;out.push((c?'PASS ':'FAIL ')+n);};
+  A('bifilarOrder(4)=[0,2,3,1]',eq(bifilarOrder(4),[0,2,3,1]));
+  A('bifilarOrder(5)=[0,2,4,3,1]',eq(bifilarOrder(5),[0,2,4,3,1]));
+  // fillet: 90°-Ecke, r=100 -> 900 + 100*pi/2 + 900
+  const f=fillet([{x:0,y:0},{x:1000,y:0},{x:1000,y:1000}],100);
+  A('fillet 90°-Länge korrekt',Math.abs(f.length-(1800+100*Math.PI/2))<1e-6);
+  // fillet gerade -> reine Länge
+  const g=fillet([{x:0,y:0},{x:500,y:0},{x:1000,y:0}],60);
+  A('fillet gerade=1000',Math.abs(g.length-1000)<1e-6);
+  console[ok?'log':'error']('Selbstchecks',out);
+  return ok;
 }
 
-// ---------- main ----------
+// ================= Loop =================
+function recompute(){ const plan=autofit(); draw(plan); renderResults(plan); }
 selfChecks();
-const plan=buildPlan();
-render(plan);
-renderInfo(plan);
+initUI();
+recompute();
 </script>
 </body>
 </html>
