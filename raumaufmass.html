@@ -357,9 +357,47 @@ function ellipse(c){
   };
 }
 
+// Echter Schnitt zweier Strecken, gemeinsame Endpunkte zaehlen nicht.
+function segCross(p1,p2,p3,p4){
+  const d=(p2.x-p1.x)*(p4.y-p3.y)-(p2.y-p1.y)*(p4.x-p3.x);
+  if(Math.abs(d)<1e-12) return false;
+  const t=((p3.x-p1.x)*(p4.y-p3.y)-(p3.y-p1.y)*(p4.x-p3.x))/d;
+  const u=((p3.x-p1.x)*(p2.y-p1.y)-(p3.y-p1.y)*(p2.x-p1.x))/d;
+  const e=1e-9;
+  return t>e && t<1-e && u>e && u<1-e;
+}
+// Ein Raum ist ein EINFACHES Polygon. Kreuzen sich zwei Waende, ist es keins -
+// und dann liefern pointInPoly, segInPoly und die Flaeche stillschweigend
+// Unsinn: bei einem gekreuzten Viereck gilt die Raummitte als aussen und die
+// Flaeche kommt als 0 heraus.
+function ringSelfIntersects(poly){
+  const n=poly.length;
+  for(let i=0;i<n;i++){
+    const a1=poly[i], a2=poly[(i+1)%n];
+    for(let j=i+1;j<n;j++){
+      if(j===i || (j+1)%n===i || (i+1)%n===j) continue;   // benachbarte Kanten
+      if(segCross(a1,a2,poly[j],poly[(j+1)%n])) return true;
+    }
+  }
+  return false;
+}
+// Wuerde eine neue Wand a-b eine bestehende kreuzen?
+function wallCrossesExisting(pts, walls, a, b){
+  const I=idx(pts);
+  if(I[a]==null||I[b]==null) return false;
+  const p=pts[I[a]], q=pts[I[b]];
+  return walls.some(([c,d])=>{
+    if(c===a||c===b||d===a||d===b) return false;          // teilt einen Endpunkt
+    if(I[c]==null||I[d]==null) return false;
+    return segCross(p,q,pts[I[c]],pts[I[d]]);
+  });
+}
+
 // Wandzug in Ecken-Reihenfolge bringen. Null, wenn es kein geschlossener
-// Ring ueber alle Punkte ist - dann gibt es kein Polygon zum Filtern.
-function wallPolygon(pts, walls){
+// Ring ueber alle Punkte ist - dann gibt es kein Polygon zum Filtern. Reine
+// Adjazenzpruefung, unabhaengig von der Geometrie - siehe wallPolygon fuer
+// die geometrische Kreuzungspruefung, die hier bewusst NICHT stattfindet.
+function wallPolygonRing(pts, walls){
   if(walls.length<3 || pts.length<3) return null;
   const adj={}; pts.forEach(p=>adj[p.id]=[]);
   for(const [a,b] of walls){
@@ -376,6 +414,18 @@ function wallPolygon(pts, walls){
   }
   if(adj[cur].find(x=>x!==prev)!==pts[0].id) return null;
   return order.map(id=>pts[I[id]]);
+}
+
+// Ein Raum ist ein EINFACHES Polygon: der Ring darf sich nicht selbst kreuzen.
+// wallPolygonRing prueft nur die Adjazenz (ein geschlossener Zug ueber alle
+// Punkte), nicht die Geometrie - ein gekreuztes Viereck besteht diese Pruefung
+// anstandslos. Getrennt von wallPolygonRing, damit der rohe Ring auch im
+// gekreuzten Fall zur Inspektion zur Verfuegung steht (siehe Statuszeile:
+// "nicht geschlossen" und "kreuzt sich" sind verschiedene Meldungen).
+function wallPolygon(pts, walls){
+  const ring=wallPolygonRing(pts, walls);
+  if(!ring || ringSelfIntersects(ring)) return null;
+  return ring;
 }
 
 function pointInPoly(p, poly){
@@ -499,7 +549,8 @@ function dragAlongModes(pts, modes, i, dx, dy){
 globalThis.CORE={ TOL_RANK, TOL_RED, TOL_MODE, SIGMA_DEF, SUGGEST_CHECK_MAX,
                   dist, idx, activeMeas, residuals, jacobian, luSolve, matTmat, matTvec,
                   gramSchmidt, nullSpace, leverage, gaugeFixed, freeCols, scaleSketch, solve, analyze,
-                  trivialModes, covariance, ellipse, wallPolygon, pointInPoly, segInPoly,
+                  trivialModes, covariance, ellipse, segCross, ringSelfIntersects, wallCrossesExisting,
+                  wallPolygonRing, wallPolygon, pointInPoly, segInPoly,
                   pairMeasurable, suggest, dragAlongModes };
 </script>
 
@@ -608,6 +659,13 @@ function importProblem(o){
       return `Messung ${m.a}–${m.b} verweist auf einen unbekannten Punkt.`;
     if(!Number.isFinite(m.d) || !(m.d>0))
       return `Messung ${m.a}–${m.b}: d muss eine Zahl größer 0 sein.`;
+    // sigma ist optional - fehlt es, greift SIGMA_DEF (siehe analyze()). Ist es
+    // aber da, muss es eine echte, positive Zahl sein: sigma:0 ergaebe in
+    // analyze() eine Division durch 0 und damit ein literales Infinity in der
+    // w-Spalte. null/undefined zaehlen als "fehlt", nicht als ungueltiger Wert -
+    // an().w liest sigma ebenfalls per "??", nicht per Praesenzpruefung.
+    if(m.sigma!=null && (!Number.isFinite(m.sigma) || !(m.sigma>0)))
+      return `Messung ${m.a}–${m.b}: σ muss, wenn angegeben, eine Zahl größer 0 sein.`;
   }
   return null;
 }
@@ -948,6 +1006,13 @@ cv.addEventListener('mousedown',e=>{
     if(M.mode==='wall'){
       const k=[a,b].sort().join('|');
       const at=M.walls.findIndex(w2=>[w2[0],w2[1]].sort().join('|')===k);
+      // Nur beim Anlegen pruefen, nicht beim Entfernen (siehe "Klick toggelt"
+      // unten) - eine Wand zu entfernen kann nie eine neue Kreuzung erzeugen.
+      if(at<0 && C.wallCrossesExisting(M.fit?M.fit.pts:M.pts, M.walls, a, b)){
+        document.getElementById('hint').textContent =
+          'Diese Wand würde eine bestehende kreuzen — nicht angelegt.';
+        render(); return;
+      }
       snapshot();
       if(at>=0) M.walls.splice(at,1); else M.walls.push([a,b]);   // Klick toggelt
       recompute();
@@ -1112,15 +1177,21 @@ function renderPanel(){
   // laufen. Eigener, von statusText() unabhaengiger Hinweis: das ist kein
   // Netzzustand (unter-/ueberbestimmt/widerspruechlich), sondern eine Aussage
   // ueber den Wandzug, die mit jedem dieser Zustaende gleichzeitig gelten
-  // kann. wallPolygon() entscheidet rein aus der Adjazenz der IDs, nicht aus
-  // Koordinaten - M.pts reicht, ein Fit wird dafuer nicht gebraucht.
+  // kann. wallPolygon() liefert aus zwei verschiedenen Gruenden null - nicht
+  // geschlossen (reine Adjazenzfrage) oder geschlossen, aber gekreuzt (eine
+  // geometrische Frage) - und die beiden brauchen unterschiedliche Hinweise.
+  // M.pts reicht fuer beide, ein Fit wird dafuer nicht gebraucht; waehrend
+  // eines Zugs haelt das die Meldung synchron mit der Live-Position (siehe
+  // mousemove-Handler, der ebenfalls M.pts schreibt).
   const wwEl=document.getElementById('wallwarn');
+  const ring = C.wallPolygonRing(M.pts, M.walls);
   const ringBroken = M.walls.length>0 && !C.wallPolygon(M.pts, M.walls);
   wwEl.style.display = ringBroken ? 'block' : 'none';
-  if(ringBroken) wwEl.textContent =
-    'Wandzug nicht geschlossen (oder ein Punkt hat nicht genau zwei Wände) — '
-   +'die Vorschlagsliste ist deshalb ungefiltert und kann Strecken enthalten, '
-   +'die sich nicht direkt messen lassen.';
+  if(ringBroken) wwEl.textContent = (ring && C.ringSelfIntersects(ring))
+    ? 'Wände kreuzen sich — Fläche und Vorschlagsfilter sind ausgesetzt.'
+    : 'Wandzug nicht geschlossen (oder ein Punkt hat nicht genau zwei Wände) — '
+     +'die Vorschlagsliste ist deshalb ungefiltert und kann Strecken enthalten, '
+     +'die sich nicht direkt messen lassen.';
 
   const tb=document.querySelector('#tbl tbody');
   tb.innerHTML='';
@@ -1743,6 +1814,42 @@ globalThis.selfChecks=function(){
        poly && !C.pairMeasurable(L,walls,poly,'C','F'));
     chk('pairMeasurable: A-E bleibt messbar (Kontrolle: gueltige Diagonale)',
        poly && C.pairMeasurable(L,walls,poly,'A','E'));
+  }
+  // --- Waende duerfen sich nicht kreuzen (Task 11) ---
+  {
+    const bow=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:0,y:3000},{id:'D',x:4000,y:3000}];
+    const walls=[['A','B'],['B','C'],['C','D'],['D','A']];
+    chk('ringSelfIntersects: gekreuztes Viereck erkannt',
+       C.ringSelfIntersects(C.wallPolygonRaw ? C.wallPolygonRaw(bow,walls) : bow)===true);
+    chk('wallPolygon: gekreuzter Zug -> null', C.wallPolygon(bow,walls)===null);
+    const ok=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:3000},{id:'D',x:0,y:3000}];
+    chk('wallPolygon: sauberes Rechteck weiterhin gueltig',
+       C.wallPolygon(ok,walls)!==null);
+    chk('ringSelfIntersects: sauberes Rechteck ist frei', C.ringSelfIntersects(ok)===false);
+    // L-Raum aus der Spec muss weiter durchgehen
+    const L=[{id:'A',x:0,y:0},{id:'B',x:8000,y:0},{id:'C',x:8000,y:2000},
+             {id:'D',x:3000,y:2000},{id:'E',x:3000,y:5000},{id:'F',x:0,y:5000}];
+    chk('ringSelfIntersects: L-Raum ist frei', C.ringSelfIntersects(L)===false);
+    // Vor dem Anlegen pruefen
+    const drei=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:3000},{id:'D',x:0,y:3000}];
+    chk('wallCrossesExisting: Diagonale kreuzt nichts, wenn nur eine Wand da ist',
+       C.wallCrossesExisting(drei,[['A','B']],'C','D')===false);
+    chk('wallCrossesExisting: kreuzende Wand erkannt',
+       C.wallCrossesExisting(drei,[['A','C']],'B','D')===true);
+    // Der Ring muss auch im gekreuzten Fall zur Inspektion verfuegbar bleiben
+    // (siehe Statuszeilen-Unterscheidung "nicht geschlossen" vs "kreuzt sich") -
+    // sonst kann wallPolygonRing != null pruefen, wer den kaputten Fall meldet.
+    chk('wallPolygonRing: liefert den rohen Ring auch wenn er sich kreuzt',
+       (()=>{ const r=C.wallPolygonRing(bow,walls); return Array.isArray(r) && r.length===4; })());
+    // Benachbarte Kanten teilen sich per Konstruktion einen Endpunkt - ohne den
+    // Adjazenz-Ausschluss meldete sich jedes Polygon selbst als gekreuzt.
+    // Kontrollprobe hier: ein Fuenfeck mit einem ueberfluessigen, kollinearen
+    // Eckpunkt auf einer Kante (B liegt exakt auf der Strecke A-C). Das ist ein
+    // gueltiger, wenn auch entarteter Ring - kein echter Schnitt zweier Kanten.
+    const collinear=[{id:'A',x:0,y:0},{id:'B',x:2000,y:0},{id:'C',x:4000,y:0},
+                     {id:'D',x:4000,y:3000},{id:'E',x:0,y:3000}];
+    chk('ringSelfIntersects: kollinearer Zwischenpunkt auf einer Kante wird nicht als Schnitt gewertet',
+       C.ringSelfIntersects(collinear)===false);
   }
   // --- suggest ---
   {
