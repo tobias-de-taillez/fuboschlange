@@ -550,7 +550,7 @@ function niceFactor(raw){
   return ELLIPSE_FACTORS[ELLIPSE_FACTORS.length-1];
 }
 
-const M={ pts:[], walls:[], meas:[], mode:'point', sel:[], fit:null, an:null, drag:null };
+const M={ pts:[], walls:[], meas:[], mode:'point', sel:[], fit:null, an:null, drag:null, dragMode:null };
 
 // Ein Zustand ist genau das, was der Nutzer eingegeben hat: Punkte, Waende,
 // Messungen. Fit und Analyse werden daraus jederzeit neu gerechnet und
@@ -610,12 +610,13 @@ function importProblem(o){
 
 const UNDO_MAX=60;
 const undoStack=[];
-// Vor jeder Aenderung aufrufen, nicht danach - der Stapel haelt den Zustand
-// VOR dem Schritt, sonst macht das erste Undo nichts.
-function snapshot(){
-  undoStack.push(serialize());
+function pushSnapshot(s){
+  undoStack.push(s);
   if(undoStack.length>UNDO_MAX) undoStack.shift();
 }
+// Vor jeder Aenderung aufrufen, nicht danach - der Stapel haelt den Zustand
+// VOR dem Schritt, sonst macht das erste Undo nichts.
+function snapshot(){ pushSnapshot(serialize()); }
 function undo(){
   if(!undoStack.length) return false;
   deserialize(JSON.parse(undoStack.pop()));
@@ -717,6 +718,12 @@ function render(){
     ctx.fillStyle='#000'; ctx.font=`${12*dpr}px system-ui`;
     ctx.fillText(pt.id, p.x+8*dpr, p.y-8*dpr);
   });
+  if(M.drag && M.dragMode){
+    document.getElementById('hint').textContent =
+      {frei:'Skizze frei — noch keine Messung',
+       moden:'Punkt folgt den Messungen',
+       starr:'Raum ist bestimmt — nur verschiebbar, Maß ändern statt ziehen'}[M.dragMode];
+  }
   // Unsicherheiten. Drei Faelle, die verschieden aussehen muessen:
   // ueberbestimmt -> Ellipse aus sigmaHat; bestimmt -> Ellipse aus dem
   // angenommenen sigma; beweglich -> Pfeil, weil eine Ellipse dort unendlich
@@ -843,12 +850,18 @@ document.getElementById('entryVal').addEventListener('keydown',e=>{
   if(e.key==='Escape') closeEntry();
 });
 
+// Der Snapshot eines Zugs gehoert der ERSTEN echten Bewegung, nicht dem
+// Mausdruck: sonst frisst ein blosser Klick ohne Drag (Auswahl, Wandwechsel)
+// das naechste Strg+Z. mousedown merkt den Vorzustand nur vor; mousemove
+// committet ihn beim ersten Schritt, mouseup verwirft ihn ohne Bewegung.
+let dragSnapshot=null;
+
 cv.addEventListener('mousedown',e=>{
   const r=cv.getBoundingClientRect(), dpr=devicePixelRatio||1;
   const w=toWorld((e.clientX-r.left)*dpr, (e.clientY-r.top)*dpr);
   const h=hit(w.x,w.y);
   if(M.mode==='point'){
-    if(h){ snapshot(); M.drag=h.id; return; }
+    if(h){ dragSnapshot=serialize(); M.drag=h.id; return; }
     snapshot(); M.pts.push({id:nextId(), x:w.x, y:w.y}); recompute(); return;
   }
   if(M.mode==='measure' && !h){
@@ -890,14 +903,40 @@ cv.addEventListener('contextmenu',e=>{
   recompute();
 });
 
+// Ziehen kennt drei Lagen:
+//  - noch keine Messung: die Skizze ist frei
+//  - dof > 0: der Punkt folgt der Maus so weit, wie die Messungen es zulassen
+//  - dof = 0: die Form ist bestimmt, es bleibt das Verschieben des ganzen Raums
 cv.addEventListener('mousemove',e=>{
   if(!M.drag) return;
   const r=cv.getBoundingClientRect(), dpr=devicePixelRatio||1;
   const w=toWorld((e.clientX-r.left)*dpr, (e.clientY-r.top)*dpr);
-  const p=M.pts.find(x=>x.id===M.drag);
-  if(p){ p.x=w.x; p.y=w.y; render(); }
+  const i=M.pts.findIndex(x=>x.id===M.drag);
+  if(i<0) return;
+  // Erste echte Bewegung dieses Zugs: jetzt erst den bei mousedown gemerkten
+  // Vorzustand auf den Undo-Stapel legen (siehe dragSnapshot oben).
+  if(dragSnapshot){ pushSnapshot(dragSnapshot); dragSnapshot=null; }
+  const dx=w.x-M.pts[i].x, dy=w.y-M.pts[i].y;
+  if(!M.an){
+    M.dragMode='frei';
+    M.pts[i].x=w.x; M.pts[i].y=w.y;
+  } else if(M.an.dof>0){
+    M.dragMode='moden';
+    const moved=C.dragAlongModes(M.pts, M.an.modes, i, dx, dy);
+    if(moved){
+      const fit=C.solve(moved, M.meas);     // Korrektor: zurueck auf die Messungen
+      fit.pts.forEach((p,q)=>{ M.pts[q].x=p.x; M.pts[q].y=p.y; });
+    }
+  } else {
+    M.dragMode='starr';
+    M.pts.forEach(p=>{ p.x+=dx; p.y+=dy; });
+  }
+  render();
 });
-addEventListener('mouseup',()=>{ if(M.drag){ M.drag=null; recompute(); } });
+addEventListener('mouseup',()=>{
+  dragSnapshot=null;                        // ohne Bewegung: verwerfen, nicht committen
+  if(M.drag){ M.drag=null; M.dragMode=null; recompute(); }
+});
 
 document.querySelectorAll('#modes button').forEach(b=>{
   b.onclick=()=>{
