@@ -298,10 +298,107 @@ function ellipse(c){
   };
 }
 
+// Wandzug in Ecken-Reihenfolge bringen. Null, wenn es kein geschlossener
+// Ring ueber alle Punkte ist - dann gibt es kein Polygon zum Filtern.
+function wallPolygon(pts, walls){
+  if(walls.length<3 || pts.length<3) return null;
+  const adj={}; pts.forEach(p=>adj[p.id]=[]);
+  for(const [a,b] of walls){
+    if(!adj[a]||!adj[b]) return null;
+    adj[a].push(b); adj[b].push(a);
+  }
+  if(pts.some(p=>adj[p.id].length!==2)) return null;
+  const I=idx(pts), order=[pts[0].id];
+  let prev=null, cur=pts[0].id;
+  for(let i=1;i<pts.length;i++){
+    const nxt=adj[cur].find(x=>x!==prev);
+    if(nxt==null || order.includes(nxt)) return null;
+    prev=cur; cur=nxt; order.push(cur);
+  }
+  if(adj[cur].find(x=>x!==prev)!==pts[0].id) return null;
+  return order.map(id=>pts[I[id]]);
+}
+
+function pointInPoly(p, poly){
+  let inside=false;
+  for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+    const a=poly[i], b=poly[j];
+    if((a.y>p.y)!==(b.y>p.y) && p.x < (b.x-a.x)*(p.y-a.y)/(b.y-a.y)+a.x) inside=!inside;
+  }
+  return inside;
+}
+
+// Messbar heisst: die Strecke bleibt im Raum. Abtasten statt Kantenschnitte -
+// faengt auch den Fall ab, dass die Strecke genau durch eine einspringende Ecke
+// laeuft. ponytail: bei drei kollinearen Ecken liegen die Abtastpunkte auf dem
+// Rand und das Ergebnis ist willkuerlich - ein solcher Raum ist entartet.
+function segInPoly(p, q, poly, steps=32){
+  for(let i=1;i<steps;i++){
+    const t=i/steps;
+    if(!pointInPoly({x:p.x+(q.x-p.x)*t, y:p.y+(q.y-p.y)*t}, poly)) return false;
+  }
+  return true;
+}
+
+const pairKey=(a,b)=>[a,b].sort().join('|');
+
+// Zwei Phasen in einem Durchlauf. Solange Messungen fehlen: die Messung
+// waehlen, deren Rigiditaetszeile am staerksten in die noch freien Richtungen
+// zeigt. Danach: die Messung waehlen, die die meisten bisher unpruefbaren
+// Messungen pruefbar macht. Jeder Vorschlag traegt in `why`, aus welcher Phase
+// er stammt - ohne das stuenden hier fuenf Eintraege, waehrend die Statuszeile
+// "3 Messungen fehlen" meldet.
+function suggest(pts, walls, meas){
+  const poly=wallPolygon(pts,walls), I=idx(pts);
+  const have=new Set(activeMeas(meas).map(m=>pairKey(m.a,m.b)));
+  const cand=[];
+  for(let i=0;i<pts.length;i++) for(let j=i+1;j<pts.length;j++){
+    if(have.has(pairKey(pts[i].id,pts[j].id))) continue;
+    if(poly && !segInPoly(pts[i],pts[j],poly)) continue;
+    cand.push({a:pts[i].id, b:pts[j].id});
+  }
+  const virt=c=>({a:c.a, b:c.b, d:dist(pts[I[c.a]],pts[I[c.b]]), sigma:SIGMA_DEF});
+  const out=[]; let work=activeMeas(meas).slice();
+  const taken=new Set();
+  let checkPhase=0;
+  for(let guard=0; guard<2*pts.length; guard++){
+    const an=analyze(pts, work);
+    let best=null, bestScore=0, why='bestimmt';
+    if(an.dof>0){
+      for(const c of cand){
+        if(taken.has(pairKey(c.a,c.b))) continue;
+        const row=jacobian(pts,[{a:c.a,b:c.b,d:0}])[0];
+        const score=an.modes.reduce((s,mo)=>{
+          let d=0; for(let i=0;i<row.length;i++) d+=row[i]*mo[i];
+          return s+d*d;
+        },0);
+        if(score>bestScore){ bestScore=score; best=c; }
+      }
+    } else {
+      if(checkPhase>=SUGGEST_CHECK_MAX) break;
+      why='pruefbar';
+      const unchecked=a=>a.w.filter(x=>x===null).length;
+      const base=unchecked(an);
+      if(base===0) break;
+      for(const c of cand){
+        if(taken.has(pairKey(c.a,c.b))) continue;
+        const gain=base-unchecked(analyze(pts, work.concat([virt(c)])));
+        if(gain>bestScore){ bestScore=gain; best=c; }
+      }
+      checkPhase++;
+    }
+    if(!best) break;
+    taken.add(pairKey(best.a,best.b));
+    out.push({a:best.a, b:best.b, why});
+    work=work.concat([virt(best)]);
+  }
+  return out;
+}
+
 globalThis.CORE={ TOL_RANK, TOL_RED, TOL_MODE, SIGMA_DEF, SUGGEST_CHECK_MAX,
                   dist, idx, activeMeas, residuals, jacobian, luSolve, matTmat, matTvec,
                   gramSchmidt, nullSpace, leverage, gaugeFixed, freeCols, scaleSketch, solve, analyze,
-                  trivialModes, covariance, ellipse };
+                  trivialModes, covariance, ellipse, wallPolygon, pointInPoly, segInPoly, suggest };
 </script>
 
 <script id="checks">
@@ -659,6 +756,60 @@ globalThis.selfChecks=function(){
        near(e4.a,20,1e-9)&&near(e4.b,10,1e-9));
     chk('ellipse: schiefe Kovarianz mit xx!=yy -> Winkel aus 3-4-5-Drehung',
        near(e4.ang,Math.atan2(3,4),1e-9));
+  }
+  // --- Polygon und Messbarkeit (Spec-Test 4) ---
+  {
+    const L=[{id:'A',x:0,y:0},{id:'B',x:8000,y:0},{id:'C',x:8000,y:2000},
+             {id:'D',x:3000,y:2000},{id:'E',x:3000,y:5000},{id:'F',x:0,y:5000}];
+    const walls=[['A','B'],['B','C'],['C','D'],['D','E'],['E','F'],['F','A']];
+    const poly=C.wallPolygon(L,walls);
+    chk('wallPolygon: geschlossener Zug -> 6 Ecken', poly && poly.length===6);
+    chk('pointInPoly: Punkt im schmalen Schenkel', C.pointInPoly({x:6000,y:1000},poly));
+    chk('pointInPoly: Punkt im ausgesparten Bereich', !C.pointInPoly({x:6000,y:4000},poly));
+    chk('segInPoly: C-F verlaesst den Raum -> unzulaessig',
+       !C.segInPoly({x:8000,y:2000},{x:0,y:5000},poly));
+    chk('segInPoly: A-E bleibt im Raum -> zulaessig',
+       C.segInPoly({x:0,y:0},{x:3000,y:5000},poly));
+    chk('wallPolygon: offener Zug -> null',
+       C.wallPolygon(L,[['A','B'],['B','C'],['C','D']])===null);
+    chk('wallPolygon: Knotengrad ungleich 2 -> null',
+       C.wallPolygon(L,walls.concat([['A','D']]))===null);
+  }
+  // --- suggest ---
+  {
+    const rect=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:3000},{id:'D',x:0,y:3000}];
+    const walls=[['A','B'],['B','C'],['C','D'],['D','A']];
+    const seiten=[{a:'A',b:'B',d:4000},{a:'B',b:'C',d:3000},{a:'C',b:'D',d:4000},{a:'D',b:'A',d:3000}];
+    const s=C.suggest(rect,walls,seiten);
+    const best=s.filter(x=>x.why==='bestimmt');
+    chk('suggest: genau ein Vorschlag fuer Bestimmtheit', best.length===1);
+    chk('suggest: es ist eine Diagonale',
+       best.length===1 && ['AC','BD'].includes([best[0].a,best[0].b].sort().join('')));
+    chk('suggest: Vorschlag macht das Netz bestimmt', (()=>{
+      if(best.length!==1) return false;
+      const I=C.idx(rect);
+      const d=C.dist(rect[I[best[0].a]],rect[I[best[0].b]]);
+      return C.analyze(rect, seiten.concat([{a:best[0].a,b:best[0].b,d}])).dof===0;
+    })());
+    chk('suggest: schlaegt danach Messungen zur Pruefbarkeit vor',
+       s.length>0 && s.some(x=>x.why==='pruefbar'));
+  }
+  {
+    const L=[{id:'A',x:0,y:0},{id:'B',x:8000,y:0},{id:'C',x:8000,y:2000},
+             {id:'D',x:3000,y:2000},{id:'E',x:3000,y:5000},{id:'F',x:0,y:5000}];
+    const walls=[['A','B'],['B','C'],['C','D'],['D','E'],['E','F'],['F','A']];
+    const I=C.idx(L);
+    const seiten=walls.map(([a,b])=>({a,b,d:C.dist(L[I[a]],L[I[b]])}));
+    chk('analyze: L mit 6 Waenden -> 3 Messungen fehlen', C.analyze(L,seiten).dof===3);
+    const s=C.suggest(L,walls,seiten);
+    chk('suggest: genau 3 Vorschlaege fuer Bestimmtheit',
+       s.filter(x=>x.why==='bestimmt').length===3);
+    chk('suggest: kein Vorschlag verlaesst den Raum',
+       s.length>0 && s.every(x=>C.segInPoly(L[I[x.a]],L[I[x.b]],C.wallPolygon(L,walls))));
+    chk('suggest: C-F wird nie vorgeschlagen',
+       s.length>0 && !s.some(x=>[x.a,x.b].sort().join('')==='CF'));
+    chk('suggest: Pruefbarkeitsphase ist gedeckelt',
+       s.filter(x=>x.why==='pruefbar').length<=C.SUGGEST_CHECK_MAX);
   }
   return {ok, out};
 };
