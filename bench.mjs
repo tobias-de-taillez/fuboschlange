@@ -1,7 +1,13 @@
 // bench.mjs — headless Bench-Runner. Node >= 18, keine Dependencies.
 //
-//   node bench.mjs [läufe] [--jobs=N] [--checks] [--save-baseline]
+//   node bench.mjs [läufe] [--jobs=N] [--checks] [--why] [--save-baseline]
 //   node bench.mjs 500 --shard=3/14        # ein einzelner Shard (intern)
+//
+// --file=<html> misst eine ANDERE Fassung der Datei. Damit ist ein A/B gegen
+// einen früheren Stand ein Zweizeiler und braucht kein Hin-und-Her im
+// Arbeitsbaum:
+//   git show HEAD~1:verlegeplan.html > /tmp/vorher.html
+//   node bench.mjs 500 --file=/tmp/vorher.html
 //
 // Die Läufe werden auf N Prozesse aufgeteilt. Jeder Shard erzeugt ALLE
 // Parametersätze (der PRNG läuft identisch weiter) und wertet nur seine eigenen
@@ -17,13 +23,14 @@ const flag = name => argv.find(a => a.startsWith('--' + name + '='))?.split('=')
 const RUNS = Number(argv.find(a => /^\d+$/.test(a)) || 500);
 const SEED = Number(flag('seed') || 20260725);
 const shardArg = flag('shard');
+const FILE = flag('file') || 'verlegeplan.html';
 
 // ---------- Shard-Modus: ein Teil der Läufe, Ergebnis als JSON auf stdout -----
 if (shardArg) {
   const [sh, ns] = shardArg.split('/').map(Number);
-  const api = load('verlegeplan.html');
+  const api = load(FILE);
   const fails = api.crossingBench(RUNS, SEED, sh, ns);
-  process.stdout.write(JSON.stringify({ fails: [...fails], allGaps: fails.allGaps }));
+  process.stdout.write(JSON.stringify({ fails: [...fails], all: fails.all }));
   process.exit(0);
 }
 
@@ -33,48 +40,73 @@ if (shardArg) {
 const JOBS = Math.max(1, Math.min(Number(flag('jobs') || availableParallelism() - 2), RUNS));
 const t0 = Date.now();
 
-let fails, allGaps;
+let fails, all;
 if (RUNS < 32 || JOBS === 1) {
-  const api = load('verlegeplan.html', { checks: argv.includes('--checks') });
+  const api = load(FILE, { checks: argv.includes('--checks') });
   const f = api.crossingBench(RUNS, SEED);
-  fails = [...f]; allGaps = f.allGaps;
+  fails = [...f]; all = f.all;
 } else {
-  if (argv.includes('--checks')) load('verlegeplan.html', { checks: true });
+  if (argv.includes('--checks')) load(FILE, { checks: true });
+  // Eigener Pfad, nicht 'bench.mjs': relativ aufgelöst bricht der Shard-Start,
+  // sobald der Aufruf aus einem anderen Arbeitsverzeichnis kommt.
+  const self = import.meta.filename;
   const run = i => new Promise((res, rej) =>
-    execFile(process.execPath, ['bench.mjs', String(RUNS), `--seed=${SEED}`,
-      `--shard=${i}/${JOBS}`], { maxBuffer: 1 << 28 },
+    execFile(process.execPath, [self, String(RUNS), `--seed=${SEED}`,
+      `--file=${FILE}`, `--shard=${i}/${JOBS}`], { maxBuffer: 1 << 28 },
       (err, out, errOut) => err ? rej(new Error(`Shard ${i}: ${err.message}\n${errOut}`))
                                 : res(JSON.parse(out))));
   const parts = await Promise.all(Array.from({ length: JOBS }, (_, i) => run(i)));
+  // Eine Fassung ohne den `all`-Kanal (--file auf einen älteren Stand) liefert
+  // hier undefined. Ohne diese Prüfung zählt flatMap das als einen Eintrag pro
+  // Shard und die Fehlerquoten wären still durch 500 statt durch 12 geteilt.
+  const bad = parts.findIndex(p => !Array.isArray(p.all));
+  if (bad >= 0) {
+    console.error(`Shard ${bad} liefert keinen all-Kanal — `
+      + `hat ${FILE} noch die alte crossingBench-Rückgabe (fails.allGaps)?`);
+    process.exit(1);
+  }
   fails = parts.flatMap(p => p.fails);
-  allGaps = parts.flatMap(p => p.allGaps);
+  all = parts.flatMap(p => p.all);
   // Jeder Lauf muss genau einmal ausgewertet worden sein. Ohne diese Prüfung
   // würde ein Shard, der still weniger liefert (z. B. wegen eines Fehlers im
   // Aufteilungs-Index), die Fehlerraten kleiner rechnen als sie sind.
-  if (allGaps.length !== RUNS) {
-    console.error(`Shards haben ${allGaps.length} von ${RUNS} Läufen ausgewertet.`);
+  if (all.length !== RUNS) {
+    console.error(`Shards haben ${all.length} von ${RUNS} Läufen ausgewertet.`);
     process.exit(1);
   }
 }
 
+// Die harten Kriterien gegen ALLE Läufe zählen, nicht gegen die Fehlschlagliste:
+// sonst hängt jede Kennzahl daran, dass ein Lauf schon aus einem ANDEREN Grund
+// in `fails` gelandet ist.
+const ok = all.filter(f => !f.err);
+const med = key => {
+  const a = ok.map(f => f[key]).filter(v => v != null).sort((x, y) => x - y);
+  return a.length ? a[a.length >> 1] : 0;
+};
 const out = {
   runs: RUNS,
-  crossFails: fails.filter(f => f.cross > 0).length,
-  covFails: fails.filter(f => f.cov < 40).length,
-  radFails: fails.filter(f => f.minR != null && f.minR < f.radSoll - 1).length,
+  crossFails: ok.filter(f => f.cross > 0).length,
+  covFails: ok.filter(f => f.cov < 40).length,
+  radFails: ok.filter(f => f.minR != null && f.minR < f.radSoll - 1).length,
   // `cross` zählt im Bench nur die Kreuzungen, `outside` zählt getrennt das
   // Rohr außerhalb des Raums (seit der Trennung in crossingBench, Step 1a).
-  outFails: fails.filter(f => f.outside > 0).length,
-  errFails: fails.filter(f => f.err).length,
-  worstCoverage: Math.min(...fails.map(f => f.cov), 100),
-  worstRadius: Math.min(...fails.map(f => f.minR ?? 999), 999),
+  outFails: ok.filter(f => f.outside > 0).length,
+  errFails: all.filter(f => f.err).length,
+  worstCoverage: Math.min(...ok.map(f => f.cov), 100),
+  worstRadius: Math.min(...ok.map(f => f.minR ?? 999), 999),
   // Diagnose, kein Gate: worstGap zeigt, ob Radius-Gewinne mit Flaeche bezahlt
   // werden. Bewusst NICHT in RATE_KEYS - die vier harten Kriterien bleiben vier.
-  // Max ueber ALLE Laeufe (allGaps), nicht nur ueber die Fehlschlaege: sonst
-  // verschwindet der schlimmste Gap-Wert aus der Kennzahl, sobald ein Lauf die
-  // vier harten Kriterien besteht (die ein Folge-Task genau verbessert).
-  worstGap: Math.max(...allGaps.map(g => g ?? 0), 0),
-  medianGap: (a => a.length ? a[a.length >> 1] : 0)(allGaps.filter(g => g != null).sort((x, y) => x - y)),
+  worstGap: Math.max(...ok.map(f => f.gap ?? 0), 0),
+  // BETRÄGE, nicht nur Quoten. Die vier harten Kriterien sind binär: sinken die
+  // Kreuzungen eines Laufs von 58 auf 20, bleibt er ein Fehlschlag und
+  // crossFailRate rührt sich nicht. Ohne diese Zeilen ist Fortschritt erst
+  // sichtbar, wenn er exakt 0 erreicht — also nie während der Arbeit daran.
+  worstCross: Math.max(...ok.map(f => f.cross ?? 0), 0),
+  medianCross: med('cross'),
+  medianGap: med('gap'),
+  medianCoverage: med('cov'),
+  medianRadius: med('minR'),
   seconds: +((Date.now() - t0) / 1000).toFixed(1),
   jobs: JOBS,
 };

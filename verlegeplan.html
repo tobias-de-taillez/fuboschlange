@@ -804,13 +804,39 @@ function doubleSpiralField(poly,insOf,s,gate){
   // äußersten Rings). Der Übergang Ring->Ring ist dann ein kurzes radiales
   // Stück in der Naht statt einer Diagonale quer durchs Feld.
   const gx=gate!=null?gate:rings[0][0].x;
-  const seamOf=r=>{
-    let bi=0,bd=Infinity;
+  // Naht am nächsten PUNKT des Rings, nicht am nächsten ECKPUNKT. simplify()
+  // fasst die lange Unterkante zu einem einzigen Segment zusammen, dort liegt
+  // also gar kein Eckpunkt in der Nähe des Verteilers. Die alte Fassung suchte
+  // den nächsten vorhandenen Eckpunkt und landete gemessen auf der
+  // Notch-Innenecke bei (5333,1741) — 1894 mm von der Naht entfernt und mitten
+  // im Raum. Vorlauf und Rücklauf begannen dadurch im Feldinneren, und die
+  // Anbindeleitungen mussten quer durch die fertige Spirale dorthin: 25 der 59
+  // gemessenen Kreuzungen der Standardkonfiguration waren genau das
+  // (14 Feld×mid, 11 Feld×leadOut).
+  // Deshalb wird der Fußpunkt auf das nächste SEGMENT projiziert und als neuer
+  // Punkt eingefügt.
+  const seamCut=r=>{
+    let bi=0,bt=0,bd=Infinity;
     for(let i=0;i<r.length;i++){
-      const d=Math.hypot(r[i].x-gx, r[i].y-seamY);
-      if(d<bd){bd=d;bi=i;}
+      const A=r[i], B=r[(i+1)%r.length];
+      const dx=B.x-A.x, dy=B.y-A.y, l2=dx*dx+dy*dy||1;
+      let t=((gx-A.x)*dx+(seamY-A.y)*dy)/l2; t=t<0?0:t>1?1:t;
+      const ex=A.x+t*dx-gx, ey=A.y+t*dy-seamY, d=ex*ex+ey*ey;
+      if(d<bd){bd=d;bi=i;bt=t;}
     }
-    return bi;
+    const A=r[bi], B=r[(bi+1)%r.length];
+    const P={x:A.x+(B.x-A.x)*bt, y:A.y+(B.y-A.y)*bt};
+    // Offene Kette ab P einmal herum. Wie bisher OHNE Doppelpunkt am Ende:
+    // ein Pfad, der exakt auf seinem Startpunkt endet, macht am Übergang zum
+    // nächsten Ring eine 180°-Kehre auf der Stelle.
+    const rest=[...r.slice(bi+1),...r.slice(0,bi+1)];
+    // Fällt P mit einem Nachbar-Eckpunkt zusammen (bt an 0 oder 1), entsteht
+    // sonst ein Segment der Länge ~0 — fillet begrenzt den Bogenradius auf
+    // 0,5·kürzestes Nachbarsegment und macht daraus einen radiuslosen Knick.
+    const eps=1e-6;
+    if(rest.length&&len(sub(rest[rest.length-1],P))<eps) rest.pop();
+    if(rest.length&&len(sub(rest[0],P))<eps) rest.shift();
+    return [P,...rest];
   };
   let seamY=Infinity;
   rings[0].forEach(p=>{ if(p.y<seamY) seamY=p.y; });     // Naht an der Unterkante
@@ -827,11 +853,10 @@ function doubleSpiralField(poly,insOf,s,gate){
     // Startpunkt und der Übergang zum nächsten Ring wird zur Nadel — eine
     // 180°-Kehre auf der Stelle, die kein Rohr biegen kann.
     if(rr.length>2 && len(sub(rr[0],rr[rr.length-1]))<1) rr=rr.slice(0,-1);
-    const bi=seamOf(rr);
     // ponytail: nur den Doppelpunkt entfernen, KEINE zusätzliche Lücke. Ein
     // Schnitt von s*0.9 vor der Naht beseitigt zwar auch die Nadel, kostete
     // aber Kreuzungen (31 -> 51) und Deckung (35% -> 30%).
-    return [...rr.slice(bi),...rr.slice(0,bi)];
+    return seamCut(rr);
   });
   // Vorlauf rein über die geraden Bahnen, U-Turn, Rücklauf raus über die
   // ungeraden. Beide Arme haben konstant s Abstand -> Gegenstrom.
@@ -2672,12 +2697,15 @@ function crossingBench(n,seed,shard,nShards){
     randSpacing:S.randSpacing,randPasses:S.randPasses,windowEdges:S.windowEdges,
     loopMode:S.loopMode,manifold:S.manifold}));
   const fails=[];
-  // gap JEDES Laufs, nicht nur der Fehlschlaege: die vier harten Kriterien
-  // unten (cross/outside/cov/rad) reissen unabhaengig von gap. Ein Folge-Task
-  // verbessert genau diese vier - bestuende ein Lauf sie danach, fiele sein
-  // gap sonst ersatzlos aus der Fehlschlagliste und worstGap koennte sinken,
-  // obwohl die schlimmste Luecke unveraendert ist. Deshalb eigener Kanal.
-  const allGaps=[];
+  // Messwerte JEDES Laufs, nicht nur der Fehlschlaege. Zwei Gruende:
+  //  1. Die vier harten Kriterien sind BINAER. Sinken die Kreuzungen eines Laufs
+  //     von 58 auf 20, bleibt er ein Fehlschlag und die Fehlerquote ruehrt sich
+  //     nicht — der Fortschritt ist unsichtbar, bis er exakt 0 erreicht. Ueber
+  //     diesen Kanal ist der Betrag sichtbar (medianCross, worstCross).
+  //  2. Bestuende ein Lauf die vier Kriterien, fiele sein gap ersatzlos aus der
+  //     Fehlschlagliste und worstGap koennte sinken, obwohl die schlimmste
+  //     Luecke unveraendert ist.
+  const all=[];
   try{
   for(let i=0;i<n;i++){
     // Raummaße um die Projektwerte streuen (+-50%), damit der Bench nicht nur
@@ -2707,20 +2735,21 @@ function crossingBench(n,seed,shard,nShards){
     let plan,x=0,cov=0,outside=0,gap=0;
     try{ plan=autofit(); x=loopCrossings(plan); outside=loopsOutside(plan);
          cov=heatCoverage(plan.loops,25); gap=gapMax(plan.loops); }
-    catch(e){ fails.push({err:String(e),cfg:{W:S.W,H:S.H,notchA:S.notchA,notchB:S.notchB,
+    catch(e){ all.push({err:String(e)});
+      fails.push({err:String(e),cfg:{W:S.W,H:S.H,notchA:S.notchA,notchB:S.notchB,
       s:S.s,bendRadius:S.bendRadius,randPasses:S.randPasses,win:S.windowEdges.join('+'),
       mode:S.loopMode,mf:`${Math.round(S.manifold.x)},${Math.round(S.manifold.y)}`}}); continue; }
-    // Gleiche Infinity->null-Regel wie beim gap-Feld im Fehlschlag-Eintrag
-    // unten: ein Kreis ohne Segmente liefert Infinity, das JSON.stringify
-    // sonst still zu null verfaelscht (Math.max ueber Infinity waere sichtbar
-    // kaputt, aber erst im bench.mjs-Output).
-    allGaps.push(isFinite(gap)?Math.round(gap):null);
     // Deckungsziel nur dort fordern, wo es der Bahnabstand überhaupt zulässt:
     // die Wirkzone ist +-25 mm, also ist 2*25/s die harte Obergrenze.
     // Harte Kriterien: keine Kreuzung, kein Rohr draußen, Deckung >= 40 %,
     // Biegeradius nie unter 5x Rohr-Durchmesser.
     const minR=Math.min(Infinity,...plan.loops.map(l=>l.minR??Infinity));
     const covFail=cov<0.40, radFail=isFinite(minR)&&minR<S.bendRadius-1;
+    // Infinity->null: ein Kreis ohne Segmente liefert Infinity, das
+    // JSON.stringify sonst still zu null verfaelscht (Math.max ueber Infinity
+    // waere sichtbar kaputt, aber erst im bench.mjs-Output).
+    all.push({cross:x,outside,cov:Math.round(cov*100),radSoll:S.bendRadius,
+      minR:isFinite(minR)?Math.round(minR):null, gap:isFinite(gap)?Math.round(gap):null});
     if(x>0||outside>0||covFail||radFail) fails.push({cross:x,outside,cov:Math.round(cov*100),
       minR:isFinite(minR)?Math.round(minR):null, radSoll:S.bendRadius,
       // gapMax liefert Infinity, wenn ein Kreis keine Segmente hat -> null.
@@ -2735,7 +2764,7 @@ function crossingBench(n,seed,shard,nShards){
   // bestehenden Array: bestehende Aufrufer (bench.mjs, Selbstcheck) lesen
   // weiterhin ein Array (.length, .map, .filter, .slice) und bleiben
   // unveraendert funktionsfaehig, ohne die Rueckgabeform umzubauen.
-  fails.allGaps=allGaps;
+  fails.all=all;
   return fails;
 }
 
