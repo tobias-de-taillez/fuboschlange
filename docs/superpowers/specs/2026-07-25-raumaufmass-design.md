@@ -237,8 +237,21 @@ Bei ≤ 30 Punkten ist das schnell genug für Live-Aktualisierung; ein
 ```
 Unterbestimmt — 3 Messungen fehlen
 Bestimmt, aber keine Messung überprüfbar
+Bestimmt, aber die Messungen widersprechen sich
 Überbestimmt — σ̂ = 6.2 mm
 ```
+
+**Korrektur aus der Implementierung.** Der Satz „bei exakt bestimmtem Netz sind
+alle Residuen strukturell null" gilt nur, solange die Messungen geometrisch
+überhaupt möglich sind. Ein Tippfehler — Diagonale 8,000 m statt 5,000 m —
+beschreibt keine mögliche Raumform; die Ausgleichung verteilt den Widerspruch
+dann auf alle Punkte und die Residuen werden groß. Ohne eigenen Zustand meldete
+das Werkzeug in genau diesem Fall ruhig „nicht prüfbar" und lieferte Wandlängen
+von 4,250 m, wo 4,000 m gemessen worden war.
+
+Der vierte Zustand fängt das ab: übersteigt das größte Residuum ein Vielfaches
+der angenommenen Messgenauigkeit, ist bewiesen, dass mindestens eine Messung
+falsch ist — welche, lässt sich ohne Redundanz nicht sagen. Rot, nicht gelb.
 
 **Messtabelle** rechts, Spalten `von · nach · d · v · Redundanz · w`, absteigend
 nach `w` sortiert. Die oberste Zeile ist der wahrscheinlichste Ausreißer. Zeilen
