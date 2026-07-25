@@ -1043,6 +1043,17 @@ function doubleSpiralField(poly,insOf,s,gate){
     const eps=1e-6;
     if(rest.length&&len(sub(rest[rest.length-1],P))<eps) rest.pop();
     if(rest.length&&len(sub(rest[0],P))<eps) rest.shift();
+    // VERWORFEN, gemessen: die Kette 2s VOR der Naht enden lassen statt am
+    // letzten Eckpunkt. Die Diagnose stimmt — bei einem exakten 4-Eck-Ring ist
+    // der letzte Eckpunkt eine GANZE RINGSEITE vor der Naht, und der Sprung zum
+    // nächsten Ring lief dadurch quer durch das halbe Feld und wieder zurück
+    // (im Frame von (1286,2090) nach (6714,2110), 5428 mm hin und 20 mm höher
+    // zurück, Radius 2 bis 5 mm). Der Rücktritt beseitigt das aber nicht und
+    // kostet deutlich Fläche:
+    //   ohne Rücktritt   covFails  2/48  medianRadius 35  radFails 48/48
+    //   mit  2s          covFails 11/48  medianRadius 22  radFails 48/48
+    // Der Sprung muss anders gelöst werden als durch Verkürzen — vermutlich
+    // durch eine echte Übergangskurve zwischen den Ringen.
     return [P,...rest];
   };
   let seamY=Infinity;
@@ -1110,10 +1121,32 @@ function doubleSpiralField(poly,insOf,s,gate){
   const R2=2*S.bendRadius;
   const gapOK=()=>pts.length<2||!back.length||!back[0]||!back[0].length||
                   len(sub(pts[pts.length-1],back[0][0]))>=R2;
-  while(!gapOK()){
+  // Abtragen nach BOGENLAENGE, nicht nach Eckpunkten. Die frühere Fassung warf je
+  // Durchlauf einen Eckpunkt weg. Bei den dichten Isolinien waren das wenige
+  // Millimeter — die exakten Skeleton-Ringe haben aber nur 4 bis 6 Ecken, ein
+  // Punkt ist also eine GANZE RINGSEITE. Gemessen sprang der Ringanfang dadurch
+  // ans andere Ende des Feldes: der Pfad lief im Frame von (1286,2090) nach
+  // (6714,2110), also 5428 mm quer durch den Raum und 20 mm höher zurück — eine
+  // 180-Grad-Kehre zwischen zwei Segmenten von 2,7 und 5,4 m, und mit Abstand
+  // die engste Stelle im ganzen Plan (Radius 2 bis 5 mm, in 22 von 32 Plänen die
+  // schlimmste Ecke überhaupt).
+  const trimFront=(r,dist)=>{
+    let rem=dist, out=r.slice();
+    while(out.length>2&&rem>0){
+      const d=len(sub(out[1],out[0]));
+      if(d>rem){
+        const u=unit(sub(out[1],out[0]));
+        out[0]={x:out[0].x+u.x*rem, y:out[0].y+u.y*rem};
+        return out;
+      }
+      rem-=d; out=out.slice(1);
+    }
+    return out;
+  };
+  for(let guard=0;guard<400&&!gapOK();guard++){
     const r=back[0];
-    if(r.length>2){
-      back=[r.slice(1),...back.slice(1)];   // ein Stück am Ringanfang abtragen
+    if(polyLen(r)>R2){
+      back=[trimFront(r,S.bendRadius/2),...back.slice(1)];
     }else if(back.length>1){
       back=back.slice(1);                   // Ring aufgebraucht: dann doch weg
     }else break;                            // letzter Ring: nichts mehr zu kürzen

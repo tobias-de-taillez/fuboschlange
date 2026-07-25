@@ -1,7 +1,7 @@
 {
  "runs": 500,
  "crossFails": 357,
- "covFails": 293,
+ "covFails": 291,
  "radFails": 487,
  "outFails": 112,
  "errFails": 0,
@@ -10,11 +10,11 @@
  "worstGap": 3383,
  "worstCross": 50,
  "medianCross": 2,
- "medianGap": 1115,
+ "medianGap": 1113,
  "medianCoverage": 38,
  "medianRadius": 21,
  "crossFailRate": 0.714,
- "covFailRate": 0.586,
+ "covFailRate": 0.582,
  "radFailRate": 0.974,
  "outFailRate": 0.224
 }
