@@ -2324,8 +2324,11 @@ function crossingBench(n,seed){
   const fails=[];
   try{
   for(let i=0;i<n;i++){
-    S.W=1500+Math.round(rnd()*9000/50)*50;
-    S.H=1500+Math.round(rnd()*5000/50)*50;
+    // Raummaße um die Projektwerte streuen (+-50%), damit der Bench nicht nur
+    // eine Geometrie prüft.
+    const jit=()=>0.5+rnd();                       // 0.5 .. 1.5
+    S.W=Math.max(1500,Math.round(8000*jit()/50)*50);
+    S.H=Math.max(1500,Math.round(3200*jit()/50)*50);
     const withNotch=rnd()<0.7;
     S.notchA=withNotch?Math.round(rnd()*(S.W*0.7)/50)*50:0;
     S.notchB=withNotch?Math.round(rnd()*(S.H*0.6)/50)*50:0;
@@ -2343,12 +2346,17 @@ function crossingBench(n,seed){
     const room=lRing(0,0,S.W,S.H,S.notchA,S.notchB);
     const k=Math.floor(rnd()*room.length), a=room[k], b=room[(k+1)%room.length], t=rnd();
     S.manifold={x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t};
-    let plan,x=0;
-    try{ plan=autofit(); x=loopCrossings(plan)+loopsOutside(plan); }
+    let plan,x=0,cov=0;
+    try{ plan=autofit(); x=loopCrossings(plan)+loopsOutside(plan);
+         cov=heatCoverage(plan.loops,25); }
     catch(e){ fails.push({err:String(e),cfg:{W:S.W,H:S.H,notchA:S.notchA,notchB:S.notchB,
       s:S.s,bendRadius:S.bendRadius,randPasses:S.randPasses,win:S.windowEdges.join('+'),
       mode:S.loopMode,mf:`${Math.round(S.manifold.x)},${Math.round(S.manifold.y)}`}}); continue; }
-    if(x>0) fails.push({cross:x,cfg:{W:S.W,H:S.H,notchA:S.notchA,notchB:S.notchB,
+    // Deckungsziel nur dort fordern, wo es der Bahnabstand überhaupt zulässt:
+    // die Wirkzone ist +-25 mm, also ist 2*25/s die harte Obergrenze.
+    const covMax=Math.min(1,50/S.s), covFail=cov<Math.min(0.40,covMax*0.9);
+    if(x>0||covFail) fails.push({cross:x,cov:Math.round(cov*100),
+      covLimit:Math.round(covMax*100),cfg:{W:S.W,H:S.H,notchA:S.notchA,notchB:S.notchB,
       notchLeft:S.notchLeft,s:S.s,bendRadius:S.bendRadius,pipeDia:S.pipeDia,edgeGap:S.edgeGap,
       randSpacing:S.randSpacing,randPasses:S.randPasses,win:S.windowEdges.join('+')||'-',
       mode:S.loopMode,mf:`${Math.round(S.manifold.x)},${Math.round(S.manifold.y)}`}});
