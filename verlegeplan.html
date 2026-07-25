@@ -1778,6 +1778,56 @@ function routeVia(a,b,lane,gap){
   }
   return pts;
 }
+// ================= Notausgang: Route an der Raumkontur =================
+// routeVia baut Manhattan-Wege im Korridor und kennt dafuer inzwischen mehrere
+// Sonderfaelle (Randzone unterhalb, andere Wand, Notch auf Korridorhoehe). Jeder
+// neue Grundriss-Fall braucht dort einen weiteren Zweig, und genau daran ist es
+// gescheitert: gemessen ueber 32 Plaene setzen leadOut (46 Punkte) und leadIn
+// (11) Stuetzpunkte IN die Aussparung, wenn der Verteiler an einer Wand sitzt,
+// die der Notch verkuerzt.
+//
+// Statt eines fuenften Sonderfalls hier ein Weg, der per KONSTRUKTION im Raum
+// liegt: an der um edgeGap nach innen versetzten Raumkontur entlang. Die
+// versetzte Kontur ist dieselbe Mengendifferenz wie beim Skeleton-Offset
+// (Rechteck minus gewachsener Notch), liegt also garantiert im Raum.
+function insetRoomRing(d){
+  const x0=d, x1=S.W-d, y0=d, y1=S.H-d;
+  if(x1-x0<1||y1-y0<1) return null;
+  const rect=[{x:x0,y:y0},{x:x1,y:y0},{x:x1,y:y1},{x:x0,y:y1}];
+  if(!hasNotch()) return rect;
+  // Notch wird intern immer oben rechts gerechnet.
+  const nx=S.W-S.notchA-d, ny=S.H-S.notchB-d;
+  if(nx>=x1||ny>=y1) return rect;
+  if(nx<=x0) return (ny-y0<1)?null:[{x:x0,y:y0},{x:x1,y:y0},{x:x1,y:ny},{x:x0,y:ny}];
+  if(ny<=y0) return (nx-x0<1)?null:[{x:x0,y:y0},{x:nx,y:y0},{x:nx,y:y1},{x:x0,y:y1}];
+  return [{x:x0,y:y0},{x:x1,y:y0},{x:x1,y:ny},{x:nx,y:ny},{x:nx,y:y1},{x:x0,y:y1}];
+}
+// Weg von a nach b entlang der versetzten Kontur, kuerzere Richtung.
+function contourRoute(a,b,d){
+  const R=insetRoomRing(d);
+  if(!R) return null;
+  const foot=p=>{ let bi=0,bt=0,bd=Infinity;
+    for(let i=0;i<R.length;i++){ const A=R[i],B=R[(i+1)%R.length];
+      const dx=B.x-A.x,dy=B.y-A.y,l2=dx*dx+dy*dy||1;
+      let t=((p.x-A.x)*dx+(p.y-A.y)*dy)/l2; t=t<0?0:t>1?1:t;
+      const ex=A.x+t*dx-p.x, ey=A.y+t*dy-p.y, q=ex*ex+ey*ey;
+      if(q<bd){bd=q;bi=i;bt=t;} }
+    const A=R[bi],B=R[(bi+1)%R.length];
+    return {i:bi,pt:{x:A.x+(B.x-A.x)*bt, y:A.y+(B.y-A.y)*bt}}; };
+  const fa=foot(a), fb=foot(b);
+  const walk=dir=>{ const out=[fa.pt];
+    let i=fa.i;
+    for(let k=0;k<R.length;k++){
+      if(i===fb.i) break;
+      i=dir>0?(i+1)%R.length:(i-1+R.length)%R.length;
+      out.push(R[dir>0?i:(i+1)%R.length]);
+    }
+    out.push(fb.pt); return out; };
+  const fwd=walk(1), bwd=walk(-1);
+  const L=p=>{let n=0;for(let i=1;i<p.length;i++)n+=len(sub(p[i],p[i-1]));return n;};
+  const mid=L(fwd)<=L(bwd)?fwd:bwd;
+  return [a,...mid,b];
+}
 // Welche Weltwand trägt den Verteiler -> Frame-Rotation.
 function rotForManifold(M){
   const nearNotchSide = hasNotch()&&Math.abs(M.x-notchX())<=1&&M.y>=S.H-S.notchB-1;
@@ -1872,8 +1922,17 @@ function buildLoops(groups,ownerOverride,connOrder){
   const seq=withEnds.slice()
     .sort((a,b)=>Math.min(a.head.x,a.tail.x)-Math.min(b.head.x,b.tail.x));
   const barW=manifoldBarW(2*seq.length);
-  const bx0=Math.min(Math.max(M.x-barW/2,S.edgeGap),
-                     Math.max(S.edgeGap,frameW()-S.edgeGap-barW));
+  // Die Leiste muss auf die TATSAECHLICHE Laenge der Verteilerwand geklemmt
+  // werden, nicht auf die Frame-Breite. Verkuerzt der Notch diese Wand, ragt die
+  // Leiste sonst darueber hinaus und die Abgaenge liegen ausserhalb des Raums —
+  // gemessen genau das: Ports bei y=2225 und 2275, waehrend die rechte Wand nur
+  // bis y=2200 reicht. Jede Zuleitung startet dann schon draussen, und keine
+  // Wegfuehrung kann das heilen.
+  const nf0=notchFrame();
+  let f0=0, f1=frameW();
+  if(nf0&&nf0.y0<=1){ if(nf0.x0<=1) f0=nf0.x1; else if(nf0.x1>=frameW()-1) f1=nf0.x0; }
+  const lo=f0+S.edgeGap, hi=Math.max(lo,f1-S.edgeGap-barW);
+  const bx0=Math.min(Math.max(M.x-barW/2,lo),hi);
   seq.forEach((r,k)=>{
     const p0={x:bx0+2*k*MANIFOLD_PITCH,y:M.y};
     const p1={x:bx0+(2*k+1)*MANIFOLD_PITCH,y:M.y};
@@ -1930,6 +1989,17 @@ function buildLoops(groups,ownerOverride,connOrder){
   const out=built.map(b=>({
     field:bk(b.frameField), rand:bk(b.frameRand), leadIn:bk(b.frameLeadIn),
     leadOut:bk(b.frameLeadOut), mid:bk(b.frameMid), rings:b.rings}));
+  // Notausgang: laeuft eine Anbindeleitung aus dem Raum, wird sie durch den Weg
+  // an der Raumkontur ersetzt. Geprueft wird in WELTkoordinaten, weil der Notch
+  // dort definiert ist; die Kontur-Route liegt per Konstruktion im Raum.
+  out.forEach(l=>{
+    ['leadIn','leadOut','mid'].forEach(k=>{
+      const p=l[k];
+      if(!p||p.length<2||p.every(q=>pointInRoom(q))) return;
+      const alt=contourRoute(p[0],p[p.length-1],S.edgeGap);
+      if(alt&&alt.every(q=>pointInRoom(q))) l[k]=alt;
+    });
+  });
 
   // Kraftmodell VOR der Längenmessung: sonst beschreiben Länge und Biegeradius
   // eine Geometrie, die so nicht gezeichnet wird.
