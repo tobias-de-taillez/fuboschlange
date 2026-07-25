@@ -214,3 +214,71 @@ diesmal mit dem gezeichneten Pfad als Referenz statt mit einer Vermutung.
 - [Luceda ManhattanFanout](https://academy.lucedaphotonics.com/ipkiss/reference/connectors/ref/ipkiss3.all.ManhattanFanout) / [FanoutPorts](https://academy.lucedaphotonics.com/ipkiss/picazzo/containers/fanout_ports/ref/picazzo3.container.fanout_ports.FanoutPorts) — gestaffelter Auslauf als Standard-Primitive.
 - [Bend radius, Wikipedia](https://en.wikipedia.org/wiki/Bend_radius)
 - [Serpentine Routing, sfcircuits](https://www.sfcircuits.com/pcb-school/serpentine-routing) — engere U-Kehren erhoehen die Diskontinuitaet; dieselbe Geometrie, andere Domaene.
+
+---
+
+# Nachtrag Runde 19 — wogegen kreuzt es, und zwei Korrekturen
+
+## Korrektur zu Runde 18
+
+Dort stand: "randPasses=2 (Omega AN) 847 Kreuzungen gegen randPasses=1 (AUS) 272,
+also ist das Omega die Quelle." Das ist **keine saubere Isolierung**. `randPasses=1`
+schaltet ueber `omegaOn()` auch `omegaClear()` ab, und damit schrumpft
+`fieldInset()` um `omegaReach()+LANE()/2` = 237 mm — das Feld rueckt 237 mm naeher
+an die Wand, die ganze Aufteilung aendert sich. Der Vergleich misst zwei Dinge
+gleichzeitig.
+
+## Was gemessen wurde
+
+`probe-kreuzpaare.mjs` behaelt fuer jedes Segment seine Herkunft (Kreis +
+Teilstueck) und zaehlt, welche Teilstuecke sich kreuzen. 20 Laeufe:
+
+| Anzahl | Paar |
+|---|---|
+| 426 | `field x rand` |
+| 148 | `rand x rand` |
+| 138 | `field x rand` (verschiedene Kreise) |
+| 23 | `leadOut x rand` |
+| 13 | `field x leadIn` |
+| 10 | `field x field` |
+
+Beteiligung je Teilstueck: `rand` 895, `field` 602, `leadOut` 48, `leadIn` 35,
+`mid` 2. **Die Randzone ist an rund 57 % aller Kreuzungsenden beteiligt** und
+`field x rand` ist mit Abstand das haeufigste Paar. Das ist das Ziel.
+
+## Korrektur zur eigenen Sonde
+
+Die Sonde sollte zusaetzlich sagen, WO diese Kreuzungen liegen, und meldete
+Wandabstaende von 82 bis 2653 mm bei einem Randzonenband von nur 100 mm Tiefe.
+`probe-randlage.mjs` widerspricht dem direkt: das `rand`-Polygon liegt ueber alle
+20 Laeufe zwischen 168 und 391 mm von einer Wand.
+
+Die Sonde hat unrecht, nicht das Programm. Der Beleg kam aus ihr selbst:
+
+    Punkt 542 mm von Wand | rand(max 300) x field(max 2035)
+
+Ein Kreuzungspunkt auf einer rand-Strecke kann nicht weiter von der Wand liegen
+als der entfernteste Stuetzpunkt dieser Strecke — es sei denn, das Mass ist nicht
+konvex. Genau das ist der Fall: "Abstand zur naechsten Wand" ist ein MINIMUM
+konvexer Funktionen. Ueber einer Strecke, die eine einspringende Ecke ueberspannt,
+kann der Wert in der Mitte ueber beide Endwerte steigen.
+
+Die Wandabstands-Ausgabe ist deshalb abgeschaltet und der Grund im Code
+vermerkt, damit niemand sie wieder einschaltet. Die Paar-Statistik haengt nicht
+an dieser Rechnung und bleibt gueltig.
+
+## Stand
+
+Keine Codeaenderung an `verlegeplan.html` diese Runde — es gab nichts zu
+verwerfen und nichts zu behalten. Bench unveraendert: crossFails 18/20,
+covFails 10/20, radFails 19/20, outFails 0/20.
+
+Naechster Schritt: `field x rand` sauber lokalisieren, mit einem Mass, das
+haelt — Abstand zur ZUGEHOERIGEN Wand der Randzonenkette statt zur naechsten
+beliebigen, oder direkt die Bogenlaenge entlang der Kette.
+
+## Quellen
+
+- [Continuous Curvature Path Planning for Headland Coverage With Agricultural Robots, J. Field Robotics 2025](https://onlinelibrary.wiley.com/doi/full/10.1002/rob.22489) — Kopfland-Planung als eigenes Problem, stetige Kruemmung fuer konvexe und konkave Ecken.
+- [Smooth turning path generation for agricultural vehicles in headlands](https://www.researchgate.net/publication/282409353_Smooth_turning_path_generation_for_agricultural_vehicles_in_headlands) — Typ U, Typ Ω und Typ T als die drei klassischen Wendeformen.
+- [Dynamic path planning method for headland turning of unmanned agricultural vehicles](https://www.sciencedirect.com/science/article/abs/pii/S016816992300087X) — omega-turn, U-turn, gap-turn und fishtail-turn im Vergleich; ausdruecklich auch Uebergaenge zwischen NICHT benachbarten Reihen.
