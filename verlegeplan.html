@@ -208,7 +208,13 @@ function lRing(x0,y0,w,h,a,b){
 // Zonenbreiten von der Wand nach innen: Randzone -> Leitungskorridor -> Feld.
 const hasNotch=()=>S.notchA>0&&S.notchB>0;
 const notchX=()=>S.W-S.notchA;                      // x der Notch-Innenwand
-const randW=e=>wEdges().includes(e)?S.randPasses*S.randSpacing:0;
+// Omega-Kehren: ist die halbe Randzonen-Teilung kleiner als der Biegeradius,
+// werden die Bahn-Enden als ausgeschwungene Schlaufen mit vollem Radius
+// verlegt. Braucht edgeGap >= R (Ausschwung zur Wand). Der Randzonen-Streifen
+// bleibt dabei schmal — die Schlaufen ragen bewusst asymmetrisch in den Raum.
+const omegaOn=()=>S.randPasses>1 && S.randSpacing/2<S.bendRadius
+              && S.edgeGap>=S.bendRadius+S.pipeDia/2;
+const randW=e=>wEdges().includes(e) ? S.randPasses*S.randSpacing : 0;
 const randWidth=()=>randW('bottom');                // Korridor liegt über der BODEN-Randzone
 // Mindest-Bahnabstand 50 mm gilt auch für Anbindeleitungen im Korridor.
 const LANE=()=>Math.max(50,S.pipeDia*1.6);
@@ -219,10 +225,13 @@ const corridorW=()=>laneCount()*LANE()+LANE()/2;
 // lane -1 = Übergangskanal für Rechteck->Rechteck-Verbinder. Liegt ZWISCHEN
 // Randzone und Korridor: unterhalb der Randzone würde jeder Verbinder die
 // Fensterbahnen durchstoßen.
-const laneY=i=>i<0 ? S.edgeGap+randWidth()-LANE()/2
-                   : S.edgeGap+randWidth()+(i+0.5)*LANE();
+// Die Omega-Schlaufen ragen 2R über die letzte Randzonenbahn in den Raum.
+// Nicht die Randzone wird breiter — Korridor und Feld weichen aus.
+const omegaClear=e=>(omegaOn()&&randW(e||'bottom')>0) ? 2*S.bendRadius+LANE()/2 : 0;
+const laneY=i=>i<0 ? S.edgeGap+randWidth()+omegaClear()-LANE()/2
+                   : S.edgeGap+randWidth()+omegaClear()+(i+0.5)*LANE();
 let curLoopCount=1;                                 // von autofit gesetzt (Korridorbreite)
-const fieldInset=()=>S.edgeGap+randWidth()+corridorW();   // = Boden-Inset
+const fieldInset=()=>S.edgeGap+randWidth()+omegaClear()+corridorW();   // = Boden-Inset
 
 // Per-Seite-Insets eines Feld-Rechtecks: Randzone nur an echten Fensterwänden,
 // Korridor nur unten, innere Nähte zwischen Rechtecken nur s/2 — sonst
@@ -232,9 +241,9 @@ function insetsFor(rect){
   const topIsOuter=rect.y0+rect.h>=S.H-1;           // Außen-Oberwand (links vom Notch)
   return {
     b: fieldInset(),
-    t: S.edgeGap+(topIsOuter?randW('top'):0),
-    l: atL? S.edgeGap+randW('left') : S.s/2,
-    r: atR? S.edgeGap+randW('right') : S.s/2,
+    t: S.edgeGap+(topIsOuter?randW('top')+omegaClear('top'):0),
+    l: atL? S.edgeGap+randW('left')+omegaClear('left') : S.s/2,
+    r: atR? S.edgeGap+randW('right')+omegaClear('right') : S.s/2,
   };
 }
 
@@ -300,6 +309,25 @@ function doubleSpiral(rect,ins,s,gate){
 function bifilarPath(rect,gate){ return doubleSpiral(rect,insetsFor(rect),S.s,gate); }
 
 // ================= Randzone =================
+// Omega-Kehre: Bahn-Ende Pe -> ausgeschwungene Schlaufe -> Nachbarbahn Ps,
+// alle Bögen mit vollem Radius R. u = Bahnrichtung am Ende (Einheitsvektor).
+// Form: 90° raus (u-Seite), Steigstück, 180° zurück, 90°-Gegenbogen auf die
+// Nachbarbahn, die dadurch um 2R später beginnt. Kreuzungsfrei: der Ausschwung
+// liegt jenseits des Nachbarbahn-Endes, der Scheitel im erweiterten Streifen.
+function omegaTurn(Pe,Ps,u,R){
+  const n=unit(sub(Ps,Pe)), d=len(sub(Ps,Pe));
+  const cw=(u.x*n.y-u.y*n.x)<0;
+  const A =add(add(Pe,scl(u,R)),  scl(n,R));      // nach 90°-Bogen
+  const B =add(add(Pe,scl(u,R)),  scl(n,R+d));    // Steigstück-Ende
+  const C2=add(add(Pe,scl(u,-R)), scl(n,R+d));    // nach 180°-Bogen
+  const D =add(Ps,scl(u,-2*R));                   // nach Gegenbogen, auf Nachbarbahn
+  return [
+    {x:A.x, y:A.y, arc:{r:R,cw,large:false}},
+    {x:B.x, y:B.y},
+    {x:C2.x,y:C2.y,arc:{r:R,cw,large:false}},     // 180°: Sehne=2R, sweep zählt
+    {x:D.x, y:D.y, arc:{r:R,cw:!cw,large:false}}, // Gegenbogen
+  ];
+}
 function randzonePath(edgeName){
   const {W,H,edgeGap,randSpacing,randPasses}=S;
   // Notch-bewusst: Oberwand endet an der Notch-Innenwand, rechte Wand an der
@@ -319,7 +347,14 @@ function randzonePath(edgeName){
     const off=edgeGap+j*randSpacing;
     let p0=add(a,scl(inw,off)),p1=add(b,scl(inw,off));
     if(j%2===1){const t=p0;p0=p1;p1=t;}
-    pts.push(p0,p1);
+    if(j>0 && omegaOn()){
+      // Kehre zu eng -> Omega-Schlaufe; die Nachbarbahn beginnt 2R später
+      const Pe=pts[pts.length-1], u=unit(sub(Pe,pts[pts.length-2]));
+      pts.push(...omegaTurn(Pe,p0,u,S.bendRadius));
+      pts.push(p1);
+    }else{
+      pts.push(p0,p1);
+    }
   }
   return pts;
 }
@@ -334,9 +369,21 @@ function fillet(pts,r){
   if(!pts.length) return {ops,length,minR};
   ops.push({kind:'move',to:pts[0]});
   if(pts.length===1) return {ops,length,minR};
+  // Vorgegebener Bogen (Omega-Schlaufen): Länge analytisch aus Sehne+Radius.
+  const pushArc=(v)=>{
+    const c=len(sub(v,prev));
+    let th=2*Math.asin(Math.min(1,c/(2*v.arc.r)));
+    if(v.arc.large) th=2*Math.PI-th;
+    ops.push({kind:'arc',to:v,r:v.arc.r,cw:v.arc.cw,large:v.arc.large});
+    length+=v.arc.r*th; minR=Math.min(minR,v.arc.r); prev=v;
+  };
   let prev=pts[0];
   for(let i=1;i<pts.length-1;i++){
     const a=pts[i-1],v=pts[i],b=pts[i+1];
+    if(v.arc){ pushArc(v); continue; }
+    // Nachbarn eines vorgegebenen Bogens sind tangential konstruiert:
+    // Ecke nicht runden, sonst verfälscht die Sehnen-Richtung den Knick.
+    if((b&&b.arc)||a.arc){ ops.push({kind:'line',to:v}); length+=len(sub(v,prev)); prev=v; continue; }
     const din=unit(sub(v,a)),dout=unit(sub(b,v));
     const dotv=Math.max(-1,Math.min(1,dot(din,dout)));
     const defl=Math.acos(dotv);                 // 0..pi
@@ -354,7 +401,8 @@ function fillet(pts,r){
     prev=pout;
   }
   const last=pts[pts.length-1];
-  ops.push({kind:'line',to:last}); length+=len(sub(last,prev));
+  if(last.arc) pushArc(last);
+  else { ops.push({kind:'line',to:last}); length+=len(sub(last,prev)); }
   return {ops,length,minR};
 }
 
@@ -591,7 +639,7 @@ function draw(plan){
   // sweep: Y-Flip spiegelt die Drehrichtung (ccw->cw); mirX spiegelt sie erneut.
   const sweep=cw=>{ let f=cw?1:0; if(S.notchLeft) f=1-f; return f; };
   const opsToD=ops=>ops.map(o=>o.kind==='move'?`M ${PP(o.to)}`:o.kind==='line'?`L ${PP(o.to)}`
-      :`A ${o.r.toFixed(1)} ${o.r.toFixed(1)} 0 0 ${sweep(o.cw)} ${PP(o.to)}`).join(' ');
+      :`A ${o.r.toFixed(1)} ${o.r.toFixed(1)} 0 ${o.large?1:0} ${sweep(o.cw)} ${PP(o.to)}`).join(' ');
   const path=(pts,stroke,sw)=>pts.length<2?'':`<path d="${opsToD(fillet(pts,S.bendRadius).ops)}" fill="none" stroke="${stroke}" stroke-width="${sw}" stroke-linejoin="round" stroke-linecap="round"/>`;
   const line=(a,b,stroke,sw,dash='')=>`<line x1="${X(a.x)}" y1="${Y(a.y)}" x2="${X(b.x)}" y2="${Y(b.y)}" stroke="${stroke}" stroke-width="${sw}" ${dash}/>`;
 
