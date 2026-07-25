@@ -475,6 +475,14 @@ function recompute(){
   if(M.pts.length>=2 && C.activeMeas(M.meas).length){
     M.fit=C.solve(M.pts, M.meas);
     M.an=C.analyze(M.fit.pts, M.meas);
+    // Skizze auf den Fit ziehen: solve() liefert frische Punkte in mm, M.pts
+    // bliebe sonst auf Klick-Pixeln stehen, waehrend render/hit/autofit ab
+    // hier M.fit.pts zeigen. Ziehen und Neuanlage schreiben aber immer in
+    // M.pts - ohne Angleich liefen beide Arrays auseinander und ein einzelner
+    // gezogener Punkt wuerde die Skizzenform zerstoeren. Nur x/y auf den
+    // bestehenden Objekten aktualisieren, id bleibt unangetastet.
+    const I=C.idx(M.pts);
+    M.fit.pts.forEach(fp=>{ const p=M.pts[I[fp.id]]; if(p){ p.x=fp.x; p.y=fp.y; } });
   } else { M.fit=null; M.an=null; }
   render();
 }
@@ -484,8 +492,11 @@ function render(){
   cv.width=cv.clientWidth*dpr; cv.height=cv.clientHeight*dpr;
   ctx.setTransform(1,0,0,1,0,0);
   ctx.clearRect(0,0,cv.width,cv.height);
-  autofit();
-  const P=M.fit?M.fit.pts:M.pts, I=C.idx(P);
+  // Waehrend eines Drags aus M.pts zeichnen und die View festhalten: liefe
+  // autofit() bei jeder Mausbewegung neu, wuerde die Skalierung springen und
+  // der Punkt unter dem Cursor wegrutschen statt ihm zu folgen.
+  if(!M.drag) autofit();
+  const P=M.drag?M.pts:(M.fit?M.fit.pts:M.pts), I=C.idx(P);
   // Waende
   ctx.strokeStyle='#333'; ctx.lineWidth=2*dpr;
   M.walls.forEach(([a,b])=>{
