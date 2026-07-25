@@ -54,6 +54,7 @@ for (let i = 0; i < N; i++) {
     if (!plan.loops.length) throw new Error('kein Kreis erzeugt');
     const minR = Math.min(Infinity, ...plan.loops.map(l => l.minR ?? Infinity));
     r = { cross: api.loopCrossings(plan), outside: api.loopsOutside(plan),
+          segOut: api.segsOutside(plan),
           cov: Math.round(api.heatCoverage(plan.loops, 25) * 100),
           gap: Math.round(api.gapMax(plan.loops)),
           minR: isFinite(minR) ? Math.round(minR) : null,
@@ -75,6 +76,10 @@ console.log(JSON.stringify({
   crossFails: cnt(r => r.cross > 0), covFails: cnt(r => r.cov < 40),
   radFails: cnt(r => r.minR != null && r.minR < R() - 1),
   outFails: cnt(r => r.outside > 0), errFails: rows.length - ok.length,
+  // Harte Anforderung, gezaehlt: Schleifen ausserhalb des Raums, muss 0 sein.
+  loopsOutside: ok.reduce((a, r) => a + (r.outside || 0), 0),
+  worstLoopsOutside: Math.max(...ok.map(r => r.outside || 0), 0),
+  segsOutside: ok.reduce((a, r) => a + (r.segOut || 0), 0),
   worstCross: Math.max(...ok.map(r => r.cross), 0),
   medianCross: med('cross'),
   worstGap: Math.max(...ok.map(r => r.gap), 0),

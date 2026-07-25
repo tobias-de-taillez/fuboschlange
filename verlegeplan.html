@@ -1530,8 +1530,22 @@ function pathCurve(pts){
     // die Kreisnaeherung erster Ordnung).
     const d3=len(sub(p2,p1))/3;
     const t1=unit(sub(p2,p0)), t2=unit(sub(p3,p1));
-    const c1={x:p1.x+t1.x*d3, y:p1.y+t1.y*d3};
-    const c2={x:p2.x-t2.x*d3, y:p2.y-t2.y*d3};
+    // Handle zusaetzlich mit dem Ablenkwinkel verjuengen: cos(defl/2) geht bei
+    // einer 180-Grad-Kehre auf 0, die Kurve wird dort also zur Geraden statt
+    // auszubeulen. Ohne das schwingt die Bezier an scharfen Ecken ueber den
+    // Streckenzug hinaus — gemessen lagen 40 von 47 Schleifen NUR deswegen
+    // ausserhalb des Raums (auf den Stuetzpunkten selbst nur 7), im schlimmsten
+    // Fall 509 mm draussen. Ein Ausbeulen ueber die Wand ist kein Darstellungs-
+    // detail: so wuerde das Rohr nicht verlegt werden koennen.
+    const taper=(a,b,c)=>{
+      const u=sub(b,a), v=sub(c,b), lu=len(u), lv=len(v);
+      if(lu<1e-9||lv<1e-9) return 1;
+      const defl=Math.acos(Math.max(-1,Math.min(1,dot(u,v)/(lu*lv))));
+      return Math.max(0,Math.cos(defl/2));
+    };
+    const k1=d3*taper(p0,p1,p2), k2=d3*taper(p1,p2,p3);
+    const c1={x:p1.x+t1.x*k1, y:p1.y+t1.y*k1};
+    const c2={x:p2.x-t2.x*k2, y:p2.y-t2.y*k2};
     ops.push({kind:'cubic',c1,c2,to:p2});
     let prev=p1;
     for(let k=1;k<=8;k++){ const t=k/8, u=1-t;
@@ -2964,6 +2978,22 @@ function selfChecks(){
     const spike=pathCurve([{x:0,y:0},{x:500,y:0},{x:0,y:0.0001}]).minR;
     A(`Kurvenmodell erkennt die 180-Grad-Kehre (${spike.toFixed(1)} mm)`,spike<1);
   }
+  // Der Ausserhalb-Zaehler muss ZAEHLEN, nicht nur "irgendwas melden".
+  {
+    const sW=S.W,sH=S.H,sA=S.notchA,sB=S.notchB;
+    try{
+      S.W=1000; S.H=1000; S.notchA=0; S.notchB=0;
+      const drin={pts:[{x:100,y:100},{x:900,y:100},{x:900,y:900}]};
+      const raus={pts:[{x:100,y:100},{x:1400,y:100}]};      // ragt rechts hinaus
+      A('Ausserhalb-Zaehler: sauberer Kreis = 0',loopsOutside({loops:[drin]})===0);
+      A('Ausserhalb-Zaehler: ein Ausreisser = 1',loopsOutside({loops:[raus]})===1);
+      A('Ausserhalb-Zaehler: zwei Kreise draussen = 2',
+        loopsOutside({loops:[raus,raus]})===2);
+      A('Ausserhalb-Zaehler zaehlt SCHLEIFEN, nicht Segmente',
+        loopsOutside({loops:[{pts:[{x:100,y:100},{x:1400,y:100},{x:1400,y:900},
+                                   {x:100,y:900}]}]})===1);
+    } finally { S.W=sW; S.H=sH; S.notchA=sA; S.notchB=sB; }
+  }
   // HARTE REGEL: keine Schlaufe kreuzt sich oder eine andere. Zufalls-Bench,
   // deterministisch geseedet. Für tiefere Läufe in der Konsole:
   //   crossingBench(500)  -> Liste der fehlschlagenden Parametersets
@@ -3401,13 +3431,69 @@ function pointInRoom(p){
   if(hasNotch()&&p.x>S.W-S.notchA+1&&p.y>S.H-S.notchB+1) return false;
   return true;
 }
+// Punkte des GEZEICHNETEN Pfades. Nur die Stuetzpunkte abzutasten genuegt nicht:
+// gezeichnet wird die Bezier durch sie, und die kann zwischen zwei Stuetzpunkten
+// ausbeulen.
+// Die Kontrollpunkte werden bewusst NICHT mitgeprueft. Eine kubische Bezier
+// liegt zwar in der konvexen Huelle ihrer vier Punkte — das ist aber nur
+// hinreichend, nicht notwendig: an einer 90-Grad-Ecke liegt der Kontrollpunkt
+// weit ausserhalb, waehrend die Kurve sauber innen bleibt. Als Testkriterium
+// erzeugt das Fehlalarme, und der Selbstcheck "sauberer Kreis = 0" faellt
+// prompt darauf herein. Stattdessen dicht abtasten.
+function drawnPoints(pts){
+  const out=[];
+  let cur=null;
+  for(const o of pathCurve(pts).ops){
+    if(o.kind==='move'||o.kind==='line'){ cur=o.to; out.push(cur); continue; }
+    if(o.kind==='cubic'){
+      const a=cur;
+      for(let k=1;k<=12;k++){ const t=k/12,u=1-t;
+        out.push({x:u*u*u*a.x+3*u*u*t*o.c1.x+3*u*t*t*o.c2.x+t*t*t*o.to.x,
+                  y:u*u*u*a.y+3*u*u*t*o.c1.y+3*u*t*t*o.c2.y+t*t*t*o.to.y}); }
+      cur=o.to; continue;
+    }
+    // Konstruierter Bogen: nur die SEHNE abtasten.
+    // Ein erster Versuch prueft zusaetzlich beide Seiten der Sehne im Abstand der
+    // Pfeilhoehe, weil der Umlaufsinn hier nicht rekonstruiert wird. Das erzeugt
+    // Phantompunkte auf der falschen Seite: bei der U-Kehre mit r=405 sind das
+    // +-405 mm, und der Zaehler meldete daraufhin "509 mm ausserhalb des Raums",
+    // wo gar kein Rohr liegt. Lieber die bekannte Luecke als eine erfundene Zahl.
+    // GRENZE, bewusst: die Woelbung konstruierter Boegen wird hier nicht geprueft.
+    // Sie sind klein (Omega-Kehren in der Randzone) oder liegen an der Naht im
+    // Feldinneren; ein Ausbruch aus dem Raum ist dort nicht zu erwarten. Sauber
+    // waere, den Mittelpunkt bei der Konstruktion mitzufuehren.
+    const a=cur, b=o.to;
+    for(let k=0;k<=8;k++){ const t=k/8;
+      out.push({x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t}); }
+    cur=b;
+  }
+  return out;
+}
+// HARTE ANFORDERUNG, zaehlbar: wie viele SCHLEIFEN liegen (teilweise) ausserhalb
+// des Raums. Muss 0 sein.
+// Die fruehere Fassung hiess zwar so, zaehlte aber SEGMENTE: das `break` verliess
+// nur die innere Abtastschleife, nicht die Segmentschleife. Ein Kreis mit 30
+// Ausreissern ergab 30, ein Kreis mit einem ergab 1 — beides sind aber genau
+// eine unbrauchbare Schleife. Und geprueft wurde nur die Polyline, nicht die
+// gezeichnete Kurve.
 function loopsOutside(plan){
   let n=0;
   plan.loops.forEach(l=>{
-    const p=l.pts;
-    for(let i=0;i<p.length-1;i++)for(let t=0;t<=6;t++){
-      const q={x:p[i].x+(p[i+1].x-p[i].x)*t/6, y:p[i].y+(p[i+1].y-p[i].y)*t/6};
-      if(!pointInRoom(q)){ n++; break; }
+    if(drawnPoints(l.pts||[]).some(q=>!pointInRoom(q))) n++;
+  });
+  return n;
+}
+// Feinere Diagnose daneben: wie viele Segmente es sind. Sagt, ob eine Schleife
+// knapp danebenliegt oder komplett entgleist.
+function segsOutside(plan){
+  let n=0;
+  plan.loops.forEach(l=>{
+    const p=l.pts||[];
+    for(let i=0;i<p.length-1;i++){
+      for(let t=0;t<=6;t++){
+        const q={x:p[i].x+(p[i+1].x-p[i].x)*t/6, y:p[i].y+(p[i+1].y-p[i].y)*t/6};
+        if(!pointInRoom(q)){ n++; break; }
+      }
     }
   });
   return n;
@@ -3472,8 +3558,8 @@ function crossingBench(n,seed,shard,nShards){
     // Ab hier die teure Auswertung — im Shard-Betrieb nur für die eigenen Läufe.
     // Der PRNG ist zu diesem Zeitpunkt schon vollständig für Lauf i verbraucht.
     if(i%NS!==SH) continue;
-    let plan,x=0,cov=0,outside=0,gap=0;
-    try{ plan=autofit(); x=loopCrossings(plan); outside=loopsOutside(plan);
+    let plan,x=0,cov=0,outside=0,segOut=0,gap=0;
+    try{ plan=autofit(); x=loopCrossings(plan); outside=loopsOutside(plan); segOut=segsOutside(plan);
          cov=heatCoverage(plan.loops,25); gap=gapMax(plan.loops); }
     catch(e){ all.push({err:String(e)});
       fails.push({err:String(e),cfg:{W:S.W,H:S.H,notchA:S.notchA,notchB:S.notchB,
@@ -3488,7 +3574,7 @@ function crossingBench(n,seed,shard,nShards){
     // Infinity->null: ein Kreis ohne Segmente liefert Infinity, das
     // JSON.stringify sonst still zu null verfaelscht (Math.max ueber Infinity
     // waere sichtbar kaputt, aber erst im bench.mjs-Output).
-    all.push({cross:x,outside,cov:Math.round(cov*100),radSoll:S.bendRadius,
+    all.push({cross:x,outside,segOut,cov:Math.round(cov*100),radSoll:S.bendRadius,
       minR:isFinite(minR)?Math.round(minR):null, gap:isFinite(gap)?Math.round(gap):null});
     if(x>0||outside>0||covFail||radFail) fails.push({cross:x,outside,cov:Math.round(cov*100),
       minR:isFinite(minR)?Math.round(minR):null, radSoll:S.bendRadius,

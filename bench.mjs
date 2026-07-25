@@ -89,9 +89,17 @@ const out = {
   crossFails: ok.filter(f => f.cross > 0).length,
   covFails: ok.filter(f => f.cov < 40).length,
   radFails: ok.filter(f => f.minR != null && f.minR < f.radSoll - 1).length,
-  // `cross` zählt im Bench nur die Kreuzungen, `outside` zählt getrennt das
-  // Rohr außerhalb des Raums (seit der Trennung in crossingBench, Step 1a).
+  // HARTE ANFORDERUNG, gezählt: Schleifen ausserhalb des Raums. Muss 0 sein.
+  // `outside` ist die Zahl der SCHLEIFEN, die (teilweise) draussen liegen —
+  // gemessen auf dem GEZEICHNETEN Pfad, nicht nur auf den Stuetzpunkten.
   outFails: ok.filter(f => f.outside > 0).length,
+  // Summe ueber alle Laeufe: wie viele Schleifen es insgesamt sind. outFails
+  // sagt "in wie vielen Laeufen", das hier sagt "wie viele Schleifen".
+  loopsOutside: ok.reduce((a, f) => a + (f.outside || 0), 0),
+  worstLoopsOutside: Math.max(...ok.map(f => f.outside || 0), 0),
+  // Feinere Diagnose: wie viele SEGMENTE. Sagt, ob eine Schleife knapp
+  // danebenliegt oder komplett entgleist.
+  segsOutside: ok.reduce((a, f) => a + (f.segOut || 0), 0),
   errFails: all.filter(f => f.err).length,
   worstCoverage: Math.min(...ok.map(f => f.cov), 100),
   worstRadius: Math.min(...ok.map(f => f.minR ?? 999), 999),
