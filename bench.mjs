@@ -20,7 +20,12 @@ import { load } from './harness.mjs';
 
 const argv = process.argv.slice(2);
 const flag = name => argv.find(a => a.startsWith('--' + name + '='))?.split('=')[1];
-const RUNS = Number(argv.find(a => /^\d+$/.test(a)) || 500);
+// Standard 20 Laeufe, nicht 500. Die Rueckkopplung soll waehrend der Arbeit
+// schnell sein; die Stufe wird erst erhoeht, wenn die aktuelle SAUBER ist
+// (siehe Hinweis am Ende des Laufs). Ein 500er-Lauf dauert mit dem Kreuzungstest
+// auf der gezeichneten Kurve ueber 40 s — das bremst jede Iteration aus, ohne
+// mehr zu sagen, solange schon die ersten 20 reissen.
+const RUNS = Number(argv.find(a => /^\d+$/.test(a)) || 20);
 const SEED = Number(flag('seed') || 20260725);
 const shardArg = flag('shard');
 const FILE = flag('file') || 'verlegeplan.html';
@@ -150,6 +155,18 @@ if (argv.includes('--save-baseline')) {
   writeFileSync('bench-baseline.json', JSON.stringify(keep, null, 1));
   process.exit(0);
 }
+// Die vier harten Kriterien. Ist der Lauf in allen vier sauber, ist die Stufe
+// geschafft und die naechste kann drauf.
+const HARD = ['crossFails', 'covFails', 'radFails', 'outFails'];
+const clean = HARD.every(k => out[k] === 0) && out.errFails === 0;
+if (clean) {
+  console.error(`\n${RUNS}/${RUNS} sauber in allen vier Kriterien.`);
+  console.error(`Naechste Stufe:  node bench.mjs ${RUNS + 20} --save-baseline`);
+} else {
+  const offen = HARD.filter(k => out[k] > 0).map(k => `${k} ${out[k]}/${RUNS}`);
+  console.error(`\nnoch offen: ${offen.join(', ')}`);
+}
+
 // Alle vier harten Kriterien gehören in den Regressionsvergleich — `outFails`
 // fehlte hier bisher, wodurch "kein Rohr außerhalb des Raums" nie geprüft wurde.
 // Verglichen werden die RATEN, nicht die Absolutzahlen: die Baseline wurde mit
@@ -203,15 +220,23 @@ if (baseRaw !== null) {
   // `x > undefined` und damit immer `false` — diese Kennzahl könnte nie mehr
   // anschlagen. Das wäre eine veraltete Baseline, die eine Kennzahl still
   // außer Kraft setzt, also ein Fehler statt eines stillen Durchwinkens.
-  const missing = RATE_KEYS.filter(k => !(k in base));
+  const missing = [...RATE_KEYS, ...HARD].filter(k => !(k in base));
   if (missing.length) {
     console.error('bench-baseline.json fehlt Schlüssel: ' + missing.join(', '));
     process.exit(1);
   }
 
-  const worse = RATE_KEYS.filter(k => out[k] > base[k] + RATE_TOLERANCE);
+  // Gleiche Laufzahl wie die Baseline? Dann sind es bei festem Seed EXAKT
+  // dieselben Parametersaetze, und die Absolutzahlen sind ohne Toleranz
+  // vergleichbar. Das ist bei kleinen Stufen wichtig: bei 20 Laeufen entspricht
+  // ein einziger gekippter Lauf 5 Prozentpunkten und damit genau der Toleranz —
+  // ein Ratenvergleich waere dort blind fuer echte Regressionen.
+  const worse = out.runs === base.runs
+    ? HARD.filter(k => out[k] > (base[k] ?? Infinity))
+    : RATE_KEYS.filter(k => out[k] > base[k] + RATE_TOLERANCE);
   if (worse.length) {
-    console.error('REGRESSION in: ' + worse.join(', '));
+    console.error('REGRESSION in: ' + worse.map(k =>
+      `${k} ${base[k]} -> ${out[k]}`).join(', '));
     process.exit(1);
   }
 }
