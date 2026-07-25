@@ -764,12 +764,12 @@ globalThis.selfChecks=function(){
     const walls=[['A','B'],['B','C'],['C','D'],['D','E'],['E','F'],['F','A']];
     const poly=C.wallPolygon(L,walls);
     chk('wallPolygon: geschlossener Zug -> 6 Ecken', poly && poly.length===6);
-    chk('pointInPoly: Punkt im schmalen Schenkel', C.pointInPoly({x:6000,y:1000},poly));
-    chk('pointInPoly: Punkt im ausgesparten Bereich', !C.pointInPoly({x:6000,y:4000},poly));
+    chk('pointInPoly: Punkt im schmalen Schenkel', poly && C.pointInPoly({x:6000,y:1000},poly));
+    chk('pointInPoly: Punkt im ausgesparten Bereich', poly && !C.pointInPoly({x:6000,y:4000},poly));
     chk('segInPoly: C-F verlaesst den Raum -> unzulaessig',
-       !C.segInPoly({x:8000,y:2000},{x:0,y:5000},poly));
+       poly && !C.segInPoly({x:8000,y:2000},{x:0,y:5000},poly));
     chk('segInPoly: A-E bleibt im Raum -> zulaessig',
-       C.segInPoly({x:0,y:0},{x:3000,y:5000},poly));
+       poly && C.segInPoly({x:0,y:0},{x:3000,y:5000},poly));
     chk('wallPolygon: offener Zug -> null',
        C.wallPolygon(L,[['A','B'],['B','C'],['C','D']])===null);
     chk('wallPolygon: Knotengrad ungleich 2 -> null',
