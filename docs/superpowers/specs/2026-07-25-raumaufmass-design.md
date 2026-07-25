@@ -216,9 +216,15 @@ Zweispaltig: Canvas links, Panel rechts.
 
 **Drei Modi** über Buttons oder Tasten `1`/`2`/`3`:
 
-- **Punkt** — Klick legt an, Ziehen verschiebt. Verschieben korrigiert die
-  Skizze, nicht das Ergebnis; nach dem Ziehen läuft der Fit neu. IDs werden
-  automatisch vergeben: `A`…`Z`, danach `AA`, `AB`, …
+- **Punkt** — Klick legt an, Ziehen verschiebt, Rechtsklick löscht. Verschieben
+  korrigiert die Skizze, nicht das Ergebnis; nach dem Ziehen läuft der Fit neu.
+
+  Löschen entfernt die Wände und Messungen des Punktes mit. Ohne diese Kaskade
+  blieben Verweise auf einen nicht mehr existierenden Punkt stehen. IDs werden
+  automatisch vergeben (`A`…`Z`, danach `AA`, `AB`, …) aus einem **monoton
+  laufenden Zähler**, der beim Löschen nicht zurückgesetzt wird — sonst
+  bekämen nach „A, B, C anlegen, B löschen, neuen Punkt anlegen" zwei Punkte
+  dieselbe ID.
 - **Wand** — zwei Punkte nacheinander klicken.
 - **Messung** — zwei Punkte klicken, dann Zahl eintippen.
 
@@ -285,9 +291,16 @@ kollabierter Klumpen, nie eine leere Zeichnung.
 
 ## Test
 
-Selbstcheck mit `assert` in derselben Datei, ausgelöst über `?test` in der URL.
-Kein Framework, keine Fixtures. Er läuft gegen ein synthetisches L mit bekannten
-Koordinaten:
+Selbstcheck in derselben Datei, kein Framework, keine Fixtures. Zwei Auslöser
+für denselben Code: `?test` in der URL schreibt das Ergebnis in die
+Browser-Konsole, und ein kleiner Node-Runner schneidet den Mathe-Block aus der
+HTML-Datei und führt ihn auf der Kommandozeile aus. Die Datei bleibt dadurch
+self-contained, die Rückmeldung beim Entwickeln trotzdem schnell.
+
+Die Prüfungen laufen gegen ein synthetisches L mit bekannten Koordinaten.
+**Verglichen werden Abstände, nie Koordinaten** — Lage und Drehung des
+Ergebnisses erbt die Ausgleichung von der Skizze, absolute Koordinaten sind
+deshalb kein Sollwert.
 
 1. **Ausreißer-Erkennung und Erholung** — exakte Distanzen auf einem
    überbestimmten Netz (L-Raum, 6 Ecken, 12 Messungen), eine Messung um 20 mm

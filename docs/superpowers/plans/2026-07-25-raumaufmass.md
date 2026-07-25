@@ -77,12 +77,20 @@ globalThis.CORE={ TOL_RANK, TOL_RED, TOL_MODE, SIGMA_DEF, SUGGEST_CHECK_MAX,
 
 <script id="checks">
 "use strict";
+// Die Assert-Funktion heisst chk, nicht A - in mehreren Tests weiter unten
+// heisst eine Matrix A, und der Name darf nicht spaeter wandern muessen.
 globalThis.selfChecks=function(){
   const C=globalThis.CORE, out=[]; let ok=true;
-  const A=(n,c)=>{ ok=ok&&!!c; out.push((c?'PASS ':'FAIL ')+n); };
+  const chk=(n,c)=>{ ok=ok&&!!c; out.push((c?'PASS ':'FAIL ')+n); };
   const near=(a,b,t)=>Math.abs(a-b)<=t;
   return {ok, out};
 };
+// Im Browser: raumaufmass.html?test ruft die Checks auf und schreibt sie in die
+// Konsole. Auf der Kommandozeile macht das test/run.mjs.
+if(typeof location!=='undefined' && location.search.includes('test')){
+  const r=globalThis.selfChecks();
+  console[r.ok?'log':'error']('Selbstchecks\n'+r.out.join('\n'));
+}
 </script>
 ```
 
@@ -121,13 +129,13 @@ In `raumaufmass.html`, Block `checks`, direkt vor `return {ok, out};` einfügen:
     const pts=[{id:'A',x:0,y:0},{id:'B',x:3000,y:4000}];
     const meas=[{a:'A',b:'B',d:5000},{a:'A',b:'B',d:4980}];
     const v=C.residuals(pts,meas);
-    A('residuals: exakte Messung -> 0', near(v[0],0,1e-9));
-    A('residuals: 20mm zu kurz gemessen -> +20', near(v[1],20,1e-9));
+    chk('residuals: exakte Messung -> 0', near(v[0],0,1e-9));
+    chk('residuals: 20mm zu kurz gemessen -> +20', near(v[1],20,1e-9));
   }
   {
     const pts=[{id:'A',x:0,y:0},{id:'B',x:1000,y:0}];
     const meas=[{a:'A',b:'B',d:900},{a:'A',b:'B',d:800,on:false}];
-    A('residuals: on:false wird ignoriert', C.residuals(pts,meas).length===1);
+    chk('residuals: on:false wird ignoriert', C.residuals(pts,meas).length===1);
   }
 ```
 
@@ -181,8 +189,8 @@ Im Block `checks` vor `return {ok, out};`:
   {
     const pts=[{id:'A',x:0,y:0},{id:'B',x:1000,y:0}];
     const J=C.jacobian(pts,[{a:'A',b:'B',d:900}]);
-    A('jacobian: Form 1x4', J.length===1 && J[0].length===4);
-    A('jacobian: waagerechte Kante -> [-1,0,1,0]',
+    chk('jacobian: Form 1x4', J.length===1 && J[0].length===4);
+    chk('jacobian: waagerechte Kante -> [-1,0,1,0]',
       near(J[0][0],-1,1e-9)&&near(J[0][1],0,1e-9)&&near(J[0][2],1,1e-9)&&near(J[0][3],0,1e-9));
   }
   {
@@ -193,9 +201,9 @@ Im Block `checks` vor `return {ok, out};`:
     const tx=[],ty=[],rot=[];
     pts.forEach(p=>{ tx.push(1,0); ty.push(0,1); rot.push(-p.y,p.x); });
     const mul=(row,t)=>row.reduce((s,x,i)=>s+x*t[i],0);
-    A('jacobian: Translation x im Nullraum', J.every(r=>near(mul(r,tx),0,1e-9)));
-    A('jacobian: Translation y im Nullraum', J.every(r=>near(mul(r,ty),0,1e-9)));
-    A('jacobian: Drehung im Nullraum',       J.every(r=>near(mul(r,rot),0,1e-9)));
+    chk('jacobian: Translation x im Nullraum', J.every(r=>near(mul(r,tx),0,1e-9)));
+    chk('jacobian: Translation y im Nullraum', J.every(r=>near(mul(r,ty),0,1e-9)));
+    chk('jacobian: Drehung im Nullraum',       J.every(r=>near(mul(r,rot),0,1e-9)));
   }
 ```
 
@@ -256,13 +264,13 @@ git commit -m "feat: rigidity jacobian"
   {
     const A=[[2,1],[1,3]], B=[[3],[5]];        // Loesung x=(0.8, 1.4)
     const X=C.luSolve(A,B);
-    A2('luSolve: 2x2 korrekt', near(X[0][0],0.8,1e-9)&&near(X[1][0],1.4,1e-9));
-    A2('luSolve: singulaer -> null', C.luSolve([[1,2],[2,4]],[[1],[2]])===null);
-    A2('luSolve: mehrere rechte Seiten', (()=>{
+    chk('luSolve: 2x2 korrekt', near(X[0][0],0.8,1e-9)&&near(X[1][0],1.4,1e-9));
+    chk('luSolve: singulaer -> null', C.luSolve([[1,2],[2,4]],[[1],[2]])===null);
+    chk('luSolve: mehrere rechte Seiten', (()=>{
       const Y=C.luSolve([[2,0],[0,4]],[[2,4],[4,8]]);
       return near(Y[0][0],1,1e-9)&&near(Y[0][1],2,1e-9)&&near(Y[1][0],1,1e-9)&&near(Y[1][1],2,1e-9);
     })());
-    A2('luSolve: Pivotierung noetig (Null auf der Diagonalen)', (()=>{
+    chk('luSolve: Pivotierung noetig (Null auf der Diagonalen)', (()=>{
       const Y=C.luSolve([[0,1],[1,0]],[[3],[5]]);
       return Y && near(Y[0][0],5,1e-9) && near(Y[1][0],3,1e-9);
     })());
@@ -270,13 +278,12 @@ git commit -m "feat: rigidity jacobian"
   {
     const M=[[1,2],[3,4]];
     const N=C.matTmat(M);                      // [[10,14],[14,20]]
-    A2('matTmat korrekt', N[0][0]===10&&N[0][1]===14&&N[1][0]===14&&N[1][1]===20);
+    chk('matTmat korrekt', N[0][0]===10&&N[0][1]===14&&N[1][0]===14&&N[1][1]===20);
     const g=C.matTvec(M,[1,1]);                // [4,6]
-    A2('matTvec korrekt', g[0]===4&&g[1]===6);
+    chk('matTvec korrekt', g[0]===4&&g[1]===6);
   }
 ```
 
-Achtung: die Assert-Funktion heißt `A`, aber `A` ist in diesem Block schon als Matrixname vergeben. Benenne im gesamten `checks`-Block die Assert-Funktion in `A2` um und passe die bestehenden Aufrufe aus Task 1 und 2 mit an — also `const A2=(n,c)=>{ ok=ok&&!!c; out.push((c?'PASS ':'FAIL ')+n); };` und überall `A(` → `A2(`.
 
 - [ ] **Step 2: Test laufen lassen, Fehlschlag prüfen**
 
@@ -363,16 +370,16 @@ Das ist die zentrale Rechnung: **eine** Zerlegung liefert Rang, Nullraum und Heb
   {
     const M=[[1,0,1],[0,1,1],[0,0,0]];         // Spalte 3 = Spalte 1 + Spalte 2
     const gs=C.gramSchmidt(M);
-    A2('gramSchmidt: Rang 2 erkannt', gs.rank===2);
-    A2('gramSchmidt: Pivotspalten 0 und 1', gs.piv[0]===0&&gs.piv[1]===1);
-    A2('gramSchmidt: Q orthonormal', (()=>{
+    chk('gramSchmidt: Rang 2 erkannt', gs.rank===2);
+    chk('gramSchmidt: Pivotspalten 0 und 1', gs.piv[0]===0&&gs.piv[1]===1);
+    chk('gramSchmidt: Q orthonormal', (()=>{
       const dot=(a,b)=>a.reduce((s,x,i)=>s+x*b[i],0);
       return near(dot(gs.Q[0],gs.Q[0]),1,1e-9)&&near(dot(gs.Q[1],gs.Q[1]),1,1e-9)
           && near(dot(gs.Q[0],gs.Q[1]),0,1e-9);
     })());
     const ns=C.nullSpace(gs);
-    A2('nullSpace: eine Dimension', ns.length===1);
-    A2('nullSpace: M*z = 0', (()=>{
+    chk('nullSpace: eine Dimension', ns.length===1);
+    chk('nullSpace: M*z = 0', (()=>{
       const z=ns[0];
       return M.every(r=>near(r.reduce((s,x,i)=>s+x*z[i],0),0,1e-9));
     })());
@@ -380,17 +387,17 @@ Das ist die zentrale Rechnung: **eine** Zerlegung liefert Rang, Nullraum und Heb
   {
     const I3=[[1,0,0],[0,1,0],[0,0,1]];        // voller Rang -> h_i = 1
     const h=C.leverage(C.gramSchmidt(I3));
-    A2('leverage: voller Rang -> h=1', h.every(x=>near(x,1,1e-9)));
+    chk('leverage: voller Rang -> h=1', h.every(x=>near(x,1,1e-9)));
     // eine Spalte, drei gleiche Zeilen -> h_i = 1/3
     const h2=C.leverage(C.gramSchmidt([[1],[1],[1]]));
-    A2('leverage: 3 gleiche Zeilen -> h=1/3', h2.every(x=>near(x,1/3,1e-9)));
-    A2('leverage: Summe h = Rang', near(h2.reduce((s,x)=>s+x,0),1,1e-9));
+    chk('leverage: 3 gleiche Zeilen -> h=1/3', h2.every(x=>near(x,1/3,1e-9)));
+    chk('leverage: Summe h = Rang', near(h2.reduce((s,x)=>s+x,0),1,1e-9));
   }
   {
     const gs=C.gramSchmidt([[0,0],[0,0]]);     // Nullmatrix
-    A2('gramSchmidt: Nullmatrix -> Rang 0', gs.rank===0);
-    A2('nullSpace: Nullmatrix -> volle Dimension', C.nullSpace(gs).length===2);
-    A2('leverage: Rang 0 -> h=0', C.leverage(gs).every(x=>x===0));
+    chk('gramSchmidt: Nullmatrix -> Rang 0', gs.rank===0);
+    chk('nullSpace: Nullmatrix -> volle Dimension', C.nullSpace(gs).length===2);
+    chk('leverage: Rang 0 -> h=0', C.leverage(gs).every(x=>x===0));
   }
 ```
 
@@ -430,17 +437,17 @@ function gramSchmidt(rows, tol){
       const row=new Array(k).fill(0); row[j]=nv; R.push(row);
     }
   }
-  return {Q, R, piv, rank:Q.length, m};
+  return {Q, R, piv, rank:Q.length, m, k};
 }
 
 // Jede abhaengige Spalte liefert genau einen Nullraum-Vektor. R eingeschraenkt
 // auf die Pivotspalten ist obere Dreiecksmatrix -> Rueckwaertseinsetzen.
+// k kommt aus gs, nicht aus R: bei Rang 0 ist R leer, die Spaltenzahl aber
+// trotzdem bekannt - und genau dann besteht der Nullraum aus allem.
 function nullSpace(gs){
-  const {R,piv,rank}=gs;
-  const k=R.length?R[0].length:(gs.k??0);
-  const kk=rank?R[0].length:k;
+  const {R,piv,rank,k}=gs;
   const isPiv=new Set(piv), out=[];
-  for(let j=0;j<kk;j++){
+  for(let j=0;j<k;j++){
     if(isPiv.has(j)) continue;
     const c=new Array(rank).fill(0);
     for(let q=rank-1;q>=0;q--){
@@ -448,7 +455,7 @@ function nullSpace(gs){
       for(let q2=q+1;q2<rank;q2++) s-=R[q][piv[q2]]*c[q2];
       c[q]=s/R[q][piv[q]];
     }
-    const z=new Array(kk).fill(0);
+    const z=new Array(k).fill(0);
     z[j]=1; piv.forEach((p,q)=>z[p]=-c[q]);
     const nrm=Math.hypot(...z)||1;
     out.push(z.map(x=>x/nrm));
@@ -464,18 +471,10 @@ function leverage(gs){
 }
 ```
 
-Damit `nullSpace` auch bei Rang 0 die Spaltenzahl kennt, muss `gramSchmidt` sie mitgeben. Ergänze in `gramSchmidt` die Rückgabe um `k` und ersetze in `nullSpace` die ersten drei Zeilen durch:
-
-```js
-  const {R,piv,rank,k}=gs;
-  const isPiv=new Set(piv), out=[];
-  for(let j=0;j<k;j++){
-```
-
 - [ ] **Step 4: Test laufen lassen, grün prüfen**
 
 Run: `node test/run.mjs`
-Expected: alle PASS. Falls "nullSpace: Nullmatrix" fehlschlägt, fehlt das `k` in der Rückgabe von `gramSchmidt`.
+Expected: alle PASS. Falls "nullSpace: Nullmatrix" fehlschlägt, fehlt `k` in der Rückgabe von `gramSchmidt` — `nullSpace` kann die Spaltenzahl bei Rang 0 nicht aus `R` ableiten, weil `R` dann leer ist.
 
 - [ ] **Step 5: Commit**
 
@@ -504,16 +503,16 @@ Drei Koordinaten festnageln entfernt genau die drei Starrbewegungen. Nebeneffekt
   {
     // P1 liegt weit rechts von P0 -> P1.y (Spalte 3) pinnen
     const waag=[{id:'A',x:0,y:0},{id:'B',x:5000,y:10},{id:'C',x:0,y:3000}];
-    A2('gauge: waagerechtes Paar pinnt P1.y',
+    chk('gauge: waagerechtes Paar pinnt P1.y',
        JSON.stringify(C.gaugeFixed(waag))===JSON.stringify([0,1,3]));
     // P1 liegt senkrecht ueber P0 -> P1.y taugt nicht, P1.x (Spalte 2) pinnen
     const senk=[{id:'A',x:0,y:0},{id:'B',x:0,y:5000},{id:'C',x:3000,y:0}];
-    A2('gauge: senkrechtes Paar pinnt P1.x',
+    chk('gauge: senkrechtes Paar pinnt P1.x',
        JSON.stringify(C.gaugeFixed(senk))===JSON.stringify([0,1,2]));
-    A2('freeCols: 2n-3 freie Spalten', C.freeCols(waag).length===2*3-3);
-    A2('freeCols: enthaelt keine gepinnte Spalte',
+    chk('freeCols: 2n-3 freie Spalten', C.freeCols(waag).length===2*3-3);
+    chk('freeCols: enthaelt keine gepinnte Spalte',
        C.freeCols(waag).every(c=>![0,1,3].includes(c)));
-    A2('gauge: unter 2 Punkten nichts zu pinnen', C.gaugeFixed([{id:'A',x:0,y:0}]).length===0);
+    chk('gauge: unter 2 Punkten nichts zu pinnen', C.gaugeFixed([{id:'A',x:0,y:0}]).length===0);
   }
   {
     // Die entscheidende Eigenschaft: keine Starrbewegung ueberlebt das Pinnen.
@@ -522,7 +521,7 @@ Drei Koordinaten festnageln entfernt genau die drei Starrbewegungen. Nebeneffekt
     const fx=C.gaugeFixed(pts);
     const tx=[],ty=[],rot=[];
     pts.forEach(p=>{ tx.push(1,0); ty.push(0,1); rot.push(-p.y,p.x); });
-    A2('gauge: jede Starrbewegung bewegt mindestens eine gepinnte Koordinate',
+    chk('gauge: jede Starrbewegung bewegt mindestens eine gepinnte Koordinate',
        [tx,ty,rot].every(t=>fx.some(c=>Math.abs(t[c])>1e-9)));
   }
 ```
@@ -588,8 +587,8 @@ git commit -m "feat: gauge fixing with non-degenerate second pin"
       {a:'A',b:'C',d:5000},
     ];
     const r=C.solve(sketch,meas);
-    A2('solve: konvergiert', r.converged);
-    A2('solve: exakte Messungen -> Residuen ~0',
+    chk('solve: konvergiert', r.converged);
+    chk('solve: exakte Messungen -> Residuen ~0',
        C.residuals(r.pts,meas).every(v=>Math.abs(v)<0.01));
     // Eichfrei pruefen. Lage und Drehung erbt das Ergebnis von der Skizze -
     // ein Vergleich absoluter Koordinaten wuerde fehlschlagen, obwohl die
@@ -601,25 +600,25 @@ git commit -m "feat: gauge fixing with non-degenerate second pin"
       worst=Math.max(worst,
         Math.abs(C.dist(r.pts[IR[a]],r.pts[IR[b]]) - C.dist(truth[IT[a]],truth[IT[b]])));
     }
-    A2('solve: Form exakt getroffen (alle Abstaende <0.01mm)', worst<0.01);
-    A2('solve: ungemessene Diagonale B-D kommt auf 5000 heraus',
+    chk('solve: Form exakt getroffen (alle Abstaende <0.01mm)', worst<0.01);
+    chk('solve: ungemessene Diagonale B-D kommt auf 5000 heraus',
        near(C.dist(r.pts[IR['B']],r.pts[IR['D']]),5000,0.01));
-    A2('solve: Eingabe unveraendert', sketch[1].x===40);
+    chk('solve: Eingabe unveraendert', sketch[1].x===40);
   }
   {
     // Unterbestimmt: 4 Punkte, nur 2 Messungen. Muss zeichenbar bleiben.
     const sketch=[{id:'A',x:0,y:0},{id:'B',x:100,y:0},{id:'C',x:100,y:80},{id:'D',x:0,y:80}];
     const r=C.solve(sketch,[{a:'A',b:'B',d:4000},{a:'B',b:'C',d:3000}]);
-    A2('solve: unterbestimmt liefert endliche Koordinaten',
+    chk('solve: unterbestimmt liefert endliche Koordinaten',
        r.pts.every(p=>isFinite(p.x)&&isFinite(p.y)));
-    A2('solve: unterbestimmt erfuellt die vorhandenen Messungen',
+    chk('solve: unterbestimmt erfuellt die vorhandenen Messungen',
        C.residuals(r.pts,[{a:'A',b:'B',d:4000},{a:'B',b:'C',d:3000}]).every(v=>Math.abs(v)<0.5));
   }
   {
-    A2('solve: ohne Messungen kein Absturz',
+    chk('solve: ohne Messungen kein Absturz',
        C.solve([{id:'A',x:0,y:0},{id:'B',x:10,y:0}],[]).pts.length===2);
     const s=C.scaleSketch([{id:'A',x:0,y:0},{id:'B',x:10,y:0}],[{a:'A',b:'B',d:5000}]);
-    A2('scaleSketch: auf Messgroesse gestreckt', near(s[1].x,5000,1e-6));
+    chk('scaleSketch: auf Messgroesse gestreckt', near(s[1].x,5000,1e-6));
   }
 ```
 
@@ -712,10 +711,10 @@ Hier entsteht die Aussage, die das Werkzeug ehrlich macht. Test 3 ist der wichti
   {
     const rect=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:3000},{id:'D',x:0,y:3000}];
     const seiten=[{a:'A',b:'B',d:4000},{a:'B',b:'C',d:3000},{a:'C',b:'D',d:4000},{a:'D',b:'A',d:3000}];
-    A2('analyze: Rechteck mit 4 Seiten -> 1 Messung fehlt', C.analyze(rect,seiten).dof===1);
-    A2('analyze: mit Diagonale -> 0 Messungen fehlen',
+    chk('analyze: Rechteck mit 4 Seiten -> 1 Messung fehlt', C.analyze(rect,seiten).dof===1);
+    chk('analyze: mit Diagonale -> 0 Messungen fehlen',
        C.analyze(rect,seiten.concat([{a:'A',b:'C',d:5000}])).dof===0);
-    A2('analyze: 4 Seiten -> genau ein Flex-Mode', C.analyze(rect,seiten).modes.length===1);
+    chk('analyze: 4 Seiten -> genau ein Flex-Mode', C.analyze(rect,seiten).modes.length===1);
   }
   // --- analyze: der Luegner-Fall (Spec-Test 3) ---
   {
@@ -723,10 +722,17 @@ Hier entsteht die Aussage, die das Werkzeug ehrlich macht. Test 3 ist der wichti
     const exakt=[{a:'A',b:'B',d:4000},{a:'B',b:'C',d:3000},{a:'C',b:'D',d:4000},
                  {a:'D',b:'A',d:3000},{a:'A',b:'C',d:5000}];        // m = 2n-3 = 5
     const an=C.analyze(rect,exakt);
-    A2('analyze: exakt bestimmt -> alle Residuen ~0', an.v.every(x=>Math.abs(x)<1e-6));
-    A2('analyze: exakt bestimmt -> Redundanz 0', an.redundancy===0);
-    A2('analyze: exakt bestimmt -> KEINE Messung pruefbar', an.w.every(x=>x===null));
-    A2('analyze: exakt bestimmt -> sigmaHat undefiniert', an.sigmaHat===null);
+    chk('analyze: exakt bestimmt -> alle Residuen ~0', an.v.every(x=>Math.abs(x)<1e-6));
+    chk('analyze: exakt bestimmt -> Redundanz 0', an.redundancy===0);
+    chk('analyze: exakt bestimmt -> KEINE Messung pruefbar', an.w.every(x=>x===null));
+    chk('analyze: exakt bestimmt -> sigmaHat undefiniert', an.sigmaHat===null);
+    // Mit beiden Diagonalen ist jede Messung pruefbar - Grundlage des
+    // Browser-Checks in Task 11. Summe der Redundanzzahlen = m - rank = 1.
+    const voll=exakt.concat([{a:'B',b:'D',d:5000}]);
+    const av=C.analyze(rect,voll);
+    chk('analyze: 6 Messungen -> jede pruefbar', Math.min(...av.red)>C.TOL_RED);
+    chk('analyze: Summe der Redundanzzahlen = m - rank',
+       near(av.red.reduce((s,x)=>s+x,0), av.m-av.rank, 1e-9));
   }
   // --- analyze: Ausreisser (Spec-Test 1) ---
   {
@@ -740,10 +746,10 @@ Hier entsteht die Aussage, die das Werkzeug ehrlich macht. Test 3 ist der wichti
     const fit=C.solve(L.map(p=>({...p})), mit);
     const an=C.analyze(fit.pts, mit);
     const wmax=an.w.reduce((bi,x,i,arr)=>(x??-1)>(arr[bi]??-1)?i:bi,0);
-    A2('analyze: der verfaelschte Wert hat das groesste w', wmax===7);
-    A2('analyze: rank 9', an.rank===9);
-    A2('analyze: ueberbestimmt -> sigmaHat vorhanden', an.sigmaHat!==null && an.sigmaHat>0);
-    A2('analyze: ueberbestimmt -> jede Messung pruefbar', an.w.every(x=>x!==null));
+    chk('analyze: der verfaelschte Wert hat das groesste w', wmax===7);
+    chk('analyze: rank 9', an.rank===9);
+    chk('analyze: ueberbestimmt -> sigmaHat vorhanden', an.sigmaHat!==null && an.sigmaHat>0);
+    chk('analyze: ueberbestimmt -> jede Messung pruefbar', an.w.every(x=>x!==null));
 
     // Formfehler eichfrei ueber alle Punktabstaende
     const formErr=P=>{
@@ -757,13 +763,13 @@ Hier entsteht die Aussage, die das Werkzeug ehrlich macht. Test 3 ist der wichti
     // Bei nur 3 redundanten Messungen verteilt die Ausgleichung den 20mm-Fehler
     // ueber das ganze Netz: Abstaende sind um bis zu 13mm verzogen. Der Fehler
     // versteckt sich also - genau deshalb muss das Werkzeug ihn benennen.
-    A2('analyze: der Ausreisser verzerrt die Form spuerbar (>5mm)', formErr(fit.pts)>5);
+    chk('analyze: der Ausreisser verzerrt die Form spuerbar (>5mm)', formErr(fit.pts)>5);
     // Und das ist der Arbeitsablauf, um den es geht: markierte Messung
     // stilllegen -> Form erholt sich vollstaendig, Netz bleibt bestimmt.
     const ohne=mit.map((m,i)=>i===7 ? {...m, on:false} : {...m});
     const fit2=C.solve(L.map(p=>({...p})), ohne);
-    A2('analyze: nach Stilllegen stimmt die Form wieder (<0.01mm)', formErr(fit2.pts)<0.01);
-    A2('analyze: nach Stilllegen ist das Netz noch bestimmt', C.analyze(fit2.pts,ohne).dof===0);
+    chk('analyze: nach Stilllegen stimmt die Form wieder (<0.01mm)', formErr(fit2.pts)<0.01);
+    chk('analyze: nach Stilllegen ist das Netz noch bestimmt', C.analyze(fit2.pts,ohne).dof===0);
   }
 ```
 
@@ -837,11 +843,11 @@ git commit -m "feat: network analysis with redundancy numbers"
     const rect=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:3000},{id:'D',x:0,y:3000}];
     const G=C.trivialModes(rect);
     const dot=(a,b)=>a.reduce((s,x,i)=>s+x*b[i],0);
-    A2('trivialModes: drei Stueck', G.length===3);
-    A2('trivialModes: orthonormal',
+    chk('trivialModes: drei Stueck', G.length===3);
+    chk('trivialModes: orthonormal',
        G.every(g=>near(dot(g,g),1,1e-9)) && near(dot(G[0],G[1]),0,1e-9)
        && near(dot(G[0],G[2]),0,1e-9) && near(dot(G[1],G[2]),0,1e-9));
-    A2('trivialModes: liegen im Nullraum von J', (()=>{
+    chk('trivialModes: liegen im Nullraum von J', (()=>{
       const J=C.jacobian(rect,[{a:'A',b:'B',d:4000},{a:'B',b:'C',d:3000}]);
       return G.every(g=>J.every(r=>near(dot(r,g),0,1e-6)));
     })());
@@ -851,24 +857,32 @@ git commit -m "feat: network analysis with redundancy numbers"
     const voll=[{a:'A',b:'B',d:4000},{a:'B',b:'C',d:3000},{a:'C',b:'D',d:4000},
                 {a:'D',b:'A',d:3000},{a:'A',b:'C',d:5000},{a:'B',b:'D',d:5000}];
     const cov=C.covariance(rect,voll,6);
-    A2('covariance: ein Block je Punkt', cov && cov.length===4);
-    A2('covariance: endlich und positiv',
+    chk('covariance: ein Block je Punkt', cov && cov.length===4);
+    chk('covariance: endlich und positiv',
        cov.every(c=>isFinite(c.xx)&&isFinite(c.yy)&&c.xx>0&&c.yy>0));
-    A2('covariance: keine Punkt-Bevorzugung durch die Eichung', (()=>{
+    chk('covariance: keine Punkt-Bevorzugung durch die Eichung', (()=>{
       // Symmetrisches Netz -> alle vier Ecken muessen aehnlich unsicher sein.
       // Waere an P0 gepinnt worden, waere P0 exakt 0 und der Rest wuechse.
       const sp=cov.map(c=>c.xx+c.yy);
       return Math.max(...sp)/Math.min(...sp) < 1.5;
     })());
-    A2('covariance: unterbestimmt -> null',
+    chk('covariance: unterbestimmt -> null',
        C.covariance(rect,[{a:'A',b:'B',d:4000}],null)===null);
+    // Der mittlere Anzeigefall: bestimmt, aber redundanzfrei. Ellipsen kommen
+    // dann aus dem ANGENOMMENEN sigma und werden gestrichelt gezeichnet.
+    // Liefert das null, faellt Task 12 stumm in den Pfeil-Zweig.
+    const knapp=C.covariance(rect, seiten.concat([{a:'A',b:'C',d:5000}]), null);
+    chk('covariance: exakt bestimmt + sigmaHat null -> endliche Bloecke',
+       knapp && knapp.every(c=>isFinite(c.xx)&&isFinite(c.yy)&&c.xx>0&&c.yy>0));
+    chk('covariance: B und D sind unsicherer als A und C (nur A-C gemessen)',
+       knapp && knapp[1].xx > knapp[0].xx && knapp[3].xx > knapp[2].xx);
   }
   {
     const e=C.ellipse({xx:400,xy:0,yy:100});
-    A2('ellipse: Halbachsen 20 und 10', near(e.a,20,1e-9)&&near(e.b,10,1e-9));
-    A2('ellipse: grosse Achse waagerecht', near(e.ang,0,1e-9));
+    chk('ellipse: Halbachsen 20 und 10', near(e.a,20,1e-9)&&near(e.b,10,1e-9));
+    chk('ellipse: grosse Achse waagerecht', near(e.ang,0,1e-9));
     const e2=C.ellipse({xx:100,xy:0,yy:400});
-    A2('ellipse: grosse Achse senkrecht', near(Math.abs(e2.ang),Math.PI/2,1e-9));
+    chk('ellipse: grosse Achse senkrecht', near(Math.abs(e2.ang),Math.PI/2,1e-9));
   }
 ```
 
@@ -970,16 +984,16 @@ git commit -m "feat: free-network covariance and error ellipses"
              {id:'D',x:3000,y:2000},{id:'E',x:3000,y:5000},{id:'F',x:0,y:5000}];
     const walls=[['A','B'],['B','C'],['C','D'],['D','E'],['E','F'],['F','A']];
     const poly=C.wallPolygon(L,walls);
-    A2('wallPolygon: geschlossener Zug -> 6 Ecken', poly && poly.length===6);
-    A2('pointInPoly: Punkt im schmalen Schenkel', C.pointInPoly({x:6000,y:1000},poly));
-    A2('pointInPoly: Punkt im ausgesparten Bereich', !C.pointInPoly({x:6000,y:4000},poly));
-    A2('segInPoly: C-F verlaesst den Raum -> unzulaessig',
+    chk('wallPolygon: geschlossener Zug -> 6 Ecken', poly && poly.length===6);
+    chk('pointInPoly: Punkt im schmalen Schenkel', C.pointInPoly({x:6000,y:1000},poly));
+    chk('pointInPoly: Punkt im ausgesparten Bereich', !C.pointInPoly({x:6000,y:4000},poly));
+    chk('segInPoly: C-F verlaesst den Raum -> unzulaessig',
        !C.segInPoly({x:8000,y:2000},{x:0,y:5000},poly));
-    A2('segInPoly: A-E bleibt im Raum -> zulaessig',
+    chk('segInPoly: A-E bleibt im Raum -> zulaessig',
        C.segInPoly({x:0,y:0},{x:3000,y:5000},poly));
-    A2('wallPolygon: offener Zug -> null',
+    chk('wallPolygon: offener Zug -> null',
        C.wallPolygon(L,[['A','B'],['B','C'],['C','D']])===null);
-    A2('wallPolygon: Knotengrad ungleich 2 -> null',
+    chk('wallPolygon: Knotengrad ungleich 2 -> null',
        C.wallPolygon(L,walls.concat([['A','D']]))===null);
   }
   // --- suggest ---
@@ -989,17 +1003,17 @@ git commit -m "feat: free-network covariance and error ellipses"
     const seiten=[{a:'A',b:'B',d:4000},{a:'B',b:'C',d:3000},{a:'C',b:'D',d:4000},{a:'D',b:'A',d:3000}];
     const s=C.suggest(rect,walls,seiten);
     const best=s.filter(x=>x.why==='bestimmt');
-    A2('suggest: genau ein Vorschlag fuer Bestimmtheit', best.length===1);
-    A2('suggest: es ist eine Diagonale',
+    chk('suggest: genau ein Vorschlag fuer Bestimmtheit', best.length===1);
+    chk('suggest: es ist eine Diagonale',
        ['AC','BD'].includes([best[0].a,best[0].b].sort().join('')));
-    A2('suggest: Vorschlag macht das Netz bestimmt', (()=>{
+    chk('suggest: Vorschlag macht das Netz bestimmt', (()=>{
       const I=C.idx(rect);
       const d=C.dist(rect[I[best[0].a]],rect[I[best[0].b]]);
       return C.analyze(rect, seiten.concat([{a:best[0].a,b:best[0].b,d}])).dof===0;
     })());
     // Danach laeuft die Suche weiter, jetzt fuer die Pruefbarkeit: mit nur
     // 5 Messungen ist keine einzige ueberpruefbar.
-    A2('suggest: schlaegt danach Messungen zur Pruefbarkeit vor',
+    chk('suggest: schlaegt danach Messungen zur Pruefbarkeit vor',
        s.some(x=>x.why==='pruefbar'));
   }
   {
@@ -1008,15 +1022,15 @@ git commit -m "feat: free-network covariance and error ellipses"
     const walls=[['A','B'],['B','C'],['C','D'],['D','E'],['E','F'],['F','A']];
     const I=C.idx(L);
     const seiten=walls.map(([a,b])=>({a,b,d:C.dist(L[I[a]],L[I[b]])}));
-    A2('analyze: L mit 6 Waenden -> 3 Messungen fehlen', C.analyze(L,seiten).dof===3);
+    chk('analyze: L mit 6 Waenden -> 3 Messungen fehlen', C.analyze(L,seiten).dof===3);
     const s=C.suggest(L,walls,seiten);
-    A2('suggest: genau 3 Vorschlaege fuer Bestimmtheit',
+    chk('suggest: genau 3 Vorschlaege fuer Bestimmtheit',
        s.filter(x=>x.why==='bestimmt').length===3);
-    A2('suggest: kein Vorschlag verlaesst den Raum',
+    chk('suggest: kein Vorschlag verlaesst den Raum',
        s.every(x=>C.segInPoly(L[I[x.a]],L[I[x.b]],C.wallPolygon(L,walls))));
-    A2('suggest: C-F wird nie vorgeschlagen',
+    chk('suggest: C-F wird nie vorgeschlagen',
        !s.some(x=>[x.a,x.b].sort().join('')==='CF'));
-    A2('suggest: Pruefbarkeitsphase ist gedeckelt',
+    chk('suggest: Pruefbarkeitsphase ist gedeckelt',
        s.filter(x=>x.why==='pruefbar').length<=C.SUGGEST_CHECK_MAX);
   }
 ```
@@ -1213,9 +1227,12 @@ const C=globalThis.CORE;
 const M={ pts:[], walls:[], meas:[], mode:'point', sel:[], fit:null, an:null, drag:null };
 
 // --- Punkt-IDs: A..Z, dann AA, AB, ...
+// Der Zaehler laeuft monoton und wird beim Loeschen NICHT zurueckgesetzt.
+// Waere er an M.pts.length gebunden, ergaebe "A,B,C anlegen, B loeschen,
+// neuer Punkt" wieder ein C - und zwei Punkte haetten dieselbe ID.
+let idSeq=0;
 function nextId(){
-  let i=M.pts.length;
-  let s='';
+  let i=idSeq++, s='';
   do{ s=String.fromCharCode(65+i%26)+s; i=Math.floor(i/26)-1; }while(i>=0);
   return s;
 }
@@ -1311,6 +1328,23 @@ cv.addEventListener('mousedown',e=>{
   } else render();
 });
 
+// Rechtsklick loescht einen Punkt samt allem, was auf ihn zeigt. Ohne die
+// Kaskade blieben verwaiste Verweise in walls/meas stehen und jacobian liefe
+// auf undefined. Ein Fehlklick ist auf einem Klick-Canvas sicher, und ein
+// uebriger Punkt kostet dauerhaft 2 Freiheitsgrade.
+cv.addEventListener('contextmenu',e=>{
+  e.preventDefault();
+  const r=cv.getBoundingClientRect(), dpr=devicePixelRatio||1;
+  const w=toWorld((e.clientX-r.left)*dpr, (e.clientY-r.top)*dpr);
+  const h=hit(w.x,w.y);
+  if(!h) return;
+  M.pts=M.pts.filter(p=>p.id!==h.id);
+  M.walls=M.walls.filter(([a,b])=>a!==h.id&&b!==h.id);
+  M.meas=M.meas.filter(m=>m.a!==h.id&&m.b!==h.id);
+  M.sel=[];
+  recompute();
+});
+
 cv.addEventListener('mousemove',e=>{
   if(!M.drag) return;
   const r=cv.getBoundingClientRect(), dpr=devicePixelRatio||1;
@@ -1326,7 +1360,7 @@ document.querySelectorAll('#modes button').forEach(b=>{
     document.querySelectorAll('#modes button').forEach(x=>
       x.setAttribute('aria-pressed', String(x===b)));
     document.getElementById('hint').textContent=
-      {point:'Klicken legt an, Ziehen verschiebt',
+      {point:'Klicken legt an, Ziehen verschiebt, Rechtsklick löscht',
        wall:'Zwei Punkte klicken (nochmal klicken entfernt die Wand)',
        measure:'Zwei Punkte klicken, dann Maß eintippen'}[M.mode];
     render();
@@ -1356,6 +1390,9 @@ Expected: unverändert alle PASS. Der `ui`-Block wird vom Runner nicht geladen; 
 2. Taste `2`, die vier Kanten klicken → durchgezogener Rahmen.
 3. Taste `3`, `A` und `B` klicken, `4000` eingeben → grüne Strichlinie, das Bild springt auf Meterskala.
 4. Zurück auf `1`, einen Punkt ziehen → er folgt der Maus, beim Loslassen rechnet es neu.
+5. Fünften Punkt anlegen (heißt `E`), Rechtsklick darauf → verschwindet, kein Kontextmenü.
+6. Rechtsklick auf `B` → `B` verschwindet **samt seiner beiden Wände und der Messung A–B**; der Rahmen ist danach offen.
+7. Neuen Punkt anlegen → er heißt `F`, **nicht** erneut `B` oder `E`. Bekommt er eine schon vergebene ID, ist der ID-Zähler an `M.pts.length` gebunden statt monoton.
 
 - [ ] **Step 5: Commit**
 
@@ -1629,6 +1666,7 @@ git commit -m "feat: suggestion list, uncertainty ellipses, flex arrows, json ex
 | `suggest` mit Messbarkeitsfilter und Greedy | 9 |
 | `suggest` schaltet bei `dof=0` auf Prüfbarkeit um, `why`-Feld, Deckel bei 3 | 9 |
 | Drei Modi, Punkte ziehen, IDs A…Z/AA | 10 |
+| Punkt löschen per Rechtsklick, Kaskade auf Wände und Messungen | 10 |
 | Live-Neuberechnung ohne „Berechnen"-Knopf | 10 |
 | Statuszeile, drei Zustände | 11 |
 | Messtabelle, nach `w` sortiert, Badge *nicht prüfbar* | 11 |
@@ -1639,6 +1677,7 @@ git commit -m "feat: suggestion list, uncertainty ellipses, flex arrows, json ex
 | Fehlerfall Wandzug nicht geschlossen / Grad ≠ 2 | 9 (`wallPolygon → null`), 12 (Hinweistext) |
 | Fehlerfall `d ≤ 0` | 10 (Eingabe), 11 (Tabelle) |
 | Fehlerfall Solver konvergiert nicht | 11 (Statuszeile, rot) |
+| Auslöser `?test` in der URL | 1 (`checks`-Block) |
 | Spec-Test 1 Ausreißer + Erholung nach Stilllegen | 7 |
 | Spec-Test 2 fehlende Messungen | 7 |
 | Spec-Test 3 Lügner-Fall | 7 |
@@ -1646,7 +1685,7 @@ git commit -m "feat: suggestion list, uncertainty ellipses, flex arrows, json ex
 
 Nicht als eigene Task abgedeckt und bewusst so: **isolierter Punkt / unverbundene Komponente**. `analyze` meldet ihn implizit — ein Punkt ohne Messung erzeugt zwei Flex-Moden und bekommt in Task 12 Pfeile in beide Richtungen. Die Statuszeile sagt „N Messungen fehlen". Eine eigene Komponentenanalyse ist damit überflüssig.
 
-**Typkonsistenz** — geprüft: `analyze` gibt `red` (nicht `redundanz`) und `redundancy` (Skalar) zurück; beide werden in Task 11 und 12 unter genau diesen Namen gelesen. `gramSchmidt` gibt `k` zurück, `nullSpace` liest es (in Task 4 Schritt 3 nachgezogen). `covariance` erwartet `sigmaHat` als drittes Argument und verträgt `null`. Die Assert-Funktion heißt ab Task 3 durchgehend `A2`.
+**Typkonsistenz** — geprüft: `analyze` gibt `red` (nicht `redundanz`) und `redundancy` (Skalar) zurück; beide werden in Task 11 und 12 unter genau diesen Namen gelesen. `gramSchmidt` gibt `k` zurück, `nullSpace` liest es (in Task 4 Schritt 3 nachgezogen). `covariance` erwartet `sigmaHat` als drittes Argument und verträgt `null`. Die Assert-Funktion heißt durchgehend `chk` — nicht `A`, weil in mehreren Tests eine Matrix `A` heißt und der Name sonst ab Task 3 umbenannt werden müsste, quer über Tasks hinweg.
 
 **Vorabprüfung der Sollwerte**
 
