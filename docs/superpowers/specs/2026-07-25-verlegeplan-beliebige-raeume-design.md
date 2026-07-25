@@ -170,10 +170,13 @@ worum es geht. Er wird nicht angepasst, damit er grün wird.
    keine Verteilerwand-Front haben kann? Wenn ja: zweite Leitungsebene zulassen
    (im Estrich real, aber Aufbauhöhe), Kreis aufteilen, oder dem Nutzer sagen,
    dass der Verteiler woanders hin muss?
-2. **Randzone an schrägen Ecken.** An einer 90°-Ecke ist die dichtere Randzone
-   klar. An 137° oder an einer einspringenden 210°-Ecke ist weder der Versatz
-   noch die Bahnzahl definiert. Muss vor dem Bau geklärt werden, sonst wird es
-   im Bau geraten.
+2. **Randzone an schrägen Ecken.** Die heutige Randzone ist für rechte Winkel
+   gebaut: an einer 90°-Ecke ist klar, wo die dichteren Bahnen umlaufen. Sobald
+   ein Winkel weder 90° noch 270° ist, sind Versatz und Bahnzahl an der Ecke
+   nicht definiert. Der spitze Fall (Bahnen laufen zusammen, es bleibt kein
+   Platz für die volle Bahnzahl) und der einspringende Fall (Bahnen laufen
+   auseinander, es entsteht eine Lücke) sind zwei verschiedene Probleme.
+   Zu klären ist beides, sonst wird es im Bau geraten.
 3. **Bahnabstand bei konturparallelen Bahnen.** Beim Versetzen einer schrägen
    Ecke wird der Abstand zwischen benachbarten Bahnen an der Ecke größer als in
    der Fläche. Wie viel Ungleichmäßigkeit ist thermisch akzeptabel?
