@@ -97,3 +97,47 @@ Zwei Fragen für die nächste Runde, beide messbar:
    dichter ab als das Feld es täte, oder ist sie netto ein Verlust?
 2. **Ist `omegaClear` überall nötig?** Es reserviert Platz für Kehren, die nur an
    den Bahnenden auftreten, wird aber über die volle Kantenlänge abgezogen.
+
+---
+
+## Nachtrag: beide Fragen gemessen und beantwortet
+
+**Frage 1 — zahlt die Randzone ihre Reservierung zurück?** Ja, und der Code
+garantiert es schon: `randOn()` (`verlegeplan.html:419`) fordert
+`S.randSpacing < S.s`. Eine Randzone, die dünner läge als das Feld, wird gar
+nicht erst gebaut, und dann ist auch `randW = 0`. Das reservierte Band wird also
+nur bezahlt, wenn dort tatsächlich dichter verlegt wird — Deckung im Band
+`50/randSpacing > 50/s`. Netto ein Gewinn, kein Verlust. Die Frage ist erledigt.
+
+**Frage 2 — ist `omegaClear` über die volle Kantenlänge nötig?** Konstruktiv
+nein: die Omega-Kehren sitzen an den Enden der Randzonen-Ketten, `omegaClear`
+wird aber als gleichmäßiges Inset über die ganze Kante abgezogen. Statt die
+positionsabhängige Reservierung zu bauen, erst den Preis gemessen — `omegaClear`
+pauschal skaliert:
+
+```
+Faktor        cross  cov  rad  out  medCov  medR
+1,0 (jetzt)     18    10   18    0     40     42
+0,5             18     9   19    0     40     42
+0,0             18     9   19    0     41     42
+```
+
+Der ganze Posten ist **einen covFail wert** und kostet dabei einen radFail. Damit
+lohnt die Maschinerie für eine positionsabhängige Reservierung nicht, und die
+Idee ist verworfen — nicht weil sie falsch wäre, sondern weil der Preis feststeht
+und zu klein ist.
+
+## Was daraus für die Deckung folgt
+
+Von den drei Faktoren ist damit jeder einzeln abgeklopft:
+
+- **Füllgüte** (Quote 1,00): kein Spielraum, das Feld füllt korrekt.
+- **Dichtegrenze** (2·reach/s): eine Eigenschaft der Eingabe `s`, nicht des Plans.
+- **Inset-Budget** (0,71): `edgeGap` ist physikalisch, `randW` zahlt sich zurück,
+  `omegaClear` ist einen covFail wert, `corridorW` ist noch nicht vermessen.
+
+Der einzige ungemessene Posten ist damit der **Verteilerkorridor** `corridorW()`
+in `fieldInset()`. Er ist der nächste und letzte Kandidat in dieser Zerlegung.
+Fällt er ebenso klein aus, ist `covFails` durch Insets nicht mehr zu bewegen und
+die verbleibende Stellschraube ist der Bahnabstand selbst — der aber eine
+Eingabe ist, keine Entscheidung des Plans.
