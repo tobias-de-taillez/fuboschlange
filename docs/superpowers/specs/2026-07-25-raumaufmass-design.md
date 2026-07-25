@@ -148,6 +148,7 @@ Feste Schwellen, damit die Anzeige reproduzierbar ist:
 | Rangtoleranz | `1e-8 · größte Spaltennorm` | Rangbestimmung in Gram-Schmidt |
 | `red_i` "nicht prüfbar" | `< 0.01` | Badge in der Messtabelle |
 | Nullraum-Anteil eines Punkts | `> 0.05 · ‖Mode‖` | Pfeil statt Ellipse |
+| Vorschläge zur Prüfbarkeit | höchstens `3` | Deckel der zweiten Suchphase |
 
 Die Kovarianz wird aus der **Pseudoinversen der vollen** `JᵀJ` gebildet, nicht aus
 der Inversen des gepinnten Systems. Sonst wären die Ellipsen an `P0` genagelt und
@@ -155,10 +156,31 @@ wüchsen mit dem Abstand davon — ein Artefakt der Eichung, nicht der Messquali
 Die Pseudoinverse verteilt die Unsicherheit über das Netz und ist das, was der
 Nutzer sehen will.
 
-**Die 3 Starrbewegungen müssen vor der Interpretation des Nullraums
-herausprojiziert werden**, sonst sieht jedes Netz beweglich aus. Die drei
-Basisvektoren sind `(1,0,1,0,…)`, `(0,1,0,1,…)` und `(−y₁,x₁,−y₂,x₂,…)`,
-orthonormalisiert.
+Sie wird nicht als Pseudoinverse ausgerechnet, sondern durch Lösen des
+erweiterten Systems mit inneren Bedingungen — die klassische freie
+Netzausgleichung:
+
+```
+[ JᵀJ   G ] [ X ]   [ I ]
+[ Gᵀ    0 ] [ · ] = [ 0 ]
+```
+
+`G` sind die drei orthonormalisierten Starrbewegungen (die Drehung um den
+Schwerpunkt gebildet). `X` ist die gesuchte Pseudoinverse. Das nutzt denselben
+dichten Gleichungslöser wie Gauß-Newton; eine eigene Pseudoinversen-Routine
+entfällt. Ist das Netz unterbestimmt, ist das erweiterte System singulär — dann
+gibt es keine Ellipsen, sondern Pfeile.
+
+**Der Nullraum darf keine Starrbewegungen enthalten**, sonst sieht jedes Netz
+beweglich aus. Die Zerlegung läuft deshalb über die auf die freien Spalten
+reduzierte Jacobi-Matrix (2n−3 Spalten statt 2n). Die drei gepinnten
+Koordinaten sind so gewählt, dass keine Starrbewegung sie unverändert lässt —
+folglich ist keine Starrbewegung in dieser Darstellung enthalten und der
+Nullraum besteht bereits ausschließlich aus echten Beweglichkeiten. Ein
+separater Projektionsschritt entfällt.
+
+Die Kovarianz ist davon ausgenommen: sie wird auf der **vollen** Jacobi-Matrix
+gerechnet, siehe unten.
 
 ### `suggest`
 
@@ -174,11 +196,19 @@ Kandidaten sind alle Punktpaare ohne Messung. Zwei Filter, dann Greedy:
    fügt keinen Rang hinzu und bringt für die Bestimmtheit nichts.
 
 Der beste Kandidat wird virtuell hinzugefügt, Rang neu gerechnet, wiederholen bis
-`dof = 0`. Ergebnis ist eine konkrete Liste: *"Miss noch A↔D, C↔F, B↔E."*
+`dof = 0`. Ergebnis ist eine konkrete Liste: *"Miss noch A↔D, B↔D, D↔F."*
 
-Ist das Netz bereits bestimmt (`dof = 0`), wechselt die Liste die Bedeutung: dann
-werden Messungen vorgeschlagen, die die *Prüfbarkeit* erhöhen — bevorzugt Paare,
-die an Messungen mit `red_i ≈ 0` angrenzen.
+Ist das Netz bestimmt (`dof = 0`), läuft die Suche weiter, aber nach einem
+anderen Kriterium: gesucht wird jetzt die Messung, die die meisten bisher
+unprüfbaren Messungen prüfbar macht. Diese zweite Phase ist auf **drei**
+Vorschläge gedeckelt — darüber hinaus ist die Frage "was noch messen" keine
+Frage der Bestimmtheit mehr, sondern eine Frage, wieviel Zeit man investieren
+will.
+
+Beide Phasen liefern in dieselbe Liste, aber jeder Eintrag trägt ein Feld
+`why` mit dem Wert `'bestimmt'` oder `'prüfbar'`. Ohne diese Unterscheidung
+stünden in der Anzeige fünf Vorschläge, während die Statuszeile "3 Messungen
+fehlen" meldet — der Nutzer könnte nicht sehen, welche drei das sind.
 
 ## UI
 
@@ -209,7 +239,18 @@ nach `w` sortiert. Die oberste Zeile ist der wahrscheinlichste Ausreißer. Zeile
 mit `red_i ≈ 0` zeigen das Badge **nicht prüfbar** statt eines Residuums. Je
 Zeile ein Schalter für `on` und ein Feld zum Überschreiben von `d`.
 
-**Vorschlagsliste** unter der Tabelle.
+**Vorschlagsliste** unter der Tabelle, in zwei getrennten Gruppen entsprechend
+dem `why`-Feld:
+
+```
+Damit der Raum bestimmt ist:        D↔F, A↔D, B↔D
+Damit die Messungen prüfbar werden: A↔C, A↔E
+```
+
+Beide Gruppen werden immer zusammen gezeigt, auch wenn noch Messungen zur
+Bestimmtheit fehlen: so steht die vollständige Einkaufsliste für einen Gang
+durch den Raum auf einmal da, statt in zwei Wellen aufzutauchen. Die Anzahl in
+der ersten Gruppe stimmt immer mit der Zahl in der Statuszeile überein.
 
 **Unsicherheits-Ellipsen** im Canvas, eine je Punkt, aus `cov`. Drei Fälle,
 die verschieden dargestellt werden müssen:
@@ -248,9 +289,17 @@ Selbstcheck mit `assert` in derselben Datei, ausgelöst über `?test` in der URL
 Kein Framework, keine Fixtures. Er läuft gegen ein synthetisches L mit bekannten
 Koordinaten:
 
-1. **Ausreißer-Erkennung** — exakte Distanzen auf einem überbestimmten Netz, eine
-   Messung um 20 mm verfälscht. Erwartung: diese Messung hat das größte `w`, die
-   übrigen Punkte werden auf ~2 mm genau rekonstruiert.
+1. **Ausreißer-Erkennung und Erholung** — exakte Distanzen auf einem
+   überbestimmten Netz (L-Raum, 6 Ecken, 12 Messungen), eine Messung um 20 mm
+   verfälscht. Erwartungen der Reihe nach: diese Messung hat das größte `w`; die
+   Form ist dadurch spürbar verzerrt; nach Stilllegen genau dieser Messung
+   stimmt die Form wieder auf Rechengenauigkeit und das Netz bleibt bestimmt.
+
+   Der mittlere Schritt ist die Begründung des ganzen Werkzeugs: bei nur drei
+   redundanten Messungen verteilt die Ausgleichung einen 20-mm-Fehler über das
+   Netz und verzerrt Abstände um bis zu 13 mm. Der Fehler versteckt sich also,
+   statt an einer Stelle aufzufallen — deshalb reicht es nicht, Residuen
+   anzusehen, und deshalb muss das Werkzeug den Verdächtigen benennen.
 2. **Fehlende Messungen** — Rechteck mit nur 4 Seiten meldet "1 Messung fehlt";
    nach Hinzufügen einer Diagonale meldet es 0.
 3. **Der Lügner-Fall** — exakt bestimmtes Netz (`m = 2n−3`). Erwartung: alle
