@@ -1160,6 +1160,29 @@ function doubleSpiralField(poly,insOf,s,gate){
   // ungeraden. Beide Arme haben konstant s Abstand -> Gegenstrom.
   const inArm=open.filter((_,k)=>k%2===0);
   const outArm=open.filter((_,k)=>k%2===1);
+  // VERWORFEN, gemessen: BRUECKE zwischen zwei Ringen — kubische Hermite von
+  // Ring-Ende nach naechstem Ring-Anfang, tangential an beide angeschlossen, mit
+  // Klemmung gegen den Raum. Der Ansatz folgt genau dem, was die drei
+  // gescheiterten Naht-Varianten nahegelegt haben: eigene Geometrie ZWISCHEN den
+  // Ringen statt Laenge AUS ihnen. Und er wirkt auch dort, wo nichts anderes
+  // gewirkt hat — die Drehung verteilt sich auf mehrere Stuetzpunkte statt in
+  // einer Ecke zu sitzen, und radFails faellt erstmals unter 19.
+  //
+  //   Tangentenlaenge  crossFails  covFails  radFails  medCross  medCov
+  //   keine Bruecke            19        10        19         5    40 %
+  //   0,4*|EA|                 19        11        20         6    39 %
+  //   0,6*|EA|                 19        11        18        11    39 %
+  //   0,8*|EA|                 19        10        20        15    40 %
+  //   1,0*|EA|                 19        11        19        17    39 %
+  //
+  // Kein Wert verbessert zwei Gates gleichzeitig, und medianCross verdoppelt
+  // sich bei der besten Radius-Einstellung von 5 auf 11: die Bruecke schwingt
+  // zwischen den Ringen aus und trifft dabei Nachbarbahnen. Netto negativ.
+  //
+  // Festgehalten, weil es der erste Konstrukt ueberhaupt ist, der radFails unter
+  // 19 bewegt: der Ansatz stimmt, aber die Bruecke braucht eine Fuehrung, die
+  // sie im Korridor zwischen Ring k und k+2 haelt — eine freie Hermite nutzt den
+  // Platz nicht, sie nimmt ihn sich.
   const pts=[];
   inArm.forEach(r=>pts.push(...r));
   let back=outArm.slice().reverse().map(r=>r.slice().reverse());
