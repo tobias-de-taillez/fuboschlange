@@ -111,7 +111,7 @@ den Fallback schon vorgesehen: `clipper2-js` lokal vendored. Aus dem Fallback
 wird jetzt eine feste Abhängigkeit — vendored, nicht per CDN, damit die Datei
 self-contained bleibt.
 
-### 2. Teilflächen mit Front zur Verteilerwand
+### 2. Verschachtelte Spuren am Rand statt Leitungen durchs Feld
 
 Das ist die Antwort auf die Kreuzungen, und sie folgt direkt aus dem Befund, dass
 alle Kreuzungen zwischen Kreisen liegen.
@@ -120,23 +120,11 @@ Heute wird der Raum in Rechtecke zerlegt und den Kreisen zugeteilt; welcher Krei
 wo liegt, folgt nicht daraus, wo der Verteiler steht. Ein Kreis in der hinteren
 Ecke braucht zwei Leitungen quer über fremdes Gebiet — und dort kreuzen sie.
 
-Stattdessen: **den Raum in so viele Teilflächen zerlegen, wie es Kreise gibt, und
-zwar so, dass jede Teilfläche ein Stück Verteilerwand berührt.** Dann geht jeder
-Kreis auf kürzestem Weg senkrecht in den Korridor, die Spuren im Korridor liegen
-in derselben Reihenfolge wie die Teilflächen an der Wand, und die Leitungen
-können sich nicht mehr kreuzen — nicht weil der Algorithmus es prüft, sondern
-weil die Anordnung es ausschließt.
-
-Praktisch: entlang der Verteilerwand schneiden, die Schnittpositionen so wählen,
-dass die Flächen etwa gleich groß werden (gleich lange Kreise).
-
-### 2b. Korrektur: Front ist zu schwach, verschachtelte Spuren sind das Richtige
-
-Die Forderung „jede Teilfläche berührt die Verteilerwand" ist erfüllbar in einem
-Rechteck und nicht erfüllbar, sobald ein Teil der Fläche hinter einer
-einspringenden Ecke liegt oder der Verteiler auf einer Innenwand sitzt — was die
-Messung oben mit 50 Kreuzungen und 7 Segmenten außerhalb genau trifft. Ein
-Verfahren, das dort aussteigt, ist kein Verfahren.
+Der naheliegende Ausweg wäre, jede Teilfläche so zuzuschneiden, dass sie ein
+Stück Verteilerwand berührt. Das trägt aber nur im Rechteck. Sobald Fläche hinter
+einer einspringenden Ecke liegt oder der Verteiler auf einer Innenwand sitzt, ist
+die Bedingung nicht erfüllbar — genau die Lage, die oben mit 50 Kreuzungen und
+7 Segmenten außerhalb gemessen ist. Ein Verfahren, das dort aussteigt, ist keins.
 
 Der allgemeine Fall ist eine **Planaritätsfrage**, und sie hat eine Antwort. Alle
 Anbindeleitungen starten am selben Ort. Sie kreuzen sich genau dann nicht, wenn
@@ -182,7 +170,7 @@ diese Umstellung überhaupt in einem Zug mit den Kreuzungen zu machen.
 ## Reihenfolge
 
 Nicht: erst das L fertigmachen, dann verallgemeinern. Der Umbau, der die
-Kreuzungen löst — Teilflächen mit Front statt beliebiger Rechteckzuteilung —
+Kreuzungen löst — verschachtelte Randspuren statt Leitungen quer durchs Feld —
 ist derselbe Umbau, der die Raumform verallgemeinert. Zweimal gebaut wäre er
 doppelte Arbeit, und die erste Fassung würde ohnehin weggeworfen.
 
@@ -192,13 +180,18 @@ als Tor:
 | Schritt | Abnahme |
 |---|---|
 | Polygon-Raumdarstellung, Offsetter vendored | bestehende L-Räume liefern denselben Plan wie heute |
-| Konturparallele Bahnen auf dem Konturbaum | Bench: Selbstkreuzungen bleiben 0, auch bei U/T/Z und schrägen Wänden |
-| Teilflächen mit Front, Spurzuteilung | Bench: Kreuzungen zwischen Kreisen von heute 9 auf 0 im Standardraum |
+| Konturparallele Bahnen auf dem Konturbaum | Selbstkreuzungen bleiben 0, auch bei U/T/Z und schrägen Wänden |
+| Bahnabstand aus dem Längenbudget lösen | kein unbelegter Streifen mehr; ausgewiesener Abstand und Flächenleistung |
+| Verschachtelte Randspuren, Spurzuteilung | Kreuzungen 0 in **allen vier** gemessenen Verteilerlagen, auch Notch-Innenwand (heute 9 / 9 / 14 / 50) |
 | Randzone an beliebigen Kanten | Bench 0/60 statt heute 52/60 |
 | Import aus `raumaufmass.html` | gemessener Raum ergibt einen Plan |
 
 Der Bench ist bereits vorhanden, deterministisch geseedet und misst genau das,
 worum es geht. Er wird nicht angepasst, damit er grün wird.
+
+Weil Kreuzungsfreiheit absolut ist, ist der Bench kein Fortschrittsmaß, sondern
+ein Tor: solange er einen Fund meldet, ist der Schritt nicht fertig. „Von 52 auf
+6 verbessert" ist kein Ergebnis.
 
 ## Anforderungen an den Bahnplaner
 
@@ -232,43 +225,88 @@ Was an Ecken wirklich passiert und behandelt werden muss:
   Streifen entlang der Mittelachse übrig, den keine Bahn erreicht. **Das** ist
   der echte Deckungsverlust, und er sitzt in der Raummitte, nicht an den Ecken.
 
-### Der Deckungsverlust muss beziffert werden, nicht wegdefiniert
+### Der Bahnabstand ist das Ergebnis, nicht die Vorgabe
 
-Die Restfläche ist die einzige Stelle, an der konturparallele Bahnen
-systematisch Boden unbeheizt lassen. Der Planer muss sie **ausrechnen und
-anzeigen** — als Fläche in m² und als Anteil. Die Thermik-Schicht kann sie
-ohnehin schon sichtbar machen.
+Das ist die wichtigste Festlegung des ganzen Dokuments, und sie kehrt die
+bisherige Rechenrichtung um.
 
-Erst wenn die Zahl auf dem Tisch liegt, ist die Frage „reicht das thermisch"
-überhaupt beantwortbar. Sie vorher zu stellen heißt, sie zu raten.
+Bisher war `s` eine Eingabe: der Nutzer stellt 150 mm ein, der Planer legt
+Bahnen im Abstand 150 mm, und wenn die Rohrlänge vorher aufgebraucht ist, hört
+er auf — mit einem dicht belegten Ring außen und einer kahlen Mitte. Genau das
+darf nicht passieren.
 
-### Kreuzungsfreiheit ist eine Konstruktionsaufgabe, keine Prüfaufgabe
+Richtig ist die andere Reihenfolge:
 
-Siehe Abschnitt 2b. Der Planer prüft nicht nachträglich auf Kreuzungen und
-repariert — er ordnet die Spuren so an, dass Kreuzungen nicht entstehen können.
-Der bestehende Bench bleibt trotzdem, als Nachweis und nicht als Krücke.
+> **Die Rohrlänge ist das Budget. Die vollständige, gleichmäßige Deckung des
+> Raums ist die Bedingung. Der Bahnabstand ist die freie Variable.**
+
+Reicht die Länge für den Zielabstand nicht, wird der Abstand **überall
+gleichmäßig** vergrößert, bis die Bahnen bis zur Mitte reichen. Ein Raum mit
+180 mm statt 150 mm ist gleichmäßig etwas schwächer beheizt. Ein Raum mit 150 mm
+außen und einem kahlen Streifen in der Mitte hat eine kalte Zone — das ist der
+schlechtere Fehler, und er ist vermeidbar.
+
+Technisch ist das eine eindimensionale Nullstellensuche: die Gesamtlänge der
+konturparallelen Bahnen fällt monoton mit dem Abstand, also gibt es genau ein
+`s`, das das Längenbudget ausschöpft. Der Zielabstand wird zur **Untergrenze**
+(dichter wäre teurer als erlaubt), nie zur Sollvorgabe.
+
+Der Rest zwischen der letzten Bahn und der Mittelachse bleibt bestehen, ist aber
+per Konstruktion schmaler als ein Bahnabstand — also nicht größer als der Abstand
+zwischen zwei Bahnen irgendwo sonst im Feld. Damit gilt dieselbe
+Gleichmäßigkeitsschranke überall, und der Begriff „Deckungsverlust" verliert
+seinen Sinn.
+
+**Die Nebenwirkung, die sichtbar gemacht werden muss.** Ein größerer Abstand
+bedeutet weniger Leistung je m². Wird der Abstand so weit aufgezogen, dass die
+Auslegungsleistung des Raums nicht mehr erreicht wird, ist der Plan geometrisch
+einwandfrei und trotzdem unbrauchbar — der Raum wird nicht warm. Der Planer muss
+deshalb neben dem gewählten Abstand die erreichte Flächenleistung ausgeben und
+sagen, wenn sie unter der Auslegung liegt. Die Thermik-Schicht rechnet das
+bereits; sie muss nur an dieser Stelle gefragt werden.
+
+Das ist der ehrliche Ausweg aus dem Zielkonflikt: nicht heimlich Fläche
+weglassen, nicht heimlich Leistung verlieren, sondern gleichmäßig verlegen und
+die Leistung benennen.
+
+### Kreuzungsfreiheit ist absolut
+
+**Leitungen kreuzen sich niemals.** Keine zweite Ebene, kein Unterführen, kein
+Notausgang. Ein Plan mit einer einzigen Kreuzung ist kein Plan.
+
+Das ist keine Qualitätsschwelle, sondern eine Vorbedingung: was sich kreuzt,
+lässt sich nicht verlegen. Damit ist auch entschieden, dass Kreuzungsfreiheit
+eine **Konstruktionsaufgabe** ist und keine Prüfaufgabe — ein Verfahren, das
+Kreuzungen erzeugt und anschließend repariert, hat keinen Anschlag nach unten.
+Die Spuren werden so angeordnet, dass Kreuzungen nicht entstehen können
+(Abschnitt 2b).
+
+Der bestehende Bench bleibt als Nachweis. Er darf nie wieder einen Fund melden,
+und wenn doch, ist der Plan verworfen und nicht nachgebessert.
 
 ### Was dem Planer abverlangt wird, in einem Satz
 
 Beliebiges einfaches Polygon, Verteiler an beliebiger Stelle des Rands, beliebige
-Kreiszahl — Ergebnis kreuzungsfrei, vollständig im Raum, mit beziffertem
-Deckungsverlust.
+Kreiszahl — Ergebnis **kreuzungsfrei**, vollständig im Raum, den ganzen Boden
+gleichmäßig belegt, mit ausgewiesenem Bahnabstand und der daraus folgenden
+Flächenleistung.
 
-## Offene Fragen
+## Entschieden
 
-Übrig bleiben zwei, und beide sind wirklich deine Entscheidung, weil sie vom Bau
-abhängen und nicht von Geometrie:
+Beide zuvor offenen Punkte sind beantwortet und stehen als harte Vorgaben fest:
 
-1. **Zweite Leitungsebene.** Falls sich in einem Extremfall doch keine planare
-   Anordnung finden lässt: darf eine Anbindeleitung eine andere kreuzen, indem
-   sie darunter durchgeführt wird? Real im Estrich möglich, kostet Aufbauhöhe.
-   Der Planer soll das nicht brauchen — aber ob es als Notausgang erlaubt ist,
-   bestimmt, ob er im Zweifel abbricht oder abtaucht.
-2. **Zulässiger Deckungsverlust.** Ab welchem Anteil unbeheizter Fläche ist ein
-   Plan unbrauchbar? Zu beantworten, wenn der Planer die Zahl liefert — vorher
-   nicht sinnvoll.
+1. **Kreuzungen sind ausgeschlossen.** Keine zweite Ebene, kein Unterführen.
+2. **Kahle Flächen sind ausgeschlossen.** Reicht die Rohrlänge für den
+   Zielabstand nicht, wird der Abstand überall gleichmäßig vergrößert. Die
+   dadurch sinkende Flächenleistung wird ausgewiesen.
 
-Technisch noch zu klären, ohne dass es dich betrifft: Größe und Lizenz von
+Damit hat der Planer zwei unverhandelbare Bedingungen und eine freie Variable.
+Er kann in eine Lage kommen, in der beide Bedingungen erfüllbar sind, die
+Auslegungsleistung aber nicht mehr erreicht wird. Das ist dann kein Fehler des
+Planers, sondern eine Aussage über den Raum — und sie muss so dastehen, nicht
+als stiller Kompromiss.
+
+Rein technisch noch zu klären, ohne dass es dich betrifft: Größe und Lizenz von
 `clipper2-js` vor dem Vendoring, und die Polygon-Entsprechung der heutigen
 Standardwerte in `S`, damit „liefert denselben Plan wie heute" prüfbar ist.
 
