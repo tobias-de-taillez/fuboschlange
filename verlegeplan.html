@@ -836,6 +836,24 @@ function doubleSpiralField(poly,insOf,s,gate){
   // (14 Feld×mid, 11 Feld×leadOut).
   // Deshalb wird der Fußpunkt auf das nächste SEGMENT projiziert und als neuer
   // Punkt eingefügt.
+  // VERWORFEN, gemessen: Ecken-Treppe (Schnitt jedes Rings um s weiter entlang
+  // des Rings versetzt, damit der Übergang Ring k -> k+2 eine 45°-Diagonale
+  // statt eines rechtwinkligen Radialsprungs wird).
+  // Die Rechnung dahinter stimmt: fillet begrenzt den Bogenradius auf
+  // 0,5·kürzestes Nachbarsegment·tan((pi-defl)/2), bei 90° also auf die halbe
+  // Sprungweite = s; bei 45° auf 1,7·s. Für Ø20 (R=100) mit s=75 ist minR >= 5·Ø
+  // am rechtwinkligen Sprung geometrisch unerfüllbar, egal wie fein abgetastet
+  // wird. Trotzdem ein Nettoverlust über 500 Läufe:
+  //   ohne Treppe   crossFails 485  covFails 322  outFails 181  medianRadius 3
+  //   mit  Treppe   crossFails 500  covFails 294  outFails 180  medianRadius 5
+  // 15 zusätzliche Kreuzungsfehlschläge für 28 Deckungsfehlschläge, und der
+  // Radius bleibt zwei Größenordnungen unter dem Soll. Grund für die Kreuzungen
+  // steht im Design-Doc: die Diagonale von Ring k nach k+2 quert das Niveau von
+  // Ring k+1 genau an dessen Schnittpunkt. Dafür bräuchte jeder Ring dort
+  // zusätzlich eine Lücke von 2s — das ist der "Torkanal", der schon einmal
+  // gemessen wurde (Kreuzungen 57 -> 103).
+  // Ebenfalls gemessen und verworfen: ein zusätzliches resampleArc auf dem
+  // zusammengesetzten Pfad. medianRadius 3 -> 5, aber covFails 322 -> 333.
   const seamCut=r=>{
     let bi=0,bt=0,bd=Infinity;
     for(let i=0;i<r.length;i++){
@@ -845,15 +863,15 @@ function doubleSpiralField(poly,insOf,s,gate){
       const ex=A.x+t*dx-gx, ey=A.y+t*dy-seamY, d=ex*ex+ey*ey;
       if(d<bd){bd=d;bi=i;bt=t;}
     }
+    // Offene Kette ab dem Fußpunkt einmal herum. Wie bisher OHNE Doppelpunkt am
+    // Ende: ein Pfad, der exakt auf seinem Startpunkt endet, macht am Übergang
+    // zum nächsten Ring eine 180°-Kehre auf der Stelle.
     const A=r[bi], B=r[(bi+1)%r.length];
     const P={x:A.x+(B.x-A.x)*bt, y:A.y+(B.y-A.y)*bt};
-    // Offene Kette ab P einmal herum. Wie bisher OHNE Doppelpunkt am Ende:
-    // ein Pfad, der exakt auf seinem Startpunkt endet, macht am Übergang zum
-    // nächsten Ring eine 180°-Kehre auf der Stelle.
     const rest=[...r.slice(bi+1),...r.slice(0,bi+1)];
-    // Fällt P mit einem Nachbar-Eckpunkt zusammen (bt an 0 oder 1), entsteht
-    // sonst ein Segment der Länge ~0 — fillet begrenzt den Bogenradius auf
-    // 0,5·kürzestes Nachbarsegment und macht daraus einen radiuslosen Knick.
+    // Fällt P mit einem Nachbar-Eckpunkt zusammen, entsteht sonst ein Segment
+    // der Länge ~0 — fillet macht daraus über dieselbe Formel einen radiuslosen
+    // Knick.
     const eps=1e-6;
     if(rest.length&&len(sub(rest[rest.length-1],P))<eps) rest.pop();
     if(rest.length&&len(sub(rest[0],P))<eps) rest.shift();
@@ -905,10 +923,22 @@ function doubleSpiralField(poly,insOf,s,gate){
   // unverändert 5347 mm). Grund: Abtragen verschiebt den Ringanfang ENTLANG
   // des konzentrischen Rings, nicht radial von ihm weg — der Abstand zum
   // Vorlauf-Ende wächst dabei kaum, sodass am Ende meist doch der ganze Ring
-  // aufgebraucht wird. Die große Lücke (gapMax 1508 mm bei den Projekt-
-  // Defaults, das 15-Fache von s) stammt also NICHT allein aus dieser Stelle.
-  // Der Literaturbefund bleibt gültig, aber die Kehre muss aus der Raummitte
-  // verschwinden (Spine statt Punktzentrum) — Kürzen allein reicht nicht.
+  // aufgebraucht wird.
+  //
+  // KORREKTUR einer früheren Diagnose an dieser Stelle: hier stand, die Kehre
+  // müsse "aus der Raummitte verschwinden (Spine statt Punktzentrum)". Das ist
+  // durch Messung widerlegt. Eine Abstandskarte der Standardkonfiguration zeigt
+  // die Raummitte durchgehend unter 60 mm zum nächsten Rohr — dort ist nichts
+  // zu holen. Die damalige Restlücke von 1615 mm lag in der KONVEXEN ECKE des L
+  // bei (5375,3175), und ihre Ursache war das Kraftmodell: mit relax:false fiel
+  // gapMax derselben Konfiguration auf 470 mm und über 500 Läufe von 6750 auf
+  // 2770 mm, ohne jede Änderung am Füllmuster.
+  //
+  // Was vom Literaturbefund bleibt: Radius und Deckung sind an DIESER Stelle
+  // gekoppelt, und die eigentliche Radius-Grenze ist die 180°-Kehre selbst
+  // (siehe fillet-Hinweis unten). Der 2R-Abstand ist eine Notbremse, keine
+  // Konstruktion — solange er über weggelassene Ringfläche bezahlt wird, bleibt
+  // radFails im Bench bei 100 %.
   const R2=2*S.bendRadius;
   const gapOK=()=>pts.length<2||!back.length||!back[0]||!back[0].length||
                   len(sub(pts[pts.length-1],back[0][0]))>=R2;
