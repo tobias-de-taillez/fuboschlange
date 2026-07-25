@@ -141,9 +141,25 @@ function leverage(gs){
   return h;
 }
 
+// P0.x, P0.y und eine Koordinate von P1 = genau die 3 Starrfreiheitsgrade.
+// Welche Koordinate von P1: eine Drehung um P0 aendert P1.y mit der Rate
+// (P1.x - P0.x). Liegt P1 senkrecht ueber P0, fixiert P1.y die Drehung gar
+// nicht und das System bliebe singulaer.
+function gaugeFixed(pts){
+  if(pts.length<2) return [];
+  const dx=Math.abs(pts[1].x-pts[0].x), dy=Math.abs(pts[1].y-pts[0].y);
+  return [0, 1, dx>=dy ? 3 : 2];
+}
+
+function freeCols(pts){
+  const fx=new Set(gaugeFixed(pts)), out=[];
+  for(let c=0;c<2*pts.length;c++) if(!fx.has(c)) out.push(c);
+  return out;
+}
+
 globalThis.CORE={ TOL_RANK, TOL_RED, TOL_MODE, SIGMA_DEF, SUGGEST_CHECK_MAX,
                   dist, idx, activeMeas, residuals, jacobian, luSolve, matTmat, matTvec,
-                  gramSchmidt, nullSpace, leverage };
+                  gramSchmidt, nullSpace, leverage, gaugeFixed, freeCols };
 </script>
 
 <script id="checks">
@@ -241,6 +257,31 @@ globalThis.selfChecks=function(){
     chk('gramSchmidt: Nullmatrix -> Rang 0', gs.rank===0);
     chk('nullSpace: Nullmatrix -> volle Dimension', C.nullSpace(gs).length===2);
     chk('leverage: Rang 0 -> h=0', C.leverage(gs).every(x=>x===0));
+  }
+  // --- Eichung ---
+  {
+    // P1 liegt weit rechts von P0 -> P1.y (Spalte 3) pinnen
+    const waag=[{id:'A',x:0,y:0},{id:'B',x:5000,y:10},{id:'C',x:0,y:3000}];
+    chk('gauge: waagerechtes Paar pinnt P1.y',
+       JSON.stringify(C.gaugeFixed(waag))===JSON.stringify([0,1,3]));
+    // P1 liegt senkrecht ueber P0 -> P1.y taugt nicht, P1.x (Spalte 2) pinnen
+    const senk=[{id:'A',x:0,y:0},{id:'B',x:0,y:5000},{id:'C',x:3000,y:0}];
+    chk('gauge: senkrechtes Paar pinnt P1.x',
+       JSON.stringify(C.gaugeFixed(senk))===JSON.stringify([0,1,2]));
+    chk('freeCols: 2n-3 freie Spalten', C.freeCols(waag).length===2*3-3);
+    chk('freeCols: enthaelt keine gepinnte Spalte',
+       C.freeCols(waag).every(c=>![0,1,3].includes(c)));
+    chk('gauge: unter 2 Punkten nichts zu pinnen', C.gaugeFixed([{id:'A',x:0,y:0}]).length===0);
+  }
+  {
+    // Die entscheidende Eigenschaft: keine Starrbewegung ueberlebt das Pinnen.
+    // Waere sie noch da, saehe jedes Netz beweglich aus.
+    const pts=[{id:'A',x:0,y:0},{id:'B',x:0,y:5000},{id:'C',x:3000,y:0}];
+    const fx=C.gaugeFixed(pts);
+    const tx=[],ty=[],rot=[];
+    pts.forEach(p=>{ tx.push(1,0); ty.push(0,1); rot.push(-p.y,p.x); });
+    chk('gauge: jede Starrbewegung bewegt mindestens eine gepinnte Koordinate',
+       [tx,ty,rot].every(t=>fx.some(c=>Math.abs(t[c])>1e-9)));
   }
   return {ok, out};
 };
