@@ -387,6 +387,24 @@ function segInPoly(p, q, poly, steps=32){
 
 const pairKey=(a,b)=>[a,b].sort().join('|');
 
+// Messbarkeit eines Punktpaars fuer die Vorschlagsliste. Eine Wand ist per
+// Definition messbar - man steht in einer Ecke und misst geradeaus zur
+// naechsten. segInPoly darf dafuer gar nicht erst gefragt werden: die Wand
+// LIEGT auf dem Polygonrand, und genau dort ist pointInPolys Paritaetstest
+// undefiniert - Abtastpunkte auf dem Rand fallen je nach Rundung zufaellig
+// rein oder raus (siehe Kommentar an segInPoly; am Test-L etwa segInPoly(A,B)
+// true, segInPoly(B,C) false, obwohl beides Waende sind). Fuer echte
+// Diagonalen bleibt segInPoly die richtige, einzige Pruefung - dort
+// funktioniert sie, und genau dort muss z.B. die Diagonale C-F im Test-L
+// weiterhin ausgeschlossen bleiben, weil sie den einspringenden Bereich quert.
+function pairMeasurable(pts, walls, poly, a, b){
+  const k=pairKey(a,b);
+  if(walls.some(([x,y])=>pairKey(x,y)===k)) return true;
+  if(!poly) return true;
+  const I=idx(pts);
+  return segInPoly(pts[I[a]], pts[I[b]], poly);
+}
+
 // Zwei Phasen in einem Durchlauf. Solange Messungen fehlen: die Messung
 // waehlen, deren Rigiditaetszeile am staerksten in die noch freien Richtungen
 // zeigt. Danach: die Messung waehlen, die die meisten bisher unpruefbaren
@@ -399,7 +417,7 @@ function suggest(pts, walls, meas){
   const cand=[];
   for(let i=0;i<pts.length;i++) for(let j=i+1;j<pts.length;j++){
     if(have.has(pairKey(pts[i].id,pts[j].id))) continue;
-    if(poly && !segInPoly(pts[i],pts[j],poly)) continue;
+    if(!pairMeasurable(pts, walls, poly, pts[i].id, pts[j].id)) continue;
     cand.push({a:pts[i].id, b:pts[j].id});
   }
   const virt=c=>({a:c.a, b:c.b, d:dist(pts[I[c.a]],pts[I[c.b]]), sigma:SIGMA_DEF});
@@ -443,7 +461,8 @@ function suggest(pts, walls, meas){
 globalThis.CORE={ TOL_RANK, TOL_RED, TOL_MODE, SIGMA_DEF, SUGGEST_CHECK_MAX,
                   dist, idx, activeMeas, residuals, jacobian, luSolve, matTmat, matTvec,
                   gramSchmidt, nullSpace, leverage, gaugeFixed, freeCols, scaleSketch, solve, analyze,
-                  trivialModes, covariance, ellipse, wallPolygon, pointInPoly, segInPoly, suggest };
+                  trivialModes, covariance, ellipse, wallPolygon, pointInPoly, segInPoly,
+                  pairMeasurable, suggest };
 </script>
 
 <script id="ui">
@@ -1204,6 +1223,27 @@ globalThis.selfChecks=function(){
        C.wallPolygon(L,[['A','B'],['B','C'],['C','D']])===null);
     chk('wallPolygon: Knotengrad ungleich 2 -> null',
        C.wallPolygon(L,walls.concat([['A','D']]))===null);
+  }
+  // --- pairMeasurable: Waende sind immer messbar, echte Diagonalen bleiben
+  // gefiltert (Review-Finding 3). segInPoly ist fuer Kanten, die auf dem
+  // Polygonrand LIEGEN, undefiniert: von den 6 Waenden des Test-L liefert
+  // segInPoly nur fuer A-B und F-A "messbar", fuer die anderen vier
+  // faelschlich "nicht messbar" (geprueft unten) - pairMeasurable darf sich
+  // fuer Waende darauf nicht verlassen, muss aber fuer echte Diagonalen wie
+  // C-F weiterhin genau das leisten, was segInPoly dort richtig beantwortet.
+  {
+    const L=[{id:'A',x:0,y:0},{id:'B',x:8000,y:0},{id:'C',x:8000,y:2000},
+             {id:'D',x:3000,y:2000},{id:'E',x:3000,y:5000},{id:'F',x:0,y:5000}];
+    const walls=[['A','B'],['B','C'],['C','D'],['D','E'],['E','F'],['F','A']];
+    const poly=C.wallPolygon(L,walls);
+    chk('pairMeasurable: segInPoly ist auf Waenden roh unzuverlaessig (Beleg fuer die Notwendigkeit des Fixes)',
+       poly && C.segInPoly(L[0],L[1],poly)===true && C.segInPoly(L[1],L[2],poly)===false);
+    walls.forEach(([a,b])=>chk(`pairMeasurable: Wand ${a}-${b} ist messbar`,
+       poly && C.pairMeasurable(L,walls,poly,a,b)));
+    chk('pairMeasurable: C-F verlaesst den Raum -> weiterhin nicht messbar',
+       poly && !C.pairMeasurable(L,walls,poly,'C','F'));
+    chk('pairMeasurable: A-E bleibt messbar (Kontrolle: gueltige Diagonale)',
+       poly && C.pairMeasurable(L,walls,poly,'A','E'));
   }
   // --- suggest ---
   {
