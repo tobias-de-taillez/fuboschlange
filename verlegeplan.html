@@ -451,6 +451,30 @@ const manifoldBarW=nPorts=>Math.max(0,nPorts-1)*MANIFOLD_PITCH;
 //   voller Korridor   crossFails 19  covFails 10  medianCross 5
 //   je Zone reduziert crossFails 20  covFails 10  medianCross 3
 // Damit die Idee traegt, muesste die Spurvergabe pro Zone statt global sein.
+//
+// RUNDE 7, ebenfalls verworfen: den Korridor ueber den SPURABSTAND verschmaelern
+// (LANE ist 0,9*R, eine 45-Grad-Ablenkung braucht laut Kommentar bei laneY nur
+// 0,41*R) und laneCount exakt statt mit Reserve. Vier Varianten, 20 Laeufe:
+//   jetzt                crossFails 19  covFails 10  radFails 19  medCov 40 %
+//   LANE 0,5*R           crossFails 20  covFails 10  radFails 19  medCov 41 %
+//   LANE 0,41*R+Dia      crossFails 20  covFails 10  radFails 19  medCov 41 %
+//   laneCount exakt      crossFails 20  covFails 10  radFails 18  medCov 40 %
+//   beides               crossFails 20  covFails 10  radFails 20  medCov 40 %
+// Jede Verschmaelerung kostet GENAU EINEN crossFail und verbessert dabei
+// medianCross von 5 auf 3 und die Deckung. Interval-Faerbung der Spuren bringt
+// uebrigens nichts: alle Spannen beginnen am Verteiler und ueberlappen dort.
+//
+// Der Blocker ist EIN Lauf, und er ist identifiziert: 4100x1700, Notch
+// 2450x300, 2 Kreise, keine Fensterwaende, Verteiler links bei y=473. Mit dem
+// schmaleren Korridor faellt fieldInset von 418 auf 325, das Feld rueckt also
+// 93 mm naeher an die Verteilerwand, und die Zuleitung quert dort den
+// END-ABSCHNITT des aeussersten Rings bei (310,481) - Deckung steigt dabei von
+// 32 auf 36 %.
+//
+// Das ist DIESELBE Ursache wie die Traverse beim Biegeradius: seamCut laesst die
+// offene Kette eine ganze Ringseite vor der Naht enden, an der Naht liegt also
+// gar keine Luecke, durch die eine Zuleitung aufsteigen koennte. Zwei der drei
+// verbliebenen Gates haengen damit an derselben Stelle.
 const corridorW=()=>laneCount()*LANE()*0.6+LANE()/2;
 // lane -1 = Übergangskanal für Rechteck->Rechteck-Verbinder. Liegt ZWISCHEN
 // Randzone und Korridor: unterhalb der Randzone würde jeder Verbinder die
