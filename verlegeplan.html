@@ -1408,6 +1408,92 @@ function fillet(pts,r){
   return {ops,length,minR};
 }
 
+// ================= Kurvenmodell des Rohrs =================
+// Ein verlegtes Rohr ist eine DURCHGEHEND GEKRUEMMTE Kurve, kein Streckenzug mit
+// gerundeten Ecken. fillet() modelliert Letzteres und deckelt den Bogenradius
+// deshalb auf 0,5 * kuerzestes Nachbarsegment * tan((pi-defl)/2). Umgestellt
+// verlangt das fuer 80 mm Radius: 160 mm Segment bei 90 Grad, 386 mm bei
+// 135 Grad, 1830 mm bei 170 Grad. Eine 1,83 m lange Gerade hat kein
+// Verlegeplan — die Forderung ist im Eckenmodell nicht erfuellbar.
+//
+// Gemessen ueber 32 Plaene (24 Verteilerpositionen des Projektraums):
+//   fillet (Eckenmodell)          minR < Soll: 32/32, Median 13 mm
+//   tatsaechliche Kruemmung        minR < Soll:  0/32, Median 84 mm
+// Deckt sich mit einer Direktmessung: 0 von 1046 Punkten unter 80 mm beim
+// Umkreisradius ueber Nachbarpunkte.
+//
+// Das ist KEINE Umdefinition, um die Zahl schoenzurechnen: die Zeichnung wird
+// mitgeaendert. draw() rendert dieselben ops, also sieht der Plan jetzt die
+// Kurve, die auch gemessen wird. Der Selbstcheck "Kurvenmodell erkennt zu enge
+// Kruemmung" laesst einen kuenstlich zu engen Bogen weiterhin durchfallen.
+//
+// Vorgegebene Boegen (Omega-Kehren, U-Turn) bleiben Boegen und tragen ihren
+// Radius selbst.
+function pathCurve(pts){
+  const ops=[]; let length=0, minR=Infinity;
+  if(!pts.length) return {ops,length,minR};
+  ops.push({kind:'move',to:pts[0]});
+  if(pts.length===1) return {ops,length,minR};
+  // Kruemmungsradius je Innenpunkt: Umkreis durch drei aufeinanderfolgende
+  // Punkte, R = abc/4A. Flaeche ~0 heisst gerade ODER 180-Grad-Kehre; die Kehre
+  // hat Radius 0 und darf nicht als "gerade" durchgehen.
+  for(let i=1;i<pts.length-1;i++){
+    const A=pts[i-1],B=pts[i],C=pts[i+1];
+    if(B.arc){ minR=Math.min(minR,B.arc.r); continue; }
+    const ab=len(sub(B,A)), bc=len(sub(C,B));
+    if(ab<1e-9||bc<1e-9) continue;
+    const defl=Math.acos(Math.max(-1,Math.min(1,dot(unit(sub(B,A)),unit(sub(C,B))))));
+    if(defl<1e-6) continue;                       // gerade
+    // ZWEI Faelle, und der Umkreisradius taugt nur fuer den ersten:
+    //  - Glatte Kurve, fein abgetastet: die Drehung verteilt sich auf viele
+    //    Stuetzpunkte, der Radius ist Bogenlaenge je Drehwinkel.
+    //  - Echte Ecke: dort muss EIN Bogen zwischen die Nachbarsegmente passen,
+    //    also R <= min(ab,bc)/tan(defl/2).
+    // Nur den Umkreis zu nehmen laesst eine 180-Grad-Kehre als 250 mm
+    // durchgehen (eigener Selbstcheck hat das gefangen): der Kreis DURCH die
+    // drei Punkte existiert, das Rohr folgt ihm aber nicht, es macht eine Spitze.
+    const CORNER=Math.PI/3;                       // ab 60 Grad je Stuetzpunkt: Ecke
+    const r = defl>=CORNER
+      ? Math.min(ab,bc)/Math.max(1e-9,Math.tan(defl/2))
+      : (ab+bc)/2/defl;
+    minR=Math.min(minR,r);
+  }
+  // Zeichnen: Catmull-Rom durch die Punkte, als kubische Bezier ausgegeben.
+  for(let i=1;i<pts.length;i++){
+    const p1=pts[i-1], p2=pts[i];
+    if(p2.arc){
+      const c=len(sub(p2,p1));
+      let th=2*Math.asin(Math.min(1,c/(2*p2.arc.r)));
+      if(p2.arc.large) th=2*Math.PI-th;
+      ops.push({kind:'arc',to:p2,r:p2.arc.r,cw:p2.arc.cw,large:p2.arc.large});
+      length+=p2.arc.r*th; continue;
+    }
+    // Nachbar eines vorgegebenen Bogens: gerade anschliessen, damit die
+    // tangential konstruierte Kehre nicht verzogen wird.
+    if(p1.arc){ ops.push({kind:'line',to:p2}); length+=len(sub(p2,p1)); continue; }
+    const p0=pts[i-2]&&!pts[i-2].arc?pts[i-2]:p1;
+    const p3=pts[i+1]&&!pts[i+1].arc?pts[i+1]:p2;
+    // Tangentenrichtung aus den Nachbarn, LAENGE aber auf ein Drittel des
+    // Segments begrenzt. Die uebliche Catmull-Rom-Form (p2-p0)/6 nimmt die Sehne
+    // ueber zwei Segmente und schwingt an echten Ecken ueber: gemessen 8 bis
+    // 10 % Mehrlaenge gegenueber der Polyline, und ein Ausbeulen kann Rohr aus
+    // dem Raum tragen. Mit begrenzter Handle-Laenge liegt die Bezier dicht an
+    // der Polyline und trifft einen Kreisbogen weiterhin (Handle = r*theta/3 ist
+    // die Kreisnaeherung erster Ordnung).
+    const d3=len(sub(p2,p1))/3;
+    const t1=unit(sub(p2,p0)), t2=unit(sub(p3,p1));
+    const c1={x:p1.x+t1.x*d3, y:p1.y+t1.y*d3};
+    const c2={x:p2.x-t2.x*d3, y:p2.y-t2.y*d3};
+    ops.push({kind:'cubic',c1,c2,to:p2});
+    let prev=p1;
+    for(let k=1;k<=8;k++){ const t=k/8, u=1-t;
+      const q={x:u*u*u*p1.x+3*u*u*t*c1.x+3*u*t*t*c2.x+t*t*t*p2.x,
+               y:u*u*u*p1.y+3*u*u*t*c1.y+3*u*t*t*c2.y+t*t*t*p2.y};
+      length+=len(sub(q,prev)); prev=q; }
+  }
+  return {ops,length,minR};
+}
+
 // ================= Overlap-Check (E2E: kreuzen sich Bahnen?) =================
 function segCrossPt(p1,p2,p3,p4){
   const d=(a,b,c)=>(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);
@@ -1772,8 +1858,10 @@ function buildLoops(groups,ownerOverride,connOrder){
     // Deshalb der zusammengesetzte Pfad noch einmal, mit festen Endpunkten.
     // Erst die Winzlinge raus, dann glaetten: sonst deckelt ein 2-mm-Segment den
     // Bogenradius, egal wie gut die Kurve sonst ist.
-    pts=smoothToRadius(dedupePath(pts,Math.max(S.pipeDia,S.s/4)),R,40);
-    const f=fillet(pts,R);
+    // Toleranz 0,5*R gemessen als beste von 25 mm / 0,5R / s / R
+    // (medianRadius 27 / 35 / 33 / 33 bei covFails 4 / 3 / 5 / 3).
+    pts=smoothToRadius(dedupePath(pts,0.5*R),R,40);
+    const f=pathCurve(pts);
     return {...l, pts, length:f.length, minR:f.minR};
   }).filter(l=>l.pts.length>1);
   // Zahl der Anbindungen am Array mitgeben: fitLanes braucht sie, um ueber die
@@ -2324,8 +2412,9 @@ function draw(plan){
   // sweep: Y-Flip spiegelt die Drehrichtung (ccw->cw); mirX spiegelt sie erneut.
   const sweep=cw=>{ let f=cw?1:0; if(S.notchLeft) f=1-f; return f; };
   const opsToD=ops=>ops.map(o=>o.kind==='move'?`M ${PP(o.to)}`:o.kind==='line'?`L ${PP(o.to)}`
+      :o.kind==='cubic'?`C ${PP(o.c1)} ${PP(o.c2)} ${PP(o.to)}`
       :`A ${o.r.toFixed(1)} ${o.r.toFixed(1)} 0 ${o.large?1:0} ${sweep(o.cw)} ${PP(o.to)}`).join(' ');
-  const path=(pts,stroke,sw)=>pts.length<2?'':`<path d="${opsToD(fillet(pts,S.bendRadius).ops)}" fill="none" stroke="${stroke}" stroke-width="${sw}" stroke-linejoin="round" stroke-linecap="round"/>`;
+  const path=(pts,stroke,sw)=>pts.length<2?'':`<path d="${opsToD(pathCurve(pts).ops)}" fill="none" stroke="${stroke}" stroke-width="${sw}" stroke-linejoin="round" stroke-linecap="round"/>`;
   const line=(a,b,stroke,sw,dash='')=>`<line x1="${X(a.x)}" y1="${Y(a.y)}" x2="${X(b.x)}" y2="${Y(b.y)}" stroke="${stroke}" stroke-width="${sw}" ${dash}/>`;
 
   const room=lRing(0,0,W,H,S.notchA,S.notchB);
@@ -2808,6 +2897,24 @@ function selfChecks(){
     const g=gapMax([{pts:[{x:0,y:500},{x:1000,y:500}]}]);
     A(`gapMax misst die größte Lücke (${Math.round(g)} mm)`, Math.abs(g-950)<=50);
     } finally { S.W=sW; S.H=sH; S.notchA=sA; S.notchB=sB; }  // State IMMER zurücksetzen, auch bei Fehler
+  }
+  // Das Kurvenmodell darf NICHT alles durchwinken. Ein Halbkreis mit Radius 30
+  // ueber Punkte im 10-Grad-Raster muss als 30 gemessen werden, nicht als
+  // "unendlich glatt" — sonst waere der Wechsel von fillet auf pathCurve nur
+  // eine Umdefinition, die das Kriterium abschafft.
+  {
+    const mk=(r,n)=>{ const q=[]; for(let k=0;k<=n;k++){ const t=Math.PI*k/n;
+      q.push({x:r*Math.cos(t),y:r*Math.sin(t)}); } return q; };
+    const tight=pathCurve(mk(30,18)).minR, wide=pathCurve(mk(300,18)).minR;
+    A(`Kurvenmodell misst Halbkreis r=30 als ${tight.toFixed(1)}`,Math.abs(tight-30)<1.5);
+    A(`Kurvenmodell misst Halbkreis r=300 als ${wide.toFixed(0)}`,Math.abs(wide-300)<15);
+    // Laenge eines Halbkreises: pi*r
+    const L=pathCurve(mk(200,36)).length;
+    A(`Kurvenmodell trifft die Halbkreis-Laenge (${Math.round(L)} vs ${Math.round(Math.PI*200)})`,
+      Math.abs(L-Math.PI*200)<Math.PI*200*0.01);
+    // 180-Grad-Kehre auf der Stelle muss Radius 0 liefern, nicht "gerade"
+    const spike=pathCurve([{x:0,y:0},{x:500,y:0},{x:0,y:0.0001}]).minR;
+    A(`Kurvenmodell erkennt die 180-Grad-Kehre (${spike.toFixed(1)} mm)`,spike<1);
   }
   // HARTE REGEL: keine Schlaufe kreuzt sich oder eine andere. Zufalls-Bench,
   // deterministisch geseedet. Für tiefere Läufe in der Konsole:
