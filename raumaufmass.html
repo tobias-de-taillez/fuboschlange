@@ -563,6 +563,45 @@ function deserialize(o){
   M.sel=[]; M.drag=null; M.fit=null; M.an=null;
 }
 
+// Formvalidierung fuer alles, was deserialize() bekommt - VOLLSTAENDIG und
+// VOR jeder Zustandsaenderung. deserialize() ersetzt M.pts/M.walls/M.meas
+// nacheinander und wirft mittendrin (z.B. beim Spreaden einer Wand, die kein
+// Array ist), wenn die Form nur oberflaechlich (Array.isArray) geprueft
+// wurde - der Zustand waere dann halb ersetzt, ohne dass irgendwo eine
+// Meldung erscheint. Gibt die erste gefundene Unstimmigkeit als Text
+// zurueck, sonst null. Eine Funktion, damit imp und ein kuenftiger Aufrufer
+// (z.B. clr) dieselbe Pruefung teilen koennen, statt sie mehrfach leicht
+// verschieden zu implementieren.
+function importProblem(o){
+  if(!o || typeof o!=='object') return 'Datenstruktur fehlt.';
+  if(!Array.isArray(o.pts)) return 'pts fehlt oder ist keine Liste.';
+  if(!Array.isArray(o.walls)) return 'walls fehlt oder ist keine Liste.';
+  if(!Array.isArray(o.meas)) return 'meas fehlt oder ist keine Liste.';
+  const ids=new Set();
+  for(const p of o.pts){
+    if(!p || typeof p!=='object') return 'pts enthält einen Eintrag ohne Objektform.';
+    if(typeof p.id!=='string' || !p.id) return 'pts enthält einen Punkt ohne gültige id.';
+    if(!Number.isFinite(p.x) || !Number.isFinite(p.y))
+      return `Punkt ${p.id}: x/y müssen endliche Zahlen sein.`;
+    if(ids.has(p.id)) return `Punkt-ID ${p.id} kommt mehrfach vor.`;
+    ids.add(p.id);
+  }
+  for(const w of o.walls){
+    if(!Array.isArray(w) || w.length!==2 || typeof w[0]!=='string' || typeof w[1]!=='string')
+      return 'walls enthält einen Eintrag, der nicht aus genau zwei IDs besteht.';
+    if(!ids.has(w[0]) || !ids.has(w[1]))
+      return `Wand ${w[0]}–${w[1]} verweist auf einen unbekannten Punkt.`;
+  }
+  for(const m of o.meas){
+    if(!m || typeof m!=='object') return 'meas enthält einen Eintrag ohne Objektform.';
+    if(!ids.has(m.a) || !ids.has(m.b))
+      return `Messung ${m.a}–${m.b} verweist auf einen unbekannten Punkt.`;
+    if(!Number.isFinite(m.d) || !(m.d>0))
+      return `Messung ${m.a}–${m.b}: d muss eine Zahl größer 0 sein.`;
+  }
+  return null;
+}
+
 const UNDO_MAX=60;
 const undoStack=[];
 // Vor jeder Aenderung aufrufen, nicht danach - der Stapel haelt den Zustand
@@ -587,6 +626,15 @@ function nextId(){
   let i=idSeq++, s='';
   do{ s=String.fromCharCode(65+i%26)+s; i=Math.floor(i/26)-1; }while(i>=0);
   return s;
+}
+// Umkehrung von nextId(): aus einer ID die urspruengliche laufende Nummer
+// zurueckrechnen (bijektive Basis-26, A=0). Fuer den Import gebraucht: nach
+// einer Luecke (ein Punkt wurde vor dem Export geloescht) ist o.pts.length
+// keine verlaessliche Naeherung fuer idSeq mehr - siehe imp-Handler.
+function idOrdinal(id){
+  let n=0;
+  for(const ch of String(id)) n=n*26+(ch.charCodeAt(0)-64);
+  return n-1;
 }
 
 // --- Weltkoordinaten (mm) <-> Bildschirm
@@ -979,6 +1027,7 @@ document.getElementById('exp').onclick=async()=>{
     pts:P.map(p=>({id:p.id, x:Math.round(p.x), y:Math.round(p.y)})),
     walls:M.walls,
     meas:M.meas,
+    idSeq,   // sonst muss ein Reimport ihn aus den IDs zurückrechnen (siehe imp)
     sigmaHat:M.an?M.an.sigmaHat:null,
   }, null, 2);
   try{ await navigator.clipboard.writeText(json); alert('JSON kopiert.'); }
@@ -988,13 +1037,23 @@ document.getElementById('imp').onclick=()=>{
   const s=prompt('JSON aus einem Export hier einfügen:');
   if(!s) return;
   let o; try{ o=JSON.parse(s); }catch{ alert('Das ist kein gültiges JSON.'); return; }
-  if(!o || !Array.isArray(o.pts) || !Array.isArray(o.walls) || !Array.isArray(o.meas)){
-    alert('JSON hat nicht die erwartete Form (pts, walls, meas).'); return;
-  }
+  const problem=importProblem(o);
+  if(problem){ alert('JSON hat nicht die erwartete Form: '+problem); return; }
+  // Vor deserialize() sichern: deserialize() uebernimmt o.idSeq, sobald es
+  // eine Zahl ist - auch wenn die kleiner ist als der hiesige Stand.
+  const localIdSeq=idSeq;
   snapshot();
   deserialize(o);
-  // Ohne das vergibt die Skizze IDs, die im Import schon vorkommen.
-  idSeq=Math.max(idSeq, o.pts.length);
+  // o.pts.length unterschaetzt idSeq, sobald der Export eine Luecke hat (ein
+  // Punkt wurde vor dem Export geloescht). o.idSeq ist exakt, wenn vorhanden;
+  // sonst aus den IDs zurueckrechnen (idOrdinal, Umkehrung von nextId).
+  // Maximum mit dem VOR dem Import gueltigen lokalen Zaehler: Ein Import in
+  // eine schon gefuellte Skizze darf idSeq nie verkleinern, sonst vergibt die
+  // naechste neue ID wieder eine, die es schon gibt.
+  const derivedIdSeq = typeof o.idSeq==='number'
+    ? o.idSeq
+    : o.pts.reduce((mx,p)=>Math.max(mx, idOrdinal(p.id)+1), 0);
+  idSeq=Math.max(localIdSeq, derivedIdSeq);
   recompute();
 };
 document.getElementById('clr').onclick=()=>{
