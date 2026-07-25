@@ -1587,10 +1587,18 @@ function omegaTurn(Pe,Ps,u,R){
   const P1=at(R*sinT, R*(cosT-1));
   const P2=at(R*sinT, R*(cosT-1)+2*R*cosT);
   const P3=at(0,      R*(4*cosT-2));              // = Ps, per Konstruktion
+  // MITTELPUNKTE mitfuehren. Ohne sie tastet drawnPoints konstruierte Boegen nur
+  // als SEHNE ab (steht dort als bewusste Grenze im Kommentar) — dann sind
+  // Kreuzungs-, Ausserhalb- und Radiuspruefung an genau den Stellen blind, an
+  // denen diese Kehre 201 mm ausschwingt. Alle drei liegen R vom jeweiligen
+  // Bogenanfang entfernt, nachgerechnet |Pi - Ci| = R.
+  const C1=at(0,          -R);
+  const C2=at(2*R*sinT,    R*(2*cosT-1));
+  const C3=at(0,           R*(4*cosT-1));
   return [
-    {...P1, arc:{r:R,cw:!cw,large:false}},
-    {...P2, arc:{r:R,cw:cw, large:true}},         // 180+2*theta > 180 -> grosser Bogen
-    {...P3, arc:{r:R,cw:!cw,large:false}},
+    {...P1, arc:{r:R,cw:!cw,large:false,c:C1}},
+    {...P2, arc:{r:R,cw:cw, large:true, c:C2}},   // 180+2*theta > 180 -> grosser Bogen
+    {...P3, arc:{r:R,cw:!cw,large:false,c:C3}},
   ];
 }
 // Wie weit die Kehre LAENGS ueber das Bahnende hinausschwingt. Der Mittelpunkt
@@ -1833,7 +1841,7 @@ function pathCurve(pts,clampRoom){
       const c=len(sub(p2,p1));
       let th=2*Math.asin(Math.min(1,c/(2*p2.arc.r)));
       if(p2.arc.large) th=2*Math.PI-th;
-      ops.push({kind:'arc',to:p2,r:p2.arc.r,cw:p2.arc.cw,large:p2.arc.large});
+      ops.push({kind:'arc',to:p2,r:p2.arc.r,cw:p2.arc.cw,large:p2.arc.large,c:p2.arc.c});
       length+=p2.arc.r*th; continue;
     }
     // Nachbar eines vorgegebenen Bogens: gerade anschliessen, damit die
@@ -3822,23 +3830,40 @@ function resampleArc(pts,stepLen,keepDeflDeg){
     if(len(sub(q,p))<1e-9||len(sub(r,q))<1e-9) return false;
     return dot(unit(sub(q,p)),unit(sub(r,q)))<KEEP;
   };
+  // REST-SEGMENT VOR EINEM ANKER. Ein Lauf mit festem Schritt endet dort, wo der
+  // Schritt gerade hinreicht — das letzte Stueck vor einer erhaltenen Ecke ist
+  // also der Rest und gleichverteilt in [0, stepLen). pathCurve deckelt den
+  // Eckenradius auf min(ab,bc)/tan(defl/2), ein 44-mm-Rest macht die Ecke damit
+  // unbaubar, voellig unabhaengig vom Winkel. Gemessen ueber die
+  // Bench-Konfigurationen ist genau das die Signatur der engsten Stelle: die
+  // kurze Seite 41 bis 95 mm, die lange exakt 5*R.
+  // Deshalb je Lauf zwischen zwei ANKERN (Anfang, Ende, erhaltene Ecke,
+  // vorgegebener Bogen) ein Schritt, der die Laufstrecke GENAU teilt. Die Punkte
+  // liegen weiterhin auf der alten Bahn, der Schritt weicht hoechstens um den
+  // Faktor n/(n+-0,5) vom Sollwert ab, und es bleibt kein Rest.
+  const anchor=i=>i===0||i===pts.length-1||!!pts[i].arc||sharp(i);
   const out=[{x:pts[0].x,y:pts[0].y}];
-  let carry=0;
+  let i0=0;
   for(let i=1;i<pts.length;i++){
-    const a=pts[i-1], b=pts[i];
-    if(b.arc){ out.push(b); carry=0; continue; }      // vorgegebene Bögen erhalten
-    if(sharp(i)){ out.push({x:b.x,y:b.y}); carry=0; continue; }
-    let segLen=len(sub(b,a));
-    if(segLen<1e-9) continue;
-    let t=(stepLen-carry)/segLen;
-    while(t<=1){
-      out.push({x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t});
-      t+=stepLen/segLen;
+    if(!anchor(i)) continue;
+    let L=0;
+    for(let j=i0+1;j<=i;j++) L+=len(sub(pts[j],pts[j-1]));
+    const n=Math.max(1,Math.round(L/stepLen)), st=L/n;
+    let acc=0, k=1;
+    for(let j=i0+1;j<=i&&k<n;j++){
+      const a=pts[j-1], b=pts[j], sl=len(sub(b,a));
+      if(sl<1e-9) continue;
+      while(k<n&&acc+sl>=k*st){
+        const t=(k*st-acc)/sl;
+        out.push({x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t});
+        k++;
+      }
+      acc+=sl;
     }
-    carry=(carry+segLen)%stepLen;
+    const B=pts[i];
+    out.push(B.arc?B:{x:B.x,y:B.y});   // vorgegebene Bögen unveraendert erhalten
+    i0=i;
   }
-  const last=pts[pts.length-1];
-  if(len(sub(out[out.length-1],last))>1e-6) out.push({x:last.x,y:last.y});
   return out;
 }
 
@@ -4035,8 +4060,22 @@ function drawnPoints(pts,per){
     // Feldinneren; ein Ausbruch aus dem Raum ist dort nicht zu erwarten. Sauber
     // waere, den Mittelpunkt bei der Konstruktion mitzufuehren.
     const a=cur, b=o.to;
-    for(let k=0;k<=8;k++){ const t=k/8;
-      out.push({x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t}); }
+    if(o.c){
+      // Mittelpunkt bekannt: den echten Bogen abtasten statt der Sehne. Die
+      // Schrittweite folgt der Pfeilhoehe — 24 Schritte je Halbkreis reichen,
+      // damit die Sehne der Abtastung unter 1 mm von der Kurve abweicht.
+      const a0=Math.atan2(a.y-o.c.y,a.x-o.c.x), a1=Math.atan2(b.y-o.c.y,b.x-o.c.x);
+      let d=a1-a0;
+      while(d<=-Math.PI) d+=2*Math.PI;
+      while(d>  Math.PI) d-=2*Math.PI;
+      if(o.large) d = d>0 ? d-2*Math.PI : d+2*Math.PI;   // grosser Bogen: Gegenrichtung
+      const N=Math.max(4,Math.ceil(Math.abs(d)/(Math.PI/24)));
+      for(let k=1;k<=N;k++){ const th=a0+d*k/N;
+        out.push({x:o.c.x+o.r*Math.cos(th), y:o.c.y+o.r*Math.sin(th)}); }
+    }else{
+      for(let k=0;k<=8;k++){ const t=k/8;
+        out.push({x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t}); }
+    }
     cur=b;
   }
   return out;
