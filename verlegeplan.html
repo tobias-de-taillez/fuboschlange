@@ -2195,15 +2195,38 @@ function selfChecks(){
   S.loopMode=bs;S.s=bss;curLoopCount=bc;
   A(`Spiralen kreuzungsfrei (${cases} Größen, 0 Overlaps)`,xc===0&&cases>0);
   // spacingAt muss stetig sein: ein Sprung im Bahnabstand erzeugt an der
-  // Bandgrenze zusammenlaufende Isolinien und damit zu enge Radien.
+  // Bandgrenze zusammenlaufende Isolinien und damit zu enge Radien. Geprüft
+  // wird relative Stetigkeit: der größte Schritt zwischen zwei Abtastpunkten
+  // muss klein sein IM VERHÄLTNIS zum Gesamthub |S.s-S.randSpacing|, den die
+  // Rampe abbaut. Eine feste mm-Schwelle ist nicht skaleninvariant: bei
+  // randSpacing nah an s (z. B. 95 bei s=100) ist |100-95|=5 klein genug, um
+  // auch eine echte Sprungfunktion (kein Übergang, sofortiger Wechsel an der
+  // Bandgrenze) bestehen zu lassen — die alte Schwelle maxJump<=6 prüfte damit
+  // faktisch nur |S.s-S.randSpacing|<=6, nicht Stetigkeit.
   {
-    const savedW=S.windowEdges, savedRot=ROT; ROT=0; S.windowEdges=['bottom'];
+    const savedW=S.windowEdges, savedRot=ROT;
+    try{
+    ROT=0; S.windowEdges=['bottom'];
     const band=S.randPasses*S.randSpacing;
+    const ramp=Math.max(2*S.s,band);          // dieselbe Formel wie in spacingAt
+    const totalDelta=Math.abs(S.s-S.randSpacing);   // Gesamthub über die Rampe
+    // Obergrenze aus denselben Größen wie spacingAt statt einer festen Zahl:
+    // deckt die komplette Rampe (endet bei band+ramp) plus Sicherheitsspanne ab.
+    // Der alte, feste Bereich `band*2` erreichte bei Standardwerten nur 200 mm,
+    // während die Rampe erst bei ~300 mm endet — die obere Knickstelle wurde
+    // nie abgetastet.
+    const yMax=(band+ramp)*1.2;
     let maxJump=0;
-    for(let y=0;y<band*2;y+=5)
+    for(let y=0;y<yMax;y+=5)
       maxJump=Math.max(maxJump,Math.abs(spacingAt(1000,y)-spacingAt(1000,y+5)));
-    S.windowEdges=savedW; ROT=savedRot;
-    A(`spacingAt stetig (max. Sprung ${Math.round(maxJump)} mm)`, maxJump<=6);
+    // Eine echte Sprungfunktion liefert maxJump==totalDelta (voller Hub in
+    // einem Abtastschritt, unabhängig von der Rasterausrichtung); die Rampe
+    // verteilt totalDelta dagegen auf ramp/5 Schritte (~2,5 % davon je Schritt
+    // bei Standardwerten). 30 % vom Gesamthub liegt sicher über dem
+    // Rampen-Schritt und sicher unter einem vollen Sprung.
+    A(`spacingAt stetig (max. Sprung ${maxJump.toFixed(2)} mm, Gesamthub ${Math.round(totalDelta)} mm)`,
+      maxJump<=totalDelta*0.3);
+    } finally { S.windowEdges=savedW; ROT=savedRot; }
   }
   // HARTE REGEL: keine Schlaufe kreuzt sich oder eine andere. Zufalls-Bench,
   // deterministisch geseedet. Für tiefere Läufe in der Konsole:
