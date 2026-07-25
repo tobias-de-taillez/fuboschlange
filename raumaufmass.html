@@ -416,11 +416,15 @@ function pairMeasurable(pts, walls, poly, a, b){
 function suggest(pts, walls, meas){
   const poly=wallPolygon(pts,walls), I=idx(pts);
   const have=new Set(activeMeas(meas).map(m=>pairKey(m.a,m.b)));
-  const cand=[];
+  const cand=[], repeats=[];
   for(let i=0;i<pts.length;i++) for(let j=i+1;j<pts.length;j++){
-    if(have.has(pairKey(pts[i].id,pts[j].id))) continue;
+    const key=pairKey(pts[i].id,pts[j].id);
     if(!pairMeasurable(pts, walls, poly, pts[i].id, pts[j].id)) continue;
-    cand.push({a:pts[i].id, b:pts[j].id});
+    const pair={a:pts[i].id, b:pts[j].id};
+    // Eine Wiederholung macht genau ihr eigenes Paar pruefbar - nachgemessen:
+    // red steigt fuer beide Zeilen auf 0.500, alle uebrigen bleiben 0. Zur
+    // Herstellung der Bestimmtheit taugt sie deshalb nie.
+    if(have.has(key)) repeats.push(pair); else cand.push(pair);
   }
   const virt=c=>({a:c.a, b:c.b, d:dist(pts[I[c.a]],pts[I[c.b]]), sigma:SIGMA_DEF});
   const out=[]; let work=activeMeas(meas).slice();
@@ -428,7 +432,7 @@ function suggest(pts, walls, meas){
   let checkPhase=0;
   for(let guard=0; guard<2*pts.length; guard++){
     const an=analyze(pts, work);
-    let best=null, bestScore=0, why='bestimmt';
+    let best=null, bestScore=0, why='bestimmt', bestRepeat=false;
     if(an.dof>0){
       for(const c of cand){
         if(taken.has(pairKey(c.a,c.b))) continue;
@@ -445,16 +449,16 @@ function suggest(pts, walls, meas){
       const unchecked=a=>a.w.filter(x=>x===null).length;
       const base=unchecked(an);
       if(base===0) break;
-      for(const c of cand){
+      for(const c of cand.concat(repeats)){
         if(taken.has(pairKey(c.a,c.b))) continue;
         const gain=base-unchecked(analyze(pts, work.concat([virt(c)])));
-        if(gain>bestScore){ bestScore=gain; best=c; }
+        if(gain>bestScore){ bestScore=gain; best=c; bestRepeat=repeats.includes(c); }
       }
       checkPhase++;
     }
     if(!best) break;
     taken.add(pairKey(best.a,best.b));
-    out.push({a:best.a, b:best.b, why});
+    out.push(bestRepeat ? {a:best.a, b:best.b, why, repeat:true} : {a:best.a, b:best.b, why});
     work=work.concat([virt(best)]);
   }
   return out;
@@ -1408,6 +1412,39 @@ globalThis.selfChecks=function(){
        s.length>0 && !s.some(x=>[x.a,x.b].sort().join('')==='CF'));
     chk('suggest: Pruefbarkeitsphase ist gedeckelt',
        s.filter(x=>x.why==='pruefbar').length<=C.SUGGEST_CHECK_MAX);
+  }
+  // --- suggest: Wiederholungen ---
+  {
+    // Dreieck, alle drei Seiten gemessen: exakt bestimmt, nichts pruefbar, und
+    // es gibt kein ungemessenes Paar mehr. Nur eine Wiederholung kann hier noch
+    // Pruefbarkeit herstellen.
+    const tri=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:1500,y:3000}];
+    const tw=[['A','B'],['B','C'],['C','A']];
+    const I=C.idx(tri);
+    const tm=tw.map(([a,b])=>({a,b,d:C.dist(tri[I[a]],tri[I[b]]),sigma:C.SIGMA_DEF}));
+    const a0=C.analyze(tri,tm);
+    chk('suggest-Fixture: Dreieck exakt bestimmt, nichts pruefbar',
+       a0.m===3 && a0.dof===0 && a0.redundancy===0 && a0.w.length===3 && a0.w.every(x=>x===null));
+    const s=C.suggest(tri,tw,tm);
+    chk('suggest: schlaegt trotz vollstaendig gemessener Paare etwas vor', s.length>0);
+    chk('suggest: und es sind Wiederholungen', s.length>0 && s.every(x=>x.repeat===true));
+    chk('suggest: Wiederholungen nur in der Pruefbarkeits-Phase',
+       s.length>0 && s.every(x=>x.why==='pruefbar'));
+    chk('suggest: die Wiederholung macht ihr Paar pruefbar', (()=>{
+      const w=s.find(x=>x.repeat); if(!w) return false;
+      const mit=tm.concat([{a:w.a,b:w.b,d:C.dist(tri[I[w.a]],tri[I[w.b]]),sigma:C.SIGMA_DEF}]);
+      return C.analyze(C.solve(tri,mit).pts,mit).w.filter(x=>x!==null).length>=2;
+    })());
+  }
+  {
+    // Gegenprobe: solange ein ungemessenes Paar existiert, gewinnt es. Eine
+    // Wiederholung darf die Bestimmtheit nie herstellen.
+    const rect=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:3000},{id:'D',x:0,y:3000}];
+    const walls=[['A','B'],['B','C'],['C','D'],['D','A']];
+    const seiten=[{a:'A',b:'B',d:4000},{a:'B',b:'C',d:3000},{a:'C',b:'D',d:4000},{a:'D',b:'A',d:3000}];
+    const best=C.suggest(rect,walls,seiten).filter(x=>x.why==='bestimmt');
+    chk('suggest: Bestimmtheit weiterhin ueber ein ungemessenes Paar',
+       best.length===1 && !best[0].repeat);
   }
   // --- dragAlongModes ---
   {
