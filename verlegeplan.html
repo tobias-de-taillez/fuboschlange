@@ -847,10 +847,32 @@ function doubleSpiralField(poly,insOf,s,gate){
   // wodurch an der Nahtstelle erst recht eine radiuslose Kehre entsteht.
   // Liegen die Enden zu eng, wird der innerste Rücklaufring weggelassen; der
   // nächste liegt 2s entfernt und trägt den Radius.
+  // KÜRZEN statt VERWERFEN. Vorher wurde der ganze innerste Rücklaufring
+  // weggelassen, bis die Enden 2R auseinander lagen — das bezahlt den
+  // Biegeradius mit der gesamten Ringfläche und ist der Grund, warum Radius
+  // und Deckung im Bench gemeinsam scheitern (gemessene Restlücke: bis zu
+  // 6946 mm bei s=100, also das ~69-Fache des Bahnabstands).
+  // Jetzt wird nur der Ringanfang an der Naht abgetragen, bis der Abstand
+  // reicht. Verlust: ein Streifen von ~2R Bogenlänge statt einer ganzen Bahn.
+  //
+  // GEMESSEN, ehrlich: der Gewinn ist marginal (Deckung 10 -> 11 %, gapMax
+  // unverändert 5347 mm). Grund: Abtragen verschiebt den Ringanfang ENTLANG
+  // des konzentrischen Rings, nicht radial von ihm weg — der Abstand zum
+  // Vorlauf-Ende wächst dabei kaum, sodass am Ende meist doch der ganze Ring
+  // aufgebraucht wird. Die große Lücke (gapMax 1508 mm bei den Projekt-
+  // Defaults, das 15-Fache von s) stammt also NICHT allein aus dieser Stelle.
+  // Der Literaturbefund bleibt gültig, aber die Kehre muss aus der Raummitte
+  // verschwinden (Spine statt Punktzentrum) — Kürzen allein reicht nicht.
   const R2=2*S.bendRadius;
-  while(pts.length>1 && back.length>1 && back[0].length &&
-        len(sub(pts[pts.length-1],back[0][0]))<R2){
-    back=back.slice(1);
+  const gapOK=()=>pts.length<2||!back.length||!back[0]||!back[0].length||
+                  len(sub(pts[pts.length-1],back[0][0]))>=R2;
+  while(!gapOK()){
+    const r=back[0];
+    if(r.length>2){
+      back=[r.slice(1),...back.slice(1)];   // ein Stück am Ringanfang abtragen
+    }else if(back.length>1){
+      back=back.slice(1);                   // Ring aufgebraucht: dann doch weg
+    }else break;                            // letzter Ring: nichts mehr zu kürzen
   }
   // ponytail: die Kehre als expliziten Halbkreis-arc zu setzen wurde probiert
   // und verschlechterte die Kreuzungen (40 -> 52), ohne den Feld-Radius zu
