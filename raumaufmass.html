@@ -725,7 +725,16 @@ document.querySelectorAll('#modes button').forEach(b=>{
     render();
   };
 });
+// Die Hotkeys 1/2/3 sind auf window gebunden, damit sie ueberall im Dokument
+// wirken - aber genau deshalb bubbelt auch ein Tastendruck im Ueberschreib-
+// Feld der Messtabelle (<input>, siehe renderPanel) bis hierher. Ohne diese
+// Sperre wechselt der Moduswechsel-Klick den Modus, renderPanel() baut die
+// Tabelle neu auf und reisst das Eingabefeld mitten in der Eingabe aus dem
+// DOM - jede Ziffer 1, 2 oder 3 im Mass wuerde das Feld zerstoeren statt sie
+// einzutragen.
 addEventListener('keydown',e=>{
+  const t=e.target;
+  if(t && (t.tagName==='INPUT' || t.tagName==='TEXTAREA' || t.isContentEditable)) return;
   const b=document.querySelector(`#modes button[data-mode="${
     {1:'point',2:'wall',3:'measure'}[e.key]}"]`);
   if(b) b.click();
