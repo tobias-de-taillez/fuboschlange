@@ -236,9 +236,67 @@ function analyze(pts, meas){
   return {rank, dof, redundancy, h, red, v, w, sigmaHat, modes, free, n, m};
 }
 
+// Die drei Starrbewegungen, Drehung um den Schwerpunkt (haelt sie unabhaengig
+// von der Lage des Netzes klein und numerisch gutartig).
+function trivialModes(pts){
+  const n=pts.length;
+  const cx=pts.reduce((s,p)=>s+p.x,0)/n, cy=pts.reduce((s,p)=>s+p.y,0)/n;
+  const t1=[],t2=[],t3=[];
+  pts.forEach(p=>{ t1.push(1,0); t2.push(0,1); t3.push(-(p.y-cy), p.x-cx); });
+  const out=[];
+  for(const v0 of [t1,t2,t3]){
+    const v=v0.slice();
+    for(const q of out){
+      let d=0; for(let i=0;i<v.length;i++) d+=q[i]*v[i];
+      for(let i=0;i<v.length;i++) v[i]-=d*q[i];
+    }
+    const nrm=Math.hypot(...v);
+    if(nrm>1e-9) out.push(v.map(x=>x/nrm));
+  }
+  return out;
+}
+
+// Freie Netzausgleichung mit inneren Bedingungen:
+//   [ JtJ  G ] [X]   [I]
+//   [ Gt   0 ] [.] = [0]
+// X ist die gesuchte Pseudoinverse. Wuerde stattdessen das gepinnte System
+// invertiert, waeren die Ellipsen an P0 genagelt und wuechsen mit dem Abstand
+// davon - ein Artefakt der Eichung, nicht der Messqualitaet.
+function covariance(pts, meas, sigmaHat){
+  const n=pts.length, k=2*n;
+  if(n<3) return null;
+  const G=trivialModes(pts);
+  if(G.length<3) return null;
+  const N=matTmat(jacobian(pts,meas));
+  const A=Array.from({length:k+3},()=>new Array(k+3).fill(0));
+  for(let i=0;i<k;i++) for(let j=0;j<k;j++) A[i][j]=N[i][j];
+  for(let i=0;i<k;i++) for(let g=0;g<3;g++){ A[i][k+g]=G[g][i]; A[k+g][i]=G[g][i]; }
+  const B=Array.from({length:k+3},(_,i)=>{
+    const r=new Array(k).fill(0); if(i<k) r[i]=1; return r;
+  });
+  const X=luSolve(A,B);
+  if(!X) return null;                       // unterbestimmt -> Pfeile statt Ellipsen
+  const s2=(sigmaHat!=null ? sigmaHat*sigmaHat : SIGMA_DEF*SIGMA_DEF);
+  return pts.map((p,i)=>({
+    xx:s2*X[2*i][2*i], xy:s2*X[2*i][2*i+1], yy:s2*X[2*i+1][2*i+1],
+  }));
+}
+
+// Eigenwerte einer 2x2-Kovarianz in geschlossener Form.
+function ellipse(c){
+  const tr=c.xx+c.yy, det=c.xx*c.yy-c.xy*c.xy;
+  const r=Math.sqrt(Math.max(0, tr*tr/4-det));
+  return {
+    a:Math.sqrt(Math.max(tr/2+r,0)),
+    b:Math.sqrt(Math.max(tr/2-r,0)),
+    ang:0.5*Math.atan2(2*c.xy, c.xx-c.yy),
+  };
+}
+
 globalThis.CORE={ TOL_RANK, TOL_RED, TOL_MODE, SIGMA_DEF, SUGGEST_CHECK_MAX,
                   dist, idx, activeMeas, residuals, jacobian, luSolve, matTmat, matTvec,
-                  gramSchmidt, nullSpace, leverage, gaugeFixed, freeCols, scaleSketch, solve, analyze };
+                  gramSchmidt, nullSpace, leverage, gaugeFixed, freeCols, scaleSketch, solve, analyze,
+                  trivialModes, covariance, ellipse };
 </script>
 
 <script id="checks">
@@ -510,6 +568,53 @@ globalThis.selfChecks=function(){
     const fit2=C.solve(L.map(p=>({...p})), ohne);
     chk('analyze: nach Stilllegen stimmt die Form wieder (<0.01mm)', formErr(fit2.pts)<0.01);
     chk('analyze: nach Stilllegen ist das Netz noch bestimmt', C.analyze(fit2.pts,ohne).dof===0);
+  }
+  // --- Kovarianz ---
+  {
+    const rect=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:3000},{id:'D',x:0,y:3000}];
+    const G=C.trivialModes(rect);
+    const dot=(a,b)=>a.reduce((s,x,i)=>s+x*b[i],0);
+    chk('trivialModes: drei Stueck', G.length===3);
+    chk('trivialModes: orthonormal',
+       G.every(g=>near(dot(g,g),1,1e-9)) && near(dot(G[0],G[1]),0,1e-9)
+       && near(dot(G[0],G[2]),0,1e-9) && near(dot(G[1],G[2]),0,1e-9));
+    chk('trivialModes: liegen im Nullraum von J', (()=>{
+      const J=C.jacobian(rect,[{a:'A',b:'B',d:4000},{a:'B',b:'C',d:3000}]);
+      return G.every(g=>J.every(r=>near(dot(r,g),0,1e-6)));
+    })());
+  }
+  {
+    const rect=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:3000},{id:'D',x:0,y:3000}];
+    const voll=[{a:'A',b:'B',d:4000},{a:'B',b:'C',d:3000},{a:'C',b:'D',d:4000},
+                {a:'D',b:'A',d:3000},{a:'A',b:'C',d:5000},{a:'B',b:'D',d:5000}];
+    const cov=C.covariance(rect,voll,6);
+    chk('covariance: ein Block je Punkt', cov && cov.length===4);
+    chk('covariance: endlich und positiv',
+       cov.every(c=>isFinite(c.xx)&&isFinite(c.yy)&&c.xx>0&&c.yy>0));
+    chk('covariance: keine Punkt-Bevorzugung durch die Eichung', (()=>{
+      // Symmetrisches Netz -> alle vier Ecken muessen aehnlich unsicher sein.
+      // Waere an P0 gepinnt worden, waere P0 exakt 0 und der Rest wuechse.
+      const sp=cov.map(c=>c.xx+c.yy);
+      return Math.max(...sp)/Math.min(...sp) < 1.5;
+    })());
+    chk('covariance: unterbestimmt -> null',
+       C.covariance(rect,[{a:'A',b:'B',d:4000}],null)===null);
+    // Der mittlere Anzeigefall: bestimmt, aber redundanzfrei. Ellipsen kommen
+    // dann aus dem ANGENOMMENEN sigma und werden gestrichelt gezeichnet.
+    // Liefert das null, faellt Task 12 stumm in den Pfeil-Zweig.
+    const seiten=[{a:'A',b:'B',d:4000},{a:'B',b:'C',d:3000},{a:'C',b:'D',d:4000},{a:'D',b:'A',d:3000}];
+    const knapp=C.covariance(rect, seiten.concat([{a:'A',b:'C',d:5000}]), null);
+    chk('covariance: exakt bestimmt + sigmaHat null -> endliche Bloecke',
+       knapp && knapp.every(c=>isFinite(c.xx)&&isFinite(c.yy)&&c.xx>0&&c.yy>0));
+    chk('covariance: B und D sind unsicherer als A und C (nur A-C gemessen)',
+       knapp && knapp[1].xx > knapp[0].xx && knapp[3].xx > knapp[2].xx);
+  }
+  {
+    const e=C.ellipse({xx:400,xy:0,yy:100});
+    chk('ellipse: Halbachsen 20 und 10', near(e.a,20,1e-9)&&near(e.b,10,1e-9));
+    chk('ellipse: grosse Achse waagerecht', near(e.ang,0,1e-9));
+    const e2=C.ellipse({xx:100,xy:0,yy:400});
+    chk('ellipse: grosse Achse senkrecht', near(Math.abs(e2.ang),Math.PI/2,1e-9));
   }
   return {ok, out};
 };
