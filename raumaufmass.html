@@ -33,7 +33,7 @@
     <span style="align-self:center;color:#666;margin-left:auto;font-size:12px">
       <span style="color:#07a">◯</span> gemessene Genauigkeit &nbsp;
       <span style="color:#999">◌</span> angenommen &nbsp;
-      <span style="color:#c60">↔</span> noch beweglich
+      <span style="color:#c60">↔</span> noch beweglich<span id="exagg"></span>
     </span>
   </div>
   <canvas id="cv"></canvas>
@@ -464,6 +464,25 @@ const C=globalThis.CORE;
 const BAARDA_W0 = 3.29; // Baardas kritischer Wert fuer Data Snooping - erst darueber gilt eine Messung ueberhaupt als Ausreisser
 const TIE_TOL   = 0.02; // Toleranzband ums groesste w (2% relativ): alles darin gilt als gleich verdaechtig statt durch Rundung getrennt
 
+// Ellipsen sind in Wirklichkeit millimetergross, der Raum aber meterweise
+// gezeichnet - unskaliert verschwindet jede Ellipse unter dem Punktmarker
+// (siehe render()). EIN Faktor je Zeichnung haelt die Punkte zueinander
+// ehrlich: doppelt so unsicher gemessen muss doppelt so gross gezeichnet
+// werden, nicht jeder Punkt einzeln auf Sichtbarkeit getrimmt. Die Liste ist
+// zugleich die Rundung auf einen sprechbaren Wert (1-2-5-Folge) und der
+// Deckel (500) - ein fast perfektes Netz bekommt so nie eine absurde
+// Ueberhoehung angezeigt.
+const ELLIPSE_TARGET_PX = 30;  // Zielgroesse der groessten Halbachse, CSS-px
+const ELLIPSE_FACTORS = [1, 2, 5, 10, 20, 50, 100, 200, 500];
+
+// Kleinster Faktor aus ELLIPSE_FACTORS, der raw mindestens erreicht.
+// Aufrunden statt runden, sonst verfehlt die Zeichnung ihr eigenes
+// Sichtbarkeitsziel knapp.
+function niceFactor(raw){
+  for(const f of ELLIPSE_FACTORS) if(f>=raw*(1-1e-9)) return f;
+  return ELLIPSE_FACTORS[ELLIPSE_FACTORS.length-1];
+}
+
 const M={ pts:[], walls:[], meas:[], mode:'point', sel:[], fit:null, an:null, drag:null };
 
 // --- Punkt-IDs: A..Z, dann AA, AB, ...
@@ -537,10 +556,21 @@ function render(){
     ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
   });
   ctx.setLineDash([]);
+  // Punkte zuerst zeichnen, Ellipsen/Pfeile erst danach darueber: eine
+  // Ellipse, die kleiner als der Punktmarker waere, muss als Ring auf dem
+  // Marker sichtbar bleiben statt darunter zu verschwinden.
+  P.forEach((pt,i)=>{
+    const p=toScr(pt);
+    ctx.fillStyle=M.sel.includes(pt.id)?'#c30':'#036';
+    ctx.beginPath(); ctx.arc(p.x,p.y,5*dpr,0,7); ctx.fill();
+    ctx.fillStyle='#000'; ctx.font=`${12*dpr}px system-ui`;
+    ctx.fillText(pt.id, p.x+8*dpr, p.y-8*dpr);
+  });
   // Unsicherheiten. Drei Faelle, die verschieden aussehen muessen:
   // ueberbestimmt -> Ellipse aus sigmaHat; bestimmt -> Ellipse aus dem
   // angenommenen sigma; beweglich -> Pfeil, weil eine Ellipse dort unendlich
   // gross waere und die Zeichnung damit luegen wuerde.
+  let exagg=null;   // Ueberhoehungsfaktor dieser Zeichnung, fuer die Legende
   if(M.an){
     const moving=new Array(P.length).fill(false);
     M.an.modes.forEach(mo=>{
@@ -550,6 +580,13 @@ function render(){
       });
     });
     const cov=M.an.dof===0 ? C.covariance(P, M.meas, M.an.sigmaHat) : null;
+    // Ellipsen vorab in mm berechnen: der Ueberhoehungsfaktor braucht die
+    // groesste Halbachse der GANZEN Zeichnung, bevor die erste Ellipse auf
+    // den Bildschirm kommt - und es darf nur EIN Faktor fuer alle Punkte
+    // gelten, sonst verzerrt sich ihre Groesse zueinander (siehe Konstanten).
+    const ell = cov ? P.map((_,i)=> moving[i] ? null : C.ellipse(cov[i])) : null;
+    const maxA = ell ? ell.reduce((mx,e)=> e && e.a>mx ? e.a : mx, 0) : 0;
+    if(maxA>0) exagg = niceFactor(ELLIPSE_TARGET_PX*dpr/(maxA*VIEW.s));
     ctx.lineWidth=1.5*dpr;
     P.forEach((pt,i)=>{
       const c=toScr(pt);
@@ -563,26 +600,22 @@ function render(){
           ctx.moveTo(c.x-dx*L, c.y-dy*L); ctx.lineTo(c.x+dx*L, c.y+dy*L);
           ctx.stroke();
         });
-      } else if(cov){
-        const e=C.ellipse(cov[i]);
+      } else if(ell && ell[i]){
+        const e=ell[i];
         ctx.strokeStyle=M.an.sigmaHat!=null?'#07a':'#999';
         ctx.setLineDash(M.an.sigmaHat!=null?[]:[3*dpr,3*dpr]);
         ctx.save(); ctx.translate(c.x,c.y); ctx.rotate(e.ang);
         ctx.beginPath();
-        // 3-fach ueberhoeht, sonst ist eine 6-mm-Ellipse im Meter-Massstab unsichtbar
-        ctx.ellipse(0,0, Math.max(e.a*VIEW.s*3, 2*dpr), Math.max(e.b*VIEW.s*3, 2*dpr), 0, 0, 7);
+        ctx.ellipse(0,0, e.a*VIEW.s*exagg, e.b*VIEW.s*exagg, 0, 0, 7);
         ctx.stroke(); ctx.restore(); ctx.setLineDash([]);
       }
     });
   }
-  // Punkte
-  P.forEach((pt,i)=>{
-    const p=toScr(pt);
-    ctx.fillStyle=M.sel.includes(pt.id)?'#c30':'#036';
-    ctx.beginPath(); ctx.arc(p.x,p.y,5*dpr,0,7); ctx.fill();
-    ctx.fillStyle='#000'; ctx.font=`${12*dpr}px system-ui`;
-    ctx.fillText(pt.id, p.x+8*dpr, p.y-8*dpr);
-  });
+  // Legende nachfuehren: null blendet sie aus, sonst bliebe eine Zahl aus
+  // einer frueheren Zeichnung stehen, sobald z.B. alle Punkte beweglich sind
+  // und gar keine Ellipse mehr gezeichnet wird.
+  document.getElementById('exagg').innerHTML = exagg!=null
+    ? ` &nbsp; Ellipsen ×${exagg} überhöht` : '';
   renderPanel();
 }
 
