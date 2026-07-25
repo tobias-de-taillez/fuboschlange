@@ -1127,20 +1127,38 @@ function zonePolyOf(rects){
   // nur edgeGap) bis hinunter in den Korridor, und jede Anbindeleitung
   // kreuzt dort das Feld.
   const yc=fieldInset();
+  let rs=rects;
   if(rects.length===1){ const r=rects[0];
     const y0=Math.max(r.y0,yc), y1=r.y0+r.h;
     if(y1-y0<S.s) return [];
-    return [{x:r.x0,y:y0},{x:r.x0+r.w,y:y0},{x:r.x0+r.w,y:y1},{x:r.x0,y:y1}]; }
-  // Zwei Rechtecke der L-Zerlegung wieder zu EINEM L verschmelzen: so entsteht
-  // eine durchgehende Spirale statt zweier Felder mit Naht dazwischen.
-  const n=notchFrame(), W=frameW(), H=frameH();
-  if(!n) { const r=rects[0];
-    return [{x:0,y:0},{x:W,y:0},{x:W,y:H},{x:0,y:H}]; }
-  const atRight=n.x1>=W-1, atBottom=n.y0<=1;
-  if(atRight&&!atBottom) return [{x:0,y:0},{x:W,y:0},{x:W,y:n.y0},{x:n.x0,y:n.y0},{x:n.x0,y:H},{x:0,y:H}];
-  if(atRight&&atBottom)  return [{x:0,y:0},{x:n.x0,y:0},{x:n.x0,y:n.y1},{x:W,y:n.y1},{x:W,y:H},{x:0,y:H}];
-  if(!atRight&&!atBottom)return [{x:0,y:0},{x:W,y:0},{x:W,y:H},{x:n.x1,y:H},{x:n.x1,y:n.y0},{x:0,y:n.y0}];
-  return [{x:n.x1,y:0},{x:W,y:0},{x:W,y:H},{x:0,y:H},{x:0,y:n.y1},{x:n.x1,y:n.y1}];
+    rs=[{x0:r.x0,y0,w:r.w,h:y1-y0}];
+  }
+  // Mehrere Teilrechtecke wieder zu EINEM Polygon verschmelzen: so entsteht eine
+  // durchgehende Spirale statt mehrerer Felder mit Nähten dazwischen.
+  return staircase(rs);
+}
+// Achsparallele Rechtecke NEBENEINANDER zu einem rektilinearen Polygon
+// verschmelzen: unten von links nach rechts, oben zurück. Doppelte und
+// kollineare Punkte fallen raus, damit rectiOffsetter die 4- bzw. 6-Eck-Form
+// wiedererkennt. Ersetzt die frühere Fallunterscheidung über notchFrame(), die
+// nur das GANZE Frame-L bauen konnte — Zonen sind jetzt beliebige x-Streifen.
+function staircase(rects){
+  const rs=rects.slice().sort((a,b)=>a.x0-b.x0), pts=[];
+  rs.forEach(r=>pts.push({x:r.x0,y:r.y0},{x:r.x0+r.w,y:r.y0}));
+  rs.slice().reverse().forEach(r=>pts.push({x:r.x0+r.w,y:r.y0+r.h},{x:r.x0,y:r.y0+r.h}));
+  const uniq=[];
+  pts.forEach(p=>{ const q=uniq[uniq.length-1];
+    if(!q||Math.abs(q.x-p.x)>0.5||Math.abs(q.y-p.y)>0.5) uniq.push(p); });
+  while(uniq.length>1){
+    const f=uniq[0], l=uniq[uniq.length-1];
+    if(Math.abs(f.x-l.x)<0.5&&Math.abs(f.y-l.y)<0.5) uniq.pop(); else break;
+  }
+  const out=[];
+  for(let i=0;i<uniq.length;i++){
+    const a=uniq[(i-1+uniq.length)%uniq.length], b=uniq[i], c=uniq[(i+1)%uniq.length];
+    if(Math.abs((b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x))>0.5) out.push(b);
+  }
+  return out.length>=4?out:uniq;
 }
 function bifilarPath(zone,gate){
   const rects=Array.isArray(zone)?zone:[zone];
@@ -1427,6 +1445,25 @@ function parallelOverlaps(paths,near){
 // ================= Zonen / Loops / Autofit =================
 // Aufteilung in N Heizkreise; jeder Kreis = Liste von Rechtecken (in Serie verlegt).
 // Alles im FRAME (Verteilerwand = Unterkante).
+// VERWORFEN, gemessen: Zonen als senkrechte Streifen, geschnitten so, dass jede
+// Zone ein Stück der Verteilerwand (Frontage) enthält.
+//
+// Die Diagnose stimmt: liegt die Aussparung an der Verteilerwand, hat die Zone
+// dahinter keine Frontage, und ihre Anbindeleitung kommt nur durch fremdes Feld
+// dorthin — daher die Kreuzungen an der Notch-Innenecke. Die Streifen beheben
+// das auch (gemeldete Konfiguration 10 -> 7 Kreuzungen, Raum medianCross
+// 19 -> 15), erzeugen aber ein NEUES Problem: ein Streifen, der die Aussparung
+// umgreift, ist L-förmig mit einem dünnen Frontage-Arm, und die Spirale darin
+// kreuzt SICH SELBST.
+//
+//   alte Aufteilung   Feld-Kreuzungen 0   worstCross  90   covFails 29/48
+//   Streifen          Feld-Kreuzungen 3   worstCross 174   covFails 33/48
+//
+// Feld-Selbstkreuzungen sind der schlimmere Fehler: das Routing kann man legen,
+// die Spirale nicht. Deshalb bleibt die alte Aufteilung, bis die Zonen ganz
+// entfallen — eine EINZIGE Spirale, danach in N Stücke gleicher Bogenlänge
+// geschnitten. Gemessen am Projektraum: ein Kreis hat medianCross 2, jede
+// Aufteilung liegt bei 15 bis 19.
 function partition(N){
   const base=rectsFrame();
   if(N<=1) return [base];                                   // 1 Kreis, alle Rechtecke
