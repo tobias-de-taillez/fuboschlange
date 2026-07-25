@@ -408,7 +408,14 @@ const omegaOn=()=>S.randPasses>1 && S.randSpacing/2<S.bendRadius
               && S.edgeGap>=S.bendRadius+S.pipeDia/2;
 // e ist eine FRAME-Kante; die Auswahl steht in Weltkanten -> mitdrehen.
 const frameEdges=()=>wEdges().map(edgeFwd);
-const randW=e=>frameEdges().includes(e) ? S.randPasses*S.randSpacing : 0;
+// Eine Randzone ist nur dann eine, wenn sie DICHTER liegt als das Feld — der
+// Sinn ist die Konvektion an der Scheibe. Ist randSpacing >= s, waere der
+// Streifen duenner belegt als das Feld daneben und wuerde nur Flaeche kosten:
+// gemessen sind die schlechtesten Deckungen im Bench genau das, etwa
+// randSpacing 175 mit 4 Bahnen = 700 mm Streifen in einem 2650 mm hohen Raum,
+// Deckung 10 %. Dann uebernimmt das Feld die Flaeche und deckt sie enger ab.
+const randOn=()=>S.windowEdges.length>0 && S.randPasses>0 && S.randSpacing<S.s;
+const randW=e=>(randOn()&&frameEdges().includes(e)) ? S.randPasses*S.randSpacing : 0;
 const randWidth=()=>randW('bottom');                // Korridor liegt über der BODEN-Randzone
 // Spurabstand im Korridor: mind. 50 mm (Verlegeabstand). Die Höhenwechsel
 // laufen als 45°-Schrägen (siehe routeVia) — eine 45°-Ablenkung braucht nur
@@ -1903,7 +1910,7 @@ function buildLoops(groups,ownerOverride,connOrder){
   // Steigleitung aus dem Korridor liegt außerhalb aller fremden Korridor-Spans
   // und kreuzt daher nichts. (Vorlauf geht weiterhin zuerst an die Scheibe.)
   const anchor = M.x;
-  if(S.windowEdges.length){
+  if(randOn()){
     let owner=-1,best=-1;
     raw.forEach((r,i)=>{ if(r.field.length){
       const d=Math.abs(r.field[0].x-anchor); if(d>best){best=d;owner=i;} }});
