@@ -1618,26 +1618,44 @@ function crossBetween(a,b,near){
 // segCrossPt sieht nur transversale Schnitte — kollineare/parallele Doppel-
 // belegung braucht diesen eigenen Check.
 function parallelOverlaps(paths,near){
-  const segs=[], R=near?400:0;
-  paths.forEach(p=>{ for(let i=0;i<p.length-1;i++){
-    const a=p[i],b=p[i+1];
-    if(Math.abs(a.y-b.y)<1e-6&&Math.abs(a.x-b.x)>1e-6)
-      segs.push({o:'h',c:a.y,lo:Math.min(a.x,b.x),hi:Math.max(a.x,b.x),p,i});
-    else if(Math.abs(a.x-b.x)<1e-6&&Math.abs(a.y-b.y)>1e-6)
-      segs.push({o:'v',c:a.x,lo:Math.min(a.y,b.y),hi:Math.max(a.y,b.y),p,i});
-  }});
-  const hits=[];
-  for(let i=0;i<segs.length;i++)for(let j=i+1;j<segs.length;j++){
-    const A=segs[i],B=segs[j];
-    if(A.o!==B.o) continue;
-    if(A.p===B.p&&Math.abs(A.i-B.i)<=1) continue;   // direkte Nachbarn (teilen nur einen Punkt)
-    if(Math.abs(A.c-B.c)>=S.pipeDia) continue;
-    const lo=Math.max(A.lo,B.lo), hi=Math.min(A.hi,B.hi);
-    if(hi-lo>1){
-      const mid = A.o==='h' ? {x:(lo+hi)/2,y:(A.c+B.c)/2} : {x:(A.c+B.c)/2,y:(lo+hi)/2};
-      if(!near||len(sub(mid,near))>R) hits.push(mid);
+  // Physische Rohr-auf-Rohr-Ueberlappung: zwei Stellen des Rohrs liegen naeher
+  // als ein Rohrdurchmesser, ohne im Pfad benachbart zu sein.
+  //
+  // Die fruehere Fassung verglich nur EXAKT achsparallele Segmente
+  // (|a.y-b.y| < 1e-6). Auf der gezeichneten Kurve ist praktisch kein Segment
+  // exakt achsparallel — der Check hat seit der Umstellung auf das Kurvenmodell
+  // also still 0 gemeldet, egal wie die Rohre lagen. Jetzt ueber den Abstand,
+  // unabhaengig von der Richtung, gitterbeschleunigt.
+  const R=near?400:0, lim=S.pipeDia, cell=Math.max(lim,20);
+  const hits=[], grid=new Map(), pts=[];
+  paths.forEach((p,pi)=>{ let cum=0;
+    for(let i=0;i<p.length;i++){
+      if(i) cum+=len(sub(p[i],p[i-1]));
+      pts.push({x:p[i].x,y:p[i].y,pi,cum});
+    }});
+  pts.forEach((q,qi)=>{ const k=Math.floor(q.x/cell)*100000+Math.floor(q.y/cell);
+    let a=grid.get(k); if(!a){a=[];grid.set(k,a);} a.push(qi); });
+  const seen=new Set();
+  pts.forEach((q,qi)=>{
+    const gx=Math.floor(q.x/cell), gy=Math.floor(q.y/cell);
+    for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++){
+      for(const ri of (grid.get((gx+dx)*100000+(gy+dy))||[])){
+        if(ri<=qi) continue;
+        const r=pts[ri];
+        // Benachbarte Stellen DESSELBEN Rohrs liegen naturgemaess dicht
+        // beieinander — ausgeschlossen wird nach BOGENLAENGE, nicht nach Index,
+        // weil die Abtastdichte variiert.
+        if(r.pi===q.pi&&Math.abs(r.cum-q.cum)<4*lim) continue;
+        if(len(sub(r,q))>=lim) continue;
+        const mid={x:(q.x+r.x)/2,y:(q.y+r.y)/2};
+        if(near&&len(sub(mid,near))<=R) continue;
+        const key=Math.round(mid.x/lim)+'|'+Math.round(mid.y/lim);
+        if(seen.has(key)) continue;
+        seen.add(key);
+        hits.push(mid);
+      }
     }
-  }
+  });
   return hits;
 }
 
@@ -3041,8 +3059,15 @@ function selfChecks(){
     const d=Math.min(p.x,p.y,4000-p.x,3000-p.y); return Math.abs(d-300)<45; });
   A('Isolinie hält konstanten Wandabstand',okIso);
   // Parallel-Detektor: zwei Rohre mit 10mm Mittenabstand bei Ø16 = Überlappung
+  // Der Detektor meldet jetzt ORTE der Ueberlappung statt ueberlappender Spannen,
+  // bei zwei durchgehend parallelen Rohren also mehrere. Geprueft wird deshalb
+  // "erkennt ueberhaupt" plus die Gegenprobe, dass normal verlegte Rohre NICHT
+  // anschlagen — ohne die zweite Haelfte waere jeder Detektor bestanden, der
+  // immer meldet.
   const pv=parallelOverlaps([[{x:0,y:0},{x:1000,y:0}],[{x:0,y:10},{x:1000,y:10}]]);
-  A('Parallel-Detektor erkennt Rohr-auf-Rohr',pv.length===1);
+  A(`Parallel-Detektor erkennt Rohr-auf-Rohr (${pv.length} Stellen)`,pv.length>=1);
+  const pv2=parallelOverlaps([[{x:0,y:0},{x:1000,y:0}],[{x:0,y:100},{x:1000,y:100}]]);
+  A('Parallel-Detektor schlaegt bei 100 mm Abstand NICHT an',pv2.length===0);
   // Randzone endet am Notch (Defaults: Notch vorhanden)
   if(hasNotch()){
     const rot0=ROT; ROT=0;                     // Frame = Welt
@@ -3166,7 +3191,10 @@ function thermalSelfChecks(A){
 // Kennzahl den schlimmsten Ort nennt.
 function gapMax(loops){
   const segs=[];
-  loops.forEach(l=>{ const p=l.pts||[];
+  // Auf dem GEZEICHNETEN Pfad, nicht auf dem Streckenzug: gemessen werden muss,
+  // was verlegt wird. Sonst laufen Zeichnung und Kennzahl auseinander — genau
+  // dieser Bruch hat schon Kreuzungen und Rohr ausserhalb des Raums verdeckt.
+  loops.forEach(l=>{ const p=l.drawn||drawnPoints(l.pts||[],6);
     for(let i=0;i<p.length-1;i++){
       const a=p[i],b=p[i+1];
       segs.push({a,b,minx:Math.min(a.x,b.x),maxx:Math.max(a.x,b.x),
@@ -3201,7 +3229,8 @@ function gapMax(loops){
 // Raster-Sampling (Schritt = reach), Segment-Bounding-Skip für Tempo.
 function heatCoverage(loops,reach){
   const segs=[];
-  loops.forEach(l=>{ const p=l.pts||[];
+  // Ebenfalls auf dem gezeichneten Pfad — siehe gapMax.
+  loops.forEach(l=>{ const p=l.drawn||drawnPoints(l.pts||[],6);
     for(let i=0;i<p.length-1;i++){
       const a=p[i],b=p[i+1];
       segs.push({a,b,minx:Math.min(a.x,b.x)-reach,maxx:Math.max(a.x,b.x)+reach,
@@ -3559,7 +3588,7 @@ function loopsOutside(plan){
 function segsOutside(plan){
   let n=0;
   plan.loops.forEach(l=>{
-    const p=l.pts||[];
+    const p=l.drawn||drawnPoints(l.pts||[],6);
     for(let i=0;i<p.length-1;i++){
       for(let t=0;t<=6;t++){
         const q={x:p[i].x+(p[i+1].x-p[i].x)*t/6, y:p[i].y+(p[i+1].y-p[i].y)*t/6};
@@ -3760,7 +3789,7 @@ function recompute(){
   // Anbindeleitungen laufen am Verteiler gewollt gebündelt (Baupraxis).
   // Ganzer Kreis inkl. Anbindeleitungen: eine Zuleitung, die auf einer
   // Randzonenbahn entlangläuft, ist ebenso Rohr-auf-Rohr wie zwei Feldbahnen.
-  plan.parOv = parallelOverlaps(plan.loops.map(l=>l.pts),M);
+  plan.parOv = parallelOverlaps(plan.loops.map(l=>l.drawn||drawnPoints(l.pts||[],6)),M);
   // Nur noch informativ: wie viele der harten Kreuzungen im Verteiler-Nahbereich
   // liegen. Dort ist das Übereinanderführen Baupraxis, aber es bleibt eine
   // Kreuzung und wird oben mitgezählt — die frühere 400-mm-Ausnahme hat sie
