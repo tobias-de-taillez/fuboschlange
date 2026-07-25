@@ -1,42 +1,62 @@
 // bench.mjs — headless Bench-Runner. Node >= 18, keine Dependencies.
+//
+//   node bench.mjs [läufe] [--jobs=N] [--checks] [--save-baseline]
+//   node bench.mjs 500 --shard=3/14        # ein einzelner Shard (intern)
+//
+// Die Läufe werden auf N Prozesse aufgeteilt. Jeder Shard erzeugt ALLE
+// Parametersätze (der PRNG läuft identisch weiter) und wertet nur seine eigenen
+// aus — die Konfigurationen sind dadurch dieselben wie in einem sequentiellen
+// Lauf und bleiben mit der Baseline vergleichbar.
 import { readFileSync, writeFileSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { availableParallelism } from 'node:os';
+import { load } from './harness.mjs';
 
-const html = readFileSync('verlegeplan.html', 'utf8');
-const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]);
-const js = scripts.reduce((a, b) => (a.length > b.length ? a : b));
+const argv = process.argv.slice(2);
+const flag = name => argv.find(a => a.startsWith('--' + name + '='))?.split('=')[1];
+const RUNS = Number(argv.find(a => /^\d+$/.test(a)) || 500);
+const SEED = Number(flag('seed') || 20260725);
+const shardArg = flag('shard');
 
-// Minimaler DOM-Stub: die Datei ruft beim Laden initUI() und recompute().
-const el = () => ({
-  value: '', textContent: '', innerHTML: '', checked: false, style: {}, dataset: {},
-  classList: { add(){}, remove(){}, toggle(){} },
-  addEventListener(){}, removeEventListener(){}, appendChild(){},
-  querySelector: () => el(), querySelectorAll: () => [],
-  getBoundingClientRect: () => ({ x:0, y:0, width:800, height:600 }),
-  // computeThermal() ruft ueber thermalImageURL() cv.getContext('2d') auf
-  // (document.createElement('canvas')). Ohne diese Methode wirft es dort mit
-  // "cv.getContext is not a function", statt in den vorgesehenen
-  // `if(!ctx) return '';`-Fallback zu laufen. null liefert exakt diesen Fallback.
-  getContext: () => null,
-});
-globalThis.document = {
-  getElementById: () => el(), querySelector: () => el(), querySelectorAll: () => [],
-  createElement: () => el(), addEventListener(){},
-  body: el(), documentElement: el(),
-};
-globalThis.window = globalThis;
-globalThis.requestAnimationFrame = fn => setTimeout(fn, 0);
-globalThis.performance = { now: () => Number(process.hrtime.bigint() / 1000000n) };
+// ---------- Shard-Modus: ein Teil der Läufe, Ergebnis als JSON auf stdout -----
+if (shardArg) {
+  const [sh, ns] = shardArg.split('/').map(Number);
+  const api = load('verlegeplan.html');
+  const fails = api.crossingBench(RUNS, SEED, sh, ns);
+  process.stdout.write(JSON.stringify({ fails: [...fails], allGaps: fails.allGaps }));
+  process.exit(0);
+}
 
-// Kein `with` — das Skript beginnt mit "use strict", dort ist es verboten.
-// Stattdessen den Skriptinhalt als Funktionsrumpf ausführen und die benötigten
-// Symbole am Ende explizit zurückgeben.
-const api = new Function(js + `
-  return { crossingBench, autofit, loopCrossings, loopsOutside, heatCoverage,
-           snappedManifold, S };
-`)();
+// ---------- Hauptprozess ------------------------------------------------------
+// Zwei Kerne für das System freilassen; unter ~32 Läufen kostet das Starten der
+// Prozesse mehr als es einspart, dann in-process rechnen.
+const JOBS = Math.max(1, Math.min(Number(flag('jobs') || availableParallelism() - 2), RUNS));
+const t0 = Date.now();
 
-const RUNS = Number(process.argv[2] || 500);
-const fails = api.crossingBench(RUNS, 20260725);
+let fails, allGaps;
+if (RUNS < 32 || JOBS === 1) {
+  const api = load('verlegeplan.html', { checks: argv.includes('--checks') });
+  const f = api.crossingBench(RUNS, SEED);
+  fails = [...f]; allGaps = f.allGaps;
+} else {
+  if (argv.includes('--checks')) load('verlegeplan.html', { checks: true });
+  const run = i => new Promise((res, rej) =>
+    execFile(process.execPath, ['bench.mjs', String(RUNS), `--seed=${SEED}`,
+      `--shard=${i}/${JOBS}`], { maxBuffer: 1 << 28 },
+      (err, out, errOut) => err ? rej(new Error(`Shard ${i}: ${err.message}\n${errOut}`))
+                                : res(JSON.parse(out))));
+  const parts = await Promise.all(Array.from({ length: JOBS }, (_, i) => run(i)));
+  fails = parts.flatMap(p => p.fails);
+  allGaps = parts.flatMap(p => p.allGaps);
+  // Jeder Lauf muss genau einmal ausgewertet worden sein. Ohne diese Prüfung
+  // würde ein Shard, der still weniger liefert (z. B. wegen eines Fehlers im
+  // Aufteilungs-Index), die Fehlerraten kleiner rechnen als sie sind.
+  if (allGaps.length !== RUNS) {
+    console.error(`Shards haben ${allGaps.length} von ${RUNS} Läufen ausgewertet.`);
+    process.exit(1);
+  }
+}
+
 const out = {
   runs: RUNS,
   crossFails: fails.filter(f => f.cross > 0).length,
@@ -45,14 +65,18 @@ const out = {
   // `cross` zählt im Bench nur die Kreuzungen, `outside` zählt getrennt das
   // Rohr außerhalb des Raums (seit der Trennung in crossingBench, Step 1a).
   outFails: fails.filter(f => f.outside > 0).length,
+  errFails: fails.filter(f => f.err).length,
   worstCoverage: Math.min(...fails.map(f => f.cov), 100),
   worstRadius: Math.min(...fails.map(f => f.minR ?? 999), 999),
   // Diagnose, kein Gate: worstGap zeigt, ob Radius-Gewinne mit Flaeche bezahlt
   // werden. Bewusst NICHT in RATE_KEYS - die vier harten Kriterien bleiben vier.
-  // Max ueber ALLE Laeufe (fails.allGaps), nicht nur ueber die Fehlschlaege:
-  // sonst verschwindet der schlimmste Gap-Wert aus der Kennzahl, sobald ein
-  // Lauf die vier harten Kriterien besteht (die ein Folge-Task genau verbessert).
-  worstGap: Math.max(...fails.allGaps.map(g => g ?? 0), 0),
+  // Max ueber ALLE Laeufe (allGaps), nicht nur ueber die Fehlschlaege: sonst
+  // verschwindet der schlimmste Gap-Wert aus der Kennzahl, sobald ein Lauf die
+  // vier harten Kriterien besteht (die ein Folge-Task genau verbessert).
+  worstGap: Math.max(...allGaps.map(g => g ?? 0), 0),
+  medianGap: (a => a.length ? a[a.length >> 1] : 0)(allGaps.filter(g => g != null).sort((x, y) => x - y)),
+  seconds: +((Date.now() - t0) / 1000).toFixed(1),
+  jobs: JOBS,
 };
 // Raten (Anteil an `runs`) zusätzlich zu den Absolutzahlen: Läufe mit
 // unterschiedlicher Laufzahl sind nur über die Rate vergleichbar (siehe
@@ -64,8 +88,26 @@ out.radFailRate = out.radFails / RUNS;
 out.outFailRate = out.outFails / RUNS;
 console.log(JSON.stringify(out, null, 1));
 
-if (process.argv.includes('--save-baseline')) {
-  writeFileSync('bench-baseline.json', JSON.stringify(out, null, 1));
+// Die häufigsten Fehlerursachen benennen, statt nur zu zählen: ohne das ist der
+// nächste Schritt nach einem roten Lauf immer erst eine eigene Probe.
+if (argv.includes('--why')) {
+  const worst = fails.filter(f => !f.err).sort((a, b) => a.cov - b.cov).slice(0, 5);
+  console.error('\nschlimmste 5 nach Deckung:');
+  worst.forEach(f => console.error('  ' + JSON.stringify({ cov: f.cov, cross: f.cross,
+    outside: f.outside, minR: f.minR, radSoll: f.radSoll, gap: f.gap, ...f.cfg })));
+  const errs = fails.filter(f => f.err);
+  if (errs.length) {
+    console.error(`\n${errs.length} Ausnahmen, erste 3:`);
+    errs.slice(0, 3).forEach(f => console.error('  ' + f.err + ' ' + JSON.stringify(f.cfg)));
+  }
+}
+
+if (argv.includes('--save-baseline')) {
+  // Laufzeit und Prozesszahl sind Eigenschaften der Maschine, nicht des Codes —
+  // in der Baseline würden sie bei jedem Speichern einen Diff erzeugen, der
+  // nichts über die Verlegequalität sagt.
+  const { seconds, jobs, ...keep } = out;
+  writeFileSync('bench-baseline.json', JSON.stringify(keep, null, 1));
   process.exit(0);
 }
 // Alle vier harten Kriterien gehören in den Regressionsvergleich — `outFails`

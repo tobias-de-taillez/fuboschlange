@@ -1,13 +1,16 @@
 {
  "runs": 500,
  "crossFails": 500,
- "covFails": 459,
+ "covFails": 449,
  "radFails": 500,
- "outFails": 184,
+ "outFails": 185,
+ "errFails": 0,
  "worstCoverage": 4,
  "worstRadius": 0,
+ "worstGap": 6946,
+ "medianGap": 1996,
  "crossFailRate": 1,
- "covFailRate": 0.918,
+ "covFailRate": 0.898,
  "radFailRate": 1,
- "outFailRate": 0.368
+ "outFailRate": 0.37
 }

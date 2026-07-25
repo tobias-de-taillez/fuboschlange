@@ -2655,7 +2655,15 @@ function loopsOutside(plan){
   });
   return n;
 }
-function crossingBench(n,seed){
+// shard/nShards: nur jeden nShards-ten Lauf AUSWERTEN, die Parametersätze aber
+// weiterhin für ALLE Läufe erzeugen. Der PRNG läuft dadurch in jedem Shard
+// identisch weiter, also sieht Shard k exakt dieselben Konfigurationen wie ein
+// sequentieller Lauf — sonst wären die Shards nicht mit der Baseline
+// vergleichbar. Die Erzeugung kostet ein paar rnd()-Aufrufe, die Auswertung
+// (autofit + Kreuzungstest + Deckung + gapMax) kostet ~200 ms; das Verhältnis
+// macht die Aufteilung auf Prozesse fast linear schnell.
+function crossingBench(n,seed,shard,nShards){
+  const NS=nShards>0?nShards:1, SH=shard>0?shard:0;
   let s=(seed||20260725)>>>0;
   const rnd=()=>{s=(s*1664525+1013904223)>>>0; return s/4294967296;};
   const pick=a=>a[Math.floor(rnd()*a.length)];
@@ -2693,6 +2701,9 @@ function crossingBench(n,seed){
     const room=lRing(0,0,S.W,S.H,S.notchA,S.notchB);
     const k=Math.floor(rnd()*room.length), a=room[k], b=room[(k+1)%room.length], t=rnd();
     S.manifold={x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t};
+    // Ab hier die teure Auswertung — im Shard-Betrieb nur für die eigenen Läufe.
+    // Der PRNG ist zu diesem Zeitpunkt schon vollständig für Lauf i verbraucht.
+    if(i%NS!==SH) continue;
     let plan,x=0,cov=0,outside=0,gap=0;
     try{ plan=autofit(); x=loopCrossings(plan); outside=loopsOutside(plan);
          cov=heatCoverage(plan.loops,25); gap=gapMax(plan.loops); }
@@ -2819,7 +2830,11 @@ function recompute(){
   lastPlan=plan;
   draw(plan); renderResults(plan);
 }
-selfChecks();
+// selfChecks() enthält selbst einen 12-Lauf-Bench und einen Spiralen-Sweep, kostet
+// also ~1,5 s. Im Browser ist das richtig (jeder Ladevorgang prüft sich selbst),
+// in den Bench-Workern und Diagnose-Proben ist es reine Wartezeit ×14 Prozesse.
+// Deshalb abschaltbar — die Prüfungen laufen dort einmal im Hauptprozess.
+if(!globalThis.SKIP_SELFCHECKS) selfChecks();
 initUI();
 recompute();
 </script>
