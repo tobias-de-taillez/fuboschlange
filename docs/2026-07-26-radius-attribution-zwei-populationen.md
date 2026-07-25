@@ -66,3 +66,66 @@ anderen als „unbekannt" gesichert. Messungen aus diesem Fenster sind nur gült
 wenn die gemessene Datei nachweislich stabil war — für beide oben zitierten
 Attributionen wurde das nachträglich gegen `git show HEAD:verlegeplan.html`
 geprüft (identische MD5, Probe reproduziert).
+
+---
+
+## Nachtrag: die Naht ist entfernbar, aber nicht bindend
+
+Die Attribution sagt „Ring-zu-Ring-Sprung = 11 von 19". Die Morph-Spirale löscht
+diesen Sprung vollständig — trotzdem fällt `radFails` nur von 19 auf 17, nicht
+auf 8. Diese zwei Zahlen vertragen sich nicht, also je Lauf gepaart (gleicher
+Seed, gleicher Index, MD5 der gemessenen Datei vor und nach dem Lauf identisch):
+
+```
+geheilt 2   bleibt 17 (davon Teil gewechselt 1)   neu 0
+```
+
+Und die Signatur der 17 wandert dabei systematisch:
+
+| Lauf | Ringe | Morph |
+|---|---|---|
+| 3 | `field 147° ab230 bc173` → 52 | `field 157° ab279 bc64` → 13 |
+| 5 | `field 153° ab402 bc190` → 45 | `field 110° ab1530 bc88` → 61 |
+| 8 | `field 144° ab470 bc154` → 50 | `field 137° ab62 bc1325` → 25 |
+| 12 | `field 145° ab380 bc140` → 44 | `field 95° ab561 bc67` → 62 |
+
+Unter der Morphung ist die Ablenkung deutlich kleiner (95–137° statt 144–155°),
+dafür ist ein Nachbarsegment **kurz** (60–130 mm statt 140–240 mm). Der Engpass
+ist nicht mehr der Sprung, sondern die **Ecke des Offset-Rings selbst**, mit
+~2·R Abtastung.
+
+**Konsequenz — und sie ist die wichtigste dieser Runde:** `radFails` ist kein
+Gate mit einer Ursache, sondern ein Minimum über viele Stellen, die alle knapp am
+Limit liegen. Wird eine Klasse beseitigt, übernimmt die nächste. Jeder Ansatz der
+Form „diese eine Stelle reparieren" kann deshalb höchstens ein paar Läufe
+gewinnen — gemessen: 2 von 19. Was zählt, ist ein Verfahren, das den **Boden**
+hebt.
+
+Die Literatur hat dafür genau einen Schritt, den dieser Code noch nicht hat:
+Held & Spielberger, Schritt 6 — die Polyline mit **tangentialen Kreisbögen**
+glätten, Radius per Binärsuche in `[r_min, r_max]`. Nicht glätten im Sinne von
+Punkte verschieben (das ist `smoothToRadius`, ausgereizt), sondern an jeder Ecke
+einen **echten Bogen mit garantiertem Radius** einsetzen. `pathCurve` hat den
+Kanal dafür bereits: ein Punkt mit `arc`-Eigenschaft wird mit seinem eigenen
+Radius gezählt (`if(B.arc){ minR=Math.min(minR,B.arc.r); continue; }`), genau wie
+die Omega-Kehren der Randzone. Ein Ring, dessen 90-Grad-Ecken als `arc`-Punkte
+mit `r = bendRadius` vorliegen, kann an diesen Ecken gar nicht mehr durchfallen.
+
+Preis: der Bogen schneidet die Ecke ab, dort bleibt Fläche unbeheizt — genau der
+Grund, aus dem der Straight-Skeleton-Offset die Isolinien abgelöst hat. Das ist
+aber kein Argument gegen den Bogen, sondern Physik: ein Rohr macht keine
+90-Grad-Ecke. Der Plan zeichnet dort heute etwas, das nicht verlegbar ist.
+
+## Nachtrag 2: der Deckungsverlust der Morphung ist universell
+
+Aus demselben gepaarten Lauf, Deckung je Lauf, Ringe → Morph:
+
+```
+ 0 R 25→19   1 L 41→22   2 L 47→38   3 L 42→33   5 L 32→24   6 R 42→37
+ 7 R 35→25   8 L 40→34   9 R 27→22  10 L 40→33  11 L 43→36  12 L 46→44
+13 L 36→30  14 R 35→31  15 R 47→44  17 R 41→40  18 R 36→32  19 L 38→30
+```
+
+**18 von 20 Läufen verlieren Deckung, Rechtecke wie L-Formen.** Kein einziger
+gewinnt. Damit ist der Topologiewechsel als Erklärung endgültig erledigt — er
+kommt in acht dieser Läufe gar nicht vor.
