@@ -2,9 +2,48 @@
 <meta charset="utf-8">
 <title>Raumaufmaß</title>
 <style>
-  body{font:14px/1.4 system-ui,sans-serif;margin:0;padding:16px}
+  *{box-sizing:border-box}
+  body{font:14px/1.45 system-ui,sans-serif;margin:0;display:flex;height:100vh}
+  #left{flex:1;display:flex;flex-direction:column;min-width:0}
+  #right{width:420px;border-left:1px solid #ccc;overflow:auto;padding:12px}
+  #status{padding:10px 12px;border-bottom:1px solid #ccc;font-weight:600}
+  #status.warn{background:#fff4e0}
+  #status.bad{background:#ffe9e9}
+  #status.good{background:#eaf7ea}
+  #modes{padding:8px 12px;border-bottom:1px solid #eee;display:flex;gap:8px}
+  #modes button{padding:6px 12px;cursor:pointer}
+  #modes button[aria-pressed=true]{background:#333;color:#fff}
+  canvas{flex:1;min-height:0;display:block;cursor:crosshair}
+  table{border-collapse:collapse;width:100%;font-size:13px}
+  th,td{border-bottom:1px solid #eee;padding:4px 6px;text-align:right}
+  th:first-child,td:first-child{text-align:left}
+  .badge{background:#eee;border-radius:3px;padding:1px 5px;font-size:11px}
+  .badge.unchecked{background:#ffe0b2}
+  tr.worst td{background:#ffecec}
+  h3{margin:14px 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:.04em}
 </style>
-<div id="app"></div>
+
+<div id="left">
+  <div id="status">—</div>
+  <div id="modes">
+    <button data-mode="point"   aria-pressed="true">1 Punkt</button>
+    <button data-mode="wall"    aria-pressed="false">2 Wand</button>
+    <button data-mode="measure" aria-pressed="false">3 Messung</button>
+    <span id="hint" style="align-self:center;color:#666"></span>
+  </div>
+  <canvas id="cv"></canvas>
+</div>
+<div id="right">
+  <h3>Messungen</h3>
+  <table id="tbl"><thead><tr>
+    <th>von→nach</th><th>d [m]</th><th>v [mm]</th><th>Red.</th><th>w</th><th></th>
+  </tr></thead><tbody></tbody></table>
+  <h3>Noch messen</h3>
+  <div id="sugg"></div>
+  <h3>Export</h3>
+  <button id="exp">JSON in die Zwischenablage</button>
+  <pre id="wl" style="font-size:12px;white-space:pre-wrap"></pre>
+</div>
 
 <script id="core">
 "use strict";
@@ -399,6 +438,162 @@ globalThis.CORE={ TOL_RANK, TOL_RED, TOL_MODE, SIGMA_DEF, SUGGEST_CHECK_MAX,
                   dist, idx, activeMeas, residuals, jacobian, luSolve, matTmat, matTvec,
                   gramSchmidt, nullSpace, leverage, gaugeFixed, freeCols, scaleSketch, solve, analyze,
                   trivialModes, covariance, ellipse, wallPolygon, pointInPoly, segInPoly, suggest };
+</script>
+
+<script id="ui">
+"use strict";
+const C=globalThis.CORE;
+const M={ pts:[], walls:[], meas:[], mode:'point', sel:[], fit:null, an:null, drag:null };
+
+// --- Punkt-IDs: A..Z, dann AA, AB, ...
+// Der Zaehler laeuft monoton und wird beim Loeschen NICHT zurueckgesetzt.
+// Waere er an M.pts.length gebunden, ergaebe "A,B,C anlegen, B loeschen,
+// neuer Punkt" wieder ein C - und zwei Punkte haetten dieselbe ID.
+let idSeq=0;
+function nextId(){
+  let i=idSeq++, s='';
+  do{ s=String.fromCharCode(65+i%26)+s; i=Math.floor(i/26)-1; }while(i>=0);
+  return s;
+}
+
+// --- Weltkoordinaten (mm) <-> Bildschirm
+const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+let VIEW={s:1, ox:0, oy:0};
+const toScr=p=>({x:p.x*VIEW.s+VIEW.ox, y:p.y*VIEW.s+VIEW.oy});
+const toWorld=(x,y)=>({x:(x-VIEW.ox)/VIEW.s, y:(y-VIEW.oy)/VIEW.s});
+
+function autofit(){
+  const P=M.fit?M.fit.pts:M.pts;
+  if(!P.length){ VIEW={s:1,ox:cv.width/2,oy:cv.height/2}; return; }
+  const xs=P.map(p=>p.x), ys=P.map(p=>p.y);
+  const w=Math.max(...xs)-Math.min(...xs)||1000, h=Math.max(...ys)-Math.min(...ys)||1000;
+  const s=Math.min((cv.width-80)/w, (cv.height-80)/h);
+  VIEW={ s, ox:cv.width/2-(Math.min(...xs)+w/2)*s, oy:cv.height/2-(Math.min(...ys)+h/2)*s };
+}
+
+function recompute(){
+  if(M.pts.length>=2 && C.activeMeas(M.meas).length){
+    M.fit=C.solve(M.pts, M.meas);
+    M.an=C.analyze(M.fit.pts, M.meas);
+  } else { M.fit=null; M.an=null; }
+  render();
+}
+
+function render(){
+  const dpr=devicePixelRatio||1;
+  cv.width=cv.clientWidth*dpr; cv.height=cv.clientHeight*dpr;
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.clearRect(0,0,cv.width,cv.height);
+  autofit();
+  const P=M.fit?M.fit.pts:M.pts, I=C.idx(P);
+  // Waende
+  ctx.strokeStyle='#333'; ctx.lineWidth=2*dpr;
+  M.walls.forEach(([a,b])=>{
+    if(I[a]==null||I[b]==null) return;
+    const p=toScr(P[I[a]]), q=toScr(P[I[b]]);
+    ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
+  });
+  // Messungen
+  ctx.strokeStyle='#3a7'; ctx.lineWidth=1*dpr; ctx.setLineDash([6*dpr,4*dpr]);
+  C.activeMeas(M.meas).forEach(m=>{
+    if(I[m.a]==null||I[m.b]==null) return;
+    const p=toScr(P[I[m.a]]), q=toScr(P[I[m.b]]);
+    ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
+  });
+  ctx.setLineDash([]);
+  // Punkte
+  P.forEach((pt,i)=>{
+    const p=toScr(pt);
+    ctx.fillStyle=M.sel.includes(pt.id)?'#c30':'#036';
+    ctx.beginPath(); ctx.arc(p.x,p.y,5*dpr,0,7); ctx.fill();
+    ctx.fillStyle='#000'; ctx.font=`${12*dpr}px system-ui`;
+    ctx.fillText(pt.id, p.x+8*dpr, p.y-8*dpr);
+  });
+  renderPanel();
+}
+
+function hit(wx,wy){
+  const P=M.fit?M.fit.pts:M.pts;
+  let best=null, bd=Infinity;
+  P.forEach(p=>{ const d=C.dist(p,{x:wx,y:wy}); if(d<bd){bd=d;best=p;} });
+  return (best && bd*VIEW.s < 14) ? best : null;
+}
+
+cv.addEventListener('mousedown',e=>{
+  const r=cv.getBoundingClientRect(), dpr=devicePixelRatio||1;
+  const w=toWorld((e.clientX-r.left)*dpr, (e.clientY-r.top)*dpr);
+  const h=hit(w.x,w.y);
+  if(M.mode==='point'){
+    if(h){ M.drag=h.id; return; }
+    M.pts.push({id:nextId(), x:w.x, y:w.y}); recompute(); return;
+  }
+  if(!h) return;
+  M.sel.push(h.id);
+  if(M.sel.length===2){
+    const [a,b]=M.sel; M.sel=[];
+    if(a===b){ render(); return; }
+    if(M.mode==='wall'){
+      const k=[a,b].sort().join('|');
+      const at=M.walls.findIndex(w2=>[w2[0],w2[1]].sort().join('|')===k);
+      if(at>=0) M.walls.splice(at,1); else M.walls.push([a,b]);   // Klick toggelt
+      recompute();
+    } else {
+      const s=prompt(`Abstand ${a}–${b} in mm:`);
+      const d=parseFloat((s||'').replace(',','.'));
+      if(isFinite(d) && d>0) M.meas.push({a,b,d,sigma:C.SIGMA_DEF,on:true});
+      else if(s!==null) alert('Ungültig: Abstand muss eine Zahl größer 0 sein.');
+      recompute();
+    }
+  } else render();
+});
+
+// Rechtsklick loescht einen Punkt samt allem, was auf ihn zeigt. Ohne die
+// Kaskade blieben verwaiste Verweise in walls/meas stehen und jacobian liefe
+// auf undefined. Ein Fehlklick ist auf einem Klick-Canvas sicher, und ein
+// uebriger Punkt kostet dauerhaft 2 Freiheitsgrade.
+cv.addEventListener('contextmenu',e=>{
+  e.preventDefault();
+  const r=cv.getBoundingClientRect(), dpr=devicePixelRatio||1;
+  const w=toWorld((e.clientX-r.left)*dpr, (e.clientY-r.top)*dpr);
+  const h=hit(w.x,w.y);
+  if(!h) return;
+  M.pts=M.pts.filter(p=>p.id!==h.id);
+  M.walls=M.walls.filter(([a,b])=>a!==h.id&&b!==h.id);
+  M.meas=M.meas.filter(m=>m.a!==h.id&&m.b!==h.id);
+  M.sel=[];
+  recompute();
+});
+
+cv.addEventListener('mousemove',e=>{
+  if(!M.drag) return;
+  const r=cv.getBoundingClientRect(), dpr=devicePixelRatio||1;
+  const w=toWorld((e.clientX-r.left)*dpr, (e.clientY-r.top)*dpr);
+  const p=M.pts.find(x=>x.id===M.drag);
+  if(p){ p.x=w.x; p.y=w.y; render(); }
+});
+addEventListener('mouseup',()=>{ if(M.drag){ M.drag=null; recompute(); } });
+
+document.querySelectorAll('#modes button').forEach(b=>{
+  b.onclick=()=>{
+    M.mode=b.dataset.mode; M.sel=[];
+    document.querySelectorAll('#modes button').forEach(x=>
+      x.setAttribute('aria-pressed', String(x===b)));
+    document.getElementById('hint').textContent=
+      {point:'Klicken legt an, Ziehen verschiebt, Rechtsklick löscht',
+       wall:'Zwei Punkte klicken (nochmal klicken entfernt die Wand)',
+       measure:'Zwei Punkte klicken, dann Maß eintippen'}[M.mode];
+    render();
+  };
+});
+addEventListener('keydown',e=>{
+  const b=document.querySelector(`#modes button[data-mode="${
+    {1:'point',2:'wall',3:'measure'}[e.key]}"]`);
+  if(b) b.click();
+});
+addEventListener('resize',render);
+
+function renderPanel(){ /* Task 11 */ }
+recompute();
 </script>
 
 <script id="checks">
