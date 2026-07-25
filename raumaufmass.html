@@ -1140,14 +1140,23 @@ globalThis.selfChecks=function(){
     const exakt=[{a:'A',b:'B',d:4000},{a:'B',b:'C',d:3000},{a:'C',b:'D',d:4000},
                  {a:'D',b:'A',d:3000},{a:'A',b:'C',d:5000}];        // m = 2n-3 = 5
     const an=C.analyze(rect,exakt);
+    // Laenge vor jedem .every()/Math.min(...) explizit mitpruefen (Review-
+    // Finding 5): .every() ist auf [] vakuos wahr und Math.min() ohne
+    // Argumente ist +Infinity, also > jede Schranke. Ein Mutant, der z.B. nur
+    // das zurueckgegebene v auf [] setzt (w, red, sigmaHat bleiben korrekt),
+    // waere ohne diese Laengenchecks von keinem der Checks unten zu fangen -
+    // ausgerechnet im Block, um den es im ganzen Werkzeug geht.
+    chk('analyze: exakt bestimmt -> v hat 5 Eintraege (einen je Messung)', an.v.length===exakt.length);
     chk('analyze: exakt bestimmt -> alle Residuen ~0', an.v.every(x=>Math.abs(x)<1e-6));
     chk('analyze: exakt bestimmt -> Redundanz 0', an.redundancy===0);
+    chk('analyze: exakt bestimmt -> w hat 5 Eintraege', an.w.length===exakt.length);
     chk('analyze: exakt bestimmt -> KEINE Messung pruefbar', an.w.every(x=>x===null));
     chk('analyze: exakt bestimmt -> sigmaHat undefiniert', an.sigmaHat===null);
     // Mit beiden Diagonalen ist jede Messung pruefbar - Grundlage des
     // Browser-Checks in Task 11. Summe der Redundanzzahlen = m - rank = 1.
     const voll=exakt.concat([{a:'B',b:'D',d:5000}]);
     const av=C.analyze(rect,voll);
+    chk('analyze: 6 Messungen -> red hat 6 Eintraege', av.red.length===voll.length);
     chk('analyze: 6 Messungen -> jede pruefbar', Math.min(...av.red)>C.TOL_RED);
     chk('analyze: Summe der Redundanzzahlen = m - rank',
        near(av.red.reduce((s,x)=>s+x,0), av.m-av.rank, 1e-9));
