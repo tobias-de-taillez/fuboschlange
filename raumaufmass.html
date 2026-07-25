@@ -10,6 +10,7 @@
   #status.warn{background:#fff4e0}
   #status.bad{background:#ffe9e9}
   #status.good{background:#eaf7ea}
+  #wallwarn{display:none;padding:6px 12px;background:#fff4e0;border-bottom:1px solid #ccc;font-size:12px}
   #modes{padding:8px 12px;border-bottom:1px solid #eee;display:flex;gap:8px}
   #modes button{padding:6px 12px;cursor:pointer}
   #modes button[aria-pressed=true]{background:#333;color:#fff}
@@ -25,6 +26,7 @@
 
 <div id="left">
   <div id="status">—</div>
+  <div id="wallwarn"></div>
   <div id="modes">
     <button data-mode="point"   aria-pressed="true">1 Punkt</button>
     <button data-mode="wall"    aria-pressed="false">2 Wand</button>
@@ -789,6 +791,21 @@ function renderPanel(){
   const [txt,cls]=statusText();
   const st=document.getElementById('status');
   st.textContent=txt; st.className=cls;
+
+  // Wandring kaputt -> Messbarkeitsfilter in suggest() ist aus (siehe dort),
+  // Vorschlaege koennen also Strecken enthalten, die real durch eine Wand
+  // laufen. Eigener, von statusText() unabhaengiger Hinweis: das ist kein
+  // Netzzustand (unter-/ueberbestimmt/widerspruechlich), sondern eine Aussage
+  // ueber den Wandzug, die mit jedem dieser Zustaende gleichzeitig gelten
+  // kann. wallPolygon() entscheidet rein aus der Adjazenz der IDs, nicht aus
+  // Koordinaten - M.pts reicht, ein Fit wird dafuer nicht gebraucht.
+  const wwEl=document.getElementById('wallwarn');
+  const ringBroken = M.walls.length>0 && !C.wallPolygon(M.pts, M.walls);
+  wwEl.style.display = ringBroken ? 'block' : 'none';
+  if(ringBroken) wwEl.textContent =
+    'Wandzug nicht geschlossen (oder ein Punkt hat nicht genau zwei Wände) — '
+   +'die Vorschlagsliste ist deshalb ungefiltert und kann Strecken enthalten, '
+   +'die sich nicht direkt messen lassen.';
 
   const tb=document.querySelector('#tbl tbody');
   tb.innerHTML='';
