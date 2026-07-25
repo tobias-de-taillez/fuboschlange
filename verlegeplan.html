@@ -256,6 +256,10 @@ const S = {
   // sich erst schließen, wenn Task 2 die separate Randzone entfernt und die
   // Rampe ohne windowEdges-Sonderfall wirken kann.
   useEikonal:false,
+  // Straight-Skeleton-Offset (rektilinear, exakt) statt Distanzfeld-Isolinien.
+  // Isolinien runden konvexe Ecken mit dem Radius des Niveaus ab; dort blieb der
+  // Boden unbeheizt. Siehe rectiOffsetter.
+  useSkeleton:true,
   // Kraftmodell-Feinabstimmung nach der Konstruktion. AUS, gemessen:
   // es verschlechtert alle vier harten Kriterien.
   //
@@ -642,16 +646,28 @@ function zoneField(poly,insOf,step){
   const d=new Float32Array(nx*ny);
   for(let j=0;j<ny;j++)for(let i=0;i<nx;i++){
     const px=x0+i*step, py=y0+j*step;
-    let best=Infinity, bi=0, inside=false;
+    let best=Infinity, bestIns=Infinity, inside=false;
     for(let k=0,m=poly.length-1;k<poly.length;m=k++){
       const a=poly[m], b=poly[k];
       const dx=b.x-a.x, dy=b.y-a.y, l2=dx*dx+dy*dy||1;
       let t=((px-a.x)*dx+(py-a.y)*dy)/l2; t=t<0?0:t>1?1:t;
       const ex=a.x+t*dx-px, ey=a.y+t*dy-py, dd=ex*ex+ey*ey;
-      if(dd<best){best=dd;bi=m;}
+      if(dd<best) best=dd;
+      // JEDE Kante muss ihr eigenes Inset einhalten: das Feld ist das MINIMUM
+      // über alle Kanten von (Abstand − Inset). Vorher wurde der Abstand zur
+      // NÄCHSTEN Kante minus DEREN Inset genommen — damit durfte ein Punkt das
+      // große Inset einer Wand verletzen, sobald eine andere Kante mit kleinem
+      // Inset zufällig näher lag.
+      // Gemessen an einem 11000x4500-L mit randPasses=3: der Korridor reicht bis
+      // y=910, das Feld lief aber bis y=110 hinunter, 22 % der Feldpunkte lagen
+      // IM Korridor — dort, wo Randzone und Anbindeleitungen verlaufen. Das war
+      // die Quelle von 141 statt 22 Kreuzungen, und es hat die Deckung
+      // fälschlich gehoben, weil es Rohr auf reservierter Fläche gezählt hat.
+      const v=Math.sqrt(dd)-insOf(m);
+      if(v<bestIns) bestIns=v;
       if((a.y>py)!==(b.y>py) && px<a.x+(py-a.y)/(b.y-a.y)*(b.x-a.x)) inside=!inside;
     }
-    d[j*nx+i]=(inside?1:-1)*Math.sqrt(best)-insOf(bi);
+    d[j*nx+i]= inside ? bestIns : -Math.sqrt(best);
   }
   return {x0,y0,step,nx,ny,d};
 }
@@ -772,6 +788,116 @@ function chainSegs(segs,step){
   }
   return out;
 }
+// ===== Rektilinearer Mitered Offset (Straight-Skeleton-Prinzip) =====
+// Die Isolinien des Distanzfeldes RUNDEN konvexe Ecken ab: der Abstand zur
+// nächsten Kante ist dort ein Kreisbogen um den Eckpunkt mit Radius = Niveau.
+// Genau da blieb der Boden unbeheizt — gemessen 807 mm tote Zone in der konvexen
+// Ecke des L. Shahid 2024 nennt dafür den Straight-Skeleton-Offset: er "maintains
+// sharp corners and preserves the overall shape" und "inherently avoids creating
+// intersecting geometries" — beides genau unsere zwei offenen Probleme.
+//
+// Die volle Skeleton-Maschinerie (Kanten- und Split-Ereignisse, Motorcycle-Graph)
+// braucht es hier nicht: unsere Zone ist per Spezifikation rektilinear, und ein
+// rektilineares L ist ein Rechteck MINUS ein Eck-Rechteck. Der mitered Offset ist
+// dann exakt
+//     (Rechteck um d verkleinert)  \  (Notch um d vergrößert)
+// mit je Kante eigenem Inset. Der Beweis ist die Kantenrechnung: jede Stützgerade
+// wandert um ihren Inset + d nach innen, und die neuen Eckpunkte sind die
+// Schnittpunkte benachbarter Stützgeraden — genau das liefert die Mengendifferenz.
+// Läuft eine Lobe zu (Kanten-Ereignis), fällt die Topologie-Änderung von selbst
+// heraus, weil die Differenz dann leer wird.
+//
+// Liefert eine Funktion d -> Ringpunkte (ohne Doppelpunkt am Ende), oder null,
+// wenn das Polygon nicht rektilinear ist. Dann bleibt der Isolinien-Pfad.
+function rectiOffsetter(poly,insOf){
+  const eps=1e-6, AX=1;                     // AX: Toleranz "auf derselben Achse"
+  if(poly.length!==4&&poly.length!==6) return null;
+  const edges=poly.map((a,i)=>({a,b:poly[(i+1)%poly.length],ins:insOf(i)}));
+  const horiz=e=>Math.abs(e.a.y-e.b.y)<AX, vert=e=>Math.abs(e.a.x-e.b.x)<AX;
+  if(!edges.every(e=>horiz(e)||vert(e))) return null;
+  let X0=Infinity,Y0=Infinity,X1=-Infinity,Y1=-Infinity;
+  poly.forEach(p=>{X0=Math.min(X0,p.x);Y0=Math.min(Y0,p.y);
+                   X1=Math.max(X1,p.x);Y1=Math.max(Y1,p.y);});
+  // Inset einer Aussenseite = das GRÖSSTE Inset der Kanten, die darauf liegen.
+  // Größte, nicht kleinste: der Offset muss jede dieser Kanten einhalten.
+  const sideIns=pick=>{ let v=null;
+    edges.forEach(e=>{ if(pick(e)) v=(v==null?e.ins:Math.max(v,e.ins)); });
+    return v; };
+  const insB=sideIns(e=>horiz(e)&&Math.abs(e.a.y-Y0)<AX);
+  const insT=sideIns(e=>horiz(e)&&Math.abs(e.a.y-Y1)<AX);
+  const insL=sideIns(e=>vert(e) &&Math.abs(e.a.x-X0)<AX);
+  const insR=sideIns(e=>vert(e) &&Math.abs(e.a.x-X1)<AX);
+  if(insB==null||insT==null||insL==null||insR==null) return null;
+
+  let notch=null;
+  if(poly.length===6){
+    // Der Reflex-Eckpunkt ist der einzige, der auf keiner bbox-Seite liegt.
+    const rv=poly.find(p=>Math.abs(p.x-X0)>AX&&Math.abs(p.x-X1)>AX
+                        &&Math.abs(p.y-Y0)>AX&&Math.abs(p.y-Y1)>AX);
+    if(!rv) return null;
+    // In welcher bbox-Ecke fehlt Fläche? Die Ecke, die nicht im Polygon liegt.
+    const inPoly=(x,y)=>{ let c=false;
+      for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+        const a=poly[j],b=poly[i];
+        if((a.y>y)!==(b.y>y)&&x<a.x+(y-a.y)/((b.y-a.y)||1e-9)*(b.x-a.x)) c=!c; }
+      return c; };
+    // Testpunkt ein Stück nach innen, damit der Rand selbst nicht mitzählt.
+    const inset=Math.min(X1-X0,Y1-Y0)*0.01+AX;
+    const miss=[[X0,Y0],[X1,Y0],[X1,Y1],[X0,Y1]].find(([x,y])=>
+      !inPoly(x+(Math.abs(x-X0)<AX?inset:-inset), y+(Math.abs(y-Y0)<AX?inset:-inset)));
+    if(!miss) return null;
+    const sx=Math.abs(miss[0]-X1)<AX?1:-1, sy=Math.abs(miss[1]-Y1)<AX?1:-1;
+    const insNX=sideIns(e=>vert(e) &&Math.abs(e.a.x-rv.x)<AX);
+    const insNY=sideIns(e=>horiz(e)&&Math.abs(e.a.y-rv.y)<AX);
+    if(insNX==null||insNY==null) return null;
+    notch={rx:rv.x,ry:rv.y,sx,sy,insNX,insNY};
+  }
+
+  return d=>{
+    const ax0=X0+insL+d, ax1=X1-insR-d, ay0=Y0+insB+d, ay1=Y1-insT-d;
+    if(ax1-ax0<eps||ay1-ay0<eps) return null;
+    const rect=(x0,y0,x1,y1)=>[{x:x0,y:y0},{x:x1,y:y0},{x:x1,y:y1},{x:x0,y:y1}];
+    if(!notch) return rect(ax0,ay0,ax1,ay1);
+    // In ein Bild spiegeln, in dem der Notch oben rechts liegt — dann gibt es nur
+    // einen Fallbaum statt vier. Die Spiegelung ist selbstinvers.
+    const fx=v=>notch.sx>0?v:-v, fy=v=>notch.sy>0?v:-v;
+    const bx0=Math.min(fx(ax0),fx(ax1)), bx1=Math.max(fx(ax0),fx(ax1));
+    const by0=Math.min(fy(ay0),fy(ay1)), by1=Math.max(fy(ay0),fy(ay1));
+    const cx=fx(notch.rx-notch.sx*(notch.insNX+d));
+    const cy=fy(notch.ry-notch.sy*(notch.insNY+d));
+    const back=(x,y)=>({x:fx(x),y:fy(y)});
+    // Genau eine gespiegelte Achse dreht den Umlaufsinn.
+    const fin=pts=>{
+      if(notch.sx*notch.sy<0) pts.reverse();
+      return pts;
+    };
+    let pts;
+    if(cx>=bx1-eps||cy>=by1-eps){                 // Notch greift nicht mehr hinein
+      pts=[back(bx0,by0),back(bx1,by0),back(bx1,by1),back(bx0,by1)];
+    }else if(cx<=bx0+eps){                        // Notch nimmt die ganze Oberseite
+      if(cy-by0<eps) return null;
+      pts=[back(bx0,by0),back(bx1,by0),back(bx1,cy),back(bx0,cy)];
+    }else if(cy<=by0+eps){                        // Notch nimmt die ganze rechte Seite
+      if(cx-bx0<eps) return null;
+      pts=[back(bx0,by0),back(cx,by0),back(cx,by1),back(bx0,by1)];
+    }else{                                        // echtes L
+      // VERWORFEN, gemessen: die Reflex-Ecke als Kreisbogen statt als Spitze.
+      // Die Geometrie-Überlegung stimmt — am konvexen Eck ist der mitered
+      // Schnitt identisch mit der Euklidischen Erosion (Abstand zum Rand ist dort
+      // min der zwei Kantenabstände, das Niveau also eine Spitze), an der
+      // Notch-Innenecke ist der nächste Randpunkt aber der Eckpunkt selbst, also
+      // ein Bogen mit Radius d, und die Spitze liegt d*sqrt(2) vom Eck entfernt
+      // statt d. Der Bogen gewinnt damit Fläche, die beheizt werden könnte.
+      // Er verliert aber MEHR Rohrlänge als er Fläche gewinnt: der Viertelbogen
+      // ist d*pi/2 lang, die zwei Schenkel der Spitze zusammen 2d. Gemessen an
+      // der Standardkonfiguration: Deckung 42,66 % mit Bogen gegen 43,01 % mit
+      // Spitze, über 500 Bench-Läufe bit-identisch. Also Spitze.
+      pts=[back(bx0,by0),back(bx1,by0),back(bx1,cy),
+           back(cx,cy),back(cx,by1),back(bx0,by1)];
+    }
+    return fin(pts);
+  };
+}
 // Bifilare Doppelspirale auf formfolgenden Isolinien.
 // Vorlauf = Bahnen 0,2,4..., Rücklauf = 1,3,5..., innen per U-Turn verbunden.
 // Die Bahnen sind Niveaulinien desselben Feldes und daher immer um s versetzt
@@ -803,22 +929,38 @@ function doubleSpiralField(poly,insOf,s,gate){
   // schon in der Feldgleichung steckt (|grad phi| = 1/s(x)). Randzone ist dann
   // kein Sonderfall, sondern ein Gebiet mit kleinerem s.
   const useEik=S.useEikonal;
-  const F=useEik?eikonalField(poly,insOf,step,spacingAt):zoneField(poly,insOf,step);
-  const lvl=useEik?1:s;                 // Niveau-Abstand im jeweiligen Feld
   const rings=[];
   // Innerste Windungen weglassen, sobald der Ring enger wird als 2x Biegeradius:
   // dort ist die Krümmung inhärent zu scharf für das Rohr und keine Glättung
   // kann das heilen — der Ring wird nur zur Spitze mit Radius nahe 0.
   const Rb=S.bendRadius;
-  for(let k=0;k<200;k++){
-    const cs=isoContours(F,k*lvl).filter(c=>polyLen(c)>4*s);
-    if(!cs.length) break;
-    cs.sort((a,b)=>polyLen(b)-polyLen(a));
-    const c=cs[0];
+  // Ring zu flach oder zu kurz? Dann ist die Spirale hier zu Ende. Gleiche
+  // Abbruchbedingung für beide Erzeuger, damit der A/B-Vergleich nur den Offset
+  // vergleicht und nicht zwei verschiedene Abbrüche.
+  const ringDone=c=>{
     let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
-    c.forEach(q=>{x0=Math.min(x0,q.x);y0=Math.min(y0,q.y);x1=Math.max(x1,q.x);y1=Math.max(y1,q.y);});
-    if(Math.min(x1-x0,y1-y0)<2*Rb) break;      // zu eng für den Biegeradius
-    rings.push(simplify(c,Math.max(2,step*0.15)));
+    c.forEach(q=>{x0=Math.min(x0,q.x);y0=Math.min(y0,q.y);
+                  x1=Math.max(x1,q.x);y1=Math.max(y1,q.y);});
+    return Math.min(x1-x0,y1-y0)<2*Rb || polyLen([...c,c[0]])<=4*s;
+  };
+  const mkRing=(S.useSkeleton&&!useEik)?rectiOffsetter(poly,insOf):null;
+  if(mkRing){
+    for(let k=0;k<200;k++){
+      const c=mkRing(k*s);
+      if(!c||ringDone(c)) break;
+      rings.push(c);
+    }
+  }else{
+    const F=useEik?eikonalField(poly,insOf,step,spacingAt):zoneField(poly,insOf,step);
+    const lvl=useEik?1:s;               // Niveau-Abstand im jeweiligen Feld
+    for(let k=0;k<200;k++){
+      const cs=isoContours(F,k*lvl).filter(c=>polyLen(c)>4*s);
+      if(!cs.length) break;
+      cs.sort((a,b)=>polyLen(b)-polyLen(a));
+      const c=simplify(cs[0],Math.max(2,step*0.15));
+      if(ringDone(c)) break;
+      rings.push(c);
+    }
   }
   if(!rings.length) return [];
   // Alle Ringe an DERSELBEN Naht aufschneiden (verteilernächste Stelle des
@@ -2597,13 +2739,28 @@ function smoothToRadius(pts,rmin,iters){
 // Ausdünnen bleibt die Form erhalten: die Punkte liegen auf der alten Bahn, nur
 // gleichmäßig verteilt. Nötig, weil fillet je Ecke bendRadius Platz auf beiden
 // Nachbarsegmenten braucht — 11 mm lange Segmente lassen keinen 80er Bogen zu.
-function resampleArc(pts,stepLen){
+function resampleArc(pts,stepLen,keepDeflDeg){
   if(pts.length<3) return pts;
+  // ECKEN ERHALTEN. Neuabtasten setzt Punkte in gleichen Bogenlängen-Abständen und
+  // übernimmt die Eingabe-Eckpunkte NICHT — eine scharfe Ecke wird dadurch als
+  // Sehne abgeschnitten, und zwar bei jedem der vier Durchläufe erneut. Genau das
+  // hat früher die konvexe Ecke des L ausgefranst (gemessen: die Glättungskette
+  // trieb gapMax um ~250 mm hoch). Beim Straight-Skeleton-Offset sind die scharfen
+  // Ecken der Sinn der Sache, also werden Eckpunkte über der Schwelle unverändert
+  // übernommen und setzen den Rest-Zähler zurück.
+  const KEEP=Math.cos((keepDeflDeg??20)*Math.PI/180);
+  const sharp=i=>{
+    if(i<=0||i>=pts.length-1) return false;
+    const p=pts[i-1],q=pts[i],r=pts[i+1];
+    if(len(sub(q,p))<1e-9||len(sub(r,q))<1e-9) return false;
+    return dot(unit(sub(q,p)),unit(sub(r,q)))<KEEP;
+  };
   const out=[{x:pts[0].x,y:pts[0].y}];
   let carry=0;
   for(let i=1;i<pts.length;i++){
     const a=pts[i-1], b=pts[i];
     if(b.arc){ out.push(b); carry=0; continue; }      // vorgegebene Bögen erhalten
+    if(sharp(i)){ out.push({x:b.x,y:b.y}); carry=0; continue; }
     let segLen=len(sub(b,a));
     if(segLen<1e-9) continue;
     let t=(stepLen-carry)/segLen;

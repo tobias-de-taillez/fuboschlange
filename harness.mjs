@@ -11,7 +11,7 @@ export const EXPORTS = [
   'loopCrossings', 'loopsOutside', 'heatCoverage', 'gapMax',
   'zonePolyOf', 'zoneField', 'eikonalField', 'isoContours', 'insetsFor',
   'polyLen', 'simplify', 'fieldInset', 'spacingAt', 'lRing', 'chainSegs',
-  'randW', 'omegaClear', 'randWidth', 'notchFrame', 'doubleSpiralField',
+  'rectiOffsetter', 'randW', 'omegaClear', 'randWidth', 'notchFrame', 'doubleSpiralField',
   'snappedManifold', 'rotFwd', 'rotBack', 'rotForManifold', 'frameW', 'frameH',
   'fillet', 'smoothToRadius', 'resampleArc', 'relaxLoops', 'pointInRoom',
   'S',
