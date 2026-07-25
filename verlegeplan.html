@@ -1183,6 +1183,35 @@ function doubleSpiralField(poly,insOf,s,gate){
   // 19 bewegt: der Ansatz stimmt, aber die Bruecke braucht eine Fuehrung, die
   // sie im Korridor zwischen Ring k und k+2 haelt — eine freie Hermite nutzt den
   // Platz nicht, sie nimmt ihn sich.
+  // VERWORFEN, gemessen: GEFUEHRTE BRUECKE zwischen zwei Ringen. Jeder
+  // Bruecken-Punkt als Konvexkombination aus einem Punkt auf Ring k und einem
+  // auf Ring k+2 — damit liegt sie per Konstruktion im Band zwischen beiden und
+  // kann keine dritte Bahn treffen.
+  //
+  // Sie loest damit auch genau das Problem der freien Hermite aus Runde 9
+  // (medianCross blieb bei 5 statt auf 11 zu springen), bringt aber deren
+  // Radiusgewinn nicht mit:
+  //
+  //   Bruecken-Laenge Lb   crossFails  covFails  radFails  medCross  medRadius
+  //   keine Bruecke                19        10        19         5        39
+  //   min(2R, 0.25*Ring)           19        10        19         5        40
+  //   min(4R, 0.25*Ring)           19        10        19         5        40
+  //   min(8R, 0.25*Ring)           20        10        19         5        38
+  //   min(16R, 0.35*Ring)          20        10        20         6        30
+  //   0.25*Ring                    20        10        20        11        41
+  //
+  // Auf den Gates exakt neutral, bei laengerer Bruecke schlechter. Neutrale
+  // Komplexitaet faellt raus.
+  //
+  // Der Grund ist strukturell: eine Kehre, die im 2s-Band zwischen den Ringen
+  // BLEIBT, kann keinen Radius wesentlich ueber s haben. Einspannung und Radius
+  // stehen also direkt gegeneinander — die freie Hermite gewinnt Radius, weil
+  // sie aus dem Band ausbricht, und kreuzt genau deshalb.
+  //
+  // Nachgerechnet, wie oft das bindend ist: nur 2 von 20 Bench-Laeufen haben
+  // ueberhaupt R > s (Dia 17 mit s=75 und s=80). Die Einspannungs-Grenze erklaert
+  // damit hoechstens 10 % der radFails, nicht die 19. Die Naht ist also NICHT
+  // die Hauptursache des Radius-Gates — dort muss anderswo gesucht werden.
   const pts=[];
   inArm.forEach(r=>pts.push(...r));
   let back=outArm.slice().reverse().map(r=>r.slice().reverse());
