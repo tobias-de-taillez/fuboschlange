@@ -3,10 +3,10 @@
  "crossFails": 19,
  "covFails": 12,
  "radFails": 20,
- "outFails": 1,
- "loopsOutside": 1,
- "worstLoopsOutside": 1,
- "segsOutside": 22,
+ "outFails": 0,
+ "loopsOutside": 0,
+ "worstLoopsOutside": 0,
+ "segsOutside": 0,
  "errFails": 0,
  "worstCoverage": 9,
  "worstRadius": 0,
@@ -19,5 +19,5 @@
  "crossFailRate": 0.95,
  "covFailRate": 0.6,
  "radFailRate": 1,
- "outFailRate": 0.05
+ "outFailRate": 0
 }

@@ -1377,6 +1377,20 @@ function chainPass(chain,off,endGap){
 function randzoneChain(chain){
   const {edgeGap,randSpacing,randPasses}=S;
   const endGap = edgeGap + (omegaOn()?S.bendRadius:0);   // Platz für den Ausschwung
+  // Ein Arm, der kuerzer ist als die beidseitige Einrueckung, hat keine nutzbare
+  // Laenge mehr: chainPass liefert dann eine INVERTIERTE Bahn, die ueber beide
+  // Enden hinauslaeuft. Gemessen genau das — Verteiler bei Frame x=227, linker
+  // Arm also 227 mm lang bei 250 mm Einrueckung je Ende, Randzone danach bei
+  // Frame x=-23 und -103, im Weltbild ueber der Oberkante des Raums.
+  // Ein Laengentest genuegt hier NICHT: die invertierte Bahn hat eine positive
+  // Laenge, sie laeuft nur falsch herum. Geprueft wird deshalb direkt, ob die
+  // Bahn im Raum liegt — in Weltkoordinaten, weil der Grundriss dort definiert
+  // ist. Liegt sie draussen, gibt es auf diesem Arm keine Randzone.
+  {
+    const probe=chainPass(chain, edgeGap, endGap);
+    if(!probe||probe.length<2) return [];
+    if(!probe.every(q=>pointInRoom(rotBack(q,S.W,S.H)))) return [];
+  }
   const pts=[];
   for(let j=0;j<randPasses;j++){
     let pass=chainPass(chain, edgeGap+j*randSpacing, endGap);
