@@ -249,11 +249,11 @@ const S = {
   // Davon strikt getrennt: das Kartenmittel bezieht sich auf die GEOMETRISCHE
   // Bodenfläche des Grundrisses — beide Werte dürfen nie vermischt werden.
   thermal:{
-    enabled:true, view:'power',
+    enabled:false, view:'power',   // Zusatzansicht, nicht der Plan selbst
     targetPowerW:2000, activeAreaM2:30,
     roomTempC:22, flowTempC:38, returnTempC:32,
     influenceLengthMm:75, gridSizeMm:40, surfaceCoefficient:10.8,
-    opacity:0.62, includeLeaders:true,
+    opacity:0.35, includeLeaders:true,   // dezent: die Zeichnung muss lesbar bleiben
     colorScaleMode:'fixed', powerScaleMaxWm2:120,
     normalSurfaceLimitC:29, edgeSurfaceLimitC:35,
   },
@@ -1736,12 +1736,19 @@ function draw(plan){
 
   const room=lRing(0,0,W,H,S.notchA,S.notchB);
   const roomClosed=[...room,room[0]];
-  const sw=Math.max(6,S.pipeDia*0.55);
+  // Rohr in etwa seiner wahren Breite: der Plan wird auf der Baustelle danach
+  // verlegt, eine Haarlinie hilft dort niemandem.
+  const sw=Math.max(14,S.pipeDia*1.0);
 
   // Fensterwände (Notch-bewusst: Oberwand endet am Notch, rechte Wand darunter)
   const xTE=hasNotch()?notchX():W, yRE=hasNotch()?H-S.notchB:H;
   const edgePts={bottom:[{x:0,y:0},{x:W,y:0}],top:[{x:0,y:H},{x:xTE,y:H}],left:[{x:0,y:0},{x:0,y:H}],right:[{x:W,y:0},{x:W,y:yRE}]};
-  let winSeg=wEdges().map(e=>line(edgePts[e][0],edgePts[e][1],'var(--window)',34)).join('');
+  // Fensterfront wird IN der Wand dargestellt, nicht darüber: eine dicke Linie
+  // über der Wandkontur löscht den Grundriss an genau den Stellen aus, die den
+  // Plan orientieren. Deshalb ein schmaler heller Streifen in der Wandmitte,
+  // wie die Fensteröffnung in einer Bauzeichnung.
+  const winW=Math.max(28,S.pipeDia*2.2)*0.45;
+  let winSeg=wEdges().map(e=>line(edgePts[e][0],edgePts[e][1],'var(--window)',winW)).join('');
 
   // Jeder Kreis als EIN durchgehender Pfad (Verteiler -> ... -> Verteiler):
   // Stückel-Zeichnung ließ die Übergänge (rand->mid->Feld) optisch offen.
@@ -1785,15 +1792,24 @@ function draw(plan){
       ` pointer-events="none" href="${hres.imageURL}"/>`;
   }
 
+  // Schichtung wie in einer technischen Zeichnung: Papier, Raumfläche, optional
+  // die Heatmap, DANN die Wand, darüber die Rohre, zuoberst Verteiler und
+  // Beschriftung. Entscheidend ist, dass die Wandkontur ÜBER der Heatmap liegt
+  // — lag sie darunter, verschwand der Grundriss unter den Farbflächen und der
+  // Plan war als Zeichnung nicht mehr lesbar.
+  const wallW=Math.max(28,S.pipeDia*2.2);
   const svg=`<svg viewBox="0 0 ${W+2*m} ${H+2*m}" xmlns="http://www.w3.org/2000/svg" id="svg">`+
     hmDefs+
     `<rect x="0" y="0" width="${W+2*m}" height="${H+2*m}" fill="#fff"/>`+
-    `<polygon points="${roomClosed.map(p=>PP(p)).join(' ')}" fill="#f8fafc" stroke="#334155" stroke-width="22" stroke-linejoin="round"/>`+
+    `<polygon points="${roomClosed.map(p=>PP(p)).join(' ')}" fill="#fff"/>`+
     hmLayer+
+    // Wand als kräftige Doppellinie: außen dunkel, innen schmal hell abgesetzt.
+    `<polygon points="${roomClosed.map(p=>PP(p)).join(' ')}" fill="none" stroke="#0f172a" stroke-width="${wallW}" stroke-linejoin="miter"/>`+
+    `<polygon points="${roomClosed.map(p=>PP(p)).join(' ')}" fill="none" stroke="#fff" stroke-width="${wallW*0.35}" stroke-linejoin="miter"/>`+
     winSeg+leaders+loopPaths+marks+
-    `<circle cx="${X(M.x)}" cy="${Y(M.y)}" r="55" fill="#0f172a"/>`+
-    `<circle cx="${X(M.x)}" cy="${Y(M.y)}" r="26" fill="#fff"/>`+
-    `<text x="${X(M.x)}" y="${Y(M.y)-90}" font-size="82" fill="#0f172a" text-anchor="middle" font-family="system-ui">Verteiler</text>`+
+    `<circle cx="${X(M.x)}" cy="${Y(M.y)}" r="70" fill="#fff" stroke="#0f172a" stroke-width="16"/>`+
+    `<circle cx="${X(M.x)}" cy="${Y(M.y)}" r="26" fill="#0f172a"/>`+
+    `<text x="${X(M.x)}" y="${Y(M.y)-110}" font-size="92" fill="#0f172a" text-anchor="middle" font-family="system-ui" font-weight="600">Verteiler</text>`+
     scaleBar+dims+`</svg>`;
   document.getElementById('plan').innerHTML=svg;
   // 'click' statt 'pointerdown': feuert nicht bei Scroll-Gesten — Touch-Nutzer
