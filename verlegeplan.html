@@ -248,11 +248,13 @@ const S = {
   // windowEdges=[], und spacingAt kehrt dann gleich in der ersten Zeile mit
   // S.s zurück (`if(!S.windowEdges.length) return S.s`) — die neue Rampe wird
   // in diesem Pfad nie erreicht, das Feld bleibt überall gleich schnell.
-  // Zur Kontrolle mit nicht-leerem windowEdges gemessen (Rampe erreichbar):
-  // Deckung 30 %, Radius spürbar besser (15 statt 4 mm), aber Kreuzungen 74 —
-  // der Doppel-Randzonen-Konflikt von oben, weiterhin unbrauchbar. Die 26 %
-  // lassen sich erst schließen, wenn Task 2 die separate Randzone entfernt
-  // und die Rampe ohne windowEdges-Sonderfall wirken kann.
+  // Zur Kontrolle mit nicht-leerem windowEdges gemessen (Rampe erreichbar),
+  // exakt dasselbe Setup vor/nach diesem Commit verglichen: Deckung unverändert
+  // 30 %, Radius deutlich besser (4 -> 15 mm, deckt sich mit der 72-Kreuzungen-
+  // Messung oben), Kreuzungen minimal höher (72 -> 74) — der Doppel-Randzonen-
+  // Konflikt von oben bleibt bestehen, weiterhin unbrauchbar. Die 26 % lassen
+  // sich erst schließen, wenn Task 2 die separate Randzone entfernt und die
+  // Rampe ohne windowEdges-Sonderfall wirken kann.
   useEikonal:false,
   relax:true,               // Kraftmodell-Feinabstimmung nach der Konstruktion
   manifold:{x:1000,y:0},    // interne Koordinaten (Notch-rechts-Welt)
@@ -601,6 +603,11 @@ function spacingAt(px,py){
   });
   const band=S.randPasses*S.randSpacing;      // dichtes Band an der Scheibe
   const ramp=Math.max(2*S.s,band);            // Übergangsbreite
+  // Randfall randPasses=0 (band=0): die alte Sprungfunktion lieferte dann
+  // überall S.s, diese Version rampt ab der Wand (dist=0) über 2*S.s hoch und
+  // liefert direkt an der Wand randSpacing statt s. Ohne Wirkung, solange
+  // useEikonal:false; für Task 2 relevant, falls diese Kombination mit
+  // aktivem Eikonal-Feld vorkommt.
   if(dist<=band) return S.randSpacing;
   if(dist>=band+ramp) return S.s;
   const t=(dist-band)/ramp;
