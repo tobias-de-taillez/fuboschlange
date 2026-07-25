@@ -47,6 +47,9 @@ const out = {
   outFails: fails.filter(f => f.outside > 0).length,
   worstCoverage: Math.min(...fails.map(f => f.cov), 100),
   worstRadius: Math.min(...fails.map(f => f.minR ?? 999), 999),
+  // Diagnose, kein Gate: worstGap zeigt, ob Radius-Gewinne mit Flaeche bezahlt
+  // werden. Bewusst NICHT in RATE_KEYS - die vier harten Kriterien bleiben vier.
+  worstGap: Math.max(...fails.map(f => f.gap ?? 0), 0),
 };
 // Raten (Anteil an `runs`) zusätzlich zu den Absolutzahlen: Läufe mit
 // unterschiedlicher Laufzahl sind nur über die Rate vergleichbar (siehe
