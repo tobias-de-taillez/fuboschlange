@@ -49,7 +49,10 @@ const out = {
   worstRadius: Math.min(...fails.map(f => f.minR ?? 999), 999),
   // Diagnose, kein Gate: worstGap zeigt, ob Radius-Gewinne mit Flaeche bezahlt
   // werden. Bewusst NICHT in RATE_KEYS - die vier harten Kriterien bleiben vier.
-  worstGap: Math.max(...fails.map(f => f.gap ?? 0), 0),
+  // Max ueber ALLE Laeufe (fails.allGaps), nicht nur ueber die Fehlschlaege:
+  // sonst verschwindet der schlimmste Gap-Wert aus der Kennzahl, sobald ein
+  // Lauf die vier harten Kriterien besteht (die ein Folge-Task genau verbessert).
+  worstGap: Math.max(...fails.allGaps.map(g => g ?? 0), 0),
 };
 // Raten (Anteil an `runs`) zusätzlich zu den Absolutzahlen: Läufe mit
 // unterschiedlicher Laufzahl sind nur über die Rate vergleichbar (siehe

@@ -2233,10 +2233,11 @@ function selfChecks(){
   // Bahn entfernt -> gapMax = 950. Prüft Faktor 2, Rasterlage und Vorzeichen.
   {
     const sW=S.W,sH=S.H,sA=S.notchA,sB=S.notchB;
+    try{
     S.W=1000; S.H=1000; S.notchA=0; S.notchB=0;
     const g=gapMax([{pts:[{x:0,y:500},{x:1000,y:500}]}]);
-    S.W=sW; S.H=sH; S.notchA=sA; S.notchB=sB;
     A(`gapMax misst die größte Lücke (${Math.round(g)} mm)`, Math.abs(g-950)<=50);
+    } finally { S.W=sW; S.H=sH; S.notchA=sA; S.notchB=sB; }  // State IMMER zurücksetzen, auch bei Fehler
   }
   // HARTE REGEL: keine Schlaufe kreuzt sich oder eine andere. Zufalls-Bench,
   // deterministisch geseedet. Für tiefere Läufe in der Konsole:
@@ -2641,6 +2642,12 @@ function crossingBench(n,seed){
     randSpacing:S.randSpacing,randPasses:S.randPasses,windowEdges:S.windowEdges,
     loopMode:S.loopMode,manifold:S.manifold}));
   const fails=[];
+  // gap JEDES Laufs, nicht nur der Fehlschlaege: die vier harten Kriterien
+  // unten (cross/outside/cov/rad) reissen unabhaengig von gap. Ein Folge-Task
+  // verbessert genau diese vier - bestuende ein Lauf sie danach, fiele sein
+  // gap sonst ersatzlos aus der Fehlschlagliste und worstGap koennte sinken,
+  // obwohl die schlimmste Luecke unveraendert ist. Deshalb eigener Kanal.
+  const allGaps=[];
   try{
   for(let i=0;i<n;i++){
     // Raummaße um die Projektwerte streuen (+-50%), damit der Bench nicht nur
@@ -2670,6 +2677,11 @@ function crossingBench(n,seed){
     catch(e){ fails.push({err:String(e),cfg:{W:S.W,H:S.H,notchA:S.notchA,notchB:S.notchB,
       s:S.s,bendRadius:S.bendRadius,randPasses:S.randPasses,win:S.windowEdges.join('+'),
       mode:S.loopMode,mf:`${Math.round(S.manifold.x)},${Math.round(S.manifold.y)}`}}); continue; }
+    // Gleiche Infinity->null-Regel wie beim gap-Feld im Fehlschlag-Eintrag
+    // unten: ein Kreis ohne Segmente liefert Infinity, das JSON.stringify
+    // sonst still zu null verfaelscht (Math.max ueber Infinity waere sichtbar
+    // kaputt, aber erst im bench.mjs-Output).
+    allGaps.push(isFinite(gap)?Math.round(gap):null);
     // Deckungsziel nur dort fordern, wo es der Bahnabstand überhaupt zulässt:
     // die Wirkzone ist +-25 mm, also ist 2*25/s die harte Obergrenze.
     // Harte Kriterien: keine Kreuzung, kein Rohr draußen, Deckung >= 40 %,
@@ -2686,6 +2698,11 @@ function crossingBench(n,seed){
       mode:S.loopMode,mf:`${Math.round(S.manifold.x)},${Math.round(S.manifold.y)}`}});
   }
   } finally { Object.assign(S,save); }   // State IMMER zurücksetzen, auch bei Fehler
+  // Diagnose-Kanal zusaetzlich zur Fehlschlagliste, als Property auf dem
+  // bestehenden Array: bestehende Aufrufer (bench.mjs, Selbstcheck) lesen
+  // weiterhin ein Array (.length, .map, .filter, .slice) und bleiben
+  // unveraendert funktionsfaehig, ohne die Rueckgabeform umzubauen.
+  fails.allGaps=allGaps;
   return fails;
 }
 
