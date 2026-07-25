@@ -241,6 +241,18 @@ const S = {
   // dünn belegt wird. Bleibt aus, bis die Deckung nachgezogen ist.
   // Mit separater Randzone läuft sie doppelt (72 Kreuzungen, Radius 4) — die
   // beiden schließen sich aus.
+  //
+  // Task 1 (stetige Rampe statt Sprung in spacingAt, siehe Selbstcheck
+  // "spacingAt stetig"): behebt den Sprung an der Bandgrenze (50 mm -> 1 mm),
+  // ändert aber NICHT die 26 % oben. Grund: die INTEGRIERTE Messung setzt
+  // windowEdges=[], und spacingAt kehrt dann gleich in der ersten Zeile mit
+  // S.s zurück (`if(!S.windowEdges.length) return S.s`) — die neue Rampe wird
+  // in diesem Pfad nie erreicht, das Feld bleibt überall gleich schnell.
+  // Zur Kontrolle mit nicht-leerem windowEdges gemessen (Rampe erreichbar):
+  // Deckung 30 %, Radius spürbar besser (15 statt 4 mm), aber Kreuzungen 74 —
+  // der Doppel-Randzonen-Konflikt von oben, weiterhin unbrauchbar. Die 26 %
+  // lassen sich erst schließen, wenn Task 2 die separate Randzone entfernt
+  // und die Rampe ohne windowEdges-Sonderfall wirken kann.
   useEikonal:false,
   relax:true,               // Kraftmodell-Feinabstimmung nach der Konstruktion
   manifold:{x:1000,y:0},    // interne Koordinaten (Notch-rechts-Welt)
@@ -574,7 +586,9 @@ function eikonalField(poly,insOf,step,sAt){
   for(let k=0;k<phi.length;k++) if(!inside[k]||phi[k]>=INF) phi[k]=-1;
   return {x0,y0,step,nx,ny,d:phi,inside};
 }
-// Bahnabstand am Ort: an markierten Fensterwänden dichter, sonst der Sollwert.
+// Bahnabstand am Ort. Der Übergang vom dichten Randband zum Kern läuft
+// LINEAR über eine Übergangsbreite: ein Sprung würde die Isolinien an der
+// Bandgrenze zusammenlaufen lassen und dort zu enge Radien erzeugen.
 function spacingAt(px,py){
   if(!S.windowEdges.length) return S.s;
   const W=frameW(), H=frameH();
@@ -585,9 +599,12 @@ function spacingAt(px,py){
     else if(e==='left') dist=Math.min(dist,px);
     else dist=Math.min(dist,W-px);
   });
-  const band=S.randPasses*S.randSpacing;
-  if(dist>=band) return S.s;
-  return S.randSpacing;                            // im Randband: dichte Bahnen
+  const band=S.randPasses*S.randSpacing;      // dichtes Band an der Scheibe
+  const ramp=Math.max(2*S.s,band);            // Übergangsbreite
+  if(dist<=band) return S.randSpacing;
+  if(dist>=band+ramp) return S.s;
+  const t=(dist-band)/ramp;
+  return S.randSpacing+(S.s-S.randSpacing)*t;
 }
 function zoneField(poly,insOf,step){
   let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
@@ -2170,6 +2187,17 @@ function selfChecks(){
   });
   S.loopMode=bs;S.s=bss;curLoopCount=bc;
   A(`Spiralen kreuzungsfrei (${cases} Größen, 0 Overlaps)`,xc===0&&cases>0);
+  // spacingAt muss stetig sein: ein Sprung im Bahnabstand erzeugt an der
+  // Bandgrenze zusammenlaufende Isolinien und damit zu enge Radien.
+  {
+    const savedW=S.windowEdges, savedRot=ROT; ROT=0; S.windowEdges=['bottom'];
+    const band=S.randPasses*S.randSpacing;
+    let maxJump=0;
+    for(let y=0;y<band*2;y+=5)
+      maxJump=Math.max(maxJump,Math.abs(spacingAt(1000,y)-spacingAt(1000,y+5)));
+    S.windowEdges=savedW; ROT=savedRot;
+    A(`spacingAt stetig (max. Sprung ${Math.round(maxJump)} mm)`, maxJump<=6);
+  }
   // HARTE REGEL: keine Schlaufe kreuzt sich oder eine andere. Zufalls-Bench,
   // deterministisch geseedet. Für tiefere Läufe in der Konsole:
   //   crossingBench(500)  -> Liste der fehlschlagenden Parametersets
