@@ -1944,11 +1944,23 @@ function buildLoops(groups,ownerOverride,connOrder){
   // gemessen genau das: Ports bei y=2225 und 2275, waehrend die rechte Wand nur
   // bis y=2200 reicht. Jede Zuleitung startet dann schon draussen, und keine
   // Wegfuehrung kann das heilen.
-  const nf0=notchFrame();
-  let f0=0, f1=frameW();
-  if(nf0&&nf0.y0<=1){ if(nf0.x0<=1) f0=nf0.x1; else if(nf0.x1>=frameW()-1) f1=nf0.x0; }
-  const lo=f0+S.edgeGap, hi=Math.max(lo,f1-S.edgeGap-barW);
-  const bx0=Math.min(Math.max(M.x-barW/2,lo),hi);
+  // Die nutzbare Wandlaenge wird ABGETASTET, nicht aus notchFrame hergeleitet.
+  // Die hergeleitete Variante hat fuer die Drehung "Verteiler an der rechten
+  // Wand" nicht gegriffen, und die Ports lagen weiter bei y=2225 und y=2275,
+  // waehrend die Wand nur bis y=2200 reicht. Abtasten ist gegen jede Drehung und
+  // jede Notch-Lage robust: gefragt wird direkt, ob ein Punkt dicht an der
+  // Verteilerwand noch IM RAUM liegt.
+  const onWall=x=>pointInRoom(rotBack({x,y:S.edgeGap},S.W,S.H));
+  let lo=M.x, hi=M.x;
+  {
+    const step=Math.max(10,S.edgeGap/2);
+    while(lo-step>=0&&onWall(lo-step)) lo-=step;
+    while(hi+step<=frameW()&&onWall(hi+step)) hi+=step;
+    if(!onWall(M.x)){ lo=S.edgeGap; hi=Math.max(lo,frameW()-S.edgeGap); }
+  }
+  // Leiste mittig um den gesetzten Punkt, aber vollstaendig in die nutzbare
+  // Spanne geschoben. Passt sie nicht hinein, wird sie ans nahe Ende gelegt.
+  const bx0=Math.min(Math.max(M.x-barW/2,lo),Math.max(lo,hi-barW));
   seq.forEach((r,k)=>{
     const p0={x:bx0+2*k*MANIFOLD_PITCH,y:M.y};
     const p1={x:bx0+(2*k+1)*MANIFOLD_PITCH,y:M.y};
@@ -2232,11 +2244,22 @@ function autofit(){
   //
   // Andere Drehungen werden nur probiert, wenn die natürliche NICHT sauber ist:
   // im Normalfall kostet die Suche dadurch nichts.
-  const natural=rotForManifold(snappedManifold());
+  const Mw=snappedManifold();
+  const natural=rotForManifold(Mw);
+  // NUR Drehungen, bei denen der Verteiler tatsaechlich auf der Frame-Unterkante
+  // liegt. Das gesamte Korridormodell setzt das voraus: laneY misst den Abstand
+  // zur Unterkante, und routeVia faedelt alles dort ein.
+  // Ohne diese Bedingung hat die Suche fuer einen Verteiler an der RECHTEN Wand
+  // die Drehung "linke Wand" gewaehlt — der Verteiler lag dann im Frame bei
+  // y=8000 statt bei 0, also am anderen Ende, und saemtliche Anbindeleitungen
+  // liefen quer durch den Raum und teils hinaus. Gemessen war das die Quelle der
+  // 78 leadOut-Punkte ausserhalb.
+  const usable=r=>{ const keep=ROT; ROT=r;
+    const ok=Math.abs(rotFwd(Mw,S.W,S.H).y)<=1; ROT=keep; return ok; };
   let best=forRot(natural), bestRot=natural;
   if(best&&best.cross>0){
     for(const r of [0,1,2,3]){
-      if(r===natural) continue;
+      if(r===natural||!usable(r)) continue;
       const c=forRot(r);
       if(betterZones(c,best)){ best=c; bestRot=r; }
       if(best.cross===0) break;
