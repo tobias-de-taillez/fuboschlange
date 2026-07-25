@@ -1566,7 +1566,13 @@ function rotForManifold(M){
   if(M.x>=S.W-1||nearNotchSide) return 3;  // rechte Wand (auch Notch-Seitenwand)
   return 0;
 }
-function buildLoops(groups){
+// ownerOverride: welcher Kreis die Randzone übernimmt. null = Heuristik unten.
+// Die Wahl ist eine echte Stellschraube — der Verbinder zwischen zwei
+// Randzonen-Ketten läuft als 45°-Schräge durch den Übergangskanal und kann dabei
+// die Zuleitungen eines ANDEREN Kreises queren. Gemessen an der gemeldeten
+// Konfiguration waren das die letzten beiden Kreuzungen, beide aus demselben
+// Verbindersegment. Deshalb probiert die Zonen-Suche alle Besitzer durch.
+function buildLoops(groups,ownerOverride){
   const M=rotFwd(snappedManifold(),S.W,S.H);  // Verteiler im Frame (auf der Unterkante)
   // Rohrfreie Lücke in der Randzone: splitChainAtManifold teilt die Kette hier,
   // beide Arme rücken um endGap ein. Durch diese Lücke steigen die Zuleitungen
@@ -1591,6 +1597,7 @@ function buildLoops(groups){
     raw.forEach((r,i)=>{ if(r.field.length){
       const d=Math.abs(r.field[0].x-anchor); if(d>best){best=d;owner=i;} }});
     if(owner<0&&raw.length) owner=0;
+    if(ownerOverride!=null&&raw[ownerOverride]) owner=ownerOverride;
     if(owner>=0){
       // Zusammenhängende Fensterwände laufen als EINE U-förmige Randzone um die
       // Ecken. Getrennte Ketten (z.B. nur oben + nur unten) werden im wandnahen
@@ -1711,23 +1718,132 @@ function buildLoops(groups){
     return {...l, pts, length:f.length, minR:f.minR};
   }).filter(l=>l.pts.length>1);
 }
+// ================= Zonen-Einpassung (iterativ) =================
+// Ein Wurf reicht nicht. Die Aufteilung bestimmt, WO die Zuleitungen laufen
+// müssen, und erst die gebaute Verlegung zeigt, ob sie ohne Kreuzung passen.
+// Also: erster Wurf -> messen -> Zonengrenzen verschieben -> wieder messen, und
+// zum Schluss auf Rohrlänge feinschleifen (= Raumausnutzung).
+//
+// Rastersuche statt Regel oder Gradientenverfahren, aus zwei Gründen:
+//  - Eine feste Regel wurde probiert (Frontage an der Verteilerwand erzwingen)
+//    und erzeugte L-Streifen mit dünnem Arm, deren Spirale sich SELBST kreuzt.
+//    Die Suche verwirft so etwas von allein, weil es schlechter misst.
+//  - Manzini & Murphy 2024 zeigen für Coverage-Pfade, dass die Zielfunktion
+//    stark nicht-konvex ist und Rastersuche den Gradientenabstieg schlägt.
+//    Deckt sich mit der Messung hier, dass das Kraftmodell alles verschlechtert.
+//
+// Bezahlbar, weil ein Kandidat billig ist: buildLoops 0,7 ms, Kreuzungstest
+// 0,2 ms. heatCoverage kostet dagegen 28 ms — deshalb ist das Suchkriterium die
+// Rohrlänge im Raum, und die echte Deckung wird erst am Ende einmal gerechnet.
+function stripZones(cuts){
+  const W=frameW(), H=frameH(), n=notchFrame();
+  const b=[0,...cuts,W], zones=[];
+  for(let i=0;i+1<b.length;i++){
+    const xa=b[i], xb=b[i+1], rs=[];
+    const push=(p,q,y0,y1)=>{ if(q-p>1&&y1-y0>1) rs.push({x0:p,y0,w:q-p,h:y1-y0}); };
+    const a0=n?Math.max(xa,n.x0):0, a1=n?Math.min(xb,n.x1):0;
+    if(!n||a1<=a0) push(xa,xb,0,H);
+    else{
+      push(xa,a0,0,H);
+      if(n.y0<=1) push(a0,a1,n.y1,H); else push(a0,a1,0,n.y0);
+      push(a1,xb,0,H);
+    }
+    if(!rs.length) return null;             // leerer Streifen -> ungültiger Kandidat
+    zones.push(rs);
+  }
+  return zones;
+}
+function scoreZones(groups){
+  if(!groups) return null;
+  // Randzonen-Besitzer mitdurchprobieren: null = Heuristik, sonst der Kreis.
+  let out=null;
+  for(const own of [null,...groups.map((_,i)=>i)]){
+    const c=scoreOne(groups,own);
+    if(betterZones(c,out)) out=c;
+  }
+  return out;
+}
+function scoreOne(groups,own){
+  let loops;
+  try{ loops=buildLoops(groups,own); }catch(e){ return null; }
+  if(!loops.length) return null;
+  const plan={loops};
+  return {groups,loops,cross:loopCrossings(plan),out:loopsOutside(plan),
+          // Feld-Selbstkreuzungen getrennt: eine Zuleitung kann man umlegen,
+          // eine sich selbst kreuzende SPIRALE nicht. Ohne diesen eigenen Rang
+          // nimmt die Suche einen entarteten Streifen in Kauf, sobald dadurch
+          // die Gesamtzahl sinkt — gemessen genau das: 3 Feld-Selbstkreuzungen
+          // gegen 5 statt 10 insgesamt.
+          fieldCross:loops.reduce((s,l)=>s+fieldCrossings(l.field||[]).length,0),
+          len:loops.reduce((s,l)=>s+l.length,0)};
+}
+// Rangfolge: erst das Feld kreuzungsfrei, dann alles kreuzungsfrei, dann kein
+// Rohr draußen, dann möglichst viel Rohr im Raum.
+const betterZones=(a,b)=>{
+  if(!a) return false;
+  if(!b) return true;
+  const k=['fieldCross','cross','out'];
+  for(const f of k){ if(a[f]!==b[f]) return a[f]<b[f]; }
+  return a.len>b.len;
+};
+function fitZones(N){
+  // Amtsinhaber ist die bisherige Aufteilung: die Suche kann nie schlechter
+  // enden als vorher, sie kann nur etwas Besseres finden.
+  let best=scoreZones(partition(N));
+  if(N<=1) return best;
+  const W=frameW(), H=frameH(), n=notchFrame(), nh=n?n.y1-n.y0:0;
+  // Erster Wurf der Streifen-Familie: gleiche FLÄCHE je Zone (nicht gleiche
+  // Breite) — ungleiche Zonen ergeben ungleiche Kreislängen und Druckverluste.
+  const areaLeft=x=>H*x-(n?Math.max(0,Math.min(x,n.x1)-n.x0)*nh:0);
+  const total=areaLeft(W);
+  const invArea=t=>{ let lo=0,hi=W;
+    for(let i=0;i<32;i++){ const m=(lo+hi)/2; if(areaLeft(m)<t) lo=m; else hi=m; }
+    return (lo+hi)/2; };
+  let cuts=[]; for(let k=1;k<N;k++) cuts.push(invArea(total*k/N));
+  let cur=scoreZones(stripZones(cuts));
+  if(betterZones(cur,best)) best=cur;
+  // Grenzen verschieben und stauchen: Koordinatenabstieg mit schrumpfender
+  // Schrittweite. Ein Schritt wird nur übernommen, wenn er messbar besser ist.
+  const minGap=Math.max(2*S.s,2*S.edgeGap);
+  let step=W/(4*N);
+  for(let round=0;round<10&&step>=S.s/2;round++){
+    let moved=false;
+    for(let i=0;i<cuts.length;i++)for(const d of [-step,step]){
+      const t=cuts.slice(); t[i]+=d;
+      const lo=(i?t[i-1]:0)+minGap, hi=(i+1<t.length?t[i+1]:W)-minGap;
+      if(t[i]<lo||t[i]>hi) continue;
+      const s=scoreZones(stripZones(t));
+      if(betterZones(s,cur)){ cur=s; cuts=t; moved=true;
+        if(betterZones(s,best)) best=s; }
+    }
+    if(!moved) step/=2;
+  }
+  return best;
+}
 function autofit(){
   ROT=rotForManifold(snappedManifold());      // Korridor an die Verteilerwand legen
-  if(S.loopMode!=='auto'){
-    curLoopCount=+S.loopMode;                 // Korridorbreite vor Konturen festlegen
-    const loops=buildLoops(partition(+S.loopMode));
-    const maxLen=Math.max(0,...loops.map(l=>l.length));
-    return {N:loops.length,loops,ok:maxLen<=S.maxLoop,forced:true};
-  }
-  let last=null;
+  const run=N=>{
+    curLoopCount=N;                           // Korridorbreite vor Konturen festlegen
+    const f=fitZones(N);
+    if(!f) return null;
+    const maxLen=Math.max(0,...f.loops.map(l=>l.length));
+    return {...f,N:f.loops.length,ok:maxLen<=S.maxLoop};
+  };
+  const wrap=(r,forced)=>r?{N:r.N,loops:r.loops,ok:!!r.ok,forced}
+                          :{N:0,loops:[],ok:false,forced};
+  if(S.loopMode!=='auto') return wrap(run(+S.loopMode),true);
+  // Unter den Kreiszahlen, die das Längenlimit halten, die KREUZUNGSFREISTE
+  // nehmen statt einfach die erste. Eine Aufteilung, die das Limit knapp hält,
+  // sich aber kreuzt, ist unbrauchbar; eine mit einem Kreis mehr kann sauber
+  // sein. Hält keine das Limit, entscheidet dieselbe Rangfolge über den besten
+  // Notbehelf.
+  let best=null, fallback=null;
   for(let N=1;N<=3;N++){
-    curLoopCount=N;
-    const loops=buildLoops(partition(N));
-    const maxLen=Math.max(0,...loops.map(l=>l.length));
-    last={N:loops.length,loops,ok:maxLen<=S.maxLoop,forced:false};
-    if(last.ok) return last;
+    const r=run(N); if(!r) continue;
+    if(betterZones(r,fallback)) fallback=r;
+    if(r.ok&&betterZones(r,best)) best=r;
   }
-  return last; // best effort (über Limit)
+  return wrap(best||fallback,false);
 }
 // Verteiler darf an JEDER Wand stehen, auch an den Notch-Innenkanten.
 function snappedManifold(){
