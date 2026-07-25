@@ -2213,6 +2213,23 @@ function buildLoops(groups,ownerOverride,connOrder){
     // Bogenradius, egal wie gut die Kurve sonst ist.
     // Toleranz 0,5*R gemessen als beste von 25 mm / 0,5R / s / R
     // (medianRadius 27 / 35 / 33 / 33 bei covFails 4 / 3 / 5 / 3).
+    //
+    // Runde 12 erneut geprueft, nachdem der Resampling-Schritt auf 5*R stand und
+    // die Attribution wieder kurze Segmente (44, 46, 61 mm) als engste Stellen
+    // zeigte. Die Rechnung dahinter stimmt — eine 90-Grad-Ecke braucht
+    // R*tan(45 Grad) = R Segmentlaenge, 0,5*R kann das nicht liefern:
+    //   Schwelle   crossFails  covFails  radFails  medRadius
+    //   0,5*R            18        10        19        46
+    //   1,0*R            18        10        19        42
+    //   1,5*R            17        10        20        50
+    //   2,0*R            18        11        20        50
+    // 1,5*R tauscht einen crossFail gegen einen radFail, 1,0*R ist neutral,
+    // 2,0*R schlechter. Kein Gewinn, Schwelle bleibt.
+    //
+    // Ebenfalls in Runde 12 verworfen: die Glaettung auf ein GROESSERES Ziel als
+    // R fahren, damit die Ablenkung je Stuetzpunkt kleiner wird.
+    //   Ziel 1,00*R (jetzt)  crossFails 18   1,25*R  18   1,50*R  19   2,00*R  19
+    // Neutral bis schlechter.
     pts=smoothToRadius(dedupePath(pts,0.5*R),R,40);
     const f=pathCurve(pts,true);
     // Einmal je Kreis: Kreuzungstest, Ausserhalb-Zaehler und die Marker im Plan
