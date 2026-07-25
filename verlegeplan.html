@@ -256,7 +256,28 @@ const S = {
   // sich erst schließen, wenn Task 2 die separate Randzone entfernt und die
   // Rampe ohne windowEdges-Sonderfall wirken kann.
   useEikonal:false,
-  relax:true,               // Kraftmodell-Feinabstimmung nach der Konstruktion
+  // Kraftmodell-Feinabstimmung nach der Konstruktion. AUS, gemessen:
+  // es verschlechtert alle vier harten Kriterien.
+  //
+  // Das Modell wurde gegen KLUMPEN gebaut — gegen die Rohranhäufung in der
+  // Raummitte, die der frühere Ring-Aufbau erzeugte. Diesen Zweck erfüllt das
+  // Isolinien-Feld inzwischen per Konstruktion: Niveaulinien desselben Feldes
+  // liegen überall genau s auseinander und laufen wandparallel. Die Kräfte
+  // haben also nichts mehr zu verteilen und verschieben nur noch eine bereits
+  // gleichmäßige Verlegung — bevorzugt aus den Ecken heraus, weil dort die
+  // Abstoßung von zwei Wandseiten gleichzeitig wirkt.
+  //
+  // 500 Bench-Läufe, an vs. aus:
+  //   crossFails      500 -> 485        covFails    449 -> 322
+  //   outFails        187 -> 181        radFails    500 -> 500 (unverändert)
+  //   worstGap       6750 -> 2770       medianGap  2000 -> 1088
+  //   medianCoverage   30 -> 37 %       medianCross  26 -> 20
+  // Standardkonfiguration: gapMax 1601 -> 470 mm, Deckung 42,8 -> 44,1 %.
+  //
+  // relaxLoops bleibt im Code: sobald das Füllmuster wieder ungleichmäßig wird
+  // (z. B. ein Serpentinen-Zweig), ist es das richtige Werkzeug. Der Schalter
+  // steht im Panel.
+  relax:false,
   manifold:{x:1000,y:0},    // interne Koordinaten (Notch-rechts-Welt)
   // ---- Thermik (Heatmap) ----
   // targetPowerW/activeAreaM2 = AUSLEGUNGSWERT (aktive Heizfläche des Planers).
