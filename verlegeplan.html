@@ -122,8 +122,8 @@
 
     <div class="grp">
       <h2>Verlegung</h2>
-      <div class="rng"><div class="top"><span>Bahnabstand</span><span class="val" id="sVal"></span></div><input type="range" id="s" min="75" max="300" step="5"></div>
-      <div class="rng"><div class="top"><span>Biegeradius</span><span class="val" id="brVal"></span></div><input type="range" id="bendRadius" min="20" max="120" step="5"></div>
+      <div class="rng"><div class="top"><span>Bahnabstand</span><span class="val" id="sVal"></span></div><input type="range" id="s" min="75" max="110" step="5"></div>
+      <div class="row"><label>Biegeradius (5×Ø, fix)</label><span class="val" id="brVal"></span></div>
       <div class="row"><label>Rohr-Ø (mm)</label><input type="number" id="pipeDia" step="1" min="8" max="32"></div>
       <div class="row"><label>Randabstand (mm)</label><input type="number" id="edgeGap" step="5" min="20" max="500"></div>
     </div>
@@ -224,7 +224,13 @@
 const S = {
   W:8000, H:3200, notchA:3000, notchB:1000,
   notchLeft:true,           // Notch im BILD links (intern immer rechts gerechnet, nur gespiegelt)
-  s:150, bendRadius:60, pipeDia:16, edgeGap:75,
+  s:100, pipeDia:16, edgeGap:90,
+  // Biegeradius ist keine Einstellung: 5x Rohr-Durchmesser ist die
+  // Verlegegrenze des Rohrs (16 mm -> 80 mm). Wird aus pipeDia abgeleitet.
+  // Setter schluckt Zuweisungen, damit Object.assign (Bench-Restore) im
+  // strict mode nicht wirft.
+  get bendRadius(){ return 5*this.pipeDia; },
+  set bendRadius(_){},
   randSpacing:50, randPasses:2, windowEdges:['bottom','left','right'],
   maxLoop:100000, loopMode:'auto',
   useSpiralField:false,     // Experiment: kontinuierliches Spiralfeld (s. doubleSpiralField)
@@ -1213,9 +1219,21 @@ function buildLoops(groups){
   // eine Geometrie, die so nicht gezeichnet wird.
   if(S.relax) relaxLoops(out,{target:S.s});
 
+  // Danach Krümmung auf den Mindest-Biegeradius bringen und die Punktdichte so
+  // ausdünnen, dass fillet den vollen Bogen legen kann. Nur das Feld — Randzone
+  // und Anbindung sind gesetzt und tragen ihre Omega-Bögen selbst.
+  const R=S.bendRadius;
+  out.forEach(l=>{
+    if(!l.field||l.field.length<3) return;
+    // Erst gleichmäßig entlang der Kurve abtasten (Segmente >= 2R, damit fillet
+    // überhaupt einen vollen Bogen legen kann), dann die Krümmung glätten.
+    // Ausdünnen statt Resampling hatte die Glättung zunichte gemacht.
+    l.field=smoothToRadius(resampleArc(l.field,2.2*R),R,150);
+  });
+
   return out.map(l=>{
     const pts=[...l.leadIn.slice(0,-1),...l.rand,...l.mid,...l.field,...l.leadOut.slice(1)];
-    const f=fillet(pts,S.bendRadius);
+    const f=fillet(pts,R);
     return {...l, pts, length:f.length, minR:f.minR};
   }).filter(l=>l.pts.length>1);
 }
@@ -1894,7 +1912,7 @@ function initUI(){
   bindNumber('pipeDia','pipeDia');bindNumber('edgeGap','edgeGap');
   bindNumber('randSpacing','randSpacing');bindNumber('randPasses','randPasses');
   bindNumber('maxLoopM','maxLoop',1000);
-  bindRange('s','s','sVal');bindRange('bendRadius','bendRadius','brVal');
+  bindRange('s','s','sVal');
   // manifold x/y felder
   const mfx=document.getElementById('mfx'),mfy=document.getElementById('mfy');
   const sm=snappedManifold(); mfx.value=Math.round(mirX(sm.x)); mfy.value=Math.round(sm.y);
@@ -2186,6 +2204,69 @@ function heatCoverage(loops,reach){
   return total? hit/total : 0;
 }
 
+// Krümmungsglättung: fillet rundet jede Ecke einzeln und braucht dafür
+// bendRadius Platz auf BEIDEN Nachbarsegmenten. Liegen die Punkte enger
+// (Isolinien liefern Millimeterabstände), kappt es den Radius auf fast 0.
+// Hier wird stattdessen der lokale Radius durch drei Punkte gemessen
+// (R = a*b*c / 4A) und der Mittelpunkt zur Sehne gezogen, bis R >= rmin.
+function smoothToRadius(pts,rmin,iters){
+  if(pts.length<3) return pts;
+  const q=pts.map(p=>({x:p.x,y:p.y,arc:p.arc}));
+  for(let it=0;it<(iters||40);it++){
+    let worst=Infinity;
+    for(let i=1;i<q.length-1;i++){
+      if(q[i].arc||q[i-1].arc||q[i+1].arc) continue;   // vorgegebene Bögen fix
+      const a=q[i-1],b=q[i],c=q[i+1];
+      const ab=len(sub(b,a)), bc=len(sub(c,b)), ca=len(sub(c,a));
+      const A2=Math.abs((b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x));
+      if(ab<1e-9||bc<1e-9) continue;
+      // Fläche ~0 heißt gerade ODER 180°-Kehre. Die Kehre ist der schlimmste
+      // Fall (Radius 0) und darf NICHT als "kollinear" übersprungen werden —
+      // sie wird seitlich aufgeweitet, damit überhaupt ein Radius entsteht.
+      const straight=dot(unit(sub(b,a)),unit(sub(c,b)))>0;
+      if(A2<1e-6){
+        if(straight) continue;                          // wirklich gerade
+        const u=unit(sub(b,a)), nrm={x:-u.y,y:u.x};
+        const cand={x:b.x+nrm.x*rmin*0.5, y:b.y+nrm.y*rmin*0.5};
+        q[i]=pointInRoom(cand)?cand:{x:b.x-nrm.x*rmin*0.5,y:b.y-nrm.y*rmin*0.5};
+        worst=0; continue;
+      }
+      const R=ab*bc*ca/(2*A2);
+      worst=Math.min(worst,R);
+      if(R>=rmin) continue;
+      // zur Sehnenmitte ziehen — je stärker, je enger die Kurve
+      const w=Math.min(0.5,0.5*(1-R/rmin));
+      q[i]={x:b.x+((a.x+c.x)/2-b.x)*w, y:b.y+((a.y+c.y)/2-b.y)*w};
+    }
+    if(worst>=rmin) break;
+  }
+  return q;
+}
+// Gleichmäßig ENTLANG der Kurve neu abtasten (konstante Bogenlänge). Anders als
+// Ausdünnen bleibt die Form erhalten: die Punkte liegen auf der alten Bahn, nur
+// gleichmäßig verteilt. Nötig, weil fillet je Ecke bendRadius Platz auf beiden
+// Nachbarsegmenten braucht — 11 mm lange Segmente lassen keinen 80er Bogen zu.
+function resampleArc(pts,stepLen){
+  if(pts.length<3) return pts;
+  const out=[{x:pts[0].x,y:pts[0].y}];
+  let carry=0;
+  for(let i=1;i<pts.length;i++){
+    const a=pts[i-1], b=pts[i];
+    if(b.arc){ out.push(b); carry=0; continue; }      // vorgegebene Bögen erhalten
+    let segLen=len(sub(b,a));
+    if(segLen<1e-9) continue;
+    let t=(stepLen-carry)/segLen;
+    while(t<=1){
+      out.push({x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t});
+      t+=stepLen/segLen;
+    }
+    carry=(carry+segLen)%stepLen;
+  }
+  const last=pts[pts.length-1];
+  if(len(sub(out[out.length-1],last))>1e-6) out.push({x:last.x,y:last.y});
+  return out;
+}
+
 // ================= Kraftmodell (Relaxation) =================
 // Feinabstimmung auf einer fertigen, topologisch korrekten Verlegung. Kräfte
 // können KEINE Kreuzung auflösen (dazu müsste ein Rohr durch das andere), aber
@@ -2333,10 +2414,9 @@ function crossingBench(n,seed){
     S.notchA=withNotch?Math.round(rnd()*(S.W*0.7)/50)*50:0;
     S.notchB=withNotch?Math.round(rnd()*(S.H*0.6)/50)*50:0;
     S.notchLeft=rnd()<0.5;
-    S.s=75+Math.round(rnd()*225/5)*5;
-    S.bendRadius=20+Math.round(rnd()*100/5)*5;
+    S.s=75+Math.round(rnd()*35/5)*5;          // 75..110, darüber/darunter unsinnig
     S.pipeDia=[12,14,16,17,20][Math.floor(rnd()*5)];
-    S.edgeGap=30+Math.round(rnd()*170/5)*5;
+    S.edgeGap=90+Math.round(rnd()*110/5)*5;   // >= bendRadius + pipeDia/2
     S.randSpacing=20+Math.round(rnd()*180/5)*5;
     S.randPasses=Math.floor(rnd()*5);
     S.windowEdges=['bottom','top','left','right'].filter(()=>rnd()<0.45);
@@ -2354,9 +2434,13 @@ function crossingBench(n,seed){
       mode:S.loopMode,mf:`${Math.round(S.manifold.x)},${Math.round(S.manifold.y)}`}}); continue; }
     // Deckungsziel nur dort fordern, wo es der Bahnabstand überhaupt zulässt:
     // die Wirkzone ist +-25 mm, also ist 2*25/s die harte Obergrenze.
-    const covMax=Math.min(1,50/S.s), covFail=cov<Math.min(0.40,covMax*0.9);
-    if(x>0||covFail) fails.push({cross:x,cov:Math.round(cov*100),
-      covLimit:Math.round(covMax*100),cfg:{W:S.W,H:S.H,notchA:S.notchA,notchB:S.notchB,
+    // Harte Kriterien: keine Kreuzung, kein Rohr draußen, Deckung >= 40 %,
+    // Biegeradius nie unter 5x Rohr-Durchmesser.
+    const minR=Math.min(Infinity,...plan.loops.map(l=>l.minR??Infinity));
+    const covFail=cov<0.40, radFail=isFinite(minR)&&minR<S.bendRadius-1;
+    if(x>0||covFail||radFail) fails.push({cross:x,cov:Math.round(cov*100),
+      minR:isFinite(minR)?Math.round(minR):null, radSoll:S.bendRadius,
+      cfg:{W:S.W,H:S.H,notchA:S.notchA,notchB:S.notchB,
       notchLeft:S.notchLeft,s:S.s,bendRadius:S.bendRadius,pipeDia:S.pipeDia,edgeGap:S.edgeGap,
       randSpacing:S.randSpacing,randPasses:S.randPasses,win:S.windowEdges.join('+')||'-',
       mode:S.loopMode,mf:`${Math.round(S.manifold.x)},${Math.round(S.manifold.y)}`}});
