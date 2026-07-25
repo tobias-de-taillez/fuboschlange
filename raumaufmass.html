@@ -460,11 +460,31 @@ function suggest(pts, walls, meas){
   return out;
 }
 
+// Einen Zug am Punkt i auf die verbliebenen Beweglichkeiten projizieren.
+// Die Moden sind die LINEARISIERTE Beweglichkeit an der aktuellen Stelle -
+// ein endlicher Zug driftet also von den Messungen weg. Der Aufrufer laesst
+// deshalb solve() als Korrektor nachlaufen (Praediktor-Korrektor).
+function dragAlongModes(pts, modes, i, dx, dy){
+  const k=modes.length;
+  if(!k) return null;
+  const A=[modes.map(m=>m[2*i]), modes.map(m=>m[2*i+1])];   // 2 x k
+  const N=matTmat(A), g=matTvec(A,[dx,dy]);
+  for(let j=0;j<k;j++) N[j][j]+=1e-9;
+  const sol=luSolve(N, g.map(x=>[x]));
+  if(!sol) return null;
+  const c=sol.map(r=>r[0]);
+  return pts.map((p,q)=>{
+    let ax=0, ay=0;
+    modes.forEach((m,j)=>{ ax+=c[j]*m[2*q]; ay+=c[j]*m[2*q+1]; });
+    return {...p, x:p.x+ax, y:p.y+ay};
+  });
+}
+
 globalThis.CORE={ TOL_RANK, TOL_RED, TOL_MODE, SIGMA_DEF, SUGGEST_CHECK_MAX,
                   dist, idx, activeMeas, residuals, jacobian, luSolve, matTmat, matTvec,
                   gramSchmidt, nullSpace, leverage, gaugeFixed, freeCols, scaleSketch, solve, analyze,
                   trivialModes, covariance, ellipse, wallPolygon, pointInPoly, segInPoly,
-                  pairMeasurable, suggest };
+                  pairMeasurable, suggest, dragAlongModes };
 </script>
 
 <script id="ui">
@@ -1388,6 +1408,24 @@ globalThis.selfChecks=function(){
        s.length>0 && !s.some(x=>[x.a,x.b].sort().join('')==='CF'));
     chk('suggest: Pruefbarkeitsphase ist gedeckelt',
        s.filter(x=>x.why==='pruefbar').length<=C.SUGGEST_CHECK_MAX);
+  }
+  // --- dragAlongModes ---
+  {
+    const rect=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:3000},{id:'D',x:0,y:3000}];
+    const seiten=[{a:'A',b:'B',d:4000},{a:'B',b:'C',d:3000},{a:'C',b:'D',d:4000},{a:'D',b:'A',d:3000}];
+    const pts=C.solve(rect,seiten).pts;
+    const an=C.analyze(pts,seiten);
+    chk('dragAlongModes: Rechteck mit 4 Seiten hat dof 1', an.dof===1 && an.modes.length===1);
+    const iC=C.idx(pts)['C'];
+    const moved=C.dragAlongModes(pts,an.modes,iC,120,0);
+    chk('dragAlongModes: liefert gleich viele Punkte', moved && moved.length===4);
+    chk('dragAlongModes: gezogener Punkt bewegt sich', moved && Math.abs(moved[iC].x-pts[iC].x)>1);
+    chk('dragAlongModes: Eingabe unveraendert', Math.abs(pts[iC].x-4000)<1e-6);
+    const korr=C.solve(moved,seiten).pts;
+    chk('dragAlongModes: Messungen bleiben nach Korrektur erfuellt',
+       C.residuals(korr,seiten).every(v=>Math.abs(v)<0.01));
+    chk('dragAlongModes: der Zug ist wirksam', Math.abs(korr[iC].x-pts[iC].x)>50);
+    chk('dragAlongModes: ohne Moden -> null', C.dragAlongModes(pts,[],iC,120,0)===null);
   }
   return {ok, out};
 };
