@@ -416,6 +416,13 @@ const randWidth=()=>randW('bottom');                // Korridor liegt über der 
 // bleibt der Korridor schmal und der Biegeradius trotzdem eingehalten.
 const LANE=()=>Math.max(50,S.pipeDia*1.6,0.9*S.bendRadius);
 const laneCount=()=>2*Math.max(1,curLoopCount)+1;   // Vor-/Rücklauf je Kreis + Reserve
+// Der Verteiler ist keine PUNKTQUELLE, sondern eine LEISTE: alle 50 mm ein
+// Abgang, sie wird also mit jeder Schlaufe länger. Daraus folgt die Reihenfolge
+// der Abgänge von selbst — sortiert man die Anschlüsse nach ihrer Lage entlang
+// der Wand und die Abgänge genauso, ist die Zuordnung monoton, und monotone
+// Zuordnungen können sich nicht überkreuzen.
+const MANIFOLD_PITCH=50;
+const manifoldBarW=nPorts=>Math.max(0,nPorts-1)*MANIFOLD_PITCH;
 // + LANE/2 Puffer: sonst liegt die äußerste Spur nur LANE/2 unter der ersten
 // Feldbahn — bei 16er Rohr wäre das physische Überlappung.
 const corridorW=()=>laneCount()*LANE()+LANE()/2;
@@ -1528,7 +1535,12 @@ function routeVia(a,b,lane,gap){
     return x+sign*d;
   };
   put(a);
-  ramp(a.x, a.y, yFor(a.x), dir);
+  // Rohre verlassen den Verteiler ORTHOGONAL zur Wand, an der er sitzt. Im Frame
+  // liegt diese Wand immer unten, der erste Zug ist also senkrecht. Eine
+  // 45°-Schräge direkt am Abgang würde die Rohre am Balken auffächern und sie
+  // dabei gegeneinander laufen lassen.
+  if(a.y<=1) put({x:a.x,y:yFor(a.x)});
+  else ramp(a.x, a.y, yFor(a.x), dir);
   if(yFor(a.x)!==yFor(b.x)){                  // Höhenwechsel an der Notch-Kante
     const edgeX = (a.x<b.x) ? (a.x<n.x0 ? n.x0 : n.x1) : (a.x>n.x1 ? n.x1 : n.x0);
     // Die Schräge gehört auf die Seite, auf der die KORRIDORHÖHE gilt — also
@@ -1572,7 +1584,7 @@ function rotForManifold(M){
 // die Zuleitungen eines ANDEREN Kreises queren. Gemessen an der gemeldeten
 // Konfiguration waren das die letzten beiden Kreuzungen, beide aus demselben
 // Verbindersegment. Deshalb probiert die Zonen-Suche alle Besitzer durch.
-function buildLoops(groups,ownerOverride){
+function buildLoops(groups,ownerOverride,connOrder){
   const M=rotFwd(snappedManifold(),S.W,S.H);  // Verteiler im Frame (auf der Unterkante)
   // Rohrfreie Lücke in der Randzone: splitChainAtManifold teilt die Kette hier,
   // beide Arme rücken um endGap ein. Durch diese Lücke steigen die Zuleitungen
@@ -1637,18 +1649,47 @@ function buildLoops(groups,ownerOverride){
   });
   // Fern -> innerste Spur: die Korridor-Spans schachteln sich um M.x, dadurch
   // muss keine Stichleitung über eine fremde Spur steigen.
+  const portOfBar={};
+  // ABGÄNGE: die Leiste trägt JE KREIS ZWEI Abgänge (Vor- und Rücklauf), Raster
+  // 50 mm, mittig am gesetzten Verteilerpunkt und in die Wand hineingeklemmt.
+  // Die Reihenfolge der KREISE entlang der Wand ist die Reihenfolge auf der
+  // Leiste — damit ist die Zuordnung monoton, und monotone Zuordnungen können
+  // sich nicht überkreuzen.
+  // 'mid' bekommt bewusst keinen Platz: das ist kein Verteilerabgang, sondern
+  // der interne Übergang Randzone -> Feld. Gibt man ihm einen, verschiebt er
+  // alle folgenden Abgänge und zerreisst genau die Vor-/Rücklauf-Paarung.
+  const withEnds=raw.filter(r=>r.head&&r.tail);
+  const seq=withEnds.slice()
+    .sort((a,b)=>Math.min(a.head.x,a.tail.x)-Math.min(b.head.x,b.tail.x));
+  const barW=manifoldBarW(2*seq.length);
+  const bx0=Math.min(Math.max(M.x-barW/2,S.edgeGap),
+                     Math.max(S.edgeGap,frameW()-S.edgeGap-barW));
+  seq.forEach((r,k)=>{
+    const p0={x:bx0+2*k*MANIFOLD_PITCH,y:M.y};
+    const p1={x:bx0+(2*k+1)*MANIFOLD_PITCH,y:M.y};
+    // Vorlauf auf den linken Abgang, wenn sein Ziel links vom Rücklaufziel liegt
+    const inLeft=r.head.x<=r.tail.x;
+    portOfBar[r.gi+'/in'] =inLeft?p0:p1;
+    portOfBar[r.gi+'/out']=inLeft?p1:p0;
+  });
+  // SPUREN getrennt davon: fern -> innerste Spur, damit die Korridor-Spans sich
+  // um den Verteiler schachteln. Diese Ordnung darf die Suche permutieren.
   conns.sort((a,b)=>Math.abs(b.t.x-M.x)-Math.abs(a.t.x-M.x));
+  // connOrder permutiert die Grundordnung. Sie bestimmt Spur UND Abgang am
+  // Verteiler; welche Zuleitung wo liegt, entscheidet also, ob sich zwei am
+  // Verteilerbalken queren. Die feste Regel "fern -> innerste Spur" ist nur ein
+  // guter Startwert, kein Optimum - deshalb sucht fitLanes darum herum.
+  if(connOrder&&connOrder.length===conns.length){
+    const perm=connOrder.map(i=>conns[i]);
+    if(perm.every(Boolean)) conns.splice(0,conns.length,...perm);
+  }
   const laneOf={}, portOf={};
   // Jede Leitung bekommt einen eigenen Abgang am Verteilerbalken. Liefen alle
   // auf denselben Punkt, träfen sich dort zwangsläufig alle Rohre.
-  const nP=conns.length, pitch=Math.max(S.pipeDia*2,LANE()/2);
   conns.forEach((c,i)=>{
     c.lane=Math.min(i,laneCount()-1);
     laneOf[c.r.gi+'/'+c.kind]=c.lane;
-    // Abgänge in Spur-Reihenfolge auffächern: innere Spur -> äußerer Abgang,
-    // dann laufen Stich und Abgang in derselben Ordnung und kreuzen sich nicht
-    const off=(i-(nP-1)/2)*pitch;
-    portOf[c.r.gi+'/'+c.kind]={x:Math.min(Math.max(M.x+off,pitch),frameW()-pitch),y:M.y};
+    portOf[c.r.gi+'/'+c.kind]=portOfBar[c.r.gi+'/'+c.kind];
   });
 
   // Stufe 3: routen, zusammensetzen und aus dem Frame zurückdrehen
@@ -1708,7 +1749,7 @@ function buildLoops(groups,ownerOverride){
     });
   });
 
-  return out.map(l=>{
+  const built2=out.map(l=>{
     let pts=[...l.leadIn.slice(0,-1),...l.rand,...l.mid,...l.field,...l.leadOut.slice(1)];
     // Die Teile sind einzeln radiustreu, ihre NAHTSTELLEN aber nicht: dort
     // treffen zwei getrennt geglättete Kurven mit eigenen Richtungen aufeinander.
@@ -1717,6 +1758,10 @@ function buildLoops(groups,ownerOverride){
     const f=fillet(pts,R);
     return {...l, pts, length:f.length, minR:f.minR};
   }).filter(l=>l.pts.length>1);
+  // Zahl der Anbindungen am Array mitgeben: fitLanes braucht sie, um ueber die
+  // Reihenfolge zu suchen, ohne buildLoops nachzubauen.
+  built2.nConns=conns.length;
+  return built2;
 }
 // ================= Zonen-Einpassung (iterativ) =================
 // Ein Wurf reicht nicht. Die Aufteilung bestimmt, WO die Zuleitungen laufen
@@ -1758,17 +1803,43 @@ function scoreZones(groups){
   // Randzonen-Besitzer mitdurchprobieren: null = Heuristik, sonst der Kreis.
   let out=null;
   for(const own of [null,...groups.map((_,i)=>i)]){
-    const c=scoreOne(groups,own);
+    const c=scoreOne(groups,own,null);
     if(betterZones(c,out)) out=c;
   }
   return out;
 }
-function scoreOne(groups,own){
+// Spurvergabe suchen. Die Reihenfolge der Anbindungen legt Spur und Abgang am
+// Verteiler fest; ob sich zwei Zuleitungen am Balken queren, haengt genau daran.
+// Erst zwei Grundordnungen, dann Nachbartausch-Bergsteigen. Laeuft NUR auf dem
+// Sieger der Zonensuche, kostet also einmalig ~30 Kandidaten statt sie mit der
+// Zonensuche zu multiplizieren.
+function fitLanes(seed){
+  if(!seed) return seed;
+  const n=seed.nConns|0;
+  if(n<2) return seed;
+  let best=seed, ord=[...Array(n).keys()];
+  for(const s of [[...ord].reverse()]){
+    const c=scoreOne(seed.groups,seed.own,s);
+    if(betterZones(c,best)){ best=c; ord=s; }
+  }
+  for(let round=0;round<4;round++){
+    let moved=false;
+    for(let i=0;i+1<n;i++){
+      const t=ord.slice(); [t[i],t[i+1]]=[t[i+1],t[i]];
+      const c=scoreOne(seed.groups,seed.own,t);
+      if(betterZones(c,best)){ best=c; ord=t; moved=true; }
+    }
+    if(!moved) break;
+  }
+  return best;
+}
+function scoreOne(groups,own,order){
   let loops;
-  try{ loops=buildLoops(groups,own); }catch(e){ return null; }
+  try{ loops=buildLoops(groups,own,order); }catch(e){ return null; }
   if(!loops.length) return null;
   const plan={loops};
-  return {groups,loops,cross:loopCrossings(plan),out:loopsOutside(plan),
+  return {groups,own,order,nConns:loops.nConns,
+          loops,cross:loopCrossings(plan),out:loopsOutside(plan),
           // Feld-Selbstkreuzungen getrennt: eine Zuleitung kann man umlegen,
           // eine sich selbst kreuzende SPIRALE nicht. Ohne diesen eigenen Rang
           // nimmt die Suche einen entarteten Streifen in Kauf, sobald dadurch
@@ -1818,10 +1889,11 @@ function fitZones(N){
     }
     if(!moved) step/=2;
   }
-  return best;
+  // Zum Schluss die Spurvergabe auf dem Sieger feinschleifen.
+  const tuned=fitLanes(best);
+  return betterZones(tuned,best)?tuned:best;
 }
 function autofit(){
-  ROT=rotForManifold(snappedManifold());      // Korridor an die Verteilerwand legen
   const run=N=>{
     curLoopCount=N;                           // Korridorbreite vor Konturen festlegen
     const f=fitZones(N);
@@ -1831,19 +1903,44 @@ function autofit(){
   };
   const wrap=(r,forced)=>r?{N:r.N,loops:r.loops,ok:!!r.ok,forced}
                           :{N:0,loops:[],ok:false,forced};
-  if(S.loopMode!=='auto') return wrap(run(+S.loopMode),true);
-  // Unter den Kreiszahlen, die das Längenlimit halten, die KREUZUNGSFREISTE
-  // nehmen statt einfach die erste. Eine Aufteilung, die das Limit knapp hält,
-  // sich aber kreuzt, ist unbrauchbar; eine mit einem Kreis mehr kann sauber
-  // sein. Hält keine das Limit, entscheidet dieselbe Rangfolge über den besten
-  // Notbehelf.
-  let best=null, fallback=null;
-  for(let N=1;N<=3;N++){
-    const r=run(N); if(!r) continue;
-    if(betterZones(r,fallback)) fallback=r;
-    if(r.ok&&betterZones(r,best)) best=r;
+  // Alles für EINE Frame-Drehung durchrechnen.
+  const forRot=rot=>{
+    ROT=rot;
+    if(S.loopMode!=='auto') return run(+S.loopMode);
+    // Unter den Kreiszahlen, die das Längenlimit halten, die KREUZUNGSFREISTE
+    // nehmen statt einfach die erste. Eine Aufteilung, die das Limit knapp hält,
+    // sich aber kreuzt, ist unbrauchbar; eine mit einem Kreis mehr kann sauber
+    // sein. Hält keine das Limit, entscheidet dieselbe Rangfolge über den
+    // besten Notbehelf.
+    let best=null, fallback=null;
+    for(let N=1;N<=3;N++){
+      const r=run(N); if(!r) continue;
+      if(betterZones(r,fallback)) fallback=r;
+      if(r.ok&&betterZones(r,best)) best=r;
+    }
+    return best||fallback;
+  };
+  // Die FRAME-DREHUNG ist selbst eine Stellschraube. rotForManifold ordnet einen
+  // Verteiler auf einer Notch-INNENKANTE der zugehörigen Aussenwand zu — der
+  // Korridor liegt dann an der Aussenwand, während der Verteiler bis zu 3 m
+  // entfernt auf der Innenkante sitzt, und jede Zuleitung muss quer durchs Feld.
+  // Gemessen waren das die schlechtesten Positionen überhaupt (bis 80
+  // Kreuzungen), alle auf x = W-notchA oder y = H-notchB.
+  //
+  // Andere Drehungen werden nur probiert, wenn die natürliche NICHT sauber ist:
+  // im Normalfall kostet die Suche dadurch nichts.
+  const natural=rotForManifold(snappedManifold());
+  let best=forRot(natural), bestRot=natural;
+  if(best&&best.cross>0){
+    for(const r of [0,1,2,3]){
+      if(r===natural) continue;
+      const c=forRot(r);
+      if(betterZones(c,best)){ best=c; bestRot=r; }
+      if(best.cross===0) break;
+    }
   }
-  return wrap(best||fallback,false);
+  ROT=bestRot;                                 // Weltkoordinaten der Auswahl gelten
+  return wrap(best,S.loopMode!=='auto');
 }
 // Verteiler darf an JEDER Wand stehen, auch an den Notch-Innenkanten.
 function snappedManifold(){

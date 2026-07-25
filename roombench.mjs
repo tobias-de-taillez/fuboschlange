@@ -47,6 +47,11 @@ for (let i = 0; i < N; i++) {
   let r;
   try {
     const plan = api.autofit();
+    // Ein Plan OHNE Kreise ist ein Fehlschlag, kein perfektes Ergebnis. Ohne
+    // diese Zeile meldet ein Absturz in buildLoops "0 Kreuzungen, 0 Radiusfehler,
+    // 0 Rohr draussen" - genau so hat ein ReferenceError einmal wie ein
+    // Durchbruch ausgesehen.
+    if (!plan.loops.length) throw new Error('kein Kreis erzeugt');
     const minR = Math.min(Infinity, ...plan.loops.map(l => l.minR ?? Infinity));
     r = { cross: api.loopCrossings(plan), outside: api.loopsOutside(plan),
           cov: Math.round(api.heatCoverage(plan.loops, 25) * 100),
