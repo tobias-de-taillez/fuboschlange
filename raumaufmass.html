@@ -209,6 +209,11 @@ function analyze(pts, meas){
   const Jfull=jacobian(pts,meas);
   const J=Jfull.map(r=>free.map(c=>r[c]));
   const gs=gramSchmidt(J, TOL_RANK);
+  // Ohne aktive Messungen hat J null Zeilen - gramSchmidt kennt dann die Spalten-
+  // zahl nicht und setzt k=0 statt nf (siehe dort). analyze kennt nf aber genau:
+  // ohne jede Messung ist jede freie Koordinate ein Flex-Mode, der Nullraum also
+  // die volle freie Dimension, nicht leer.
+  if(m===0) gs.k=nf;
   const rank=gs.rank;
   const dof=Math.max(0, nf-rank);
   const redundancy=m-rank;
@@ -408,6 +413,45 @@ globalThis.selfChecks=function(){
     chk('analyze: mit Diagonale -> 0 Messungen fehlen',
        C.analyze(rect,seiten.concat([{a:'A',b:'C',d:5000}])).dof===0);
     chk('analyze: 4 Seiten -> genau ein Flex-Mode', C.analyze(rect,seiten).modes.length===1);
+  }
+  // --- analyze: Modeform ist echt, nicht nur gezaehlt (Review-Finding 2) ---
+  {
+    // Gleiches Rechteck, gleiche vier Seiten -> genau ein Flex-Mode (siehe oben).
+    // Eine vertauschte Ruecktransformation (f[i]=z[c] statt f[c]=z[i]) waere mit
+    // "modes.length===1" allein nicht zu erwischen - deshalb hier die Form pruefen.
+    const rect=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:3000},{id:'D',x:0,y:3000}];
+    const seiten=[{a:'A',b:'B',d:4000},{a:'B',b:'C',d:3000},{a:'C',b:'D',d:4000},{a:'D',b:'A',d:3000}];
+    const an=C.analyze(rect,seiten);
+    const n2=2*rect.length;
+    chk('analyze: Mode-Vektor hat Laenge 2n', an.modes.every(z=>z.length===n2));
+    const fixed=C.gaugeFixed(rect);
+    chk('analyze: Mode-Vektor ist 0 an den gepinnten Spalten',
+       an.modes.every(z=>fixed.every(c=>z[c]===0)));
+    const J=C.jacobian(rect,seiten);
+    chk('analyze: Mode-Vektor liegt im Nullraum der Jacobi-Matrix (J*z ~ 0)',
+       an.modes.every(z=>J.every(row=>near(row.reduce((s,x,i)=>s+x*z[i],0),0,1e-9))));
+  }
+  // --- analyze: Moden ohne jede Messung (Review-Finding 1) ---
+  {
+    // gramSchmidt sieht bei 0 Zeilen keine Spalten (k=0) und nullSpace liefert
+    // dann faelschlich []. analyze kennt die Spaltenzahl (nf) aber genau: ohne
+    // jede Messung ist jede freie Koordinate ein Flex-Mode.
+    const rect=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:3000},{id:'D',x:0,y:3000}];
+    const an=C.analyze(rect,[]);
+    chk('analyze: ohne Messungen -> modes.length = dof', an.modes.length===an.dof);
+  }
+  // --- analyze: sigma-Gewichtung wirkt pro Messung (Review-Finding 3) ---
+  {
+    // Ueberbestimmtes Netz, eine Messung absichtlich leicht verstimmt (v!=0),
+    // damit "sigma verdoppelt -> w halbiert" keine 0/2=0-Nullaussage ist.
+    const rect=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:3000},{id:'D',x:0,y:3000}];
+    const voll=[{a:'A',b:'B',d:4000},{a:'B',b:'C',d:3000},{a:'C',b:'D',d:4000},
+                {a:'D',b:'A',d:3010},{a:'A',b:'C',d:5000},{a:'B',b:'D',d:5000}];
+    const sigma5=voll.map(m=>({...m, sigma:5}));
+    const sigma10=sigma5.map((m,i)=>i===3 ? {...m, sigma:10} : m);
+    const w5=C.analyze(rect,sigma5).w, w10=C.analyze(rect,sigma10).w;
+    chk('analyze: sigma der Messung verdoppelt -> w dieser Messung halbiert',
+       near(w10[3], w5[3]/2, 1e-9));
   }
   // --- analyze: der Luegner-Fall (Spec-Test 3) ---
   {
