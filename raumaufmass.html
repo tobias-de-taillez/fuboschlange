@@ -446,15 +446,18 @@ globalThis.CORE={ TOL_RANK, TOL_RED, TOL_MODE, SIGMA_DEF, SUGGEST_CHECK_MAX,
 const C=globalThis.CORE;
 
 // ================= UI-Konstanten =================
-// Schwellwerte fuer die Ausreisser-Markierung in renderPanel(): eine Zeile
-// gilt nur dann als eindeutig verdaechtig, wenn ihr w klar (Faktor
-// WORST_MARGIN) vor dem naechstkleineren liegt UND selbst spuerbar ueber
-// WORST_MIN_W liegt. Ohne beide Schwellen entscheidet Rundungsstaub, welche
-// Messung angeklagt wird: bei Redundanz 1 sind alle w mathematisch gleich
-// gross (w_i = |c|/sigma_i fuer jedes i - eine Identitaet, kein Zufall), bei
-// einem perfekten Fit sind alle w exakt 0. Siehe task-11-report.md.
-const WORST_MARGIN = 1.5;  // groesstes w muss mind. das 1.5-fache des naechsten sein
-const WORST_MIN_W   = 0.5; // ...und dabei spuerbar ueber Konvergenzrauschen liegen
+// Schwellwerte fuer die Ausreisser-Markierung in renderPanel(): markiert wird
+// nicht mehr eine einzelne "schlimmste" Messung, sondern alle Messungen, die
+// gleichzeitig (a) ueberhaupt statistisch auffaellig sind und (b) nahe genug
+// am groessten w im Feld liegen, um mathematisch gleich verdaechtig zu sein.
+// Bei Redundanz 1 sind alle w z.B. mathematisch gleich gross (w_i = |c|/sigma_i
+// fuer jedes i - eine Identitaet, kein Zufall; die tatsaechlich berechneten
+// Werte weichen nur durch Rundung/Konvergenzrauschen minimal voneinander ab,
+// daher TIE_TOL statt exaktem Vergleich), bei einem perfekten Fit sind alle w
+// exakt 0. Eine einzelne "Gewinnerin" waere dort reiner Rundungsstaub.
+// Siehe task-11-report.md.
+const BAARDA_W0 = 3.29; // Baardas kritischer Wert fuer Data Snooping - erst darueber gilt eine Messung ueberhaupt als Ausreisser
+const TIE_TOL   = 0.02; // Toleranzband ums groesste w (2% relativ): alles darin gilt als gleich verdaechtig statt durch Rundung getrennt
 
 const M={ pts:[], walls:[], meas:[], mode:'point', sel:[], fit:null, an:null, drag:null };
 
@@ -643,19 +646,22 @@ function renderPanel(){
   const tb=document.querySelector('#tbl tbody');
   tb.innerHTML='';
   const act=C.activeMeas(M.meas);
-  // Groesstes normiertes Residuum = Kandidat fuer den wahrscheinlichsten
-  // Ausreisser - aber nur markieren, wenn er sich klar (WORST_MARGIN) vom
-  // naechstkleineren abhebt und selbst spuerbar (WORST_MIN_W) ueber 0 liegt.
-  // Sonst entscheidet Rundungsstaub, welche Messung angeklagt wird: bei
-  // Redundanz 1 sind alle w mathematisch gleich gross, bei einem perfekten
-  // Fit sind alle w exakt 0 (siehe Konstanten-Kommentar oben).
-  let worst=-1;
-  if(M.an) M.an.w.forEach((x,i)=>{ if(x!=null && (worst<0 || x>M.an.w[worst])) worst=i; });
-  if(worst>=0){
-    const rest=M.an.w.filter((x,i)=>x!=null && i!==worst);
-    const runnerUp=rest.length ? Math.max(...rest) : 0;
-    if(!(M.an.w[worst]>WORST_MIN_W && M.an.w[worst]>WORST_MARGIN*runnerUp)) worst=-1;
-  }
+  // Nicht die eine "schlimmste" Messung suchen, sondern alle, die gleich
+  // verdaechtig sind: ueber Baardas Grenzwert (statistisch ueberhaupt ein
+  // Ausreisser) UND innerhalb TIE_TOL des groessten w im Feld (mathematisch
+  // nicht vom Spitzenwert zu unterscheiden). Ein klarer Spitzenreiter liefert
+  // so genau eine markierte Zeile, ein Unentschieden markiert alle gleich
+  // weit vorne liegenden (siehe Konstanten-Kommentar oben).
+  const wMax=M.an ? M.an.w.reduce((mx,x)=>(x!=null&&x>mx)?x:mx, -Infinity) : -Infinity;
+  const suspects=new Set();
+  // Beide Bedingungen gelten pro Zeile, nicht nur fuers Feld-Maximum: sonst
+  // koennte eine Zeile knapp unter BAARDA_W0 allein deshalb mitmarkiert
+  // werden, weil ein anderer, selbst nur knapp ueber der Schwelle liegender
+  // Wert zufaellig in der Naehe liegt - genau die Art Scheinbefund, die das
+  // Werkzeug vermeiden soll.
+  if(M.an) M.an.w.forEach((x,i)=>{
+    if(x!=null && x>BAARDA_W0 && x>=wMax*(1-TIE_TOL)) suspects.add(i);
+  });
 
   // absteigend nach w sortiert anzeigen, aber die Originalindizes behalten
   const rows=act.map((m,i)=>({m,i,w:M.an?M.an.w[i]:null}));
@@ -663,7 +669,7 @@ function renderPanel(){
 
   rows.forEach(({m,i,w})=>{
     const tr=document.createElement('tr');
-    if(i===worst && w!=null) tr.className='worst';
+    if(suspects.has(i)) tr.className='worst';
     const red=M.an?M.an.red[i]:null;
     const v=M.an?M.an.v[i]:null;
     tr.innerHTML=
@@ -696,17 +702,15 @@ function renderPanel(){
     tb.appendChild(tr);
   });
 
-  // Wenn Messungen zwar Residuen haben, aber keine Zeile markiert wurde, ist
-  // das kein Darstellungsfehler, sondern eine ehrliche Auskunft: Die Zahlen
-  // reichen nicht, um eine bestimmte Messung herauszugreifen. Ohne diesen
-  // Satz saehe die Tabelle aus wie eine Tabelle ohne Befund. Nicht zeigen bei
-  // Redundanz 0 (eigene Statuszeile + eigene Badges) und nicht bei einem
-  // perfekten Fit (alle w exakt 0 - kein Befund, keine Erklaerung noetig).
-  const anyResidual=M.an && M.an.w.some(x=>x!=null && x>WORST_MIN_W);
-  const showWhy=M.an && M.an.redundancy>0 && worst<0 && anyResidual;
+  // Sind mehrere Zeilen markiert, ist das kein Darstellungsfehler, sondern
+  // eine ehrliche Auskunft: Die Daten reichen nicht, um unter den gleich
+  // verdaechtigen Messungen eine einzelne herauszugreifen. Bei genau einer
+  // markierten Zeile (klarer Spitzenreiter) oder keiner (nichts auffaellig)
+  // bleibt der Satz weg.
+  const showWhy=suspects.size>1;
   const why=document.getElementById('why');
   why.textContent = showWhy
-    ? 'Kein Ausreißer eingrenzbar — die normierten Residuen fallen praktisch gleich groß aus; erst eine weitere Messung würde sie trennen.'
+    ? 'Mehrere Messungen sind gleich verdächtig — die normierten Residuen liegen praktisch gleichauf; erst eine weitere Messung würde sie trennen.'
     : '';
   why.style.display = showWhy ? '' : 'none';
 }
