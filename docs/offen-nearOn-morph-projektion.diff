@@ -1,0 +1,38 @@
+diff --git a/verlegeplan.html b/verlegeplan.html
+index ad76150..a255b99 100644
+--- a/verlegeplan.html
++++ b/verlegeplan.html
+@@ -1085,6 +1085,27 @@ function doubleSpiralField(poly,insOf,s,gate){
+     // Schlechter als BEIDE. Die Splice-Stelle ist wieder ein Sprung, und es sind
+     // jetzt zwei davon (Morph->Rest und Rest->Morph-Ruecklauf) statt vorher
+     // keiner. Genau das, was die Morphung eigentlich abschafft.
++    // VERWORFEN, gemessen: den Abbruch bei ungleicher Eckenzahl ganz abschaffen,
++    // indem die Zuordnung statt ueber den Kantenindex ueber die
++    // NAECHSTE-PUNKT-PROJEKTION auf Ring B laeuft. Punkte auf einer
++    // kollabierenden Lobe von A landen dann alle auf derselben Ecke von B, die
++    // Morphung laeuft weiter statt abzubrechen — die Zuordnung, die die
++    // MA-Literatur "partially linear morphing" nennt.
++    //   Ringe (jetzt)     crossFails 18  covFails 10  radFails 19  medR 46
++    //   Morph, Index      crossFails 17  covFails 17  radFails 17  medR 49
++    //   Morph, Projektion crossFails 18  covFails 16  radFails 20  medR 34
++    // Das Dwelling an der kollabierten Ecke ist eine Spitze: medianRadius faellt
++    // von 49 auf 34, radFails auf 20/20.
++    //
++    // WICHTIGER ALS DAS ERGEBNIS: die Deckung kommt dabei NICHT zurueck
++    // (covFails 17 -> 16). Nach Notch getrennt gemessen, 20 Laeufe:
++    //   Ringe        Rechteck n=8: cov 5  medCov 36   L n=12: cov  5  medCov 40
++    //   Morph Index  Rechteck n=8: cov 6  medCov 32   L n=12: cov 11  medCov 33
++    //   Morph Proj.  Rechteck n=8: cov 6  medCov 31   L n=12: cov 10  medCov 35
++    // Rechtecke haben gar keinen Topologiewechsel (rectiOffsetter liefert dort
++    // immer ein Viereck) und verlieren unter der Morphung trotzdem Deckung.
++    // Damit ist der Abbruch NICHT die Ursache des Deckungsverlusts, und die
++    // Medial-Axis-Spur der Runden 13-15 ist als Deckungs-Fix widerlegt.
+     const arm=st=>{
+       const o=[];
+       for(let k=st;k+2<al.length;k+=2){
+@@ -4179,3 +4200,5 @@ recompute();
+ </script>
+ </body>
+ </html>
++
++// probe
