@@ -39,8 +39,49 @@ function jacobian(pts, meas){
   });
 }
 
+// Gauss-Jordan mit Spaltenpivotierung, mehrere rechte Seiten.
+// ponytail: dicht und dumm - bei 2n <= 60 Unbekannten ist sparse reiner Aufwand.
+function luSolve(A, B){
+  const k=A.length; if(!k) return [];
+  const p=B[0].length;
+  let mx=0; for(const r of A) for(const x of r) mx=Math.max(mx,Math.abs(x));
+  const eps=1e-12*(mx||1);
+  const M=A.map((r,i)=>r.concat(B[i]));
+  for(let c=0;c<k;c++){
+    let piv=c;
+    for(let r=c+1;r<k;r++) if(Math.abs(M[r][c])>Math.abs(M[piv][c])) piv=r;
+    if(Math.abs(M[piv][c])<eps) return null;
+    [M[c],M[piv]]=[M[piv],M[c]];
+    const d=M[c][c];
+    for(let j=c;j<k+p;j++) M[c][j]/=d;
+    for(let r=0;r<k;r++){
+      if(r===c) continue;
+      const f=M[r][c]; if(f===0) continue;
+      for(let j=c;j<k+p;j++) M[r][j]-=f*M[c][j];
+    }
+  }
+  return M.map(r=>r.slice(k));
+}
+
+function matTmat(A){
+  const m=A.length, k=m?A[0].length:0;
+  const N=Array.from({length:k},()=>new Array(k).fill(0));
+  for(let i=0;i<m;i++) for(let a=0;a<k;a++){
+    const va=A[i][a]; if(!va) continue;
+    for(let b=a;b<k;b++) N[a][b]+=va*A[i][b];
+  }
+  for(let a=0;a<k;a++) for(let b=0;b<a;b++) N[a][b]=N[b][a];
+  return N;
+}
+
+function matTvec(A,v){
+  const m=A.length, k=m?A[0].length:0, g=new Array(k).fill(0);
+  for(let i=0;i<m;i++) for(let a=0;a<k;a++) g[a]+=A[i][a]*v[i];
+  return g;
+}
+
 globalThis.CORE={ TOL_RANK, TOL_RED, TOL_MODE, SIGMA_DEF, SUGGEST_CHECK_MAX,
-                  dist, idx, activeMeas, residuals, jacobian };
+                  dist, idx, activeMeas, residuals, jacobian, luSolve, matTmat, matTvec };
 </script>
 
 <script id="checks">
@@ -83,6 +124,28 @@ globalThis.selfChecks=function(){
     chk('jacobian: Translation x im Nullraum', J.every(r=>near(mul(r,tx),0,1e-9)));
     chk('jacobian: Translation y im Nullraum', J.every(r=>near(mul(r,ty),0,1e-9)));
     chk('jacobian: Drehung im Nullraum',       J.every(r=>near(mul(r,rot),0,1e-9)));
+  }
+  // --- luSolve / matTmat / matTvec ---
+  {
+    const A=[[2,1],[1,3]], B=[[3],[5]];        // Loesung x=(0.8, 1.4)
+    const X=C.luSolve(A,B);
+    chk('luSolve: 2x2 korrekt', near(X[0][0],0.8,1e-9)&&near(X[1][0],1.4,1e-9));
+    chk('luSolve: singulaer -> null', C.luSolve([[1,2],[2,4]],[[1],[2]])===null);
+    chk('luSolve: mehrere rechte Seiten', (()=>{
+      const Y=C.luSolve([[2,0],[0,4]],[[2,4],[4,8]]);
+      return near(Y[0][0],1,1e-9)&&near(Y[0][1],2,1e-9)&&near(Y[1][0],1,1e-9)&&near(Y[1][1],2,1e-9);
+    })());
+    chk('luSolve: Pivotierung noetig (Null auf der Diagonalen)', (()=>{
+      const Y=C.luSolve([[0,1],[1,0]],[[3],[5]]);
+      return Y && near(Y[0][0],5,1e-9) && near(Y[1][0],3,1e-9);
+    })());
+  }
+  {
+    const M=[[1,2],[3,4]];
+    const N=C.matTmat(M);                      // [[10,14],[14,20]]
+    chk('matTmat korrekt', N[0][0]===10&&N[0][1]===14&&N[1][0]===14&&N[1][1]===20);
+    const g=C.matTvec(M,[1,1]);                // [4,6]
+    chk('matTvec korrekt', g[0]===4&&g[1]===6);
   }
   return {ok, out};
 };
