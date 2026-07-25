@@ -1,0 +1,9 @@
+{
+ "runs": 500,
+ "crossFails": 500,
+ "covFails": 459,
+ "radFails": 500,
+ "outFails": 184,
+ "worstCoverage": 4,
+ "worstRadius": 0
+}
