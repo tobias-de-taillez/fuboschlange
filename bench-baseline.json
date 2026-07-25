@@ -5,5 +5,9 @@
  "radFails": 500,
  "outFails": 184,
  "worstCoverage": 4,
- "worstRadius": 0
+ "worstRadius": 0,
+ "crossFailRate": 1,
+ "covFailRate": 0.918,
+ "radFailRate": 1,
+ "outFailRate": 0.368
 }

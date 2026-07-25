@@ -48,6 +48,14 @@ const out = {
   worstCoverage: Math.min(...fails.map(f => f.cov), 100),
   worstRadius: Math.min(...fails.map(f => f.minR ?? 999), 999),
 };
+// Raten (Anteil an `runs`) zusätzlich zu den Absolutzahlen: Läufe mit
+// unterschiedlicher Laufzahl sind nur über die Rate vergleichbar (siehe
+// Regressionsvergleich weiter unten). Die Absolutzahlen bleiben erhalten,
+// sie sind für die Diagnose nützlich.
+out.crossFailRate = out.crossFails / RUNS;
+out.covFailRate = out.covFails / RUNS;
+out.radFailRate = out.radFails / RUNS;
+out.outFailRate = out.outFails / RUNS;
 console.log(JSON.stringify(out, null, 1));
 
 if (process.argv.includes('--save-baseline')) {
@@ -56,7 +64,25 @@ if (process.argv.includes('--save-baseline')) {
 }
 // Alle vier harten Kriterien gehören in den Regressionsvergleich — `outFails`
 // fehlte hier bisher, wodurch "kein Rohr außerhalb des Raums" nie geprüft wurde.
-const KEYS = ['crossFails', 'covFails', 'radFails', 'outFails'];
+// Verglichen werden die RATEN, nicht die Absolutzahlen: die Baseline wurde mit
+// 500 Läufen geschrieben. Ein Vergleichslauf mit anderer Laufzahl hat andere
+// Absolutzahlen selbst bei unveränderter Fehlerquote — nachgewiesen mit
+// `node bench.mjs 600`, das gegen die 500er-Baseline in allen vier
+// Absolutzahlen "schlechter" meldet, obwohl sich am Code nichts geändert hat.
+// Umgekehrt kaschiert ein Lauf mit weniger Läufen (z. B. 60) eine echte
+// Verschlechterung. Raten sind laufzahl-unabhängig vergleichbar.
+const RATE_KEYS = ['crossFailRate', 'covFailRate', 'radFailRate', 'outFailRate'];
+// Toleranz gegen das Rauschen unterschiedlicher Laufzahlen: bei festem Seed
+// ist jeder Lauf deterministisch, aber verschieden lange Präfixe derselben
+// Zufallsfolge liefern leicht unterschiedliche Raten. Gemessen (gleicher
+// Code, n=60/500/600) war die größte Abweichung von der 500er-Rate ein Anstieg
+// von +0.0153 bei `outFailRate` (600 Läufe: 0.3833 vs. 500 Läufe: 0.368) — alle
+// anderen Abweichungen lagen bei 0 oder darunter. 0.05 (5 Prozentpunkte) deckt
+// das mit knapp 3x Sicherheitsabstand ab, bleibt aber klein genug, um echte
+// Regressionen zu erkennen: die bisherigen Verschlechterungen in diesem
+// Projekt (siehe Task-Brief: z. B. Kreuzungen 57->103) verschieben die Rate um
+// ein Vielfaches, nicht um einzelne Prozentpunkte.
+const RATE_TOLERANCE = 0.05;
 
 // Fehlende Baseline-Datei ist ein legitimer Erstlauf: still bleiben, Exit 0.
 let baseRaw;
@@ -72,6 +98,14 @@ if (baseRaw !== null) {
   let base;
   try {
     base = JSON.parse(baseRaw);
+    // JSON erlaubt auch `null`, Zahlen oder Strings als Dokument-Wurzel — das
+    // ist gültiges JSON, aber kein Objekt. Der `in`-Check weiter unten
+    // verlangt ein Objekt und würde sonst mit einem ungefangenen TypeError
+    // abbrechen. Hier wie einen Parse-Fehler behandeln: eine Baseline ohne
+    // Objektstruktur ist genauso unbrauchbar wie eine mit Syntaxfehler.
+    if (base === null || typeof base !== 'object') {
+      throw new TypeError(`kein Objekt, sondern ${base === null ? 'null' : typeof base}`);
+    }
   } catch (e) {
     console.error('bench-baseline.json ist beschädigt (kein gültiges JSON): ' + e.message);
     process.exit(1);
@@ -81,13 +115,13 @@ if (baseRaw !== null) {
   // `x > undefined` und damit immer `false` — diese Kennzahl könnte nie mehr
   // anschlagen. Das wäre eine veraltete Baseline, die eine Kennzahl still
   // außer Kraft setzt, also ein Fehler statt eines stillen Durchwinkens.
-  const missing = KEYS.filter(k => !(k in base));
+  const missing = RATE_KEYS.filter(k => !(k in base));
   if (missing.length) {
     console.error('bench-baseline.json fehlt Schlüssel: ' + missing.join(', '));
     process.exit(1);
   }
 
-  const worse = KEYS.filter(k => out[k] > base[k]);
+  const worse = RATE_KEYS.filter(k => out[k] > base[k] + RATE_TOLERANCE);
   if (worse.length) {
     console.error('REGRESSION in: ' + worse.join(', '));
     process.exit(1);
