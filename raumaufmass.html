@@ -30,6 +30,11 @@
     <button data-mode="wall"    aria-pressed="false">2 Wand</button>
     <button data-mode="measure" aria-pressed="false">3 Messung</button>
     <span id="hint" style="align-self:center;color:#666"></span>
+    <span style="align-self:center;color:#666;margin-left:auto;font-size:12px">
+      <span style="color:#07a">◯</span> gemessene Genauigkeit &nbsp;
+      <span style="color:#999">◌</span> angenommen &nbsp;
+      <span style="color:#c60">↔</span> noch beweglich
+    </span>
   </div>
   <canvas id="cv"></canvas>
 </div>
@@ -532,6 +537,44 @@ function render(){
     ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
   });
   ctx.setLineDash([]);
+  // Unsicherheiten. Drei Faelle, die verschieden aussehen muessen:
+  // ueberbestimmt -> Ellipse aus sigmaHat; bestimmt -> Ellipse aus dem
+  // angenommenen sigma; beweglich -> Pfeil, weil eine Ellipse dort unendlich
+  // gross waere und die Zeichnung damit luegen wuerde.
+  if(M.an){
+    const moving=new Array(P.length).fill(false);
+    M.an.modes.forEach(mo=>{
+      const nrm=Math.hypot(...mo)||1;
+      P.forEach((_,i)=>{
+        if(Math.hypot(mo[2*i],mo[2*i+1])/nrm > C.TOL_MODE) moving[i]=true;
+      });
+    });
+    const cov=M.an.dof===0 ? C.covariance(P, M.meas, M.an.sigmaHat) : null;
+    ctx.lineWidth=1.5*dpr;
+    P.forEach((pt,i)=>{
+      const c=toScr(pt);
+      if(moving[i]){
+        ctx.strokeStyle='#c60';
+        M.an.modes.forEach(mo=>{
+          const nrm=Math.hypot(...mo)||1;
+          const dx=mo[2*i]/nrm, dy=mo[2*i+1]/nrm;
+          const L=34*dpr;
+          ctx.beginPath();
+          ctx.moveTo(c.x-dx*L, c.y-dy*L); ctx.lineTo(c.x+dx*L, c.y+dy*L);
+          ctx.stroke();
+        });
+      } else if(cov){
+        const e=C.ellipse(cov[i]);
+        ctx.strokeStyle=M.an.sigmaHat!=null?'#07a':'#999';
+        ctx.setLineDash(M.an.sigmaHat!=null?[]:[3*dpr,3*dpr]);
+        ctx.save(); ctx.translate(c.x,c.y); ctx.rotate(e.ang);
+        ctx.beginPath();
+        // 3-fach ueberhoeht, sonst ist eine 6-mm-Ellipse im Meter-Massstab unsichtbar
+        ctx.ellipse(0,0, Math.max(e.a*VIEW.s*3, 2*dpr), Math.max(e.b*VIEW.s*3, 2*dpr), 0, 0, 7);
+        ctx.stroke(); ctx.restore(); ctx.setLineDash([]);
+      }
+    });
+  }
   // Punkte
   P.forEach((pt,i)=>{
     const p=toScr(pt);
@@ -713,7 +756,45 @@ function renderPanel(){
     ? 'Mehrere Messungen sind gleich verdächtig — die normierten Residuen liegen praktisch gleichauf; erst eine weitere Messung würde sie trennen.'
     : '';
   why.style.display = showWhy ? '' : 'none';
+
+  // --- Vorschläge, nach Zweck getrennt. Ungetrennt stünden hier fünf Einträge,
+  //     während die Statuszeile "3 Messungen fehlen" meldet.
+  // P wie in render() hergeleitet (waehrend eines Drags aus M.pts, sonst aus
+  // dem Fit) und nur einmal berechnet - keine zweite, abweichende Herleitung
+  // fuer Vorschlaege und Wandlaengen getrennt.
+  const P=M.drag?M.pts:(M.fit?M.fit.pts:M.pts), I=C.idx(P);
+  const sg=document.getElementById('sugg');
+  const list=(M.pts.length>=3 && M.an) ? C.suggest(P, M.walls, M.meas) : [];
+  const grp=(t,w)=>{
+    const e=list.filter(s=>s.why===w);
+    return e.length ? `<div style="margin-bottom:6px"><b>${t}</b><br>`
+      + e.map(s=>`${s.a} ↔ ${s.b}`).join(' &nbsp; ') + '</div>' : '';
+  };
+  if(!M.an) sg.textContent='—';
+  else if(!list.length)
+    sg.textContent = M.an.dof>0
+      ? 'Keine messbare Strecke bringt das Netz weiter — fehlt eine Wand im Zug?'
+      : 'Nichts mehr nötig.';
+  else sg.innerHTML = grp('Damit der Raum bestimmt ist:','bestimmt')
+                    + grp('Damit die Messungen prüfbar werden:','pruefbar');
+
+  // --- Wandlängen
+  document.getElementById('wl').textContent = M.walls
+    .map(([a,b])=>`${a}–${b}  ${fmtM(C.dist(P[I[a]],P[I[b]]))} m`).join('\n');
 }
+
+document.getElementById('exp').onclick=async()=>{
+  const P=M.drag?M.pts:(M.fit?M.fit.pts:M.pts);
+  const json=JSON.stringify({
+    pts:P.map(p=>({id:p.id, x:Math.round(p.x), y:Math.round(p.y)})),
+    walls:M.walls,
+    meas:M.meas,
+    sigmaHat:M.an?M.an.sigmaHat:null,
+  }, null, 2);
+  try{ await navigator.clipboard.writeText(json); alert('JSON kopiert.'); }
+  catch{ prompt('Kopieren mit Strg+C:', json); }
+};
+
 recompute();
 </script>
 
