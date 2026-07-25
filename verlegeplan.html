@@ -234,6 +234,14 @@ const S = {
   randSpacing:50, randPasses:2, windowEdges:['bottom','left','right'],
   maxLoop:100000, loopMode:'auto',
   useSpiralField:false,     // Experiment: kontinuierliches Spiralfeld (s. doubleSpiralField)
+  // Eikonal: Bahnabstand ortsabhängig über |grad phi| = 1/s(x). Gemessen mit
+  // INTEGRIERTER Randzone (windowEdges leer, Randband über spacingAt):
+  // Kreuzungen 33 statt 34, Biegeradius 56 statt 34 mm — deutlich besser beim
+  // härtesten Kriterium. Deckung aber 26 statt 32 %, weil das Randband noch zu
+  // dünn belegt wird. Bleibt aus, bis die Deckung nachgezogen ist.
+  // Mit separater Randzone läuft sie doppelt (72 Kreuzungen, Radius 4) — die
+  // beiden schließen sich aus.
+  useEikonal:false,
   relax:true,               // Kraftmodell-Feinabstimmung nach der Konstruktion
   manifold:{x:1000,y:0},    // interne Koordinaten (Notch-rechts-Welt)
   // ---- Thermik (Heatmap) ----
@@ -530,6 +538,57 @@ function simplify(pts,tol){
 // Feldpolygon einer Zone: das Zonenpolygon, jede Kante um ihren eigenen Inset
 // nach innen. Statt zu offsetten wird der Inset direkt vom Distanzfeld
 // abgezogen — der nächste Randpunkt bestimmt, welcher Inset gilt.
+// ===== Eikonal-Feld mit variabler Geschwindigkeit =====
+// Das Abstandsfeld erzwingt überall denselben Bahnabstand. Hier stattdessen
+// |grad phi| = 1/s(x): der Bahnabstand ist ORTSABHÄNGIG. Dicht an der
+// Fensterfront, weiter im Kern. Die Randzone ist damit kein Sonderfall mehr,
+// sondern nur ein Gebiet mit kleinerem s.
+// Gelöst per Fast Sweeping (Godunov-Upwind, 4 Durchlaufrichtungen) — robust
+// und ohne Prioritätswarteschlange.
+function eikonalField(poly,insOf,step,sAt){
+  const F=zoneField(poly,insOf,step);              // liefert Gitter + Innen/Außen
+  const {x0,y0,nx,ny,d}=F;
+  const INF=1e9, phi=new Float64Array(nx*ny).fill(INF);
+  const inside=new Uint8Array(nx*ny);
+  for(let k=0;k<d.length;k++) inside[k]= d[k]>0 ?1:0;
+  // Startwerte: die Randbahn (Abstand ~0) ist phi=0
+  for(let k=0;k<d.length;k++) if(inside[k]&&d[k]<step) phi[k]=0;
+  const idx=(i,j)=>j*nx+i;
+  const sweep=(iFrom,iTo,iStep,jFrom,jTo,jStep)=>{
+    for(let j=jFrom;j!==jTo;j+=jStep)for(let i=iFrom;i!==iTo;i+=iStep){
+      const k=idx(i,j); if(!inside[k]||phi[k]===0) continue;
+      const ax=Math.min(i>0?phi[k-1]:INF, i<nx-1?phi[k+1]:INF);
+      const ay=Math.min(j>0?phi[k-nx]:INF, j<ny-1?phi[k+nx]:INF);
+      const px=x0+i*step, py=y0+j*step;
+      const f=step/Math.max(1e-6,sAt(px,py));      // Schrittkosten = step/s(x)
+      let v;
+      if(Math.abs(ax-ay)>=f) v=Math.min(ax,ay)+f;  // eindimensionaler Fall
+      else v=(ax+ay+Math.sqrt(2*f*f-(ax-ay)*(ax-ay)))/2;
+      if(v<phi[k]) phi[k]=v;
+    }
+  };
+  for(let pass=0;pass<2;pass++){
+    sweep(0,nx,1, 0,ny,1); sweep(nx-1,-1,-1, 0,ny,1);
+    sweep(0,nx,1, ny-1,-1,-1); sweep(nx-1,-1,-1, ny-1,-1,-1);
+  }
+  for(let k=0;k<phi.length;k++) if(!inside[k]||phi[k]>=INF) phi[k]=-1;
+  return {x0,y0,step,nx,ny,d:phi,inside};
+}
+// Bahnabstand am Ort: an markierten Fensterwänden dichter, sonst der Sollwert.
+function spacingAt(px,py){
+  if(!S.windowEdges.length) return S.s;
+  const W=frameW(), H=frameH();
+  let dist=Infinity;
+  frameEdges().forEach(e=>{
+    if(e==='bottom') dist=Math.min(dist,py);
+    else if(e==='top') dist=Math.min(dist,H-py);
+    else if(e==='left') dist=Math.min(dist,px);
+    else dist=Math.min(dist,W-px);
+  });
+  const band=S.randPasses*S.randSpacing;
+  if(dist>=band) return S.s;
+  return S.randSpacing;                            // im Randband: dichte Bahnen
+}
 function zoneField(poly,insOf,step){
   let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
   poly.forEach(p=>{x0=Math.min(x0,p.x);y0=Math.min(y0,p.y);x1=Math.max(x1,p.x);y1=Math.max(y1,p.y);});
@@ -695,14 +754,19 @@ function doubleSpiralField(poly,insOf,s,gate){
   }
   // Fallback: konzentrische Isolinien (z.B. wenn die Zone zu klein ist)
   const step=Math.max(12,Math.min(s/3,60));
-  const F=zoneField(poly,insOf,step);
+  // Eikonal: Niveaus liegen bei ganzzahligen Vielfachen, weil der Bahnabstand
+  // schon in der Feldgleichung steckt (|grad phi| = 1/s(x)). Randzone ist dann
+  // kein Sonderfall, sondern ein Gebiet mit kleinerem s.
+  const useEik=S.useEikonal;
+  const F=useEik?eikonalField(poly,insOf,step,spacingAt):zoneField(poly,insOf,step);
+  const lvl=useEik?1:s;                 // Niveau-Abstand im jeweiligen Feld
   const rings=[];
   // Innerste Windungen weglassen, sobald der Ring enger wird als 2x Biegeradius:
   // dort ist die Krümmung inhärent zu scharf für das Rohr und keine Glättung
   // kann das heilen — der Ring wird nur zur Spitze mit Radius nahe 0.
   const Rb=S.bendRadius;
   for(let k=0;k<200;k++){
-    const cs=isoContours(F,k*s).filter(c=>polyLen(c)>4*s);
+    const cs=isoContours(F,k*lvl).filter(c=>polyLen(c)>4*s);
     if(!cs.length) break;
     cs.sort((a,b)=>polyLen(b)-polyLen(a));
     const c=cs[0];
