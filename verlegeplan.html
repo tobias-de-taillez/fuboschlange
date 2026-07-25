@@ -228,6 +228,7 @@ const S = {
   randSpacing:50, randPasses:2, windowEdges:['bottom','left','right'],
   maxLoop:100000, loopMode:'auto',
   useSpiralField:false,     // Experiment: kontinuierliches Spiralfeld (s. doubleSpiralField)
+  relax:true,               // Kraftmodell-Feinabstimmung nach der Konstruktion
   manifold:{x:1000,y:0},    // interne Koordinaten (Notch-rechts-Welt)
   // ---- Thermik (Heatmap) ----
   // targetPowerW/activeAreaM2 = AUSLEGUNGSWERT (aktive Heizfläche des Planers).
@@ -719,8 +720,15 @@ function doubleSpiralField(poly,insOf,s,gate){
   // Kreuzungen von 57 auf 103 — die Ring-Enden liegen dann zu weit auseinander
   // und die Verbindungen werden selbst zu Diagonalen.
   const open=rings.map((r,k)=>{
-    const rr = orient[k]===orient[0] ? r : r.slice().reverse();
+    let rr = orient[k]===orient[0] ? r : r.slice().reverse();
+    // Geschlossenen Ring öffnen: sonst endet der Pfad exakt auf seinem
+    // Startpunkt und der Übergang zum nächsten Ring wird zur Nadel — eine
+    // 180°-Kehre auf der Stelle, die kein Rohr biegen kann.
+    if(rr.length>2 && len(sub(rr[0],rr[rr.length-1]))<1) rr=rr.slice(0,-1);
     const bi=seamOf(rr);
+    // ponytail: nur den Doppelpunkt entfernen, KEINE zusätzliche Lücke. Ein
+    // Schnitt von s*0.9 vor der Naht beseitigt zwar auch die Nadel, kostete
+    // aber Kreuzungen (31 -> 51) und Deckung (35% -> 30%).
     return [...rr.slice(bi),...rr.slice(0,bi)];
   });
   // Vorlauf rein über die geraden Bahnen, U-Turn, Rücklauf raus über die
@@ -1169,7 +1177,7 @@ function buildLoops(groups){
   // Stufe 3: routen, zusammensetzen und aus dem Frame zurückdrehen
   const back=p=>{ const q=rotBack(p,S.W,S.H); return p.arc?{...q,arc:p.arc}:q; };
   const bk=a=>a.map(back);
-  return raw.map(r=>{
+  const built=raw.map(r=>{
     if(!r.head) return {pts:[]};
     const L=kind=>laneOf[r.gi+'/'+kind]??0;
     let field=r.field.slice();
@@ -1185,9 +1193,24 @@ function buildLoops(groups){
       ? routeVia(r.rand[r.rand.length-1],r.field[0],L('mid')).slice(1,-1) : [];
     const pts=[...leadIn.slice(0,-1),...r.rand,...mid,...field,...leadOut.slice(1)];
     const rings=r.rects.reduce((a,x)=>a+passCount(field,x,M.x),0);   // echte Bahnenzahl
-    const f=fillet(pts,S.bendRadius);      // Länge im Frame = Länge in der Welt
-    return {pts:bk(pts), field:bk(field), rand:bk(r.rand), leadIn:bk(leadIn),
-            leadOut:bk(leadOut), mid:bk(mid), rings, length:f.length, minR:f.minR};
+    return {frameField:field, frameRand:r.rand, frameLeadIn:leadIn,
+            frameLeadOut:leadOut, frameMid:mid, rings};
+  }).filter(l=>l.frameField||l.frameRand);
+
+  // Erst in die Welt zurückdrehen — das Kraftmodell prüft gegen die echte
+  // Raumkontur, im Frame wären Wand-Constraint und pointInRoom falsch.
+  const out=built.map(b=>({
+    field:bk(b.frameField), rand:bk(b.frameRand), leadIn:bk(b.frameLeadIn),
+    leadOut:bk(b.frameLeadOut), mid:bk(b.frameMid), rings:b.rings}));
+
+  // Kraftmodell VOR der Längenmessung: sonst beschreiben Länge und Biegeradius
+  // eine Geometrie, die so nicht gezeichnet wird.
+  if(S.relax) relaxLoops(out,{target:S.s});
+
+  return out.map(l=>{
+    const pts=[...l.leadIn.slice(0,-1),...l.rand,...l.mid,...l.field,...l.leadOut.slice(1)];
+    const f=fillet(pts,S.bendRadius);
+    return {...l, pts, length:f.length, minR:f.minR};
   }).filter(l=>l.pts.length>1);
 }
 function autofit(){
@@ -2155,6 +2178,79 @@ function heatCoverage(loops,reach){
     }
   }
   return total? hit/total : 0;
+}
+
+// ================= Kraftmodell (Relaxation) =================
+// Feinabstimmung auf einer fertigen, topologisch korrekten Verlegung. Kräfte
+// können KEINE Kreuzung auflösen (dazu müsste ein Rohr durch das andere), aber
+// sie gleichen Abstände aus, drücken Rohre aus zu engen Stellen und glätten
+// Kurven bis der Biegeradius passt.
+//
+// Drei Kräfte je Punkt:
+//   1. Abstoßung von fremden Rohrstücken, die näher als der Soll-Abstand sind
+//   2. Rückhaltekraft an der Wand (nie näher als edgeGap)
+//   3. Glättung (Laplace) — erzwingt Mindestkrümmung, also den Biegeradius
+// Ankerpunkte (Verteileranschluss, Randzone) bleiben fest.
+function relaxLoops(loops,opt){
+  const o=Object.assign({iters:24,repel:0.35,smooth:0.22,wall:0.6,target:S.s},opt||{});
+  const cell=Math.max(o.target,S.s), grid=new Map();
+  const key=(x,y)=>Math.round(x/cell)+'|'+Math.round(y/cell);
+  // Bewegliche Punkte: nur das Feld. Randzone und Anbindung sind gesetzt.
+  const nodes=[];
+  loops.forEach((l,li)=>{
+    const f=l.field||[];
+    f.forEach((p,i)=>nodes.push({p:{x:p.x,y:p.y},li,i,
+      fixed:i===0||i===f.length-1, ref:f, idx:i}));
+  });
+  if(!nodes.length) return 0;
+  const room=lRing(0,0,S.W,S.H,S.notchA,S.notchB);
+  let moved=0;
+  for(let it=0;it<o.iters;it++){
+    grid.clear();
+    nodes.forEach(n=>{ const k=key(n.p.x,n.p.y);
+      if(!grid.has(k)) grid.set(k,[]); grid.get(k).push(n); });
+    const dsp=nodes.map(()=>({x:0,y:0}));
+    nodes.forEach((n,ni)=>{
+      if(n.fixed) return;
+      let fx=0,fy=0;
+      // 1) Abstoßung
+      const gx=Math.round(n.p.x/cell), gy=Math.round(n.p.y/cell);
+      for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){
+        (grid.get((gx+a)+'|'+(gy+b))||[]).forEach(m=>{
+          if(m===n) return;
+          if(m.li===n.li && Math.abs(m.i-n.i)<3) return;   // direkte Nachbarn
+          const dx=n.p.x-m.p.x, dy=n.p.y-m.p.y, d=Math.hypot(dx,dy);
+          if(d<1e-6||d>=o.target) return;
+          const push=(o.target-d)/o.target;
+          fx+=dx/d*push; fy+=dy/d*push;
+        });
+      }
+      // 2) Wand
+      const nr=nearestOnRing(n.p,room);
+      if(nr.d<S.edgeGap){
+        const dx=n.p.x-nr.pt.x, dy=n.p.y-nr.pt.y, d=Math.hypot(dx,dy)||1;
+        const push=(S.edgeGap-nr.d)/S.edgeGap;
+        fx+=dx/d*push*o.wall; fy+=dy/d*push*o.wall;
+      }
+      // 3) Glättung
+      const prev=n.ref[n.idx-1], next=n.ref[n.idx+1];
+      if(prev&&next){
+        fx+=((prev.x+next.x)/2-n.p.x)/o.target*o.smooth;
+        fy+=((prev.y+next.y)/2-n.p.y)/o.target*o.smooth;
+      }
+      dsp[ni]={x:fx*o.repel*o.target, y:fy*o.repel*o.target};
+    });
+    nodes.forEach((n,ni)=>{
+      if(n.fixed) return;
+      const cand={x:n.p.x+dsp[ni].x, y:n.p.y+dsp[ni].y};
+      if(!pointInRoom(cand)) return;                 // nie aus dem Raum schieben
+      moved+=Math.hypot(dsp[ni].x,dsp[ni].y);
+      n.p=cand;
+    });
+  }
+  // zurückschreiben
+  nodes.forEach(n=>{ n.ref[n.idx]={x:n.p.x,y:n.p.y}; });
+  return moved;
 }
 
 // ================= Kreuzungs-Bench (harte Regel) =================
