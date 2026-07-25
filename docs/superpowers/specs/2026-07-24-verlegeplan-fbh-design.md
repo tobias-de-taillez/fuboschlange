@@ -63,24 +63,37 @@ verschwindet per Konstruktion.
 Zonenbreiten von der Wand nach innen: **Randzone → Leitungskorridor → Feld**.
 `fieldInset = edgeGap + randPasses×randSpacing + korridorBreite`.
 
-### 2. `doubleSpiral(rect, d0, s)` → Punkt[]
-Echte bifilare Doppelspirale, **keine aufgeschnittenen Ringe**:
-- Vorlauf-Arm spiralt nach innen, Bahnen bei `d0, d0+2s, d0+4s, …`
-- Rücklauf-Arm spiralt nach außen, Bahnen bei `d0+s, d0+3s, …`
-- Beide Arme innen per U-Turn verbunden, beide Enden liegen außen.
+### 2. `doubleSpiral(rect, ins, s, gate)` → Punkt[]
+Bifilare Doppelspirale aus **wandparallelen konzentrischen Ringen** mit
+**Ecken-Treppe** (Praxis-Standard):
+- Rücklauf = gerade Tiefen (0, 2s, …) im Uhrzeigersinn, Vorlauf = ungerade
+  Tiefen (s, 3s, …) gegen den Uhrzeigersinn → Gegenstrom, Abstand s überall.
+- Jeder Ring hat in der Unterkante nahe der **verteilerzugewandten Ecke** eine
+  Lücke der Breite `g = 2s`; alle Ring-zu-Ring-Sprünge laufen als parallele
+  Diagonalen in dieser 45°-Ecken-Zone. Ein Sprung quert das Kanten-Niveau des
+  fremden Zwischenrings exakt in dessen Lücken-Mitte → kreuzungsfrei per
+  Konstruktion.
+- Eintritt in der Lücken-Mitte des äußersten Rings (`x0+g/2`), Austritt am
+  Lückenrand (`x0+g`) → beide Steigleitungen fallen frei in den Korridor,
+  Abstand s. Die Schlaufe beginnt und endet damit an der Verteiler-Seite.
+- `ins` = per-Seite-Insets (`insetsFor`): Randzonenbreite nur an echten
+  Fensterwänden, Korridor nur unten, innere Nähte s/2.
 
-Jeder Arm ist eine rechteckige archimedische Spirale: der Wandabstand wächst pro
-Vierteldrehung um `step/4`. Es wird nichts aufgeschnitten und es gibt keinen
-radialen Sprung → **ein Arm kann sich per Konstruktion nicht selbst kreuzen**,
-und die Arme liegen konstant `s` auseinander → sie kreuzen einander nie.
+**Verworfen:**
+- Aufgeschnittene Ringe mit gemeinsamer Tor-x-Linie (Sprung k→k+2 durch den
+  Endpunkt von Ring k+1; latenter Bug).
+- Archimedische Arme (Wandabstand wächst pro Vierteldrehung): funktionell
+  kreuzungsfrei, aber alle Bahnen leicht schräg — Nutzeranforderung ist
+  wandparallel.
+- Feste vertikale Tor-Spalte bei Verteiler-Projektion: bricht, sobald das Tor
+  randnah geklemmt wird und innere Ringe die Spalte nicht mehr erreichen.
 
-Beide Arme laufen gleich tief (`min` der Schrittzahlen), sonst entartet der
-U-Turn zu einer langen Diagonale quer durch die Raummitte.
-
-**Verworfen (war der Bug):** Ringe einzeln aufschneiden und radial verbinden.
-Alle Ring-Öffnungen liegen auf derselben x-Linie, dadurch läuft der Sprung von
-Ring k zu k+2 exakt durch den Endpunkt von Ring k+1. Der Fehler war latent und
-schlug nur bei bestimmten Raumgrößen zu.
+### 2b. Spiegelung & Heizdeckung
+- `notchLeft` (Default): Grundriss mit Ausschnitt oben links. Intern wird immer
+  Notch-rechts gerechnet; nur Rendering, Klick und Verteiler-Felder spiegeln
+  (`mirX`), Fensterkanten-Angaben werden beim Übergang getauscht (`wEdges`).
+- `heatCoverage`: Raster-Sampling (Schritt 25 mm) — Anteil der Bodenfläche im
+  Abstand ≤ 25 mm um irgendein Rohr. Als Karte „Heizdeckung" ausgewiesen.
 
 ### 3. `randzone(windowEdges, randSpacing, randPasses)` → Punkt[]
 Entlang jeder markierten Fensterkante `randPasses` dichte Parallelbahnen im
