@@ -50,6 +50,8 @@
   <div id="sugg"></div>
   <h3>Export</h3>
   <button id="exp">JSON in die Zwischenablage</button>
+  <button id="imp">JSON einfügen</button>
+  <button id="clr">Alles verwerfen</button>
   <pre id="wl" style="font-size:12px;white-space:pre-wrap"></pre>
 </div>
 
@@ -616,6 +618,10 @@ function recompute(){
     M.fit.pts.forEach(fp=>{ const p=M.pts[I[fp.id]]; if(p){ p.x=fp.x; p.y=fp.y; } });
   } else { M.fit=null; M.an=null; }
   render();
+  // Ein Aufmass dauert leicht eine halbe Stunde. Ein Reload darf es nicht
+  // kosten. Bewusst ohne Debounce: serialize() ist bei den hier realistischen
+  // Groessen unter einer Millisekunde.
+  try{ localStorage.setItem('raumaufmass', serialize()); }catch{}
 }
 
 function render(){
@@ -978,6 +984,35 @@ document.getElementById('exp').onclick=async()=>{
   try{ await navigator.clipboard.writeText(json); alert('JSON kopiert.'); }
   catch{ prompt('Kopieren mit Strg+C:', json); }
 };
+document.getElementById('imp').onclick=()=>{
+  const s=prompt('JSON aus einem Export hier einfügen:');
+  if(!s) return;
+  let o; try{ o=JSON.parse(s); }catch{ alert('Das ist kein gültiges JSON.'); return; }
+  if(!o || !Array.isArray(o.pts) || !Array.isArray(o.walls) || !Array.isArray(o.meas)){
+    alert('JSON hat nicht die erwartete Form (pts, walls, meas).'); return;
+  }
+  snapshot();
+  deserialize(o);
+  // Ohne das vergibt die Skizze IDs, die im Import schon vorkommen.
+  idSeq=Math.max(idSeq, o.pts.length);
+  recompute();
+};
+document.getElementById('clr').onclick=()=>{
+  if(!confirm('Alle Punkte, Wände und Messungen verwerfen?')) return;
+  snapshot();
+  deserialize({pts:[],walls:[],meas:[]});
+  recompute();
+};
+
+// Ein Aufmass dauert leicht eine halbe Stunde. Ein Reload darf es nicht kosten -
+// beim Start das letzte Autosave wiederherstellen, wenn eins da ist.
+try{
+  const gespeichert=localStorage.getItem('raumaufmass');
+  if(gespeichert){
+    const o=JSON.parse(gespeichert);
+    if(o && Array.isArray(o.pts) && o.pts.length) deserialize(o);
+  }
+}catch{}
 
 recompute();
 </script>
