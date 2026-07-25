@@ -127,3 +127,90 @@ Einzelposten und der nächste Angriff.**
 - [A smooth spiral tool path for high speed machining of 2D pockets](https://www.sciencedirect.com/science/article/abs/pii/S0010448509001031)
 - [Spiral toolpath generation method for pocket machining](https://www.sciencedirect.com/science/article/abs/pii/S0360835219306114)
 - [MagiCAD: Machine-Learning-Routing für Fußbodenheizung](https://www.magicad.com/tools/machine-learning-algorithm-for-automatic-routing-of-underfloor-heating-circuits-2/) — kommerzieller Stand der Technik, bestätigt Zielgröße „Temperaturgradient minimieren".
+
+---
+
+# Nachtrag Runde 17 — die Randzonen-Kehre war falsch konstruiert
+
+Die Vermutung aus dem Hauptteil ("Gruppe 1 ist der Verteiler-Abgang") war
+**falsch**. `probe-teil.mjs` misst, in welchem Teilstueck der schaerfste Punkt
+liegt, und antwortet eindeutig:
+
+    schlimmster Punkt liegt in: {"rand":10,"leadOut":5,"field":5}
+
+Die Signatur `defl 90°, ab=50, bc=160` ist `randSpacing` gegen `2*bendRadius`
+— also die **Omega-Kehre der Randzone**, nicht der Verteiler.
+
+## Der Defekt
+
+`omegaTurn` war Bogen – **Gerade** – Bogen:
+
+    A  = Pe + u*R + n*R        (arc)
+    B  = Pe + u*R + n*(R+d)    <- kein arc
+    C2 = Pe - u*R + n*(R+d)    (arc)
+
+`A→B = n*d = 50`, `B→C2 = -u*2R = 160`, dazwischen 90°. Erste Vermutung: `B→C2`
+ist eine Sehne von 2R bei r=R, also ein 180°-Bogen, dessen Anfangstangente
+senkrecht auf der Sehne steht — dann waere die Ecke nur ein Messartefakt.
+
+`probe-omega.mjs` misst den Umkreis dreier benachbarter Punkte des
+**gezeichneten** Pfades und widerlegt das:
+
+    kleinster Radius laut pathCurve (Polygon): 50.0 mm
+    kleinster Radius am GEZEICHNETEN Pfad:     43.0 mm
+    davon wirklich unter 80 mm: 33 von 63
+
+Die Ecke ist echt, und gezeichnet sogar enger als geschaetzt. Gut, dass die
+Kennzahl nicht auf die Vermutung hin gelockert wurde.
+
+## Die Konstruktion
+
+Zwei parallele Bahnen im Abstand `d < 2R` mit Boegen vom Radius R zu verbinden
+geht nur als Ausschwung: erst um θ **vom** Ziel weg, dann ein Gegenbogen ueber
+`180+2θ`, dann um θ zurueck. Netto 180°. Der seitliche Versatz ist die Summe
+der drei n-Anteile:
+
+    d = R(cos θ − 1) + 2R cos θ + R(cos θ − 1) = R(4 cos θ − 2)
+    →   cos θ = (d + 2R) / (4R)
+
+θ=0 ist die gewoehnliche Kehre mit `d = 2R`; je enger die Teilung, desto weiter
+schwingt die Schlaufe aus. Fuer `d=50, R=80`: θ = 49,0°.
+
+Der grosse Bogen liegt laengs bei `2R sin θ`, sein Rand also `R` weiter — die
+noetige Ausschwungweite ist `R(2 sin θ + 1)`, fuer unsere Werte 201 mm statt der
+frueher pauschal angesetzten 80 mm. Als `omegaReach()` an `endGap` und
+`omegaClear()` gehaengt.
+
+## Gemessen
+
+| | crossFails | covFails | radFails | outFails | medianRadius | medianGap |
+|---|---|---|---|---|---|---|
+| vorher | 18 | 10 | 19 | 0 | 46 | 1083 |
+| Drei-Bogen-Kehre | 18 | 10 | 19 | 0 | **50** | **1048** |
+
+Die Gates bewegen sich nicht, weil andere Gruppen binden (`field` mit Schenkeln
+von 3–13 mm, `leadOut` mit 25 mm). Der Beleg ist trotzdem hart:
+
+    an den Omega-Stellen, gezeichnet:  43.0 mm  ->  319.5 mm
+    davon unter 80 mm:                 33       ->  0
+    Teilstueck-Verteilung "rand":      10/20    ->  2/20
+
+## Was der Fix freilegt
+
+Dieselbe Probe zeigt jetzt das umgekehrte Vorzeichen:
+
+    kleinster Radius laut pathCurve (Polygon): 14.2 mm
+    kleinster Radius am GEZEICHNETEN Pfad:     319.5 mm
+
+`pathCurve` ueberspringt die Kruemmungsrechnung nur, wenn der Punkt SELBST eine
+Bogenstuetze ist — nicht, wenn der FOLGEPUNKT eine ist. An den drei dicht
+beieinander liegenden Omega-Stuetzpunkten liest es deshalb Sehnen als Ecken.
+`radFails` ist an diesen Stellen **zu hoch gemeldet**. Naechster Schritt, und
+diesmal mit dem gezeichneten Pfad als Referenz statt mit einer Vermutung.
+
+## Quellen
+
+- [LiDAR 2.0: Hierarchical Curvy Waveguide Detailed Routing, arXiv:2505.17239](https://arxiv.org/html/2505.17239) — "Congested Port Spreading": *"We add 5 units of extension length for each grid shift, ensuring they occupy distinct routing tracks and satisfying the minimum bend radius."* Auslauflaenge proportional zum Portindex. PDF in `paper/2505.17239_LiDAR2.pdf`.
+- [Luceda ManhattanFanout](https://academy.lucedaphotonics.com/ipkiss/reference/connectors/ref/ipkiss3.all.ManhattanFanout) / [FanoutPorts](https://academy.lucedaphotonics.com/ipkiss/picazzo/containers/fanout_ports/ref/picazzo3.container.fanout_ports.FanoutPorts) — gestaffelter Auslauf als Standard-Primitive.
+- [Bend radius, Wikipedia](https://en.wikipedia.org/wiki/Bend_radius)
+- [Serpentine Routing, sfcircuits](https://www.sfcircuits.com/pcb-school/serpentine-routing) — engere U-Kehren erhoehen die Diskontinuitaet; dieselbe Geometrie, andere Domaene.

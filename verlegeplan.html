@@ -491,7 +491,7 @@ const omegaEndEdges=()=>{
   edgeChains(frameEdges()).forEach(ch=>{ s.add(ch[0]); s.add(ch[ch.length-1]); });
   return [...s];
 };
-const omegaClear=e=>omegaEndEdges().includes(e||'bottom') ? 2*S.bendRadius+LANE()/2 : 0;
+const omegaClear=e=>omegaEndEdges().includes(e||'bottom') ? omegaReach()+LANE()/2 : 0;
 const laneY=i=>i<0 ? S.edgeGap+randWidth()+omegaClear()-LANE()/2
                    : S.edgeGap+randWidth()+omegaClear()+(i+0.5)*LANE();
 let curLoopCount=1;                                 // von autofit gesetzt (Korridorbreite)
@@ -1502,18 +1502,43 @@ function bifilarPath(zone,gate){
 // liegt jenseits des Nachbarbahn-Endes, der Scheitel im erweiterten Streifen.
 function omegaTurn(Pe,Ps,u,R){
   const n=unit(sub(Ps,Pe)), d=len(sub(Ps,Pe));
-  const cw=(u.x*n.y-u.y*n.x)<0;
-  const A =add(add(Pe,scl(u,R)),  scl(n,R));      // nach 90°-Bogen
-  const B =add(add(Pe,scl(u,R)),  scl(n,R+d));    // Steigstück-Ende
-  const C2=add(add(Pe,scl(u,-R)), scl(n,R+d));    // nach 180°-Bogen
-  const D =add(Ps,scl(u,-2*R));                   // nach Gegenbogen, auf Nachbarbahn
+  const cw=(u.x*n.y-u.y*n.x)<0;                   // dreht "nach n" im Uhrzeigersinn?
+  // DREI Boegen mit vollem Radius, kein gerades Steigstueck dazwischen.
+  //
+  // Die vorherige Fassung war Bogen - Gerade - Bogen, und der Uebergang von der
+  // Geraden in den 180-Grad-Bogen war eine echte 90-Grad-Ecke: gemessen ueber 20
+  // Bench-Laeufe ist in 10 davon der schaerfste Punkt des GANZEN Plans genau
+  // dieser Punkt, mit den Schenkeln 50 mm (= randSpacing) und 160 mm (= 2R).
+  // Am gezeichneten Pfad nachgemessen (probe-omega.mjs): 43 mm, also noch enger
+  // als die Polygonschaetzung von 50 mm - die Ecke ist echt und keine
+  // Messartefakt der Kennzahl.
+  //
+  // Konstruktion: erst um theta VOM Ziel weg, dann ein grosser Gegenbogen ueber
+  // 180+2*theta, dann um theta zurueck. Netto 180 Grad. Der seitliche Versatz
+  // folgt aus der Summe der drei n-Anteile:
+  //     d = R*(cos(th)-1) + 2R*cos(th) + R*(cos(th)-1) = R*(4*cos(th) - 2)
+  // also cos(th) = (d + 2R) / (4R). Bei th=0 ist das die gewoehnliche Kehre mit
+  // d = 2R; je enger die Teilung, desto weiter schwingt die Schlaufe aus.
+  const cosT=Math.min(1,Math.max(-1,(d+2*R)/(4*R))), th=Math.acos(cosT);
+  const sinT=Math.sin(th);
+  const at=(a,b)=>({x:Pe.x+u.x*a+n.x*b, y:Pe.y+u.y*a+n.y*b});
+  const P1=at(R*sinT, R*(cosT-1));
+  const P2=at(R*sinT, R*(cosT-1)+2*R*cosT);
+  const P3=at(0,      R*(4*cosT-2));              // = Ps, per Konstruktion
   return [
-    {x:A.x, y:A.y, arc:{r:R,cw,large:false}},
-    {x:B.x, y:B.y},
-    {x:C2.x,y:C2.y,arc:{r:R,cw,large:false}},     // 180°: Sehne=2R, sweep zählt
-    {x:D.x, y:D.y, arc:{r:R,cw:!cw,large:false}}, // Gegenbogen
+    {...P1, arc:{r:R,cw:!cw,large:false}},
+    {...P2, arc:{r:R,cw:cw, large:true}},         // 180+2*theta > 180 -> grosser Bogen
+    {...P3, arc:{r:R,cw:!cw,large:false}},
   ];
 }
+// Wie weit die Kehre LAENGS ueber das Bahnende hinausschwingt. Der Mittelpunkt
+// des grossen Bogens liegt bei 2R*sin(theta), sein Rand also R weiter.
+// Frueher stand hier pauschal R - das reicht fuer die Drei-Bogen-Kehre nicht.
+const omegaReach=()=>{
+  const R=S.bendRadius, d=S.randSpacing;
+  const cosT=Math.min(1,Math.max(-1,(d+2*R)/(4*R)));
+  return R*(2*Math.sqrt(Math.max(0,1-cosT*cosT))+1);
+};
 // Wandspanne einer FRAME-Kante ('bottom' = Verteilerwand), notch-bewusst.
 // Gibt Anfang/Ende auf der Wandlinie (ohne Einrückung) + Innen-Normale.
 function edgeSpan(edgeName){
@@ -1591,7 +1616,7 @@ function chainPass(chain,off,endGap){
 }
 function randzoneChain(chain){
   const {edgeGap,randSpacing,randPasses}=S;
-  const endGap = edgeGap + (omegaOn()?S.bendRadius:0);   // Platz für den Ausschwung
+  const endGap = edgeGap + (omegaOn()?omegaReach():0);   // Platz für den Ausschwung
   // Ein Arm, der kuerzer ist als die beidseitige Einrueckung, hat keine nutzbare
   // Laenge mehr: chainPass liefert dann eine INVERTIERTE Bahn, die ueber beide
   // Enden hinauslaeuft. Gemessen genau das — Verteiler bei Frame x=227, linker
@@ -2094,7 +2119,7 @@ function buildLoops(groups,ownerOverride,connOrder){
   // Rohrfreie Lücke in der Randzone: splitChainAtManifold teilt die Kette hier,
   // beide Arme rücken um endGap ein. Durch diese Lücke steigen die Zuleitungen
   // ab, ohne die Randzonenbahnen zu durchstechen.
-  const endGap=S.edgeGap+(omegaOn()?S.bendRadius:0);
+  const endGap=S.edgeGap+(omegaOn()?omegaReach():0);
   const gap={lo:M.x-endGap+S.pipeDia, hi:M.x+endGap-S.pipeDia};
 
   // Stufe 1: Felder (noch ohne Randzone/Anbindung)
