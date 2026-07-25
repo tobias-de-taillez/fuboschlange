@@ -743,7 +743,16 @@ function doubleSpiralField(poly,insOf,s,gate){
   const outArm=open.filter((_,k)=>k%2===1);
   const pts=[];
   inArm.forEach(r=>pts.push(...r));
-  outArm.reverse().forEach(r=>pts.push(...r.slice().reverse()));
+  const back=outArm.slice().reverse().map(r=>r.slice().reverse());
+  // U-Turn zwischen den Armen als AUSGESCHWUNGENE Kehre: die Arme liegen nur s
+  // auseinander, eine direkte 180°-Wende hätte Radius s/2 (50 mm bei s=100) und
+  // bliebe unter dem Mindest-Biegeradius 5xØ. Der Ausschwung erzeugt ihn.
+  if(pts.length>1 && back.length && back[0].length){
+    const Pe=pts[pts.length-1], u=unit(sub(Pe,pts[pts.length-2]));
+    const Ps=back[0][0], R=S.bendRadius;
+    if(len(sub(Pe,Ps))<2*R) pts.push(...omegaTurn(Pe,Ps,u,R));
+  }
+  back.forEach(r=>pts.push(...r));
   return pts;
 }
 // Zonenpolygon + Kanten-Insets für eine Gruppe von Rechtecken.
@@ -1224,11 +1233,18 @@ function buildLoops(groups){
   // und Anbindung sind gesetzt und tragen ihre Omega-Bögen selbst.
   const R=S.bendRadius;
   out.forEach(l=>{
-    if(!l.field||l.field.length<3) return;
-    // Erst gleichmäßig entlang der Kurve abtasten (Segmente >= 2R, damit fillet
-    // überhaupt einen vollen Bogen legen kann), dann die Krümmung glätten.
-    // Ausdünnen statt Resampling hatte die Glättung zunichte gemacht.
-    l.field=smoothToRadius(resampleArc(l.field,2.2*R),R,150);
+    // Auf ALLE Teile: leadIn/rand lagen ebenso unter der Grenze wie das Feld.
+    // Endpunkte bleiben fix (Verteileranschluss, Übergänge), die vorgegebenen
+    // Omega-Bögen werden von smoothToRadius ohnehin nicht angefasst.
+    ['field','leadIn','leadOut','mid','rand'].forEach(k=>{
+      if(!l[k]||l[k].length<3) return;
+      // Abwechselnd resampeln und glätten: die Glättung verschiebt Punkte und
+      // macht die Abstände wieder ungleich, ein einmaliges Resampling davor
+      // reicht deshalb nicht. fillet braucht auf BEIDEN Nachbarsegmenten R.
+      let a=l[k];
+      for(let pass=0;pass<4;pass++) a=smoothToRadius(resampleArc(a,2.4*R),R,60);
+      l[k]=a;
+    });
   });
 
   return out.map(l=>{
