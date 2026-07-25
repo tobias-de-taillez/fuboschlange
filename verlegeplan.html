@@ -2184,7 +2184,22 @@ function buildLoops(groups,ownerOverride,connOrder){
       // Segmente übrig, in die fillet keinen vollen Bogen legen kann.
       // Umgekehrt ändert Resampling die Form kaum, es setzt Punkte nur neu auf
       // die bereits geglättete Kurve.
-      for(let pass=0;pass<4;pass++) a=resampleArc(smoothToRadius(a,R,60),2.4*R);
+      // Resampling-Schritt 5*R, GEMESSEN statt geraten. Attribution ueber die 20
+      // Bench-Konfigurationen: die schlimmste Ecke liegt in 12 von 19 Faellen im
+      // FELD, mit 120 bis 170 Grad Ablenkung, und ein Nachbarsegment ist dabei
+      // fast immer ~190 mm lang — genau der alte Schritt 2,4*R.
+      // pathCurve begrenzt an einer echten Ecke auf min(ab,bc)/tan(defl/2); fuer
+      // 150 Grad braucht der volle Radius also R*tan(75 Grad) = 3,7*R
+      // Segmentlaenge. 2,4*R kann das nicht liefern, egal wie gut die Kurve ist.
+      //   Schritt   crossFails  covFails  radFails  medCross  medRadius
+      //   2,4*R (alt)      19        10        19         5        39
+      //   3,5*R            20        10        20         3        43
+      //   4,0*R            19        10        20         3        45
+      //   5,0*R            18        10        19         3        46
+      //   6,0*R            19        10        19         3        45
+      //   8,0*R            20        10        20         3        45
+      //  12,0*R            18        10        20         3        45
+      for(let pass=0;pass<4;pass++) a=resampleArc(smoothToRadius(a,R,60),5.0*R);
       l[k]=a;
     });
   });
