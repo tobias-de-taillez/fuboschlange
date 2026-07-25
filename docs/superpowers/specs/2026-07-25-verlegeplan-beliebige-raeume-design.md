@@ -19,9 +19,15 @@ Nicht aus Commit-Notizen übernommen, sondern am jetzigen Stand (`285dabe`) nach
 | Messung | Wert |
 |---|---|
 | Zufalls-Bench, 60 Konfigurationen | **52 fehlerhaft** (Kreuzung oder Rohr außerhalb des Raums) |
-| Standardraum 8000 × 3200 mit Notch | **9 Kreuzungen**, 0 Segmente außerhalb |
-| davon Selbstkreuzungen innerhalb eines Heizkreises | **0** |
-| Rohr außerhalb, Verteiler auf einer Notch-Wand | 2 Segmente |
+| Standardraum, Verteiler Außenwand unten | **9 Kreuzungen**, 0 außerhalb |
+| dieselbe Lage, Selbstkreuzungen innerhalb eines Kreises | **0** |
+| Verteiler Außenwand links | 9 Kreuzungen, 0 außerhalb |
+| Verteiler Notch-Innenwand, senkrecht | 14 Kreuzungen, **7 Segmente außerhalb** |
+| Verteiler Notch-Innenwand, waagerecht | **50 Kreuzungen**, 0 außerhalb |
+
+Die Notiz in `285dabe` sprach von 2 Segmenten außerhalb bei Verteiler auf einer
+Notch-Wand. Nachgemessen sind es 7, und auf der waagerechten Notch-Wand
+verfünffacht sich zusätzlich die Kreuzungszahl. Die Notiz war zu günstig.
 
 Die dritte Zeile ist der Befund, auf dem alles Weitere steht. `loopCrossings()`
 zählt Selbstkreuzungen je Kreis **plus** Kreuzungen zwischen verschiedenen
@@ -124,14 +130,44 @@ weil die Anordnung es ausschließt.
 Praktisch: entlang der Verteilerwand schneiden, die Schnittpositionen so wählen,
 dass die Flächen etwa gleich groß werden (gleich lange Kreise).
 
-**Der Ausnahmefall, der offen bleibt.** Es gibt Räume, in denen ein Teil der
-Fläche von der Verteilerwand aus nicht erreichbar ist, ohne fremdes Gebiet zu
-queren — etwa hinter einer einspringenden Ecke, oder wenn der Verteiler auf einer
-Notch-Innenwand sitzt. Dort ist „jede Teilfläche hat Front" nicht erfüllbar.
-Ob diese Fälle vorkommen und wie sie behandelt werden, ist **nicht entschieden**
-— siehe offene Fragen. Solange das offen ist, ist die Kreuzungsfreiheit eine
-**Eigenschaft mit Ausnahmen**, keine Garantie, und das Dokument behauptet nichts
-anderes.
+### 2b. Korrektur: Front ist zu schwach, verschachtelte Spuren sind das Richtige
+
+Die Forderung „jede Teilfläche berührt die Verteilerwand" ist erfüllbar in einem
+Rechteck und nicht erfüllbar, sobald ein Teil der Fläche hinter einer
+einspringenden Ecke liegt oder der Verteiler auf einer Innenwand sitzt — was die
+Messung oben mit 50 Kreuzungen und 7 Segmenten außerhalb genau trifft. Ein
+Verfahren, das dort aussteigt, ist kein Verfahren.
+
+Der allgemeine Fall ist eine **Planaritätsfrage**, und sie hat eine Antwort. Alle
+Anbindeleitungen starten am selben Ort. Sie kreuzen sich genau dann nicht, wenn
+ihre Reihenfolge am Verteiler dieselbe ist wie die Reihenfolge, in der ihre
+Teilflächen beim Umlauf durch den Raum erreicht werden. Diese Bedingung lässt
+sich **durch Konstruktion** erfüllen statt durch Prüfung:
+
+- Die Teilflächen werden in **einer** Reihenfolge gebildet — Umlauf vom Verteiler
+  aus entlang des Rands — statt beliebig zugeteilt.
+- Die Anbindeleitungen laufen in einem Korridor, der dem Raumrand folgt. Spur *k*
+  liegt im Abstand *k · Spurbreite* von der Wand.
+- Spuren sind ineinandergeschachtelte Randversätze. Zwei Versätze desselben
+  Randes schneiden sich nicht. Jeder Kreis verlässt seine Spur bei seiner eigenen
+  Teilfläche.
+
+Damit braucht keine Teilfläche eine eigene Front. Eine Fläche hinter einer
+einspringenden Ecke bekommt eine weiter außen liegende Spur, und die Leitung
+läuft am Rand dorthin — ohne fremdes Feld zu queren, weil der Korridor kein Feld
+ist.
+
+Das ist derselbe Mechanismus wie im Feld: Spuren **sind** Randversätze. Der
+Bahnplaner bekommt dadurch nicht zwei Verfahren, sondern eines — die äußersten
+Versätze sind Korridor, der Rest ist Feld.
+
+**Warum das nicht der bereits verworfene Ring ist.** In `285dabe` wurde ein
+umlaufender Ringkorridor entfernt, weil er „die Verlegefläche halbiert" hat: er
+reservierte die volle Korridorbreite auf **allen** Seiten, unabhängig davon, ob
+dort überhaupt eine Leitung lief. Der Fehler war die pauschale Reservierung, nicht
+der Ring. Reserviert werden darf nur, was tatsächlich belegt ist: auf jedem
+Randstück so viele Spuren, wie dort Leitungen vorbeikommen — das sind nahe am
+Verteiler viele und am fernen Ende genau eine.
 
 ### 3. Raumdarstellung
 
@@ -164,28 +200,77 @@ als Tor:
 Der Bench ist bereits vorhanden, deterministisch geseedet und misst genau das,
 worum es geht. Er wird nicht angepasst, damit er grün wird.
 
+## Anforderungen an den Bahnplaner
+
+Der Raum ist gegeben. Was der Planer nicht kann, ist sein Mangel — nicht der des
+Raums. Die folgenden Punkte standen in einer früheren Fassung als Fragen an den
+Nutzer und gehören dort nicht hin.
+
+### Schräge Ecken sind kein Sonderfall
+
+Eine frühere Fassung behauptete, an schrägen Ecken sei der Bahnabstand nicht
+definiert und an einspringenden Ecken entstehe eine Lücke. **Beides ist falsch.**
+
+Ein echter Randversatz hat als definierende Eigenschaft den konstanten
+Normalabstand. Zwei aufeinanderfolgende Versätze liegen überall genau den
+Bahnabstand auseinander — an einer 90°-Ecke wie an einer 63°-Ecke. Die
+Ungleichmäßigkeit, die ich vermutet hatte, entsteht nur bei
+**Gehrungs-Ecken auf einem Polygonzug**, nicht beim Versatz selbst.
+
+An einer Ecke ist die Verrundung ohnehin die physikalisch richtige Wahl: das
+Rohr hat einen Mindestbiegeradius und **kann** keine scharfe Ecke. Der Wert dafür
+existiert bereits als `S.bendRadius`, und `fillet()` setzt ihn heute schon um.
+
+Was an Ecken wirklich passiert und behandelt werden muss:
+
+- **Spitze Ecke:** aufeinanderfolgende Versätze laufen zusammen, ab einer
+  bestimmten Tiefe verschwindet die Ecke. Die dortigen Bahnen enden einfach.
+  Das ist korrekt und nicht zu reparieren.
+- **Einspringende Ecke:** der Versatz erzeugt einen Bogen mit dem Bahnabstand als
+  Radius. Kein Loch, keine Lücke.
+- **Restfläche in der Mitte:** nach dem letzten vollen Versatz bleibt ein
+  Streifen entlang der Mittelachse übrig, den keine Bahn erreicht. **Das** ist
+  der echte Deckungsverlust, und er sitzt in der Raummitte, nicht an den Ecken.
+
+### Der Deckungsverlust muss beziffert werden, nicht wegdefiniert
+
+Die Restfläche ist die einzige Stelle, an der konturparallele Bahnen
+systematisch Boden unbeheizt lassen. Der Planer muss sie **ausrechnen und
+anzeigen** — als Fläche in m² und als Anteil. Die Thermik-Schicht kann sie
+ohnehin schon sichtbar machen.
+
+Erst wenn die Zahl auf dem Tisch liegt, ist die Frage „reicht das thermisch"
+überhaupt beantwortbar. Sie vorher zu stellen heißt, sie zu raten.
+
+### Kreuzungsfreiheit ist eine Konstruktionsaufgabe, keine Prüfaufgabe
+
+Siehe Abschnitt 2b. Der Planer prüft nicht nachträglich auf Kreuzungen und
+repariert — er ordnet die Spuren so an, dass Kreuzungen nicht entstehen können.
+Der bestehende Bench bleibt trotzdem, als Nachweis und nicht als Krücke.
+
+### Was dem Planer abverlangt wird, in einem Satz
+
+Beliebiges einfaches Polygon, Verteiler an beliebiger Stelle des Rands, beliebige
+Kreiszahl — Ergebnis kreuzungsfrei, vollständig im Raum, mit beziffertem
+Deckungsverlust.
+
 ## Offene Fragen
 
-1. **Unerreichbare Teilflächen.** Kommen Räume vor, in denen eine Teilfläche
-   keine Verteilerwand-Front haben kann? Wenn ja: zweite Leitungsebene zulassen
-   (im Estrich real, aber Aufbauhöhe), Kreis aufteilen, oder dem Nutzer sagen,
-   dass der Verteiler woanders hin muss?
-2. **Randzone an schrägen Ecken.** Die heutige Randzone ist für rechte Winkel
-   gebaut: an einer 90°-Ecke ist klar, wo die dichteren Bahnen umlaufen. Sobald
-   ein Winkel weder 90° noch 270° ist, sind Versatz und Bahnzahl an der Ecke
-   nicht definiert. Der spitze Fall (Bahnen laufen zusammen, es bleibt kein
-   Platz für die volle Bahnzahl) und der einspringende Fall (Bahnen laufen
-   auseinander, es entsteht eine Lücke) sind zwei verschiedene Probleme.
-   Zu klären ist beides, sonst wird es im Bau geraten.
-3. **Bahnabstand bei konturparallelen Bahnen.** Beim Versetzen einer schrägen
-   Ecke wird der Abstand zwischen benachbarten Bahnen an der Ecke größer als in
-   der Fläche. Wie viel Ungleichmäßigkeit ist thermisch akzeptabel?
-4. **Vendoring.** `clipper2-js` lokal einbetten heißt, eine fremde Bibliothek in
-   die HTML-Datei zu inlinen. Größe und Lizenz sind zu prüfen, bevor das
-   entschieden wird.
-5. **Migration bestehender Pläne.** Es gibt keine gespeicherten Pläne, aber die
-   Standardwerte in `S` sind das Arbeitsbeispiel. Deren Entsprechung als Polygon
-   ist festzulegen, damit „liefert denselben Plan wie heute" prüfbar ist.
+Übrig bleiben zwei, und beide sind wirklich deine Entscheidung, weil sie vom Bau
+abhängen und nicht von Geometrie:
+
+1. **Zweite Leitungsebene.** Falls sich in einem Extremfall doch keine planare
+   Anordnung finden lässt: darf eine Anbindeleitung eine andere kreuzen, indem
+   sie darunter durchgeführt wird? Real im Estrich möglich, kostet Aufbauhöhe.
+   Der Planer soll das nicht brauchen — aber ob es als Notausgang erlaubt ist,
+   bestimmt, ob er im Zweifel abbricht oder abtaucht.
+2. **Zulässiger Deckungsverlust.** Ab welchem Anteil unbeheizter Fläche ist ein
+   Plan unbrauchbar? Zu beantworten, wenn der Planer die Zahl liefert — vorher
+   nicht sinnvoll.
+
+Technisch noch zu klären, ohne dass es dich betrifft: Größe und Lizenz von
+`clipper2-js` vor dem Vendoring, und die Polygon-Entsprechung der heutigen
+Standardwerte in `S`, damit „liefert denselben Plan wie heute" prüfbar ist.
 
 ## Was ausdrücklich nicht Teil davon ist
 
