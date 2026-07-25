@@ -201,9 +201,39 @@ function solve(pts0, meas){
   return {pts, iters:it, converged};
 }
 
+// Eine Zerlegung, drei Antworten: Rang (= fehlende Messungen), Nullraum
+// (= welche Punkte noch wackeln) und Hebelwerte (= welche Messung pruefbar ist).
+function analyze(pts, meas){
+  const act=activeMeas(meas), m=act.length, n=pts.length;
+  const free=freeCols(pts), nf=free.length;
+  const Jfull=jacobian(pts,meas);
+  const J=Jfull.map(r=>free.map(c=>r[c]));
+  const gs=gramSchmidt(J, TOL_RANK);
+  const rank=gs.rank;
+  const dof=Math.max(0, nf-rank);
+  const redundancy=m-rank;
+  const h=leverage(gs);
+  const red=h.map(x=>Math.max(0, 1-x));
+  const v=residuals(pts,meas);
+  const sigmaHat = redundancy>0
+    ? Math.sqrt(v.reduce((s,r)=>s+r*r,0)/redundancy)
+    : null;
+  const w=act.map((mm,i)=> red[i]<TOL_RED
+    ? null
+    : Math.abs(v[i])/((mm.sigma??SIGMA_DEF)*Math.sqrt(red[i])));
+  // Moden liegen in den freien Koordinaten - auf die vollen 2n aufblasen.
+  // Starrbewegungen koennen nicht dabei sein, die hat das Pinnen entfernt.
+  const modes=nullSpace(gs).map(z=>{
+    const f=new Array(2*n).fill(0);
+    free.forEach((c,i)=>f[c]=z[i]);
+    return f;
+  });
+  return {rank, dof, redundancy, h, red, v, w, sigmaHat, modes, free, n, m};
+}
+
 globalThis.CORE={ TOL_RANK, TOL_RED, TOL_MODE, SIGMA_DEF, SUGGEST_CHECK_MAX,
                   dist, idx, activeMeas, residuals, jacobian, luSolve, matTmat, matTvec,
-                  gramSchmidt, nullSpace, leverage, gaugeFixed, freeCols, scaleSketch, solve };
+                  gramSchmidt, nullSpace, leverage, gaugeFixed, freeCols, scaleSketch, solve, analyze };
 </script>
 
 <script id="checks">
@@ -369,6 +399,70 @@ globalThis.selfChecks=function(){
        C.solve([{id:'A',x:0,y:0},{id:'B',x:10,y:0}],[]).pts.length===2);
     const s=C.scaleSketch([{id:'A',x:0,y:0},{id:'B',x:10,y:0}],[{a:'A',b:'B',d:5000}]);
     chk('scaleSketch: auf Messgroesse gestreckt', near(s[1].x,5000,1e-6));
+  }
+  // --- analyze: fehlende Messungen (Spec-Test 2) ---
+  {
+    const rect=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:3000},{id:'D',x:0,y:3000}];
+    const seiten=[{a:'A',b:'B',d:4000},{a:'B',b:'C',d:3000},{a:'C',b:'D',d:4000},{a:'D',b:'A',d:3000}];
+    chk('analyze: Rechteck mit 4 Seiten -> 1 Messung fehlt', C.analyze(rect,seiten).dof===1);
+    chk('analyze: mit Diagonale -> 0 Messungen fehlen',
+       C.analyze(rect,seiten.concat([{a:'A',b:'C',d:5000}])).dof===0);
+    chk('analyze: 4 Seiten -> genau ein Flex-Mode', C.analyze(rect,seiten).modes.length===1);
+  }
+  // --- analyze: der Luegner-Fall (Spec-Test 3) ---
+  {
+    const rect=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:3000},{id:'D',x:0,y:3000}];
+    const exakt=[{a:'A',b:'B',d:4000},{a:'B',b:'C',d:3000},{a:'C',b:'D',d:4000},
+                 {a:'D',b:'A',d:3000},{a:'A',b:'C',d:5000}];        // m = 2n-3 = 5
+    const an=C.analyze(rect,exakt);
+    chk('analyze: exakt bestimmt -> alle Residuen ~0', an.v.every(x=>Math.abs(x)<1e-6));
+    chk('analyze: exakt bestimmt -> Redundanz 0', an.redundancy===0);
+    chk('analyze: exakt bestimmt -> KEINE Messung pruefbar', an.w.every(x=>x===null));
+    chk('analyze: exakt bestimmt -> sigmaHat undefiniert', an.sigmaHat===null);
+    // Mit beiden Diagonalen ist jede Messung pruefbar - Grundlage des
+    // Browser-Checks in Task 11. Summe der Redundanzzahlen = m - rank = 1.
+    const voll=exakt.concat([{a:'B',b:'D',d:5000}]);
+    const av=C.analyze(rect,voll);
+    chk('analyze: 6 Messungen -> jede pruefbar', Math.min(...av.red)>C.TOL_RED);
+    chk('analyze: Summe der Redundanzzahlen = m - rank',
+       near(av.red.reduce((s,x)=>s+x,0), av.m-av.rank, 1e-9));
+  }
+  // --- analyze: Ausreisser (Spec-Test 1) ---
+  {
+    const L=[{id:'A',x:0,y:0},{id:'B',x:8000,y:0},{id:'C',x:8000,y:2000},
+             {id:'D',x:3000,y:2000},{id:'E',x:3000,y:5000},{id:'F',x:0,y:5000}];
+    const paare=[['A','B'],['B','C'],['C','D'],['D','E'],['E','F'],['F','A'],
+                 ['A','C'],['A','D'],['A','E'],['B','D'],['D','F'],['C','F']];
+    const I=C.idx(L);
+    const exakt=paare.map(([a,b])=>({a,b,d:C.dist(L[I[a]],L[I[b]]),sigma:5}));
+    const mit=exakt.map((m,i)=>i===7 ? {...m, d:m.d+20} : {...m});   // A-D um 20mm falsch
+    const fit=C.solve(L.map(p=>({...p})), mit);
+    const an=C.analyze(fit.pts, mit);
+    const wmax=an.w.reduce((bi,x,i,arr)=>(x??-1)>(arr[bi]??-1)?i:bi,0);
+    chk('analyze: der verfaelschte Wert hat das groesste w', wmax===7);
+    chk('analyze: rank 9', an.rank===9);
+    chk('analyze: ueberbestimmt -> sigmaHat vorhanden', an.sigmaHat!==null && an.sigmaHat>0);
+    chk('analyze: ueberbestimmt -> jede Messung pruefbar', an.w.every(x=>x!==null));
+
+    // Formfehler eichfrei ueber alle Punktabstaende
+    const formErr=P=>{
+      const IP=C.idx(P); let w=0;
+      for(let i=0;i<6;i++) for(let j=i+1;j<6;j++){
+        const a=L[i].id, b=L[j].id;
+        w=Math.max(w, Math.abs(C.dist(P[IP[a]],P[IP[b]]) - C.dist(L[I[a]],L[I[b]])));
+      }
+      return w;
+    };
+    // Bei nur 3 redundanten Messungen verteilt die Ausgleichung den 20mm-Fehler
+    // ueber das ganze Netz: Abstaende sind um bis zu 13mm verzogen. Der Fehler
+    // versteckt sich also - genau deshalb muss das Werkzeug ihn benennen.
+    chk('analyze: der Ausreisser verzerrt die Form spuerbar (>5mm)', formErr(fit.pts)>5);
+    // Und das ist der Arbeitsablauf, um den es geht: markierte Messung
+    // stilllegen -> Form erholt sich vollstaendig, Netz bleibt bestimmt.
+    const ohne=mit.map((m,i)=>i===7 ? {...m, on:false} : {...m});
+    const fit2=C.solve(L.map(p=>({...p})), ohne);
+    chk('analyze: nach Stilllegen stimmt die Form wieder (<0.01mm)', formErr(fit2.pts)<0.01);
+    chk('analyze: nach Stilllegen ist das Netz noch bestimmt', C.analyze(fit2.pts,ohne).dof===0);
   }
   return {ok, out};
 };
