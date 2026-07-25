@@ -123,24 +123,43 @@ In `globalThis.CORE` aufnehmen.
 
 - [ ] **Step 1: Fehlschlagenden Test schreiben**
 
+**Fixture-Wahl, teuer gelernt.** Ein Rechteck mit vier Seiten und einer Diagonale taugt hier **nicht**: es bleibt das ungemessene Paar B–D übrig, und das macht im Alleingang alle Messungen prüfbar (Gewinn 5 gegen 2 für eine Wiederholung). Die Prüfbarkeitsphase ist damit nach einem Schritt fertig, eine Wiederholung kommt nie zur Bewertung. Nachgemessen.
+
+Richtig ist ein Dreieck mit allen drei Seiten gemessen: `m=3, dof=0, redundancy=0`, nichts prüfbar — und alle drei möglichen Paare sind bereits gemessen. Eine Wiederholung ist dort die einzige Möglichkeit überhaupt.
+
 ```js
   // --- suggest: Wiederholungen ---
   {
+    // Dreieck, alle drei Seiten gemessen: exakt bestimmt, nichts pruefbar, und
+    // es gibt kein ungemessenes Paar mehr. Nur eine Wiederholung kann hier noch
+    // Pruefbarkeit herstellen.
+    const tri=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:1500,y:3000}];
+    const tw=[['A','B'],['B','C'],['C','A']];
+    const I=C.idx(tri);
+    const tm=tw.map(([a,b])=>({a,b,d:C.dist(tri[I[a]],tri[I[b]]),sigma:C.SIGMA_DEF}));
+    const a0=C.analyze(tri,tm);
+    chk('suggest-Fixture: Dreieck exakt bestimmt, nichts pruefbar',
+       a0.m===3 && a0.dof===0 && a0.redundancy===0 && a0.w.length===3 && a0.w.every(x=>x===null));
+    const s=C.suggest(tri,tw,tm);
+    chk('suggest: schlaegt trotz vollstaendig gemessener Paare etwas vor', s.length>0);
+    chk('suggest: und es sind Wiederholungen', s.length>0 && s.every(x=>x.repeat===true));
+    chk('suggest: Wiederholungen nur in der Pruefbarkeits-Phase',
+       s.length>0 && s.every(x=>x.why==='pruefbar'));
+    chk('suggest: die Wiederholung macht ihr Paar pruefbar', (()=>{
+      const w=s.find(x=>x.repeat); if(!w) return false;
+      const mit=tm.concat([{a:w.a,b:w.b,d:C.dist(tri[I[w.a]],tri[I[w.b]]),sigma:C.SIGMA_DEF}]);
+      return C.analyze(C.solve(tri,mit).pts,mit).w.filter(x=>x!==null).length>=2;
+    })());
+  }
+  {
+    // Gegenprobe: solange ein ungemessenes Paar existiert, gewinnt es. Eine
+    // Wiederholung darf die Bestimmtheit nie herstellen.
     const rect=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:3000},{id:'D',x:0,y:3000}];
     const walls=[['A','B'],['B','C'],['C','D'],['D','A']];
-    const exakt=[{a:'A',b:'B',d:4000},{a:'B',b:'C',d:3000},{a:'C',b:'D',d:4000},
-                 {a:'D',b:'A',d:3000},{a:'A',b:'C',d:5000}];
-    const s=C.suggest(rect,walls,exakt);
-    chk('suggest: mehr als die eine offene Strecke', s.length>1);
-    chk('suggest: mindestens eine Wiederholung dabei', s.some(x=>x.repeat===true));
-    chk('suggest: Wiederholungen nur in der Pruefbarkeits-Phase',
-       s.filter(x=>x.repeat).every(x=>x.why==='pruefbar'));
-    chk('suggest: eine Wiederholung macht ihr Paar pruefbar', (()=>{
-      const w=s.find(x=>x.repeat); if(!w) return false;
-      const I=C.idx(rect);
-      const mit=exakt.concat([{a:w.a,b:w.b,d:C.dist(rect[I[w.a]],rect[I[w.b]]),sigma:C.SIGMA_DEF}]);
-      return C.analyze(C.solve(rect,mit).pts,mit).w.filter(x=>x!==null).length>=2;
-    })());
+    const seiten=[{a:'A',b:'B',d:4000},{a:'B',b:'C',d:3000},{a:'C',b:'D',d:4000},{a:'D',b:'A',d:3000}];
+    const best=C.suggest(rect,walls,seiten).filter(x=>x.why==='bestimmt');
+    chk('suggest: Bestimmtheit weiterhin ueber ein ungemessenes Paar',
+       best.length===1 && !best[0].repeat);
   }
 ```
 
