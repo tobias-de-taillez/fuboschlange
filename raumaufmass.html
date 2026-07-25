@@ -4,7 +4,7 @@
 <style>
   *{box-sizing:border-box}
   body{font:14px/1.45 system-ui,sans-serif;margin:0;display:flex;height:100vh}
-  #left{flex:1;display:flex;flex-direction:column;min-width:0}
+  #left{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
   #right{width:420px;border-left:1px solid #ccc;overflow:auto;padding:12px}
   #status{padding:10px 12px;border-bottom:1px solid #ccc;font-weight:600}
   #status.warn{background:#fff4e0}
@@ -39,6 +39,12 @@
     </span>
   </div>
   <canvas id="cv"></canvas>
+  <div id="entry" style="display:none;position:absolute;z-index:5;background:#fff;
+       border:1px solid #333;border-radius:4px;padding:6px 8px;box-shadow:0 2px 8px #0003">
+    <div id="entryLabel" style="font-size:12px;color:#444;margin-bottom:4px"></div>
+    <input id="entryVal" inputmode="decimal" size="8" style="text-align:right"> m
+    <button id="entryOk">✓</button>
+  </div>
 </div>
 <div id="right">
   <h3>Messungen</h3>
@@ -771,6 +777,72 @@ function hit(wx,wy){
   return (best && bd*VIEW.s < 14) ? best : null;
 }
 
+// Abstand eines Punktes zu einer Strecke, plus Fusspunkt-Parameter.
+function distToSeg(p,a,b){
+  const vx=b.x-a.x, vy=b.y-a.y, L2=vx*vx+vy*vy;
+  const t=L2? Math.max(0,Math.min(1,((p.x-a.x)*vx+(p.y-a.y)*vy)/L2)) : 0;
+  return {d:Math.hypot(p.x-(a.x+vx*t), p.y-(a.y+vy*t)), t};
+}
+// Naechste Wand unter dem Cursor. Nur die mittleren 70 Prozent zaehlen -
+// nahe den Enden soll der Eckpunkt gewinnen, sonst kaeme man nicht mehr an ihn heran.
+function nearestWall(wx,wy){
+  const P=M.drag?M.pts:(M.fit?M.fit.pts:M.pts), I=C.idx(P);
+  let best=null, bd=Infinity;
+  M.walls.forEach(([a,b])=>{
+    if(I[a]==null||I[b]==null) return;
+    const r=distToSeg({x:wx,y:wy}, P[I[a]], P[I[b]]);
+    if(r.t<0.15||r.t>0.85) return;
+    if(r.d<bd){ bd=r.d; best={a,b}; }
+  });
+  return (best && bd*VIEW.s < 12) ? best : null;
+}
+
+let entryPair=null;
+// Mass fuer ein Paar eintragen. Einheit ist METER - die Tabelle zeigt Meter,
+// der Laser zeigt Meter, und die frueher hier verlangten Millimeter waren die
+// Ursache dafuer, dass ein getipptes "4.250" einen 4,25-mm-Raum ergab, ohne
+// dass eine Pruefung anschlug: sind alle Masse gleich falsch, ist das Netz
+// konsistent, und Geometrie ist massstabsinvariant.
+function enterMeasurement(a,b){
+  const P=M.fit?M.fit.pts:M.pts, I=C.idx(P);
+  if(I[a]==null||I[b]==null) return;
+  entryPair={a,b};
+  const mid={x:(P[I[a]].x+P[I[b]].x)/2, y:(P[I[a]].y+P[I[b]].y)/2};
+  const s=toScr(mid), dpr=devicePixelRatio||1;
+  const box=document.getElementById('entry');
+  box.style.display='block';
+  // toScr() gibt Koordinaten relativ zur Canvas-Ecke, #entry haengt aber an
+  // #left - und die Canvas ist darin nicht die erste Zeile (Status/Modi stehen
+  // darueber). Ohne den Versatz der Canvas selbst landet das Feld am Kopf von
+  // #left statt an der Wand (browser-vermessen: cv.offsetTop ~90px).
+  box.style.left=(s.x/dpr+cv.offsetLeft-60)+'px';
+  box.style.top =(s.y/dpr+cv.offsetTop-18)+'px';
+  const vorhanden=M.meas.filter(m=>(m.a===a&&m.b===b)||(m.a===b&&m.b===a));
+  document.getElementById('entryLabel').textContent = vorhanden.length
+    ? `${a}–${b} — bisher ${vorhanden.map(m=>fmtM(m.d)).join(', ')} m, weiterer Wert:`
+    : `${a}–${b}`;
+  const inp=document.getElementById('entryVal');
+  inp.value=''; inp.focus();
+}
+function closeEntry(){ entryPair=null; document.getElementById('entry').style.display='none'; }
+function commitEntry(){
+  if(!entryPair) return;
+  const inp=document.getElementById('entryVal');
+  const d=parseFloat(inp.value.replace(',','.'))*1000;
+  if(!isFinite(d)||d<=0){ inp.style.background='#fdd'; return; }
+  if(d<100 && !confirm(`${fmtM(d)} m ist sehr kurz — als Meter gemeint?\n\nOK = so übernehmen`)) return;
+  snapshot();
+  M.meas.push({a:entryPair.a, b:entryPair.b, d, sigma:C.SIGMA_DEF, on:true});
+  closeEntry();
+  recompute();
+}
+document.getElementById('entryOk').onclick=commitEntry;
+document.getElementById('entryVal').addEventListener('keydown',e=>{
+  e.stopPropagation();                       // Modus-Kuerzel duerfen hier nicht feuern
+  if(e.key==='Enter') commitEntry();
+  if(e.key==='Escape') closeEntry();
+});
+
 cv.addEventListener('mousedown',e=>{
   const r=cv.getBoundingClientRect(), dpr=devicePixelRatio||1;
   const w=toWorld((e.clientX-r.left)*dpr, (e.clientY-r.top)*dpr);
@@ -778,6 +850,10 @@ cv.addEventListener('mousedown',e=>{
   if(M.mode==='point'){
     if(h){ snapshot(); M.drag=h.id; return; }
     snapshot(); M.pts.push({id:nextId(), x:w.x, y:w.y}); recompute(); return;
+  }
+  if(M.mode==='measure' && !h){
+    const wall=nearestWall(w.x,w.y);
+    if(wall){ enterMeasurement(wall.a, wall.b); return; }
   }
   if(!h) return;
   M.sel.push(h.id);
@@ -791,11 +867,7 @@ cv.addEventListener('mousedown',e=>{
       if(at>=0) M.walls.splice(at,1); else M.walls.push([a,b]);   // Klick toggelt
       recompute();
     } else {
-      const s=prompt(`Abstand ${a}–${b} in mm:`);
-      const d=parseFloat((s||'').replace(',','.'));
-      if(isFinite(d) && d>0){ snapshot(); M.meas.push({a,b,d,sigma:C.SIGMA_DEF,on:true}); }
-      else if(s!==null) alert('Ungültig: Abstand muss eine Zahl größer 0 sein.');
-      recompute();
+      enterMeasurement(a,b);
     }
   } else render();
 });
