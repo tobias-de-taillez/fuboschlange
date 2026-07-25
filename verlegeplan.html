@@ -1157,7 +1157,35 @@ function bifilarPath(zone,gate){
     if(Math.abs(a.y-b.y)<1) return S.edgeGap+randW('top')+omegaClear('top');
     if(Math.abs(a.x-b.x)<1 && a.x<=1) return S.edgeGap+randW('left')+omegaClear('left');
     if(Math.abs(a.x-b.x)<1 && a.x>=frameW()-1) return S.edgeGap+randW('right')+omegaClear('right');
-    return S.edgeGap;                                            // Notch-Innenkanten
+    // Notch-Innenkanten.
+    //
+    // VERWORFEN, gemessen: hier zusätzlich einen senkrechten Umgehungskanal
+    // freihalten. Die Diagnose stimmt — liegt die Aussparung an der Verteilerwand,
+    // kommt die Anbindeleitung der Zone HINTER ihr nicht durch den unteren
+    // Korridor (da ist kein Boden) und muss über die Aussparung steigen; dieser
+    // Aufstieg läuft dann durch das Feld der Nachbarzone. Bei der
+    // Standardkonfiguration mit Verteiler auf der Oberwand lagen 8 der 10
+    // Kreuzungen genau dort, bei Frame x ~ 3090.
+    //
+    // Der Kanal beseitigt sie auch (10 -> 2 bei dieser einen Verteilerposition),
+    // ist aber ein monotoner Tausch ohne Optimum. 500 Bench-Läufe:
+    //   Kanalbreite      crossFails covFails outFails worstCross medianCoverage
+    //   keiner                  453      327      122        162           36 %
+    //   edgeGap+2*LANE          451      342      125        151           36 %
+    //   edgeGap+3*LANE          449      349      126        141           35 %
+    //   edgeGap+corridorW       448      365      106        121           34 %
+    // Über die 48 Verteilerpositionen des Projektraums: covFails 29 -> 37 -> 39
+    // -> 48 bei medianCross unverändert 19 -> 18. Also Deckung bezahlt, ohne die
+    // Kreuzungen wirklich loszuwerden.
+    //
+    // Die Ursache ist die ZONEN-AUFTEILUNG selbst, nicht der fehlende Kanal: eine
+    // Anbindeleitung muss durch fremdes Feld, weil die Zonen getrennt sind. Der
+    // Ausweg ist eine EINZIGE Spirale, die anschliessend in N Stücke gleicher
+    // Bogenlänge geschnitten wird (Shahid 2024: zerlegen nur, um wieder zu
+    // verschmelzen) — dann liegen alle Rohrenden an der Naht im Korridor.
+    // Gemessen am Projektraum: ein Kreis hat covFails 0/48 und medianCross 2,
+    // drei Zonen haben covFails 29/48 und medianCross 19.
+    return S.edgeGap;
   };
   return doubleSpiralField(poly,insOf,S.s,gate);
 }
@@ -1455,15 +1483,30 @@ function routeVia(a,b,lane,gap){
   const ramp=(x,y0,y1,sign)=>{                // Schräge von y0 auf y1 ab x
     const d=Math.abs(y1-y0);
     if(d<1e-6) return x;
+    // Die Schräge darf das Notch-x-Fenster nicht überfahren: dort gilt eine
+    // andere Korridorhöhe, und IM Fenster gibt es überhaupt keinen Boden.
+    if(hitsNotch && yFor(x+sign*d)!==yFor(x)){ put({x,y:y1}); return x; }
     if(d*2>room) { put({x,y:y1}); return x; }  // zu eng -> rechtwinklig
     put({x,y:y0}); put({x:x+sign*d,y:y1});
     return x+sign*d;
   };
   put(a);
-  let cx = ramp(a.x, a.y, yFor(a.x), dir);
+  ramp(a.x, a.y, yFor(a.x), dir);
   if(yFor(a.x)!==yFor(b.x)){                  // Höhenwechsel an der Notch-Kante
     const edgeX = (a.x<b.x) ? (a.x<n.x0 ? n.x0 : n.x1) : (a.x>n.x1 ? n.x1 : n.x0);
-    cx = ramp(edgeX, yFor(a.x), yFor(b.x), dir);
+    // Die Schräge gehört auf die Seite, auf der die KORRIDORHÖHE gilt — also
+    // ausserhalb der Aussparung. Vorher lief sie ab der Kante nach INNEN und
+    // kletterte dabei durch die Aussparung, in der kein Boden ist: gemessen an
+    // der Standardkonfiguration mit Verteiler auf der Oberwand lief mid von
+    // Frame (3000,198) nach (2054,1144) und leadOut zurück — zwei Segmente
+    // ausserhalb des Gebäudes.
+    const safeSign = Math.abs(edgeX-n.x1)<1 ? 1 : -1;
+    const yLo=Math.min(yFor(a.x),yFor(b.x)), yHi=Math.max(yFor(a.x),yFor(b.x));
+    // Fusspunkt der Schräge auf der sicheren Seite; im Frame bleiben, sonst wird
+    // die Schräge steiler statt aus dem Raum zu laufen.
+    const xFar=Math.max(0,Math.min(frameW(),edgeX+safeSign*(yHi-yLo)));
+    if(dir===safeSign){ put({x:edgeX,y:yHi}); put({x:xFar,y:yLo}); }
+    else              { put({x:xFar,y:yLo});  put({x:edgeX,y:yHi}); }
   }
   // Zielseite: Schräge rückwärts, damit b senkrecht angefahren wird
   const dEnd=Math.abs(yFor(b.x)-b.y);
@@ -2206,16 +2249,16 @@ function renderResults(plan){
   const broken=(plan.errs||[]).length>0;
 
   const ov=(plan.overlaps||[]).length, po=(plan.parOv||[]).length, lc=plan.leadCross||0;
-  if(ov>0)
-    notes.push(`<div class="note warn">⚠ E2E-Check: ${ov} Überlappung(en) in den Verlegespiralen — im Plan rot markiert. Muss 0 sein; Parameter prüfen.</div>`);
+  if(ov>0){
+    // lc sagt, wie viele davon am Verteiler liegen. Das entschuldigt sie nicht —
+    // es sagt nur, wo zu suchen ist.
+    const wo = lc>0 ? ` ${lc} davon im Verteiler-Nahbereich (≤ 40 cm).` : '';
+    notes.push(`<div class="note warn">⚠ E2E-Check: ${ov} Kreuzung(en) — im Plan rot markiert. Muss 0 sein.${wo} Gezählt wird jeder Abschnitt: Feld, Randzone, Anbindung, Übergang, und jeder Kreis gegen jeden anderen.</div>`);
+  }
   if(po>0)
     notes.push(`<div class="note warn">⚠ ${po} parallele Rohr-Überlappung(en): Rohre dichter als Ø ${S.pipeDia} mm — im Plan rot markiert. Abstände prüfen.</div>`);
-  if(!broken&&ov===0&&po===0){
-    const leadTxt = lc>0
-      ? ` Anbindeleitungen: ${lc} Kreuzungspunkt(e) — dort werden Rohre übereinander geführt (Baupraxis).`
-      : ' Auch die Anbindeleitungen kreuzen sich nicht.';
-    notes.push(`<div class="note ok">✓ E2E-Check: Verlegespiralen kreuzungsfrei.${leadTxt}</div>`);
-  }
+  if(!broken&&ov===0&&po===0)
+    notes.push(`<div class="note ok">✓ E2E-Check: kreuzungsfrei — Feld, Randzone und Anbindeleitungen, alle Kreise gegeneinander.</div>`);
 
   // Biegeradius: fillet kappt an engen Kehren still — hier wird es sichtbar.
   if(isFinite(plan.minBend)&&plan.minBend<S.bendRadius-1){
@@ -3081,20 +3124,33 @@ function applyThermal(kind){
 function recompute(){
   const plan=autofit();
   const M=snappedManifold();
-  // Harte Anforderung: die Verlegespiralen dürfen sich nie kreuzen.
-  plan.overlaps = plan.loops.flatMap(l=>fieldCrossings(l.field));
+  // Harte Anforderung: KEIN Rohr darf ein anderes kreuzen — weder auf seiner
+  // eigenen Bahn noch das Rohr eines anderen Kreises, und egal in welchem
+  // Abschnitt (Feld, Randzone, Anbindung, Übergang).
+  //
+  // Vorher stand hier `plan.loops.flatMap(l=>fieldCrossings(l.field))`. Das
+  // prüfte nur das Feld EINES Kreises gegen sich selbst. Nicht geprüft wurden:
+  // Randzone, Anbindeleitungen, Übergänge — und vor allem Kreis gegen Kreis,
+  // weil crossBetween hier gar nicht vorkam. Gemessen an der
+  // Standardkonfiguration mit Verteiler auf der Oberwand: 10 echte Kreuzungen,
+  // alle zwischen Kreis 0 und Kreis 1, acht davon 4,4 bis 4,8 m vom Verteiler
+  // entfernt mitten im Feld — und die Anzeige meldete "0 Überlappungen".
+  plan.overlaps = [
+    ...plan.loops.flatMap(l=>fieldCrossings(l.pts)),
+    ...plan.loops.flatMap((l,i)=>plan.loops.slice(i+1)
+        .flatMap(o=>crossBetween(l.pts,o.pts))),
+  ];
   // Ebenfalls hart: parallele Rohre dichter als der Rohr-Ø (unsichtbar für
   // den Kreuzungstest, deshalb eigener Detektor). Nur Feld/Randzone/Kanal —
   // Anbindeleitungen laufen am Verteiler gewollt gebündelt (Baupraxis).
   // Ganzer Kreis inkl. Anbindeleitungen: eine Zuleitung, die auf einer
   // Randzonenbahn entlangläuft, ist ebenso Rohr-auf-Rohr wie zwei Feldbahnen.
   plan.parOv = parallelOverlaps(plan.loops.map(l=>l.pts),M);
-  // Getrennt gezählt: Anbindeleitungen. Kreuzungen dort sind Baupraxis
-  // (Rohre werden am Verteiler übereinander geführt), kein Planungsfehler.
-  plan.leadCross = plan.loops.flatMap(l=>fieldCrossings(l.pts,M))
-    .filter(c=>!plan.overlaps.some(o=>len(sub(o,c))<1)).length;
-  for(let i=0;i<plan.loops.length;i++)for(let j=i+1;j<plan.loops.length;j++)
-    plan.leadCross += crossBetween(plan.loops[i].pts,plan.loops[j].pts,M).length;
+  // Nur noch informativ: wie viele der harten Kreuzungen im Verteiler-Nahbereich
+  // liegen. Dort ist das Übereinanderführen Baupraxis, aber es bleibt eine
+  // Kreuzung und wird oben mitgezählt — die frühere 400-mm-Ausnahme hat sie
+  // aus BEIDEN Zahlen fallen lassen und damit vor dem Nutzer versteckt.
+  plan.leadCross = plan.overlaps.filter(c=>len(sub(c,M))<=400).length;
   plan.minBend = Math.min(Infinity,...plan.loops.map(l=>l.minR??Infinity));
   plan.coverage = heatCoverage(plan.loops,25);   // 25 mm Wirkzone um jedes Rohr
   plan.errs = validate(plan);

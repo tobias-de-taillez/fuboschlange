@@ -13,7 +13,7 @@ export const EXPORTS = [
   'polyLen', 'simplify', 'fieldInset', 'spacingAt', 'lRing', 'chainSegs',
   'rectiOffsetter', 'randW', 'omegaClear', 'randWidth', 'notchFrame', 'doubleSpiralField',
   'snappedManifold', 'rotFwd', 'rotBack', 'rotForManifold', 'frameW', 'frameH',
-  'fillet', 'smoothToRadius', 'resampleArc', 'relaxLoops', 'pointInRoom',
+  'parallelOverlaps', 'fieldCrossings', 'crossBetween', 'segCrossPt', 'fillet', 'smoothToRadius', 'resampleArc', 'relaxLoops', 'pointInRoom',
   'S',
 ];
 
