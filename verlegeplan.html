@@ -1124,6 +1124,22 @@ function doubleSpiralField(poly,insOf,s,gate){
   // Wichtig bleibt: fillet kann eine 180°-Wende prinzipiell nicht runden
   // (Tangentenabstand R/tan(0) = unendlich, gekappt fällt der Radius auf 0),
   // deshalb ist der 2R-Abstand oben die eigentliche Absicherung.
+  // U-TURN ALS EXPLIZITER HALBKREIS. Die beiden Armenden liegen durch gapOK()
+  // oben mindestens 2R auseinander — ein Halbkreis darueber hat damit per
+  // Konstruktion Radius >= R. Ohne ihn sieht fillet eine 180-Grad-Ecke und kann
+  // sie prinzipiell nicht runden: der Tangentenabstand ist R/tan(0), also
+  // unendlich, gekappt faellt der Radius auf 0. Gemessen ueber 24
+  // Verteilerpositionen war genau das die engste Stelle im ganzen Plan
+  // (defl 180 Grad, rr 2,5 mm, zwischen Segmenten von 2,7 und 5,4 m).
+  if(pts.length>=2&&back.length&&back[0]&&back[0].length){
+    const E=pts[pts.length-1], A=back[0][0], d=len(sub(A,E));
+    if(d>=2*S.bendRadius-1&&d<40*S.bendRadius){
+      const u=unit(sub(E,pts[pts.length-2]));
+      const n=unit(sub(A,E));
+      back=[[{x:A.x,y:A.y,arc:{r:d/2,cw:(u.x*n.y-u.y*n.x)<0}},...back[0].slice(1)],
+            ...back.slice(1)];
+    }
+  }
   back.forEach(r=>pts.push(...r));
   return pts;
 }
@@ -1754,7 +1770,9 @@ function buildLoops(groups,ownerOverride,connOrder){
     // Die Teile sind einzeln radiustreu, ihre NAHTSTELLEN aber nicht: dort
     // treffen zwei getrennt geglättete Kurven mit eigenen Richtungen aufeinander.
     // Deshalb der zusammengesetzte Pfad noch einmal, mit festen Endpunkten.
-    pts=smoothToRadius(pts,R,40);
+    // Erst die Winzlinge raus, dann glaetten: sonst deckelt ein 2-mm-Segment den
+    // Bogenradius, egal wie gut die Kurve sonst ist.
+    pts=smoothToRadius(dedupePath(pts,Math.max(S.pipeDia,S.s/4)),R,40);
     const f=fillet(pts,R);
     return {...l, pts, length:f.length, minR:f.minR};
   }).filter(l=>l.pts.length>1);
@@ -3027,6 +3045,45 @@ function smoothToRadius(pts,rmin,iters){
     if(worst>=rmin) break;
   }
   return q;
+}
+// Winzige Segmente entfernen. fillet begrenzt den Bogenradius auf
+// 0,5 * kuerzestes Nachbarsegment * tan((pi-defl)/2) — ein 2 mm langes Segment
+// deckelt ihn also bei 2,4 mm, voellig unabhaengig vom Winkel. Gemessen ueber 24
+// Verteilerpositionen sind die engsten Stellen durchweg genau das: gewoehnliche
+// Ecken (45 bis 135 Grad) mit einem 2 bis 16 mm langen Nachbarsegment, entstanden
+// an den Uebergaengen zwischen Randzone, Anbindung und Feld. Solche Punkte tragen
+// nichts zur Form bei.
+// Konstruierte Boegen (Omega-Kehren) bleiben unangetastet — sie sind fertige
+// Geometrie mit garantiertem Radius.
+// Von den ZWEI Punkten eines Winzsegments faellt der mit der KLEINEREN
+// Ablenkung — der andere traegt die Form. Blind den spaeteren zu verwerfen
+// loescht die kurzen Seiten duenner Ringe, und aus den zwei langen Seiten wird
+// eine 180-Grad-Spitze: gemessen genau das, defl 180 Grad zwischen Segmenten von
+// 2,8 und 2,9 m, mit Radius 2,5 mm.
+function dedupePath(pts,tol){
+  if(pts.length<3) return pts;
+  const ang=(A,B,C)=>{
+    const u=sub(B,A), v=sub(C,B), lu=len(u), lv=len(v);
+    if(lu<1e-9||lv<1e-9) return 0;
+    return Math.acos(Math.max(-1,Math.min(1,dot(u,v)/(lu*lv))));
+  };
+  let out=pts.slice();
+  for(;;){
+    let drop=-1, best=Infinity;
+    for(let i=1;i<out.length-1;i++){
+      if(out[i].arc||out[i-1].arc) continue;          // Boegen bleiben unangetastet
+      if(len(sub(out[i],out[i-1]))>=tol) continue;
+      const dPrev=i>1?ang(out[i-2],out[i-1],out[i]):0;
+      const dCur=ang(out[i-1],out[i],out[i+1]);
+      const cand=dCur<=dPrev?i:i-1;
+      if(cand<1||cand>=out.length-1||out[cand].arc) continue;
+      const w=Math.min(dCur,dPrev);
+      if(w<best){ best=w; drop=cand; }
+    }
+    if(drop<0) break;
+    out=out.filter((_,i)=>i!==drop);
+  }
+  return out;
 }
 // Gleichmäßig ENTLANG der Kurve neu abtasten (konstante Bogenlänge). Anders als
 // Ausdünnen bleibt die Form erhalten: die Punkte liegen auf der alten Bahn, nur

@@ -1,20 +1,20 @@
 {
  "runs": 500,
- "crossFails": 353,
+ "crossFails": 354,
  "covFails": 295,
- "radFails": 499,
- "outFails": 109,
+ "radFails": 497,
+ "outFails": 108,
  "errFails": 0,
  "worstCoverage": 5,
  "worstRadius": 0,
  "worstGap": 3383,
  "worstCross": 50,
  "medianCross": 2,
- "medianGap": 1115,
+ "medianGap": 1112,
  "medianCoverage": 38,
- "medianRadius": 10,
- "crossFailRate": 0.706,
+ "medianRadius": 12,
+ "crossFailRate": 0.708,
  "covFailRate": 0.59,
- "radFailRate": 0.998,
- "outFailRate": 0.218
+ "radFailRate": 0.994,
+ "outFailRate": 0.216
 }
