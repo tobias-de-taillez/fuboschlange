@@ -544,6 +544,37 @@ function zoneField(poly,insOf,step){
   }
   return {x0,y0,step,nx,ny,d};
 }
+// ===== Geodätisches Winkelfeld =====
+// atan2 um einen Anker misst den Winkel per Luftlinie und ist bei L-Formen
+// mehrdeutig (Bereiche hinter der Ecke). Stattdessen die Umlaufzahl u als
+// harmonische Funktion IM Gebiet: Laplace(u)=0, Sprung um genau 1 über einen
+// Schnitt vom Anker zur Wand, Neumann-Rand (kein Fluss durch die Wand).
+// u wächst dann entlang von Wegen im Polygon — auch um Ecken herum.
+function windingField(inside,nx,ny,x0,y0,step,ax,ay,iters){
+  const u=new Float32Array(nx*ny), un=new Float32Array(nx*ny);
+  const ai=Math.round((ax-x0)/step), aj=Math.round((ay-y0)/step);
+  // Schnitt: von der Ankerzelle senkrecht nach unten (zur Verteilerwand).
+  // Eine waagerechte Nachbarschaft, die ihn quert, bekommt +-1 aufgeschlagen.
+  const crosses=(i,j,i2)=>j<aj && ((i<ai&&i2>=ai)||(i2<ai&&i>=ai));
+  const idx=(i,j)=>j*nx+i;
+  for(let it=0;it<iters;it++){
+    for(let j=0;j<ny;j++)for(let i=0;i<nx;i++){
+      const k=idx(i,j);
+      if(!inside[k]){ un[k]=u[k]; continue; }
+      let sum=0,n=0;
+      const add=(i2,j2,off)=>{ const k2=idx(i2,j2);
+        if(i2<0||i2>=nx||j2<0||j2>=ny||!inside[k2]) return;   // Neumann: Rand ignorieren
+        sum+=u[k2]+off; n++; };
+      add(i-1,j, crosses(i,j,i-1)?(i-1<ai?-1:1):0);
+      add(i+1,j, crosses(i,j,i+1)?(i+1<ai?-1:1):0);
+      add(i,j-1,0); add(i,j+1,0);
+      un[k]= n? sum/n : u[k];
+    }
+    u.set(un);
+  }
+  return u;
+}
+
 // ===== Kontinuierliches Spiralfeld =====
 // phi = d/(2s) - theta/2pi. Eine Umrundung um den Anker erhöht theta um 2pi und
 // damit d um 2s: die Isolinien von phi sind ECHTE Spiralen, keine Ringe. Damit
@@ -559,17 +590,16 @@ function spiralPasses(poly,insOf,s,gate){
     const v=d[j*nx+i]; if(v>best){best=v;ax=x0+i*step;ay=y0+j*step;}
   }
   if(best<s) return {passes:[],anchor:{x:ax,y:ay}};
-  // Naht zeigt zum Verteiler: dort beginnt und endet die Spirale.
-  const gx=gate!=null?gate:ax;
-  const base=Math.atan2(-1e6-ay, gx-ax);
-  const th=(px,py)=>{ let t=Math.atan2(py-ay,px-ax)-base;
-    while(t<0)t+=2*Math.PI; while(t>=2*Math.PI)t-=2*Math.PI; return t; };
-  const phi=new Float32Array(nx*ny), TH=new Float32Array(nx*ny);
-  for(let j=0;j<ny;j++)for(let i=0;i<nx;i++){
-    const px=x0+i*step, py=y0+j*step, t=th(px,py);
-    TH[j*nx+i]=t;
-    phi[j*nx+i]=d[j*nx+i]/(2*s)-t/(2*Math.PI);
-  }
+  // Geodätisches Winkelfeld statt atan2: u ist die Umlaufzahl entlang von Wegen
+  // IM Polygon, wächst also auch um Ecken herum korrekt.
+  const inside=new Uint8Array(nx*ny);
+  for(let k=0;k<inside.length;k++) inside[k]=d[k]>-step?1:0;
+  const U=windingField(inside,nx,ny,x0,y0,step,ax,ay,240);
+  // Der Schnitt liegt zwischen den Zellen; über ihn springt u um 1.
+  const ai=Math.round((ax-x0)/step), aj=Math.round((ay-y0)/step);
+  const onCut=(i,j,i2)=>j<aj && ((i<ai&&i2>=ai)||(i2<ai&&i>=ai));
+  const phi=new Float32Array(nx*ny);
+  for(let k=0;k<phi.length;k++) phi[k]=d[k]/(2*s)-U[k];
   // Marching Squares auf phi, aber Zellen an der Naht (theta-Sprung) auslassen:
   // dort ist phi unstetig, die Isolinie endet und setzt am nächsten Niveau fort.
   const iso=level=>{
@@ -578,8 +608,8 @@ function spiralPasses(poly,insOf,s,gate){
       return {x:pa.x+(pb.x-pa.x)*t,y:pa.y+(pb.y-pa.y)*t};};
     for(let j=0;j<ny-1;j++)for(let i=0;i<nx-1;i++){
       const id=[j*nx+i,j*nx+i+1,(j+1)*nx+i+1,(j+1)*nx+i];
-      const tt=id.map(k=>TH[k]);
-      if(Math.max(...tt)-Math.min(...tt)>Math.PI) continue;      // Nahtzelle
+      if(!id.every(k=>inside[k])) continue;                      // außerhalb
+      if(onCut(i,j,i+1)||onCut(i,j+1,i+1)) continue;             // Zelle am Schnitt
       const v=id.map(k=>phi[k]);
       const p=[{x:x0+i*step,y:y0+j*step},{x:x0+(i+1)*step,y:y0+j*step},
                {x:x0+(i+1)*step,y:y0+(j+1)*step},{x:x0+i*step,y:y0+(j+1)*step}];
@@ -593,12 +623,23 @@ function spiralPasses(poly,insOf,s,gate){
     return chainSegs(segs,step);
   };
   // Alle Niveaus einsammeln: ganze = Vorlauf, halbe = Rücklauf
+  // u an einem Punkt (bilinear) — für die Orientierung der Segmente
+  const uAt=p=>{
+    const fi=(p.x-x0)/step, fj=(p.y-y0)/step;
+    const i=Math.max(0,Math.min(nx-2,Math.floor(fi))), j=Math.max(0,Math.min(ny-2,Math.floor(fj)));
+    const tx=fi-i, ty=fj-j;
+    return U[j*nx+i]*(1-tx)*(1-ty)+U[j*nx+i+1]*tx*(1-ty)
+          +U[(j+1)*nx+i]*(1-tx)*ty+U[(j+1)*nx+i+1]*tx*ty;
+  };
+  // In Richtung wachsender Umlaufzahl orientieren. atan2 um den Anker wäre
+  // hier wieder mehrdeutig — genau der Fehler, den das Feld behebt.
+  const orientByU=c=>uAt(c[c.length-1])>=uAt(c[0])?c:c.slice().reverse();
   const flow=[], ret=[];
   for(let k=-40;k<=40;k+=1){
-    iso(k).forEach(c=>{ if(polyLen(c)>2*s) flow.push({k,c:simplify(c,step*0.2)}); });
-    iso(k+0.5).forEach(c=>{ if(polyLen(c)>2*s) ret.push({k:k+0.5,c:simplify(c,step*0.2)}); });
+    iso(k).forEach(c=>{ if(polyLen(c)>2*s) flow.push({k,c:orientByU(simplify(c,step*0.2))}); });
+    iso(k+0.5).forEach(c=>{ if(polyLen(c)>2*s) ret.push({k:k+0.5,c:orientByU(simplify(c,step*0.2))}); });
   }
-  return {passes:{flow,ret},anchor:{x:ax,y:ay}};
+  return {passes:{flow,ret},anchor:{x:ax,y:ay},oriented:true};
 }
 // Segmentliste zu Ketten verbinden (gemeinsam von iso und isoContours genutzt)
 function chainSegs(segs,step){
@@ -635,15 +676,8 @@ function doubleSpiralField(poly,insOf,s,gate){
   // braucht es ein geodätisches Winkelfeld statt atan2 um einen Punkt.
   const sp=S.useSpiralField?spiralPasses(poly,insOf,s,gate):{passes:null};
   if(sp.passes&&sp.passes.flow&&sp.passes.flow.length){
-    const A=sp.anchor;
-    const ang=p=>Math.atan2(p.y-A.y,p.x-A.x);
-    const order=arr=>arr.sort((a,b)=>a.k-b.k).map(o=>{
-      const c=o.c;
-      // in Umlaufrichtung orientieren (theta aufsteigend)
-      let dth=ang(c[c.length-1])-ang(c[0]);
-      while(dth<-Math.PI)dth+=2*Math.PI; while(dth>Math.PI)dth-=2*Math.PI;
-      return dth<0 ? c.slice().reverse() : c;
-    });
+    // Segmente sind bereits nach der Umlaufzahl orientiert (orientByU)
+    const order=arr=>arr.sort((a,b)=>a.k-b.k).map(o=>o.c);
     const fl=order(sp.passes.flow), rt=order(sp.passes.ret);
     if(fl.length){
       const pts=[];
