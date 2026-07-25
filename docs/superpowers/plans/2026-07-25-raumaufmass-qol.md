@@ -260,7 +260,9 @@ In `suggest`, die Kandidatenbildung ergänzen. Der heutige Block überspringt ge
   for(let i=0;i<pts.length;i++) for(let j=i+1;j<pts.length;j++){
     const key=pairKey(pts[i].id,pts[j].id);
     const pair={a:pts[i].id, b:pts[j].id};
-    if(!pairMeasurable(pts[i],pts[j],poly,walls)) continue;
+    // Signatur beachten: pairMeasurable(pts, walls, poly, aId, bId) - Listen
+    // und IDs, nicht Punktobjekte.
+    if(!pairMeasurable(pts, walls, poly, pts[i].id, pts[j].id)) continue;
     // Eine Wiederholung macht genau ihr eigenes Paar pruefbar - nachgemessen:
     // auf einem exakt bestimmten Netz steigt red der beiden Zeilen auf 0.500,
     // alle uebrigen bleiben bei 0. Deshalb sind Wiederholungen nur in der
