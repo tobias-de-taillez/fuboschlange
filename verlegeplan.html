@@ -2395,6 +2395,20 @@ function scoreOne(groups,own,order){
   let loops;
   try{ loops=buildLoops(groups,own,order); }catch(e){ return null; }
   if(!loops.length) return null;
+  // VERWORFEN, gemessen: Step-over-Variation als Bewertungsgroesse, nach
+  // Held & Spielberger (CAD&A 11(3) 2014, Abschnitt 3.2). Ihre Aussage ist
+  // richtig und fuer uns einschlaegig — eine Zerlegung soll nicht die FLAECHE
+  // gleich verteilen, sondern die Ungleichmaessigkeit des Bahnabstands
+  // minimieren, geschaetzt ohne den Pfad zu bauen aus der Hoehe h des
+  // Medial-Axis-Baums: d_max = h / ceil(h/s).
+  // Als Stellvertreter genommen: halbe kleinste Zonenweite minus halber
+  // fieldInset, Abweichung von einer ganzen Bahnzahl. Gemessen ueber 20 Laeufe
+  //   ohne   crossFails 18  covFails 10  radFails 19
+  //   mit    crossFails 19  covFails 11  radFails 20
+  // Alle drei schlechter. Der Stellvertreter ist zu grob: die halbe kleinste
+  // Weite ist nicht die Baumhoehe, und bei L-Zonen liegt sie voellig daneben.
+  // Fuer den Ansatz braucht es die echte Medial Axis der Zone, nicht eine
+  // Bounding-Box-Schaetzung.
   const plan={loops};
   return {groups,own,order,nConns:loops.nConns,
           loops,cross:loopCrossings(plan),out:loopsOutside(plan),
