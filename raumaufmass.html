@@ -607,7 +607,72 @@ addEventListener('keydown',e=>{
 });
 addEventListener('resize',render);
 
-function renderPanel(){ /* Task 11 */ }
+const fmtM=mm=>(mm/1000).toFixed(3);
+
+function statusText(){
+  if(M.pts.length<3) return ['Zu wenig Punkte — mindestens 3 anlegen.','warn'];
+  if(!M.an) return ['Noch keine Messung eingetragen.','warn'];
+  if(M.fit && !M.fit.converged)
+    return ['Ausgleichung nicht konvergiert — Ergebnis ist nicht belastbar.','bad'];
+  if(M.an.dof>0)
+    return [`Unterbestimmt — ${M.an.dof} ${M.an.dof===1?'Messung fehlt':'Messungen fehlen'}. `
+           +`Gezeigt wird der beste zur Skizze passende Fit.`,'warn'];
+  if(M.an.redundancy===0)
+    return ['Bestimmt, aber keine Messung überprüfbar — jede Messung geht ungeprüft ein.','warn'];
+  return [`Überbestimmt — σ̂ = ${M.an.sigmaHat.toFixed(1)} mm`,'good'];
+}
+
+function renderPanel(){
+  const [txt,cls]=statusText();
+  const st=document.getElementById('status');
+  st.textContent=txt; st.className=cls;
+
+  const tb=document.querySelector('#tbl tbody');
+  tb.innerHTML='';
+  const act=C.activeMeas(M.meas);
+  // Index des groessten normierten Residuums = wahrscheinlichster Ausreisser
+  let worst=-1;
+  if(M.an) M.an.w.forEach((x,i)=>{ if(x!=null && (worst<0 || x>M.an.w[worst])) worst=i; });
+
+  // absteigend nach w sortiert anzeigen, aber die Originalindizes behalten
+  const rows=act.map((m,i)=>({m,i,w:M.an?M.an.w[i]:null}));
+  rows.sort((p,q)=>(q.w??-1)-(p.w??-1));
+
+  rows.forEach(({m,i,w})=>{
+    const tr=document.createElement('tr');
+    if(i===worst && w!=null) tr.className='worst';
+    const red=M.an?M.an.red[i]:null;
+    const v=M.an?M.an.v[i]:null;
+    tr.innerHTML=
+      `<td>${m.a}→${m.b}</td>`+
+      `<td><input value="${fmtM(m.d)}" size="6" style="text-align:right"></td>`+
+      `<td>${v==null?'—':v.toFixed(1)}</td>`+
+      `<td>${red==null?'—':red.toFixed(2)}</td>`+
+      `<td>${w==null?'<span class="badge unchecked">nicht prüfbar</span>':w.toFixed(1)}</td>`+
+      `<td><button title="Messung stilllegen/reaktivieren">${m.on===false?'aus':'an'}</button>`+
+      `<button title="Messung löschen">×</button></td>`;
+    const [inp]=tr.getElementsByTagName('input');
+    inp.onchange=()=>{
+      const d=parseFloat(inp.value.replace(',','.'))*1000;
+      if(isFinite(d)&&d>0){ m.d=d; recompute(); }
+      else { inp.value=fmtM(m.d); alert('Ungültig: Maß muss eine Zahl größer 0 sein.'); }
+    };
+    const [tog,del]=tr.getElementsByTagName('button');
+    tog.onclick=()=>{ m.on=(m.on===false); recompute(); };
+    del.onclick=()=>{ M.meas.splice(M.meas.indexOf(m),1); recompute(); };
+    tb.appendChild(tr);
+  });
+
+  // Stillgelegte Messungen bleiben sichtbar, sonst findet man sie nie wieder
+  M.meas.filter(m=>m.on===false).forEach(m=>{
+    const tr=document.createElement('tr');
+    tr.style.opacity='.45';
+    tr.innerHTML=`<td>${m.a}→${m.b}</td><td>${fmtM(m.d)}</td><td>—</td><td>—</td>`+
+                 `<td><span class="badge">stillgelegt</span></td><td><button>an</button></td>`;
+    tr.getElementsByTagName('button')[0].onclick=()=>{ m.on=true; recompute(); };
+    tb.appendChild(tr);
+  });
+}
 recompute();
 </script>
 
