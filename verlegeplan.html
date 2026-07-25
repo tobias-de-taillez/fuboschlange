@@ -49,7 +49,7 @@
   /* ---- Main ---- */
   main{padding:18px}
   .planwrap{background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:12px;position:relative}
-  .planwrap svg{width:100%;height:auto;display:block;cursor:crosshair;touch-action:none}
+  .planwrap svg{width:100%;height:auto;display:block;cursor:crosshair}
   .badge{position:absolute;top:16px;right:16px;background:#0f172a;color:#fff;font-size:11px;padding:4px 9px;border-radius:999px;opacity:.85}
   .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-top:14px}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;box-shadow:var(--shadow)}
@@ -72,7 +72,10 @@
   .pbtn{margin-left:auto;padding:7px 14px;border:1px solid var(--line);border-radius:8px;background:#fff;font:inherit;cursor:pointer;color:#334155}
   .pbtn:hover{background:#f1f5f9}
   @media print{aside,header .sub,.badge,.pbtn{display:none}.app{grid-template-columns:1fr}main{padding:0}
-    .planwrap,.card,.loops{box-shadow:none;break-inside:avoid}}
+    .planwrap,.card,.loops{box-shadow:none;break-inside:avoid}
+    /* hohe Räume: Plan auf eine Seite begrenzen statt mitten durchzuschneiden */
+    .planwrap svg{max-height:170mm;width:auto;max-width:100%;margin:0 auto;display:block}}
+  @page{size:landscape}
 </style>
 </head>
 <body>
@@ -86,10 +89,10 @@
   <aside id="panel">
     <div class="grp">
       <h2>Raum (mm)</h2>
-      <div class="row"><label>Breite</label><input type="number" id="W" step="50"></div>
-      <div class="row"><label>Höhe</label><input type="number" id="H" step="50"></div>
-      <div class="row"><label>Notch Breite</label><input type="number" id="notchA" step="50"></div>
-      <div class="row"><label>Notch Höhe</label><input type="number" id="notchB" step="50"></div>
+      <div class="row"><label>Breite</label><input type="number" id="W" step="50" min="500" max="30000"></div>
+      <div class="row"><label>Höhe</label><input type="number" id="H" step="50" min="500" max="30000"></div>
+      <div class="row"><label>Notch Breite</label><input type="number" id="notchA" step="50" min="0" max="30000"></div>
+      <div class="row"><label>Notch Höhe</label><input type="number" id="notchB" step="50" min="0" max="30000"></div>
       <p class="hint">L = Rechteck minus Ausschnitt oben rechts. Notch 0 = volles Rechteck.</p>
     </div>
 
@@ -97,13 +100,13 @@
       <h2>Verlegung</h2>
       <div class="rng"><div class="top"><span>Bahnabstand</span><span class="val" id="sVal"></span></div><input type="range" id="s" min="75" max="300" step="5"></div>
       <div class="rng"><div class="top"><span>Biegeradius</span><span class="val" id="brVal"></span></div><input type="range" id="bendRadius" min="20" max="120" step="5"></div>
-      <div class="row"><label>Rohr-Ø</label><input type="number" id="pipeDia" step="1"></div>
-      <div class="row"><label>Randabstand</label><input type="number" id="edgeGap" step="5"></div>
+      <div class="row"><label>Rohr-Ø (mm)</label><input type="number" id="pipeDia" step="1" min="8" max="32"></div>
+      <div class="row"><label>Randabstand (mm)</label><input type="number" id="edgeGap" step="5" min="20" max="500"></div>
     </div>
 
     <div class="grp">
       <h2>Randzone (Fenster)</h2>
-      <div class="row"><label>Bahnabstand</label><input type="number" id="randSpacing" step="5"></div>
+      <div class="row"><label>Bahnabstand (mm)</label><input type="number" id="randSpacing" step="5" min="10" max="500"></div>
       <div class="row"><label>Bahnen</label><input type="number" id="randPasses" min="0" max="4" step="1"></div>
       <div class="chips" id="winChips">
         <label class="chip"><input type="checkbox" value="bottom">Unten</label>
@@ -115,7 +118,7 @@
 
     <div class="grp">
       <h2>Heizkreise</h2>
-      <div class="row"><label>Max Kreislänge (m)</label><input type="number" id="maxLoopM" step="5"></div>
+      <div class="row"><label>Max Kreislänge (m)</label><input type="number" id="maxLoopM" step="5" min="10" max="300"></div>
       <div class="seg" id="loopSeg">
         <button data-n="auto" class="on">Auto</button>
         <button data-n="1">1</button>
@@ -128,8 +131,8 @@
     <div class="grp">
       <h2>Verteiler</h2>
       <p class="hint" id="mfHint">Auf den Plan klicken zum Setzen. Wird auf nächste Wand gesnappt.</p>
-      <div class="row"><label>x</label><input type="number" id="mfx" step="10"></div>
-      <div class="row"><label>y</label><input type="number" id="mfy" step="10"></div>
+      <div class="row"><label>x (mm)</label><input type="number" id="mfx" step="10"></div>
+      <div class="row"><label>y (mm)</label><input type="number" id="mfy" step="10"></div>
     </div>
   </aside>
 
@@ -192,23 +195,43 @@ function lRing(x0,y0,w,h,a,b){
   ];
 }
 // Zonenbreiten von der Wand nach innen: Randzone -> Leitungskorridor -> Feld.
-const randWidth=()=>S.windowEdges.length ? S.randPasses*S.randSpacing : 0;
+const hasNotch=()=>S.notchA>0&&S.notchB>0;
+const notchX=()=>S.W-S.notchA;                      // x der Notch-Innenwand
+const randW=e=>S.windowEdges.includes(e)?S.randPasses*S.randSpacing:0;
+const randWidth=()=>randW('bottom');                // Korridor liegt über der BODEN-Randzone
 const LANE=()=>Math.max(25,S.pipeDia*1.6);          // Spurabstand im Korridor
 const laneCount=()=>3*Math.max(1,curLoopCount);     // Vorlauf/Rücklauf/Übergang je Kreis
-const corridorW=()=>laneCount()*LANE();
+// + LANE/2 Puffer: sonst liegt die äußerste Spur nur LANE/2 unter der ersten
+// Feldbahn — bei 16er Rohr wäre das physische Überlappung.
+const corridorW=()=>laneCount()*LANE()+LANE()/2;
 // lane -1 = Übergangskanal für Rechteck->Rechteck-Verbinder. Liegt ZWISCHEN
 // Randzone und Korridor: unterhalb der Randzone würde jeder Verbinder die
 // Fensterbahnen durchstoßen.
 const laneY=i=>i<0 ? S.edgeGap+randWidth()-LANE()/2
                    : S.edgeGap+randWidth()+(i+0.5)*LANE();
 let curLoopCount=1;                                 // von autofit gesetzt (Korridorbreite)
-const fieldInset=()=>S.edgeGap+randWidth()+corridorW();
+const fieldInset=()=>S.edgeGap+randWidth()+corridorW();   // = Boden-Inset
+
+// Per-Seite-Insets eines Feld-Rechtecks: Randzone nur an echten Fensterwänden,
+// Korridor nur unten, innere Nähte zwischen Rechtecken nur s/2 — sonst
+// entstehen breite unbeheizte Streifen an Wänden ohne Fenster/Korridor.
+function insetsFor(rect){
+  const atL=rect.x0<=1, atR=rect.x0+rect.w>=S.W-1;
+  const topIsOuter=rect.y0+rect.h>=S.H-1;           // Außen-Oberwand (links vom Notch)
+  return {
+    b: fieldInset(),
+    t: S.edgeGap+(topIsOuter?randW('top'):0),
+    l: atL? S.edgeGap+randW('left') : S.s/2,
+    r: atR? S.edgeGap+randW('right') : S.s/2,
+  };
+}
 
 // Echte Bahnenzahl: Probe-Linie quer durchs Rechteck, gezählt wird jedes
 // Rohr, das sie schneidet (nur Feldbahnen, Korridor/Kanal unterhalb ignoriert).
 function passCount(field,rect){
-  const px=rect.x0+rect.w/2+S.s*0.6;          // neben dem Torkanal in der Mitte
-  const yMin=fieldInset()-1;
+  const ins=insetsFor(rect);
+  const px=rect.x0+(rect.w+ins.l-ins.r)/2+S.s*0.6;  // neben dem Torkanal
+  const yMin=rect.y0+ins.b-1;
   let n=0;
   for(let i=0;i<field.length-1;i++){
     const a=field[i],b=field[i+1];
@@ -223,17 +246,23 @@ function bifilarOrder(n){const ev=[],od=[];for(let i=0;i<n;i++)(i%2===0?ev:od).p
 // Ein Spiralarm: rechteckige archimedische Spirale. Der Wandabstand wächst pro
 // Vierteldrehung um step/4, also um step pro voller Umdrehung. Kein Aufschneiden
 // und kein radialer Sprung -> der Arm kann sich per Konstruktion nicht kreuzen.
-function armSteps(rect,d0,step){                  // wie viele Vierteldrehungen passen
-  const at=d=>({w:rect.w-2*d, h:rect.h-2*d});
+function armSteps(rect,ins,d0,step){              // wie viele Vierteldrehungen passen
+  const at=d=>({w:rect.w-ins.l-ins.r-2*d, h:rect.h-ins.b-ins.t-2*d});
   let k=0;
   for(;k<400;k++){ const e=at(d0+k*step/4); if(e.w<=step/2||e.h<=step/2) break; }
   return k;
 }
-function spiralArm(rect,d0,step,n,inward){
-  const pts=[], cx=rect.x0+rect.w/2;
-  const at=d=>({x0:rect.x0+d, y0:rect.y0+d, x1:rect.x0+rect.w-d, y1:rect.y0+rect.h-d});
+function spiralArm(rect,ins,d0,step,n,inward){
+  const pts=[];
+  const at=d=>({x0:rect.x0+ins.l+d, y0:rect.y0+ins.b+d,
+                x1:rect.x0+rect.w-ins.r-d, y1:rect.y0+rect.h-ins.t-d});
   if(n<=0) return pts;
-  pts.push({x:cx,y:at(d0).y0});                   // Start: untere Kante, Mitte
+  const e0=at(d0), cx=(e0.x0+e0.x1)/2;
+  // Anker seitlich versetzt (Abstand s): sonst liegen Ein- und Austritts-
+  // Steigleitung kollinear. Vorlauf RECHTS der Mitte: seine unterste Bahn
+  // beginnt erst dort, und die Austritts-Vertikale links der Mitte fällt frei
+  // durchs Tor, statt die Bahn zu durchstechen.
+  pts.push({x:cx+(inward?1:-1)*step/4,y:e0.y0});  // Start: untere Kante
   for(let k=0;k<n;k++){
     const e=at(d0+k*step/4);
     pts.push([{x:e.x1,y:e.y0},{x:e.x1,y:e.y1},{x:e.x0,y:e.y1},{x:e.x0,y:e.y0}][k%4]);
@@ -244,24 +273,31 @@ function spiralArm(rect,d0,step,n,inward){
 // (Bahnen 1,3,5...), immer um s versetzt -> Gegenstrom, beide Enden außen.
 // Gleiche Schrittzahl für beide Arme, sonst enden sie unterschiedlich tief und
 // der U-Turn wird zu einer langen Diagonale quer durch die Mitte.
-function doubleSpiral(rect,d0,s){
-  const n=Math.min(armSteps(rect,d0,2*s),armSteps(rect,d0+s,2*s));
+function doubleSpiral(rect,ins,s){
+  const n=Math.min(armSteps(rect,ins,0,2*s),armSteps(rect,ins,s,2*s));
   if(n<=0) return [];
-  const inArm=spiralArm(rect,d0,2*s,n,true), outArm=spiralArm(rect,d0+s,2*s,n,false);
+  const inArm=spiralArm(rect,ins,0,2*s,n,true), outArm=spiralArm(rect,ins,s,2*s,n,false);
   if(!inArm.length) return [];
   if(!outArm.length) return inArm;
   return [...inArm,...outArm];                    // Innen verbunden (U-Turn)
 }
-function bifilarPath(rect){ return doubleSpiral(rect,fieldInset(),S.s); }
+function bifilarPath(rect){ return doubleSpiral(rect,insetsFor(rect),S.s); }
 
 // ================= Randzone =================
 function randzonePath(edgeName){
   const {W,H,edgeGap,randSpacing,randPasses}=S;
+  // Notch-bewusst: Oberwand endet an der Notch-Innenwand, rechte Wand an der
+  // Notch-Unterkante — sonst läuft die Randzone durch die Aussparung.
+  const xTopEnd = hasNotch()? notchX() : W;
+  const yRightEnd = hasNotch()? H-S.notchB : H;
+  // Seitliche Randzonen beginnen ÜBER dem Korridor, sonst kreuzen ihre
+  // vertikalen Bahnen sämtliche Leitungs-Spuren.
+  const yStart = fieldInset();
   let a,b,inw;
   if(edgeName==='bottom'){a={x:edgeGap,y:0};b={x:W-edgeGap,y:0};inw={x:0,y:1};}
-  else if(edgeName==='top'){a={x:edgeGap,y:H};b={x:W-edgeGap,y:H};inw={x:0,y:-1};}
-  else if(edgeName==='left'){a={x:0,y:edgeGap};b={x:0,y:H-edgeGap};inw={x:1,y:0};}
-  else{a={x:W,y:edgeGap};b={x:W,y:H-edgeGap};inw={x:-1,y:0};}
+  else if(edgeName==='top'){a={x:edgeGap,y:H};b={x:xTopEnd-edgeGap,y:H};inw={x:0,y:-1};}
+  else if(edgeName==='left'){a={x:0,y:yStart};b={x:0,y:H-edgeGap};inw={x:1,y:0};}
+  else{a={x:W,y:yStart};b={x:W,y:yRightEnd-edgeGap};inw={x:-1,y:0};}
   const pts=[];
   for(let j=0;j<randPasses;j++){
     const off=edgeGap+j*randSpacing;
@@ -273,12 +309,15 @@ function randzonePath(edgeName){
 }
 
 // ================= Fillet: Ecken runden + korrekte Bogenlänge =================
-// Gibt {ops, length}. Bogenlänge = r * Ablenkwinkel (analytisch, nicht Polyline-Näherung).
+// Gibt {ops, length, minR}. Bogenlänge = r * Ablenkwinkel (analytisch).
+// minR = kleinster tatsächlich verwendeter Radius: wird ein Bogen wegen Platz-
+// mangel gekappt (enge Kehre), muss das sichtbar werden — stilles Kappen unter
+// den machbaren Biegeradius wäre ein nicht verlegbarer Plan.
 function fillet(pts,r){
-  const ops=[]; let length=0;
-  if(!pts.length) return {ops,length};
+  const ops=[]; let length=0, minR=Infinity;
+  if(!pts.length) return {ops,length,minR};
   ops.push({kind:'move',to:pts[0]});
-  if(pts.length===1) return {ops,length};
+  if(pts.length===1) return {ops,length,minR};
   let prev=pts[0];
   for(let i=1;i<pts.length-1;i++){
     const a=pts[i-1],v=pts[i],b=pts[i+1];
@@ -295,11 +334,12 @@ function fillet(pts,r){
     const pin=add(v,scl(din,-t)), pout=add(v,scl(dout,t));
     ops.push({kind:'line',to:pin}); length+=len(sub(pin,prev));
     ops.push({kind:'arc',to:pout,r:rr,cw:cross<0}); length+=rr*defl;
+    minR=Math.min(minR,rr);
     prev=pout;
   }
   const last=pts[pts.length-1];
   ops.push({kind:'line',to:last}); length+=len(sub(last,prev));
-  return {ops,length};
+  return {ops,length,minR};
 }
 
 // ================= Overlap-Check (E2E: kreuzen sich Bahnen?) =================
@@ -332,6 +372,32 @@ function crossBetween(a,b,near){
   }
   return hits;
 }
+// Parallele Rohre mit Mittenabstand < Rohr-Ø = physische Überlappung.
+// segCrossPt sieht nur transversale Schnitte — kollineare/parallele Doppel-
+// belegung braucht diesen eigenen Check.
+function parallelOverlaps(paths,near){
+  const segs=[], R=near?400:0;
+  paths.forEach(p=>{ for(let i=0;i<p.length-1;i++){
+    const a=p[i],b=p[i+1];
+    if(Math.abs(a.y-b.y)<1e-6&&Math.abs(a.x-b.x)>1e-6)
+      segs.push({o:'h',c:a.y,lo:Math.min(a.x,b.x),hi:Math.max(a.x,b.x),p,i});
+    else if(Math.abs(a.x-b.x)<1e-6&&Math.abs(a.y-b.y)>1e-6)
+      segs.push({o:'v',c:a.x,lo:Math.min(a.y,b.y),hi:Math.max(a.y,b.y),p,i});
+  }});
+  const hits=[];
+  for(let i=0;i<segs.length;i++)for(let j=i+1;j<segs.length;j++){
+    const A=segs[i],B=segs[j];
+    if(A.o!==B.o) continue;
+    if(A.p===B.p&&Math.abs(A.i-B.i)<=1) continue;   // direkte Nachbarn (teilen nur einen Punkt)
+    if(Math.abs(A.c-B.c)>=S.pipeDia) continue;
+    const lo=Math.max(A.lo,B.lo), hi=Math.min(A.hi,B.hi);
+    if(hi-lo>1){
+      const mid = A.o==='h' ? {x:(lo+hi)/2,y:(A.c+B.c)/2} : {x:(A.c+B.c)/2,y:(lo+hi)/2};
+      if(!near||len(sub(mid,near))>R) hits.push(mid);
+    }
+  }
+  return hits;
+}
 
 // ================= Zonen / Loops / Autofit =================
 // L in Basis-Rechtecke zerlegen (linker hoher Teil + rechter niedriger Teil).
@@ -356,20 +422,32 @@ function partition(N){
   return [[Lz],[{...Rz,w:Rz.w/2}],[{x0:Rz.x0+Rz.w/2,y0:Rz.y0,w:Rz.w/2,h:Rz.h}]];
 }
 // Manhattan-Weg über eine reservierte Korridor-Spur (statt diagonal durchs Feld).
-// wallDetour: Startpunkt liegt hinter dem Feld (Verteiler an Seiten-/Oberwand)
-// -> erst an der Seitenwand entlang, sonst würde die Vertikale das Feld zerschneiden.
-function routeVia(a,b,lane,wallDetour){
+// side: null = Verteiler an der Unterwand, sonst 'L'|'R'|'N' = an welcher Wand
+// die Detour-Vertikale läuft ('N' = links neben der Notch-Innenwand). Notch-
+// bewusst, sonst laufen Leitungen durch die Aussparung.
+function routeVia(a,b,lane,side){
   const yC=laneY(lane), pts=[a];
-  if(wallDetour){
-    const xW=(a.x<S.W/2)?laneY(lane):S.W-laneY(lane);
+  if(side){
+    const xW = side==='L'? laneY(lane) : side==='R'? S.W-laneY(lane) : notchX()-laneY(lane);
     pts.push({x:xW,y:a.y},{x:xW,y:yC});
   }else if(Math.abs(a.y-yC)>1) pts.push({x:a.x,y:yC});
   pts.push({x:b.x,y:yC},b);
   return pts;
 }
+// An welcher Wand hängt der Verteiler? Bestimmt die Detour-Seite.
+function detourSideFor(M){
+  if(M.y<=fieldInset()) return null;                 // Unterwand-Bereich: kein Detour
+  if(M.x<=1) return 'L';
+  if(M.x>=S.W-1) return 'R';
+  if(M.y>=S.H-1) return 'L';                         // Oberwand existiert nur links vom Notch
+  if(hasNotch()&&Math.abs(M.x-notchX())<=1) return 'N';        // Notch-Seitenwand
+  if(hasNotch()&&Math.abs(M.y-(S.H-S.notchB))<=1) return 'R';  // Notch-Unterwand
+  return M.x<S.W/2?'L':'R';
+}
 function buildLoops(groups){
   const M=snappedManifold();
-  const detour = M.y > fieldInset();          // Verteiler nicht an unterer Wand
+  const side=detourSideFor(M);
+  const detour = side!==null;                 // Verteiler nicht an unterer Wand
 
   // Stufe 1: Felder (noch ohne Randzone/Anbindung)
   const raw=groups.map((rects,gi)=>{
@@ -386,14 +464,29 @@ function buildLoops(groups){
   // Randzone dem Kreis mit dem anker-fernsten Feld-Eintritt zuordnen: dessen
   // Steigleitung aus dem Korridor liegt außerhalb aller fremden Korridor-Spans
   // und kreuzt daher nichts. (Vorlauf geht weiterhin zuerst an die Scheibe.)
-  const wallX = M.x<S.W/2 ? 0 : S.W;
+  const wallX = side==='R' ? S.W : side==='N' ? notchX() : 0;
   const anchor = detour ? wallX : M.x;
   if(S.windowEdges.length){
     let owner=-1,best=-1;
     raw.forEach((r,i)=>{ if(r.field.length){
       const d=Math.abs(r.field[0].x-anchor); if(d>best){best=d;owner=i;} }});
     if(owner<0&&raw.length) owner=0;
-    if(owner>=0) S.windowEdges.forEach(e=>{ raw[owner].rand=raw[owner].rand.concat(randzonePath(e)); });
+    if(owner>=0){
+      // Übergänge zwischen Randzonen verschiedener Kanten durch einen wandnahen
+      // Kanal führen — sonst läuft der Verbinder kollinear zur äußersten Feldbahn.
+      const parts=S.windowEdges.map(e=>randzonePath(e)).filter(p=>p.length);
+      let rz=[];
+      parts.forEach(p=>{
+        if(rz.length){
+          const a=rz[rz.length-1], b=p[0];
+          const chan = (a.x<S.edgeGap+1&&b.x<S.edgeGap+1) ? S.edgeGap*0.4
+                     : (a.x>S.W-S.edgeGap-1&&b.x>S.W-S.edgeGap-1) ? S.W-S.edgeGap*0.4 : null;
+          if(chan!==null) rz.push({x:chan,y:a.y},{x:chan,y:b.y});
+        }
+        rz=rz.concat(p);
+      });
+      raw[owner].rand=rz;
+    }
   }
   raw.forEach(r=>{
     r.head = r.rand.length?r.rand[0]:r.field[0];
@@ -437,15 +530,16 @@ function buildLoops(groups){
     // Rechteck->Rechteck-Übergänge im wandnahen Kanal (unter allem) -> kreuzt nichts.
     // Rückwärts einsetzen, damit die gespeicherten Indizes gültig bleiben.
     r.joins.slice().reverse().forEach(j=>{
-      field.splice(j.at,0,...routeVia(j.from,j.to,-1,false).slice(1,-1));
+      field.splice(j.at,0,...routeVia(j.from,j.to,-1,null).slice(1,-1));
     });
-    const leadIn  = routeVia(M,r.head,L('in'),detour);
-    const leadOut = routeVia(M,r.tail,L('out'),detour).reverse();
+    const leadIn  = routeVia(M,r.head,L('in'),side);
+    const leadOut = routeVia(M,r.tail,L('out'),side).reverse();
     const mid = (r.rand.length&&r.field.length)
-      ? routeVia(r.rand[r.rand.length-1],r.field[0],L('mid'),false).slice(1,-1) : [];
+      ? routeVia(r.rand[r.rand.length-1],r.field[0],L('mid'),null).slice(1,-1) : [];
     const pts=[...leadIn.slice(0,-1),...r.rand,...mid,...field,...leadOut.slice(1)];
     const rings=r.rects.reduce((a,x)=>a+passCount(field,x),0);   // echte Bahnenzahl
-    return {pts, field, rand:r.rand, leadIn, leadOut, mid, rings, length:fillet(pts,S.bendRadius).length};
+    const f=fillet(pts,S.bendRadius);
+    return {pts, field, rand:r.rand, leadIn, leadOut, mid, rings, length:f.length, minR:f.minR};
   }).filter(l=>l.pts.length>1);
 }
 function autofit(){
@@ -478,7 +572,9 @@ function draw(plan){
   const X=x=>x+m, Y=y=>(H-y)+m;
   const PP=p=>`${X(p.x).toFixed(1)} ${Y(p.y).toFixed(1)}`;
   const opsToD=ops=>ops.map(o=>o.kind==='move'?`M ${PP(o.to)}`:o.kind==='line'?`L ${PP(o.to)}`
-      :`A ${o.r.toFixed(1)} ${o.r.toFixed(1)} 0 0 ${o.cw?0:1} ${PP(o.to)}`).join(' ');
+      // sweep invertiert: Y=(H-y) spiegelt die Drehrichtung — Modell-ccw wird
+      // Bildschirm-cw, sonst wölben die Eckbögen nach außen statt nach innen.
+      :`A ${o.r.toFixed(1)} ${o.r.toFixed(1)} 0 0 ${o.cw?1:0} ${PP(o.to)}`).join(' ');
   const path=(pts,stroke,sw)=>pts.length<2?'':`<path d="${opsToD(fillet(pts,S.bendRadius).ops)}" fill="none" stroke="${stroke}" stroke-width="${sw}" stroke-linejoin="round" stroke-linecap="round"/>`;
   const line=(a,b,stroke,sw,dash='')=>`<line x1="${X(a.x)}" y1="${Y(a.y)}" x2="${X(b.x)}" y2="${Y(b.y)}" stroke="${stroke}" stroke-width="${sw}" ${dash}/>`;
 
@@ -486,8 +582,9 @@ function draw(plan){
   const roomClosed=[...room,room[0]];
   const sw=Math.max(6,S.pipeDia*0.55);
 
-  // Fensterwände
-  const edgePts={bottom:[{x:0,y:0},{x:W,y:0}],top:[{x:0,y:H},{x:W,y:H}],left:[{x:0,y:0},{x:0,y:H}],right:[{x:W,y:0},{x:W,y:H}]};
+  // Fensterwände (Notch-bewusst: Oberwand endet am Notch, rechte Wand darunter)
+  const xTE=hasNotch()?notchX():W, yRE=hasNotch()?H-S.notchB:H;
+  const edgePts={bottom:[{x:0,y:0},{x:W,y:0}],top:[{x:0,y:H},{x:xTE,y:H}],left:[{x:0,y:0},{x:0,y:H}],right:[{x:W,y:0},{x:W,y:yRE}]};
   let winSeg=S.windowEdges.map(e=>line(edgePts[e][0],edgePts[e][1],'var(--window)',34)).join('');
 
   // Loops (Feld gefillt) + Randzone + Verteiler-Leitungen
@@ -515,7 +612,7 @@ function draw(plan){
     `<text x="${X(-m*0.35)}" y="${Y(H/2)}" font-size="105" text-anchor="middle" transform="rotate(-90 ${X(-m*0.35)} ${Y(H/2)})">${(H/1000).toFixed(2)} m</text></g>`;
 
   // Overlap-Marker (rot) — sollten nie erscheinen (E2E-Check)
-  const marks=(plan.overlaps||[]).map(p=>
+  const marks=[...(plan.overlaps||[]),...(plan.parOv||[])].map(p=>
     `<circle cx="${X(p.x)}" cy="${Y(p.y)}" r="75" fill="none" stroke="#dc2626" stroke-width="16"/>`).join('');
 
   const svg=`<svg viewBox="0 0 ${W+2*m} ${H+2*m}" xmlns="http://www.w3.org/2000/svg" id="svg">`+
@@ -527,7 +624,9 @@ function draw(plan){
     `<text x="${X(M.x)}" y="${Y(M.y)-90}" font-size="82" fill="#0f172a" text-anchor="middle" font-family="system-ui">Verteiler</text>`+
     scaleBar+dims+`</svg>`;
   document.getElementById('plan').innerHTML=svg;
-  document.getElementById('svg').addEventListener('pointerdown',onPlanClick);
+  // 'click' statt 'pointerdown': feuert nicht bei Scroll-Gesten — Touch-Nutzer
+  // können über den Plan scrollen, ohne den Verteiler zu verschieben.
+  document.getElementById('svg').addEventListener('click',onPlanClick);
 }
 
 // ================= Klick -> Verteiler setzen =================
@@ -537,7 +636,9 @@ function onPlanClick(e){
   const loc=p.matrixTransform(svg.getScreenCTM().inverse());
   const m=Math.max(400,S.s*3);
   S.manifold={x:loc.x-m, y:S.H-(loc.y-m)};
+  // State = gesnappter Punkt, damit Felder, State und Zeichnung übereinstimmen.
   const snap=snappedManifold();
+  S.manifold={x:snap.x,y:snap.y};
   document.getElementById('mfx').value=Math.round(snap.x);
   document.getElementById('mfy').value=Math.round(snap.y);
   recompute();
@@ -568,33 +669,57 @@ function renderResults(plan){
 
   document.getElementById('legend').innerHTML=
     plan.loops.map((l,i)=>`<span><span class="dot" style="background:${LOOPHEX[i%3]}"></span>Kreis ${i+1}</span>`).join('')+
-    `<span><span class="dot" style="background:var(--rand)"></span>Randzone</span>`+
-    `<span><span class="dot" style="background:var(--window)"></span>Fensterwand</span>`+
-    `<span><span class="dot" style="background:#94a3b8"></span>Verteiler-Leitung</span>`;
+    (S.windowEdges.length
+      ? `<span><span class="dot" style="background:var(--rand)"></span>Randzone</span>`+
+        `<span><span class="dot" style="background:var(--window)"></span>Fensterwand</span>`
+      : '')+
+    `<span>dünne Linie = Anbindeleitung (Kreisfarbe)</span>`;
 
-  const ov=(plan.overlaps||[]).length, lc=plan.leadCross||0;
-  const leadTxt = lc>0
-    ? ` Anbindeleitungen: ${lc} Kreuzungspunkt(e) — dort werden Rohre übereinander geführt (Baupraxis).`
-    : ' Auch die Anbindeleitungen kreuzen sich nicht.';
-  const ovNote = ov>0
-    ? `<div class="note warn">⚠ E2E-Check: ${ov} Überlappung(en) in den Verlegespiralen — im Plan rot markiert. Muss 0 sein; Parameter prüfen.</div>`
-    : `<div class="note ok">✓ E2E-Check: Verlegespiralen kreuzungsfrei.${leadTxt}</div>`;
+  const notes=[];
+  // Harte Eingabefehler zuerst — dann KEINE grünen Häkchen für einen kaputten Plan.
+  (plan.errs||[]).forEach(e=>notes.push(`<div class="note warn">⚠ ${e}</div>`));
+  const broken=(plan.errs||[]).length>0;
+
+  const ov=(plan.overlaps||[]).length, po=(plan.parOv||[]).length, lc=plan.leadCross||0;
+  if(ov>0)
+    notes.push(`<div class="note warn">⚠ E2E-Check: ${ov} Überlappung(en) in den Verlegespiralen — im Plan rot markiert. Muss 0 sein; Parameter prüfen.</div>`);
+  if(po>0)
+    notes.push(`<div class="note warn">⚠ ${po} parallele Rohr-Überlappung(en): Rohre dichter als Ø ${S.pipeDia} mm — im Plan rot markiert. Abstände prüfen.</div>`);
+  if(!broken&&ov===0&&po===0){
+    const leadTxt = lc>0
+      ? ` Anbindeleitungen: ${lc} Kreuzungspunkt(e) — dort werden Rohre übereinander geführt (Baupraxis).`
+      : ' Auch die Anbindeleitungen kreuzen sich nicht.';
+    notes.push(`<div class="note ok">✓ E2E-Check: Verlegespiralen kreuzungsfrei.${leadTxt}</div>`);
+  }
+
+  // Biegeradius: fillet kappt an engen Kehren still — hier wird es sichtbar.
+  if(isFinite(plan.minBend)&&plan.minBend<S.bendRadius-1){
+    const feas=plan.minBend>=2.5*S.pipeDia;
+    notes.push(`<div class="note ${feas?'ok':'warn'}">${feas?'ℹ':'⚠'} Engste Kehre: Radius ${Math.round(plan.minBend)} mm (eingestellt ${S.bendRadius} mm)${feas?' — noch verlegbar.':` — unter ${Math.round(2.5*S.pipeDia)} mm (2,5×Ø) kaum biegbar! Randzonen-/Bahnabstand erhöhen.`}</div>`);
+  }
 
   const over=plan.loops.filter(l=>l.length>S.maxLoop).length;
-  const maxNote = (over>0 && plan.loops.length>=3)
-    ? `<div class="note warn">⚠ ${over} Kreis(e) über Max ${m(S.maxLoop)} m — auch mit 3 Kreisen nicht lösbar. Bahnabstand erhöhen oder Fläche reduzieren.</div>`
-    : over>0
-    ? `<div class="note warn">⚠ ${over} Kreis(e) über Max ${m(S.maxLoop)} m. „Auto“ wählen oder mehr Kreise.</div>`
-    : `<div class="note ok">✓ Alle Kreise ≤ Max ${m(S.maxLoop)} m. Materialbedarf: ${m(total)} m Rohr Ø${S.pipeDia} mm.</div>`;
+  if(over>0&&plan.loops.length>=3)
+    notes.push(`<div class="note warn">⚠ ${over} Kreis(e) über Max ${m(S.maxLoop)} m — auch mit 3 Kreisen nicht lösbar. Bahnabstand erhöhen oder Fläche reduzieren.</div>`);
+  else if(over>0)
+    notes.push(`<div class="note warn">⚠ ${over} Kreis(e) über Max ${m(S.maxLoop)} m. „Auto“ wählen oder mehr Kreise.</div>`);
+  else if(!broken)
+    notes.push(`<div class="note ok">✓ Alle Kreise ≤ Max ${m(S.maxLoop)} m. Materialbedarf: ${m(total)} m Rohr Ø${S.pipeDia} mm.</div>`);
 
-  document.getElementById('notes').innerHTML = ovNote + maxNote;
+  document.getElementById('notes').innerHTML = notes.join('');
 }
 const card=(k,v,unit)=>`<div class="card"><div class="k">${k}</div><div class="v">${v} <small>${unit}</small></div></div>`;
 
 // ================= Bindings =================
 function bindNumber(id,key,scale=1){
   const el=document.getElementById(id); el.value=S[key]/scale;
-  el.addEventListener('input',()=>{const v=parseFloat(el.value); if(!isNaN(v)){S[key]=v*scale; recompute();}});
+  el.addEventListener('input',()=>{
+    let v=parseFloat(el.value); if(isNaN(v)) return;   // unfertige Eingabe: alten Wert behalten
+    // min/max der Inputs gelten auch für Getipptes, nicht nur für den Spinner
+    if(el.min!=='')v=Math.max(v,+el.min);
+    if(el.max!=='')v=Math.min(v,+el.max);
+    S[key]=v*scale; recompute();
+  });
 }
 function bindRange(id,key,valId){
   const el=document.getElementById(id), out=document.getElementById(valId);
@@ -607,12 +732,22 @@ function initUI(){
   bindNumber('randSpacing','randSpacing');bindNumber('randPasses','randPasses');
   bindNumber('maxLoopM','maxLoop',1000);
   bindRange('s','s','sVal');bindRange('bendRadius','bendRadius','brVal');
-  bindNumber('mfx','manifold'); // overwritten below
   // manifold x/y felder
   const mfx=document.getElementById('mfx'),mfy=document.getElementById('mfy');
   const sm=snappedManifold(); mfx.value=Math.round(sm.x); mfy.value=Math.round(sm.y);
-  const setMf=()=>{S.manifold={x:parseFloat(mfx.value)||0,y:parseFloat(mfy.value)||0};recompute();};
+  const setMf=()=>{
+    const x=parseFloat(mfx.value), y=parseFloat(mfy.value);
+    if(isNaN(x)||isNaN(y)) return;              // leeres Feld beim Umtippen: kein 0-Teleport
+    S.manifold={x,y}; recompute();
+  };
+  // Auf blur/Enter den gesnappten Punkt zurückschreiben — Felder, State und
+  // Zeichnung zeigen danach denselben Verteiler.
+  const snapBack=()=>{
+    const sp=snappedManifold(); S.manifold={x:sp.x,y:sp.y};
+    mfx.value=Math.round(sp.x); mfy.value=Math.round(sp.y);
+  };
   mfx.oninput=setMf; mfy.oninput=setMf;
+  mfx.onchange=snapBack; mfy.onchange=snapBack;
   // fenster chips
   document.querySelectorAll('#winChips input').forEach(cb=>{
     cb.checked=S.windowEdges.includes(cb.value);
@@ -657,24 +792,54 @@ function selfChecks(){
   S.loopMode=bs;S.s=bss;curLoopCount=bc;
   A(`Spiralen kreuzungsfrei (${cases} Größen, 0 Overlaps)`,xc===0&&cases>0);
   // Doppelspirale: Vor- und Rücklauf um s versetzt (Gegenstrom)
-  const ds=doubleSpiral({x0:0,y0:0,w:4000,h:3000},200,150);
+  const ins0={l:200,r:200,t:200,b:200};
+  const ds=doubleSpiral({x0:0,y0:0,w:4000,h:3000},ins0,150);
   A('Doppelspirale liefert beide Arme',ds.length>8);
+  // Parallel-Detektor: zwei Rohre mit 10mm Mittenabstand bei Ø16 = Überlappung
+  const pv=parallelOverlaps([[{x:0,y:0},{x:1000,y:0}],[{x:0,y:10},{x:1000,y:10}]]);
+  A('Parallel-Detektor erkennt Rohr-auf-Rohr',pv.length===1);
+  // Randzone endet am Notch (Defaults: Notch vorhanden)
+  if(hasNotch()){
+    const topZ=randzonePath('top');
+    A('Randzone Oben endet am Notch',Math.max(...topZ.map(p=>p.x))<=notchX()-S.edgeGap+1);
+    const rZ=randzonePath('right');
+    A('Randzone Rechts endet am Notch',Math.max(...rZ.map(p=>p.y))<=S.H-S.notchB-S.edgeGap+1);
+  }
   console[ok?'log':'error']('Selbstchecks',out);
   return ok;
 }
 
 // ================= Loop =================
+// Eingabe-Plausibilität: harte Fehler, die einen unbrauchbaren Plan erzeugen.
+function validate(plan){
+  const errs=[];
+  if(S.notchA>0&&S.notchB>0&&(S.notchA>=S.W-100||S.notchB>=S.H-100))
+    errs.push(`Notch (${S.notchA}×${S.notchB}) ist so groß wie der Raum — Grundriss ungültig.`);
+  if(S.s<S.pipeDia*1.5)
+    errs.push(`Bahnabstand ${S.s} mm zu klein für Rohr-Ø ${S.pipeDia} mm (min. ${Math.ceil(S.pipeDia*1.5)} mm).`);
+  if(S.windowEdges.length&&S.randSpacing<S.pipeDia*1.25)
+    errs.push(`Randzonen-Abstand ${S.randSpacing} mm zu klein für Rohr-Ø ${S.pipeDia} mm.`);
+  if(!plan.loops.some(l=>l.field&&l.field.length))
+    errs.push('Kein Verlegefeld — Raum zu klein für die aktuellen Abstände.');
+  return errs;
+}
 function recompute(){
   const plan=autofit();
   const M=snappedManifold();
   // Harte Anforderung: die Verlegespiralen dürfen sich nie kreuzen.
   plan.overlaps = plan.loops.flatMap(l=>fieldCrossings(l.field));
+  // Ebenfalls hart: parallele Rohre dichter als der Rohr-Ø (unsichtbar für
+  // den Kreuzungstest, deshalb eigener Detektor). Nur Feld/Randzone/Kanal —
+  // Anbindeleitungen laufen am Verteiler gewollt gebündelt (Baupraxis).
+  plan.parOv = parallelOverlaps(plan.loops.map(l=>[...(l.rand||[]),...(l.mid||[]),...(l.field||[])]),M);
   // Getrennt gezählt: Anbindeleitungen. Kreuzungen dort sind Baupraxis
   // (Rohre werden am Verteiler übereinander geführt), kein Planungsfehler.
   plan.leadCross = plan.loops.flatMap(l=>fieldCrossings(l.pts,M))
     .filter(c=>!plan.overlaps.some(o=>len(sub(o,c))<1)).length;
   for(let i=0;i<plan.loops.length;i++)for(let j=i+1;j<plan.loops.length;j++)
     plan.leadCross += crossBetween(plan.loops[i].pts,plan.loops[j].pts,M).length;
+  plan.minBend = Math.min(Infinity,...plan.loops.map(l=>l.minR??Infinity));
+  plan.errs = validate(plan);
   draw(plan); renderResults(plan);
 }
 selfChecks();
