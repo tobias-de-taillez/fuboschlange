@@ -743,15 +743,25 @@ function doubleSpiralField(poly,insOf,s,gate){
   const outArm=open.filter((_,k)=>k%2===1);
   const pts=[];
   inArm.forEach(r=>pts.push(...r));
-  const back=outArm.slice().reverse().map(r=>r.slice().reverse());
-  // U-Turn zwischen den Armen als AUSGESCHWUNGENE Kehre: die Arme liegen nur s
-  // auseinander, eine direkte 180°-Wende hätte Radius s/2 (50 mm bei s=100) und
-  // bliebe unter dem Mindest-Biegeradius 5xØ. Der Ausschwung erzeugt ihn.
-  if(pts.length>1 && back.length && back[0].length){
-    const Pe=pts[pts.length-1], u=unit(sub(Pe,pts[pts.length-2]));
-    const Ps=back[0][0], R=S.bendRadius;
-    if(len(sub(Pe,Ps))<2*R) pts.push(...omegaTurn(Pe,Ps,u,R));
+  let back=outArm.slice().reverse().map(r=>r.slice().reverse());
+  // U-Turn zwischen den Armen: der Rücklauf läuft ANTIPARALLEL zum Vorlauf,
+  // die Kehre braucht daher einen Halbkreis mit Radius >= 5xØ, also mindestens
+  // 2R Abstand zwischen den Armenden. omegaTurn taugt hier nicht — es ist für
+  // gleichlaufende Nachbarbahnen (Serpentine) gebaut und endet in Richtung +u,
+  // wodurch an der Nahtstelle erst recht eine radiuslose Kehre entsteht.
+  // Liegen die Enden zu eng, wird der innerste Rücklaufring weggelassen; der
+  // nächste liegt 2s entfernt und trägt den Radius.
+  const R2=2*S.bendRadius;
+  while(pts.length>1 && back.length>1 && back[0].length &&
+        len(sub(pts[pts.length-1],back[0][0]))<R2){
+    back=back.slice(1);
   }
+  // ponytail: die Kehre als expliziten Halbkreis-arc zu setzen wurde probiert
+  // und verschlechterte die Kreuzungen (40 -> 52), ohne den Feld-Radius zu
+  // heben — der Bogen überlebt die anschließende Glättung nicht unverändert.
+  // Wichtig bleibt: fillet kann eine 180°-Wende prinzipiell nicht runden
+  // (Tangentenabstand R/tan(0) = unendlich, gekappt fällt der Radius auf 0),
+  // deshalb ist der 2R-Abstand oben die eigentliche Absicherung.
   back.forEach(r=>pts.push(...r));
   return pts;
 }
@@ -780,6 +790,10 @@ function zonePolyOf(rects){
 function bifilarPath(zone,gate){
   const rects=Array.isArray(zone)?zone:[zone];
   const poly=zonePolyOf(rects);
+  // zonePolyOf liefert [] wenn nach dem Korridor-Ausschnitt keine Fläche mehr
+  // übrig ist (sehr flache Zone). Ohne diese Prüfung greift insOf auf poly[i]
+  // zu und wirft.
+  if(poly.length<3) return [];
   const ins=insetsFor(rects[0]);
   // Inset je Kante: Unterkante trägt den Korridor, die Außenwände Randzone.
   const insOf=i=>{
@@ -2307,7 +2321,10 @@ function relaxLoops(loops,opt){
   loops.forEach((l,li)=>{
     const f=l.field||[];
     f.forEach((p,i)=>nodes.push({p:{x:p.x,y:p.y},li,i,
-      fixed:i===0||i===f.length-1, ref:f, idx:i}));
+      // Konstruierte Bögen (Omega-Kehren, U-Turn) sind fertige Geometrie mit
+      // garantiertem Radius — die dürfen weder verschoben noch ihr arc-Attribut
+      // verlieren, sonst wird die Kehre wieder zur radiuslosen Spitze.
+      fixed:i===0||i===f.length-1||!!p.arc, arc:p.arc, ref:f, idx:i}));
   });
   if(!nodes.length) return 0;
   const room=lRing(0,0,S.W,S.H,S.notchA,S.notchB);
@@ -2378,7 +2395,9 @@ function relaxLoops(loops,opt){
     });
   }
   // zurückschreiben
-  nodes.forEach(n=>{ n.ref[n.idx]={x:n.p.x,y:n.p.y}; });
+  // arc-Attribut mitschreiben: ohne das verliert der Pfad seine konstruierten
+  // Bögen und fillet macht aus jeder Kehre wieder eine Spitze.
+  nodes.forEach(n=>{ n.ref[n.idx]=n.arc?{x:n.p.x,y:n.p.y,arc:n.arc}:{x:n.p.x,y:n.p.y}; });
   return moved;
 }
 
