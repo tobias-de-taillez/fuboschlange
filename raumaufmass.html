@@ -33,6 +33,8 @@
     <button data-mode="measure" aria-pressed="false">3 Messung</button>
     <span id="hint" style="align-self:center;color:#666"></span>
     <span style="align-self:center;color:#666;margin-left:auto;font-size:12px">
+      <span style="color:#3a7">– – –</span> gemessen &nbsp;
+      <span style="color:#d33">· · ·</span> noch zu messen &nbsp;
       <span style="color:#07a">◯</span> gemessene Genauigkeit &nbsp;
       <span style="color:#999">◌</span> angenommen &nbsp;
       <span style="color:#c60">↔</span> noch beweglich<span id="exagg"></span>
@@ -550,7 +552,7 @@ function niceFactor(raw){
   return ELLIPSE_FACTORS[ELLIPSE_FACTORS.length-1];
 }
 
-const M={ pts:[], walls:[], meas:[], mode:'point', sel:[], fit:null, an:null, drag:null, dragMode:null };
+const M={ pts:[], walls:[], meas:[], mode:'point', sel:[], fit:null, an:null, sugg:[], drag:null, dragMode:null };
 
 // Ein Zustand ist genau das, was der Nutzer eingegeben hat: Punkte, Waende,
 // Messungen. Fit und Analyse werden daraus jederzeit neu gerechnet und
@@ -672,6 +674,10 @@ function recompute(){
     const I=C.idx(M.pts);
     M.fit.pts.forEach(fp=>{ const p=M.pts[I[fp.id]]; if(p){ p.x=fp.x; p.y=fp.y; } });
   } else { M.fit=null; M.an=null; }
+  // Einmal je Aenderung, nicht je Bild: suggest() ruft intern analyze() je
+  // Kandidat auf, im Zug waere das ein Ruckeln.
+  M.sugg = (M.an && M.pts.length>=3)
+    ? C.suggest(M.fit?M.fit.pts:M.pts, M.walls, M.meas) : [];
   render();
   // Ein Aufmass dauert leicht eine halbe Stunde. Ein Reload darf es nicht
   // kosten. Bewusst ohne Debounce: serialize() ist bei den hier realistischen
@@ -708,6 +714,36 @@ function render(){
     ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
   });
   ctx.setLineDash([]);
+  // Noch fehlende Messungen rot gestrichelt. Anderes Strichmuster als die
+  // gruenen vorhandenen - Rot gegen Gruen allein waere fuer Rotgruenblinde
+  // nicht unterscheidbar.
+  if(M.sugg.length){
+    ctx.strokeStyle='#d33'; ctx.lineWidth=1.5*dpr;
+    M.sugg.forEach(sg=>{
+      if(I[sg.a]==null||I[sg.b]==null) return;
+      const p=toScr(P[I[sg.a]]), q=toScr(P[I[sg.b]]);
+      ctx.setLineDash(sg.why==='bestimmt' ? [2*dpr,4*dpr] : [1*dpr,6*dpr]);
+      ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
+    });
+    ctx.setLineDash([]);
+  }
+  // Jede Messung beschriftet - sonst sieht man Striche und weiss nicht, welcher
+  // 4,25 m ist. Bei mehreren Werten fuers selbe Paar die Anzahl dazu.
+  ctx.font=`${11*dpr}px system-ui`; ctx.textAlign='center';
+  const gezeigt=new Set();
+  C.activeMeas(M.meas).forEach(m=>{
+    if(I[m.a]==null||I[m.b]==null) return;
+    const k=[m.a,m.b].sort().join('|');
+    if(gezeigt.has(k)) return;
+    gezeigt.add(k);
+    const alle=C.activeMeas(M.meas).filter(x=>[x.a,x.b].sort().join('|')===k);
+    const p=toScr(P[I[m.a]]), q=toScr(P[I[m.b]]);
+    const txt=alle.length>1 ? `${fmtM(m.d)} (${alle.length}×)` : fmtM(m.d);
+    const mx=(p.x+q.x)/2, my=(p.y+q.y)/2;
+    ctx.fillStyle='#fff'; ctx.fillRect(mx-22*dpr, my-8*dpr, 44*dpr, 14*dpr);
+    ctx.fillStyle='#3a7'; ctx.fillText(txt, mx, my+3*dpr);
+  });
+  ctx.textAlign='start';
   // Punkte zuerst zeichnen, Ellipsen/Pfeile erst danach darueber: eine
   // Ellipse, die kleiner als der Punktmarker waere, muss als Ring auf dem
   // Marker sichtbar bleiben statt darunter zu verschwinden.
@@ -1113,7 +1149,7 @@ function renderPanel(){
   // fuer Vorschlaege und Wandlaengen getrennt.
   const P=M.drag?M.pts:(M.fit?M.fit.pts:M.pts), I=C.idx(P);
   const sg=document.getElementById('sugg');
-  const list=(M.pts.length>=3 && M.an) ? C.suggest(P, M.walls, M.meas) : [];
+  const list=M.sugg;
   const grp=(t,w)=>{
     const e=list.filter(s=>s.why===w);
     return e.length ? `<div style="margin-bottom:6px"><b>${t}</b><br>`
