@@ -227,6 +227,7 @@ const S = {
   s:150, bendRadius:60, pipeDia:16, edgeGap:75,
   randSpacing:50, randPasses:2, windowEdges:['bottom','left','right'],
   maxLoop:100000, loopMode:'auto',
+  useSpiralField:false,     // Experiment: kontinuierliches Spiralfeld (s. doubleSpiralField)
   manifold:{x:1000,y:0},    // interne Koordinaten (Notch-rechts-Welt)
   // ---- Thermik (Heatmap) ----
   // targetPowerW/activeAreaM2 = AUSLEGUNGSWERT (aktive Heizfläche des Planers).
@@ -543,12 +544,115 @@ function zoneField(poly,insOf,step){
   }
   return {x0,y0,step,nx,ny,d};
 }
+// ===== Kontinuierliches Spiralfeld =====
+// phi = d/(2s) - theta/2pi. Eine Umrundung um den Anker erhöht theta um 2pi und
+// damit d um 2s: die Isolinien von phi sind ECHTE Spiralen, keine Ringe. Damit
+// entfallen die Ring-zu-Ring-Übergänge, an denen bisher alles gekreuzt hat.
+// Vorlauf = ganzzahlige Niveaus, Rücklauf = halbzahlige -> überall s Abstand.
+function spiralPasses(poly,insOf,s,gate){
+  const step=Math.max(10,Math.min(s/3.5,45));
+  const F=zoneField(poly,insOf,step);
+  const {x0,y0,nx,ny,d}=F;
+  // Anker = tiefster Punkt des Feldes (Zentrum der Form)
+  let best=-Infinity, ax=0, ay=0;
+  for(let j=0;j<ny;j++)for(let i=0;i<nx;i++){
+    const v=d[j*nx+i]; if(v>best){best=v;ax=x0+i*step;ay=y0+j*step;}
+  }
+  if(best<s) return {passes:[],anchor:{x:ax,y:ay}};
+  // Naht zeigt zum Verteiler: dort beginnt und endet die Spirale.
+  const gx=gate!=null?gate:ax;
+  const base=Math.atan2(-1e6-ay, gx-ax);
+  const th=(px,py)=>{ let t=Math.atan2(py-ay,px-ax)-base;
+    while(t<0)t+=2*Math.PI; while(t>=2*Math.PI)t-=2*Math.PI; return t; };
+  const phi=new Float32Array(nx*ny), TH=new Float32Array(nx*ny);
+  for(let j=0;j<ny;j++)for(let i=0;i<nx;i++){
+    const px=x0+i*step, py=y0+j*step, t=th(px,py);
+    TH[j*nx+i]=t;
+    phi[j*nx+i]=d[j*nx+i]/(2*s)-t/(2*Math.PI);
+  }
+  // Marching Squares auf phi, aber Zellen an der Naht (theta-Sprung) auslassen:
+  // dort ist phi unstetig, die Isolinie endet und setzt am nächsten Niveau fort.
+  const iso=level=>{
+    const segs=[];
+    const ip=(pa,pb,va,vb)=>{const t=(level-va)/((vb-va)||1e-9);
+      return {x:pa.x+(pb.x-pa.x)*t,y:pa.y+(pb.y-pa.y)*t};};
+    for(let j=0;j<ny-1;j++)for(let i=0;i<nx-1;i++){
+      const id=[j*nx+i,j*nx+i+1,(j+1)*nx+i+1,(j+1)*nx+i];
+      const tt=id.map(k=>TH[k]);
+      if(Math.max(...tt)-Math.min(...tt)>Math.PI) continue;      // Nahtzelle
+      const v=id.map(k=>phi[k]);
+      const p=[{x:x0+i*step,y:y0+j*step},{x:x0+(i+1)*step,y:y0+j*step},
+               {x:x0+(i+1)*step,y:y0+(j+1)*step},{x:x0+i*step,y:y0+(j+1)*step}];
+      let m=0; for(let k=0;k<4;k++) if(v[k]>=level) m|=1<<k;
+      if(m===0||m===15) continue;
+      const E=[];
+      for(let k=0;k<4;k++){const k2=(k+1)%4;
+        if((v[k]>=level)!==(v[k2]>=level)) E.push(ip(p[k],p[k2],v[k],v[k2]));}
+      for(let k=0;k+1<E.length;k+=2) segs.push([E[k],E[k+1]]);
+    }
+    return chainSegs(segs,step);
+  };
+  // Alle Niveaus einsammeln: ganze = Vorlauf, halbe = Rücklauf
+  const flow=[], ret=[];
+  for(let k=-40;k<=40;k+=1){
+    iso(k).forEach(c=>{ if(polyLen(c)>2*s) flow.push({k,c:simplify(c,step*0.2)}); });
+    iso(k+0.5).forEach(c=>{ if(polyLen(c)>2*s) ret.push({k:k+0.5,c:simplify(c,step*0.2)}); });
+  }
+  return {passes:{flow,ret},anchor:{x:ax,y:ay}};
+}
+// Segmentliste zu Ketten verbinden (gemeinsam von iso und isoContours genutzt)
+function chainSegs(segs,step){
+  const key=p=>Math.round(p.x/(step*0.05))+'|'+Math.round(p.y/(step*0.05));
+  const map=new Map();
+  segs.forEach((s,i)=>{[0,1].forEach(e=>{const k=key(s[e]);
+    if(!map.has(k))map.set(k,[]); map.get(k).push({i,e});});});
+  const used=new Array(segs.length).fill(false), out=[];
+  for(let i=0;i<segs.length;i++){
+    if(used[i])continue; used[i]=true;
+    const ch=[segs[i][0],segs[i][1]];
+    for(;;){ const k=key(ch[ch.length-1]);
+      const c=(map.get(k)||[]).find(x=>!used[x.i]);
+      if(!c)break; used[c.i]=true; ch.push(segs[c.i][1-c.e]); }
+    for(;;){ const k=key(ch[0]);
+      const c=(map.get(k)||[]).find(x=>!used[x.i]);
+      if(!c)break; used[c.i]=true; ch.unshift(segs[c.i][1-c.e]); }
+    if(ch.length>=3) out.push(ch);
+  }
+  return out;
+}
 // Bifilare Doppelspirale auf formfolgenden Isolinien.
 // Vorlauf = Bahnen 0,2,4..., Rücklauf = 1,3,5..., innen per U-Turn verbunden.
 // Die Bahnen sind Niveaulinien desselben Feldes und daher immer um s versetzt
 // und ineinander verschachtelt — Kreuzungsfreiheit folgt aus der Konstruktion,
 // unabhängig von der Raumform.
 function doubleSpiralField(poly,insOf,s,gate){
+  // Echte Spirale: Ende von Niveau k ist per Konstruktion der Anfang von k+1
+  // (eine Umrundung = 2s mehr Wandabstand).
+  // AUS per Default: der Winkel um einen einzelnen Anker ist bei L-Formen
+  // mehrdeutig (Bereiche "hinter der Ecke"), die Niveaus zerfallen dort in
+  // Stücke und das Aneinanderhängen erzeugt Diagonalen quer durch den Raum.
+  // Gemessen 335 Kreuzungen gegenüber 57 beim Isolinien-Ring. Für den Ausbau
+  // braucht es ein geodätisches Winkelfeld statt atan2 um einen Punkt.
+  const sp=S.useSpiralField?spiralPasses(poly,insOf,s,gate):{passes:null};
+  if(sp.passes&&sp.passes.flow&&sp.passes.flow.length){
+    const A=sp.anchor;
+    const ang=p=>Math.atan2(p.y-A.y,p.x-A.x);
+    const order=arr=>arr.sort((a,b)=>a.k-b.k).map(o=>{
+      const c=o.c;
+      // in Umlaufrichtung orientieren (theta aufsteigend)
+      let dth=ang(c[c.length-1])-ang(c[0]);
+      while(dth<-Math.PI)dth+=2*Math.PI; while(dth>Math.PI)dth-=2*Math.PI;
+      return dth<0 ? c.slice().reverse() : c;
+    });
+    const fl=order(sp.passes.flow), rt=order(sp.passes.ret);
+    if(fl.length){
+      const pts=[];
+      fl.forEach(c=>pts.push(...c));                 // Vorlauf: außen -> innen
+      rt.reverse().forEach(c=>pts.push(...c.slice().reverse())); // Rücklauf raus
+      if(pts.length>3) return pts;
+    }
+  }
+  // Fallback: konzentrische Isolinien (z.B. wenn die Zone zu klein ist)
   const step=Math.max(12,Math.min(s/3,60));
   const F=zoneField(poly,insOf,step);
   const rings=[];
