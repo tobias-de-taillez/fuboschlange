@@ -31,6 +31,7 @@
     <button data-mode="point"   aria-pressed="true">1 Punkt</button>
     <button data-mode="wall"    aria-pressed="false">2 Wand</button>
     <button data-mode="measure" aria-pressed="false">3 Messung</button>
+    <button id="ring" title="Alle Punkte in Anlegereihenfolge zu einem geschlossenen Wandzug verbinden">Wandzug schließen</button>
     <span id="hint" style="align-self:center;color:#666"></span>
     <span style="align-self:center;color:#666;margin-left:auto;font-size:12px">
       <span style="color:#3a7">– – –</span> gemessen &nbsp;
@@ -865,7 +866,11 @@ function enterMeasurement(a,b){
     ? `${a}–${b} — bisher ${vorhanden.map(m=>fmtM(m.d)).join(', ')} m, weiterer Wert:`
     : `${a}–${b}`;
   const inp=document.getElementById('entryVal');
-  inp.value=''; inp.focus();
+  // Carried-over aus Task 5: eine rote Fehlermarkierung (siehe commitEntry)
+  // darf nicht ins naechste Paar hinueberhaengen - dieses Feld hier hat noch
+  // gar keinen abgelehnten Wert gesehen. Einzige Ausnahme von "enterMeasurement
+  // unangetastet": der Brief zaehlt diesen Fix explizit zu Task 8.
+  inp.value=''; inp.style.background=''; inp.focus();
 }
 function closeEntry(){ entryPair=null; document.getElementById('entry').style.display='none'; }
 function commitEntry(){
@@ -885,6 +890,13 @@ document.getElementById('entryVal').addEventListener('keydown',e=>{
   if(e.key==='Enter') commitEntry();
   if(e.key==='Escape') closeEntry();
 });
+// Carried-over aus Task 5: die rote Fehlermarkierung einer abgelehnten Eingabe
+// (siehe commitEntry) blieb stehen, auch nachdem ein gueltiger Wert eingetippt
+// wurde. enterMeasurement() selbst bleibt unangetastet - hier wird stattdessen
+// bei jeder Eingabeaenderung zurueckgesetzt.
+document.getElementById('entryVal').addEventListener('input',()=>{
+  document.getElementById('entryVal').style.background='';
+});
 
 // Der Snapshot eines Zugs gehoert der ERSTEN echten Bewegung, nicht dem
 // Mausdruck: sonst frisst ein blosser Klick ohne Drag (Auswahl, Wandwechsel)
@@ -902,7 +914,12 @@ cv.addEventListener('mousedown',e=>{
   }
   if(M.mode==='measure' && !h){
     const wall=nearestWall(w.x,w.y);
-    if(wall){ enterMeasurement(wall.a, wall.b); return; }
+    // Carried-over aus Task 5: eine halb angefangene Punktauswahl (M.sel hat
+    // schon einen Eintrag) darf nicht stehen bleiben, wenn stattdessen eine
+    // Wand getroffen wird - sonst bleibt der erste Punkt optisch markiert,
+    // waehrend das Eingabefeld schon fuer das Wandpaar offen ist. render()
+    // vor dem Oeffnen des Feldes, damit die Markierung sofort verschwindet.
+    if(wall){ M.sel=[]; render(); enterMeasurement(wall.a, wall.b); return; }
   }
   if(!h) return;
   M.sel.push(h.id);
@@ -974,10 +991,13 @@ addEventListener('mouseup',()=>{
   if(M.drag){ M.drag=null; M.dragMode=null; recompute(); }
 });
 
-document.querySelectorAll('#modes button').forEach(b=>{
+// [data-mode] statt button schlechthin: #modes enthaelt seit Task 8 auch den
+// Ring-Knopf, der keinen Modus ist und daher weder mitschaltet noch ein
+// aria-pressed bekommen soll.
+document.querySelectorAll('#modes button[data-mode]').forEach(b=>{
   b.onclick=()=>{
     M.mode=b.dataset.mode; M.sel=[];
-    document.querySelectorAll('#modes button').forEach(x=>
+    document.querySelectorAll('#modes button[data-mode]').forEach(x=>
       x.setAttribute('aria-pressed', String(x===b)));
     document.getElementById('hint').textContent=
       {point:'Klicken legt an, Ziehen verschiebt, Rechtsklick löscht',
@@ -986,6 +1006,14 @@ document.querySelectorAll('#modes button').forEach(b=>{
     render();
   };
 });
+document.getElementById('ring').onclick=()=>{
+  if(M.pts.length<3){ alert('Mindestens 3 Punkte nötig.'); return; }
+  snapshot();
+  // In Anlegereihenfolge verbinden - genau so, wie der Nutzer den Raum
+  // abgelaufen ist. Ersetzt den bestehenden Zug, statt ihn zu ergaenzen.
+  M.walls=M.pts.map((p,i)=>[p.id, M.pts[(i+1)%M.pts.length].id]);
+  recompute();
+};
 // Die Hotkeys 1/2/3 sind auf window gebunden, damit sie ueberall im Dokument
 // wirken - aber genau deshalb bubbelt auch ein Tastendruck im Ueberschreib-
 // Feld der Messtabelle (<input>, siehe renderPanel) bis hierher. Ohne diese
@@ -996,6 +1024,10 @@ document.querySelectorAll('#modes button').forEach(b=>{
 addEventListener('keydown',e=>{
   const t=e.target;
   if(t && (t.tagName==='INPUT' || t.tagName==='TEXTAREA' || t.isContentEditable)) return;
+  if(e.key==='Escape'){
+    if(entryPair){ closeEntry(); return; }
+    if(M.sel.length){ M.sel=[]; render(); return; }
+  }
   if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='z'){
     e.preventDefault();
     if(!undo()) document.getElementById('hint').textContent='Nichts mehr rückgängig zu machen.';
