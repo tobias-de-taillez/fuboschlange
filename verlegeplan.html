@@ -301,14 +301,14 @@ const fieldInset=()=>S.edgeGap+randWidth()+omegaClear()+corridorW();   // = Bode
 function insetsFor(rect){
   const atL=rect.x0<=1, atR=rect.x0+rect.w>=frameW()-1;
   const topIsOuter=rect.y0+rect.h>=frameH()-1;      // Außen-Oberkante im Frame
-  // Muss eine Leitung zu einer anderen Wand als der Verteilerwand, läuft sie
-  // seitlich am Feld vorbei -> dort ebenfalls Korridor reservieren.
-  const ring = frameEdges().some(e=>e!=='bottom') ? corridorW() : 0;
+  // Korridor NUR an der Verteilerwand. Ihn rundum zu reservieren kostete an
+  // jeder Seite die volle Korridorbreite und drückte das Verlegefeld auf die
+  // Hälfte des Raums — Heizfläche ist wertvoller als bequemes Routing.
   return {
     b: fieldInset(),
-    t: S.edgeGap+(topIsOuter?randW('top')+omegaClear('top')+ring:0),
-    l: atL? S.edgeGap+randW('left')+omegaClear('left')+ring : S.s/2,
-    r: atR? S.edgeGap+randW('right')+omegaClear('right')+ring : S.s/2,
+    t: S.edgeGap+(topIsOuter?randW('top')+omegaClear('top'):0),
+    l: atL? S.edgeGap+randW('left')+omegaClear('left') : S.s/2,
+    r: atR? S.edgeGap+randW('right')+omegaClear('right') : S.s/2,
   };
 }
 
@@ -815,20 +815,9 @@ function autofit(){
   }
   return last; // best effort (über Limit)
 }
+// Verteiler darf an JEDER Wand stehen, auch an den Notch-Innenkanten.
 function snappedManifold(){
-  // Nur AUSSENwände: die Notch-Innenkanten sind keine Kante des umschließenden
-  // Rechtecks. Läge der Verteiler dort, wäre keine Frame-Rotation möglich, die
-  // ihn auf die Korridor-Unterkante bringt — Leitungen liefen dann quer durch
-  // die Aussparung, also außerhalb des Raums.
-  const box=[{x:0,y:0},{x:S.W,y:0},{x:S.W,y:S.H},{x:0,y:S.H}];
-  const p=nearestOnRing(S.manifold,box).pt;
-  if(!hasNotch()) return p;
-  // Die Box-Kanten sind im Notch-Bereich keine echte Wand -> dorthin klemmen,
-  // wo die Wand tatsächlich endet.
-  const xN=S.W-S.notchA, yN=S.H-S.notchB;
-  if(p.y>=S.H-1 && p.x>xN) return {x:xN,y:S.H};      // Oberwand endet am Notch
-  if(p.x>=S.W-1 && p.y>yN) return {x:S.W,y:yN};      // rechte Wand endet am Notch
-  return p;
+  return nearestOnRing(S.manifold,lRing(0,0,S.W,S.H,S.notchA,S.notchB)).pt;
 }
 
 // ================= Render =================
