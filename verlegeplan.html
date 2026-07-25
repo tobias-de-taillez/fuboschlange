@@ -1075,6 +1075,16 @@ function doubleSpiralField(poly,insOf,s,gate){
     let sy=Infinity; rings[0].forEach(q=>{ if(q.y<sy) sy=q.y; });
     var seamY0=sy;
     const al=rings.map(alignRing);
+    // VERWORFEN, gemessen: den Morph-Abschnitt mit der bestehenden
+    // Ringverkettung fuer die tieferen Ringe KOMBINIEREN, in der Reihenfolge
+    // Morph-Vorlauf, Rest hinein, Rest heraus, Morph-Ruecklauf. Das sollte die
+    // fehlende Deckung zurueckbringen, ohne die Morph-Gewinne aufzugeben.
+    //   Ringe (jetzt)      crossFails 18  covFails 10  radFails 19
+    //   Morph mit Abbruch  crossFails 17  covFails 17  radFails 17
+    //   Morph + Rest       crossFails 20  covFails 15  radFails 20
+    // Schlechter als BEIDE. Die Splice-Stelle ist wieder ein Sprung, und es sind
+    // jetzt zwei davon (Morph->Rest und Rest->Morph-Ruecklauf) statt vorher
+    // keiner. Genau das, was die Morphung eigentlich abschafft.
     const arm=st=>{
       const o=[];
       for(let k=st;k+2<al.length;k+=2){
