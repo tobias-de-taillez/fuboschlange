@@ -441,6 +441,16 @@ const manifoldBarW=nPorts=>Math.max(0,nPorts-1)*MANIFOLD_PITCH;
 //   ohne LANE/2-Puffer   crossFails 20  covFails 12
 // Unter 0,6 kippen die Kreuzungen, der Puffer wird gebraucht. Der Korridor wird
 // aus dem Feld herausgeschnitten, jeder Millimeter davon fehlt der Deckung.
+// VERWORFEN, gemessen: Korridorbreite je Zone nach Abstand zum Verteiler. Die
+// Beobachtung stimmt — die Anbindeleitungen faechern vom Verteiler aus, direkt
+// daneben liegen alle, am fernen Ende nur noch die der letzten Zone, und der
+// ueber die ganze Breite gleich breite Ausschnitt verschenkt bis zu 359 von
+// 1700 mm Raumhoehe. Der Schluss war trotzdem falsch: die SPURVERGABE ist
+// global. Die ferne Zone bekommt eine hohe Spurnummer, ihre eigene Zuleitung
+// laeuft also weit oben im Korridor, und ihr verbreitertes Feld waechst darueber.
+//   voller Korridor   crossFails 19  covFails 10  medianCross 5
+//   je Zone reduziert crossFails 20  covFails 10  medianCross 3
+// Damit die Idee traegt, muesste die Spurvergabe pro Zone statt global sein.
 const corridorW=()=>laneCount()*LANE()*0.6+LANE()/2;
 // lane -1 = Übergangskanal für Rechteck->Rechteck-Verbinder. Liegt ZWISCHEN
 // Randzone und Korridor: unterhalb der Randzone würde jeder Verbinder die
@@ -1905,6 +1915,7 @@ function buildLoops(groups,ownerOverride,connOrder){
     const field=bifilarPath(rects,M.x);
     return {gi,rects,field,joins:[],rand:[]};
   });
+
 
   // Randzone dem Kreis mit dem anker-fernsten Feld-Eintritt zuordnen: dessen
   // Steigleitung aus dem Korridor liegt außerhalb aller fremden Korridor-Spans
