@@ -494,8 +494,12 @@ function render(){
   ctx.clearRect(0,0,cv.width,cv.height);
   // Waehrend eines Drags aus M.pts zeichnen und die View festhalten: liefe
   // autofit() bei jeder Mausbewegung neu, wuerde die Skalierung springen und
-  // der Punkt unter dem Cursor wegrutschen statt ihm zu folgen.
-  if(!M.drag) autofit();
+  // der Punkt unter dem Cursor wegrutschen statt ihm zu folgen. Vor dem ersten
+  // Fit genauso: ohne Loesung gibt es keinen sinnvollen Massstab, und ein Refit
+  // zwischen zwei Klicks wuerde jeden Klick in einem anderen Bezugsrahmen lesen
+  // als dem, der beim Zeichnen zu sehen war - die Skizze verzerrt sich, bevor
+  // der Solver sie ueberhaupt bekommt.
+  if(!M.drag && M.fit) autofit();
   const P=M.drag?M.pts:(M.fit?M.fit.pts:M.pts), I=C.idx(P);
   // Waende
   ctx.strokeStyle='#333'; ctx.lineWidth=2*dpr;
