@@ -1,0 +1,61 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Raumaufmaß</title>
+<style>
+  body{font:14px/1.4 system-ui,sans-serif;margin:0;padding:16px}
+</style>
+<div id="app"></div>
+
+<script id="core">
+"use strict";
+// ================= Konstanten =================
+const TOL_RANK = 1e-8;   // Rangtoleranz, relativ zur größten Spaltennorm
+const TOL_RED  = 0.01;   // darunter gilt eine Messung als nicht prüfbar
+const TOL_MODE = 0.05;   // Anteil am Flex-Mode -> Pfeil statt Ellipse
+const SIGMA_DEF = 5;     // angenommene Standardabweichung je Messung, mm
+const SUGGEST_CHECK_MAX = 3;  // Deckel der Vorschlaege zur Pruefbarkeit
+
+// ================= Grundlagen =================
+const dist=(p,q)=>Math.hypot(p.x-q.x, p.y-q.y);
+const idx=pts=>{ const m={}; pts.forEach((p,i)=>m[p.id]=i); return m; };
+const activeMeas=meas=>meas.filter(m=>m.on!==false);
+
+function residuals(pts, meas){
+  const I=idx(pts);
+  return activeMeas(meas).map(m=>dist(pts[I[m.a]], pts[I[m.b]]) - m.d);
+}
+
+globalThis.CORE={ TOL_RANK, TOL_RED, TOL_MODE, SIGMA_DEF, SUGGEST_CHECK_MAX,
+                  dist, idx, activeMeas, residuals };
+</script>
+
+<script id="checks">
+"use strict";
+// Die Assert-Funktion heisst chk, nicht A - in mehreren Tests weiter unten
+// heisst eine Matrix A, und der Name darf nicht spaeter wandern muessen.
+globalThis.selfChecks=function(){
+  const C=globalThis.CORE, out=[]; let ok=true;
+  const chk=(n,c)=>{ ok=ok&&!!c; out.push((c?'PASS ':'FAIL ')+n); };
+  const near=(a,b,t)=>Math.abs(a-b)<=t;
+  // --- residuals ---
+  {
+    const pts=[{id:'A',x:0,y:0},{id:'B',x:3000,y:4000}];
+    const meas=[{a:'A',b:'B',d:5000},{a:'A',b:'B',d:4980}];
+    const v=C.residuals(pts,meas);
+    chk('residuals: exakte Messung -> 0', near(v[0],0,1e-9));
+    chk('residuals: 20mm zu kurz gemessen -> +20', near(v[1],20,1e-9));
+  }
+  {
+    const pts=[{id:'A',x:0,y:0},{id:'B',x:1000,y:0}];
+    const meas=[{a:'A',b:'B',d:900},{a:'A',b:'B',d:800,on:false}];
+    chk('residuals: on:false wird ignoriert', C.residuals(pts,meas).length===1);
+  }
+  return {ok, out};
+};
+// Im Browser: raumaufmass.html?test ruft die Checks auf und schreibt sie in die
+// Konsole. Auf der Kommandozeile macht das test/run.mjs.
+if(typeof location!=='undefined' && location.search.includes('test')){
+  const r=globalThis.selfChecks();
+  console[r.ok?'log':'error']('Selbstchecks\n'+r.out.join('\n'));
+}
+</script>
