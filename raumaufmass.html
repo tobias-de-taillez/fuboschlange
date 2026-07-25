@@ -423,7 +423,10 @@ globalThis.selfChecks=function(){
     const seiten=[{a:'A',b:'B',d:4000},{a:'B',b:'C',d:3000},{a:'C',b:'D',d:4000},{a:'D',b:'A',d:3000}];
     const an=C.analyze(rect,seiten);
     const n2=2*rect.length;
-    chk('analyze: Mode-Vektor hat Laenge 2n', an.modes.every(z=>z.length===n2));
+    // length===1 explizit mittesten: modes.every(...) ist auf [] vakuos wahr,
+    // die Form-Checks unten waeren sonst kein Test, sondern nur Dekoration.
+    chk('analyze: genau ein Mode-Vektor, Laenge 2n',
+       an.modes.length===1 && an.modes.every(z=>z.length===n2));
     const fixed=C.gaugeFixed(rect);
     chk('analyze: Mode-Vektor ist 0 an den gepinnten Spalten',
        an.modes.every(z=>fixed.every(c=>z[c]===0)));
