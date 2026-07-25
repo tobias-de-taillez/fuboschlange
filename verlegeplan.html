@@ -1559,11 +1559,27 @@ function pathCurve(pts,clampRoom){
       // Kurve drin ist. Bei Faktor 0 ist sie die Gerade zwischen den
       // Stuetzpunkten, also genau der Streckenzug — der wird ohnehin geprueft,
       // die Schleife endet also garantiert.
+      // Zweite Bedingung neben "im Raum": die Kurve darf sich nicht so weit vom
+      // Streckenzug entfernen, dass sie die NACHBARBAHN erreicht. Gemessen ueber
+      // 16 Plaene wichen 920 Punkte um mehr als den halben Bahnabstand ab, der
+      // schlimmste um 332 mm — bei 100 mm Bahnabstand liegt die Nachbarbahn dann
+      // im Weg, und genau daher kommen Kreuzungen, die auf dem Streckenzug gar
+      // nicht existieren.
+      // Grenze aus dem ENGSTEN vorkommenden Abstand (Randzone, falls vorhanden),
+      // halbiert, minus halber Rohrdurchmesser. Eine echte glatte Kurve weicht
+      // bei dieser Abtastung nur wenige Millimeter ab, die Grenze schneidet also
+      // nichts Sinnvolles weg.
+      const eng=Math.min(S.s, S.windowEdges.length?S.randSpacing:S.s);
+      const devLim=Math.max(2, eng/2-S.pipeDia/2);
+      const dSeg=(q,A,B)=>{ const dx=B.x-A.x, dy=B.y-A.y, l2=dx*dx+dy*dy||1;
+        let t=((q.x-A.x)*dx+(q.y-A.y)*dy)/l2; t=t<0?0:t>1?1:t;
+        return len(sub({x:A.x+t*dx,y:A.y+t*dy},q)); };
       const inside=(a,b)=>{
         for(let k=1;k<8;k++){ const t=k/8,u=1-t;
           const q={x:u*u*u*p1.x+3*u*u*t*a.x+3*u*t*t*b.x+t*t*t*p2.x,
                    y:u*u*u*p1.y+3*u*u*t*a.y+3*u*t*t*b.y+t*t*t*p2.y};
-          if(!pointInRoom(q)) return false; }
+          if(!pointInRoom(q)) return false;
+          if(dSeg(q,p1,p2)>devLim) return false; }
         return true;
       };
       if(pointInRoom(p1)&&pointInRoom(p2)){
