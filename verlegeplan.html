@@ -260,6 +260,8 @@ const S = {
   // Isolinien runden konvexe Ecken mit dem Radius des Niveaus ab; dort blieb der
   // Boden unbeheizt. Siehe rectiOffsetter.
   useSkeleton:true,
+  // Morph-Spirale nach Abrahamsen. Standardmaessig AUS, bis gemessen.
+  useMorphSpiral:false,
   // Kraftmodell-Feinabstimmung nach der Konstruktion. AUS, gemessen:
   // es verschlechtert alle vier harten Kriterien.
   //
@@ -928,6 +930,12 @@ function rectiOffsetter(poly,insOf){
       if(notch.sx*notch.sy<0) pts.reverse();
       return pts;
     };
+    // VERWORFEN, gemessen: konstante Eckenzahl, die kollabierende Notch-Ecke als
+    // Doppelpunkt behalten, damit die Morph-Spirale (siehe doubleSpiralField)
+    // durchgehend eine kantenweise Zuordnung hat. Das verschlechtert den
+    // normalen Pfad deutlich - crossFails 18 -> 20 -, weil seamCut und die
+    // Ringverkettung mit entarteten Kanten schlechter umgehen, und der Morphung
+    // bringt es die fehlende Deckung nicht zurueck (covFails 17 -> 16).
     let pts;
     if(cx>=bx1-eps||cy>=by1-eps){                 // Notch greift nicht mehr hinein
       pts=[back(bx0,by0),back(bx1,by0),back(bx1,by1),back(bx0,by1)];
@@ -1020,6 +1028,67 @@ function doubleSpiralField(poly,insOf,s,gate){
     }
   }
   if(!rings.length) return [];
+  // ===== Morph-Spirale nach Abrahamsen (arXiv:1412.5034) =====
+  // Der Kern seines Verfahrens: die Spirale entsteht durch INTERPOLATION
+  // zwischen aufeinanderfolgenden Wellenfronten, wobei der Parameter proportional
+  // zur Bogenlaenge ENTLANG der Front fortschreitet. Am Ende einer Umdrehung ist
+  // er genau 1, der Pfad liegt also exakt auf der naechsten Front — es gibt
+  // keinen Uebergang, den man ueberbruecken muesste, und damit weder die
+  // Traverse (Radius) noch den Sprung (Kreuzung).
+  //
+  // Entscheidend ist die ZUORDNUNG zwischen zwei Fronten. Abrahamsen nimmt dafuer
+  // die Eltern-Zeiger im Voronoi-Baum. Ein frueherer Versuch hier hat stattdessen
+  // gleiche Bogenlaengen-ANTEILE zweier Ringe gleichgesetzt und den Pfad quer
+  // durch den Raum gezogen — bei unterschiedlicher Ringform meint derselbe Anteil
+  // eine voellig andere Stelle.
+  // Fuer rektilineare Offsets ist die richtige Zuordnung dagegen trivial:
+  // beide Ringe haben dieselben Kantennormalen in derselben Reihenfolge, also
+  // entsprechen sich die Kanten paarweise. Das gilt, solange keine Kante
+  // kollabiert — dort bricht die Morphung ab und der Rest laeuft wie bisher.
+  const morphRev=(A,B)=>{
+    const n=A.length, out=[];
+    const cum=[0];
+    for(let i=1;i<=n;i++) cum.push(cum[i-1]+len(sub(A[i%n],A[i-1])));
+    const L=cum[n]||1;
+    for(let i=0;i<n;i++){
+      const a0=A[i], a1=A[(i+1)%n], b0=B[i], b1=B[(i+1)%n];
+      const segL=len(sub(a1,a0));
+      const m=Math.max(1,Math.ceil(segL/(2*S.bendRadius)));
+      for(let k=0;k<m;k++){
+        const f=k/m, t=(cum[i]+f*segL)/L;
+        const px=a0.x+(a1.x-a0.x)*f, py=a0.y+(a1.y-a0.y)*f;
+        const qx=b0.x+(b1.x-b0.x)*f, qy=b0.y+(b1.y-b0.y)*f;
+        out.push({x:px+(qx-px)*t, y:py+(qy-py)*t});
+      }
+    }
+    return out;
+  };
+  // Ringe so drehen, dass Index 0 bei allen an der Naht liegt — sonst sind die
+  // Kanten zwar paarweise parallel, aber gegeneinander verschoben.
+  const alignRing=r=>{
+    let bi=0,bd=Infinity;
+    r.forEach((q,i)=>{ const d=Math.hypot(q.x-(gate!=null?gate:r[0].x), q.y-seamY0);
+      if(d<bd){bd=d;bi=i;} });
+    return [...r.slice(bi),...r.slice(0,bi)];
+  };
+  if(S.useMorphSpiral){
+    let sy=Infinity; rings[0].forEach(q=>{ if(q.y<sy) sy=q.y; });
+    var seamY0=sy;
+    const al=rings.map(alignRing);
+    const arm=st=>{
+      const o=[];
+      for(let k=st;k+2<al.length;k+=2){
+        if(al[k].length!==al[k+2].length) break;
+        o.push(...morphRev(al[k],al[k+2]));
+      }
+      return o;
+    };
+    const fwd=arm(0), bwd=arm(1);
+    if(fwd.length>3&&bwd.length>3){
+      const out=[...fwd,...bwd.slice().reverse()];
+      if(out.every(q=>pointInRoom(rotBack(q,S.W,S.H)))) return out;
+    }
+  }
   // Alle Ringe an DERSELBEN Naht aufschneiden (verteilernächste Stelle des
   // äußersten Rings). Der Übergang Ring->Ring ist dann ein kurzes radiales
   // Stück in der Naht statt einer Diagonale quer durchs Feld.
