@@ -166,6 +166,55 @@ const S = {
 // Bild-x <-> intern-x (Involution). windowEdges sind BILD-Angaben ->
 // intern links/rechts tauschen, wenn gespiegelt.
 const mirX=x=>S.notchLeft ? S.W-x : x;
+// ---- Wand-Frame: die Verteilerwand wird zur "Unterkante" ----
+// Der Korridor liegt immer an der Verteilerwand; damit laufen Anbindeleitungen
+// nie quer durchs Feld. Statt jede Funktion vier Wandfälle behandeln zu lassen,
+// wird die ganze Geometrie in einen Frame gedreht (rot=Anzahl 90°-Schritte),
+// dort wie gewohnt "Korridor unten" gerechnet und am Ende zurückgedreht.
+let ROT=0;                                     // 0=unten,1=links,2=oben,3=rechts
+// Die Verteilerwand muss zur Frame-UNTERkante werden (Frame-y = Wandabstand).
+const rotFwd=(p,W,H)=>{                        // Welt -> Frame
+  switch(ROT){
+    case 1: return {x:H-p.y, y:p.x};           // linke Wand  -> unten
+    case 2: return {x:W-p.x, y:H-p.y};         // obere Wand  -> unten
+    case 3: return {x:p.y,   y:W-p.x};         // rechte Wand -> unten
+    default:return {x:p.x,   y:p.y};
+  }
+};
+const rotBack=(p,W,H)=>{                       // Frame -> Welt (W,H = Welt-Maße)
+  switch(ROT){
+    case 1: return {x:p.y,   y:H-p.x};
+    case 2: return {x:W-p.x, y:H-p.y};
+    case 3: return {x:W-p.y, y:p.x};
+    default:return {x:p.x,   y:p.y};
+  }
+};
+const rotOdd=()=>ROT===1||ROT===3;             // Frame-Maße vertauscht?
+const frameW=()=>rotOdd()?S.H:S.W;
+const frameH=()=>rotOdd()?S.W:S.H;
+// Fensterkanten mitdrehen: Frame-'bottom' ist die Verteilerwand.
+const EDGE_CYCLE=['bottom','left','top','right'];
+const edgeFwd=e=>{ const i=EDGE_CYCLE.indexOf(e); return i<0?e:EDGE_CYCLE[(i-ROT+8)%4]; };
+// Notch im Frame (Welt: obere rechte Ecke). Nach Rotation liegt er in einer
+// beliebigen Ecke — Ecken drehen und Hülle bilden.
+function notchFrame(){
+  if(!hasNotch()) return null;
+  const W=S.W,H=S.H;
+  const cs=[{x:S.W-S.notchA,y:S.H-S.notchB},{x:W,y:H}].map(p=>rotFwd(p,W,H));
+  return {x0:Math.min(cs[0].x,cs[1].x), y0:Math.min(cs[0].y,cs[1].y),
+          x1:Math.max(cs[0].x,cs[1].x), y1:Math.max(cs[0].y,cs[1].y)};
+}
+// L im Frame in zwei Rechtecke zerlegen — der Notch klebt an zwei Boxrändern.
+function rectsFrame(){
+  const W=frameW(), H=frameH(), n=notchFrame();
+  if(!n) return [{x0:0,y0:0,w:W,h:H}];
+  const atRight=n.x1>=W-1, atBottom=n.y0<=1;
+  const big  = atRight ? {x0:0,y0:0,w:n.x0,h:H} : {x0:n.x1,y0:0,w:W-n.x1,h:H};
+  const smallX= atRight ? n.x0 : 0, smallW= atRight ? W-n.x0 : n.x1;
+  const small= atBottom ? {x0:smallX,y0:n.y1,w:smallW,h:H-n.y1}
+                        : {x0:smallX,y0:0,   w:smallW,h:n.y0};
+  return [big,small].filter(r=>r.w>1&&r.h>1);
+}
 const wEdges=()=>S.notchLeft
   ? S.windowEdges.map(e=>e==='left'?'right':e==='right'?'left':e)
   : S.windowEdges;
@@ -214,7 +263,9 @@ const notchX=()=>S.W-S.notchA;                      // x der Notch-Innenwand
 // bleibt dabei schmal — die Schlaufen ragen bewusst asymmetrisch in den Raum.
 const omegaOn=()=>S.randPasses>1 && S.randSpacing/2<S.bendRadius
               && S.edgeGap>=S.bendRadius+S.pipeDia/2;
-const randW=e=>wEdges().includes(e) ? S.randPasses*S.randSpacing : 0;
+// e ist eine FRAME-Kante; die Auswahl steht in Weltkanten -> mitdrehen.
+const frameEdges=()=>wEdges().map(edgeFwd);
+const randW=e=>frameEdges().includes(e) ? S.randPasses*S.randSpacing : 0;
 const randWidth=()=>randW('bottom');                // Korridor liegt über der BODEN-Randzone
 // Mindest-Bahnabstand 50 mm gilt auch für Anbindeleitungen im Korridor.
 const LANE=()=>Math.max(50,S.pipeDia*1.6);
@@ -237,8 +288,8 @@ const fieldInset=()=>S.edgeGap+randWidth()+omegaClear()+corridorW();   // = Bode
 // Korridor nur unten, innere Nähte zwischen Rechtecken nur s/2 — sonst
 // entstehen breite unbeheizte Streifen an Wänden ohne Fenster/Korridor.
 function insetsFor(rect){
-  const atL=rect.x0<=1, atR=rect.x0+rect.w>=S.W-1;
-  const topIsOuter=rect.y0+rect.h>=S.H-1;           // Außen-Oberwand (links vom Notch)
+  const atL=rect.x0<=1, atR=rect.x0+rect.w>=frameW()-1;
+  const topIsOuter=rect.y0+rect.h>=frameH()-1;      // Außen-Oberkante im Frame
   return {
     b: fieldInset(),
     t: S.edgeGap+(topIsOuter?randW('top')+omegaClear('top'):0),
@@ -328,20 +379,45 @@ function omegaTurn(Pe,Ps,u,R){
     {x:D.x, y:D.y, arc:{r:R,cw:!cw,large:false}}, // Gegenbogen
   ];
 }
+// edgeName ist eine FRAME-Kante ('bottom' = Verteilerwand).
 function randzonePath(edgeName){
-  const {W,H,edgeGap,randSpacing,randPasses}=S;
-  // Notch-bewusst: Oberwand endet an der Notch-Innenwand, rechte Wand an der
-  // Notch-Unterkante — sonst läuft die Randzone durch die Aussparung.
-  const xTopEnd = hasNotch()? notchX() : W;
-  const yRightEnd = hasNotch()? H-S.notchB : H;
+  const {edgeGap,randSpacing,randPasses}=S;
+  const W=frameW(), H=frameH(), n=notchFrame();
+  // Notch-bewusst: eine Kante endet an der Aussparung statt durch sie zu laufen.
+  const lim=(along,fixedHigh)=>{                 // Grenze entlang der Kante
+    if(!n) return null;
+    return {n,fixedHigh};
+  };
   // Seitliche Randzonen beginnen ÜBER dem Korridor, sonst kreuzen ihre
-  // vertikalen Bahnen sämtliche Leitungs-Spuren.
+  // Bahnen sämtliche Leitungs-Spuren.
   const yStart = fieldInset();
   let a,b,inw;
-  if(edgeName==='bottom'){a={x:edgeGap,y:0};b={x:W-edgeGap,y:0};inw={x:0,y:1};}
-  else if(edgeName==='top'){a={x:edgeGap,y:H};b={x:xTopEnd-edgeGap,y:H};inw={x:0,y:-1};}
-  else if(edgeName==='left'){a={x:0,y:yStart};b={x:0,y:H-edgeGap};inw={x:1,y:0};}
-  else{a={x:W,y:yStart};b={x:W,y:yRightEnd-edgeGap};inw={x:-1,y:0};}
+  if(edgeName==='bottom'){
+    const xEnd = n&&n.y0<=1 ? (n.x1>=W-1?n.x0:W) : W;
+    const xBeg = n&&n.y0<=1&&n.x0<=1 ? n.x1 : 0;
+    a={x:xBeg+edgeGap,y:0}; b={x:xEnd-edgeGap,y:0}; inw={x:0,y:1};
+  }
+  else if(edgeName==='top'){
+    const xEnd = n&&n.y1>=H-1 ? (n.x1>=W-1?n.x0:W) : W;
+    const xBeg = n&&n.y1>=H-1&&n.x0<=1 ? n.x1 : 0;
+    a={x:xBeg+edgeGap,y:H}; b={x:xEnd-edgeGap,y:H}; inw={x:0,y:-1};
+  }
+  else if(edgeName==='left'){
+    const yEnd = n&&n.x0<=1 ? (n.y1>=H-1?n.y0:H) : H;
+    const yBeg = n&&n.x0<=1&&n.y0<=1 ? Math.max(n.y1,yStart) : yStart;
+    a={x:0,y:yBeg}; b={x:0,y:yEnd-edgeGap}; inw={x:1,y:0};
+  }
+  else{
+    const yEnd = n&&n.x1>=W-1 ? (n.y1>=H-1?n.y0:H) : H;
+    const yBeg = n&&n.x1>=W-1&&n.y0<=1 ? Math.max(n.y1,yStart) : yStart;
+    a={x:W,y:yBeg}; b={x:W,y:yEnd-edgeGap}; inw={x:-1,y:0};
+  }
+  // Der Omega-Ausschwung ragt R über das Bahnende hinaus -> Bahnen einkürzen,
+  // sonst schwingt die Schlaufe über die Wand- bzw. Notch-Kante.
+  if(omegaOn()){
+    const d=unit(sub(b,a)), R=S.bendRadius;
+    a=add(a,scl(d,R)); b=add(b,scl(d,-R));
+  }
   const pts=[];
   for(let j=0;j<randPasses;j++){
     const off=edgeGap+j*randSpacing;
@@ -464,15 +540,10 @@ function parallelOverlaps(paths,near){
 }
 
 // ================= Zonen / Loops / Autofit =================
-// L in Basis-Rechtecke zerlegen (linker hoher Teil + rechter niedriger Teil).
-function rectsOfL(){
-  const xN=S.W-S.notchA, hasNotch=S.notchA>0&&S.notchB>0;
-  if(!hasNotch) return [{x0:0,y0:0,w:S.W,h:S.H}];
-  return [{x0:0,y0:0,w:xN,h:S.H},{x0:xN,y0:0,w:S.notchA,h:S.H-S.notchB}];
-}
 // Aufteilung in N Heizkreise; jeder Kreis = Liste von Rechtecken (in Serie verlegt).
+// Alles im FRAME (Verteilerwand = Unterkante).
 function partition(N){
-  const base=rectsOfL();
+  const base=rectsFrame();
   if(N<=1) return [base];                                   // 1 Kreis, alle Rechtecke
   if(base.length===1){                                      // reines Rechteck -> N Streifen
     const r=base[0], loops=[];
@@ -485,33 +556,41 @@ function partition(N){
     return [[{...Lz,w:Lz.w/2}],[{x0:Lz.x0+Lz.w/2,y0:Lz.y0,w:Lz.w/2,h:Lz.h}],[Rz]];
   return [[Lz],[{...Rz,w:Rz.w/2}],[{x0:Rz.x0+Rz.w/2,y0:Rz.y0,w:Rz.w/2,h:Rz.h}]];
 }
-// Manhattan-Weg über eine reservierte Korridor-Spur (statt diagonal durchs Feld).
-// side: null = Verteiler an der Unterwand, sonst 'L'|'R'|'N' = an welcher Wand
-// die Detour-Vertikale läuft ('N' = links neben der Notch-Innenwand). Notch-
-// bewusst, sonst laufen Leitungen durch die Aussparung.
-function routeVia(a,b,lane,side){
-  const yC=laneY(lane), pts=[a];
-  if(side){
-    const xW = side==='L'? laneY(lane) : side==='R'? S.W-laneY(lane) : notchX()-laneY(lane);
-    pts.push({x:xW,y:a.y},{x:xW,y:yC});
-  }else if(Math.abs(a.y-yC)>1) pts.push({x:a.x,y:yC});
-  pts.push({x:b.x,y:yC},b);
+// Manhattan-Weg über eine reservierte Korridor-Spur. Im Frame liegt der
+// Verteiler IMMER an der Unterkante, also nie ein Umweg über eine Seitenwand:
+// hoch/runter auf die Spur, entlang, wieder hoch/runter.
+function routeVia(a,b,lane){
+  const yC=laneY(lane), n=notchFrame(), pts=[];
+  const put=p=>{ const q=pts[pts.length-1];
+    if(!q||Math.abs(q.x-p.x)>1e-6||Math.abs(q.y-p.y)>1e-6) pts.push(p); };
+  // Klebt der Notch an der Verteilerwand, liegt der Korridor dort im Nichts:
+  // die Spur steigt in diesem x-Bereich über die Notch-Oberkante.
+  const overNotch = n && n.y0<=1 && yC<n.y1;
+  const yHi = overNotch ? n.y1+(yC-(S.edgeGap+randWidth()+omegaClear()))+LANE()/2 : yC;
+  const yFor = x => (overNotch && x>n.x0-1 && x<n.x1+1) ? yHi : yC;
+  put(a);
+  put({x:a.x,y:yFor(a.x)});
+  if(yFor(a.x)!==yFor(b.x)){                  // Höhenwechsel an der Notch-Kante
+    const edgeX = (a.x<b.x) ? (a.x<n.x0 ? n.x0 : n.x1) : (a.x>n.x1 ? n.x1 : n.x0);
+    put({x:edgeX,y:yFor(a.x)});
+    put({x:edgeX,y:yFor(b.x)});
+  }
+  put({x:b.x,y:yFor(b.x)});
+  put(b);
   return pts;
 }
-// An welcher Wand hängt der Verteiler? Bestimmt die Detour-Seite.
-function detourSideFor(M){
-  if(M.y<=fieldInset()) return null;                 // Unterwand-Bereich: kein Detour
-  if(M.x<=1) return 'L';
-  if(M.x>=S.W-1) return 'R';
-  if(M.y>=S.H-1) return 'L';                         // Oberwand existiert nur links vom Notch
-  if(hasNotch()&&Math.abs(M.x-notchX())<=1) return 'N';        // Notch-Seitenwand
-  if(hasNotch()&&Math.abs(M.y-(S.H-S.notchB))<=1) return 'R';  // Notch-Unterwand
-  return M.x<S.W/2?'L':'R';
+// Welche Weltwand trägt den Verteiler -> Frame-Rotation.
+function rotForManifold(M){
+  const nearNotchSide = hasNotch()&&Math.abs(M.x-notchX())<=1&&M.y>=S.H-S.notchB-1;
+  const nearNotchBot  = hasNotch()&&Math.abs(M.y-(S.H-S.notchB))<=1&&M.x>=notchX()-1;
+  if(M.y<=1) return 0;                 // Unterwand
+  if(M.x<=1) return 1;                 // linke Wand
+  if(M.y>=S.H-1||nearNotchBot) return 2;   // Oberwand (auch Notch-Unterkante)
+  if(M.x>=S.W-1||nearNotchSide) return 3;  // rechte Wand (auch Notch-Seitenwand)
+  return 0;
 }
 function buildLoops(groups){
-  const M=snappedManifold();
-  const side=detourSideFor(M);
-  const detour = side!==null;                 // Verteiler nicht an unterer Wand
+  const M=rotFwd(snappedManifold(),S.W,S.H);  // Verteiler im Frame (auf der Unterkante)
 
   // Stufe 1: Felder (noch ohne Randzone/Anbindung)
   const raw=groups.map((rects,gi)=>{
@@ -528,8 +607,7 @@ function buildLoops(groups){
   // Randzone dem Kreis mit dem anker-fernsten Feld-Eintritt zuordnen: dessen
   // Steigleitung aus dem Korridor liegt außerhalb aller fremden Korridor-Spans
   // und kreuzt daher nichts. (Vorlauf geht weiterhin zuerst an die Scheibe.)
-  const wallX = side==='R' ? S.W : side==='N' ? notchX() : 0;
-  const anchor = detour ? wallX : M.x;
+  const anchor = M.x;
   if(S.windowEdges.length){
     let owner=-1,best=-1;
     raw.forEach((r,i)=>{ if(r.field.length){
@@ -538,14 +616,30 @@ function buildLoops(groups){
     if(owner>=0){
       // Übergänge zwischen Randzonen verschiedener Kanten durch einen wandnahen
       // Kanal führen — sonst läuft der Verbinder kollinear zur äußersten Feldbahn.
-      const parts=wEdges().map(e=>randzonePath(e)).filter(p=>p.length);
+      // Randzonen verschiedener Kanten immer im wandnahen Kanal verbinden.
+      // Eine Direktverbindung wäre eine Diagonale quer durch den Raum (und
+      // durch den Notch) — genau der Fall, den der Raum-Check gemeldet hat.
+      const FW=frameW(), FH=frameH(), c=S.edgeGap*0.4;
+      const nearest=p=>{                    // Anschlusspunkt im umlaufenden Kanal
+        const d=[[p.x,c,'b'],[p.x,FH-c,'t'],[c,p.y,'l'],[FW-c,p.y,'r']];
+        const dist=[Math.abs(p.y),Math.abs(FH-p.y),Math.abs(p.x),Math.abs(FW-p.x)];
+        const i=dist.indexOf(Math.min(...dist));
+        return {x:d[i][0],y:d[i][1],side:d[i][2]};
+      };
+      const corner=s1=>({b:{x:c,y:c},t:{x:c,y:FH-c},l:{x:c,y:c},r:{x:FW-c,y:c}}[s1]);
+      const parts=wEdges().map(e=>randzonePath(edgeFwd(e))).filter(p=>p.length);
       let rz=[];
       parts.forEach(p=>{
         if(rz.length){
           const a=rz[rz.length-1], b=p[0];
-          const chan = (a.x<S.edgeGap+1&&b.x<S.edgeGap+1) ? S.edgeGap*0.4
-                     : (a.x>S.W-S.edgeGap-1&&b.x>S.W-S.edgeGap-1) ? S.W-S.edgeGap*0.4 : null;
-          if(chan!==null) rz.push({x:chan,y:a.y},{x:chan,y:b.y});
+          const ca=nearest(a), cb=nearest(b);
+          rz.push(ca);
+          if(ca.side!==cb.side){            // um die Ecke im Kanal
+            const k={x:(ca.side==='r'||cb.side==='r')?FW-c:c,
+                     y:(ca.side==='t'||cb.side==='t')?FH-c:c};
+            rz.push(k);
+          }
+          rz.push(cb);
         }
         rz=rz.concat(p);
       });
@@ -570,43 +664,37 @@ function buildLoops(groups){
       conns.push({r,kind:'mid',t:r.field[0],src:r.rand[r.rand.length-1]});
     conns.push({r,kind:'out',t:r.tail});
   });
-  // Fern -> innerste Spur (Spans schachteln sich um M.x). Ausnahme im Detour-Fall:
-  // Anschlüsse, die die Ecke an der Detour-Wand berühren (Randzonen-Anschluss),
-  // müssen UNTER alle Wand-Vertikalen — und untereinander: je weiter ihre
-  // Horizontale reicht, desto innerer die Spur. Sonst durchsticht jede
-  // Wand-Vertikale die weit reichende Ecken-Horizontale.
-  const laneKey=c=>{
-    if(detour){
-      const near=Math.min(Math.abs(c.t.x-wallX), c.src?Math.abs(c.src.x-wallX):Infinity);
-      if(near<fieldInset()) return -1e9-Math.abs(c.t.x-wallX);   // Reach absteigend
-    }
-    return -Math.abs(c.t.x-M.x);
-  };
-  conns.sort((a,b)=>laneKey(a)-laneKey(b));
+  // Fern -> innerste Spur: die Korridor-Spans schachteln sich um M.x, dadurch
+  // muss keine Stichleitung über eine fremde Spur steigen.
+  conns.sort((a,b)=>Math.abs(b.t.x-M.x)-Math.abs(a.t.x-M.x));
   const laneOf={};
-  conns.forEach((c,i)=>{ c.lane=Math.min(i,laneCount()-1); laneOf[c.r.gi+'/'+c.kind+'/'+(c.join?c.join.at:'')]=c.lane; });
+  conns.forEach((c,i)=>{ c.lane=Math.min(i,laneCount()-1); laneOf[c.r.gi+'/'+c.kind]=c.lane; });
 
-  // Stufe 3: routen und zusammensetzen
+  // Stufe 3: routen, zusammensetzen und aus dem Frame zurückdrehen
+  const back=p=>{ const q=rotBack(p,S.W,S.H); return p.arc?{...q,arc:p.arc}:q; };
+  const bk=a=>a.map(back);
   return raw.map(r=>{
     if(!r.head) return {pts:[]};
-    const L=(kind,at='')=>laneOf[r.gi+'/'+kind+'/'+at]??0;
+    const L=kind=>laneOf[r.gi+'/'+kind]??0;
     let field=r.field.slice();
     // Rechteck->Rechteck-Übergänge im wandnahen Kanal (unter allem) -> kreuzt nichts.
     // Rückwärts einsetzen, damit die gespeicherten Indizes gültig bleiben.
     r.joins.slice().reverse().forEach(j=>{
-      field.splice(j.at,0,...routeVia(j.from,j.to,-1,null).slice(1,-1));
+      field.splice(j.at,0,...routeVia(j.from,j.to,-1).slice(1,-1));
     });
-    const leadIn  = routeVia(M,r.head,L('in'),side);
-    const leadOut = routeVia(M,r.tail,L('out'),side).reverse();
+    const leadIn  = routeVia(M,r.head,L('in'));
+    const leadOut = routeVia(M,r.tail,L('out')).reverse();
     const mid = (r.rand.length&&r.field.length)
-      ? routeVia(r.rand[r.rand.length-1],r.field[0],L('mid'),null).slice(1,-1) : [];
+      ? routeVia(r.rand[r.rand.length-1],r.field[0],L('mid')).slice(1,-1) : [];
     const pts=[...leadIn.slice(0,-1),...r.rand,...mid,...field,...leadOut.slice(1)];
     const rings=r.rects.reduce((a,x)=>a+passCount(field,x,M.x),0);   // echte Bahnenzahl
-    const f=fillet(pts,S.bendRadius);
-    return {pts, field, rand:r.rand, leadIn, leadOut, mid, rings, length:f.length, minR:f.minR};
+    const f=fillet(pts,S.bendRadius);      // Länge im Frame = Länge in der Welt
+    return {pts:bk(pts), field:bk(field), rand:bk(r.rand), leadIn:bk(leadIn),
+            leadOut:bk(leadOut), mid:bk(mid), rings, length:f.length, minR:f.minR};
   }).filter(l=>l.pts.length>1);
 }
 function autofit(){
+  ROT=rotForManifold(snappedManifold());      // Korridor an die Verteilerwand legen
   if(S.loopMode!=='auto'){
     curLoopCount=+S.loopMode;                 // Korridorbreite vor Konturen festlegen
     const loops=buildLoops(partition(+S.loopMode));
@@ -873,10 +961,19 @@ function selfChecks(){
   A('Parallel-Detektor erkennt Rohr-auf-Rohr',pv.length===1);
   // Randzone endet am Notch (Defaults: Notch vorhanden)
   if(hasNotch()){
+    const rot0=ROT; ROT=0;                     // Frame = Welt
+    const n=notchFrame();
     const topZ=randzonePath('top');
-    A('Randzone Oben endet am Notch',Math.max(...topZ.map(p=>p.x))<=notchX()-S.edgeGap+1);
+    A('Randzone Oben endet am Notch',Math.max(...topZ.map(p=>p.x))<=n.x0-S.edgeGap+1);
     const rZ=randzonePath('right');
-    A('Randzone Rechts endet am Notch',Math.max(...rZ.map(p=>p.y))<=S.H-S.notchB-S.edgeGap+1);
+    A('Randzone Rechts endet am Notch',Math.max(...rZ.map(p=>p.y))<=n.y0-S.edgeGap+1);
+    // Frame-Rotation: Verteiler an jeder Wand -> Korridor immer an dieser Wand
+    ROT=1; const fw=frameW(), fh=frameH();
+    A('Frame-Rotation dreht Raummaße',fw===S.H&&fh===S.W);
+    const p={x:1234,y:567};
+    const rt=rotBack(rotFwd(p,S.W,S.H),S.W,S.H);
+    A('rotFwd/rotBack sind invers',Math.abs(rt.x-p.x)<1e-6&&Math.abs(rt.y-p.y)<1e-6);
+    ROT=rot0;
   }
   console[ok?'log':'error']('Selbstchecks',out);
   return ok;
@@ -921,6 +1018,10 @@ function validate(plan){
     errs.push(`Randzonen-Abstand ${S.randSpacing} mm zu klein für Rohr-Ø ${S.pipeDia} mm.`);
   if(!plan.loops.some(l=>l.field&&l.field.length))
     errs.push('Kein Verlegefeld — Raum zu klein für die aktuellen Abstände.');
+  // ponytail: Randzonen-Verbinder über Eck laufen bei L-Räumen noch durch die
+  // Aussparung. Ehrlich melden statt still falsch zeichnen.
+  if(hasNotch()&&S.windowEdges.length>1)
+    errs.push('Mehrere Fensterwände am L-Raum: der Verbinder zwischen den Randzonen ist noch nicht notch-sicher. Einzelne Fensterwand wählen.');
   return errs;
 }
 function recompute(){
