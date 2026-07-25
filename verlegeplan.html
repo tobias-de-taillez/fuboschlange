@@ -1085,6 +1085,51 @@ function doubleSpiralField(poly,insOf,s,gate){
     // Schlechter als BEIDE. Die Splice-Stelle ist wieder ein Sprung, und es sind
     // jetzt zwei davon (Morph->Rest und Rest->Morph-Ruecklauf) statt vorher
     // keiner. Genau das, was die Morphung eigentlich abschafft.
+    //
+    // DER DECKUNGSVERLUST DER MORPHUNG IST GEMESSEN UND ERKLAERT (Runde 17).
+    // Ueber 20 Laeufe legt die Morphung 83 % der Rohrlaenge der Ringfassung
+    // (3 044 380 gegen 3 663 455 mm), in 18 von 20 Laeufen weniger, in keinem
+    // mehr. Deckung ist hier praktisch proportional zur Rohrlaenge (Wirkzone
+    // +-25 mm), also ist das die ganze Geschichte.
+    //
+    // Die Rechnung dahinter: bei n Ringen legt die Ringfassung n Umdrehungen auf
+    // den Radien 0..(n-1)s. Die Morphung legt je Arm eine Umdrehung ZWISCHEN
+    // zwei Ringen, also zusammen n-2 — die Summe der Umfaenge laeuft von P(s) bis
+    // P((n-2)s) statt von P(0) bis P((n-1)s). Es fehlen genau die AEUSSERSTE und
+    // die INNERSTE Umdrehung. Das ist kein Fehler der Implementierung, sondern
+    // was eine Spirale ueber dieselbe radiale Spanne tut.
+    //
+    // Drei Reparaturen gemessen, alle verworfen (Ringe = 18/10/19, medCov 40,
+    // medR 46; einfache Morphung = 17/17/17, medCov 33, medR 49):
+    //   innersten Ring anhaengen        cross 20  cov 16  rad 20  medCov 35  medR 43
+    //   aeussersten voranstellen        cross 20  cov 12  rad 18  medCov 39  medR 49
+    //   beide, je am richtigen Arm      cross 20  cov 12  rad 20  medCov 38  medR 38
+    // Die Deckung kommt damit fast zurueck, aber medianCross springt von 5 auf
+    // 12-13: die vorangestellte Umdrehung liegt am Anfang der Spirale nur
+    // 2s*t vom Ring entfernt, bei t nahe 0 also praktisch auf ihr. Zwei Bahnen
+    // auf demselben Radius zaehlen als Ueberlappung.
+    //
+    // Vierte Reparatur, ohne Zusatz-Umdrehung: die RINGE DICHTER erzeugen, damit
+    // die Spirale trotz zweier fehlender Umdrehungen denselben effektiven
+    // Bahnabstand hat (n Ringe ueber (n-1)s sind 0,9s effektiv, n-2 Umdrehungen
+    // ueber dieselbe Spanne sind 1,125s):
+    //   Faktor  cross  cov  rad  medCross  medCov  medR
+    //   1,00      17    17   17      5        33     49
+    //   0,95      20    14   20      -        36     42
+    //   0,90      17    15   20      5        36     46
+    //   0,85      20    11   20      -        39     40
+    //   0,80      17    11   20      5        39     39
+    //   0,70      20     7   20      -        48     33
+    // Bei 0,70 ist covFails 7/20 der beste Deckungswert dieses Projekts
+    // ueberhaupt (Ringfassung: 10/20) — die Deckung ist also KAUFBAR. Bezahlt
+    // wird sie durchweg mit dem Radius: medR faellt von 46 auf 33, radFails
+    // steht in JEDER Morph-Variante bei 20/20.
+    //
+    // Damit ist die Rollenverteilung geklaert: die Morphung loest die Naht
+    // (crossFails 17, radFails 17 = beide Bestwerte) und die Dichte loest die
+    // Deckung (covFails 7). Beide zusammen gehen nicht, weil die Dichte den
+    // Radius frisst. Keine Kombination schlaegt die Ringfassung, deshalb bleibt
+    // S.useMorphSpiral aus.
     const arm=st=>{
       const o=[];
       for(let k=st;k+2<al.length;k+=2){
@@ -1114,6 +1159,23 @@ function doubleSpiralField(poly,insOf,s,gate){
   // (14 Feld×mid, 11 Feld×leadOut).
   // Deshalb wird der Fußpunkt auf das nächste SEGMENT projiziert und als neuer
   // Punkt eingefügt.
+  // AUSGESCHLOSSEN, gerechnet statt gemessen (Runde 17): eine BIARC-Bruecke
+  // (zwei tangentiale Boegen, S-Kurve) am Ring-zu-Ring-Uebergang. Die Geometrie
+  // stimmt — Ring k und k+2 sind an der Naht GLEICHGERICHTET mit Versatz 2s,
+  // also keine Kehre, sondern eine S-Kurve; fuer Versatz h und Laengsweg L gilt
+  // theta = 2*atan(h/L) und rho = L/(2 sin theta), bei L = h also rho = s, und
+  // s >= bendRadius trifft in den meisten Bench-Laeufen zu.
+  // Sie scheitert aber am selben Punkt wie die Ecken-Treppe und beide Hermite-
+  // Bruecken darunter: zwischen Ring k und k+2 liegt Ring k+1 des GEGENARMS.
+  // Jede Bruecke, egal wie glatt, muss ihn queren. Der Laengsweg L ~ 2h = 4s
+  // macht das schlimmer als die kurze Diagonale, nicht besser.
+  // Ebenfalls gerechnet und damit erledigt: Held & Spielberger Schritt 6, echte
+  // tangentiale Kreisboegen an jeder Ecke statt Punkte zu verschieben. Der Bogen
+  // liefert rr = t/tan(defl/2) mit t <= min(ab,bc) — pathCurve rechnet an der
+  // Ecke mit genau min(ab,bc)/tan(defl/2). Ein eingesetzter Bogen kann die
+  // Kennzahl also bestenfalls ERREICHEN und bei konkurrierenden Nachbarecken nur
+  // unterbieten. Kein Hebel, keine Implementierung noetig.
+  //
   // VERWORFEN, gemessen: Ecken-Treppe (Schnitt jedes Rings um s weiter entlang
   // des Rings versetzt, damit der Übergang Ring k -> k+2 eine 45°-Diagonale
   // statt eines rechtwinkligen Radialsprungs wird).
