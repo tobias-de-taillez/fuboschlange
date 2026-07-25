@@ -872,6 +872,25 @@ function doubleSpiralField(poly,insOf,s,gate){
     // Fällt P mit einem Nachbar-Eckpunkt zusammen, entsteht sonst ein Segment
     // der Länge ~0 — fillet macht daraus über dieselbe Formel einen radiuslosen
     // Knick.
+    //
+    // VERWORFEN, gemessen: die Schwelle anheben, also bei P nahe A oder B gleich
+    // A bzw. B als Schnitt nehmen statt P einzufügen. Motiv war echt — die engste
+    // Stelle der Standardkonfiguration ist eine gewöhnliche 84°-Ecke bei
+    // (4000,542) mit einem 20 mm langen Nachbarsegment neben 192 mm Median, also
+    // Diskretisierung und kein 180°-Knick, und der Fix hob dort minR von 11 auf
+    // 18 mm. Über 500 Läufe ist er trotzdem ein Verlust, bei jeder Schwelle:
+    //           Schwelle    crossFails  covFails  outFails  medianCoverage
+    //   keine (dieser Code)        485       322       181           37 %
+    //   0,5·R = 40 mm             487       331       184           36 %
+    //   0,5·s = 50 mm             486       335       184           36 %
+    //   2·R  = 160 mm             486       334       185           36 %
+    // medianRadius bleibt in allen Fällen 3 mm. Das ist der eigentliche Befund:
+    // die Naht ist nicht die bench-weit bindende Stelle. Das sind die
+    // KETTENENDEN DER RANDZONE — gemessen defl 156° bei (170,3110) und
+    // (7830,1710), wo die dichte Bahn am Wandende zurückläuft. Dort gilt
+    // rr >= R nur für L >= 2R/tan((pi-defl)/2) = 9,4·R = 750 mm Segmentlänge;
+    // durch feinere oder gröbere Abtastung ist das nicht erreichbar. Diese Kehre
+    // braucht einen konstruierten Bogen (omegaTurn), nicht mehr Punkte.
     const eps=1e-6;
     if(rest.length&&len(sub(rest[rest.length-1],P))<eps) rest.pop();
     if(rest.length&&len(sub(rest[0],P))<eps) rest.shift();
