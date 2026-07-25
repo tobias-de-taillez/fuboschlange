@@ -680,6 +680,10 @@ function doubleSpiralField(poly,insOf,s,gate){
   // Ring so rotieren, dass er an der Naht beginnt; Umlaufsinn vereinheitlichen
   const area=r=>{let a=0;for(let i=0,j=r.length-1;i<r.length;j=i++)a+=(r[j].x*r[i].y-r[i].x*r[j].y);return a/2;};
   const orient=rings.map(area).map(a=>a>=0?1:-1);
+  // ponytail: Ringe an der Naht rotiert, aber NICHT gekürzt. Ein Torkanal
+  // (beidseitig g/2 abschneiden) wurde probiert und verschlechterte die
+  // Kreuzungen von 57 auf 103 — die Ring-Enden liegen dann zu weit auseinander
+  // und die Verbindungen werden selbst zu Diagonalen.
   const open=rings.map((r,k)=>{
     const rr = orient[k]===orient[0] ? r : r.slice().reverse();
     const bi=seamOf(rr);
@@ -696,8 +700,15 @@ function doubleSpiralField(poly,insOf,s,gate){
 }
 // Zonenpolygon + Kanten-Insets für eine Gruppe von Rechtecken.
 function zonePolyOf(rects){
+  // Der Korridor wird aus der Zone HERAUSGESCHNITTEN, nicht nur als Kanten-
+  // Inset behandelt: sonst folgt das Distanzfeld an den Seitenkanten (Inset
+  // nur edgeGap) bis hinunter in den Korridor, und jede Anbindeleitung
+  // kreuzt dort das Feld.
+  const yc=fieldInset();
   if(rects.length===1){ const r=rects[0];
-    return [{x:r.x0,y:r.y0},{x:r.x0+r.w,y:r.y0},{x:r.x0+r.w,y:r.y0+r.h},{x:r.x0,y:r.y0+r.h}]; }
+    const y0=Math.max(r.y0,yc), y1=r.y0+r.h;
+    if(y1-y0<S.s) return [];
+    return [{x:r.x0,y:y0},{x:r.x0+r.w,y:y0},{x:r.x0+r.w,y:y1},{x:r.x0,y:y1}]; }
   // Zwei Rechtecke der L-Zerlegung wieder zu EINEM L verschmelzen: so entsteht
   // eine durchgehende Spirale statt zweier Felder mit Naht dazwischen.
   const n=notchFrame(), W=frameW(), H=frameH();
