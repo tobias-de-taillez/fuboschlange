@@ -1043,17 +1043,32 @@ function doubleSpiralField(poly,insOf,s,gate){
     const eps=1e-6;
     if(rest.length&&len(sub(rest[rest.length-1],P))<eps) rest.pop();
     if(rest.length&&len(sub(rest[0],P))<eps) rest.shift();
-    // VERWORFEN, gemessen: die Kette 2s VOR der Naht enden lassen statt am
-    // letzten Eckpunkt. Die Diagnose stimmt — bei einem exakten 4-Eck-Ring ist
-    // der letzte Eckpunkt eine GANZE RINGSEITE vor der Naht, und der Sprung zum
-    // nächsten Ring lief dadurch quer durch das halbe Feld und wieder zurück
-    // (im Frame von (1286,2090) nach (6714,2110), 5428 mm hin und 20 mm höher
-    // zurück, Radius 2 bis 5 mm). Der Rücktritt beseitigt das aber nicht und
-    // kostet deutlich Fläche:
-    //   ohne Rücktritt   covFails  2/48  medianRadius 35  radFails 48/48
-    //   mit  2s          covFails 11/48  medianRadius 22  radFails 48/48
-    // Der Sprung muss anders gelöst werden als durch Verkürzen — vermutlich
-    // durch eine echte Übergangskurve zwischen den Ringen.
+    // Die Kette LAEUFT BIS KURZ VOR DIE NAHT zurueck. Ohne das endet sie am
+    // letzten Eckpunkt r[bi] — bei den frueheren dichten Isolinien Millimeter vor
+    // der Naht, bei einem exakten 4-Eck-Ring aber eine GANZE RINGSEITE davor.
+    // Der Sprung zum naechsten Ring lief dadurch quer durch das halbe Feld und
+    // wieder zurueck: im Frame von (1286,2090) nach (6714,2110), also 5428 mm hin
+    // und 20 mm hoeher zurueck, mit Radius 2 bis 5 mm — in 22 von 32 Plaenen die
+    // schlimmste Ecke ueberhaupt.
+    //
+    // Ein erster Versuch kuerzte die Kette am Ende um 2s und ging damit in die
+    // FALSCHE Richtung: er entfernte Ringlaenge, statt die fehlende Strecke bis
+    // zur Naht zu ergaenzen (covFails 2 -> 11). Richtig ist, von r[bi] aus
+    // Richtung P zu verlaengern und `gap` davor stehenzubleiben.
+    //
+    // VERWORFEN, gemessen: bis 2s vor die Naht verlaengern (gap = 2s laesst den
+    // Sprung Ring k -> k+2 als 45-Grad-Diagonale laufen). Der Ansatz ist richtig
+    // herum — der erste Versuch kuerzte stattdessen und ging in die falsche
+    // Richtung (covFails 2 -> 11) — und er bringt auch Flaeche:
+    //   ohne Verlaengerung   Bench covFails 291   crossFails 357   worstCross 50
+    //   mit  2s              Bench covFails 253   crossFails 368   worstCross 83
+    // Er faellt trotzdem raus: der Selbstcheck "Spiralen kreuzungsfrei
+    // (15 Groessen)" wird davon wieder ROT. Der laenger geschlossene Ring laesst
+    // den Sprung den ZWISCHENRING queren — genau die Torkanal-Falle aus dem
+    // Design-Doc. Eine Spirale, die sich auf einem simplen Rechteck selbst
+    // kreuzt, ist schlimmer als 38 Deckungsfehlschlaege.
+    // Der Sprung braucht eine echte Uebergangskurve, die den Zwischenring in
+    // seiner Luecke quert; Verlaengern allein reicht nicht.
     return [P,...rest];
   };
   let seamY=Infinity;
