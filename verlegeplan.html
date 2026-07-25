@@ -301,11 +301,14 @@ const fieldInset=()=>S.edgeGap+randWidth()+omegaClear()+corridorW();   // = Bode
 function insetsFor(rect){
   const atL=rect.x0<=1, atR=rect.x0+rect.w>=frameW()-1;
   const topIsOuter=rect.y0+rect.h>=frameH()-1;      // Außen-Oberkante im Frame
+  // Muss eine Leitung zu einer anderen Wand als der Verteilerwand, läuft sie
+  // seitlich am Feld vorbei -> dort ebenfalls Korridor reservieren.
+  const ring = frameEdges().some(e=>e!=='bottom') ? corridorW() : 0;
   return {
     b: fieldInset(),
-    t: S.edgeGap+(topIsOuter?randW('top')+omegaClear('top'):0),
-    l: atL? S.edgeGap+randW('left')+omegaClear('left') : S.s/2,
-    r: atR? S.edgeGap+randW('right')+omegaClear('right') : S.s/2,
+    t: S.edgeGap+(topIsOuter?randW('top')+omegaClear('top')+ring:0),
+    l: atL? S.edgeGap+randW('left')+omegaClear('left')+ring : S.s/2,
+    r: atR? S.edgeGap+randW('right')+omegaClear('right')+ring : S.s/2,
   };
 }
 
@@ -624,10 +627,27 @@ function partition(N){
 // Manhattan-Weg über eine reservierte Korridor-Spur. Im Frame liegt der
 // Verteiler IMMER an der Unterkante, also nie ein Umweg über eine Seitenwand:
 // hoch/runter auf die Spur, entlang, wieder hoch/runter.
-function routeVia(a,b,lane){
+function routeVia(a,b,lane,gap){
   const yC=laneY(lane), n=notchFrame(), pts=[];
   const put=p=>{ const q=pts[pts.length-1];
     if(!q||Math.abs(q.x-p.x)>1e-6||Math.abs(q.y-p.y)>1e-6) pts.push(p); };
+  // Ziel UNTERHALB des Korridors (Randzone): erst in der rohrfreien
+  // Verteiler-Lücke auf Zielhöhe absteigen, dann waagerecht heranfahren.
+  // Andersherum (erst waagerecht, dann fallen) durchsticht die Absenkung
+  // zwangsläufig alle Randzonenbahnen zwischen Korridor und Ziel.
+  if(gap && b.y<yC-1 && a.y<=1){
+    const gx=Math.min(Math.max(a.x,gap.lo),gap.hi);   // x innerhalb der Lücke
+    put(a); put({x:gx,y:a.y}); put({x:gx,y:b.y}); put(b);
+    return pts;
+  }
+  // Ziel an einer ANDEREN Wand als der Verteilerwand (z.B. Randzone gegenüber):
+  // im Verteiler-Korridor bis zur Seite, dort im Seitenkorridor hoch, dann quer.
+  // Direkt hochzuziehen würde das ganze Feld zerschneiden.
+  if(b.y > frameH()-fieldInset()+1){
+    const xS = b.x<frameW()/2 ? laneY(lane) : frameW()-laneY(lane);
+    put(a); put({x:a.x,y:yC}); put({x:xS,y:yC}); put({x:xS,y:b.y}); put(b);
+    return pts;
+  }
   // Klebt der Notch an der Verteilerwand, liegt der Korridor dort im Nichts:
   // die Spur steigt in diesem x-Bereich über die Notch-Oberkante.
   const overNotch = n && n.y0<=1 && yC<n.y1;
@@ -673,6 +693,11 @@ function rotForManifold(M){
 }
 function buildLoops(groups){
   const M=rotFwd(snappedManifold(),S.W,S.H);  // Verteiler im Frame (auf der Unterkante)
+  // Rohrfreie Lücke in der Randzone: splitChainAtManifold teilt die Kette hier,
+  // beide Arme rücken um endGap ein. Durch diese Lücke steigen die Zuleitungen
+  // ab, ohne die Randzonenbahnen zu durchstechen.
+  const endGap=S.edgeGap+(omegaOn()?S.bendRadius:0);
+  const gap={lo:M.x-endGap+S.pipeDia, hi:M.x+endGap-S.pipeDia};
 
   // Stufe 1: Felder (noch ohne Randzone/Anbindung)
   const raw=groups.map((rects,gi)=>{
@@ -761,8 +786,8 @@ function buildLoops(groups){
       field.splice(j.at,0,...routeVia(j.from,j.to,-1).slice(1,-1));
     });
     const P=kind=>portOf[r.gi+'/'+kind]??M;
-    const leadIn  = routeVia(P('in'),r.head,L('in'));
-    const leadOut = routeVia(P('out'),r.tail,L('out')).reverse();
+    const leadIn  = routeVia(P('in'),r.head,L('in'),gap);
+    const leadOut = routeVia(P('out'),r.tail,L('out'),gap).reverse();
     const mid = (r.rand.length&&r.field.length)
       ? routeVia(r.rand[r.rand.length-1],r.field[0],L('mid')).slice(1,-1) : [];
     const pts=[...leadIn.slice(0,-1),...r.rand,...mid,...field,...leadOut.slice(1)];
@@ -791,8 +816,19 @@ function autofit(){
   return last; // best effort (über Limit)
 }
 function snappedManifold(){
-  const room=lRing(0,0,S.W,S.H,S.notchA,S.notchB);
-  return nearestOnRing(S.manifold,room).pt;
+  // Nur AUSSENwände: die Notch-Innenkanten sind keine Kante des umschließenden
+  // Rechtecks. Läge der Verteiler dort, wäre keine Frame-Rotation möglich, die
+  // ihn auf die Korridor-Unterkante bringt — Leitungen liefen dann quer durch
+  // die Aussparung, also außerhalb des Raums.
+  const box=[{x:0,y:0},{x:S.W,y:0},{x:S.W,y:S.H},{x:0,y:S.H}];
+  const p=nearestOnRing(S.manifold,box).pt;
+  if(!hasNotch()) return p;
+  // Die Box-Kanten sind im Notch-Bereich keine echte Wand -> dorthin klemmen,
+  // wo die Wand tatsächlich endet.
+  const xN=S.W-S.notchA, yN=S.H-S.notchB;
+  if(p.y>=S.H-1 && p.x>xN) return {x:xN,y:S.H};      // Oberwand endet am Notch
+  if(p.x>=S.W-1 && p.y>yN) return {x:S.W,y:yN};      // rechte Wand endet am Notch
+  return p;
 }
 
 // ================= Render =================
@@ -1111,6 +1147,23 @@ function loopCrossings(plan){
     n+=crossBetween(plan.loops[i].pts,plan.loops[j].pts).length;
   return n;
 }
+// Ebenso hart: kein Rohr darf den Raum verlassen (Notch-Aussparung eingeschlossen).
+function pointInRoom(p){
+  if(p.x<-1||p.x>S.W+1||p.y<-1||p.y>S.H+1) return false;
+  if(hasNotch()&&p.x>S.W-S.notchA+1&&p.y>S.H-S.notchB+1) return false;
+  return true;
+}
+function loopsOutside(plan){
+  let n=0;
+  plan.loops.forEach(l=>{
+    const p=l.pts;
+    for(let i=0;i<p.length-1;i++)for(let t=0;t<=6;t++){
+      const q={x:p[i].x+(p[i+1].x-p[i].x)*t/6, y:p[i].y+(p[i+1].y-p[i].y)*t/6};
+      if(!pointInRoom(q)){ n++; break; }
+    }
+  });
+  return n;
+}
 function crossingBench(n,seed){
   let s=(seed||20260725)>>>0;
   const rnd=()=>{s=(s*1664525+1013904223)>>>0; return s/4294967296;};
@@ -1135,12 +1188,13 @@ function crossingBench(n,seed){
     S.randPasses=Math.floor(rnd()*5);
     S.windowEdges=['bottom','top','left','right'].filter(()=>rnd()<0.45);
     S.loopMode=pick(['auto','1','2','3']);
-    // Verteiler irgendwo auf die Kontur setzen
+    // Verteiler zufällig auf der Raumkontur: zufällige Wand, zufällige Stelle
+    // darauf — damit sind alle vier Wände und die Notch-Kanten abgedeckt.
     const room=lRing(0,0,S.W,S.H,S.notchA,S.notchB);
     const k=Math.floor(rnd()*room.length), a=room[k], b=room[(k+1)%room.length], t=rnd();
     S.manifold={x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t};
     let plan,x=0;
-    try{ plan=autofit(); x=loopCrossings(plan); }
+    try{ plan=autofit(); x=loopCrossings(plan)+loopsOutside(plan); }
     catch(e){ fails.push({err:String(e),cfg:{W:S.W,H:S.H,notchA:S.notchA,notchB:S.notchB,
       s:S.s,bendRadius:S.bendRadius,randPasses:S.randPasses,win:S.windowEdges.join('+'),
       mode:S.loopMode,mf:`${Math.round(S.manifold.x)},${Math.round(S.manifold.y)}`}}); continue; }
