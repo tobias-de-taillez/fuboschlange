@@ -1053,11 +1053,17 @@ function routeVia(a,b,lane,gap){
     put(a); put({x:a.x,y:yC}); put({x:xS,y:yC}); put({x:xS,y:b.y}); put(b);
     return pts;
   }
-  // Klebt der Notch an der Verteilerwand, liegt der Korridor dort im Nichts:
-  // die Spur steigt in diesem x-Bereich über die Notch-Oberkante.
-  const overNotch = n && n.y0<=1 && yC<n.y1;
-  const yHi = overNotch ? n.y1+(yC-(S.edgeGap+randWidth()+omegaClear()))+LANE()/2 : yC;
-  const yFor = x => (overNotch && x>n.x0-1 && x<n.x1+1) ? yHi : yC;
+  // Liegt der Notch auf Korridorhöhe, gibt es dort keinen Boden: die Spur muss
+  // ausweichen — unter dem Notch durch, wenn darunter Platz ist, sonst darüber.
+  // Das gilt UNABHÄNGIG davon, wo der Verteiler sitzt; die frühere Bedingung
+  // (Notch nur an der Verteilerwand) ließ Rohr durch die Aussparung laufen.
+  const hitsNotch = n && yC>n.y0-1 && yC<n.y1+1;
+  const base=S.edgeGap+randWidth()+omegaClear();
+  // ponytail: immer ÜBER den Notch ausweichen. Ein Zweig "darunter durch" wurde
+  // probiert und verschlechterte Rohr-außerhalb von 6 auf 116 Konfigurationen —
+  // die Ausweichhöhe lag dort teils selbst außerhalb des Raums.
+  const yAlt = hitsNotch ? n.y1+(yC-base)+LANE()/2 : yC;
+  const yFor = x => (hitsNotch && x>n.x0-1 && x<n.x1+1) ? yAlt : yC;
   // Höhenwechsel als 45°-Schräge in Laufrichtung: zwei 45°-Ecken statt zweier
   // rechtwinkliger. Reicht der Platz nicht, bleibt es rechtwinklig.
   const dir = b.x>=a.x ? 1 : -1;
@@ -2192,7 +2198,11 @@ function heatCoverage(loops,reach){
 //   3. Glättung (Laplace) — erzwingt Mindestkrümmung, also den Biegeradius
 // Ankerpunkte (Verteileranschluss, Randzone) bleiben fest.
 function relaxLoops(loops,opt){
-  const o=Object.assign({iters:24,repel:0.35,smooth:0.22,wall:0.6,target:S.s},opt||{});
+  // wall = Abstoßung wenn näher als edgeGap, wallPull = Anziehung wenn weiter.
+  // Die Anziehung gilt für ALLE Wände (ganze Raumkontur inkl. Notch-Innenkanten),
+  // nicht nur für die als Fensterfront markierten.
+  const o=Object.assign({iters:24,repel:0.35,smooth:0.22,wall:0.6,wallPull:0.18,
+                         target:S.s},opt||{});
   const cell=Math.max(o.target,S.s), grid=new Map();
   const key=(x,y)=>Math.round(x/cell)+'|'+Math.round(y/cell);
   // Bewegliche Punkte: nur das Feld. Randzone und Anbindung sind gesetzt.
@@ -2225,12 +2235,21 @@ function relaxLoops(loops,opt){
           fx+=dx/d*push; fy+=dy/d*push;
         });
       }
-      // 2) Wand
+      // 2) Wand mit ZIELABSTAND: näher als edgeGap -> abstoßen, weiter -> anziehen.
+      // Ohne die Anziehung wirkt nur die Abstoßung der Rohre untereinander und
+      // treibt alles nach innen — es entstehen Klumpen in der Raummitte statt
+      // einer gleichmäßigen Verteilung. Die Anziehung ist deutlich schwächer,
+      // sonst sammelt sich umgekehrt alles an der Wand.
       const nr=nearestOnRing(n.p,room);
-      if(nr.d<S.edgeGap){
+      {
         const dx=n.p.x-nr.pt.x, dy=n.p.y-nr.pt.y, d=Math.hypot(dx,dy)||1;
-        const push=(S.edgeGap-nr.d)/S.edgeGap;
-        fx+=dx/d*push*o.wall; fy+=dy/d*push*o.wall;
+        if(nr.d<S.edgeGap){
+          const push=(S.edgeGap-nr.d)/S.edgeGap;
+          fx+=dx/d*push*o.wall; fy+=dy/d*push*o.wall;
+        }else{
+          const pull=Math.min(1,(nr.d-S.edgeGap)/(o.target*4));
+          fx-=dx/d*pull*o.wallPull; fy-=dy/d*pull*o.wallPull;
+        }
       }
       // 3) Glättung
       const prev=n.ref[n.idx-1], next=n.ref[n.idx+1];
@@ -2243,9 +2262,22 @@ function relaxLoops(loops,opt){
     nodes.forEach((n,ni)=>{
       if(n.fixed) return;
       const cand={x:n.p.x+dsp[ni].x, y:n.p.y+dsp[ni].y};
-      if(!pointInRoom(cand)) return;                 // nie aus dem Raum schieben
+      // Punkt UND die Verbindungen zu beiden Nachbarn müssen im Raum bleiben.
+      // Nur den Punkt zu prüfen reicht nicht: er kann innen liegen, während das
+      // Segment zum Nachbarn über eine Notch-Ecke schneidet — die Wand-
+      // Anziehung zieht genau dorthin.
+      if(!pointInRoom(cand)) return;
+      const segOK=(a,b)=>{
+        if(!a||!b) return true;
+        for(let t=1;t<5;t++){
+          const q={x:a.x+(b.x-a.x)*t/5, y:a.y+(b.y-a.y)*t/5};
+          if(!pointInRoom(q)) return false;
+        }
+        return true;
+      };
+      if(!segOK(n.ref[n.idx-1],cand)||!segOK(cand,n.ref[n.idx+1])) return;
       moved+=Math.hypot(dsp[ni].x,dsp[ni].y);
-      n.p=cand;
+      n.p=cand; n.ref[n.idx]=cand;      // sofort schreiben: Nachbarn prüfen aktuell
     });
   }
   // zurückschreiben
