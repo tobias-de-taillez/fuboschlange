@@ -267,8 +267,11 @@ const omegaOn=()=>S.randPasses>1 && S.randSpacing/2<S.bendRadius
 const frameEdges=()=>wEdges().map(edgeFwd);
 const randW=e=>frameEdges().includes(e) ? S.randPasses*S.randSpacing : 0;
 const randWidth=()=>randW('bottom');                // Korridor liegt über der BODEN-Randzone
-// Mindest-Bahnabstand 50 mm gilt auch für Anbindeleitungen im Korridor.
-const LANE=()=>Math.max(50,S.pipeDia*1.6);
+// Spurabstand im Korridor: mind. 50 mm (Verlegeabstand). Die Höhenwechsel
+// laufen als 45°-Schrägen (siehe routeVia) — eine 45°-Ablenkung braucht nur
+// R/tan(67,5°) ~ 0,41R Platz statt R wie eine rechtwinklige Ecke, deshalb
+// bleibt der Korridor schmal und der Biegeradius trotzdem eingehalten.
+const LANE=()=>Math.max(50,S.pipeDia*1.6,0.9*S.bendRadius);
 const laneCount=()=>2*Math.max(1,curLoopCount)+1;   // Vor-/Rücklauf je Kreis + Reserve
 // + LANE/2 Puffer: sonst liegt die äußerste Spur nur LANE/2 unter der ersten
 // Feldbahn — bei 16er Rohr wäre das physische Überlappung.
@@ -277,8 +280,16 @@ const corridorW=()=>laneCount()*LANE()+LANE()/2;
 // Randzone und Korridor: unterhalb der Randzone würde jeder Verbinder die
 // Fensterbahnen durchstoßen.
 // Die Omega-Schlaufen ragen 2R über die letzte Randzonenbahn in den Raum.
-// Nicht die Randzone wird breiter — Korridor und Feld weichen aus.
-const omegaClear=e=>(omegaOn()&&randW(e||'bottom')>0) ? 2*S.bendRadius+LANE()/2 : 0;
+// Sie sitzen NUR an den Enden einer Randzonen-Kette: bei links->unten->rechts
+// also oben an den Seitenwänden, nicht an der Unterkante. Nur dort muss das
+// Feld ausweichen — sonst verschenkt man den Streifen über die ganze Breite.
+const omegaEndEdges=()=>{
+  if(!omegaOn()) return [];
+  const s=new Set();
+  edgeChains(frameEdges()).forEach(ch=>{ s.add(ch[0]); s.add(ch[ch.length-1]); });
+  return [...s];
+};
+const omegaClear=e=>omegaEndEdges().includes(e||'bottom') ? 2*S.bendRadius+LANE()/2 : 0;
 const laneY=i=>i<0 ? S.edgeGap+randWidth()+omegaClear()-LANE()/2
                    : S.edgeGap+randWidth()+omegaClear()+(i+0.5)*LANE();
 let curLoopCount=1;                                 // von autofit gesetzt (Korridorbreite)
@@ -438,9 +449,13 @@ function edgeChains(frameSel){
 }
 // Eine Randzonenbahn im Abstand off entlang einer Kettenfolge: Ecken sind die
 // Schnittpunkte der eingerückten Wandlinien, Enden um endGap eingerückt.
+// Kettenglied: 'bottom' (volle Kante) oder {e, a, b} mit eigenen Endpunkten
 function chainPass(chain,off,endGap){
-  const ls=chain.map(e=>{ const s=edgeSpan(e);
-    return {p:add(s.a,scl(s.inw,off)), d:unit(sub(s.b,s.a)), L:len(sub(s.b,s.a))}; });
+  const ls=chain.map(item=>{
+    const e=typeof item==='string'?item:item.e, s=edgeSpan(e);
+    const a=item.a??s.a, b=item.b??s.b;
+    return {p:add(a,scl(s.inw,off)), d:unit(sub(b,a)), L:len(sub(b,a))};
+  });
   // Ecke = Schnittpunkt der beiden eingerückten Wandlinien (Projektion, da
   // rechtwinklig): so entsteht EIN durchgehender Zug ohne Sprung.
   const corner=(A,B)=>add(A.p,scl(A.d,(B.p.x-A.p.x)*A.d.x+(B.p.y-A.p.y)*A.d.y));
@@ -469,6 +484,21 @@ function randzoneChain(chain){
 }
 // Einzelkante (für Selbstchecks / Kompatibilität)
 function randzonePath(edgeName){ return randzoneChain([edgeName]); }
+// Enthält die Kette die Verteilerwand, wird sie dort in zwei Arme geteilt:
+// jeder Arm beginnt beim Verteiler. Sonst müsste die Zuleitung bis ans ferne
+// Kettenende laufen — direkt auf der ersten Randzonenbahn (Rohr auf Rohr).
+function splitChainAtManifold(chain,mx){
+  const i=chain.indexOf('bottom');
+  if(i<0) return [chain];
+  const s=edgeSpan('bottom');
+  if(mx<=s.a.x+1||mx>=s.b.x-1) return [chain];        // Verteiler am Kettenende
+  const Mp={x:mx,y:s.a.y};
+  // Beide Arme starten am Verteiler. Kanten vor 'bottom' laufen dabei rückwärts.
+  const rev=e=>{ const t=edgeSpan(e); return {e,a:t.b,b:t.a}; };
+  const leftArm  = [{e:'bottom',a:Mp,b:s.a}, ...chain.slice(0,i).reverse().map(rev)];
+  const rightArm = [{e:'bottom',a:Mp,b:s.b}, ...chain.slice(i+1)];
+  return [leftArm,rightArm];
+}
 
 // ================= Fillet: Ecken runden + korrekte Bogenlänge =================
 // Gibt {ops, length, minR}. Bogenlänge = r * Ablenkwinkel (analytisch).
@@ -603,15 +633,32 @@ function routeVia(a,b,lane){
   const overNotch = n && n.y0<=1 && yC<n.y1;
   const yHi = overNotch ? n.y1+(yC-(S.edgeGap+randWidth()+omegaClear()))+LANE()/2 : yC;
   const yFor = x => (overNotch && x>n.x0-1 && x<n.x1+1) ? yHi : yC;
+  // Höhenwechsel als 45°-Schräge in Laufrichtung: zwei 45°-Ecken statt zweier
+  // rechtwinkliger. Reicht der Platz nicht, bleibt es rechtwinklig.
+  const dir = b.x>=a.x ? 1 : -1;
+  const room = Math.abs(b.x-a.x);
+  const ramp=(x,y0,y1,sign)=>{                // Schräge von y0 auf y1 ab x
+    const d=Math.abs(y1-y0);
+    if(d<1e-6) return x;
+    if(d*2>room) { put({x,y:y1}); return x; }  // zu eng -> rechtwinklig
+    put({x,y:y0}); put({x:x+sign*d,y:y1});
+    return x+sign*d;
+  };
   put(a);
-  put({x:a.x,y:yFor(a.x)});
+  let cx = ramp(a.x, a.y, yFor(a.x), dir);
   if(yFor(a.x)!==yFor(b.x)){                  // Höhenwechsel an der Notch-Kante
     const edgeX = (a.x<b.x) ? (a.x<n.x0 ? n.x0 : n.x1) : (a.x>n.x1 ? n.x1 : n.x0);
-    put({x:edgeX,y:yFor(a.x)});
-    put({x:edgeX,y:yFor(b.x)});
+    cx = ramp(edgeX, yFor(a.x), yFor(b.x), dir);
   }
-  put({x:b.x,y:yFor(b.x)});
-  put(b);
+  // Zielseite: Schräge rückwärts, damit b senkrecht angefahren wird
+  const dEnd=Math.abs(yFor(b.x)-b.y);
+  if(dEnd>1e-6 && dEnd*2<=room){
+    put({x:b.x-dir*dEnd, y:yFor(b.x)});
+    put({x:b.x, y:b.y});
+  }else{
+    put({x:b.x,y:yFor(b.x)});
+    put(b);
+  }
   return pts;
 }
 // Welche Weltwand trägt den Verteiler -> Frame-Rotation.
@@ -653,23 +700,15 @@ function buildLoops(groups){
       // Ecken. Getrennte Ketten (z.B. nur oben + nur unten) werden im wandnahen
       // Kanal verbunden — eine Direktverbindung wäre eine Diagonale quer durch
       // den Raum und ggf. durch den Notch.
-      const FW=frameW(), FH=frameH(), c=S.edgeGap*0.4;
-      const chans=p=>{                       // nächster Punkt im umlaufenden Kanal
-        const cand=[{x:p.x,y:c},{x:p.x,y:FH-c},{x:c,y:p.y},{x:FW-c,y:p.y}];
-        const dist=[p.y,FH-p.y,p.x,FW-p.x].map(Math.abs);
-        return cand[dist.indexOf(Math.min(...dist))];
-      };
-      const parts=edgeChains(frameEdges()).map(ch=>randzoneChain(ch)).filter(p=>p.length);
+      // Ketten am Verteiler in zwei Arme teilen (jeder beginnt dort) und die
+      // Stränge über den Übergangskanal verbinden — mit denselben 45°-Rampen
+      // wie die Anbindeleitungen, statt über scharfe wandnahe Ecken.
+      const parts=edgeChains(frameEdges())
+        .flatMap(ch=>splitChainAtManifold(ch,M.x))
+        .map(ch=>randzoneChain(ch)).filter(p=>p.length);
       let rz=[];
       parts.forEach(p=>{
-        if(rz.length){
-          const a=rz[rz.length-1], b=p[0], ca=chans(a), cb=chans(b);
-          rz.push(ca);
-          if(Math.abs(ca.x-cb.x)>1&&Math.abs(ca.y-cb.y)>1)      // um die Ecke
-            rz.push({x:(Math.abs(ca.x-c)<1||Math.abs(cb.x-c)<1)?c:FW-c,
-                     y:(Math.abs(ca.y-c)<1||Math.abs(cb.y-c)<1)?c:FH-c});
-          rz.push(cb);
-        }
+        if(rz.length) rz.push(...routeVia(rz[rz.length-1],p[0],-1).slice(1,-1));
         rz=rz.concat(p);
       });
       raw[owner].rand=rz;
@@ -696,8 +735,18 @@ function buildLoops(groups){
   // Fern -> innerste Spur: die Korridor-Spans schachteln sich um M.x, dadurch
   // muss keine Stichleitung über eine fremde Spur steigen.
   conns.sort((a,b)=>Math.abs(b.t.x-M.x)-Math.abs(a.t.x-M.x));
-  const laneOf={};
-  conns.forEach((c,i)=>{ c.lane=Math.min(i,laneCount()-1); laneOf[c.r.gi+'/'+c.kind]=c.lane; });
+  const laneOf={}, portOf={};
+  // Jede Leitung bekommt einen eigenen Abgang am Verteilerbalken. Liefen alle
+  // auf denselben Punkt, träfen sich dort zwangsläufig alle Rohre.
+  const nP=conns.length, pitch=Math.max(S.pipeDia*2,LANE()/2);
+  conns.forEach((c,i)=>{
+    c.lane=Math.min(i,laneCount()-1);
+    laneOf[c.r.gi+'/'+c.kind]=c.lane;
+    // Abgänge in Spur-Reihenfolge auffächern: innere Spur -> äußerer Abgang,
+    // dann laufen Stich und Abgang in derselben Ordnung und kreuzen sich nicht
+    const off=(i-(nP-1)/2)*pitch;
+    portOf[c.r.gi+'/'+c.kind]={x:Math.min(Math.max(M.x+off,pitch),frameW()-pitch),y:M.y};
+  });
 
   // Stufe 3: routen, zusammensetzen und aus dem Frame zurückdrehen
   const back=p=>{ const q=rotBack(p,S.W,S.H); return p.arc?{...q,arc:p.arc}:q; };
@@ -711,8 +760,9 @@ function buildLoops(groups){
     r.joins.slice().reverse().forEach(j=>{
       field.splice(j.at,0,...routeVia(j.from,j.to,-1).slice(1,-1));
     });
-    const leadIn  = routeVia(M,r.head,L('in'));
-    const leadOut = routeVia(M,r.tail,L('out')).reverse();
+    const P=kind=>portOf[r.gi+'/'+kind]??M;
+    const leadIn  = routeVia(P('in'),r.head,L('in'));
+    const leadOut = routeVia(P('out'),r.tail,L('out')).reverse();
     const mid = (r.rand.length&&r.field.length)
       ? routeVia(r.rand[r.rand.length-1],r.field[0],L('mid')).slice(1,-1) : [];
     const pts=[...leadIn.slice(0,-1),...r.rand,...mid,...field,...leadOut.slice(1)];
@@ -981,6 +1031,12 @@ function selfChecks(){
   });
   S.loopMode=bs;S.s=bss;curLoopCount=bc;
   A(`Spiralen kreuzungsfrei (${cases} Größen, 0 Overlaps)`,xc===0&&cases>0);
+  // HARTE REGEL: keine Schlaufe kreuzt sich oder eine andere. Zufalls-Bench,
+  // deterministisch geseedet. Für tiefere Läufe in der Konsole:
+  //   crossingBench(500)  -> Liste der fehlschlagenden Parametersets
+  const N=40, bench=crossingBench(N);
+  A(`Bench: ${N} Zufallssets kreuzungsfrei (${bench.length} Fehler)`,bench.length===0);
+  if(bench.length) console.warn('Kreuzungs-Bench, erste Fehlschläge:',bench.slice(0,5));
   // Doppelspirale: Vor- und Rücklauf um s versetzt (Gegenstrom)
   const ins0={l:200,r:200,t:200,b:200};
   const ds=doubleSpiral({x0:0,y0:0,w:4000,h:3000},ins0,150);
@@ -1044,6 +1100,59 @@ function heatCoverage(loops,reach){
   return total? hit/total : 0;
 }
 
+// ================= Kreuzungs-Bench (harte Regel) =================
+// KEINE Schlaufe darf sich kreuzen — weder mit sich selbst noch mit einer
+// anderen. Wird über zufällige Parametersets geprüft (deterministischer PRNG,
+// damit ein Fehlschlag reproduzierbar bleibt).
+function loopCrossings(plan){
+  let n=0;
+  plan.loops.forEach(l=>{ n+=fieldCrossings(l.pts).length; });
+  for(let i=0;i<plan.loops.length;i++)for(let j=i+1;j<plan.loops.length;j++)
+    n+=crossBetween(plan.loops[i].pts,plan.loops[j].pts).length;
+  return n;
+}
+function crossingBench(n,seed){
+  let s=(seed||20260725)>>>0;
+  const rnd=()=>{s=(s*1664525+1013904223)>>>0; return s/4294967296;};
+  const pick=a=>a[Math.floor(rnd()*a.length)];
+  const save=JSON.parse(JSON.stringify({W:S.W,H:S.H,notchA:S.notchA,notchB:S.notchB,
+    notchLeft:S.notchLeft,s:S.s,bendRadius:S.bendRadius,pipeDia:S.pipeDia,edgeGap:S.edgeGap,
+    randSpacing:S.randSpacing,randPasses:S.randPasses,windowEdges:S.windowEdges,
+    loopMode:S.loopMode,manifold:S.manifold}));
+  const fails=[];
+  for(let i=0;i<n;i++){
+    S.W=1500+Math.round(rnd()*9000/50)*50;
+    S.H=1500+Math.round(rnd()*5000/50)*50;
+    const withNotch=rnd()<0.7;
+    S.notchA=withNotch?Math.round(rnd()*(S.W*0.7)/50)*50:0;
+    S.notchB=withNotch?Math.round(rnd()*(S.H*0.6)/50)*50:0;
+    S.notchLeft=rnd()<0.5;
+    S.s=75+Math.round(rnd()*225/5)*5;
+    S.bendRadius=20+Math.round(rnd()*100/5)*5;
+    S.pipeDia=[12,14,16,17,20][Math.floor(rnd()*5)];
+    S.edgeGap=30+Math.round(rnd()*170/5)*5;
+    S.randSpacing=20+Math.round(rnd()*180/5)*5;
+    S.randPasses=Math.floor(rnd()*5);
+    S.windowEdges=['bottom','top','left','right'].filter(()=>rnd()<0.45);
+    S.loopMode=pick(['auto','1','2','3']);
+    // Verteiler irgendwo auf die Kontur setzen
+    const room=lRing(0,0,S.W,S.H,S.notchA,S.notchB);
+    const k=Math.floor(rnd()*room.length), a=room[k], b=room[(k+1)%room.length], t=rnd();
+    S.manifold={x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t};
+    let plan,x=0;
+    try{ plan=autofit(); x=loopCrossings(plan); }
+    catch(e){ fails.push({err:String(e),cfg:{W:S.W,H:S.H,notchA:S.notchA,notchB:S.notchB,
+      s:S.s,bendRadius:S.bendRadius,randPasses:S.randPasses,win:S.windowEdges.join('+'),
+      mode:S.loopMode,mf:`${Math.round(S.manifold.x)},${Math.round(S.manifold.y)}`}}); continue; }
+    if(x>0) fails.push({cross:x,cfg:{W:S.W,H:S.H,notchA:S.notchA,notchB:S.notchB,
+      notchLeft:S.notchLeft,s:S.s,bendRadius:S.bendRadius,pipeDia:S.pipeDia,edgeGap:S.edgeGap,
+      randSpacing:S.randSpacing,randPasses:S.randPasses,win:S.windowEdges.join('+')||'-',
+      mode:S.loopMode,mf:`${Math.round(S.manifold.x)},${Math.round(S.manifold.y)}`}});
+  }
+  Object.assign(S,save);
+  return fails;
+}
+
 // Eingabe-Plausibilität: harte Fehler, die einen unbrauchbaren Plan erzeugen.
 function validate(plan){
   const errs=[];
@@ -1069,7 +1178,9 @@ function recompute(){
   // Ebenfalls hart: parallele Rohre dichter als der Rohr-Ø (unsichtbar für
   // den Kreuzungstest, deshalb eigener Detektor). Nur Feld/Randzone/Kanal —
   // Anbindeleitungen laufen am Verteiler gewollt gebündelt (Baupraxis).
-  plan.parOv = parallelOverlaps(plan.loops.map(l=>[...(l.rand||[]),...(l.mid||[]),...(l.field||[])]),M);
+  // Ganzer Kreis inkl. Anbindeleitungen: eine Zuleitung, die auf einer
+  // Randzonenbahn entlangläuft, ist ebenso Rohr-auf-Rohr wie zwei Feldbahnen.
+  plan.parOv = parallelOverlaps(plan.loops.map(l=>l.pts),M);
   // Getrennt gezählt: Anbindeleitungen. Kreuzungen dort sind Baupraxis
   // (Rohre werden am Verteiler übereinander geführt), kein Planungsfehler.
   plan.leadCross = plan.loops.flatMap(l=>fieldCrossings(l.pts,M))
