@@ -554,7 +554,7 @@ function niceFactor(raw){
   return ELLIPSE_FACTORS[ELLIPSE_FACTORS.length-1];
 }
 
-const M={ pts:[], walls:[], meas:[], mode:'point', sel:[], fit:null, an:null, sugg:[], drag:null, dragMode:null };
+const M={ pts:[], walls:[], meas:[], mode:'point', sel:[], fit:null, an:null, sugg:[], drag:null, dragMode:null, highlight:null };
 
 // Ein Zustand ist genau das, was der Nutzer eingegeben hat: Punkte, Waende,
 // Messungen. Fit und Analyse werden daraus jederzeit neu gerechnet und
@@ -709,9 +709,14 @@ function render(){
     ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
   });
   // Messungen
-  ctx.strokeStyle='#3a7'; ctx.lineWidth=1*dpr; ctx.setLineDash([6*dpr,4*dpr]);
+  ctx.setLineDash([6*dpr,4*dpr]);
   C.activeMeas(M.meas).forEach(m=>{
     if(I[m.a]==null||I[m.b]==null) return;
+    // Hervorhebung: Tabellenzeile oder Vorschlag im Panel gehovert - Paar ist
+    // ungerichtet, A→B und B→A meinen dieselbe Strecke.
+    const hl = M.highlight && ((M.highlight.a===m.a&&M.highlight.b===m.b)||(M.highlight.a===m.b&&M.highlight.b===m.a));
+    ctx.strokeStyle = hl ? '#063' : '#3a7';
+    ctx.lineWidth   = (hl?3:1)*dpr;
     const p=toScr(P[I[m.a]]), q=toScr(P[I[m.b]]);
     ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
   });
@@ -720,9 +725,13 @@ function render(){
   // gruenen vorhandenen - Rot gegen Gruen allein waere fuer Rotgruenblinde
   // nicht unterscheidbar.
   if(M.sugg.length){
-    ctx.strokeStyle='#d33'; ctx.lineWidth=1.5*dpr;
     M.sugg.forEach(sg=>{
       if(I[sg.a]==null||I[sg.b]==null) return;
+      // Analog zu den Messungen: dieselbe ungerichtete Paarpruefung gegen
+      // M.highlight, nur dunkleres Rot statt dunkleres Gruen.
+      const hl = M.highlight && ((M.highlight.a===sg.a&&M.highlight.b===sg.b)||(M.highlight.a===sg.b&&M.highlight.b===sg.a));
+      ctx.strokeStyle = hl ? '#900' : '#d33';
+      ctx.lineWidth   = (hl?3:1.5)*dpr;
       const p=toScr(P[I[sg.a]]), q=toScr(P[I[sg.b]]);
       ctx.setLineDash(sg.why==='bestimmt' ? [2*dpr,4*dpr] : [1*dpr,6*dpr]);
       ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
@@ -1131,6 +1140,10 @@ function renderPanel(){
   rows.forEach(({m,i,w})=>{
     const tr=document.createElement('tr');
     if(suspects.has(i)) tr.className='worst';
+    // Verknuepfung zur Zeichnung: Zeile gehovert -> die zugehoerige Strecke
+    // wird im Plan hervorgehoben (siehe render(), Messungen-Block).
+    tr.onmouseenter=()=>{ M.highlight={a:m.a,b:m.b}; render(); };
+    tr.onmouseleave=()=>{ M.highlight=null; render(); };
     const red=M.an?M.an.red[i]:null;
     const v=M.an?M.an.v[i]:null;
     tr.innerHTML=
@@ -1191,10 +1204,15 @@ function renderPanel(){
   const P=M.drag?M.pts:(M.fit?M.fit.pts:M.pts), I=C.idx(P);
   const sg=document.getElementById('sugg');
   const list=M.sugg;
+  // Als Knoepfe statt reinem Text: Hover verknuepft mit der Zeichnung (wie bei
+  // den Tabellenzeilen), Klick oeffnet die Eingabe direkt fuer dieses Paar -
+  // ohne den Umweg ueber zwei Punktklicks im Plan.
   const grp=(t,w)=>{
     const e=list.filter(s=>s.why===w);
-    return e.length ? `<div style="margin-bottom:6px"><b>${t}</b><br>`
-      + e.map(s=>`${s.a} ↔ ${s.b}`).join(' &nbsp; ') + '</div>' : '';
+    if(!e.length) return '';
+    return `<div style="margin-bottom:6px"><b>${t}</b><br>`
+      + e.map((s,i)=>`<button class="sg" data-a="${s.a}" data-b="${s.b}">${s.a} ↔ ${s.b}${s.repeat?' (nochmal)':''}</button>`).join(' ')
+      + '</div>';
   };
   if(!M.an) sg.textContent='—';
   else if(!list.length)
@@ -1203,6 +1221,11 @@ function renderPanel(){
       : 'Nichts mehr nötig.';
   else sg.innerHTML = grp('Damit der Raum bestimmt ist:','bestimmt')
                     + grp('Damit die Messungen prüfbar werden:','pruefbar');
+  sg.querySelectorAll('button.sg').forEach(b=>{
+    b.onmouseenter=()=>{ M.highlight={a:b.dataset.a,b:b.dataset.b}; render(); };
+    b.onmouseleave=()=>{ M.highlight=null; render(); };
+    b.onclick=()=>{ M.highlight=null; enterMeasurement(b.dataset.a, b.dataset.b); };
+  });
 
   // --- Wandlängen
   document.getElementById('wl').textContent = M.walls
