@@ -1477,7 +1477,11 @@ function fillet(pts,r){
 //
 // Vorgegebene Boegen (Omega-Kehren, U-Turn) bleiben Boegen und tragen ihren
 // Radius selbst.
-function pathCurve(pts){
+// clampRoom: die Handle-Laenge notfalls verkleinern, bis die Kurve im Raum
+// bleibt. Nur fuer echte Plaene einschalten — die Selbstchecks pruefen pathCurve
+// mit synthetischen Koordinaten, die ausserhalb des eingestellten Raums liegen,
+// und wuerden dann alle zu Geraden.
+function pathCurve(pts,clampRoom){
   const ops=[]; let length=0, minR=Infinity;
   if(!pts.length) return {ops,length,minR};
   ops.push({kind:'move',to:pts[0]});
@@ -1543,9 +1547,33 @@ function pathCurve(pts){
       const defl=Math.acos(Math.max(-1,Math.min(1,dot(u,v)/(lu*lv))));
       return Math.max(0,Math.cos(defl/2));
     };
-    const k1=d3*taper(p0,p1,p2), k2=d3*taper(p1,p2,p3);
-    const c1={x:p1.x+t1.x*k1, y:p1.y+t1.y*k1};
-    const c2={x:p2.x-t2.x*k2, y:p2.y-t2.y*k2};
+    let k1=d3*taper(p0,p1,p2), k2=d3*taper(p1,p2,p3);
+    const mk=(a,b)=>[{x:p1.x+t1.x*a, y:p1.y+t1.y*a},{x:p2.x-t2.x*b, y:p2.y-t2.y*b}];
+    let [c1,c2]=mk(k1,k2);
+    if(clampRoom){
+      // Ausbeulen ueber die Wand ist kein Darstellungsdetail: so liesse sich das
+      // Rohr nicht verlegen. Die Verjuengung ueber cos(defl/2) allein genuegt
+      // nicht — gemessen lagen 45 Schleifen ausserhalb, davon nur 12 schon auf
+      // den Stuetzpunkten, im schlimmsten Fall 321 mm unter dem Fussboden.
+      // Deshalb hier hart nachgeregelt: Handle halbieren, bis die abgetastete
+      // Kurve drin ist. Bei Faktor 0 ist sie die Gerade zwischen den
+      // Stuetzpunkten, also genau der Streckenzug — der wird ohnehin geprueft,
+      // die Schleife endet also garantiert.
+      const inside=(a,b)=>{
+        for(let k=1;k<8;k++){ const t=k/8,u=1-t;
+          const q={x:u*u*u*p1.x+3*u*u*t*a.x+3*u*t*t*b.x+t*t*t*p2.x,
+                   y:u*u*u*p1.y+3*u*u*t*a.y+3*u*t*t*b.y+t*t*t*p2.y};
+          if(!pointInRoom(q)) return false; }
+        return true;
+      };
+      if(pointInRoom(p1)&&pointInRoom(p2)){
+        let f=1;
+        for(let it=0;it<8&&!inside(c1,c2);it++){
+          f*=0.5; [c1,c2]=mk(k1*f,k2*f);
+        }
+        if(!inside(c1,c2)){ c1={...p1}; c2={...p2}; }   // Gerade
+      }
+    }
     ops.push({kind:'cubic',c1,c2,to:p2});
     let prev=p1;
     for(let k=1;k<=8;k++){ const t=k/8, u=1-t;
@@ -1923,7 +1951,7 @@ function buildLoops(groups,ownerOverride,connOrder){
     // Toleranz 0,5*R gemessen als beste von 25 mm / 0,5R / s / R
     // (medianRadius 27 / 35 / 33 / 33 bei covFails 4 / 3 / 5 / 3).
     pts=smoothToRadius(dedupePath(pts,0.5*R),R,40);
-    const f=pathCurve(pts);
+    const f=pathCurve(pts,true);
     return {...l, pts, length:f.length, minR:f.minR};
   }).filter(l=>l.pts.length>1);
   // Zahl der Anbindungen am Array mitgeben: fitLanes braucht sie, um ueber die
@@ -2476,7 +2504,7 @@ function draw(plan){
   const opsToD=ops=>ops.map(o=>o.kind==='move'?`M ${PP(o.to)}`:o.kind==='line'?`L ${PP(o.to)}`
       :o.kind==='cubic'?`C ${PP(o.c1)} ${PP(o.c2)} ${PP(o.to)}`
       :`A ${o.r.toFixed(1)} ${o.r.toFixed(1)} 0 ${o.large?1:0} ${sweep(o.cw)} ${PP(o.to)}`).join(' ');
-  const path=(pts,stroke,sw)=>pts.length<2?'':`<path d="${opsToD(pathCurve(pts).ops)}" fill="none" stroke="${stroke}" stroke-width="${sw}" stroke-linejoin="round" stroke-linecap="round"/>`;
+  const path=(pts,stroke,sw)=>pts.length<2?'':`<path d="${opsToD(pathCurve(pts,true).ops)}" fill="none" stroke="${stroke}" stroke-width="${sw}" stroke-linejoin="round" stroke-linecap="round"/>`;
   const line=(a,b,stroke,sw,dash='')=>`<line x1="${X(a.x)}" y1="${Y(a.y)}" x2="${X(b.x)}" y2="${Y(b.y)}" stroke="${stroke}" stroke-width="${sw}" ${dash}/>`;
 
   const room=lRing(0,0,W,H,S.notchA,S.notchB);
@@ -3443,7 +3471,7 @@ function pointInRoom(p){
 function drawnPoints(pts){
   const out=[];
   let cur=null;
-  for(const o of pathCurve(pts).ops){
+  for(const o of pathCurve(pts,true).ops){
     if(o.kind==='move'||o.kind==='line'){ cur=o.to; out.push(cur); continue; }
     if(o.kind==='cubic'){
       const a=cur;
