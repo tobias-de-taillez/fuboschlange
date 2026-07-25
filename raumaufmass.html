@@ -38,6 +38,7 @@
   <table id="tbl"><thead><tr>
     <th>von→nach</th><th>d [m]</th><th>v [mm]</th><th>Red.</th><th>w</th><th></th>
   </tr></thead><tbody></tbody></table>
+  <div id="why" style="color:#666;font-size:12px;margin-top:4px"></div>
   <h3>Noch messen</h3>
   <div id="sugg"></div>
   <h3>Export</h3>
@@ -443,6 +444,18 @@ globalThis.CORE={ TOL_RANK, TOL_RED, TOL_MODE, SIGMA_DEF, SUGGEST_CHECK_MAX,
 <script id="ui">
 "use strict";
 const C=globalThis.CORE;
+
+// ================= UI-Konstanten =================
+// Schwellwerte fuer die Ausreisser-Markierung in renderPanel(): eine Zeile
+// gilt nur dann als eindeutig verdaechtig, wenn ihr w klar (Faktor
+// WORST_MARGIN) vor dem naechstkleineren liegt UND selbst spuerbar ueber
+// WORST_MIN_W liegt. Ohne beide Schwellen entscheidet Rundungsstaub, welche
+// Messung angeklagt wird: bei Redundanz 1 sind alle w mathematisch gleich
+// gross (w_i = |c|/sigma_i fuer jedes i - eine Identitaet, kein Zufall), bei
+// einem perfekten Fit sind alle w exakt 0. Siehe task-11-report.md.
+const WORST_MARGIN = 1.5;  // groesstes w muss mind. das 1.5-fache des naechsten sein
+const WORST_MIN_W   = 0.5; // ...und dabei spuerbar ueber Konvergenzrauschen liegen
+
 const M={ pts:[], walls:[], meas:[], mode:'point', sel:[], fit:null, an:null, drag:null };
 
 // --- Punkt-IDs: A..Z, dann AA, AB, ...
@@ -630,9 +643,19 @@ function renderPanel(){
   const tb=document.querySelector('#tbl tbody');
   tb.innerHTML='';
   const act=C.activeMeas(M.meas);
-  // Index des groessten normierten Residuums = wahrscheinlichster Ausreisser
+  // Groesstes normiertes Residuum = Kandidat fuer den wahrscheinlichsten
+  // Ausreisser - aber nur markieren, wenn er sich klar (WORST_MARGIN) vom
+  // naechstkleineren abhebt und selbst spuerbar (WORST_MIN_W) ueber 0 liegt.
+  // Sonst entscheidet Rundungsstaub, welche Messung angeklagt wird: bei
+  // Redundanz 1 sind alle w mathematisch gleich gross, bei einem perfekten
+  // Fit sind alle w exakt 0 (siehe Konstanten-Kommentar oben).
   let worst=-1;
   if(M.an) M.an.w.forEach((x,i)=>{ if(x!=null && (worst<0 || x>M.an.w[worst])) worst=i; });
+  if(worst>=0){
+    const rest=M.an.w.filter((x,i)=>x!=null && i!==worst);
+    const runnerUp=rest.length ? Math.max(...rest) : 0;
+    if(!(M.an.w[worst]>WORST_MIN_W && M.an.w[worst]>WORST_MARGIN*runnerUp)) worst=-1;
+  }
 
   // absteigend nach w sortiert anzeigen, aber die Originalindizes behalten
   const rows=act.map((m,i)=>({m,i,w:M.an?M.an.w[i]:null}));
@@ -672,6 +695,20 @@ function renderPanel(){
     tr.getElementsByTagName('button')[0].onclick=()=>{ m.on=true; recompute(); };
     tb.appendChild(tr);
   });
+
+  // Wenn Messungen zwar Residuen haben, aber keine Zeile markiert wurde, ist
+  // das kein Darstellungsfehler, sondern eine ehrliche Auskunft: Die Zahlen
+  // reichen nicht, um eine bestimmte Messung herauszugreifen. Ohne diesen
+  // Satz saehe die Tabelle aus wie eine Tabelle ohne Befund. Nicht zeigen bei
+  // Redundanz 0 (eigene Statuszeile + eigene Badges) und nicht bei einem
+  // perfekten Fit (alle w exakt 0 - kein Befund, keine Erklaerung noetig).
+  const anyResidual=M.an && M.an.w.some(x=>x!=null && x>WORST_MIN_W);
+  const showWhy=M.an && M.an.redundancy>0 && worst<0 && anyResidual;
+  const why=document.getElementById('why');
+  why.textContent = showWhy
+    ? 'Kein Ausreißer eingrenzbar — die normierten Residuen fallen praktisch gleich groß aus; erst eine weitere Messung würde sie trennen.'
+    : '';
+  why.style.display = showWhy ? '' : 'none';
 }
 recompute();
 </script>
