@@ -1132,6 +1132,25 @@ function doubleSpiralField(poly,insOf,s,gate){
   // gemessen wurde (Kreuzungen 57 -> 103).
   // Ebenfalls gemessen und verworfen: ein zusätzliches resampleArc auf dem
   // zusammengesetzten Pfad. medianRadius 3 -> 5, aber covFails 322 -> 333.
+  // ATTRIBUTION DES RADIUS-GATES, Runde 16, ueber alle 20 Bench-Laeufe:
+  // die engste Stelle liegt in 15 von 19 Faellen im FELD, in 3 im leadIn, in 1
+  // in der Randzone. Und 11 der 19 haben DIESELBE Signatur — Ablenkung 144-155
+  // Grad mit EINEM Nachbarsegment von 140 bis 240 mm, also 1,7 bis 2,4·s:
+  //   s 110  defl 152  ab 527  bc 237  soll 100  ist 58
+  //   s  80  defl 155  ab 1035 bc 192  soll  85  ist 42
+  //   s 105  defl 145  ab 4650 bc 181  soll  85  ist 58
+  //   s  80  defl 145  ab 380  bc 140  soll  70  ist 44
+  // 1,7·s ist exakt die Sprungweite Ring k -> k+2 an der Naht (siehe die
+  // Treppen-Rechnung oben). pathCurve deckelt dort auf bc/tan(defl/2), fuer
+  // 145 Grad also auf bc/3,17 — bei bc = 1,7·s sind das 0,54·s.
+  //
+  // Damit ist die Runde-10-Formulierung "die Naht ist nicht die Hauptursache"
+  // praeziser zu fassen: sie war fuer die damals geprueften Naht-VARIANTEN
+  // richtig (Ringlaenge umverteilen, Bruecke einspannen), aber der Sprung selbst
+  // IST die haeufigste engste Stelle. Was ihn beseitigt, ist nicht eine bessere
+  // Kehre, sondern gar keine Kehre: die Morphung oben hat radFails 19 -> 17 und
+  // crossFails 18 -> 17 gebracht, beides Bestwerte, und scheitert allein an der
+  // Deckung.
   const seamCut=r=>{
     let bi=0,bt=0,bd=Infinity;
     for(let i=0;i<r.length;i++){
