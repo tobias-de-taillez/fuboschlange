@@ -2542,8 +2542,8 @@ function crossingBench(n,seed){
     const room=lRing(0,0,S.W,S.H,S.notchA,S.notchB);
     const k=Math.floor(rnd()*room.length), a=room[k], b=room[(k+1)%room.length], t=rnd();
     S.manifold={x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t};
-    let plan,x=0,cov=0;
-    try{ plan=autofit(); x=loopCrossings(plan)+loopsOutside(plan);
+    let plan,x=0,cov=0,outside=0;
+    try{ plan=autofit(); x=loopCrossings(plan); outside=loopsOutside(plan);
          cov=heatCoverage(plan.loops,25); }
     catch(e){ fails.push({err:String(e),cfg:{W:S.W,H:S.H,notchA:S.notchA,notchB:S.notchB,
       s:S.s,bendRadius:S.bendRadius,randPasses:S.randPasses,win:S.windowEdges.join('+'),
@@ -2554,7 +2554,7 @@ function crossingBench(n,seed){
     // Biegeradius nie unter 5x Rohr-Durchmesser.
     const minR=Math.min(Infinity,...plan.loops.map(l=>l.minR??Infinity));
     const covFail=cov<0.40, radFail=isFinite(minR)&&minR<S.bendRadius-1;
-    if(x>0||covFail||radFail) fails.push({cross:x,cov:Math.round(cov*100),
+    if(x>0||outside>0||covFail||radFail) fails.push({cross:x,outside,cov:Math.round(cov*100),
       minR:isFinite(minR)?Math.round(minR):null, radSoll:S.bendRadius,
       cfg:{W:S.W,H:S.H,notchA:S.notchA,notchB:S.notchB,
       notchLeft:S.notchLeft,s:S.s,bendRadius:S.bendRadius,pipeDia:S.pipeDia,edgeGap:S.edgeGap,
