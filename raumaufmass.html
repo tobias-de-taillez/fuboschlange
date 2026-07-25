@@ -544,6 +544,38 @@ function niceFactor(raw){
 
 const M={ pts:[], walls:[], meas:[], mode:'point', sel:[], fit:null, an:null, drag:null };
 
+// Ein Zustand ist genau das, was der Nutzer eingegeben hat: Punkte, Waende,
+// Messungen. Fit und Analyse werden daraus jederzeit neu gerechnet und
+// gehoeren deshalb nicht hinein.
+const serialize=()=>JSON.stringify({
+  pts:M.pts.map(p=>({id:p.id,x:p.x,y:p.y})),
+  walls:M.walls.map(w=>[...w]),
+  meas:M.meas.map(m=>({...m})),
+  idSeq,
+});
+function deserialize(o){
+  M.pts=o.pts.map(p=>({...p}));
+  M.walls=o.walls.map(w=>[...w]);
+  M.meas=o.meas.map(m=>({...m}));
+  if(typeof o.idSeq==='number') idSeq=o.idSeq;
+  M.sel=[]; M.drag=null; M.fit=null; M.an=null;
+}
+
+const UNDO_MAX=60;
+const undoStack=[];
+// Vor jeder Aenderung aufrufen, nicht danach - der Stapel haelt den Zustand
+// VOR dem Schritt, sonst macht das erste Undo nichts.
+function snapshot(){
+  undoStack.push(serialize());
+  if(undoStack.length>UNDO_MAX) undoStack.shift();
+}
+function undo(){
+  if(!undoStack.length) return false;
+  deserialize(JSON.parse(undoStack.pop()));
+  recompute();
+  return true;
+}
+
 // --- Punkt-IDs: A..Z, dann AA, AB, ...
 // Der Zaehler laeuft monoton und wird beim Loeschen NICHT zurueckgesetzt.
 // Waere er an M.pts.length gebunden, ergaebe "A,B,C anlegen, B loeschen,
@@ -690,8 +722,8 @@ cv.addEventListener('mousedown',e=>{
   const w=toWorld((e.clientX-r.left)*dpr, (e.clientY-r.top)*dpr);
   const h=hit(w.x,w.y);
   if(M.mode==='point'){
-    if(h){ M.drag=h.id; return; }
-    M.pts.push({id:nextId(), x:w.x, y:w.y}); recompute(); return;
+    if(h){ snapshot(); M.drag=h.id; return; }
+    snapshot(); M.pts.push({id:nextId(), x:w.x, y:w.y}); recompute(); return;
   }
   if(!h) return;
   M.sel.push(h.id);
@@ -701,12 +733,13 @@ cv.addEventListener('mousedown',e=>{
     if(M.mode==='wall'){
       const k=[a,b].sort().join('|');
       const at=M.walls.findIndex(w2=>[w2[0],w2[1]].sort().join('|')===k);
+      snapshot();
       if(at>=0) M.walls.splice(at,1); else M.walls.push([a,b]);   // Klick toggelt
       recompute();
     } else {
       const s=prompt(`Abstand ${a}–${b} in mm:`);
       const d=parseFloat((s||'').replace(',','.'));
-      if(isFinite(d) && d>0) M.meas.push({a,b,d,sigma:C.SIGMA_DEF,on:true});
+      if(isFinite(d) && d>0){ snapshot(); M.meas.push({a,b,d,sigma:C.SIGMA_DEF,on:true}); }
       else if(s!==null) alert('Ungültig: Abstand muss eine Zahl größer 0 sein.');
       recompute();
     }
@@ -723,6 +756,7 @@ cv.addEventListener('contextmenu',e=>{
   const w=toWorld((e.clientX-r.left)*dpr, (e.clientY-r.top)*dpr);
   const h=hit(w.x,w.y);
   if(!h) return;
+  snapshot();
   M.pts=M.pts.filter(p=>p.id!==h.id);
   M.walls=M.walls.filter(([a,b])=>a!==h.id&&b!==h.id);
   M.meas=M.meas.filter(m=>m.a!==h.id&&m.b!==h.id);
@@ -761,6 +795,11 @@ document.querySelectorAll('#modes button').forEach(b=>{
 addEventListener('keydown',e=>{
   const t=e.target;
   if(t && (t.tagName==='INPUT' || t.tagName==='TEXTAREA' || t.isContentEditable)) return;
+  if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='z'){
+    e.preventDefault();
+    if(!undo()) document.getElementById('hint').textContent='Nichts mehr rückgängig zu machen.';
+    return;
+  }
   const b=document.querySelector(`#modes button[data-mode="${
     {1:'point',2:'wall',3:'measure'}[e.key]}"]`);
   if(b) b.click();
@@ -871,12 +910,12 @@ function renderPanel(){
     const [inp]=tr.getElementsByTagName('input');
     inp.onchange=()=>{
       const d=parseFloat(inp.value.replace(',','.'))*1000;
-      if(isFinite(d)&&d>0){ m.d=d; recompute(); }
+      if(isFinite(d)&&d>0){ snapshot(); m.d=d; recompute(); }
       else { inp.value=fmtM(m.d); alert('Ungültig: Maß muss eine Zahl größer 0 sein.'); }
     };
     const [tog,del]=tr.getElementsByTagName('button');
-    tog.onclick=()=>{ m.on=(m.on===false); recompute(); };
-    del.onclick=()=>{ M.meas.splice(M.meas.indexOf(m),1); recompute(); };
+    tog.onclick=()=>{ snapshot(); m.on=(m.on===false); recompute(); };
+    del.onclick=()=>{ snapshot(); M.meas.splice(M.meas.indexOf(m),1); recompute(); };
     tb.appendChild(tr);
   });
 
@@ -886,7 +925,7 @@ function renderPanel(){
     tr.style.opacity='.45';
     tr.innerHTML=`<td>${m.a}→${m.b}</td><td>${fmtM(m.d)}</td><td>—</td><td>—</td>`+
                  `<td><span class="badge">stillgelegt</span></td><td><button>an</button></td>`;
-    tr.getElementsByTagName('button')[0].onclick=()=>{ m.on=true; recompute(); };
+    tr.getElementsByTagName('button')[0].onclick=()=>{ snapshot(); m.on=true; recompute(); };
     tb.appendChild(tr);
   });
 
