@@ -537,7 +537,7 @@ const GROSS_ERROR_SIGMA = 5; // Vielfaches von sigma, ab dem ein Residuum nicht 
 
 // Ellipsen sind in Wirklichkeit millimetergross, der Raum aber meterweise
 // gezeichnet - unskaliert verschwindet jede Ellipse unter dem Punktmarker
-// (siehe render()). EIN Faktor je Zeichnung haelt die Punkte zueinander
+// (siehe drawCanvas()). EIN Faktor je Zeichnung haelt die Punkte zueinander
 // ehrlich: doppelt so unsicher gemessen muss doppelt so gross gezeichnet
 // werden, nicht jeder Punkt einzeln auf Sichtbarkeit getrimmt. Die Liste ist
 // zugleich die Rundung auf einen sprechbaren Wert (1-2-5-Folge) und der
@@ -688,6 +688,16 @@ function recompute(){
 }
 
 function render(){
+  drawCanvas();
+  renderPanel();
+}
+
+// Reines Zeichnen, ohne die Tabelle anzufassen: ein Hover auf Zeile oder
+// Vorschlag soll nur die Hervorhebung im Plan aktualisieren, nicht das Panel
+// neu aufbauen - sonst zerstoert render() per renderPanel() genau die Zeile,
+// auf der der Cursor gerade steht (ungespeicherte Eingabe weg, Fokus weg,
+// mouseleave feuert nie, weil das Element unter dem Cursor verschwindet).
+function drawCanvas(){
   const dpr=devicePixelRatio||1;
   cv.width=cv.clientWidth*dpr; cv.height=cv.clientHeight*dpr;
   ctx.setTransform(1,0,0,1,0,0);
@@ -821,7 +831,6 @@ function render(){
   // und gar keine Ellipse mehr gezeichnet wird.
   document.getElementById('exagg').innerHTML = exagg!=null
     ? ` &nbsp; Ellipsen ×${exagg} überhöht` : '';
-  renderPanel();
 }
 
 function hit(wx,wy){
@@ -1141,9 +1150,9 @@ function renderPanel(){
     const tr=document.createElement('tr');
     if(suspects.has(i)) tr.className='worst';
     // Verknuepfung zur Zeichnung: Zeile gehovert -> die zugehoerige Strecke
-    // wird im Plan hervorgehoben (siehe render(), Messungen-Block).
-    tr.onmouseenter=()=>{ M.highlight={a:m.a,b:m.b}; render(); };
-    tr.onmouseleave=()=>{ M.highlight=null; render(); };
+    // wird im Plan hervorgehoben (siehe drawCanvas(), Messungen-Block).
+    tr.onmouseenter=()=>{ M.highlight={a:m.a,b:m.b}; drawCanvas(); };
+    tr.onmouseleave=()=>{ M.highlight=null; drawCanvas(); };
     const red=M.an?M.an.red[i]:null;
     const v=M.an?M.an.v[i]:null;
     tr.innerHTML=
@@ -1198,7 +1207,7 @@ function renderPanel(){
 
   // --- Vorschläge, nach Zweck getrennt. Ungetrennt stünden hier fünf Einträge,
   //     während die Statuszeile "3 Messungen fehlen" meldet.
-  // P wie in render() hergeleitet (waehrend eines Drags aus M.pts, sonst aus
+  // P wie in drawCanvas() hergeleitet (waehrend eines Drags aus M.pts, sonst aus
   // dem Fit) und nur einmal berechnet - keine zweite, abweichende Herleitung
   // fuer Vorschlaege und Wandlaengen getrennt.
   const P=M.drag?M.pts:(M.fit?M.fit.pts:M.pts), I=C.idx(P);
@@ -1222,8 +1231,8 @@ function renderPanel(){
   else sg.innerHTML = grp('Damit der Raum bestimmt ist:','bestimmt')
                     + grp('Damit die Messungen prüfbar werden:','pruefbar');
   sg.querySelectorAll('button.sg').forEach(b=>{
-    b.onmouseenter=()=>{ M.highlight={a:b.dataset.a,b:b.dataset.b}; render(); };
-    b.onmouseleave=()=>{ M.highlight=null; render(); };
+    b.onmouseenter=()=>{ M.highlight={a:b.dataset.a,b:b.dataset.b}; drawCanvas(); };
+    b.onmouseleave=()=>{ M.highlight=null; drawCanvas(); };
     b.onclick=()=>{ M.highlight=null; enterMeasurement(b.dataset.a, b.dataset.b); };
   });
 
