@@ -425,7 +425,16 @@ const MANIFOLD_PITCH=50;
 const manifoldBarW=nPorts=>Math.max(0,nPorts-1)*MANIFOLD_PITCH;
 // + LANE/2 Puffer: sonst liegt die äußerste Spur nur LANE/2 unter der ersten
 // Feldbahn — bei 16er Rohr wäre das physische Überlappung.
-const corridorW=()=>laneCount()*LANE()+LANE()/2;
+// Korridorbreite. Der Faktor 0,6 auf die Spurzahl ist GEMESSEN, nicht geraten:
+// seit die Verteilerleiste die Anbindungen monoton ordnet, laufen sie nicht mehr
+// beliebig durcheinander und brauchen weniger Platz. 20 Bench-Laeufe:
+//   Faktor 1,0 (vorher)  crossFails 19  covFails 12  medianCoverage 36 %
+//   Faktor 0,6           crossFails 19  covFails 11  medianCoverage 37 %
+//   Faktor 0,5           crossFails 20  covFails 11  radFails 19
+//   ohne LANE/2-Puffer   crossFails 20  covFails 12
+// Unter 0,6 kippen die Kreuzungen, der Puffer wird gebraucht. Der Korridor wird
+// aus dem Feld herausgeschnitten, jeder Millimeter davon fehlt der Deckung.
+const corridorW=()=>laneCount()*LANE()*0.6+LANE()/2;
 // lane -1 = Übergangskanal für Rechteck->Rechteck-Verbinder. Liegt ZWISCHEN
 // Randzone und Korridor: unterhalb der Randzone würde jeder Verbinder die
 // Fensterbahnen durchstoßen.
