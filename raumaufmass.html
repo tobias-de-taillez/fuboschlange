@@ -25,8 +25,22 @@ function residuals(pts, meas){
   return activeMeas(meas).map(m=>dist(pts[I[m.a]], pts[I[m.b]]) - m.d);
 }
 
+// Zeile je Messung: d|xa-xb|/dxa = +u, d/dxb = -u, alles andere 0.
+function jacobian(pts, meas){
+  const I=idx(pts), n=pts.length;
+  return activeMeas(meas).map(m=>{
+    const a=I[m.a], b=I[m.b], pa=pts[a], pb=pts[b];
+    const L=dist(pa,pb)||1e-9;   // ponytail: zwei deckungsgleiche Punkte sind
+                                 // Eingabefehler, nicht Mathematik - nur kein NaN
+    const ux=(pa.x-pb.x)/L, uy=(pa.y-pb.y)/L;
+    const row=new Array(2*n).fill(0);
+    row[2*a]=ux; row[2*a+1]=uy; row[2*b]=-ux; row[2*b+1]=-uy;
+    return row;
+  });
+}
+
 globalThis.CORE={ TOL_RANK, TOL_RED, TOL_MODE, SIGMA_DEF, SUGGEST_CHECK_MAX,
-                  dist, idx, activeMeas, residuals };
+                  dist, idx, activeMeas, residuals, jacobian };
 </script>
 
 <script id="checks">
@@ -49,6 +63,26 @@ globalThis.selfChecks=function(){
     const pts=[{id:'A',x:0,y:0},{id:'B',x:1000,y:0}];
     const meas=[{a:'A',b:'B',d:900},{a:'A',b:'B',d:800,on:false}];
     chk('residuals: on:false wird ignoriert', C.residuals(pts,meas).length===1);
+  }
+  // --- jacobian ---
+  {
+    const pts=[{id:'A',x:0,y:0},{id:'B',x:1000,y:0}];
+    const J=C.jacobian(pts,[{a:'A',b:'B',d:900}]);
+    chk('jacobian: Form 1x4', J.length===1 && J[0].length===4);
+    chk('jacobian: waagerechte Kante -> [-1,0,1,0]',
+      near(J[0][0],-1,1e-9)&&near(J[0][1],0,1e-9)&&near(J[0][2],1,1e-9)&&near(J[0][3],0,1e-9));
+  }
+  {
+    // Starrbewegungen liegen im Nullraum: J*t = 0 fuer Translation und Drehung
+    const pts=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:1500,y:2500}];
+    const meas=[{a:'A',b:'B',d:4000},{a:'B',b:'C',d:1},{a:'C',b:'A',d:1}];
+    const J=C.jacobian(pts,meas);
+    const tx=[],ty=[],rot=[];
+    pts.forEach(p=>{ tx.push(1,0); ty.push(0,1); rot.push(-p.y,p.x); });
+    const mul=(row,t)=>row.reduce((s,x,i)=>s+x*t[i],0);
+    chk('jacobian: Translation x im Nullraum', J.every(r=>near(mul(r,tx),0,1e-9)));
+    chk('jacobian: Translation y im Nullraum', J.every(r=>near(mul(r,ty),0,1e-9)));
+    chk('jacobian: Drehung im Nullraum',       J.every(r=>near(mul(r,rot),0,1e-9)));
   }
   return {ok, out};
 };
