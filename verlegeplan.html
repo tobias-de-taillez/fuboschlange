@@ -1952,7 +1952,10 @@ function buildLoops(groups,ownerOverride,connOrder){
     // (medianRadius 27 / 35 / 33 / 33 bei covFails 4 / 3 / 5 / 3).
     pts=smoothToRadius(dedupePath(pts,0.5*R),R,40);
     const f=pathCurve(pts,true);
-    return {...l, pts, length:f.length, minR:f.minR};
+    // Einmal je Kreis: Kreuzungstest, Ausserhalb-Zaehler und die Marker im Plan
+    // brauchen alle denselben gezeichneten Pfad. Ohne das Zwischenspeichern
+    // rechnet ihn jeder Aufruf neu, und die Zonen-Suche ruft sie hundertfach.
+    return {...l, pts, drawn:drawnPoints(pts,6), length:f.length, minR:f.minR};
   }).filter(l=>l.pts.length>1);
   // Zahl der Anbindungen am Array mitgeben: fitLanes braucht sie, um ueber die
   // Reihenfolge zu suchen, ohne buildLoops nachzubauen.
@@ -3446,12 +3449,48 @@ function relaxLoops(loops,opt){
 // KEINE Schlaufe darf sich kreuzen — weder mit sich selbst noch mit einer
 // anderen. Wird über zufällige Parametersets geprüft (deterministischer PRNG,
 // damit ein Fehlschlag reproduzierbar bleibt).
+// Kreuzungen auf dem GEZEICHNETEN Pfad, nicht auf dem Streckenzug.
+//
+// Seit der Umstellung auf das Kurvenmodell sind das zwei verschiedene Dinge: die
+// Bezier zwischen zwei Stuetzpunkten weicht seitlich aus und kann eine
+// Nachbarbahn schneiden, wo die Polyline es nicht tut. Gemessen ueber 24
+// Plaene: 62 Kreuzungen auf der Polyline, 854 auf der gezeichneten Kurve — und
+// zwar in ALLEN 24 Plaenen mehr. Der Test hat also gemeldet, was nicht verlegt
+// wird, und der Nutzer sah im Plan Kreuzungen ohne Markierung.
+//
+// Gitterbeschleunigt, weil die gezeichnete Kurve zehnmal so viele Punkte hat und
+// der Test O(n^2) ist. Zellenweite = Bahnabstand: zwei Segmente koennen sich nur
+// schneiden, wenn sie sich eine Zelle teilen.
+function crossHits(paths,near){
+  const R=near?400:0, cell=Math.max(50,S.s), hits=[], grid=new Map(), segs=[];
+  paths.forEach((p,pi)=>{ for(let i=0;i+1<p.length;i++) segs.push({pi,i,a:p[i],b:p[i+1],
+                            last:i===p.length-2}); });
+  segs.forEach((sg,si)=>{
+    const x0=Math.floor(Math.min(sg.a.x,sg.b.x)/cell), x1=Math.floor(Math.max(sg.a.x,sg.b.x)/cell);
+    const y0=Math.floor(Math.min(sg.a.y,sg.b.y)/cell), y1=Math.floor(Math.max(sg.a.y,sg.b.y)/cell);
+    for(let x=x0;x<=x1;x++)for(let y=y0;y<=y1;y++){
+      const k=x*100000+y; let arr=grid.get(k); if(!arr){arr=[];grid.set(k,arr);} arr.push(si);
+    }
+  });
+  const N=segs.length, seen=new Set();
+  for(const arr of grid.values()){
+    for(let u=0;u<arr.length;u++)for(let v=u+1;v<arr.length;v++){
+      const iu=arr[u], iv=arr[v], A=segs[iu], B=segs[iv];
+      // Nachbarsegmente desselben Pfades teilen einen Punkt — keine Kreuzung.
+      if(A.pi===B.pi&&Math.abs(A.i-B.i)<2) continue;
+      // Erstes und letztes Segment eines Kreises treffen sich am Verteiler.
+      if(A.pi===B.pi&&((A.i===0&&B.last)||(B.i===0&&A.last))) continue;
+      const key=iu*N+iv;
+      if(seen.has(key)) continue;
+      seen.add(key);
+      const c=segCrossPt(A.a,A.b,B.a,B.b);
+      if(c&&(!near||len(sub(c,near))>R)) hits.push(c);
+    }
+  }
+  return hits;
+}
 function loopCrossings(plan){
-  let n=0;
-  plan.loops.forEach(l=>{ n+=fieldCrossings(l.pts).length; });
-  for(let i=0;i<plan.loops.length;i++)for(let j=i+1;j<plan.loops.length;j++)
-    n+=crossBetween(plan.loops[i].pts,plan.loops[j].pts).length;
-  return n;
+  return crossHits(plan.loops.map(l=>l.drawn||drawnPoints(l.pts||[],6))).length;
 }
 // Ebenso hart: kein Rohr darf den Raum verlassen (Notch-Aussparung eingeschlossen).
 function pointInRoom(p){
@@ -3468,14 +3507,18 @@ function pointInRoom(p){
 // weit ausserhalb, waehrend die Kurve sauber innen bleibt. Als Testkriterium
 // erzeugt das Fehlalarme, und der Selbstcheck "sauberer Kreis = 0" faellt
 // prompt darauf herein. Stattdessen dicht abtasten.
-function drawnPoints(pts){
+// per = Stuetzpunkte je Kurvenstueck. 12 fuer die Ausserhalb-Pruefung (dort
+// zaehlt jeder Millimeter), 6 genuegt fuer den Kreuzungstest — die Ausbuchtung
+// ist eine glatte Kurve, keine Zacke.
+function drawnPoints(pts,per){
   const out=[];
   let cur=null;
   for(const o of pathCurve(pts,true).ops){
     if(o.kind==='move'||o.kind==='line'){ cur=o.to; out.push(cur); continue; }
     if(o.kind==='cubic'){
       const a=cur;
-      for(let k=1;k<=12;k++){ const t=k/12,u=1-t;
+      const NP=per||12;
+      for(let k=1;k<=NP;k++){ const t=k/NP,u=1-t;
         out.push({x:u*u*u*a.x+3*u*u*t*o.c1.x+3*u*t*t*o.c2.x+t*t*t*o.to.x,
                   y:u*u*u*a.y+3*u*u*t*o.c1.y+3*u*t*t*o.c2.y+t*t*t*o.to.y}); }
       cur=o.to; continue;
@@ -3507,7 +3550,7 @@ function drawnPoints(pts){
 function loopsOutside(plan){
   let n=0;
   plan.loops.forEach(l=>{
-    if(drawnPoints(l.pts||[]).some(q=>!pointInRoom(q))) n++;
+    if((l.drawn||drawnPoints(l.pts||[],6)).some(q=>!pointInRoom(q))) n++;
   });
   return n;
 }
@@ -3711,11 +3754,7 @@ function recompute(){
   // Standardkonfiguration mit Verteiler auf der Oberwand: 10 echte Kreuzungen,
   // alle zwischen Kreis 0 und Kreis 1, acht davon 4,4 bis 4,8 m vom Verteiler
   // entfernt mitten im Feld — und die Anzeige meldete "0 Überlappungen".
-  plan.overlaps = [
-    ...plan.loops.flatMap(l=>fieldCrossings(l.pts)),
-    ...plan.loops.flatMap((l,i)=>plan.loops.slice(i+1)
-        .flatMap(o=>crossBetween(l.pts,o.pts))),
-  ];
+  plan.overlaps = crossHits(plan.loops.map(l=>l.drawn||drawnPoints(l.pts||[],6)));
   // Ebenfalls hart: parallele Rohre dichter als der Rohr-Ø (unsichtbar für
   // den Kreuzungstest, deshalb eigener Detektor). Nur Feld/Randzone/Kanal —
   // Anbindeleitungen laufen am Verteiler gewollt gebündelt (Baupraxis).

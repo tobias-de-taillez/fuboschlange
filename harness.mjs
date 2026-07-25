@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 // steht, also lieber einmal breit als bei jeder Probe nachziehen.
 export const EXPORTS = [
   'crossingBench', 'autofit', 'buildLoops', 'partition', 'bifilarPath',
-  'loopCrossings', 'loopsOutside', 'segsOutside', 'drawnPoints', 'heatCoverage', 'gapMax',
+  'loopCrossings', 'loopsOutside', 'segsOutside', 'crossHits', 'drawnPoints', 'heatCoverage', 'gapMax',
   'zonePolyOf', 'zoneField', 'eikonalField', 'isoContours', 'insetsFor',
   'polyLen', 'simplify', 'fieldInset', 'spacingAt', 'lRing', 'chainSegs',
   'rectiOffsetter', 'randW', 'omegaClear', 'randWidth', 'notchFrame', 'doubleSpiralField',
