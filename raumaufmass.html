@@ -483,6 +483,20 @@ const C=globalThis.CORE;
 const BAARDA_W0 = 3.29; // Baardas kritischer Wert fuer Data Snooping - erst darueber gilt eine Messung ueberhaupt als Ausreisser
 const TIE_TOL   = 0.02; // Toleranzband ums groesste w (2% relativ): alles darin gilt als gleich verdaechtig statt durch Rundung getrennt
 
+// Bei redundancy===0 ist jedes Residuum strukturell exakt 0 - ABER nur, wenn
+// die Messungen zueinander passen. Widersprechen sie sich (z.B. ein Zahlendreher),
+// kann der Fit nicht alle gleichzeitig erfuellen und verteilt den Widerspruch
+// als grosse Residuen ueber das Netz. w ist hier ueberall null (siehe Badge
+// "nicht pruefbar"), also gibt es keinen normierten Test - aber "nicht pruefbar"
+// heisst nicht "nichts wissen": ein Residuum von mehreren sigma ist unter
+// normalem Messrauschen praktisch ausgeschlossen und beweist damit einen
+// Widerspruch in den Daten, unabhaengig von jeder Redundanz. Verglichen wird
+// je Messung gegen ihr EIGENES sigma (sigma ist pro Messung ueberschreibbar),
+// nicht gegen einen globalen Wert - eine mit sigma=20 grosszuegig eingetragene
+// Zollstockmessung soll nicht beim gleichen Millimeterbetrag Alarm ausloesen
+// wie eine Lasermessung mit sigma=5.
+const GROSS_ERROR_SIGMA = 5; // Vielfaches von sigma, ab dem ein Residuum nicht mehr als Messrauschen erklaerbar ist
+
 // Ellipsen sind in Wirklichkeit millimetergross, der Raum aber meterweise
 // gezeichnet - unskaliert verschwindet jede Ellipse unter dem Punktmarker
 // (siehe render()). EIN Faktor je Zeichnung haelt die Punkte zueinander
@@ -720,6 +734,21 @@ addEventListener('resize',render);
 
 const fmtM=mm=>(mm/1000).toFixed(3);
 
+// Groesstes |v_i|/sigma_i ueber alle aktiven Messungen - je Messung gegen ihr
+// EIGENES sigma normiert (siehe Kommentar an GROSS_ERROR_SIGMA), nicht gegen
+// einen globalen Wert. Nur fuer den redundancy===0-Fall gedacht: dort ist w
+// ueberall null, das ist also die einzige Kennzahl, die dort noch etwas ueber
+// die Groesse der Widerspruechlichkeit aussagen kann.
+function worstResidualRatio(){
+  const act=C.activeMeas(M.meas);
+  let ratio=0, v=0;
+  M.an.v.forEach((vi,i)=>{
+    const r=Math.abs(vi)/(act[i].sigma??C.SIGMA_DEF);
+    if(r>ratio){ ratio=r; v=Math.abs(vi); }
+  });
+  return {ratio, v};
+}
+
 function statusText(){
   if(M.pts.length<3) return ['Zu wenig Punkte — mindestens 3 anlegen.','warn'];
   if(!M.an) return ['Noch keine Messung eingetragen.','warn'];
@@ -728,8 +757,22 @@ function statusText(){
   if(M.an.dof>0)
     return [`Unterbestimmt — ${M.an.dof} ${M.an.dof===1?'Messung fehlt':'Messungen fehlen'}. `
            +`Gezeigt wird der beste zur Skizze passende Fit.`,'warn'];
-  if(M.an.redundancy===0)
+  if(M.an.redundancy===0){
+    // "Nicht pruefbar" ist nur die halbe Wahrheit: sie gilt fuer die einzelne
+    // Messung (siehe Badge in der Tabelle), nicht fuer das Netz als Ganzes.
+    // Passen die Messungen nicht zueinander, kann der Fit sie nicht alle
+    // gleichzeitig erfuellen und die Residuen werden gross - das ist harter
+    // Beweis fuer einen Fehler, auch wenn keine einzelne Messung isoliert
+    // werden kann. Diese Unterscheidung ist am Residuum sichtbar, obwohl
+    // "redundancy===0" fuer beide Faelle identisch ist.
+    const {ratio,v}=worstResidualRatio();
+    if(ratio>GROSS_ERROR_SIGMA)
+      return [`Bestimmt, aber widersprüchlich — die Messungen passen nicht zueinander `
+             +`(größte Abweichung ${v.toFixed(0)} mm, das ist mehr als ${GROSS_ERROR_SIGMA}× die angenommene `
+             +`Messgenauigkeit). Mindestens eine Messung ist falsch — welche, lässt sich ohne `
+             +`weitere Messung nicht bestimmen.`,'bad'];
     return ['Bestimmt, aber keine Messung überprüfbar — jede Messung geht ungeprüft ein.','warn'];
+  }
   return [`Überbestimmt — σ̂ = ${M.an.sigmaHat.toFixed(1)} mm`,'good'];
 }
 
@@ -1082,6 +1125,36 @@ globalThis.selfChecks=function(){
     chk('analyze: 6 Messungen -> jede pruefbar', Math.min(...av.red)>C.TOL_RED);
     chk('analyze: Summe der Redundanzzahlen = m - rank',
        near(av.red.reduce((s,x)=>s+x,0), av.m-av.rank, 1e-9));
+  }
+  // --- analyze: widerspruechliches bestimmtes Netz ist von einem
+  // konsistenten bestimmten Netz unterscheidbar (Review-Finding 1).
+  // redundancy===0 ist in beiden Faellen gleich, w ist in beiden Faellen
+  // ueberall null - "nicht pruefbar" gilt fuer beide identisch und reicht
+  // daher nicht, um sie auseinanderzuhalten. Der Unterschied liegt in der
+  // GROESSE der Residuen: ein Zahlendreher (hier A-C: 8000 statt korrekt
+  // 5000 im 3-4-5-Rechteck) kann vom Fit nicht aufgeloest werden und
+  // hinterlaesst Residuen weit ausserhalb dessen, was Messrauschen erklaeren
+  // kann - das ist genau der Beweis, den statusText() jetzt nutzt.
+  {
+    const rect=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:3000},{id:'D',x:0,y:3000}];
+    const widerspruch=[{a:'A',b:'B',d:4000},{a:'B',b:'C',d:3000},{a:'C',b:'D',d:4000},
+                 {a:'D',b:'A',d:3000},{a:'A',b:'C',d:8000}];   // A-C vertippt: 8000 statt 5000
+    const fit=C.solve(rect.map(p=>({...p})), widerspruch);
+    const an=C.analyze(fit.pts, widerspruch);
+    chk('analyze: widerspruechliches Netz -> trotzdem bestimmt (Redundanz 0)', an.redundancy===0);
+    chk('analyze: widerspruechliches Netz -> v hat 5 Eintraege', an.v.length===widerspruch.length);
+    chk('analyze: widerspruechliches Netz -> Residuen weit ausserhalb des Messrauschens',
+       Math.max(...an.v.map(Math.abs)) > 20*C.SIGMA_DEF);
+
+    const konsistent=[{a:'A',b:'B',d:4000},{a:'B',b:'C',d:3000},{a:'C',b:'D',d:4000},
+                 {a:'D',b:'A',d:3000},{a:'A',b:'C',d:5000}];
+    const anK=C.analyze(rect, konsistent);
+    chk('analyze: konsistentes bestimmtes Netz -> ebenfalls Redundanz 0 (Gegenprobe)', anK.redundancy===0);
+    chk('analyze: konsistentes bestimmtes Netz -> Residuen ~0',
+       Math.max(...anK.v.map(Math.abs)) < 1e-6);
+    chk('analyze: beide Netze an "redundancy" ununterscheidbar, aber am Residuum klar getrennt',
+       an.redundancy===anK.redundancy &&
+       Math.max(...an.v.map(Math.abs)) > 1000*Math.max(...anK.v.map(Math.abs), 1e-9));
   }
   // --- analyze: Ausreisser (Spec-Test 1) ---
   {
