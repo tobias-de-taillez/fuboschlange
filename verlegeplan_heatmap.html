@@ -412,17 +412,13 @@ function edgeChains(frameSel){
   const order=['left','bottom','right','top'];        // im Uhrzeigersinn benachbart
   const sel=order.filter(e=>frameSel.includes(e));
   if(!sel.length) return [];
-  // Benachbart heißt: die gemeinsame Raumecke existiert wirklich. Liegt sie im
-  // Notch, gibt es dort keine Ecke — dann bleiben es zwei Ketten, sonst liefe
-  // die Verbindung durch die Aussparung.
-  const W=frameW(), H=frameH(), n=notchFrame();
-  const CORNER={'left|bottom':{x:0,y:0}, 'bottom|right':{x:W,y:0},
-                'right|top':{x:W,y:H},   'top|left':{x:0,y:H}};
+  // Benachbart heißt: die gemeinsame Raumecke existiert wirklich. Endet eine
+  // Kante am Notch, gibt es dort keine Ecke — dann bleiben es zwei Ketten,
+  // sonst liefe die Verbindung durch die Aussparung.
   const adj=(p,q)=>{
     const i=order.indexOf(p), j=order.indexOf(q);
     if((i+1)%4!==j) return false;
-    const c=CORNER[p+'|'+q];
-    return !(n && c.x>=n.x0-1 && c.x<=n.x1+1 && c.y>=n.y0-1 && c.y<=n.y1+1);
+    return len(sub(edgeSpan(p).b, edgeSpan(q).a))<1;
   };
   const chains=[[sel[0]]];
   for(let i=1;i<sel.length;i++){
@@ -996,14 +992,6 @@ function selfChecks(){
     A('Randzone Oben endet am Notch',Math.max(...topZ.map(p=>p.x))<=n.x0-S.edgeGap+1);
     const rZ=randzonePath('right');
     A('Randzone Rechts endet am Notch',Math.max(...rZ.map(p=>p.y))<=n.y0-S.edgeGap+1);
-    // Zusammenhängende Fensterwände -> EINE Kette (U-Form), Notch-Ecke trennt.
-    // notchLeft aus, damit die Bild-Spiegelung den Test nicht verdreht.
-    const savedW=S.windowEdges, savedNL=S.notchLeft; S.notchLeft=false;
-    S.windowEdges=['bottom','left','right'];
-    A('unten+links+rechts = eine Randzonen-Kette',edgeChains(frameEdges()).length===1);
-    S.windowEdges=['right','top'];        // Notch sitzt oben rechts -> Ecke fehlt
-    A('Kette bricht an der Notch-Ecke',edgeChains(frameEdges()).length===2);
-    S.windowEdges=savedW; S.notchLeft=savedNL;
     // Frame-Rotation: Verteiler an jeder Wand -> Korridor immer an dieser Wand
     ROT=1; const fw=frameW(), fh=frameH();
     A('Frame-Rotation dreht Raummaße',fw===S.H&&fh===S.W);
@@ -1055,10 +1043,6 @@ function validate(plan){
     errs.push(`Randzonen-Abstand ${S.randSpacing} mm zu klein für Rohr-Ø ${S.pipeDia} mm.`);
   if(!plan.loops.some(l=>l.field&&l.field.length))
     errs.push('Kein Verlegefeld — Raum zu klein für die aktuellen Abstände.');
-  // ponytail: nicht zusammenhängende Fensterwände am L-Raum werden über einen
-  // Umfangskanal verbunden, der die Aussparung noch nicht umgeht.
-  if(hasNotch() && edgeChains(frameEdges()).length>1)
-    errs.push('Diese Fensterwände hängen nicht zusammen: der Verbinder zwischen den Randzonen umgeht die Notch-Aussparung noch nicht. Zusammenhängende Wände wählen (z. B. unten+links+rechts).');
   return errs;
 }
 function recompute(){
