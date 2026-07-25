@@ -2789,7 +2789,15 @@ function crossingBench(n,seed,shard,nShards){
     S.notchLeft=rnd()<0.5;
     S.s=75+Math.round(rnd()*35/5)*5;          // 75..110, darüber/darunter unsinnig
     S.pipeDia=[12,14,16,17,20][Math.floor(rnd()*5)];
-    S.edgeGap=90+Math.round(rnd()*110/5)*5;   // >= bendRadius + pipeDia/2
+    // edgeGap hat eine physikalische Untergrenze: die Endschlaufe schwingt bis
+    // bendRadius an die Wand aus, plus halber Rohrdurchmesser. Der alte Kommentar
+    // behauptete diese Grenze, der Wert hielt sie aber nicht ein — 90 mm Start
+    // gegen 110 mm Bedarf bei Ø20. Gemessen 16 von 500 Läufen (3,2 %) mit
+    // randPasses>1 und edgeGap darunter; dort ist minR >= 5·Ø geometrisch
+    // unerfüllbar, radFails hätte also selbst bei perfekter Kehre nie 0 erreichen
+    // können. Ein Bench, der unerfüllbare Eingaben erzeugt, misst nicht die
+    // Verlegung. validate() weist den Fall jetzt in der UI aus.
+    S.edgeGap=Math.max(5.5*S.pipeDia, 90+Math.round(rnd()*110/5)*5);
     S.randSpacing=20+Math.round(rnd()*180/5)*5;
     S.randPasses=Math.floor(rnd()*5);
     S.windowEdges=['bottom','top','left','right'].filter(()=>rnd()<0.45);
@@ -2847,6 +2855,15 @@ function validate(plan){
     errs.push(`Bahnabstand ${S.s} mm zu klein für Rohr-Ø ${S.pipeDia} mm (min. ${Math.ceil(S.pipeDia*1.5)} mm).`);
   if(S.windowEdges.length&&S.randSpacing<S.pipeDia*1.25)
     errs.push(`Randzonen-Abstand ${S.randSpacing} mm zu klein für Rohr-Ø ${S.pipeDia} mm.`);
+  // Die Randzonen-Kehre braucht den Biegeradius als Ausschwung zur Wand. Ist der
+  // Randabstand kleiner, lässt sich der Mindest-Biegeradius dort nicht einhalten,
+  // egal wie gerechnet wird — gleiche Bedingung wie in omegaOn().
+  if(S.windowEdges.length&&S.randPasses>1&&S.randSpacing/2<S.bendRadius
+     &&S.edgeGap<S.bendRadius+S.pipeDia/2)
+    errs.push(`Randabstand ${S.edgeGap} mm zu klein für die Endschlaufe: `
+      +`nötig sind ${Math.ceil(S.bendRadius+S.pipeDia/2)} mm `
+      +`(Biegeradius ${S.bendRadius} mm + halber Rohr-Ø). `
+      +`Sonst wird der Biegeradius an den Randzonen-Enden unterschritten.`);
   if(!plan.loops.some(l=>l.field&&l.field.length))
     errs.push('Kein Verlegefeld — Raum zu klein für die aktuellen Abstände.');
   // ponytail: nicht zusammenhängende Fensterwände am L-Raum werden über einen
