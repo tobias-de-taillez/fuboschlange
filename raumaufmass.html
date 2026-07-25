@@ -80,8 +80,70 @@ function matTvec(A,v){
   return g;
 }
 
+// Rangaufdeckendes modifiziertes Gram-Schmidt ueber die SPALTEN.
+// Doppelte Orthogonalisierung: die Rangerkennung ist genau die Stelle, an der
+// einfache Genauigkeit kippt, und ein falscher Rang ist eine falsche Aussage
+// darueber, wieviele Messungen fehlen.
+function gramSchmidt(rows, tol){
+  const m=rows.length, k=m?rows[0].length:0;
+  const col=j=>rows.map(r=>r[j]);
+  let scale=0;
+  for(let j=0;j<k;j++) scale=Math.max(scale, Math.hypot(...col(j)));
+  const t=(tol??TOL_RANK)*(scale||1);
+  const Q=[], R=[], piv=[];
+  for(let j=0;j<k;j++){
+    const v=col(j), coef=new Array(Q.length).fill(0);
+    for(let pass=0;pass<2;pass++){
+      for(let q=0;q<Q.length;q++){
+        let d=0; for(let i=0;i<m;i++) d+=Q[q][i]*v[i];
+        coef[q]+=d;
+        for(let i=0;i<m;i++) v[i]-=d*Q[q][i];
+      }
+    }
+    R.forEach((row,q)=>row[j]=coef[q]);
+    const nv=Math.hypot(...v);
+    if(nv>t){
+      for(let i=0;i<m;i++) v[i]/=nv;
+      Q.push(v); piv.push(j);
+      const row=new Array(k).fill(0); row[j]=nv; R.push(row);
+    }
+  }
+  return {Q, R, piv, rank:Q.length, m, k};
+}
+
+// Jede abhaengige Spalte liefert genau einen Nullraum-Vektor. R eingeschraenkt
+// auf die Pivotspalten ist obere Dreiecksmatrix -> Rueckwaertseinsetzen.
+// k kommt aus gs, nicht aus R: bei Rang 0 ist R leer, die Spaltenzahl aber
+// trotzdem bekannt - und genau dann besteht der Nullraum aus allem.
+function nullSpace(gs){
+  const {R,piv,rank,k}=gs;
+  const isPiv=new Set(piv), out=[];
+  for(let j=0;j<k;j++){
+    if(isPiv.has(j)) continue;
+    const c=new Array(rank).fill(0);
+    for(let q=rank-1;q>=0;q--){
+      let s=R[q][j];
+      for(let q2=q+1;q2<rank;q2++) s-=R[q][piv[q2]]*c[q2];
+      c[q]=s/R[q][piv[q]];
+    }
+    const z=new Array(k).fill(0);
+    z[j]=1; piv.forEach((p,q)=>z[p]=-c[q]);
+    const nrm=Math.hypot(...z)||1;
+    out.push(z.map(x=>x/nrm));
+  }
+  return out;
+}
+
+// h_i = Zeilennorm^2 der Orthonormalbasis der Spalten = Diagonale der Hutmatrix.
+function leverage(gs){
+  const h=new Array(gs.m).fill(0);
+  gs.Q.forEach(q=>q.forEach((v,i)=>h[i]+=v*v));
+  return h;
+}
+
 globalThis.CORE={ TOL_RANK, TOL_RED, TOL_MODE, SIGMA_DEF, SUGGEST_CHECK_MAX,
-                  dist, idx, activeMeas, residuals, jacobian, luSolve, matTmat, matTvec };
+                  dist, idx, activeMeas, residuals, jacobian, luSolve, matTmat, matTvec,
+                  gramSchmidt, nullSpace, leverage };
 </script>
 
 <script id="checks">
@@ -146,6 +208,39 @@ globalThis.selfChecks=function(){
     chk('matTmat korrekt', N[0][0]===10&&N[0][1]===14&&N[1][0]===14&&N[1][1]===20);
     const g=C.matTvec(M,[1,1]);                // [4,6]
     chk('matTvec korrekt', g[0]===4&&g[1]===6);
+  }
+  // --- gramSchmidt / nullSpace / leverage ---
+  {
+    const M=[[1,0,1],[0,1,1],[0,0,0]];         // Spalte 3 = Spalte 1 + Spalte 2
+    const gs=C.gramSchmidt(M);
+    chk('gramSchmidt: Rang 2 erkannt', gs.rank===2);
+    chk('gramSchmidt: Pivotspalten 0 und 1', gs.piv[0]===0&&gs.piv[1]===1);
+    chk('gramSchmidt: Q orthonormal', (()=>{
+      const dot=(a,b)=>a.reduce((s,x,i)=>s+x*b[i],0);
+      return near(dot(gs.Q[0],gs.Q[0]),1,1e-9)&&near(dot(gs.Q[1],gs.Q[1]),1,1e-9)
+          && near(dot(gs.Q[0],gs.Q[1]),0,1e-9);
+    })());
+    const ns=C.nullSpace(gs);
+    chk('nullSpace: eine Dimension', ns.length===1);
+    chk('nullSpace: M*z = 0', (()=>{
+      const z=ns[0];
+      return M.every(r=>near(r.reduce((s,x,i)=>s+x*z[i],0),0,1e-9));
+    })());
+  }
+  {
+    const I3=[[1,0,0],[0,1,0],[0,0,1]];        // voller Rang -> h_i = 1
+    const h=C.leverage(C.gramSchmidt(I3));
+    chk('leverage: voller Rang -> h=1', h.every(x=>near(x,1,1e-9)));
+    // eine Spalte, drei gleiche Zeilen -> h_i = 1/3
+    const h2=C.leverage(C.gramSchmidt([[1],[1],[1]]));
+    chk('leverage: 3 gleiche Zeilen -> h=1/3', h2.every(x=>near(x,1/3,1e-9)));
+    chk('leverage: Summe h = Rang', near(h2.reduce((s,x)=>s+x,0),1,1e-9));
+  }
+  {
+    const gs=C.gramSchmidt([[0,0],[0,0]]);     // Nullmatrix
+    chk('gramSchmidt: Nullmatrix -> Rang 0', gs.rank===0);
+    chk('nullSpace: Nullmatrix -> volle Dimension', C.nullSpace(gs).length===2);
+    chk('leverage: Rang 0 -> h=0', C.leverage(gs).every(x=>x===0));
   }
   return {ok, out};
 };
