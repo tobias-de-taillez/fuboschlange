@@ -2423,7 +2423,22 @@ function buildLoops(groups,ownerOverride,connOrder){
     // R fahren, damit die Ablenkung je Stuetzpunkt kleiner wird.
     //   Ziel 1,00*R (jetzt)  crossFails 18   1,25*R  18   1,50*R  19   2,00*R  19
     // Neutral bis schlechter.
-    pts=smoothToRadius(dedupePath(pts,0.5*R),R,40);
+    // Runde 17: Schwelle von 0,5*R auf 1,0*R, GEMEINSAM mit dem Rest-freien
+    // Resampling (siehe resampleArc). Einzeln bewegt keins der beiden die Gates
+    // netto — 1,0*R allein war in Runde 12 neutral, das Resampling allein tauscht
+    // einen Radius- gegen einen Kreuzungsfehlschlag. Zusammen fallen die radFails
+    // ohne Gegenleistung:
+    //   Resampling  Dedupe   cross  cov  rad  out  medR
+    //   mit Rest     0,5*R     18    10   19    0    46   <- Baseline
+    //   rest-frei    0,5*R     19    10   18    0    50
+    //   rest-frei    0,25*R    18    10   19    0    29
+    //   rest-frei    1,0*R     18    10   18    0    42
+    //   rest-frei    1,25*R    18    10   18    0    42
+    // Der Zusammenhang ist direkt: das rest-freie Resampling erzeugt vor jeder
+    // erhaltenen Ecke ein Segment voller Laenge statt eines Rests. Eine Schwelle
+    // von 0,5*R raeumt danach noch Punkte weg, die jetzt Form tragen; 1,0*R
+    // passt zu den neuen Abstaenden.
+    pts=smoothToRadius(dedupePath(pts,1.0*R),R,40);
     const f=pathCurve(pts,true);
     // Einmal je Kreis: Kreuzungstest, Ausserhalb-Zaehler und die Marker im Plan
     // brauchen alle denselben gezeichneten Pfad. Ohne das Zwischenspeichern
