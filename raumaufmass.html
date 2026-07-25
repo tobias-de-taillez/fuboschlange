@@ -267,6 +267,11 @@ function covariance(pts, meas, sigmaHat){
   if(n<3) return null;
   const G=trivialModes(pts);
   if(G.length<3) return null;
+  // Ohne aktive Messungen hat jacobian() 0 Zeilen; matTmat() kennt die Spaltenzahl
+  // dann nicht (siehe dort) und liefert [] statt einer k x k Nullmatrix. N[i][j]
+  // waere darauf ein Zugriff auf undefined[j] - ausgerechnet im unterbestimmtesten
+  // Fall, den es gibt, statt der vertraglich vorgesehenen null-Antwort.
+  if(!activeMeas(meas).length) return null;
   const N=matTmat(jacobian(pts,meas));
   const A=Array.from({length:k+3},()=>new Array(k+3).fill(0));
   for(let i=0;i<k;i++) for(let j=0;j<k;j++) A[i][j]=N[i][j];
@@ -599,15 +604,33 @@ globalThis.selfChecks=function(){
     })());
     chk('covariance: unterbestimmt -> null',
        C.covariance(rect,[{a:'A',b:'B',d:4000}],null)===null);
+    // Review-Finding 1: der unterbestimmteste Fall ueberhaupt - keine einzige
+    // aktive Messung. jacobian() liefert dann 0 Zeilen; matTmat() kann die
+    // Spaltenzahl nicht mehr aus den Zeilen ablesen und liefert [] statt einer
+    // Nullmatrix (siehe dort). Ungeschuetzt indiziert covariance() darauf
+    // undefined[j] und stuerzt ab. Mit try/catch geprueft, damit ein Absturz
+    // hier als FAIL auffaellt statt den ganzen Lauf mitzureissen.
+    chk('covariance: keine Messungen ueberhaupt -> null statt Absturz', (()=>{
+      try{ return C.covariance(rect,[],null)===null; }catch(e){ return false; }
+    })());
+    chk('covariance: alle Messungen deaktiviert -> null statt Absturz', (()=>{
+      try{ return C.covariance(rect,[{a:'A',b:'B',d:4000,on:false}],null)===null; }catch(e){ return false; }
+    })());
     // Der mittlere Anzeigefall: bestimmt, aber redundanzfrei. Ellipsen kommen
     // dann aus dem ANGENOMMENEN sigma und werden gestrichelt gezeichnet.
     // Liefert das null, faellt Task 12 stumm in den Pfeil-Zweig.
     const seiten=[{a:'A',b:'B',d:4000},{a:'B',b:'C',d:3000},{a:'C',b:'D',d:4000},{a:'D',b:'A',d:3000}];
     const knapp=C.covariance(rect, seiten.concat([{a:'A',b:'C',d:5000}]), null);
+    // Review-Finding 2: knapp.length===4 explizit mitpruefen - [].every(...) ist
+    // auf [] vakuos wahr (wie bei "modes.length===1" weiter oben), der Check
+    // bestuende also selbst dann, wenn covariance() faelschlich [] zurueckgaebe.
     chk('covariance: exakt bestimmt + sigmaHat null -> endliche Bloecke',
-       knapp && knapp.every(c=>isFinite(c.xx)&&isFinite(c.yy)&&c.xx>0&&c.yy>0));
+       knapp && knapp.length===4 && knapp.every(c=>isFinite(c.xx)&&isFinite(c.yy)&&c.xx>0&&c.yy>0));
+    // Laenge auch hier vor dem Indizieren pruefen: knapp[1] auf einem leeren
+    // Array ist undefined, und .xx darauf wirft - dann reisst dieser eine Check
+    // per Exception den ganzen Lauf ab, statt einfach als FAIL durchzufallen.
     chk('covariance: B und D sind unsicherer als A und C (nur A-C gemessen)',
-       knapp && knapp[1].xx > knapp[0].xx && knapp[3].xx > knapp[2].xx);
+       knapp && knapp.length===4 && knapp[1].xx > knapp[0].xx && knapp[3].xx > knapp[2].xx);
   }
   {
     const e=C.ellipse({xx:400,xy:0,yy:100});
@@ -615,6 +638,27 @@ globalThis.selfChecks=function(){
     chk('ellipse: grosse Achse waagerecht', near(e.ang,0,1e-9));
     const e2=C.ellipse({xx:100,xy:0,yy:400});
     chk('ellipse: grosse Achse senkrecht', near(Math.abs(e2.ang),Math.PI/2,1e-9));
+    // Review-Finding 3: beide Faelle oben haben xy=0 - darin verschwinden sowohl
+    // das -xy*xy in der Determinante als auch das 2*xy im Winkel-Zaehler. Ein
+    // fehlender Faktor 2 oder ein Vorzeichenfehler bei xy waere unbemerkt
+    // geblieben. Handgerechnet: tr=500, det=250*250-150*150=40000, r=150 ->
+    // a=sqrt(400)=20, b=sqrt(100)=10, ang=0.5*atan2(300,0)=pi/4.
+    const e3=C.ellipse({xx:250,xy:150,yy:250});
+    chk('ellipse: schiefe Kovarianz -> Halbachsen 20 und 10',
+       near(e3.a,20,1e-9)&&near(e3.b,10,1e-9));
+    chk('ellipse: schiefe Kovarianz -> Winkel 45 Grad', near(e3.ang,Math.PI/4,1e-9));
+    // xx=yy oben ist selbst noch ein Sonderfall: atan2(y,0) haengt nur vom
+    // Vorzeichen von y ab, nie von seiner Groesse - ein fehlender Faktor 2 wuerde
+    // das Ergebnis dann NICHT aendern, e3 wuerde ihn also nicht fangen. Deshalb
+    // zusaetzlich ein Fall mit xx!=yy, gebaut aus einer 3-4-5-Drehung (cos=4/5,
+    // sin=3/5) zweier Eigenwerte 400 und 100: xx=292, xy=144, yy=208 -> a=20,
+    // b=10, Winkel=atan2(3,4). Per Mutationstest geprueft: dieser Fall faengt
+    // fehlenden Faktor 2, Vorzeichenfehler bei xy und det=xx*yy+xy*xy gleichermassen.
+    const e4=C.ellipse({xx:292,xy:144,yy:208});
+    chk('ellipse: schiefe Kovarianz mit xx!=yy -> Halbachsen 20 und 10',
+       near(e4.a,20,1e-9)&&near(e4.b,10,1e-9));
+    chk('ellipse: schiefe Kovarianz mit xx!=yy -> Winkel aus 3-4-5-Drehung',
+       near(e4.ang,Math.atan2(3,4),1e-9));
   }
   return {ok, out};
 };
