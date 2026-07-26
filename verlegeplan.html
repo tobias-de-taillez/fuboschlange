@@ -406,7 +406,15 @@ const notchX=()=>S.W-S.notchA;                      // x der Notch-Innenwand
 // werden die Bahn-Enden als ausgeschwungene Schlaufen mit vollem Radius
 // verlegt. Braucht edgeGap >= R (Ausschwung zur Wand). Der Randzonen-Streifen
 // bleibt dabei schmal — die Schlaufen ragen bewusst asymmetrisch in den Raum.
-const omegaOn=()=>S.randPasses>1 && S.randSpacing/2<S.bendRadius
+// randOn() MUSS mitgeprueft werden. Ohne das wird Platz fuer Kehren reserviert,
+// die es gar nicht gibt: ist randSpacing >= s, schaltet randOn die Randzone ab
+// (der Streifen laege duenner als das Feld daneben), aber randPasses>1 und
+// randSpacing/2<bendRadius bleiben wahr. Gemessen an einem 10200x3500-Raum mit
+// randSpacing 120 gegen s 100:
+//     fieldInset 645 = edgeGap 200 + randWidth 0 + omegaClear 265 + Korridor 180
+// 265 mm des Raums waren fuer Ausschwuenge reserviert, die nie gebaut werden -
+// und fieldInset zieht sie an der Verteilerwand vom Feld ab.
+const omegaOn=()=>randOn() && S.randPasses>1 && S.randSpacing/2<S.bendRadius
               && S.edgeGap>=S.bendRadius+S.pipeDia/2;
 // e ist eine FRAME-Kante; die Auswahl steht in Weltkanten -> mitdrehen.
 const frameEdges=()=>wEdges().map(edgeFwd);
