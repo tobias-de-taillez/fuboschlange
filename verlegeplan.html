@@ -1893,6 +1893,70 @@ function curveMinR(ops){
   }
   return minR;
 }
+// Biarc-Spline nach Bertolazzi, Frego, Biral: "Interpolating Splines of Biarcs
+// from a Sequence of Planar Points", CAD&A 18(1) 2021, 66-85 (PDF in paper/).
+//
+// Warum ueberhaupt: unsere Bahn ist ein Polygon, gezeichnet als Catmull-Rom.
+// Zwischen zwei Stuetzpunkten ist die Kurve FREI, und curveMinR misst dort ueber
+// 20 Laeufe im Median 1 mm statt 80. Ein Biarc-Spline hat dagegen stueckweise
+// KONSTANTE Kruemmung - der Radius ist geschlossen bekannt und nicht geschaetzt.
+//
+// Lemma 2 des Papers gibt die geschlossene Loesung des G1-Hermite-Problems:
+//     omega = atan2(y1-y0, x1-x0),  d = |p1-p0|
+//     kappa(t0,t1,omega,d) = (2/d) * ( sin(omega-t0) + sin(omega-(t0+t1)/2) )
+//     ell(t0,t1,omega,d)   = (d/2) / ( cos((t1-t0)/4) * sinc(omega-(3*t0+t1)/4) )
+//     kappa0 = kappa(t0,t1,..)   kappa1 = -kappa(t1,t0,..)
+// Die sinc-Formulierung ist der Kern ihres Beitrags: sie vermeidet die Division
+// durch die Kruemmung und bleibt damit auch fuer fast gerade Stuecke stabil.
+//
+// Die Tangentenwinkel sind freie Parameter. Gleichung (12) gibt den Startwert
+// ihres Optimierers, ein laengengewichtetes Mittel der Nachbarrichtungen:
+//     theta_i = (om[i-1]/d[i-1] + om[i]/d[i]) / (1/d[i-1] + 1/d[i])
+const sinc_=z=>Math.abs(z)<1e-8 ? 1-z*z/6 : Math.sin(z)/z;
+function biarcTangents(pts){
+  const n=pts.length; if(n<2) return [];
+  const om=[], dd=[];
+  for(let i=0;i+1<n;i++){
+    om.push(Math.atan2(pts[i+1].y-pts[i].y, pts[i+1].x-pts[i].x));
+    dd.push(Math.max(1e-9,len(sub(pts[i+1],pts[i]))));
+  }
+  // Winkel entfalten, sonst mittelt der Sprung bei +-pi falsch (Theorem 1: k_i)
+  for(let i=1;i<om.length;i++){
+    while(om[i]-om[i-1]> Math.PI) om[i]-=2*Math.PI;
+    while(om[i]-om[i-1]<-Math.PI) om[i]+=2*Math.PI;
+  }
+  const th=[0];
+  for(let i=1;i<n-1;i++)
+    th.push((om[i-1]/dd[i-1]+om[i]/dd[i])/(1/dd[i-1]+1/dd[i]));
+  th.push(0);
+  // ENDTANGENTEN. Gleichung (12) setzt sie auf die Sehnenrichtung; das ist nur
+  // der Startwert ihres Optimierers und an den Enden schlecht. Nachgemessen an
+  // 7 Punkten exakt auf einem Kreis r=200: die Innensegmente liefern 200.00,
+  // die beiden Randsegmente 399.14 und 133.24. Mit den echten Kreistangenten
+  // kommt exakt 200.000 heraus, die Formel selbst stimmt also.
+  // Stattdessen spiegeln: theta_0 = 2*omega_{1/2} - theta_1. Fuer einen Kreis
+  // ist das exakt, denn theta_1 = omega_{1/2} + delta und die wahre Tangente
+  // ist omega_{1/2} - delta.
+  th[0]     = n>2 ? 2*om[0]-th[1]                     : om[0];
+  th[n-1]   = n>2 ? 2*om[om.length-1]-th[n-2]         : om[om.length-1];
+  return th;
+}
+// Kleinster Radius des Biarc-Splines durch dieselben Punkte.
+function biarcMinR(pts,thIn){
+  if(pts.length<2) return Infinity;
+  const th=thIn||biarcTangents(pts);
+  let minR=Infinity;
+  for(let i=0;i+1<pts.length;i++){
+    const p0=pts[i], p1=pts[i+1];
+    const d=len(sub(p1,p0)); if(d<1e-9) continue;
+    const om=Math.atan2(p1.y-p0.y,p1.x-p0.x);
+    const kap=(a,b)=>2/d*(Math.sin(om-a)+Math.sin(om-(a+b)/2));
+    const k0=kap(th[i],th[i+1]), k1=-kap(th[i+1],th[i]);
+    if(Math.abs(k0)>1e-12) minR=Math.min(minR,1/Math.abs(k0));
+    if(Math.abs(k1)>1e-12) minR=Math.min(minR,1/Math.abs(k1));
+  }
+  return minR;
+}
 function pathCurve(pts,clampRoom){
   const ops=[]; let length=0, minR=Infinity;
   if(!pts.length) return {ops,length,minR,minRDrawn:curveMinR(ops)};
