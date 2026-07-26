@@ -229,8 +229,12 @@ fn malformed_topology_candidate() -> CandidatePath {
 }
 
 fn self_contact_candidate(custom_end_x: f64, key: Vec<u32>) -> CandidatePath {
-    let (_context, connection) = default_context_and_connection();
+    let (_context, mut connection) = default_context_and_connection();
     let x1 = connection.start_port.x;
+    connection.end_port = point(custom_end_x, 0.0);
+    connection.second_port = connection.end_port;
+    connection.end_port_edge_offset_mm = custom_end_x;
+    connection.second_port_edge_offset_mm = custom_end_x;
     let r = 80.0;
     let xc = x1 - r - 25.0;
     candidate_from_parts(
@@ -345,7 +349,7 @@ fn multiple_start_leads_candidate() -> CandidatePath {
     )
 }
 
-fn nonlead_initial_wall_prefix_candidate() -> CandidatePath {
+fn initial_nonlead_wall_candidate(split_y: f64) -> CandidatePath {
     let (_context, connection) = default_context_and_connection();
     let mut primitives = mirrored_racetrack_primitives(&connection, 80.0);
     primitives.splice(
@@ -353,10 +357,10 @@ fn nonlead_initial_wall_prefix_candidate() -> CandidatePath {
         [
             line(
                 (connection.start_port.x, 0.0),
-                (connection.start_port.x, 10.0),
+                (connection.start_port.x, split_y),
             ),
             line(
-                (connection.start_port.x, 10.0),
+                (connection.start_port.x, split_y),
                 (connection.start_port.x, 80.0),
             ),
         ],
@@ -396,6 +400,56 @@ fn nonlead_initial_wall_prefix_candidate() -> CandidatePath {
     )
 }
 
+fn nonlead_initial_wall_prefix_candidate() -> CandidatePath {
+    initial_nonlead_wall_candidate(10.0)
+}
+
+fn certified_wall_threshold_candidate() -> CandidatePath {
+    initial_nonlead_wall_candidate(20.0)
+}
+
+#[test]
+fn tolerant_arc_merge_returns_validation_error_instead_of_panicking() {
+    let (_context, connection) = default_context_and_connection();
+    let radius_delta = 0.5e-6;
+    let outcome = std::panic::catch_unwind(|| {
+        CandidatePath::from_primitives(
+            vec![
+                arc((80.0, 0.0), (0.0, 80.0), (0.0, 0.0), 80.0, FRAC_PI_2),
+                arc(
+                    (0.0, 80.0),
+                    (-80.0 - radius_delta, -radius_delta),
+                    (0.0, -radius_delta),
+                    80.0 + radius_delta,
+                    FRAC_PI_2,
+                ),
+            ],
+            PathProvenance {
+                roles: vec![
+                    PrimitiveRole::Inbound { winding: 0 },
+                    PrimitiveRole::Inbound { winding: 0 },
+                ],
+                parent_pairs: vec![ParentPair {
+                    first_primitive: 0,
+                    first_range: ParameterRange::FULL,
+                    second_primitive: 1,
+                    second_range: ParameterRange::FULL,
+                    first_winding: 0,
+                    second_winding: 0,
+                }],
+                start_port_edge_offset_mm: connection.start_port_edge_offset_mm,
+                end_port_edge_offset_mm: connection.end_port_edge_offset_mm,
+            },
+            connection,
+            120.0,
+            CandidateKey(vec![1, 1, 2, 3, 5]),
+        )
+    });
+
+    let result = outcome.expect("candidate validation must not unwind");
+    assert_eq!(result.unwrap_err().code.as_str(), "TOPOLOGY_INVALID");
+}
+
 #[test]
 fn radius_below_80_mm_is_rejected() {
     let (context, _connection) = default_context_and_connection();
@@ -424,13 +478,19 @@ fn path_segment_outside_polygon_is_rejected() {
 #[test]
 fn nonadjacent_tangency_is_rejected() {
     let (context, _connection) = default_context_and_connection();
-    assert!(validate_hard_constraints(&nonadjacent_tangency_candidate(), &context).is_err());
+    assert_failure_code(
+        validate_hard_constraints(&nonadjacent_tangency_candidate(), &context),
+        "SELF_INTERSECTION",
+    );
 }
 
 #[test]
 fn crossing_is_rejected() {
     let (context, _connection) = default_context_and_connection();
-    assert!(validate_hard_constraints(&crossing_candidate(), &context).is_err());
+    assert_failure_code(
+        validate_hard_constraints(&crossing_candidate(), &context),
+        "SELF_INTERSECTION",
+    );
 }
 
 #[test]
@@ -443,6 +503,16 @@ fn g1_break_is_rejected() {
 fn valid_wall_zone_prefix_is_accepted() {
     let (context, _connection) = default_context_and_connection();
     assert!(validate_hard_constraints(&racetrack_candidate(80.0), &context).is_ok());
+}
+
+#[test]
+fn accepted_wall_clearance_must_meet_reported_lower_bound() {
+    let (context, _connection) = default_context_and_connection();
+
+    assert_failure_code(
+        validate_hard_constraints(&certified_wall_threshold_candidate(), &context),
+        "WALL_CLEARANCE_TOO_SMALL",
+    );
 }
 
 #[test]

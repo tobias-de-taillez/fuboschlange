@@ -1,5 +1,5 @@
 use approx::assert_abs_diff_eq;
-use single_loop_solver::geometry::PointClassification;
+use single_loop_solver::geometry::{PointClassification, Winding};
 use single_loop_solver::input::{connection_warning, validate_and_normalize};
 use single_loop_solver::model::{
     ConnectionInput, Point, SolveSingleLoopInput, SolverErrorCode, SolverWarningCode,
@@ -151,6 +151,30 @@ fn clockwise_polygon_preserves_original_connection_edge() {
 }
 
 #[test]
+fn translated_finite_rectangle_keeps_area_and_winding() {
+    let origin = 1e12;
+    let normalized = validate_and_normalize(request_with_polygon(
+        polygon(&[
+            (origin, origin),
+            (origin + 300.0, origin),
+            (origin + 300.0, origin + 200.0),
+            (origin, origin + 200.0),
+        ]),
+        0,
+        150.0,
+    ))
+    .unwrap();
+
+    assert_eq!(normalized.polygon.winding(), Winding::CounterClockwise);
+    assert_eq!(
+        normalized
+            .polygon
+            .classify_point(point(origin + 150.0, origin + 100.0)),
+        PointClassification::Inside
+    );
+}
+
+#[test]
 fn collinear_original_edge_is_preserved_during_internal_simplification() {
     let input = request_with_polygon(
         polygon(&[
@@ -167,6 +191,13 @@ fn collinear_original_edge_is_preserved_during_internal_simplification() {
 
     assert_point_close(normalized.connection.center, (225.0, 0.0));
     assert_eq!(normalized.polygon.internal_ccw_vertices().len(), 4);
+    let internal_edge = normalized.polygon.internal_edge_index_for_original(0);
+    assert_eq!(
+        normalized
+            .polygon
+            .original_edge_indices_for_internal(internal_edge),
+        &[0, 1]
+    );
 }
 
 #[test]

@@ -94,6 +94,37 @@ fn parent_pairs_report_stable_min_and_max_spacing_with_global_offsets() {
 }
 
 #[test]
+fn one_parent_pair_reports_spacing_that_varies_from_eighty_to_one_twenty_mm() {
+    let horizontal_offset = (120.0_f64.powi(2) - 80.0_f64.powi(2)).sqrt();
+    let path = canonicalize_path(&[
+        line((0.0, 0.0), (100.0, 0.0)),
+        arc((100.0, 0.0), (100.0, 80.0), (100.0, 40.0), 40.0, PI),
+        line((100.0, 80.0), (horizontal_offset, 80.0)),
+    ])
+    .unwrap();
+    let parent_pairs = vec![ParentPair {
+        first_primitive: 0,
+        first_range: ParameterRange::FULL,
+        second_primitive: 2,
+        second_range: ParameterRange::FULL,
+        first_winding: 0,
+        second_winding: 1,
+    }];
+
+    let result = spacing_extrema(&path, &parent_pairs, 0.1).unwrap();
+
+    assert_abs_diff_eq!(result.min.distance_mm, 80.0, epsilon = 1e-9);
+    assert_abs_diff_eq!(result.max.distance_mm, 120.0, epsilon = 1e-9);
+    assert_abs_diff_eq!(result.min.first_point.x, horizontal_offset, epsilon = 1e-9);
+    assert_abs_diff_eq!(result.min.first_point.y, 0.0, epsilon = 1e-9);
+    assert_abs_diff_eq!(result.min.second_point.x, horizontal_offset, epsilon = 1e-9);
+    assert_abs_diff_eq!(result.min.second_point.y, 80.0, epsilon = 1e-9);
+    assert_eq!(result.max.first_point, point(0.0, 0.0));
+    assert_abs_diff_eq!(result.max.second_point.x, horizontal_offset, epsilon = 1e-9);
+    assert_abs_diff_eq!(result.max.second_point.y, 80.0, epsilon = 1e-9);
+}
+
+#[test]
 fn diagnostics_only_consider_parent_pairs_not_leads_or_inner_turn() {
     let path = serpentine_with_eighty_and_one_twenty_mm_pairs();
     let parent_pairs = vec![ParentPair {

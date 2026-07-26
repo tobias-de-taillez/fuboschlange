@@ -161,6 +161,95 @@ fn parallel_return_path(split: bool) -> CandidatePath {
     candidate_from_parts(primitives, roles, vec![], connection, vec![9, split as u32])
 }
 
+fn near_threshold_arc_path(split_arcs: bool) -> CandidatePath {
+    let (_context, connection) = context_and_connection();
+    let radius_mm: f64 = 12.5;
+    let target_distance_mm: f64 = 49.999_999;
+    let horizontal_gap_mm = (target_distance_mm.powi(2) - (2.0 * radius_mm).powi(2)).sqrt();
+
+    let (primitives, roles) = if split_arcs {
+        (
+            vec![
+                arc(
+                    (0.0, 0.0),
+                    (radius_mm, radius_mm),
+                    (0.0, radius_mm),
+                    radius_mm,
+                    FRAC_PI_2,
+                ),
+                arc(
+                    (radius_mm, radius_mm),
+                    (0.0, 2.0 * radius_mm),
+                    (0.0, radius_mm),
+                    radius_mm,
+                    FRAC_PI_2,
+                ),
+                line(
+                    (0.0, 2.0 * radius_mm),
+                    (-horizontal_gap_mm, 2.0 * radius_mm),
+                ),
+                arc(
+                    (-horizontal_gap_mm, 2.0 * radius_mm),
+                    (-horizontal_gap_mm - radius_mm, 3.0 * radius_mm),
+                    (-horizontal_gap_mm, 3.0 * radius_mm),
+                    radius_mm,
+                    -FRAC_PI_2,
+                ),
+                arc(
+                    (-horizontal_gap_mm - radius_mm, 3.0 * radius_mm),
+                    (-horizontal_gap_mm, 4.0 * radius_mm),
+                    (-horizontal_gap_mm, 3.0 * radius_mm),
+                    radius_mm,
+                    -FRAC_PI_2,
+                ),
+            ],
+            vec![
+                PrimitiveRole::Inbound { winding: 0 },
+                PrimitiveRole::Inbound { winding: 1 },
+                PrimitiveRole::InnerTurn,
+                PrimitiveRole::Outbound { winding: 1 },
+                PrimitiveRole::Outbound { winding: 0 },
+            ],
+        )
+    } else {
+        (
+            vec![
+                arc(
+                    (0.0, 0.0),
+                    (0.0, 2.0 * radius_mm),
+                    (0.0, radius_mm),
+                    radius_mm,
+                    PI,
+                ),
+                line(
+                    (0.0, 2.0 * radius_mm),
+                    (-horizontal_gap_mm, 2.0 * radius_mm),
+                ),
+                arc(
+                    (-horizontal_gap_mm, 2.0 * radius_mm),
+                    (-horizontal_gap_mm, 4.0 * radius_mm),
+                    (-horizontal_gap_mm, 3.0 * radius_mm),
+                    radius_mm,
+                    -PI,
+                ),
+            ],
+            vec![
+                PrimitiveRole::Inbound { winding: 0 },
+                PrimitiveRole::InnerTurn,
+                PrimitiveRole::Outbound { winding: 0 },
+            ],
+        )
+    };
+
+    candidate_from_parts(
+        primitives,
+        roles,
+        vec![],
+        connection,
+        vec![4, 2, split_arcs as u32],
+    )
+}
+
 fn triangular_boundary_path() -> CandidatePath {
     let (_context, connection) = context_and_connection();
     candidate_from_parts(
@@ -213,6 +302,25 @@ fn triangular_boundary_minimum_is_not_replaced_by_nearby_samples() {
         local_arc_length_mm,
         epsilon = 1e-12
     );
+}
+
+#[test]
+fn near_fifty_arc_boundary_minimum_is_invariant_under_arc_subdivision() {
+    let whole = near_threshold_arc_path(false);
+    let split = near_threshold_arc_path(true);
+    let local_arc_length_mm = 12.5 * PI + (49.999_999_f64.powi(2) - 25.0_f64.powi(2)).sqrt();
+
+    let whole_result = minimum_nonlocal_distance(&whole, local_arc_length_mm).unwrap();
+    let split_result = minimum_nonlocal_distance(&split, local_arc_length_mm).unwrap();
+
+    assert_abs_diff_eq!(whole_result.distance_mm, 49.999_999, epsilon = 1e-9);
+    assert_abs_diff_eq!(split_result.distance_mm, 49.999_999, epsilon = 1e-9);
+    assert_abs_diff_eq!(
+        whole_result.distance_mm,
+        split_result.distance_mm,
+        epsilon = 1e-9
+    );
+    assert!(whole_result.distance_mm < 50.0);
 }
 
 #[test]

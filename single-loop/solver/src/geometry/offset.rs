@@ -1,7 +1,9 @@
 use super::polygon::{
     PointClassification, classify_closed_polyline_point, closed_polyline_boundary_distance,
 };
-use super::{POSITION_TOLERANCE_MM, Polygon, canonicalize_path};
+use super::{
+    Intersection, POSITION_TOLERANCE_MM, Polygon, canonicalize_path, primitive_intersections,
+};
 use crate::constants::TOPOLOGY_QUANTIZATION_MM;
 use crate::input::{NormalizedInput, internal_validation_failure, no_solution_geometry};
 use crate::model::{PathPrimitive, Point, SolverError};
@@ -9,6 +11,9 @@ use cavalier_contours::core::math::angle_from_bulge;
 use cavalier_contours::polyline::{PlineSource, Polyline, seg_arc_radius_and_center};
 
 const VORONOI_HAUSDORFF_MM: f64 = 0.05;
+const QUANTIZATION_ENDPOINT_ERROR_MM: f64 =
+    TOPOLOGY_QUANTIZATION_MM * std::f64::consts::SQRT_2 * 0.5;
+const TESSELLATION_HAUSDORFF_MM: f64 = VORONOI_HAUSDORFF_MM - QUANTIZATION_ENDPOINT_ERROR_MM;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct QuantizedPoint {
@@ -44,9 +49,12 @@ impl AllowedRegion {
 
     fn from_exact_loop(
         loop_polyline: &Polyline<f64>,
+        polygon: &Polygon,
         wall_clearance_mm: f64,
     ) -> Result<Self, SolverError> {
+        validate_offset_loop(loop_polyline)?;
         let boundary = polyline_to_exact_boundary(loop_polyline)?;
+        validate_boundary_containment(&boundary, polygon)?;
         let quantized_segments = quantized_segments_for_boundary(&boundary);
         Ok(Self {
             boundary,
@@ -60,8 +68,8 @@ impl AllowedRegion {
 pub fn erode_for_centerline(input: &NormalizedInput) -> Result<AllowedRegion, SolverError> {
     let loops = offset_inward_with_cavalier(&input.polygon, input.raw.wall_clearance_mm)?;
     match loops.as_slice() {
-        [single] if has_positive_area(single) => {
-            AllowedRegion::from_exact_loop(single, input.raw.wall_clearance_mm)
+        [single] => {
+            AllowedRegion::from_exact_loop(single, &input.polygon, input.raw.wall_clearance_mm)
         }
         _ => Err(no_solution_geometry("WALL_INSET_DISCONNECTED_OR_EMPTY")),
     }
@@ -71,32 +79,25 @@ fn offset_inward_with_cavalier(
     polygon: &Polygon,
     wall_clearance_mm: f64,
 ) -> Result<Vec<Polyline<f64>>, SolverError> {
-    let offset_loops = polygon
+    Ok(polygon
         .internal_ccw_polyline()
-        .parallel_offset(wall_clearance_mm);
-    let mut sanitized = Vec::with_capacity(offset_loops.len());
-    for loop_polyline in offset_loops {
-        if !loop_polyline.is_closed() || loop_polyline.vertex_count() < 3 {
-            continue;
-        }
-
-        let loop_polyline = loop_polyline
-            .remove_repeat_pos(POSITION_TOLERANCE_MM)
-            .unwrap_or(loop_polyline);
-        let loop_polyline = loop_polyline
-            .remove_redundant(POSITION_TOLERANCE_MM)
-            .unwrap_or(loop_polyline);
-        if loop_polyline.vertex_count() < 3 {
-            continue;
-        }
-        sanitized.push(loop_polyline);
-    }
-
-    Ok(sanitized)
+        .parallel_offset(wall_clearance_mm))
 }
 
-fn has_positive_area(loop_polyline: &Polyline<f64>) -> bool {
-    loop_polyline.area() > POSITION_TOLERANCE_MM
+fn validate_offset_loop(loop_polyline: &Polyline<f64>) -> Result<(), SolverError> {
+    if !loop_polyline.is_closed() {
+        return Err(internal_validation_failure("OFFSET_LOOP_NOT_CLOSED"));
+    }
+    if loop_polyline.vertex_count() < 3 {
+        return Err(internal_validation_failure("OFFSET_LOOP_TOO_SHORT"));
+    }
+    let area = loop_polyline.area();
+    if !area.is_finite() || area <= POSITION_TOLERANCE_MM {
+        return Err(internal_validation_failure(
+            "OFFSET_LOOP_ORIENTATION_INVALID",
+        ));
+    }
+    Ok(())
 }
 
 fn polyline_to_exact_boundary(
@@ -155,6 +156,58 @@ fn validate_closed_boundary(boundary: &[PathPrimitive]) -> Result<(), SolverErro
         return Err(internal_validation_failure("OFFSET_LOOP_NOT_CLOSED"));
     }
 
+    for first in 0..boundary.len() {
+        for second in (first + 1)..boundary.len() {
+            let intersection = primitive_intersections(&boundary[first], &boundary[second]);
+            let adjacent = second == first + 1 || (first == 0 && second + 1 == boundary.len());
+            if adjacent {
+                let shared = if second == first + 1 {
+                    boundary[first].end()
+                } else {
+                    boundary[first].start()
+                };
+                let only_shared_endpoint = match intersection {
+                    Intersection::None => true,
+                    Intersection::Points(ref points) => {
+                        points.len() == 1
+                            && points[0].point.distance_to(shared) <= POSITION_TOLERANCE_MM
+                    }
+                    Intersection::Overlap => false,
+                };
+                if !only_shared_endpoint {
+                    return Err(internal_validation_failure("OFFSET_LOOP_SELF_INTERSECTION"));
+                }
+            } else if !matches!(intersection, Intersection::None) {
+                return Err(internal_validation_failure("OFFSET_LOOP_SELF_INTERSECTION"));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_boundary_containment(
+    boundary: &[PathPrimitive],
+    polygon: &Polygon,
+) -> Result<(), SolverError> {
+    let polygon_edges = (0..polygon.original_edge_count())
+        .map(|index| {
+            let (start, end) = polygon.original_edge(index);
+            PathPrimitive::Line { start, end }
+        })
+        .collect::<Vec<_>>();
+
+    for primitive in boundary {
+        if polygon_edges
+            .iter()
+            .any(|edge| !matches!(primitive_intersections(primitive, edge), Intersection::None))
+            || polygon.classify_point(primitive.point_at(0.5)) != PointClassification::Inside
+        {
+            return Err(internal_validation_failure(
+                "OFFSET_LOOP_OUTSIDE_SOURCE_POLYGON",
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -183,10 +236,10 @@ fn tessellate_for_quantization(primitive: &PathPrimitive) -> Vec<Point> {
             sweep_rad,
             ..
         } => {
-            let max_segment_angle = if *radius_mm <= VORONOI_HAUSDORFF_MM {
+            let max_segment_angle = if *radius_mm <= TESSELLATION_HAUSDORFF_MM {
                 sweep_rad.abs()
             } else {
-                let cosine = (1.0 - VORONOI_HAUSDORFF_MM / *radius_mm).clamp(-1.0, 1.0);
+                let cosine = (1.0 - TESSELLATION_HAUSDORFF_MM / *radius_mm).clamp(-1.0, 1.0);
                 2.0 * cosine.acos()
             };
             let segment_count = if max_segment_angle == 0.0 {
@@ -198,5 +251,33 @@ fn tessellate_for_quantization(primitive: &PathPrimitive) -> Vec<Point> {
                 .map(|index| primitive.point_at(index as f64 / segment_count as f64))
                 .collect()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn point(x: f64, y: f64) -> Point {
+        Point::new(x, y)
+    }
+
+    fn line(start: (f64, f64), end: (f64, f64)) -> PathPrimitive {
+        PathPrimitive::Line {
+            start: point(start.0, start.1),
+            end: point(end.0, end.1),
+        }
+    }
+
+    #[test]
+    fn self_crossing_exact_offset_loop_is_rejected() {
+        let boundary = vec![
+            line((0.0, 0.0), (2.0, 2.0)),
+            line((2.0, 2.0), (0.0, 2.0)),
+            line((0.0, 2.0), (2.0, 0.0)),
+            line((2.0, 0.0), (0.0, 0.0)),
+        ];
+
+        assert!(validate_closed_boundary(&boundary).is_err());
     }
 }

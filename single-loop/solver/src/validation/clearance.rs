@@ -122,12 +122,10 @@ pub(crate) fn minimum_wall_clearance(
     let (start_exceptions, end_exceptions) = zone_exceptions(candidate, &intervals)?;
 
     let boundary = polygon_edges(&context.polygon);
-    let mut best: Option<(f64, MinWallClearance)> = None;
+    let mut best: Option<MinWallClearance> = None;
 
     for interval in &intervals {
-        if interval.phase == ZonePhase::NearWall
-            && (start_exceptions.contains(interval) || end_exceptions.contains(interval))
-        {
+        if start_exceptions.contains(interval) || end_exceptions.contains(interval) {
             continue;
         }
         if interval.phase == ZonePhase::NearWall {
@@ -148,23 +146,21 @@ pub(crate) fn minimum_wall_clearance(
             };
             if best
                 .as_ref()
-                .map(|(_, current)| compare_wall_clearance(&witness, current).is_lt())
+                .map(|current| compare_wall_clearance(&witness, current).is_lt())
                 .unwrap_or(true)
             {
-                best = Some((pair.distance_mm, witness));
+                best = Some(witness);
             }
         }
     }
 
-    let Some((best_raw_distance_mm, best)) = best else {
+    let Some(best) = best else {
         return Err(ValidationFailure::new(
             ValidationFailureCode::WallClearanceTooSmall,
         ));
     };
 
-    if best_raw_distance_mm + crate::geometry::POSITION_TOLERANCE_MM
-        < context.allowed_region.wall_clearance_mm
-    {
+    if best.lower_bound_mm < context.allowed_region.wall_clearance_mm {
         return Err(
             ValidationFailure::new(ValidationFailureCode::WallClearanceTooSmall)
                 .with_points(best.point_on_pipe, best.point_on_wall),
@@ -753,7 +749,7 @@ fn zone_exceptions(
             break;
         }
         match interval.phase {
-            ZonePhase::NearWall if !start_inside => start.push(*interval),
+            ZonePhase::NearWall if !start_inside => {}
             ZonePhase::NearWall => {
                 return Err(
                     ValidationFailure::new(ValidationFailureCode::ConnectionZoneReentry)
@@ -762,6 +758,7 @@ fn zone_exceptions(
             }
             ZonePhase::Inside => start_inside = true,
         }
+        start.push(*interval);
     }
 
     let mut end = Vec::new();
@@ -774,7 +771,7 @@ fn zone_exceptions(
             break;
         }
         match interval.phase {
-            ZonePhase::NearWall if !end_inside => end.push(*interval),
+            ZonePhase::NearWall if !end_inside => {}
             ZonePhase::NearWall => {
                 return Err(
                     ValidationFailure::new(ValidationFailureCode::ConnectionZoneReentry)
@@ -783,6 +780,7 @@ fn zone_exceptions(
             }
             ZonePhase::Inside => end_inside = true,
         }
+        end.push(*interval);
     }
     end.reverse();
 

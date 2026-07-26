@@ -103,12 +103,15 @@ pub fn coverage_bounds(
             .expect("a non-converged coverage search has a cell");
         let (left, right) = bisect_longest_edge(cell.vertices);
         for triangle in [left, right] {
+            if used >= max_cells {
+                return Err(coverage_limit_error(max_cells, used));
+            }
             let child = make_cell(triangle, path, next_id);
             next_id += 1;
+            used += 1;
             best = Some(stable_max(best, child.sample));
             heap.push(child);
         }
-        used += 1;
     }
 }
 

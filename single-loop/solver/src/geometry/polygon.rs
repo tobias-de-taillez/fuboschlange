@@ -23,7 +23,7 @@ pub enum PointClassification {
 pub struct Polygon {
     original: Vec<Point>,
     internal_ccw: Vec<Point>,
-    original_edge_for_internal: Vec<usize>,
+    original_edges_for_internal: Vec<Vec<usize>>,
     winding: Winding,
     internal_edge_for_original: Vec<usize>,
     original_polyline: Polyline<f64>,
@@ -46,7 +46,7 @@ impl Polygon {
             Winding::CounterClockwise
         };
         let (ccw_vertices, ccw_original_edge) = ccw_vertices_and_edge_map(&original, winding);
-        let (internal_ccw, original_edge_for_internal, internal_edge_for_original) =
+        let (internal_ccw, original_edges_for_internal, internal_edge_for_original) =
             simplify_ccw_vertices(&ccw_vertices, &ccw_original_edge)?;
 
         Ok(Self {
@@ -54,7 +54,7 @@ impl Polygon {
             internal_ccw_polyline: closed_polyline_from_points(&internal_ccw),
             original,
             internal_ccw,
-            original_edge_for_internal,
+            original_edges_for_internal,
             winding,
             internal_edge_for_original,
         })
@@ -101,7 +101,11 @@ impl Polygon {
     }
 
     pub fn original_edge_index_for_internal(&self, internal_edge_index: usize) -> usize {
-        self.original_edge_for_internal[internal_edge_index]
+        self.original_edges_for_internal[internal_edge_index][0]
+    }
+
+    pub fn original_edge_indices_for_internal(&self, internal_edge_index: usize) -> &[usize] {
+        &self.original_edges_for_internal[internal_edge_index]
     }
 
     pub fn internal_edge_index_for_original(&self, original_edge_index: usize) -> usize {
@@ -226,7 +230,7 @@ fn ccw_vertices_and_edge_map(original: &[Point], winding: Winding) -> (Vec<Point
 fn simplify_ccw_vertices(
     ccw_vertices: &[Point],
     ccw_original_edge: &[usize],
-) -> Result<(Vec<Point>, Vec<usize>, Vec<usize>), SolverError> {
+) -> Result<(Vec<Point>, Vec<Vec<usize>>, Vec<usize>), SolverError> {
     let n = ccw_vertices.len();
     let mut kept_indices = Vec::with_capacity(n);
 
@@ -248,27 +252,28 @@ fn simplify_ccw_vertices(
         .iter()
         .map(|&index| ccw_vertices[index])
         .collect::<Vec<_>>();
-    let mut original_edge_for_internal = Vec::with_capacity(kept_indices.len());
+    let mut original_edges_for_internal = Vec::with_capacity(kept_indices.len());
     let mut internal_edge_for_original = vec![0usize; n];
 
     for (internal_index, &start_ccw_index) in kept_indices.iter().enumerate() {
         let end_ccw_index = kept_indices[(internal_index + 1) % kept_indices.len()];
-        original_edge_for_internal.push(ccw_original_edge[start_ccw_index]);
-
+        let mut original_edge_span = Vec::new();
         let mut edge_index = start_ccw_index;
         loop {
             let original_edge_index = ccw_original_edge[edge_index];
+            original_edge_span.push(original_edge_index);
             internal_edge_for_original[original_edge_index] = internal_index;
             edge_index = (edge_index + 1) % n;
             if edge_index == end_ccw_index {
                 break;
             }
         }
+        original_edges_for_internal.push(original_edge_span);
     }
 
     Ok((
         internal_ccw,
-        original_edge_for_internal,
+        original_edges_for_internal,
         internal_edge_for_original,
     ))
 }
@@ -278,12 +283,23 @@ fn is_redundant_collinear_vertex(prev: Point, current: Point, next: Point) -> bo
 }
 
 fn signed_area(points: &[Point]) -> f64 {
-    let mut area = 0.0;
+    let origin = points[0];
+    let mut sum = 0.0;
+    let mut compensation = 0.0;
     for (index, point) in points.iter().copied().enumerate() {
         let next = points[(index + 1) % points.len()];
-        area += point.x * next.y - point.y * next.x;
+        let point = point - origin;
+        let next = next - origin;
+        let term = point.x * next.y - point.y * next.x;
+        let combined = sum + term;
+        compensation += if sum.abs() >= term.abs() {
+            (sum - combined) + term
+        } else {
+            (term - combined) + sum
+        };
+        sum = combined;
     }
-    area * 0.5
+    (sum + compensation) * 0.5
 }
 
 fn closed_polyline_from_points(points: &[Point]) -> Polyline<f64> {

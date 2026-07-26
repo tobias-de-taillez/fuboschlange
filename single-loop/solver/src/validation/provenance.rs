@@ -5,6 +5,8 @@ use crate::input::NormalizedConnection;
 use crate::model::PathPrimitive;
 use crate::validation::{ValidationFailure, ValidationFailureCode};
 
+const PARAMETER_REMAP_TOLERANCE: f64 = 1e-12;
+
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct CandidateKey(pub Vec<u32>);
 
@@ -268,14 +270,14 @@ fn remap_parent_pairs(
                     first_offset_mm,
                     first_length_mm,
                     first_group_length_mm,
-                ),
+                )?,
                 second_primitive: second_index,
                 second_range: remap_range(
                     pair.second_range,
                     second_offset_mm,
                     second_length_mm,
                     second_group_length_mm,
-                ),
+                )?,
                 first_winding: pair.first_winding,
                 second_winding: pair.second_winding,
             })
@@ -288,14 +290,34 @@ fn remap_range(
     offset_mm: f64,
     primitive_length_mm: f64,
     group_length_mm: f64,
-) -> ParameterRange {
-    if group_length_mm == 0.0 {
-        return ParameterRange::FULL;
+) -> Result<ParameterRange, ValidationFailure> {
+    if !range.start.is_finite()
+        || !range.end.is_finite()
+        || range.start < -PARAMETER_REMAP_TOLERANCE
+        || range.end > 1.0 + PARAMETER_REMAP_TOLERANCE
+        || range.start > range.end + PARAMETER_REMAP_TOLERANCE
+        || !group_length_mm.is_finite()
+        || group_length_mm <= 0.0
+    {
+        return Err(ValidationFailure::new(
+            ValidationFailureCode::TopologyInvalid,
+        ));
     }
 
     let start = (offset_mm + primitive_length_mm * range.start) / group_length_mm;
     let end = (offset_mm + primitive_length_mm * range.end) / group_length_mm;
-    ParameterRange::new(start, end)
+    if !start.is_finite()
+        || !end.is_finite()
+        || start < -PARAMETER_REMAP_TOLERANCE
+        || end > 1.0 + PARAMETER_REMAP_TOLERANCE
+        || start > end + PARAMETER_REMAP_TOLERANCE
+    {
+        return Err(ValidationFailure::new(
+            ValidationFailureCode::TopologyInvalid,
+        ));
+    }
+
+    Ok(ParameterRange::new(start, end))
 }
 
 fn tangent_delta(left: Vec2, right: Vec2) -> f64 {

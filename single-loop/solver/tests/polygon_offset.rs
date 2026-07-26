@@ -158,6 +158,37 @@ fn concave_inset_retains_exact_arc_boundary() {
 }
 
 #[test]
+fn arc_tessellation_reserves_error_for_endpoint_quantization() {
+    let normalized = validate_and_normalize(request_with_polygon(
+        polygon(&[
+            (0.0, 0.0),
+            (300.0, 0.0),
+            (300.0, 240.0),
+            (180.0, 240.0),
+            (180.0, 120.0),
+            (0.0, 120.0),
+        ]),
+        0,
+        120.0,
+        16.1,
+    ))
+    .unwrap();
+
+    let allowed = erode_for_centerline(&normalized).unwrap();
+    let line_count = allowed
+        .boundary
+        .iter()
+        .filter(|primitive| matches!(primitive, PathPrimitive::Line { .. }))
+        .count();
+    let quantized_arc_segment_count = allowed.quantized_segments.len() - line_count;
+
+    assert!(
+        quantized_arc_segment_count >= 11,
+        "quantization reserve requires at least 11 arc chords, got {quantized_arc_segment_count}"
+    );
+}
+
+#[test]
 fn total_disappearance_maps_to_no_solution_geometry() {
     let normalized = validate_and_normalize(request_with_polygon(
         polygon(&[(0.0, 0.0), (200.0, 0.0), (200.0, 80.0), (0.0, 80.0)]),

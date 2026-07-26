@@ -64,12 +64,6 @@ fn is_allowed_consecutive_endpoint_contact(
     match intersection {
         Intersection::Points(points) if points.len() == 1 => {
             let shared = candidate.path.primitives()[i].end();
-            crate::geometry::primitive_distance(
-                &candidate.path.primitives()[i],
-                crate::geometry::ParameterRange::FULL,
-                &candidate.path.primitives()[j],
-                crate::geometry::ParameterRange::FULL,
-            );
             points[0].point.distance_to(shared) <= crate::geometry::POSITION_TOLERANCE_MM
         }
         Intersection::None | Intersection::Overlap | Intersection::Points(_) => false,

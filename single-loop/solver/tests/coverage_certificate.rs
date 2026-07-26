@@ -40,6 +40,19 @@ fn horizontal_diameter_of_square_has_fifty_mm_max_distance() {
 }
 
 #[test]
+fn coverage_budget_counts_both_evaluated_children() {
+    let polygon = square(100.0);
+    let path = canonical(&[line((0.0, 50.0), (100.0, 50.0))]);
+
+    let error = coverage_bounds(&polygon, &path, 40.0, 4).unwrap_err();
+
+    assert_eq!(error.code, SolverErrorCode::SolverLimitExceeded);
+    assert_eq!(error.details["reason"].as_str(), Some("MAX_COVERAGE_CELLS"));
+    assert_eq!(error.details["limit"].as_number(), Some(4.0));
+    assert_eq!(error.details["used"].as_number(), Some(4.0));
+}
+
+#[test]
 fn coverage_budget_is_deterministic_at_exact_cell_limit() {
     let polygon = square(1_000.0);
     let path = canonical(&[line((0.0, 500.0), (1_000.0, 500.0))]);
