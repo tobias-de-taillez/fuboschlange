@@ -4601,6 +4601,43 @@ function crossingBench(n,seed,shard,nShards){
     S.randPasses=Math.floor(rnd()*5);
     S.windowEdges=['bottom','top','left','right'].filter(()=>rnd()<0.45);
     S.loopMode=pick(['auto','1','2','3']);
+    // DECKUNGSZIEL MUSS ERREICHBAR SEIN — dieselbe Regel wie oben fuer edgeGap,
+    // nur fuer das zweite Kriterium. heatCoverage zaehlt den Flaechenanteil im
+    // Umkreis von 25 mm um ein Rohr; im Feld ist damit hoechstens 2*25/s
+    // erreichbar, und das Feld ist nur (W-2*inset)*(H-2*inset) gross. Das
+    // Produkt ist eine harte Obergrenze, unabhaengig von jeder Verlegung.
+    //
+    // Gemessen ueber 20 Laeufe: 6 der 10 covFails lagen ueber dieser Grenze,
+    // also arithmetisch unerfuellbar — und das schon unter der optimistischen
+    // Annahme EINES Kreises (schmalster Korridor); mit den tatsaechlichen 2 bis 3
+    // Kreisen waeren es mehr. Beispiele:
+    //   cov 28, Deckel 33   s=100 edgeGap=190  5350x2350
+    //   cov 35, Deckel 39   s=100 edgeGap=200 10200x3500
+    //   cov 36, Deckel 36   s= 85 edgeGap=150  4100x1700
+    // covFails haette damit nie unter 6/20 fallen koennen, egal wie gut die
+    // Verlegung ist.
+    //
+    // Behandelt wird der Widerspruch dort, wo er entsteht: edgeGap wird auf den
+    // groessten Wert gesenkt, der das Ziel noch zulaesst — nie unter die
+    // physikalische Untergrenze von oben, und nie ERHOEHT. Bleibt der Raum auch
+    // dann zu klein, wird nichts geschoent; der Lauf bleibt ein Fehlschlag.
+    {
+      const lane=Math.max(50,S.pipeDia*1.6,0.9*S.bendRadius);
+      const corr=3*lane*0.3+lane/2;              // 1 Kreis, optimistisch
+      const cap=Math.min(1,2*25/S.s);
+      const need=0.40/cap;                       // noetiger Flaechenanteil
+      const fracAt=g=>{ const ins=g+corr;
+        return Math.max(0,(S.W-2*ins)*(S.H-2*ins))/(S.W*S.H); };
+      const floor=Math.max(5.5*S.pipeDia,0);
+      if(fracAt(S.edgeGap)<need && fracAt(floor)>=need){
+        let lo=floor, hi=S.edgeGap;
+        for(let it=0;it<24&&hi-lo>1;it++){
+          const mid=(lo+hi)/2;
+          if(fracAt(mid)>=need) lo=mid; else hi=mid;
+        }
+        S.edgeGap=Math.round(lo);
+      }
+    }
     // Verteiler zufällig auf der Raumkontur: zufällige Wand, zufällige Stelle
     // darauf — damit sind alle vier Wände und die Notch-Kanten abgedeckt.
     const room=lRing(0,0,S.W,S.H,S.notchA,S.notchB);
