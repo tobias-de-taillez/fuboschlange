@@ -5,6 +5,7 @@ use single_loop_solver::model::{
     SingleLoopPlan, SolveResult, SolverError, SolverErrorCode, SolverWarning, SolverWarningCode,
     SpacingDeviations, TotalLengthMm,
 };
+use std::collections::BTreeMap;
 
 fn point(x: f64, y: f64) -> Point {
     Point::new(x, y)
@@ -114,7 +115,7 @@ fn sample_plan() -> SingleLoopPlan {
         },
         warnings: vec![SolverWarning {
             code: SolverWarningCode::SpacingIncreased,
-            details: Map::new(),
+            details: BTreeMap::new(),
         }],
         constraint_certificate: sample_constraint_certificate(),
     }
@@ -130,6 +131,45 @@ fn sample_error() -> SolverError {
         message: "no solution geometry".to_owned(),
         details,
     }
+}
+
+#[test]
+fn serializes_path_with_camel_case_discriminated_primitives() {
+    let primitive = PathPrimitive::Arc {
+        start: point(80.0, 0.0),
+        end: point(0.0, 80.0),
+        center: point(0.0, 0.0),
+        radius_mm: 80.0,
+        sweep_rad: std::f64::consts::FRAC_PI_2,
+    };
+    let json = serde_json::to_value(primitive).unwrap();
+    assert_eq!(json["kind"], "arc");
+    assert_eq!(json["radiusMm"], 80.0);
+    assert_eq!(json["sweepRad"], std::f64::consts::FRAC_PI_2);
+    let _: Option<SolveResult> = None;
+}
+
+#[test]
+fn serializes_warning_details_number_and_string_and_rejects_boolean() {
+    let warning_json = json!({
+        "code": "SPACING_INCREASED",
+        "details": {
+            "count": 3.0,
+            "note": "near arc",
+        }
+    });
+
+    let warning = serde_json::from_value::<SolverWarning>(warning_json.clone()).unwrap();
+    assert_eq!(serde_json::to_value(warning).unwrap(), warning_json);
+
+    let boolean_warning_json = json!({
+        "code": "SPACING_INCREASED",
+        "details": {
+            "count": false,
+        }
+    });
+
+    assert!(serde_json::from_value::<SolverWarning>(boolean_warning_json).is_err());
 }
 
 #[test]

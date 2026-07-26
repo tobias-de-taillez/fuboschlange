@@ -2,6 +2,7 @@ use serde::de::Error as _;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
+use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -145,6 +146,71 @@ pub struct ConstraintCertificate {
     pub numeric_tolerance_mm: f64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FiniteNumber(f64);
+
+impl FiniteNumber {
+    fn new(value: f64) -> Option<Self> {
+        value.is_finite().then_some(Self(value))
+    }
+
+    const fn get(self) -> f64 {
+        self.0
+    }
+}
+
+impl Serialize for FiniteNumber {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_f64(self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for FiniteNumber {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = f64::deserialize(deserializer)?;
+        Self::new(value).ok_or_else(|| D::Error::custom("warning detail numbers must be finite"))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum WarningDetail {
+    Number(FiniteNumber),
+    String(String),
+}
+
+impl WarningDetail {
+    pub fn number(value: f64) -> Option<Self> {
+        FiniteNumber::new(value).map(Self::Number)
+    }
+
+    pub fn string(value: impl Into<String>) -> Self {
+        Self::String(value.into())
+    }
+
+    pub fn as_number(&self) -> Option<f64> {
+        match self {
+            Self::Number(value) => Some(value.get()),
+            Self::String(_) => None,
+        }
+    }
+
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            Self::Number(_) => None,
+            Self::String(value) => Some(value.as_str()),
+        }
+    }
+}
+
+pub type WarningDetails = BTreeMap<String, WarningDetail>;
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SolverWarningCode {
     #[serde(rename = "CONNECTION_SHIFTED")]
@@ -159,7 +225,7 @@ pub enum SolverWarningCode {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SolverWarning {
     pub code: SolverWarningCode,
-    pub details: Map<String, Value>,
+    pub details: WarningDetails,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
