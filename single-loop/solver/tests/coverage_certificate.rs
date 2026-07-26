@@ -40,6 +40,29 @@ fn horizontal_diameter_of_square_has_fifty_mm_max_distance() {
 }
 
 #[test]
+fn coverage_budget_stops_before_evaluating_excess_seed_triangle() {
+    let polygon = Polygon::try_from_original(vec![
+        point(0.0, 30.0),
+        point(10.0, 10.0),
+        point(30.0, 0.0),
+        point(50.0, 10.0),
+        point(60.0, 30.0),
+        point(50.0, 50.0),
+        point(30.0, 60.0),
+        point(10.0, 50.0),
+    ])
+    .unwrap();
+    let path = canonical(&[line((0.0, 30.0), (60.0, 30.0))]);
+
+    let error = coverage_bounds(&polygon, &path, 0.1, 3).unwrap_err();
+
+    assert_eq!(error.code, SolverErrorCode::SolverLimitExceeded);
+    assert_eq!(error.details["reason"].as_str(), Some("MAX_COVERAGE_CELLS"));
+    assert_eq!(error.details["limit"].as_number(), Some(3.0));
+    assert_eq!(error.details["used"].as_number(), Some(3.0));
+}
+
+#[test]
 fn coverage_budget_counts_both_evaluated_children() {
     let polygon = square(100.0);
     let path = canonical(&[line((0.0, 50.0), (100.0, 50.0))]);

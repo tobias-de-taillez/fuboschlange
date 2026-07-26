@@ -66,16 +66,16 @@ pub fn coverage_bounds(
     let mut heap = BinaryHeap::with_capacity(cells.len());
     let mut best = None;
     let mut next_id = 0;
+    let mut used = 0;
     for triangle in cells.drain(..) {
+        if used >= max_cells {
+            return Err(coverage_limit_error(max_cells, used));
+        }
         let cell = make_cell(triangle, path, next_id);
         next_id += 1;
+        used += 1;
         best = Some(stable_max(best, cell.sample));
         heap.push(cell);
-    }
-
-    let mut used = heap.len();
-    if used > max_cells {
-        return Err(coverage_limit_error(max_cells, used));
     }
 
     loop {
