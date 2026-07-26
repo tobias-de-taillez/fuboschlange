@@ -1,13 +1,17 @@
 mod distance;
 mod intersection;
+mod offset;
 mod path;
+mod polygon;
 mod predicates;
 mod primitive;
 mod vector;
 
-pub use distance::{primitive_distance, ClosestPair};
-pub use intersection::{primitive_intersections, Intersection, IntersectionPoint};
-pub use path::{canonicalize_path, CanonicalPath, PathError};
+pub use distance::{ClosestPair, primitive_distance};
+pub use intersection::{Intersection, IntersectionPoint, primitive_intersections};
+pub use offset::{AllowedRegion, QuantizedPoint, erode_for_centerline};
+pub use path::{CanonicalPath, PathError, canonicalize_path};
+pub use polygon::{PointClassification, Polygon, Winding};
 pub use predicates::ParameterRange;
 pub use primitive::Aabb;
 pub use vector::Vec2;
