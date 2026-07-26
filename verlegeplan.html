@@ -1339,6 +1339,26 @@ function doubleSpiralField(poly,insOf,s,gate){
     // liefern alle crossFails 12, erst 2,0*s faellt auf 13 zurueck. Es wirkt
     // also die Verschiebung des Ringanfangs weg vom Nahtfusspunkt, nicht die
     // Lueckenbreite. 0,5*s liegt mittig im flachen Bereich.
+    // GEMESSEN UND NICHT GENOMMEN: denselben Schlitz auch in Ring 1. Der
+    // Ruecklauf-Arm ENDET auf Ring 1, der Vorlauf beginnt auf Ring 0 — nach dem
+    // Schlitz oben teilen sich beide Leitungen dieselbe Oeffnung, und `field x
+    // leadIn` ist mit 47 von 205 Punkten (23 %) an die Spitze gerueckt.
+    //   nur Ring 0 (jetzt)        crossFails 12  covFails 10  radFails 18  medX 6
+    //   Ring 0 und 1              crossFails 10  covFails 12  radFails 17  medX 2
+    // Zwei Gates besser, eins schlechter; in Summe 39 statt 40 Fehlschlaege, und
+    // medianCross faellt von 6 auf 2. Die zwei Deckungsverluste sind Grenzfaelle
+    // (43 -> 39 % und 40 -> 39 %), aber der Regressionsvergleich des Bench
+    // vergleicht die harten Kriterien einzeln — deshalb bleibt es draussen, bis
+    // die Deckungsseite dazu geklaert ist.
+    //
+    // Die Breite spielt dabei GAR KEINE Rolle: 0,02 / 0,05 / 0,10 / 0,20 * s
+    // liefern alle exakt 10/12/17. 0,02*s sind 2 mm — es wirkt also allein, dass
+    // der projizierte Nahtfusspunkt P aus der Kette faellt, nicht die Luecke.
+    // Ebenfalls gemessen: den Schnittpunkt ROTIEREN statt zu kuerzen (volle
+    // Ringlaenge, nur andere Nahtstelle) — deutlich schlechter, crossFails 16 bis
+    // 19. Der Schlitz muss eine echte Oeffnung sein.
+    // Und: derselbe Schlitz in ALLEN Ringen ist schlechter als in keinem
+    // (crossFails 15, covFails 13, radFails 20, medianCross 20).
     if(k===0&&cut.length>3){
       const g=0.5*S.s; let acc=0, i=0;
       while(i<cut.length-3&&acc<g){ acc+=len(sub(cut[i+1],cut[i])); i++; }
