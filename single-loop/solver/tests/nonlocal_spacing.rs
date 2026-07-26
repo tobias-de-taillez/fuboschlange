@@ -111,20 +111,30 @@ fn valid_port_pair_candidate() -> CandidatePath {
         vec![
             PrimitiveRole::StartLead,
             PrimitiveRole::Inbound { winding: 0 },
-            PrimitiveRole::Inbound { winding: 1 },
+            PrimitiveRole::Inbound { winding: 2 },
             PrimitiveRole::InnerTurn,
+            PrimitiveRole::Outbound { winding: 3 },
             PrimitiveRole::Outbound { winding: 1 },
-            PrimitiveRole::Outbound { winding: 0 },
             PrimitiveRole::EndLead,
         ],
-        vec![ParentPair {
-            first_primitive: 1,
-            first_range: ParameterRange::FULL,
-            second_primitive: 4,
-            second_range: ParameterRange::FULL,
-            first_winding: 0,
-            second_winding: 1,
-        }],
+        vec![
+            ParentPair {
+                first_primitive: 1,
+                first_range: ParameterRange::FULL,
+                second_primitive: 5,
+                second_range: ParameterRange::FULL,
+                first_winding: 0,
+                second_winding: 1,
+            },
+            ParentPair {
+                first_primitive: 2,
+                first_range: ParameterRange::FULL,
+                second_primitive: 4,
+                second_range: ParameterRange::FULL,
+                first_winding: 2,
+                second_winding: 3,
+            },
+        ],
         connection,
         vec![1, 2, 3],
     )
@@ -151,6 +161,29 @@ fn parallel_return_path(split: bool) -> CandidatePath {
     candidate_from_parts(primitives, roles, vec![], connection, vec![9, split as u32])
 }
 
+fn triangular_boundary_path() -> CandidatePath {
+    let (_context, connection) = context_and_connection();
+    candidate_from_parts(
+        vec![
+            line((0.0, 0.0), (100.0, 0.0)),
+            arc((100.0, 0.0), (100.0, 160.0), (100.0, 80.0), 80.0, PI),
+            line((100.0, 160.0), (0.0, 160.0)),
+            arc((0.0, 160.0), (0.0, 320.0), (0.0, 240.0), 80.0, -PI),
+            line((0.0, 320.0), (100.0, 320.0)),
+        ],
+        vec![
+            PrimitiveRole::StartLead,
+            PrimitiveRole::Inbound { winding: 0 },
+            PrimitiveRole::InnerTurn,
+            PrimitiveRole::Outbound { winding: 0 },
+            PrimitiveRole::EndLead,
+        ],
+        vec![],
+        connection,
+        vec![2, 7, 1, 8],
+    )
+}
+
 #[test]
 fn nonlocal_result_is_invariant_under_line_subdivision() {
     let whole = parallel_return_path(false);
@@ -160,6 +193,26 @@ fn nonlocal_result_is_invariant_under_line_subdivision() {
     assert_abs_diff_eq!(a.distance_mm, 160.0, epsilon = 1e-9);
     assert_abs_diff_eq!(b.distance_mm, 160.0, epsilon = 1e-9);
     assert_abs_diff_eq!(a.distance_mm, b.distance_mm, epsilon = 1e-9);
+}
+
+#[test]
+fn triangular_boundary_minimum_is_not_replaced_by_nearby_samples() {
+    let candidate = triangular_boundary_path();
+    let constrained_horizontal_gap_mm = 12.345_678_9;
+    let local_arc_length_mm = 200.0 + 160.0 * PI + constrained_horizontal_gap_mm;
+
+    let result = minimum_nonlocal_distance(&candidate, local_arc_length_mm).unwrap();
+
+    assert_abs_diff_eq!(
+        result.distance_mm,
+        320.0_f64.hypot(constrained_horizontal_gap_mm),
+        epsilon = 1e-12
+    );
+    assert_abs_diff_eq!(
+        result.second_path_offset_mm - result.first_path_offset_mm,
+        local_arc_length_mm,
+        epsilon = 1e-12
+    );
 }
 
 #[test]

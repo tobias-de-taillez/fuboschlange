@@ -1,14 +1,14 @@
 use crate::constants::MIN_RADIUS_MM;
 use crate::geometry::{
-    ClosestPair, Intersection, ParameterRange, PointClassification, primitive_distance,
-    primitive_intersections,
+    ClosestPair, Intersection, ParameterRange, PointClassification, Vec2, primitive_distance,
+    primitive_distance_candidates, primitive_intersections,
 };
 use crate::model::{PathPrimitive, Point};
 use crate::validation::{
     CandidatePath, ValidationContext, ValidationFailure, ValidationFailureCode,
 };
 
-const NONLOCAL_CELL_TOLERANCE_MM: f64 = 1e-6;
+const NONLOCAL_BOUNDARY_CERTIFICATION_MM: f64 = 1e-10;
 const CONSERVATIVE_DISTANCE_ERROR_MM: f64 = 2.0 * crate::geometry::POSITION_TOLERANCE_MM;
 const ARCLENGTH_TOLERANCE_MM: f64 = 1e-12;
 
@@ -62,17 +62,24 @@ struct ClassifiedInterval {
     phase: ZonePhase,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum DomainStatus {
-    Outside,
-    Mixed,
-    Inside,
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct DomainPoint {
+    a_t: f64,
+    b_t: f64,
+}
+
+#[derive(Clone, Debug)]
+struct FeasibleDomain {
+    vertices: Vec<DomainPoint>,
+    a_length_mm: f64,
+    b_length_mm: f64,
+    required_offset_mm: f64,
 }
 
 #[derive(Clone, Copy, Debug)]
-struct ParameterCell {
-    a_range: ParameterRange,
-    b_range: ParameterRange,
+struct BoundaryInterval {
+    start: f64,
+    end: f64,
 }
 
 pub(crate) fn minimum_bend_radius(
@@ -112,7 +119,7 @@ pub(crate) fn minimum_wall_clearance(
     context: &ValidationContext,
 ) -> Result<MinWallClearance, ValidationFailure> {
     let intervals = classify_allowed_intervals(candidate, context);
-    let (start_exceptions, end_exceptions) = zone_exceptions(&intervals)?;
+    let (start_exceptions, end_exceptions) = zone_exceptions(candidate, &intervals)?;
 
     let boundary = polygon_edges(&context.polygon);
     let mut best: Option<(f64, MinWallClearance)> = None;
@@ -198,305 +205,428 @@ pub fn minimum_nonlocal_distance(
 ) -> Result<NonlocalDistance, ValidationFailure> {
     let primitives = candidate.path.primitives();
     let prefix = candidate.path.prefix_lengths();
-    let full_cell = ParameterCell {
-        a_range: ParameterRange::FULL,
-        b_range: ParameterRange::FULL,
-    };
     let mut best = exact_port_distance(candidate, local_arc_length_mm);
 
-    for i in 0..primitives.len() {
-        for j in i..primitives.len() {
-            seed_pair(
-                i,
-                j,
+    for a_index in 0..primitives.len() {
+        for b_index in a_index..primitives.len() {
+            minimize_primitive_pair(
+                a_index,
+                b_index,
                 prefix,
-                &primitives[i],
-                &primitives[j],
-                &full_cell,
+                &primitives[a_index],
+                &primitives[b_index],
                 local_arc_length_mm,
                 &mut best,
             );
         }
     }
 
-    for i in 0..primitives.len() {
-        for j in (i + 1)..primitives.len() {
-            search_pair(candidate, i, j, local_arc_length_mm, prefix, &mut best);
-        }
-    }
-
-    for (index, primitive) in primitives.iter().enumerate() {
-        if let Some(current_best) = best {
-            if let Some(lower_bound) =
-                same_primitive_nonlocal_lower_bound(primitive, local_arc_length_mm)
-            {
-                if lower_bound >= current_best.distance_mm {
-                    continue;
-                }
-            }
-        }
-        search_pair(
-            candidate,
-            index,
-            index,
-            local_arc_length_mm,
-            prefix,
-            &mut best,
-        );
-    }
-
     best.ok_or_else(|| ValidationFailure::new(ValidationFailureCode::NonlocalSpacingTooSmall))
 }
 
-fn seed_pair(
+fn minimize_primitive_pair(
     a_index: usize,
     b_index: usize,
     prefix: &[f64],
     a: &PathPrimitive,
     b: &PathPrimitive,
-    cell: &ParameterCell,
     local_arc_length_mm: f64,
     best: &mut Option<NonlocalDistance>,
 ) {
-    match ordered_domain_status(
+    let Some(domain) = feasible_domain(
         prefix[a_index],
         a.length(),
         prefix[b_index],
         b.length(),
-        cell,
         local_arc_length_mm,
-    ) {
-        DomainStatus::Outside => {}
-        DomainStatus::Inside => {
+    ) else {
+        return;
+    };
+
+    for pair in primitive_distance_candidates(a, ParameterRange::FULL, b, ParameterRange::FULL) {
+        if domain.contains(pair.a_t, pair.b_t) {
+            consider_closest_pair(a_index, b_index, prefix, a, b, pair, best);
+        }
+    }
+
+    for vertex in &domain.vertices {
+        consider_closest_pair(
+            a_index,
+            b_index,
+            prefix,
+            a,
+            b,
+            pair_at_domain_point(a, b, *vertex),
+            best,
+        );
+    }
+
+    for edge_index in 0..domain.vertices.len() {
+        let start = domain.vertices[edge_index];
+        let end = domain.vertices[(edge_index + 1) % domain.vertices.len()];
+        if start.a_t == end.a_t {
+            let a_t = ((start.a_t + end.a_t) * 0.5).clamp(0.0, 1.0);
+            let b_range = ParameterRange::new(start.b_t.min(end.b_t), start.b_t.max(end.b_t));
             consider_closest_pair(
                 a_index,
                 b_index,
                 prefix,
                 a,
                 b,
-                primitive_distance(a, cell.a_range, b, cell.b_range),
+                primitive_distance(a, ParameterRange::new(a_t, a_t), b, b_range),
                 best,
             );
-        }
-        DomainStatus::Mixed => {
-            if let Some(sample) =
-                best_valid_sample(a_index, b_index, prefix, a, b, cell, local_arc_length_mm)
-            {
-                consider_distance(sample, best);
-            }
-        }
-    }
-}
-
-fn search_pair(
-    candidate: &CandidatePath,
-    a_index: usize,
-    b_index: usize,
-    local_arc_length_mm: f64,
-    prefix: &[f64],
-    best: &mut Option<NonlocalDistance>,
-) {
-    recurse_pair(
-        candidate,
-        a_index,
-        b_index,
-        local_arc_length_mm,
-        prefix,
-        &ParameterCell {
-            a_range: ParameterRange::FULL,
-            b_range: ParameterRange::FULL,
-        },
-        best,
-    );
-}
-
-fn recurse_pair(
-    candidate: &CandidatePath,
-    a_index: usize,
-    b_index: usize,
-    local_arc_length_mm: f64,
-    prefix: &[f64],
-    cell: &ParameterCell,
-    best: &mut Option<NonlocalDistance>,
-) {
-    let primitives = candidate.path.primitives();
-    let a = &primitives[a_index];
-    let b = &primitives[b_index];
-    let a_length = a.length();
-    let b_length = b.length();
-
-    match ordered_domain_status(
-        prefix[a_index],
-        a_length,
-        prefix[b_index],
-        b_length,
-        cell,
-        local_arc_length_mm,
-    ) {
-        DomainStatus::Outside => return,
-        DomainStatus::Inside => {
+        } else if start.b_t == end.b_t {
+            let b_t = ((start.b_t + end.b_t) * 0.5).clamp(0.0, 1.0);
+            let a_range = ParameterRange::new(start.a_t.min(end.a_t), start.a_t.max(end.a_t));
             consider_closest_pair(
                 a_index,
                 b_index,
                 prefix,
                 a,
                 b,
-                primitive_distance(a, cell.a_range, b, cell.b_range),
+                primitive_distance(a, a_range, b, ParameterRange::new(b_t, b_t)),
                 best,
             );
-            return;
+        } else {
+            consider_closest_pair(
+                a_index,
+                b_index,
+                prefix,
+                a,
+                b,
+                fixed_lag_boundary_minimum(a, b, start, end),
+                best,
+            );
         }
-        DomainStatus::Mixed => {}
+    }
+}
+
+impl FeasibleDomain {
+    fn contains(&self, a_t: f64, b_t: f64) -> bool {
+        self.b_length_mm * b_t - self.a_length_mm * a_t >= self.required_offset_mm
+    }
+}
+
+fn feasible_domain(
+    a_prefix_mm: f64,
+    a_length_mm: f64,
+    b_prefix_mm: f64,
+    b_length_mm: f64,
+    local_arc_length_mm: f64,
+) -> Option<FeasibleDomain> {
+    let required_offset_mm = local_arc_length_mm - (b_prefix_mm - a_prefix_mm);
+    let rectangle = [
+        DomainPoint { a_t: 0.0, b_t: 0.0 },
+        DomainPoint { a_t: 1.0, b_t: 0.0 },
+        DomainPoint { a_t: 1.0, b_t: 1.0 },
+        DomainPoint { a_t: 0.0, b_t: 1.0 },
+    ];
+    let mut vertices = Vec::new();
+
+    for index in 0..rectangle.len() {
+        let previous = rectangle[(index + rectangle.len() - 1) % rectangle.len()];
+        let current = rectangle[index];
+        let previous_value = domain_value(previous, a_length_mm, b_length_mm, required_offset_mm);
+        let current_value = domain_value(current, a_length_mm, b_length_mm, required_offset_mm);
+        let previous_inside = previous_value >= 0.0;
+        let current_inside = current_value >= 0.0;
+
+        if previous_inside != current_inside {
+            let fraction = previous_value / (previous_value - current_value);
+            push_domain_vertex(
+                &mut vertices,
+                DomainPoint {
+                    a_t: (previous.a_t + (current.a_t - previous.a_t) * fraction).clamp(0.0, 1.0),
+                    b_t: (previous.b_t + (current.b_t - previous.b_t) * fraction).clamp(0.0, 1.0),
+                },
+            );
+        }
+        if current_inside {
+            push_domain_vertex(&mut vertices, current);
+        }
     }
 
-    if let Some(sample) =
-        best_valid_sample(a_index, b_index, prefix, a, b, cell, local_arc_length_mm)
+    if vertices.len() > 1
+        && same_parameter(vertices[0].a_t, vertices.last().unwrap().a_t)
+        && same_parameter(vertices[0].b_t, vertices.last().unwrap().b_t)
     {
-        consider_distance(sample, best);
+        vertices.pop();
     }
 
-    let span_mm = a_length * (cell.a_range.end - cell.a_range.start)
-        + b_length * (cell.b_range.end - cell.b_range.start);
-    if span_mm <= NONLOCAL_CELL_TOLERANCE_MM {
+    (!vertices.is_empty()).then_some(FeasibleDomain {
+        vertices,
+        a_length_mm,
+        b_length_mm,
+        required_offset_mm,
+    })
+}
+
+fn domain_value(
+    point: DomainPoint,
+    a_length_mm: f64,
+    b_length_mm: f64,
+    required_offset_mm: f64,
+) -> f64 {
+    b_length_mm * point.b_t - a_length_mm * point.a_t - required_offset_mm
+}
+
+fn push_domain_vertex(vertices: &mut Vec<DomainPoint>, point: DomainPoint) {
+    if vertices.last().is_some_and(|last| {
+        same_parameter(last.a_t, point.a_t) && same_parameter(last.b_t, point.b_t)
+    }) {
         return;
     }
+    vertices.push(point);
+}
 
-    let lower = primitive_distance(a, cell.a_range, b, cell.b_range);
-    if let Some(current) = best {
-        if lower.distance_mm > current.distance_mm {
-            return;
-        }
-    }
+fn same_parameter(left: f64, right: f64) -> bool {
+    (left - right).abs() <= 64.0 * f64::EPSILON
+}
 
-    let a_span = a_length * (cell.a_range.end - cell.a_range.start);
-    let b_span = b_length * (cell.b_range.end - cell.b_range.start);
-    if a_span >= b_span {
-        let midpoint = (cell.a_range.start + cell.a_range.end) * 0.5;
-        recurse_pair(
-            candidate,
-            a_index,
-            b_index,
-            local_arc_length_mm,
-            prefix,
-            &ParameterCell {
-                a_range: ParameterRange::new(cell.a_range.start, midpoint),
-                b_range: cell.b_range,
-            },
-            best,
-        );
-        recurse_pair(
-            candidate,
-            a_index,
-            b_index,
-            local_arc_length_mm,
-            prefix,
-            &ParameterCell {
-                a_range: ParameterRange::new(midpoint, cell.a_range.end),
-                b_range: cell.b_range,
-            },
-            best,
-        );
-    } else {
-        let midpoint = (cell.b_range.start + cell.b_range.end) * 0.5;
-        recurse_pair(
-            candidate,
-            a_index,
-            b_index,
-            local_arc_length_mm,
-            prefix,
-            &ParameterCell {
-                a_range: cell.a_range,
-                b_range: ParameterRange::new(cell.b_range.start, midpoint),
-            },
-            best,
-        );
-        recurse_pair(
-            candidate,
-            a_index,
-            b_index,
-            local_arc_length_mm,
-            prefix,
-            &ParameterCell {
-                a_range: cell.a_range,
-                b_range: ParameterRange::new(midpoint, cell.b_range.end),
-            },
-            best,
-        );
+fn pair_at_domain_point(a: &PathPrimitive, b: &PathPrimitive, point: DomainPoint) -> ClosestPair {
+    let point_on_a = a.point_at(point.a_t);
+    let point_on_b = b.point_at(point.b_t);
+    ClosestPair {
+        point_on_a,
+        point_on_b,
+        a_t: point.a_t,
+        b_t: point.b_t,
+        distance_mm: point_on_a.distance_to(point_on_b),
     }
 }
 
-fn ordered_domain_status(
-    a_prefix: f64,
-    a_length: f64,
-    b_prefix: f64,
-    b_length: f64,
-    cell: &ParameterCell,
-    local_arc_length_mm: f64,
-) -> DomainStatus {
-    let min_gap =
-        (b_prefix + b_length * cell.b_range.start) - (a_prefix + a_length * cell.a_range.end);
-    let max_gap =
-        (b_prefix + b_length * cell.b_range.end) - (a_prefix + a_length * cell.a_range.start);
-
-    if max_gap < local_arc_length_mm - ARCLENGTH_TOLERANCE_MM {
-        DomainStatus::Outside
-    } else if min_gap >= local_arc_length_mm - ARCLENGTH_TOLERANCE_MM {
-        DomainStatus::Inside
-    } else {
-        DomainStatus::Mixed
-    }
-}
-
-fn best_valid_sample(
-    a_index: usize,
-    b_index: usize,
-    prefix: &[f64],
+fn fixed_lag_boundary_minimum(
     a: &PathPrimitive,
     b: &PathPrimitive,
-    cell: &ParameterCell,
-    local_arc_length_mm: f64,
-) -> Option<NonlocalDistance> {
-    let mut best = None;
-    let mut samples = vec![
-        (cell.a_range.start, cell.b_range.start),
-        (cell.a_range.start, cell.b_range.end),
-        (cell.a_range.end, cell.b_range.start),
-        (cell.a_range.end, cell.b_range.end),
-        (
-            (cell.a_range.start + cell.a_range.end) * 0.5,
-            (cell.b_range.start + cell.b_range.end) * 0.5,
-        ),
-    ];
-    samples.sort_by(|left, right| {
-        left.0
-            .total_cmp(&right.0)
-            .then_with(|| left.1.total_cmp(&right.1))
-    });
-    samples.dedup_by(|left, right| {
-        (left.0 - right.0).abs() <= 1e-12 && (left.1 - right.1).abs() <= 1e-12
-    });
+    start: DomainPoint,
+    end: DomainPoint,
+) -> ClosestPair {
+    if matches!(a, PathPrimitive::Line { .. }) && matches!(b, PathPrimitive::Line { .. }) {
+        return line_line_boundary_minimum(a, b, start, end);
+    }
+    if let Some(pair) = equal_curvature_arc_boundary_minimum(a, b, start, end) {
+        return pair;
+    }
+    certified_boundary_minimum(a, b, start, end)
+}
 
-    for (a_t, b_t) in samples {
-        let first_path_offset_mm = prefix[a_index] + a.length() * a_t;
-        let second_path_offset_mm = prefix[b_index] + b.length() * b_t;
-        if second_path_offset_mm - first_path_offset_mm
-            < local_arc_length_mm - ARCLENGTH_TOLERANCE_MM
-        {
-            continue;
+fn line_line_boundary_minimum(
+    a: &PathPrimitive,
+    b: &PathPrimitive,
+    start: DomainPoint,
+    end: DomainPoint,
+) -> ClosestPair {
+    let at_start = pair_at_boundary_parameter(a, b, start, end, 0.0);
+    let at_end = pair_at_boundary_parameter(a, b, start, end, 1.0);
+    let relative_start = at_start.point_on_a - at_start.point_on_b;
+    let relative_delta = (at_end.point_on_a - at_end.point_on_b) - relative_start;
+    let denominator = relative_delta.norm_squared();
+    let q = if denominator == 0.0 {
+        0.0
+    } else {
+        (-relative_start.dot(relative_delta) / denominator).clamp(0.0, 1.0)
+    };
+    pair_at_boundary_parameter(a, b, start, end, q)
+}
+
+fn equal_curvature_arc_boundary_minimum(
+    a: &PathPrimitive,
+    b: &PathPrimitive,
+    start: DomainPoint,
+    end: DomainPoint,
+) -> Option<ClosestPair> {
+    let (
+        PathPrimitive::Arc {
+            center: a_center,
+            radius_mm: a_radius,
+            sweep_rad: a_sweep,
+            ..
+        },
+        PathPrimitive::Arc {
+            center: b_center,
+            radius_mm: b_radius,
+            sweep_rad: b_sweep,
+            ..
+        },
+    ) = (a, b)
+    else {
+        return None;
+    };
+    if a_radius != b_radius || a_sweep.signum() != b_sweep.signum() {
+        return None;
+    }
+
+    let a_angle_span = a_sweep * (end.a_t - start.a_t);
+    let b_angle_span = b_sweep * (end.b_t - start.b_t);
+    let angle_scale = a_angle_span.abs().max(b_angle_span.abs()).max(1.0);
+    if (a_angle_span - b_angle_span).abs() > 64.0 * f64::EPSILON * angle_scale {
+        return None;
+    }
+
+    let at_start = pair_at_boundary_parameter(a, b, start, end, 0.0);
+    let mut best = at_start;
+    consider_closest_candidate(pair_at_boundary_parameter(a, b, start, end, 1.0), &mut best);
+
+    let center_delta = *a_center - *b_center;
+    let radial_delta = (at_start.point_on_a - *a_center) - (at_start.point_on_b - *b_center);
+    if center_delta.norm_squared() == 0.0
+        || radial_delta.norm_squared() == 0.0
+        || a_angle_span.abs() <= f64::EPSILON
+    {
+        return Some(best);
+    }
+
+    let target_angle = (-center_delta.y).atan2(-center_delta.x);
+    let radial_angle = radial_delta.y.atan2(radial_delta.x);
+    for turns in -2..=2 {
+        let q =
+            (target_angle + f64::from(turns) * std::f64::consts::TAU - radial_angle) / a_angle_span;
+        if (0.0..=1.0).contains(&q) {
+            consider_closest_candidate(pair_at_boundary_parameter(a, b, start, end, q), &mut best);
         }
-        consider_distance(
-            NonlocalDistance {
-                distance_mm: a.point_at(a_t).distance_to(b.point_at(b_t)),
-                first_point: a.point_at(a_t),
-                second_point: b.point_at(b_t),
-                first_path_offset_mm,
-                second_path_offset_mm,
-            },
+    }
+
+    Some(best)
+}
+
+fn certified_boundary_minimum(
+    a: &PathPrimitive,
+    b: &PathPrimitive,
+    start: DomainPoint,
+    end: DomainPoint,
+) -> ClosestPair {
+    let mut best = pair_at_boundary_parameter(a, b, start, end, 0.0);
+    for q in [0.5, 1.0] {
+        consider_closest_candidate(pair_at_boundary_parameter(a, b, start, end, q), &mut best);
+    }
+
+    let mut pending = vec![BoundaryInterval {
+        start: 0.0,
+        end: 1.0,
+    }];
+    while let Some(interval) = pending.pop() {
+        let (lower_bound_mm, q_candidate) =
+            boundary_interval_lower_bound(a, b, start, end, interval);
+        consider_closest_candidate(
+            pair_at_boundary_parameter(a, b, start, end, q_candidate),
             &mut best,
         );
+        if lower_bound_mm + NONLOCAL_BOUNDARY_CERTIFICATION_MM >= best.distance_mm {
+            continue;
+        }
+
+        let midpoint = (interval.start + interval.end) * 0.5;
+        if midpoint == interval.start || midpoint == interval.end {
+            continue;
+        }
+        pending.push(BoundaryInterval {
+            start: midpoint,
+            end: interval.end,
+        });
+        pending.push(BoundaryInterval {
+            start: interval.start,
+            end: midpoint,
+        });
     }
 
     best
+}
+
+fn boundary_interval_lower_bound(
+    a: &PathPrimitive,
+    b: &PathPrimitive,
+    start: DomainPoint,
+    end: DomainPoint,
+    interval: BoundaryInterval,
+) -> (f64, f64) {
+    let midpoint = (interval.start + interval.end) * 0.5;
+    let half_span = (interval.end - interval.start) * 0.5;
+    let a_t = interpolate(start.a_t, end.a_t, midpoint);
+    let b_t = interpolate(start.b_t, end.b_t, midpoint);
+    let (a_point, a_derivative, a_second_bound) = boundary_derivatives(a, a_t, end.a_t - start.a_t);
+    let (b_point, b_derivative, b_second_bound) = boundary_derivatives(b, b_t, end.b_t - start.b_t);
+    let relative = a_point - b_point;
+    let derivative = a_derivative - b_derivative;
+    let derivative_norm_squared = derivative.norm_squared();
+    let offset = if derivative_norm_squared == 0.0 {
+        0.0
+    } else {
+        (-relative.dot(derivative) / derivative_norm_squared).clamp(-half_span, half_span)
+    };
+    let linear_minimum = (relative + derivative * offset).norm();
+    let taylor_error = 0.5 * (a_second_bound + b_second_bound) * half_span * half_span;
+    let roundoff = 64.0
+        * f64::EPSILON
+        * (linear_minimum + derivative.norm() * half_span + taylor_error).max(1.0);
+    (
+        (linear_minimum - taylor_error - roundoff).max(0.0),
+        midpoint + offset,
+    )
+}
+
+fn boundary_derivatives(
+    primitive: &PathPrimitive,
+    t: f64,
+    parameter_span: f64,
+) -> (Point, Vec2, f64) {
+    let point = primitive.point_at(t);
+    match primitive {
+        PathPrimitive::Line { start, end } => (point, (*end - *start) * parameter_span, 0.0),
+        PathPrimitive::Arc {
+            center,
+            radius_mm,
+            sweep_rad,
+            ..
+        } => {
+            let radial = (point - *center) / *radius_mm;
+            let tangent = if *sweep_rad > 0.0 {
+                radial.perp_ccw()
+            } else {
+                -radial.perp_ccw()
+            };
+            let derivative = tangent * primitive.length() * parameter_span;
+            let second_bound = radius_mm * (sweep_rad * parameter_span).powi(2);
+            (point, derivative, second_bound)
+        }
+    }
+}
+
+fn pair_at_boundary_parameter(
+    a: &PathPrimitive,
+    b: &PathPrimitive,
+    start: DomainPoint,
+    end: DomainPoint,
+    q: f64,
+) -> ClosestPair {
+    pair_at_domain_point(
+        a,
+        b,
+        DomainPoint {
+            a_t: interpolate(start.a_t, end.a_t, q),
+            b_t: interpolate(start.b_t, end.b_t, q),
+        },
+    )
+}
+
+fn interpolate(start: f64, end: f64, t: f64) -> f64 {
+    start + (end - start) * t
+}
+
+fn consider_closest_candidate(candidate: ClosestPair, best: &mut ClosestPair) {
+    let replace = candidate
+        .distance_mm
+        .total_cmp(&best.distance_mm)
+        .then_with(|| candidate.point_on_a.x.total_cmp(&best.point_on_a.x))
+        .then_with(|| candidate.point_on_a.y.total_cmp(&best.point_on_a.y))
+        .then_with(|| candidate.point_on_b.x.total_cmp(&best.point_on_b.x))
+        .then_with(|| candidate.point_on_b.y.total_cmp(&best.point_on_b.y))
+        .then_with(|| candidate.a_t.total_cmp(&best.a_t))
+        .then_with(|| candidate.b_t.total_cmp(&best.b_t))
+        .is_lt();
+    if replace {
+        *best = candidate;
+    }
 }
 
 fn consider_closest_pair(
@@ -570,23 +700,6 @@ fn exact_port_distance(
     })
 }
 
-fn same_primitive_nonlocal_lower_bound(
-    primitive: &PathPrimitive,
-    local_arc_length_mm: f64,
-) -> Option<f64> {
-    if primitive.length() + ARCLENGTH_TOLERANCE_MM < local_arc_length_mm {
-        return None;
-    }
-
-    match primitive {
-        PathPrimitive::Line { .. } => Some(local_arc_length_mm),
-        PathPrimitive::Arc { radius_mm, .. } => {
-            let angle = local_arc_length_mm / *radius_mm;
-            Some(2.0 * *radius_mm * (angle * 0.5).sin())
-        }
-    }
-}
-
 fn classify_allowed_intervals(
     candidate: &CandidatePath,
     context: &ValidationContext,
@@ -627,23 +740,48 @@ fn classify_allowed_intervals(
 }
 
 fn zone_exceptions(
+    candidate: &CandidatePath,
     intervals: &[ClassifiedInterval],
 ) -> Result<(Vec<ClassifiedInterval>, Vec<ClassifiedInterval>), ValidationFailure> {
     let mut start = Vec::new();
+    let mut start_inside = false;
     for interval in intervals {
-        if interval.phase == ZonePhase::NearWall {
-            start.push(*interval);
-        } else {
+        if !matches!(
+            candidate.provenance.roles.get(interval.primitive_index),
+            Some(crate::validation::PrimitiveRole::StartLead)
+        ) {
             break;
+        }
+        match interval.phase {
+            ZonePhase::NearWall if !start_inside => start.push(*interval),
+            ZonePhase::NearWall => {
+                return Err(
+                    ValidationFailure::new(ValidationFailureCode::ConnectionZoneReentry)
+                        .with_primitive(interval.primitive_index),
+                );
+            }
+            ZonePhase::Inside => start_inside = true,
         }
     }
 
     let mut end = Vec::new();
+    let mut end_inside = false;
     for interval in intervals.iter().rev() {
-        if interval.phase == ZonePhase::NearWall {
-            end.push(*interval);
-        } else {
+        if !matches!(
+            candidate.provenance.roles.get(interval.primitive_index),
+            Some(crate::validation::PrimitiveRole::EndLead)
+        ) {
             break;
+        }
+        match interval.phase {
+            ZonePhase::NearWall if !end_inside => end.push(*interval),
+            ZonePhase::NearWall => {
+                return Err(
+                    ValidationFailure::new(ValidationFailureCode::ConnectionZoneReentry)
+                        .with_primitive(interval.primitive_index),
+                );
+            }
+            ZonePhase::Inside => end_inside = true,
         }
     }
     end.reverse();

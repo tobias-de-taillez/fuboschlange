@@ -88,6 +88,35 @@ pub(crate) fn point_on_line_parameter(line: &PathPrimitive, point: Point) -> f64
     }
 }
 
+pub(crate) fn solve_line_parameters(
+    a_start: Point,
+    a_end: Point,
+    b_start: Point,
+    b_end: Point,
+) -> Option<(f64, f64)> {
+    let a_direction = a_end - a_start;
+    let b_direction = b_end - b_start;
+    let a_scale = a_direction.x.abs().max(a_direction.y.abs());
+    let b_scale = b_direction.x.abs().max(b_direction.y.abs());
+    if a_scale == 0.0 || b_scale == 0.0 {
+        return None;
+    }
+
+    let scaled_a = a_direction / a_scale;
+    let scaled_b = b_direction / b_scale;
+    let denominator = scaled_a.x * scaled_b.y - scaled_a.y * scaled_b.x;
+    if denominator == 0.0 {
+        return None;
+    }
+
+    let delta = b_start - a_start;
+    let delta_for_a = delta / a_scale;
+    let delta_for_b = delta / b_scale;
+    let a_t = (delta_for_a.x * scaled_b.y - delta_for_a.y * scaled_b.x) / denominator;
+    let b_t = (delta_for_b.x * scaled_a.y - delta_for_b.y * scaled_a.x) / denominator;
+    Some((a_t, b_t))
+}
+
 pub(crate) fn arc_parameter_for_angle(arc: &PathPrimitive, angle: f64) -> Option<f64> {
     let (_center, _radius_mm, start_angle, sweep_rad) = arc_properties(arc);
     let signed_delta = signed_angle_delta(start_angle, angle, sweep_rad);

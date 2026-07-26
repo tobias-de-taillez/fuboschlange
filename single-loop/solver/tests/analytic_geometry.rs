@@ -90,6 +90,20 @@ fn line_line_crossing_returns_one_point() {
 }
 
 #[test]
+fn near_parallel_line_crossing_is_not_dropped_by_absolute_epsilon() {
+    let a = line((0.0, 0.0), (1.0, 1e-16));
+    let b = line((0.0, 1e-16), (1.0, 0.0));
+
+    let hit = primitive_intersections(&a, &b);
+    assert_points_close(hit.points(), &[(0.5, 0.5e-16)]);
+
+    let distance = primitive_distance(&a, ParameterRange::FULL, &b, ParameterRange::FULL);
+    assert_eq!(distance.distance_mm, 0.0);
+    assert_abs_diff_eq!(distance.a_t, 0.5, epsilon = 1e-15);
+    assert_abs_diff_eq!(distance.b_t, 0.5, epsilon = 1e-15);
+}
+
+#[test]
 fn line_line_collinear_overlap_returns_overlap() {
     let hit = primitive_intersections(
         &line((0.0, 0.0), (100.0, 0.0)),

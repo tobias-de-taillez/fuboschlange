@@ -1,7 +1,7 @@
 use crate::geometry::POSITION_TOLERANCE_MM;
 use crate::geometry::predicates::{
     arc_parameter_for_point_with_radial_tolerance_strict, arc_properties, arc_set_intervals_strict,
-    line_endpoints, point_on_line_parameter, same_point,
+    line_endpoints, point_on_line_parameter, same_point, solve_line_parameters,
 };
 use crate::model::{PathPrimitive, Point};
 use robust::Coord;
@@ -57,17 +57,12 @@ fn line_line_intersections(a: &PathPrimitive, b: &PathPrimitive) -> Intersection
         return Intersection::None;
     }
 
-    let r = p2 - p;
-    let s = q2 - q;
-    let denominator = cross(r, s);
-    if denominator.abs() <= f64::EPSILON {
+    let Some((t, u)) = solve_line_parameters(p, p2, q, q2) else {
         return Intersection::None;
-    }
-
-    let q_minus_p = q - p;
-    let t = clamp_unit(cross(q_minus_p, s) / denominator);
-    let u = clamp_unit(cross(q_minus_p, r) / denominator);
-    let point = p + r * t;
+    };
+    let t = clamp_unit(t);
+    let u = clamp_unit(u);
+    let point = p + (p2 - p) * t;
 
     finalize_points(vec![IntersectionPoint {
         point,
@@ -305,10 +300,6 @@ fn coord(point: Point) -> Coord<f64> {
         x: point.x,
         y: point.y,
     }
-}
-
-fn cross(a: crate::geometry::Vec2, b: crate::geometry::Vec2) -> f64 {
-    a.x * b.y - a.y * b.x
 }
 
 fn discriminant_roundoff_tolerance(quadratic_a: f64, quadratic_b: f64, quadratic_c: f64) -> f64 {

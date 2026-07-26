@@ -73,14 +73,24 @@ fn assert_failure_code(result: Result<HardValidationReport, ValidationFailure>, 
 }
 
 fn default_parent_pairs() -> Vec<ParentPair> {
-    vec![ParentPair {
-        first_primitive: 1,
-        first_range: ParameterRange::FULL,
-        second_primitive: 4,
-        second_range: ParameterRange::FULL,
-        first_winding: 0,
-        second_winding: 1,
-    }]
+    vec![
+        ParentPair {
+            first_primitive: 1,
+            first_range: ParameterRange::FULL,
+            second_primitive: 5,
+            second_range: ParameterRange::FULL,
+            first_winding: 0,
+            second_winding: 1,
+        },
+        ParentPair {
+            first_primitive: 2,
+            first_range: ParameterRange::FULL,
+            second_primitive: 4,
+            second_range: ParameterRange::FULL,
+            first_winding: 2,
+            second_winding: 3,
+        },
+    ]
 }
 
 fn mirrored_racetrack_primitives(
@@ -137,10 +147,10 @@ fn racetrack_candidate(radius_mm: f64) -> CandidatePath {
         vec![
             PrimitiveRole::StartLead,
             PrimitiveRole::Inbound { winding: 0 },
-            PrimitiveRole::Inbound { winding: 1 },
+            PrimitiveRole::Inbound { winding: 2 },
             PrimitiveRole::InnerTurn,
+            PrimitiveRole::Outbound { winding: 3 },
             PrimitiveRole::Outbound { winding: 1 },
-            PrimitiveRole::Outbound { winding: 0 },
             PrimitiveRole::EndLead,
         ],
         default_parent_pairs(),
@@ -180,10 +190,10 @@ fn outside_polygon_candidate() -> CandidatePath {
         vec![
             PrimitiveRole::StartLead,
             PrimitiveRole::Inbound { winding: 0 },
-            PrimitiveRole::Inbound { winding: 1 },
+            PrimitiveRole::Inbound { winding: 2 },
             PrimitiveRole::InnerTurn,
+            PrimitiveRole::Outbound { winding: 3 },
             PrimitiveRole::Outbound { winding: 1 },
-            PrimitiveRole::Outbound { winding: 0 },
             PrimitiveRole::EndLead,
         ],
         default_parent_pairs(),
@@ -242,10 +252,10 @@ fn self_contact_candidate(custom_end_x: f64, key: Vec<u32>) -> CandidatePath {
         vec![
             PrimitiveRole::StartLead,
             PrimitiveRole::Inbound { winding: 0 },
-            PrimitiveRole::Inbound { winding: 1 },
+            PrimitiveRole::Inbound { winding: 2 },
             PrimitiveRole::InnerTurn,
+            PrimitiveRole::Outbound { winding: 3 },
             PrimitiveRole::Outbound { winding: 1 },
-            PrimitiveRole::Outbound { winding: 0 },
             PrimitiveRole::EndLead,
         ],
         default_parent_pairs(),
@@ -297,15 +307,92 @@ fn wall_zone_reentry_candidate() -> CandidatePath {
         vec![
             PrimitiveRole::StartLead,
             PrimitiveRole::Inbound { winding: 0 },
-            PrimitiveRole::Inbound { winding: 1 },
+            PrimitiveRole::Inbound { winding: 2 },
             PrimitiveRole::InnerTurn,
+            PrimitiveRole::Outbound { winding: 3 },
             PrimitiveRole::Outbound { winding: 1 },
-            PrimitiveRole::Outbound { winding: 0 },
             PrimitiveRole::EndLead,
         ],
         default_parent_pairs(),
         connection,
         vec![3, 1, 4],
+    )
+}
+
+fn multiple_start_leads_candidate() -> CandidatePath {
+    let (_context, connection) = default_context_and_connection();
+    candidate_from_parts(
+        mirrored_racetrack_primitives(&connection, 80.0),
+        vec![
+            PrimitiveRole::StartLead,
+            PrimitiveRole::StartLead,
+            PrimitiveRole::Inbound { winding: 0 },
+            PrimitiveRole::InnerTurn,
+            PrimitiveRole::Outbound { winding: 1 },
+            PrimitiveRole::Outbound { winding: 1 },
+            PrimitiveRole::EndLead,
+        ],
+        vec![ParentPair {
+            first_primitive: 2,
+            first_range: ParameterRange::FULL,
+            second_primitive: 4,
+            second_range: ParameterRange::FULL,
+            first_winding: 0,
+            second_winding: 1,
+        }],
+        connection,
+        vec![2, 3, 5, 7],
+    )
+}
+
+fn nonlead_initial_wall_prefix_candidate() -> CandidatePath {
+    let (_context, connection) = default_context_and_connection();
+    let mut primitives = mirrored_racetrack_primitives(&connection, 80.0);
+    primitives.splice(
+        0..1,
+        [
+            line(
+                (connection.start_port.x, 0.0),
+                (connection.start_port.x, 10.0),
+            ),
+            line(
+                (connection.start_port.x, 10.0),
+                (connection.start_port.x, 80.0),
+            ),
+        ],
+    );
+    candidate_from_parts(
+        primitives,
+        vec![
+            PrimitiveRole::StartLead,
+            PrimitiveRole::Inbound { winding: 0 },
+            PrimitiveRole::Inbound { winding: 0 },
+            PrimitiveRole::Inbound { winding: 2 },
+            PrimitiveRole::InnerTurn,
+            PrimitiveRole::Outbound { winding: 3 },
+            PrimitiveRole::Outbound { winding: 1 },
+            PrimitiveRole::EndLead,
+        ],
+        vec![
+            ParentPair {
+                first_primitive: 2,
+                first_range: ParameterRange::FULL,
+                second_primitive: 6,
+                second_range: ParameterRange::FULL,
+                first_winding: 0,
+                second_winding: 1,
+            },
+            ParentPair {
+                first_primitive: 3,
+                first_range: ParameterRange::FULL,
+                second_primitive: 5,
+                second_range: ParameterRange::FULL,
+                first_winding: 2,
+                second_winding: 3,
+            },
+        ],
+        connection,
+        vec![1, 6, 1, 8],
     )
 }
 
@@ -359,11 +446,78 @@ fn valid_wall_zone_prefix_is_accepted() {
 }
 
 #[test]
+fn nonlead_geometry_in_initial_wall_prefix_is_rejected() {
+    let (context, _connection) = default_context_and_connection();
+    assert_failure_code(
+        validate_hard_constraints(&nonlead_initial_wall_prefix_candidate(), &context),
+        "CONNECTION_ZONE_REENTRY",
+    );
+}
+
+#[test]
 fn wall_zone_leave_and_reenter_is_rejected() {
     let (context, _connection) = context_and_connection(100.0);
     assert_failure_code(
         validate_hard_constraints(&wall_zone_reentry_candidate(), &context),
         "CONNECTION_ZONE_REENTRY",
+    );
+}
+
+#[test]
+fn empty_parent_phase_data_is_rejected() {
+    let (context, _connection) = default_context_and_connection();
+    let mut candidate = racetrack_candidate(80.0);
+    candidate.provenance.parent_pairs.clear();
+    assert_failure_code(
+        validate_hard_constraints(&candidate, &context),
+        "INVALID_TOPOLOGY_PARENT_PAIR",
+    );
+}
+
+#[test]
+fn duplicate_parent_phase_data_is_rejected() {
+    let (context, _connection) = default_context_and_connection();
+    let mut candidate = racetrack_candidate(80.0);
+    candidate
+        .provenance
+        .parent_pairs
+        .push(candidate.provenance.parent_pairs[0].clone());
+    assert_failure_code(
+        validate_hard_constraints(&candidate, &context),
+        "INVALID_TOPOLOGY_PARENT_PAIR",
+    );
+}
+
+#[test]
+fn parent_metadata_must_match_indexed_role_windings() {
+    let (context, _connection) = default_context_and_connection();
+    let mut candidate = racetrack_candidate(80.0);
+    candidate.provenance.parent_pairs[0].first_winding = 8;
+    candidate.provenance.parent_pairs[0].second_winding = 9;
+    assert_failure_code(
+        validate_hard_constraints(&candidate, &context),
+        "INVALID_TOPOLOGY_PARENT_PAIR",
+    );
+}
+
+#[test]
+fn parent_phase_pair_must_alternate_inbound_and_outbound() {
+    let (context, _connection) = default_context_and_connection();
+    let mut candidate = racetrack_candidate(80.0);
+    candidate.provenance.parent_pairs[0].second_primitive = 2;
+    candidate.provenance.parent_pairs[0].second_winding = 2;
+    assert_failure_code(
+        validate_hard_constraints(&candidate, &context),
+        "INVALID_PRIMITIVE_ROLE_PHASE",
+    );
+}
+
+#[test]
+fn multiple_start_lead_roles_are_rejected() {
+    let (context, _connection) = default_context_and_connection();
+    assert_failure_code(
+        validate_hard_constraints(&multiple_start_leads_candidate(), &context),
+        "INVALID_PRIMITIVE_ROLE_ORDER",
     );
 }
 

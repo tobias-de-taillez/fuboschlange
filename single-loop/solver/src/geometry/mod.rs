@@ -7,6 +7,7 @@ mod predicates;
 mod primitive;
 mod vector;
 
+pub(crate) use distance::primitive_distance_candidates;
 pub use distance::{ClosestPair, primitive_distance};
 pub use intersection::{Intersection, IntersectionPoint, primitive_intersections};
 pub use offset::{AllowedRegion, QuantizedPoint, erode_for_centerline};

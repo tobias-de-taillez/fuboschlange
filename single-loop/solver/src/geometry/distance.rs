@@ -3,6 +3,7 @@ use crate::geometry::intersection::{Intersection, primitive_intersections};
 use crate::geometry::predicates::{
     PARAMETER_TOLERANCE, ParameterRange, arc_parameter_for_angle, arc_properties,
     arc_range_intervals_strict, point_on_arc_parameter_in_range, point_on_line_parameter,
+    solve_line_parameters,
 };
 use crate::model::{PathPrimitive, Point};
 use std::cmp::Ordering;
@@ -23,6 +24,15 @@ pub fn primitive_distance(
     b: &PathPrimitive,
     b_range: ParameterRange,
 ) -> ClosestPair {
+    choose_lexicographically_stable_minimum(primitive_distance_candidates(a, a_range, b, b_range))
+}
+
+pub(crate) fn primitive_distance_candidates(
+    a: &PathPrimitive,
+    a_range: ParameterRange,
+    b: &PathPrimitive,
+    b_range: ParameterRange,
+) -> Vec<ClosestPair> {
     let intersections = primitive_intersections(a, b);
     let mut candidates = endpoint_projection_candidates(a, a_range, b, b_range);
     candidates.extend(zero_distance_candidates(
@@ -33,7 +43,7 @@ pub fn primitive_distance(
         &intersections,
     ));
     candidates.extend(interior_stationary_candidates(a, a_range, b, b_range));
-    choose_lexicographically_stable_minimum(candidates)
+    candidates
 }
 
 fn endpoint_projection_candidates(
@@ -286,21 +296,9 @@ fn line_line_stationary_candidates(
         unreachable!();
     };
 
-    let a_dir = *a_end - *a_start;
-    let b_dir = *b_end - *b_start;
-    let delta = *a_start - *b_start;
-    let aa = a_dir.dot(a_dir);
-    let ab = a_dir.dot(b_dir);
-    let bb = b_dir.dot(b_dir);
-    let ad = a_dir.dot(delta);
-    let bd = b_dir.dot(delta);
-    let denominator = aa * bb - ab * ab;
-    if denominator.abs() <= f64::EPSILON {
+    let Some((a_t, b_t)) = solve_line_parameters(*a_start, *a_end, *b_start, *b_end) else {
         return Vec::new();
-    }
-
-    let a_t = (ab * bd - bb * ad) / denominator;
-    let b_t = (aa * bd - ab * ad) / denominator;
+    };
     if !a_range.contains(a_t) || !b_range.contains(b_t) {
         return Vec::new();
     }
