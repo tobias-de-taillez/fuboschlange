@@ -1953,6 +1953,25 @@ function biarcTangents(pts){
   // Stattdessen spiegeln: theta_0 = 2*omega_{1/2} - theta_1. Fuer einen Kreis
   // ist das exakt, denn theta_1 = omega_{1/2} + delta und die wahre Tangente
   // ist omega_{1/2} - delta.
+  // DREI ENDBEDINGUNGEN GEMESSEN (Runde 27), keine bringt outFails auf 0:
+  //
+  //   Endbedingung        Kreis-Kontrolle   cross  cov  rad  out
+  //   Spiegel (diese)          200.0          15    10    4    3
+  //   Sehne (Gl. 12 pur)       133.2          16    10    5    2
+  //   halbe Spiegelung         159.9          16    10    3    4
+  //   Catmull-Rom (Default)      -            12    10   17    0
+  //
+  // Anlass war eine Messung, die genau hierher zeigte: von allen Punkten, die
+  // die Biarc-Zeichnung ausserhalb des Raums legt, lagen ALLE bei 98 Prozent
+  // der Pfadlaenge, also am Ende. Die Endtangente ist damit ein Beitrag - aber
+  // nicht die Ursache, denn auch "Sehne" laesst zwei Laeufe draussen. Und
+  // "Sehne" waere fuer unsere Pfade sogar die inhaltlich richtige Wahl: das
+  // Rohr verlaesst den Verteiler orthogonal zur Wand, und genau diese Richtung
+  // hat das erste Segment.
+  //
+  // Beibehalten wird die Spiegelung, weil sie als einzige den Kreis exakt
+  // reproduziert und biarcMinR als DIAGNOSE genau davon lebt. Fuer die
+  // Zeichnung ist die Frage offen, solange useBiarc aus ist.
   th[0]     = n>2 ? 2*om[0]-th[1]                     : om[0];
   th[n-1]   = n>2 ? 2*om[om.length-1]-th[n-2]         : om[om.length-1];
   return th;
