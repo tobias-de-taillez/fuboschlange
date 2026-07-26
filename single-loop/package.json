@@ -1,0 +1,21 @@
+{
+  "name": "single-loop-fbh",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "wasm:build": "wasm-pack build solver --target web --out-dir ../src/wasm/pkg",
+    "dev": "npm run wasm:build && vite",
+    "build": "npm run wasm:build && tsc --noEmit && vite build",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "check": "npm run test && npm run build"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.0",
+    "@types/node": "26.1.1",
+    "jsdom": "29.1.1",
+    "typescript": "7.0.2",
+    "vite": "8.1.5",
+    "vitest": "4.1.10"
+  }
+}
