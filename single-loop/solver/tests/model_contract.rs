@@ -1,9 +1,10 @@
-use serde_json::{json, Map, Value};
+use serde_json::{json, Value};
 use single_loop_solver::model::{
-    ConstraintCertificate, ConstraintCoverageMm, CoverageOutput, LocatedSpacing, MinBendRadiusMm,
+    ConstraintCertificate, ConstraintCoverageMm, CoverageOutput, ErrorDetail, LocatedSpacing,
+    LIMIT_100000, MinBendRadiusMm,
     MinNonlocalSpacingMm, MinWallClearanceMm, NormalizedConnectionOutput, PathPrimitive, Point,
     SingleLoopPlan, SolveResult, SolverError, SolverErrorCode, SolverWarning, SolverWarningCode,
-    SpacingDeviations, TotalLengthMm,
+    SpacingDeviations, TotalLengthMm, TRUE, ZERO,
 };
 use std::collections::BTreeMap;
 
@@ -41,11 +42,11 @@ fn sample_certificate_coverage_json() -> Value {
 
 fn sample_constraint_certificate() -> ConstraintCertificate {
     ConstraintCertificate {
-        inside_polygon: true,
-        g1_continuous: true,
-        self_intersection_count: 0,
-        connection_zone_compliant: true,
-        bifilar_topology: true,
+        inside_polygon: TRUE,
+        g1_continuous: TRUE,
+        self_intersection_count: ZERO,
+        connection_zone_compliant: TRUE,
+        bifilar_topology: TRUE,
         min_bend_radius_mm: MinBendRadiusMm {
             lower_bound_mm: 80.0,
             primitive_index: 0,
@@ -63,7 +64,7 @@ fn sample_constraint_certificate() -> ConstraintCertificate {
         },
         total_length_mm: TotalLengthMm {
             upper_bound_mm: 123.0,
-            limit_mm: 100_000,
+            limit_mm: LIMIT_100000,
         },
         coverage_mm: sample_certificate_coverage(),
         numeric_tolerance_mm: 0.01,
@@ -122,9 +123,9 @@ fn sample_plan() -> SingleLoopPlan {
 }
 
 fn sample_error() -> SolverError {
-    let mut details = Map::new();
-    details.insert("attempts".to_owned(), Value::from(3));
-    details.insert("fatal".to_owned(), Value::from(false));
+    let mut details = BTreeMap::new();
+    details.insert("attempts".to_owned(), ErrorDetail::number(3.0).unwrap());
+    details.insert("fatal".to_owned(), ErrorDetail::boolean(false));
 
     SolverError {
         code: SolverErrorCode::NoSolutionGeometry,
@@ -214,4 +215,82 @@ fn rejects_contradictory_solve_result_boolean_flags() {
 
     assert!(serde_json::from_value::<SolveResult>(contradictory_success).is_err());
     assert!(serde_json::from_value::<SolveResult>(contradictory_error).is_err());
+}
+
+#[test]
+fn serializes_constraint_certificate_literal_fields_and_rejects_false() {
+    let json = serde_json::to_value(sample_constraint_certificate()).unwrap();
+    assert_eq!(json["insidePolygon"], Value::Bool(true));
+    assert_eq!(json["g1Continuous"], Value::Bool(true));
+    assert_eq!(json["connectionZoneCompliant"], Value::Bool(true));
+    assert_eq!(json["bifilarTopology"], Value::Bool(true));
+
+    for field in [
+        "insidePolygon",
+        "g1Continuous",
+        "connectionZoneCompliant",
+        "bifilarTopology",
+    ] {
+        let mut invalid = json.clone();
+        invalid
+            .as_object_mut()
+            .unwrap()
+            .insert(field.to_owned(), Value::Bool(false));
+        assert!(
+            serde_json::from_value::<ConstraintCertificate>(invalid).is_err(),
+            "expected {field} = false to be rejected"
+        );
+    }
+}
+
+#[test]
+fn serializes_constraint_certificate_literal_counts_and_limits_and_rejects_non_literals() {
+    let json = serde_json::to_value(sample_constraint_certificate()).unwrap();
+    assert_eq!(json["selfIntersectionCount"], Value::from(0));
+    assert_eq!(json["totalLengthMm"]["limitMm"], Value::from(100_000));
+
+    let mut invalid_count = json.clone();
+    invalid_count
+        .as_object_mut()
+        .unwrap()
+        .insert("selfIntersectionCount".to_owned(), Value::from(1));
+    assert!(serde_json::from_value::<ConstraintCertificate>(invalid_count).is_err());
+
+    let mut invalid_limit = json.clone();
+    invalid_limit
+        .get_mut("totalLengthMm")
+        .unwrap()
+        .as_object_mut()
+        .unwrap()
+        .insert("limitMm".to_owned(), Value::from(99_999));
+    assert!(serde_json::from_value::<ConstraintCertificate>(invalid_limit).is_err());
+}
+
+#[test]
+fn serializes_solver_error_details_scalars_and_rejects_non_scalar_values() {
+    let valid = json!({
+        "code": "NO_SOLUTION_GEOMETRY",
+        "message": "no solution geometry",
+        "details": {
+            "attempts": 3.0,
+            "mode": "retry",
+            "fatal": false,
+        }
+    });
+
+    let error = serde_json::from_value::<SolverError>(valid.clone()).unwrap();
+    assert_eq!(serde_json::to_value(error).unwrap(), valid);
+
+    for invalid_details in [
+        json!({"bad": null}),
+        json!({"bad": [1, 2, 3]}),
+        json!({"bad": {"nested": true}}),
+    ] {
+        let invalid = json!({
+            "code": "NO_SOLUTION_GEOMETRY",
+            "message": "no solution geometry",
+            "details": invalid_details,
+        });
+        assert!(serde_json::from_value::<SolverError>(invalid).is_err());
+    }
 }

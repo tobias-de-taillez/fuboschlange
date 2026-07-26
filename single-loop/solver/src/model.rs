@@ -1,7 +1,6 @@
 use serde::de::Error as _;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -39,6 +38,90 @@ pub enum PathPrimitive {
         sweep_rad: f64,
     },
 }
+
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub struct LiteralBool<const VALUE: bool>;
+
+impl<const VALUE: bool> LiteralBool<VALUE> {
+    pub const fn new() -> Self {
+        Self
+    }
+}
+
+impl<const VALUE: bool> Default for LiteralBool<VALUE> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<const VALUE: bool> Serialize for LiteralBool<VALUE> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_bool(VALUE)
+    }
+}
+
+impl<'de, const VALUE: bool> Deserialize<'de> for LiteralBool<VALUE> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = bool::deserialize(deserializer)?;
+        if value == VALUE {
+            Ok(Self)
+        } else {
+            Err(D::Error::custom(format!("expected {VALUE}")))
+        }
+    }
+}
+
+pub type LiteralTrue = LiteralBool<true>;
+pub const TRUE: LiteralTrue = LiteralBool;
+
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub struct LiteralU32<const VALUE: u32>;
+
+impl<const VALUE: u32> LiteralU32<VALUE> {
+    pub const fn new() -> Self {
+        Self
+    }
+}
+
+impl<const VALUE: u32> Default for LiteralU32<VALUE> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<const VALUE: u32> Serialize for LiteralU32<VALUE> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_u32(VALUE)
+    }
+}
+
+impl<'de, const VALUE: u32> Deserialize<'de> for LiteralU32<VALUE> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = u32::deserialize(deserializer)?;
+        if value == VALUE {
+            Ok(Self)
+        } else {
+            Err(D::Error::custom(format!("expected {VALUE}")))
+        }
+    }
+}
+
+pub type LiteralZero = LiteralU32<0>;
+pub type LiteralLimit100000 = LiteralU32<100_000>;
+pub const ZERO: LiteralZero = LiteralU32;
+pub const LIMIT_100000: LiteralLimit100000 = LiteralU32;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -127,17 +210,17 @@ pub struct MinNonlocalSpacingMm {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TotalLengthMm {
     pub upper_bound_mm: f64,
-    pub limit_mm: u32,
+    pub limit_mm: LiteralLimit100000,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ConstraintCertificate {
-    pub inside_polygon: bool,
-    pub g1_continuous: bool,
-    pub self_intersection_count: u32,
-    pub connection_zone_compliant: bool,
-    pub bifilar_topology: bool,
+    pub inside_polygon: LiteralTrue,
+    pub g1_continuous: LiteralTrue,
+    pub self_intersection_count: LiteralZero,
+    pub connection_zone_compliant: LiteralTrue,
+    pub bifilar_topology: LiteralTrue,
     pub min_bend_radius_mm: MinBendRadiusMm,
     pub min_wall_clearance_mm: MinWallClearanceMm,
     pub min_nonlocal_spacing_mm: MinNonlocalSpacingMm,
@@ -211,6 +294,51 @@ impl WarningDetail {
 
 pub type WarningDetails = BTreeMap<String, WarningDetail>;
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ErrorDetail {
+    Number(FiniteNumber),
+    String(String),
+    Boolean(bool),
+}
+
+impl ErrorDetail {
+    pub fn number(value: f64) -> Option<Self> {
+        FiniteNumber::new(value).map(Self::Number)
+    }
+
+    pub fn string(value: impl Into<String>) -> Self {
+        Self::String(value.into())
+    }
+
+    pub fn boolean(value: bool) -> Self {
+        Self::Boolean(value)
+    }
+
+    pub fn as_number(&self) -> Option<f64> {
+        match self {
+            Self::Number(value) => Some(value.get()),
+            Self::String(_) | Self::Boolean(_) => None,
+        }
+    }
+
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            Self::Number(_) | Self::Boolean(_) => None,
+            Self::String(value) => Some(value.as_str()),
+        }
+    }
+
+    pub fn as_bool(&self) -> Option<bool> {
+        match self {
+            Self::Boolean(value) => Some(*value),
+            Self::Number(_) | Self::String(_) => None,
+        }
+    }
+}
+
+pub type ErrorDetails = BTreeMap<String, ErrorDetail>;
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SolverWarningCode {
     #[serde(rename = "CONNECTION_SHIFTED")]
@@ -255,7 +383,7 @@ pub enum SolverErrorCode {
 pub struct SolverError {
     pub code: SolverErrorCode,
     pub message: String,
-    pub details: Map<String, Value>,
+    pub details: ErrorDetails,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
