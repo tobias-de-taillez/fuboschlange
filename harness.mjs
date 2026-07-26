@@ -14,7 +14,7 @@ export const EXPORTS = [
   'rectiOffsetter', 'randW', 'omegaClear', 'randWidth', 'notchFrame', 'doubleSpiralField',
   'snappedManifold', 'rotFwd', 'rotBack', 'rotForManifold', 'frameW', 'frameH',
   'parallelOverlaps', 'fieldCrossings', 'crossBetween', 'segCrossPt', 'fillet', 'smoothToRadius', 'resampleArc', 'relaxLoops', 'pointInRoom', 'contourRoute', 'insetRoomRing',
-  'omegaTurn', 'pathCurve', 'S',
+  'omegaTurn', 'pathCurve', 'curveMinR', 'S',
 ];
 
 // opts.checks: die Selbstchecks der Datei mitlaufen lassen (Default: nein).

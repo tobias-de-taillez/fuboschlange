@@ -1835,11 +1835,49 @@ function fillet(pts,r){
 // bleibt. Nur fuer echte Plaene einschalten — die Selbstchecks pruefen pathCurve
 // mit synthetischen Koordinaten, die ausserhalb des eingestellten Raums liegen,
 // und wuerden dann alle zu Geraden.
+// Kleinster Kruemmungsradius der GEZEICHNETEN Kurve, analytisch.
+//
+// pathCurve schaetzt den Radius aus dem Stuetz-POLYGON: bei defl >= 60 Grad
+// min(ab,bc)/tan(defl/2). Gemessen ist diese Schaetzung bei grossen Winkeln
+// deutlich zu OPTIMISTISCH — drei Punkte mit 144 Grad Ablenkung und 400 mm
+// Schenkeln ergeben dort 130 mm, die gezeichnete Kurve hat 15,9 mm.
+//
+// Hier stattdessen die Kruemmung der Bezier selbst:
+//     kappa(t) = |x'y'' - y'x''| / (x'^2 + y'^2)^(3/2)
+// Fuer die kubische Bezier gibt es kein brauchbares geschlossenes Maximum
+// (Cubic Bezier-Spline Curves: Interpolation and Maximum Curvature,
+// arXiv:2412.07227), also dicht abtasten — aber mit ANALYTISCHEN Ableitungen,
+// nicht mit finiten Differenzen. Kruemmung aus abgetasteten PUNKTEN ist
+// beruechtigt rauschempfindlich, die Ableitungen sind es nicht.
+function curveMinR(ops){
+  let minR=Infinity, cur=null;
+  const N=48;
+  for(const o of ops){
+    if(o.kind==='move'||o.kind==='line'){ cur=o.to; continue; }
+    if(o.kind==='arc'){ minR=Math.min(minR,o.r); cur=o.to; continue; }
+    if(o.kind!=='cubic'||!cur){ if(o.to) cur=o.to; continue; }
+    const P0=cur,P1=o.c1,P2=o.c2,P3=o.to;
+    for(let k=0;k<=N;k++){
+      const t=k/N, u=1-t;
+      const dx=3*u*u*(P1.x-P0.x)+6*u*t*(P2.x-P1.x)+3*t*t*(P3.x-P2.x);
+      const dy=3*u*u*(P1.y-P0.y)+6*u*t*(P2.y-P1.y)+3*t*t*(P3.y-P2.y);
+      const ex=6*u*(P2.x-2*P1.x+P0.x)+6*t*(P3.x-2*P2.x+P1.x);
+      const ey=6*u*(P2.y-2*P1.y+P0.y)+6*t*(P3.y-2*P2.y+P1.y);
+      const sp=dx*dx+dy*dy;
+      if(sp<1e-12) continue;                   // Spitze: Geschwindigkeit null
+      const num=Math.abs(dx*ey-dy*ex);
+      if(num<1e-12) continue;                  // gerade
+      minR=Math.min(minR, Math.pow(sp,1.5)/num);
+    }
+    cur=o.to;
+  }
+  return minR;
+}
 function pathCurve(pts,clampRoom){
   const ops=[]; let length=0, minR=Infinity;
-  if(!pts.length) return {ops,length,minR};
+  if(!pts.length) return {ops,length,minR,minRDrawn:curveMinR(ops)};
   ops.push({kind:'move',to:pts[0]});
-  if(pts.length===1) return {ops,length,minR};
+  if(pts.length===1) return {ops,length,minR,minRDrawn:curveMinR(ops)};
   // Kruemmungsradius je Innenpunkt: Umkreis durch drei aufeinanderfolgende
   // Punkte, R = abc/4A. Flaeche ~0 heisst gerade ODER 180-Grad-Kehre; die Kehre
   // hat Radius 0 und darf nicht als "gerade" durchgehen.
@@ -1951,7 +1989,7 @@ function pathCurve(pts,clampRoom){
                y:u*u*u*p1.y+3*u*u*t*c1.y+3*u*t*t*c2.y+t*t*t*p2.y};
       length+=len(sub(q,prev)); prev=q; }
   }
-  return {ops,length,minR};
+  return {ops,length,minR,minRDrawn:curveMinR(ops)};
 }
 
 // ================= Overlap-Check (E2E: kreuzen sich Bahnen?) =================
@@ -2522,7 +2560,7 @@ function buildLoops(groups,ownerOverride,connOrder){
     // Einmal je Kreis: Kreuzungstest, Ausserhalb-Zaehler und die Marker im Plan
     // brauchen alle denselben gezeichneten Pfad. Ohne das Zwischenspeichern
     // rechnet ihn jeder Aufruf neu, und die Zonen-Suche ruft sie hundertfach.
-    return {...l, pts, drawn:drawnPoints(pts,6), length:f.length, minR:f.minR};
+    return {...l, pts, drawn:drawnPoints(pts,6), length:f.length, minR:f.minR, minRDrawn:f.minRDrawn};
   }).filter(l=>l.pts.length>1);
   // Zahl der Anbindungen am Array mitgeben: fitLanes braucht sie, um ueber die
   // Reihenfolge zu suchen, ohne buildLoops nachzubauen.
