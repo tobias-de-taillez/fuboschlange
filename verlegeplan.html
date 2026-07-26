@@ -1998,6 +1998,59 @@ function biarcMinR(pts,thIn){
 //     x* = x0 + l0 * sinc(k0*l0/2) * cos(t0 + k0*l0/2)
 //     y* = y0 + l0 * sinc(k0*l0/2) * sin(t0 + k0*l0/2)
 // Die sinc-Form deckt den Grenzfall k->0 (Gerade) mit ab, ohne Fallunterscheidung.
+// Stuetzpolygon so weit VERFEINERN, dass der Biarc in einem Toleranzband bleibt.
+//
+// Gemessen weicht der Biarc bis 263 mm vom Stuetzpolygon ab (p90 49, p99 138),
+// waehrend der Wandabstand edgeGap nur 90 mm betraegt — genau so laeuft Rohr aus
+// dem Raum. Die Literatur loest das ueber ein Toleranzband mit Garantie
+// (Optimal Arc-Spline Approximation with Detecting Straight Sections, LNCS 2013;
+// Held & Eibl, CAD 37(10) 2005).
+//
+// Der Hebel ist NICHT, einzelne Segmente flacher zu machen — das wurde in
+// Runde 26 gemessen und verworfen, weil unterschiedliche Faktoren an den
+// gemeinsamen Punkten die G1-Stetigkeit zerreissen. Stattdessen den Punktabstand
+// verkleinern: die Abweichung eines Biarcs skaliert mit der Sehnenlaenge, also
+// konvergiert Einfuegen von Zwischenpunkten gegen das Polygon. Die Tangenten
+// werden danach global neu bestimmt, G1 bleibt also erhalten.
+function biarcRefine(pts,tol,maxPass){
+  let cur=pts;
+  for(let pass=0;pass<(maxPass??4);pass++){
+    const th=biarcTangents(cur);
+    const add=new Set();
+    for(let i=0;i+1<cur.length;i++){
+      const p0=cur[i], p1=cur[i+1];
+      if(p0.arc||p1.arc) continue;              // vorgegebene Boegen unangetastet
+      const d=len(sub(p1,p0)); if(d<2*tol) continue;
+      const om=Math.atan2(p1.y-p0.y,p1.x-p0.x);
+      const kap=(a,b)=>2/d*(Math.sin(om-a)+Math.sin(om-(a+b)/2));
+      const ell=(a,b)=>d/2/(Math.cos((b-a)/4)*sinc_(om-(3*a+b)/4));
+      const t0=th[i], t1=th[i+1];
+      const k0=kap(t0,t1), k1=-kap(t1,t0), l0=ell(t0,t1), l1=ell(t1,t0);
+      if(!isFinite(k0)||!isFinite(k1)||!isFinite(l0)||!isFinite(l1)||l0<0||l1<0){ add.add(i); continue; }
+      // Groesste Abweichung von der Sehne, an sechs Stellen je Bogen geprueft
+      const at_=(from,a,k,ss)=>{ const h=k*ss/2, sc=sinc_(h);
+        return {x:from.x+ss*sc*Math.cos(a+h), y:from.y+ss*sc*Math.sin(a+h)}; };
+      const J=at_(p0,t0,k0,l0);
+      const dist=q=>{ const vx=p1.x-p0.x, vy=p1.y-p0.y, L=vx*vx+vy*vy||1;
+        let t=((q.x-p0.x)*vx+(q.y-p0.y)*vy)/L; t=t<0?0:t>1?1:t;
+        return Math.hypot(q.x-p0.x-vx*t, q.y-p0.y-vy*t); };
+      let dev=0;
+      for(let j=1;j<6;j++){
+        dev=Math.max(dev,dist(at_(p0,t0,k0,l0*j/6)));
+        dev=Math.max(dev,dist(at_(J,t0+k0*l0,k1,l1*j/6)));
+      }
+      if(dev>tol) add.add(i);
+    }
+    if(!add.size) break;
+    const out=[];
+    for(let i=0;i<cur.length;i++){
+      out.push(cur[i]);
+      if(add.has(i)) out.push({x:(cur[i].x+cur[i+1].x)/2, y:(cur[i].y+cur[i+1].y)/2});
+    }
+    cur=out;
+  }
+  return cur;
+}
 function biarcOps(pts,clampArc){
   const ops=[{kind:'move',to:pts[0]}]; let length=0, minR=Infinity;
   if(pts.length<2) return {ops,length,minR};
@@ -2086,7 +2139,32 @@ function biarcOps(pts,clampArc){
   return {ops,length,minR};
 }
 function pathCurve(pts,clampRoom){
-  if(S.useBiarc&&pts.length>2){ const b=biarcOps(pts,clampRoom); return {...b,minRDrawn:b.minR}; }
+  if(S.useBiarc&&pts.length>2){
+    // TOLERANZ DURCHGEFAHREN (Runde 28), 20 Laeufe je Wert:
+    //
+    //   tol            cross  cov  rad  out  medianRadius
+    //   0,50*edgeGap     16    10   19    0       56
+    //   0,60*edgeGap     16    10   16    0       60
+    //   0,70*edgeGap     16    10   15    1       60
+    //   0,80*edgeGap     15    10   11    1       61
+    //   0,90*edgeGap     15    10    8    2       61
+    //   1,20*edgeGap     16    10    6    1       71
+    //   Catmull-Rom      12    10   17    0       50
+    //
+    // Der Zielkonflikt ist damit vermessen und nicht wegzuparametrieren: mehr
+    // Toleranz heisst besserer Radius und mehr Rohr ausserhalb. Der einzige
+    // Wert mit outFails 0 UND besserem Radius als der Default ist 0,60 - und
+    // der kostet vier Kreuzungen fuer einen Radiusfehler. Deshalb bleibt
+    // useBiarc aus.
+    //
+    // Warum die Kreuzungen: der Bogen woelbt bis tol = 54 mm vom Stuetzpolygon
+    // weg, der Bahnabstand s liegt bei 75..110 mm. Eine Ausbeulung von mehr als
+    // s/2 (37..55 mm) trifft die Nachbarbahn. Die Toleranz muesste also gegen
+    // den BAHNABSTAND gemessen werden, nicht nur gegen den Wandabstand - und
+    // bei tol = s/2 ist der Radius wieder bei 19 (Zeile 0,50 oben).
+    const b=biarcOps(clampRoom?biarcRefine(pts,0.6*S.edgeGap):pts,clampRoom);
+    return {...b,minRDrawn:b.minR};
+  }
   const ops=[]; let length=0, minR=Infinity;
   if(!pts.length) return {ops,length,minR,minRDrawn:curveMinR(ops)};
   ops.push({kind:'move',to:pts[0]});
