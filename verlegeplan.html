@@ -2170,6 +2170,36 @@ function pathCurve(pts,clampRoom){
     // s/2 (37..55 mm) trifft die Nachbarbahn. Die Toleranz muesste also gegen
     // den BAHNABSTAND gemessen werden, nicht nur gegen den Wandabstand - und
     // bei tol = s/2 ist der Radius wieder bei 19 (Zeile 0,50 oben).
+    //
+    // NACHGEMESSEN statt abgeleitet (Runde 23): die Zeile "0,50*edgeGap" belegt
+    // das NICHT, weil edgeGap und s im Bench unabhaengig gestreut werden. Mit
+    // einer Schranke direkt am Bahnabstand:
+    //   tol                              cross  cov  rad  out  medR
+    //   0,35*s                             13     7   20    0    31
+    //   0,45*s                             13     7   20    0    33
+    //   0,50*s                             15     7   20    0    36
+    //   min(0,6*edgeGap, 0,45*s)           13     7   20    0    33
+    //   Catmull-Rom (jetzt)                12     7   17    0    50
+    // Also nicht "wieder bei 19", sondern 20 - und in JEDER Kennzahl schlechter
+    // als Catmull-Rom, medianRadius 31..36 gegen 50. Die pauschale Toleranz ist
+    // damit erledigt, in beiden Bezugsgroessen.
+    //
+    // VERWORFEN, gemessen: eine KOLLISIONSBEWUSSTE Toleranz statt einer
+    // pauschalen. Der Gedanke ist richtig - der Bogen darf ausbeulen, wo Platz
+    // ist, und muss nur dort eng bleiben, wo eine Nachbarbahn steht. Umgesetzt
+    // als tol(i) = 0,5*(Abstand zur naechsten nicht-index-benachbarten Stelle
+    // des Pfades minus Rohrdurchmesser), gitterbeschleunigt, in biarcRefine
+    // eingehaengt. Ergebnis: crossFails 13, covFails 7, radFails 20,
+    // medianRadius 30 - praktisch identisch mit der 0,45*s-Zeile oben.
+    //
+    // Der Grund ist strukturell und schliesst die ganze Familie aus: in einer
+    // FLAECHENFUELLENDEN Spirale hat jeder Punkt eine Nachbarbahn im Abstand s.
+    // "Platz an dieser Stelle" ist damit ueberall s - pipeDia, und jede
+    // platzabhaengige Toleranz degeneriert zur s-Schranke. Ein lokal groesserer
+    // Radius waere nur zu haben, wenn die Nachbarbahn SICH MIT woelbt (zwei
+    // parallele Kurven halten ihren Abstand) - das laesst sich am
+    // Stuetzpolygon nicht sehen, sondern erst an den fertigen Kurven, und
+    // erforderte eine Iteration Bauen -> Abstand messen -> lokal verfeinern.
     const b=biarcOps(clampRoom?biarcRefine(pts,0.6*S.edgeGap):pts,clampRoom);
     return {...b,minRDrawn:b.minR};
   }
