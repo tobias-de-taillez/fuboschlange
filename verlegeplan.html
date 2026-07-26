@@ -2023,6 +2023,28 @@ function biarcOps(pts,clampArc){
     const om=Math.atan2(p1.y-p0.y,p1.x-p0.x);
     const kap=(a,b)=>2/d*(Math.sin(om-a)+Math.sin(om-(a+b)/2));
     const ell=(a,b)=>d/2/(Math.cos((b-a)/4)*sinc_(om-(3*a+b)/4));
+    // VERWORFEN, gemessen (Runde 26): den freien Parameter der Biarc-Familie je
+    // SEGMENT per Bisektion so weit zurueckdrehen, bis der Bogen im Raum liegt —
+    // nach Held & Eibl, "Biarc approximation of polygons within asymmetric
+    // tolerance bands", CAD 37(10) 2005. Der Ansatz ist richtig, die Umsetzung
+    // je Segment ist es nicht:
+    //
+    //   Baseline (Catmull-Rom)          cross 12  cov 10  rad 17  out 0
+    //   Biarc schlicht                        17      11       5      2
+    //   Biarc + Mittelpunkt-Klemme            15      10       4      3
+    //   Biarc + Toleranzband je Segment       19      10       9      4
+    //
+    // Grund: skaliert man die Tangentenabweichung JE SEGMENT, bekommen zwei
+    // Nachbarsegmente verschiedene Faktoren und die Tangente am gemeinsamen
+    // Punkt stimmt nicht mehr ueberein. Damit ist die G1-Stetigkeit zerstoert —
+    // also genau die Eigenschaft, wegen der man Biarcs nimmt — und an jedem
+    // Uebergang entsteht eine Ecke. Held justiert die Tangenten deshalb an den
+    // PUNKTEN, geteilt von beiden angrenzenden Biarcs, nicht je Segment.
+    // Ein zweiter Fallstrick auf dem Weg, dokumentiert fuer den naechsten
+    // Versuch: die Winkel aus biarcTangents sind ENTFALTET (Theorem 1 laesst
+    // omega_i um 2*k*pi verschoben zu), omega kommt frisch aus atan2. Fuer sin
+    // und cos ist das egal, fuers Skalieren nicht — ohne Zurueckfalten in
+    // (-pi,pi] wurde daraus outFails 17 und medianCross 3625.
     const t0=th[i], t1=th[i+1];
     const k0=kap(t0,t1), k1=-kap(t1,t0);
     const l0=ell(t0,t1), l1=ell(t1,t0);
