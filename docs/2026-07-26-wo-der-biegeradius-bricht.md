@@ -113,11 +113,15 @@ nie gemessene Änderung (`nearOn`-Projektion als Morph-Zuordnung — genau der
 
 ## Nächster Schritt
 
+> **ÜBERHOLT — siehe Nachtrag Runde 17 und Runde 21.** Die Zuordnung „Gruppe 1 =
+> Verteiler-Abgang" war falsch (es war die Omega-Kehre der Randzone), und die
+> Bogenmittelpunkt-Korrektur aus Runde 20 hat das Bild noch einmal verschoben.
+> Der aktuelle Stand steht im **Nachtrag Runde 21**: `radFails` sitzt zu 16/20
+> im Feld, und punktweises Reparieren von Ecken kann das Gate nicht bewegen.
+
+Der ursprüngliche Text, als Beleg dafür, worauf die Messung damals zeigte:
 Gruppe 3 lokal heilen statt den Ring zu verwerfen, dann Gruppe 1 (zwei
-45°-Knicke am Verteiler), dann Gruppe 2 zurückverfolgen. Gruppe 1 und 2
-zusammen sind 13 von 20 — solange die stehen, kann `radFails` nicht unter
-13/20 fallen, egal was mit Gruppe 3 passiert. **Gruppe 1 ist damit der größte
-Einzelposten und der nächste Angriff.**
+45°-Knicke am Verteiler), dann Gruppe 2 zurückverfolgen.
 
 ## Quellen
 
@@ -282,3 +286,116 @@ beliebigen, oder direkt die Bogenlaenge entlang der Kette.
 - [Continuous Curvature Path Planning for Headland Coverage With Agricultural Robots, J. Field Robotics 2025](https://onlinelibrary.wiley.com/doi/full/10.1002/rob.22489) — Kopfland-Planung als eigenes Problem, stetige Kruemmung fuer konvexe und konkave Ecken.
 - [Smooth turning path generation for agricultural vehicles in headlands](https://www.researchgate.net/publication/282409353_Smooth_turning_path_generation_for_agricultural_vehicles_in_headlands) — Typ U, Typ Ω und Typ T als die drei klassischen Wendeformen.
 - [Dynamic path planning method for headland turning of unmanned agricultural vehicles](https://www.sciencedirect.com/science/article/abs/pii/S016816992300087X) — omega-turn, U-turn, gap-turn und fishtail-turn im Vergleich; ausdruecklich auch Uebergaenge zwischen NICHT benachbarten Reihen.
+
+
+---
+
+# Nachtrag Runde 21 — das Gate ist ein Minimum, punktweise Reparatur bewegt es nicht
+
+Vier Varianten am Feldpfad, alle nachweislich geladen UND nachweislich wirksam
+(Zähler: `dedupePath` entfernt 7102 Punkte, `despike` 1114):
+
+| | cross | cov | rad | worstCov |
+|---|---|---|---|---|
+| Baseline | 18 | 10 | 18 | 23 |
+| dedupe auf Gesamtpfad | 18 | 10 | 18 | 23 |
+| dedupe je Durchlauf | 18 | 10 | 18 | 23 |
+| despike je Durchlauf | 18 | 10 | 18 | 23 |
+| despike + dedupe | 18 | 10 | 18 | **19** |
+
+Damit ist auch die offene Frage aus Runde 16 beantwortet: `despike` ist gültig
+gemessen und neutral.
+
+**Der Grund.** Der schärfste Punkt wechselt die KLASSE, sobald man eine Klasse
+entfernt:
+
+    ohne alles     90 Grad, Schenkel 3..35 mm neben rund 400 mm (= 5*R)
+    nur dedupe    180 Grad, beidseits rund 400 mm
+    nur despike    90 Grad, jetzt mit 2..15 mm
+
+Der kleinste Radius ist ein **Minimum über alle Ecken**. Solange irgendeine
+Klasse steht, bewegt sich das Gate nicht — und beide zu entfernen kostet Deckung,
+ohne es zu bewegen. Es gibt mindestens eine dritte Klasse.
+
+**Schlussfolgerung:** punktweises Reparieren kann `radFails` nicht lösen. Deckt
+sich mit [Pocketing toolpath computation using an optimization
+method](https://www.sciencedirect.com/science/article/abs/pii/S0010448511001278):
+dort ist die Krümmung eine HARTE NEBENBEDINGUNG beim ERZEUGEN der Bahn, nicht
+ein nachträgliches Ausrunden.
+
+Der Gegenbeweis im eigenen Haus: `omegaTurn` konstruiert die Randzonenkehre aus
+drei Bögen mit vollem Radius, und `probe-omegageo.mjs` misst dort exakt 80,0 mm.
+Wo explizit konstruiert wird, hält der Radius. Wo geglättet wird, nicht.
+
+---
+
+# Nachtrag Runde 22 — die dritte Klasse, und ein optimistisches Maß
+
+## Die dritte Klasse
+
+Mit `despike` UND `dedupe` aktiv (beide aus Runde 21) bindet:
+
+    55  field  144°  Schenkel 231/172   ->  r = 172/tan(72°) = 55
+    34  field   90°  Schenkel 421/34
+     6  rand   135°  Schenkel  15/355
+
+Der Zusammenhang, der alles erklärt: für Radius R braucht eine Ecke die
+Tangentenlänge `t = R·tan(defl/2)` auf **beiden** Schenkeln, und das wächst
+brutal mit dem Winkel:
+
+| defl | nötige Tangentenlänge bei R=80 |
+|---|---|
+| 90° | 80 mm |
+| 135° | 193 mm |
+| 144° | 246 mm |
+| 160° | 454 mm |
+| 170° | 908 mm |
+
+Bei 144° und 400 mm Schenkel wären 246 mm nötig — **der Bogen passt**, er wird
+nur nicht gebaut.
+
+## arcCorners: exakt, aber zu teuer
+
+Konstruktion explizit statt geglättet, wie `omegaTurn`. Isoliert nachgemessen:
+
+    90 Grad, Schenkel 400   pathCurve 80.0   gezeichnet 80.0   |P-c|-r 0.0000
+    30 Grad, Schenkel 400   pathCurve 80.0   gezeichnet 80.0   |P-c|-r 0.0000
+
+Die Geometrie stimmt also. Im Bench trotzdem in **allen drei** offenen Gates
+schlechter:
+
+| | crossFails | covFails | radFails |
+|---|---|---|---|
+| Baseline | **18** | **10** | **18** |
+| arcCorners | 19 | 12 | 19 |
+
+Der Preis, nicht die Geometrie: der Bogen **schneidet** die Ecke und zieht den
+Pfad um bis zu `R/cos(defl/2) − R` nach innen. Das kostet Deckung in jeder Ecke
+und verschiebt den Pfad in Kreuzungen. Für den Ansatz müsste der Bogen die Ecke
+**umfahren** statt sie abzuschneiden — nach außen ausschwingen wie `omegaTurn`,
+was am Raumrand aber hinausführt.
+
+## Wichtiger: das Maß ist bei großen Winkeln optimistisch
+
+Dieselbe Sonde, drei Punkte mit 144° Ablenkung und 400 mm Schenkeln, **ohne**
+Bogen:
+
+    pathCurve minR   130.0 mm
+    gezeichnet minR   15.9 mm
+
+`pathCurve` nimmt bei `defl ≥ 60°` die Regel `min(ab,bc)/tan(defl/2)` =
+400/3,078 = 130. Die gezeichnete Catmull-Rom-Kurve durch dieselben drei Punkte
+hat dort 15,9 mm.
+
+Das ist die **umgekehrte** Richtung zum Omega-Fall aus Runde 18 (dort war die
+Schätzung zu pessimistisch). Folge: **`radFails 18/20` ist eher zu niedrig
+gemeldet**, nicht zu hoch. Das ist der nächste Schritt und er ist gut gestellt:
+den Radius am gezeichneten Pfad messen, mit der jetzt korrekten Bogenabtastung
+als Referenz.
+
+## Quellen
+
+- [Interpolating Splines of Biarcs from a Sequence of Planar Points, CAD&A 18(1) 2021](https://cad-journal.net/files/vol_18/CAD_18(1)_2021_66-85.pdf) — PDF in `paper/`
+- [Corner Detection and Arc Approximation of Planar Data Set, arXiv:1311.5881](https://arxiv.org/pdf/1311.5881) — PDF in `paper/`
+- [Optimal arc spline approximation, CAGD 2014](https://www.sciencedirect.com/science/article/abs/pii/S0167839614000272)
+- [G1 arc spline approximation of quadratic Bézier curves](https://www.sciencedirect.com/science/article/abs/pii/S0010448598000165) — C1-Bahnen aus überwiegend Kreisbögen, ausdrücklich unter Maximierung der Radien

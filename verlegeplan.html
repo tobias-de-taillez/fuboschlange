@@ -2424,6 +2424,23 @@ function buildLoops(groups,ownerOverride,connOrder){
       // als HARTE Nebenbedingung beim ERZEUGEN der Kurve, nicht als
       // nachtraegliches Ausrunden): punktweises Reparieren von Ecken kann dieses
       // Gate nicht loesen. Die Erzeugung darf gar keine Ecke unter R liefern.
+      // GEMESSEN UND VERWORFEN (Runde 22): grosse Ecken als echten Bogen mit
+      // Radius R konstruieren, statt sie glaetten zu lassen (arcCorners).
+      // Fuer Radius R braucht eine Ecke die Tangentenlaenge t = R*tan(defl/2)
+      // auf beiden Schenkeln — 90 Grad: 80 mm, 135 Grad: 193, 144 Grad: 246,
+      // 160 Grad: 454, 170 Grad: 908.
+      // Die Konstruktion selbst ist exakt, isoliert nachgemessen:
+      //   90 Grad, Schenkel 400   pathCurve 80.0   gezeichnet 80.0   |P-c|-r 0.0000
+      //   30 Grad, Schenkel 400   pathCurve 80.0   gezeichnet 80.0   |P-c|-r 0.0000
+      // Trotzdem im Bench schlechter, und zwar in allen drei offenen Gates:
+      //   Baseline     crossFails 18  covFails 10  radFails 18
+      //   arcCorners   crossFails 19  covFails 12  radFails 19
+      // Der Grund ist der Preis, nicht die Geometrie: der Bogen SCHNEIDET die
+      // Ecke und zieht den Pfad um bis zu R/cos(defl/2) - R nach innen. Das
+      // kostet Deckung in jeder Ecke und verschiebt den Pfad in Kreuzungen.
+      // Fuer den Ansatz muesste der Bogen die Ecke UMFAHREN statt sie
+      // abzuschneiden — also nach aussen ausschwingen wie omegaTurn, was am
+      // Rand aber aus dem Raum fuehrt.
       for(let pass=0;pass<4;pass++) a=resampleArc(smoothToRadius(a,R,60),5.0*R);
       l[k]=a;
     });
