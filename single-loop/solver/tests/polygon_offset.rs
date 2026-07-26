@@ -189,6 +189,32 @@ fn arc_tessellation_reserves_error_for_endpoint_quantization() {
 }
 
 #[test]
+fn huge_finite_translation_returns_helper_quantization_resource_error() {
+    let origin = 1e16;
+    let normalized = validate_and_normalize(request_with_polygon(
+        polygon(&[
+            (origin, origin),
+            (origin + 1e9, origin),
+            (origin + 1e9, origin + 1e9),
+            (origin, origin + 1e9),
+        ]),
+        0,
+        5e8,
+        20.0,
+    ))
+    .unwrap();
+
+    let error = assert_error(
+        erode_for_centerline(&normalized),
+        SolverErrorCode::SolverLimitExceeded,
+    );
+    assert_eq!(
+        error.details.get("reason").and_then(|value| value.as_str()),
+        Some("HELPER_QUANTIZATION_RANGE")
+    );
+}
+
+#[test]
 fn total_disappearance_maps_to_no_solution_geometry() {
     let normalized = validate_and_normalize(request_with_polygon(
         polygon(&[(0.0, 0.0), (200.0, 0.0), (200.0, 80.0), (0.0, 80.0)]),

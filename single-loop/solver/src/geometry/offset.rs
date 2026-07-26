@@ -6,11 +6,15 @@ use super::{
 };
 use crate::constants::TOPOLOGY_QUANTIZATION_MM;
 use crate::input::{NormalizedInput, internal_validation_failure, no_solution_geometry};
-use crate::model::{PathPrimitive, Point, SolverError};
+use crate::model::{ErrorDetail, PathPrimitive, Point, SolverError, SolverErrorCode};
 use cavalier_contours::core::math::angle_from_bulge;
 use cavalier_contours::polyline::{PlineSource, Polyline, seg_arc_radius_and_center};
+use std::collections::BTreeMap;
 
 const VORONOI_HAUSDORFF_MM: f64 = 0.05;
+const MAX_HELPER_SEGMENTS: usize = 2_000_000;
+const I64_MIN_AS_F64: f64 = -9_223_372_036_854_775_808.0;
+const I64_MAX_EXCLUSIVE_AS_F64: f64 = 9_223_372_036_854_775_808.0;
 const QUANTIZATION_ENDPOINT_ERROR_MM: f64 =
     TOPOLOGY_QUANTIZATION_MM * std::f64::consts::SQRT_2 * 0.5;
 const TESSELLATION_HAUSDORFF_MM: f64 = VORONOI_HAUSDORFF_MM - QUANTIZATION_ENDPOINT_ERROR_MM;
@@ -22,12 +26,20 @@ pub struct QuantizedPoint {
 }
 
 impl QuantizedPoint {
-    fn from_point(point: Point) -> Self {
-        Self {
-            x: (point.x / TOPOLOGY_QUANTIZATION_MM).round() as i64,
-            y: (point.y / TOPOLOGY_QUANTIZATION_MM).round() as i64,
-        }
+    fn try_from_point(point: Point) -> Result<Self, SolverError> {
+        let Some(x) = quantize_coordinate(point.x) else {
+            return Err(helper_quantization_range_error());
+        };
+        let Some(y) = quantize_coordinate(point.y) else {
+            return Err(helper_quantization_range_error());
+        };
+        Ok(Self { x, y })
     }
+}
+
+fn quantize_coordinate(coordinate_mm: f64) -> Option<i64> {
+    let rounded = (coordinate_mm / TOPOLOGY_QUANTIZATION_MM).round();
+    (rounded >= I64_MIN_AS_F64 && rounded < I64_MAX_EXCLUSIVE_AS_F64).then(|| rounded as i64)
 }
 
 #[derive(Clone, Debug)]
@@ -55,7 +67,7 @@ impl AllowedRegion {
         validate_offset_loop(loop_polyline)?;
         let boundary = polyline_to_exact_boundary(loop_polyline)?;
         validate_boundary_containment(&boundary, polygon)?;
-        let quantized_segments = quantized_segments_for_boundary(&boundary);
+        let quantized_segments = quantized_segments_for_boundary(&boundary)?;
         Ok(Self {
             boundary,
             quantized_segments,
@@ -213,44 +225,114 @@ fn validate_boundary_containment(
 
 fn quantized_segments_for_boundary(
     boundary: &[PathPrimitive],
-) -> Vec<(QuantizedPoint, QuantizedPoint)> {
-    let mut result = Vec::new();
+) -> Result<Vec<(QuantizedPoint, QuantizedPoint)>, SolverError> {
+    let mut required_segments = 0usize;
     for primitive in boundary {
-        let points = tessellate_for_quantization(primitive);
-        for pair in points.windows(2) {
-            let start = QuantizedPoint::from_point(pair[0]);
-            let end = QuantizedPoint::from_point(pair[1]);
+        let primitive_segments = tessellation_segment_count(primitive)?;
+        let Some(total) = required_segments.checked_add(primitive_segments) else {
+            return Err(helper_segment_limit_error(f64::MAX));
+        };
+        if total > MAX_HELPER_SEGMENTS {
+            return Err(helper_segment_limit_error(total as f64));
+        }
+        required_segments = total;
+    }
+
+    let mut result = Vec::new();
+    result
+        .try_reserve_exact(required_segments)
+        .map_err(|_| helper_segment_allocation_error(required_segments))?;
+    for primitive in boundary {
+        let segment_count = tessellation_segment_count(primitive)?;
+        let mut start = QuantizedPoint::try_from_point(primitive.point_at(0.0))?;
+        for index in 1..=segment_count {
+            let end = QuantizedPoint::try_from_point(
+                primitive.point_at(index as f64 / segment_count as f64),
+            )?;
             if start != end {
                 result.push((start, end));
             }
+            start = end;
         }
     }
-    result
+    Ok(result)
 }
 
-fn tessellate_for_quantization(primitive: &PathPrimitive) -> Vec<Point> {
-    match primitive {
-        PathPrimitive::Line { start, end } => vec![*start, *end],
-        PathPrimitive::Arc {
-            radius_mm,
-            sweep_rad,
-            ..
-        } => {
-            let max_segment_angle = if *radius_mm <= TESSELLATION_HAUSDORFF_MM {
-                sweep_rad.abs()
-            } else {
-                let cosine = (1.0 - TESSELLATION_HAUSDORFF_MM / *radius_mm).clamp(-1.0, 1.0);
-                2.0 * cosine.acos()
-            };
-            let segment_count = if max_segment_angle == 0.0 {
-                1usize
-            } else {
-                (sweep_rad.abs() / max_segment_angle).ceil().max(1.0) as usize
-            };
-            (0..=segment_count)
-                .map(|index| primitive.point_at(index as f64 / segment_count as f64))
-                .collect()
-        }
+fn tessellation_segment_count(primitive: &PathPrimitive) -> Result<usize, SolverError> {
+    let PathPrimitive::Arc {
+        radius_mm,
+        sweep_rad,
+        ..
+    } = primitive
+    else {
+        return Ok(1);
+    };
+
+    let required = if *radius_mm <= TESSELLATION_HAUSDORFF_MM {
+        1.0
+    } else {
+        let ratio = TESSELLATION_HAUSDORFF_MM / *radius_mm;
+        let max_segment_angle = 4.0 * (0.5 * ratio).sqrt().asin();
+        (sweep_rad.abs() / max_segment_angle).ceil().max(1.0)
+    };
+    if !required.is_finite() || required > MAX_HELPER_SEGMENTS as f64 {
+        return Err(helper_segment_limit_error(required));
+    }
+    Ok(required as usize)
+}
+
+fn helper_segment_limit_error(required: f64) -> SolverError {
+    let mut details = BTreeMap::from([
+        (
+            "reason".to_string(),
+            ErrorDetail::string("MAX_HELPER_SEGMENTS"),
+        ),
+        (
+            "limit".to_string(),
+            ErrorDetail::number(MAX_HELPER_SEGMENTS as f64).unwrap(),
+        ),
+    ]);
+    if let Some(required) = ErrorDetail::number(required) {
+        details.insert("required".to_string(), required);
+    }
+    SolverError {
+        code: SolverErrorCode::SolverLimitExceeded,
+        message: "Helper geometry exceeded its deterministic segment budget".to_string(),
+        details,
+    }
+}
+
+fn helper_segment_allocation_error(required: usize) -> SolverError {
+    SolverError {
+        code: SolverErrorCode::SolverLimitExceeded,
+        message: "Helper geometry allocation failed within its segment budget".to_string(),
+        details: BTreeMap::from([
+            (
+                "reason".to_string(),
+                ErrorDetail::string("HELPER_SEGMENT_ALLOCATION_FAILED"),
+            ),
+            (
+                "required".to_string(),
+                ErrorDetail::number(required as f64).unwrap(),
+            ),
+        ]),
+    }
+}
+
+fn helper_quantization_range_error() -> SolverError {
+    SolverError {
+        code: SolverErrorCode::SolverLimitExceeded,
+        message: "Helper geometry exceeds the checked quantization range".to_string(),
+        details: BTreeMap::from([
+            (
+                "reason".to_string(),
+                ErrorDetail::string("HELPER_QUANTIZATION_RANGE"),
+            ),
+            (
+                "quantizationMm".to_string(),
+                ErrorDetail::number(TOPOLOGY_QUANTIZATION_MM).unwrap(),
+            ),
+        ]),
     }
 }
 
@@ -267,6 +349,36 @@ mod tests {
             start: point(start.0, start.1),
             end: point(end.0, end.1),
         }
+    }
+
+    #[test]
+    fn huge_finite_radius_returns_deterministic_helper_segment_limit() {
+        let radius_mm = 1e12;
+        let boundary = vec![PathPrimitive::Arc {
+            start: point(radius_mm, 0.0),
+            end: point(0.0, radius_mm),
+            center: point(0.0, 0.0),
+            radius_mm,
+            sweep_rad: std::f64::consts::FRAC_PI_2,
+        }];
+
+        let first = quantized_segments_for_boundary(&boundary).unwrap_err();
+        let second = quantized_segments_for_boundary(&boundary).unwrap_err();
+
+        assert_eq!(first, second);
+        assert_eq!(
+            first.code,
+            crate::model::SolverErrorCode::SolverLimitExceeded
+        );
+        assert_eq!(
+            first.details["reason"].as_str(),
+            Some("MAX_HELPER_SEGMENTS")
+        );
+        assert_eq!(
+            first.details["limit"].as_number(),
+            Some(MAX_HELPER_SEGMENTS as f64)
+        );
+        assert!(first.details["required"].as_number().unwrap() > MAX_HELPER_SEGMENTS as f64);
     }
 
     #[test]
