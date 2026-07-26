@@ -1,8 +1,14 @@
+mod distance;
+mod intersection;
 mod path;
+mod predicates;
 mod primitive;
 mod vector;
 
-pub use path::{CanonicalPath, PathError, canonicalize_path};
+pub use distance::{primitive_distance, ClosestPair};
+pub use intersection::{primitive_intersections, Intersection, IntersectionPoint};
+pub use path::{canonicalize_path, CanonicalPath, PathError};
+pub use predicates::ParameterRange;
 pub use primitive::Aabb;
 pub use vector::Vec2;
 
