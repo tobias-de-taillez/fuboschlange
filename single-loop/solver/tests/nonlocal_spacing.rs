@@ -91,22 +91,28 @@ fn valid_port_pair_candidate() -> CandidatePath {
     let x1 = connection.start_port.x;
     let x2 = connection.end_port.x;
     let r = 80.0;
-    let xc = x1 - r - 25.0;
+    let angle = PI / 6.0;
+    let lead_length = (r * angle.cos() - 25.0) / angle.sin();
+    let lead_dx = lead_length * angle.sin();
+    let lead_y = lead_length * angle.cos();
+    let start_one_third = (x1 - lead_dx / 3.0, lead_y / 3.0);
+    let start_two_thirds = (x1 - 2.0 * lead_dx / 3.0, 2.0 * lead_y / 3.0);
+    let arc_start = (x1 - lead_dx, lead_y);
+    let center = (arc_start.0 + r * angle.cos(), arc_start.1 + r * angle.sin());
+    let arc_sweep = -(PI + 2.0 * angle);
+    let arc_end = (x2 + lead_dx, lead_y);
+    let end_one_third = (x2 + 2.0 * lead_dx / 3.0, 2.0 * lead_y / 3.0);
+    let end_two_thirds = (x2 + lead_dx / 3.0, lead_y / 3.0);
+
     candidate_from_parts(
         vec![
-            line((x1, 0.0), (x1, r)),
-            arc((x1, r), (x1 - r, 2.0 * r), (x1 - r, r), r, FRAC_PI_2),
-            line((x1 - r, 2.0 * r), (xc, 2.0 * r)),
-            arc((xc, 2.0 * r), (xc, 4.0 * r), (xc, 3.0 * r), r, -PI),
-            line((xc, 4.0 * r), (x2 - r, 4.0 * r)),
-            arc(
-                (x2 - r, 4.0 * r),
-                (x2, 3.0 * r),
-                (x2 - r, 3.0 * r),
-                r,
-                -FRAC_PI_2,
-            ),
-            line((x2, 3.0 * r), (x2, 0.0)),
+            line((x1, 0.0), start_one_third),
+            line(start_one_third, start_two_thirds),
+            line(start_two_thirds, arc_start),
+            arc(arc_start, arc_end, center, r, arc_sweep),
+            line(arc_end, end_one_third),
+            line(end_one_third, end_two_thirds),
+            line(end_two_thirds, (x2, 0.0)),
         ],
         vec![
             PrimitiveRole::StartLead,

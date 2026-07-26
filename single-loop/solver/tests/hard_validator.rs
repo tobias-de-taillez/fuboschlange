@@ -100,21 +100,27 @@ fn mirrored_racetrack_primitives(
     let x1 = connection.start_port.x;
     let x2 = connection.end_port.x;
     let r = radius_mm;
-    let xc = x1 - r - 25.0;
+    let angle = PI / 6.0;
+    let lead_length = (r * angle.cos() - 25.0) / angle.sin();
+    let lead_dx = lead_length * angle.sin();
+    let lead_y = lead_length * angle.cos();
+    let start_one_third = (x1 - lead_dx / 3.0, lead_y / 3.0);
+    let start_two_thirds = (x1 - 2.0 * lead_dx / 3.0, 2.0 * lead_y / 3.0);
+    let arc_start = (x1 - lead_dx, lead_y);
+    let center = (arc_start.0 + r * angle.cos(), arc_start.1 + r * angle.sin());
+    let arc_sweep = -(PI + 2.0 * angle);
+    let arc_end = (x2 + lead_dx, lead_y);
+    let end_one_third = (x2 + 2.0 * lead_dx / 3.0, 2.0 * lead_y / 3.0);
+    let end_two_thirds = (x2 + lead_dx / 3.0, lead_y / 3.0);
+
     vec![
-        line((x1, 0.0), (x1, r)),
-        arc((x1, r), (x1 - r, 2.0 * r), (x1 - r, r), r, FRAC_PI_2),
-        line((x1 - r, 2.0 * r), (xc, 2.0 * r)),
-        arc((xc, 2.0 * r), (xc, 4.0 * r), (xc, 3.0 * r), r, -PI),
-        line((xc, 4.0 * r), (x2 - r, 4.0 * r)),
-        arc(
-            (x2 - r, 4.0 * r),
-            (x2, 3.0 * r),
-            (x2 - r, 3.0 * r),
-            r,
-            -FRAC_PI_2,
-        ),
-        line((x2, 3.0 * r), (x2, 0.0)),
+        line((x1, 0.0), start_one_third),
+        line(start_one_third, start_two_thirds),
+        line(start_two_thirds, arc_start),
+        arc(arc_start, arc_end, center, r, arc_sweep),
+        line(arc_end, end_one_third),
+        line(end_one_third, end_two_thirds),
+        line(end_two_thirds, (x2, 0.0)),
     ]
 }
 
@@ -329,15 +335,15 @@ fn multiple_start_leads_candidate() -> CandidatePath {
         mirrored_racetrack_primitives(&connection, 80.0),
         vec![
             PrimitiveRole::StartLead,
-            PrimitiveRole::StartLead,
             PrimitiveRole::Inbound { winding: 0 },
+            PrimitiveRole::StartLead,
             PrimitiveRole::InnerTurn,
             PrimitiveRole::Outbound { winding: 1 },
             PrimitiveRole::Outbound { winding: 1 },
             PrimitiveRole::EndLead,
         ],
         vec![ParentPair {
-            first_primitive: 2,
+            first_primitive: 1,
             first_range: ParameterRange::FULL,
             second_primitive: 4,
             second_range: ParameterRange::FULL,
@@ -352,17 +358,26 @@ fn multiple_start_leads_candidate() -> CandidatePath {
 fn initial_nonlead_wall_candidate(split_y: f64) -> CandidatePath {
     let (_context, connection) = default_context_and_connection();
     let mut primitives = mirrored_racetrack_primitives(&connection, 80.0);
+    let (first_start, first_end) = match &primitives[0] {
+        PathPrimitive::Line { start, end } => (*start, *end),
+        PathPrimitive::Arc { .. } => unreachable!("fixture starts with a line"),
+    };
+    let split_fraction = split_y / first_end.y;
+    let split = point(
+        first_start.x + (first_end.x - first_start.x) * split_fraction,
+        split_y,
+    );
     primitives.splice(
         0..1,
         [
-            line(
-                (connection.start_port.x, 0.0),
-                (connection.start_port.x, split_y),
-            ),
-            line(
-                (connection.start_port.x, split_y),
-                (connection.start_port.x, 80.0),
-            ),
+            PathPrimitive::Line {
+                start: first_start,
+                end: split,
+            },
+            PathPrimitive::Line {
+                start: split,
+                end: first_end,
+            },
         ],
     );
     candidate_from_parts(

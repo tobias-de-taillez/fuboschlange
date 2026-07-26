@@ -10,7 +10,6 @@ use crate::validation::{
 
 const NONLOCAL_BOUNDARY_CERTIFICATION_MM: f64 = 1e-10;
 const CONSERVATIVE_DISTANCE_ERROR_MM: f64 = 2.0 * crate::geometry::POSITION_TOLERANCE_MM;
-const ARCLENGTH_TOLERANCE_MM: f64 = 1e-12;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MinBendRadius {
@@ -80,6 +79,24 @@ struct FeasibleDomain {
 struct BoundaryInterval {
     start: f64,
     end: f64,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct CertifiedClosestPair {
+    witness: ClosestPair,
+    adaptive_lower_bound_mm: Option<f64>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct CertifiedNonlocalDistance {
+    witness: NonlocalDistance,
+    lower_bound_mm: f64,
+}
+
+#[derive(Default)]
+struct NonlocalSearch {
+    best_witness: Option<NonlocalDistance>,
+    smallest_certified_lower: Option<CertifiedNonlocalDistance>,
 }
 
 pub(crate) fn minimum_bend_radius(
@@ -174,24 +191,20 @@ pub(crate) fn minimum_nonlocal_spacing_report(
     candidate: &CandidatePath,
     local_arc_length_mm: f64,
 ) -> Result<MinNonlocalSpacing, ValidationFailure> {
-    let raw = minimum_nonlocal_distance(candidate, local_arc_length_mm)?;
-    let lower_bound_mm = if is_exact_port_identity(candidate, local_arc_length_mm, &raw) {
-        50.0
-    } else {
-        (raw.distance_mm - CONSERVATIVE_DISTANCE_ERROR_MM).max(0.0)
-    };
-
-    if lower_bound_mm < 50.0 {
+    let certified = certified_nonlocal_distance(candidate, local_arc_length_mm)?;
+    if certified.lower_bound_mm < 50.0 {
         return Err(
-            ValidationFailure::new(ValidationFailureCode::NonlocalSpacingTooSmall)
-                .with_points(raw.first_point, raw.second_point),
+            ValidationFailure::new(ValidationFailureCode::NonlocalSpacingTooSmall).with_points(
+                certified.witness.first_point,
+                certified.witness.second_point,
+            ),
         );
     }
 
     Ok(MinNonlocalSpacing {
-        lower_bound_mm,
-        first_point: raw.first_point,
-        second_point: raw.second_point,
+        lower_bound_mm: certified.lower_bound_mm,
+        first_point: certified.witness.first_point,
+        second_point: certified.witness.second_point,
     })
 }
 
@@ -199,35 +212,68 @@ pub fn minimum_nonlocal_distance(
     candidate: &CandidatePath,
     local_arc_length_mm: f64,
 ) -> Result<NonlocalDistance, ValidationFailure> {
+    minimum_nonlocal_search(candidate, local_arc_length_mm)?
+        .best_witness
+        .ok_or_else(|| ValidationFailure::new(ValidationFailureCode::NonlocalSpacingTooSmall))
+}
+
+fn certified_nonlocal_distance(
+    candidate: &CandidatePath,
+    local_arc_length_mm: f64,
+) -> Result<CertifiedNonlocalDistance, ValidationFailure> {
+    minimum_nonlocal_search(candidate, local_arc_length_mm)?
+        .smallest_certified_lower
+        .ok_or_else(|| ValidationFailure::new(ValidationFailureCode::NonlocalSpacingTooSmall))
+}
+
+fn minimum_nonlocal_search(
+    candidate: &CandidatePath,
+    local_arc_length_mm: f64,
+) -> Result<NonlocalSearch, ValidationFailure> {
     let primitives = candidate.path.primitives();
     let prefix = candidate.path.prefix_lengths();
-    let mut best = exact_port_distance(candidate, local_arc_length_mm);
+    let mut search = NonlocalSearch::default();
+    if let Some(port_pair) = exact_port_distance(candidate, local_arc_length_mm) {
+        consider_certified_distance(
+            port_pair,
+            certified_pair_lower_bound(candidate, local_arc_length_mm, &port_pair),
+            &mut search,
+        );
+    }
 
     for a_index in 0..primitives.len() {
         for b_index in a_index..primitives.len() {
             minimize_primitive_pair(
+                candidate,
                 a_index,
                 b_index,
                 prefix,
                 &primitives[a_index],
                 &primitives[b_index],
                 local_arc_length_mm,
-                &mut best,
+                &mut search,
             );
         }
     }
 
-    best.ok_or_else(|| ValidationFailure::new(ValidationFailureCode::NonlocalSpacingTooSmall))
+    if search.best_witness.is_none() || search.smallest_certified_lower.is_none() {
+        return Err(ValidationFailure::new(
+            ValidationFailureCode::NonlocalSpacingTooSmall,
+        ));
+    }
+    Ok(search)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn minimize_primitive_pair(
+    candidate: &CandidatePath,
     a_index: usize,
     b_index: usize,
     prefix: &[f64],
     a: &PathPrimitive,
     b: &PathPrimitive,
     local_arc_length_mm: f64,
-    best: &mut Option<NonlocalDistance>,
+    search: &mut NonlocalSearch,
 ) {
     let Some(domain) = feasible_domain(
         prefix[a_index],
@@ -241,19 +287,33 @@ fn minimize_primitive_pair(
 
     for pair in primitive_distance_candidates(a, ParameterRange::FULL, b, ParameterRange::FULL) {
         if domain.contains(pair.a_t, pair.b_t) {
-            consider_closest_pair(a_index, b_index, prefix, a, b, pair, best);
+            consider_closest_pair(
+                candidate,
+                local_arc_length_mm,
+                a_index,
+                b_index,
+                prefix,
+                a,
+                b,
+                pair,
+                None,
+                search,
+            );
         }
     }
 
     for vertex in &domain.vertices {
         consider_closest_pair(
+            candidate,
+            local_arc_length_mm,
             a_index,
             b_index,
             prefix,
             a,
             b,
             pair_at_domain_point(a, b, *vertex),
-            best,
+            None,
+            search,
         );
     }
 
@@ -264,35 +324,45 @@ fn minimize_primitive_pair(
             let a_t = ((start.a_t + end.a_t) * 0.5).clamp(0.0, 1.0);
             let b_range = ParameterRange::new(start.b_t.min(end.b_t), start.b_t.max(end.b_t));
             consider_closest_pair(
+                candidate,
+                local_arc_length_mm,
                 a_index,
                 b_index,
                 prefix,
                 a,
                 b,
                 primitive_distance(a, ParameterRange::new(a_t, a_t), b, b_range),
-                best,
+                None,
+                search,
             );
         } else if start.b_t == end.b_t {
             let b_t = ((start.b_t + end.b_t) * 0.5).clamp(0.0, 1.0);
             let a_range = ParameterRange::new(start.a_t.min(end.a_t), start.a_t.max(end.a_t));
             consider_closest_pair(
+                candidate,
+                local_arc_length_mm,
                 a_index,
                 b_index,
                 prefix,
                 a,
                 b,
                 primitive_distance(a, a_range, b, ParameterRange::new(b_t, b_t)),
-                best,
+                None,
+                search,
             );
         } else {
+            let boundary = fixed_lag_boundary_minimum(a, b, start, end);
             consider_closest_pair(
+                candidate,
+                local_arc_length_mm,
                 a_index,
                 b_index,
                 prefix,
                 a,
                 b,
-                fixed_lag_boundary_minimum(a, b, start, end),
-                best,
+                boundary.witness,
+                boundary.adaptive_lower_bound_mm,
+                search,
             );
         }
     }
@@ -397,12 +467,19 @@ fn fixed_lag_boundary_minimum(
     b: &PathPrimitive,
     start: DomainPoint,
     end: DomainPoint,
-) -> ClosestPair {
+) -> CertifiedClosestPair {
     if matches!(a, PathPrimitive::Line { .. }) && matches!(b, PathPrimitive::Line { .. }) {
-        return line_line_boundary_minimum(a, b, start, end);
+        let witness = line_line_boundary_minimum(a, b, start, end);
+        return CertifiedClosestPair {
+            witness,
+            adaptive_lower_bound_mm: None,
+        };
     }
-    if let Some(pair) = equal_curvature_arc_boundary_minimum(a, b, start, end) {
-        return pair;
+    if let Some(witness) = equal_curvature_arc_boundary_minimum(a, b, start, end) {
+        return CertifiedClosestPair {
+            witness,
+            adaptive_lower_bound_mm: None,
+        };
     }
     certified_boundary_minimum(a, b, start, end)
 }
@@ -491,12 +568,13 @@ fn certified_boundary_minimum(
     b: &PathPrimitive,
     start: DomainPoint,
     end: DomainPoint,
-) -> ClosestPair {
+) -> CertifiedClosestPair {
     let mut best = pair_at_boundary_parameter(a, b, start, end, 0.0);
     for q in [0.5, 1.0] {
         consider_closest_candidate(pair_at_boundary_parameter(a, b, start, end, q), &mut best);
     }
 
+    let mut certified_lower_bound_mm = f64::INFINITY;
     let mut pending = vec![BoundaryInterval {
         start: 0.0,
         end: 1.0,
@@ -509,11 +587,13 @@ fn certified_boundary_minimum(
             &mut best,
         );
         if lower_bound_mm + NONLOCAL_BOUNDARY_CERTIFICATION_MM >= best.distance_mm {
+            certified_lower_bound_mm = certified_lower_bound_mm.min(lower_bound_mm);
             continue;
         }
 
         let midpoint = (interval.start + interval.end) * 0.5;
         if midpoint == interval.start || midpoint == interval.end {
+            certified_lower_bound_mm = certified_lower_bound_mm.min(lower_bound_mm);
             continue;
         }
         pending.push(BoundaryInterval {
@@ -526,7 +606,10 @@ fn certified_boundary_minimum(
         });
     }
 
-    best
+    CertifiedClosestPair {
+        witness: best,
+        adaptive_lower_bound_mm: Some(certified_lower_bound_mm.min(best.distance_mm)),
+    }
 }
 
 fn boundary_interval_lower_bound(
@@ -625,35 +708,66 @@ fn consider_closest_candidate(candidate: ClosestPair, best: &mut ClosestPair) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn consider_closest_pair(
+    candidate: &CandidatePath,
+    local_arc_length_mm: f64,
     a_index: usize,
     b_index: usize,
     prefix: &[f64],
     a: &PathPrimitive,
     b: &PathPrimitive,
     pair: ClosestPair,
-    best: &mut Option<NonlocalDistance>,
+    adaptive_lower_bound_mm: Option<f64>,
+    search: &mut NonlocalSearch,
 ) {
-    consider_distance(
-        NonlocalDistance {
-            distance_mm: pair.distance_mm,
-            first_point: pair.point_on_a,
-            second_point: pair.point_on_b,
-            first_path_offset_mm: prefix[a_index] + a.length() * pair.a_t,
-            second_path_offset_mm: prefix[b_index] + b.length() * pair.b_t,
-        },
-        best,
+    let distance = NonlocalDistance {
+        distance_mm: pair.distance_mm,
+        first_point: pair.point_on_a,
+        second_point: pair.point_on_b,
+        first_path_offset_mm: prefix[a_index] + a.length() * pair.a_t,
+        second_path_offset_mm: prefix[b_index] + b.length() * pair.b_t,
+    };
+    let lower_bound_mm = adaptive_lower_bound_mm.map_or_else(
+        || certified_pair_lower_bound(candidate, local_arc_length_mm, &distance),
+        |bound| bound.max(0.0),
     );
+    consider_certified_distance(distance, lower_bound_mm, search);
 }
 
-fn consider_distance(candidate: NonlocalDistance, best: &mut Option<NonlocalDistance>) {
-    let replace = match best {
+fn consider_certified_distance(
+    candidate: NonlocalDistance,
+    lower_bound_mm: f64,
+    search: &mut NonlocalSearch,
+) {
+    let replace_witness = match search.best_witness {
         None => true,
-        Some(current) => compare_nonlocal_distance(&candidate, current).is_lt(),
+        Some(current) => compare_nonlocal_distance(&candidate, &current).is_lt(),
     };
-    if replace {
-        *best = Some(candidate);
+    if replace_witness {
+        search.best_witness = Some(candidate);
     }
+
+    let certified = CertifiedNonlocalDistance {
+        witness: candidate,
+        lower_bound_mm,
+    };
+    let replace_lower = match search.smallest_certified_lower {
+        None => true,
+        Some(current) => compare_certified_nonlocal_distance(&certified, &current).is_lt(),
+    };
+    if replace_lower {
+        search.smallest_certified_lower = Some(certified);
+    }
+}
+
+fn compare_certified_nonlocal_distance(
+    left: &CertifiedNonlocalDistance,
+    right: &CertifiedNonlocalDistance,
+) -> core::cmp::Ordering {
+    left.lower_bound_mm
+        .total_cmp(&right.lower_bound_mm)
+        .then_with(|| compare_nonlocal_distance(&left.witness, &right.witness))
 }
 
 fn compare_nonlocal_distance(
@@ -680,7 +794,7 @@ fn exact_port_distance(
     candidate: &CandidatePath,
     local_arc_length_mm: f64,
 ) -> Option<NonlocalDistance> {
-    if !has_exact_port_identity(candidate, local_arc_length_mm) {
+    if !has_certifiable_port_endpoints(candidate, local_arc_length_mm) {
         return None;
     }
 
@@ -820,24 +934,30 @@ fn compare_wall_clearance(
         .then_with(|| left.point_on_wall.y.total_cmp(&right.point_on_wall.y))
 }
 
-fn is_exact_port_identity(
+fn certified_pair_lower_bound(
+    candidate: &CandidatePath,
+    local_arc_length_mm: f64,
+    distance: &NonlocalDistance,
+) -> f64 {
+    if is_exact_port_parameter_pair(candidate, local_arc_length_mm, distance) {
+        50.0
+    } else {
+        (distance.distance_mm - CONSERVATIVE_DISTANCE_ERROR_MM).max(0.0)
+    }
+}
+
+fn is_exact_port_parameter_pair(
     candidate: &CandidatePath,
     local_arc_length_mm: f64,
     distance: &NonlocalDistance,
 ) -> bool {
-    has_exact_port_identity(candidate, local_arc_length_mm)
-        && distance
-            .first_point
-            .distance_to(candidate.connection.start_port)
-            <= crate::geometry::POSITION_TOLERANCE_MM
-        && distance
-            .second_point
-            .distance_to(candidate.connection.end_port)
-            <= crate::geometry::POSITION_TOLERANCE_MM
+    has_certifiable_port_endpoints(candidate, local_arc_length_mm)
+        && distance.first_path_offset_mm == 0.0
+        && distance.second_path_offset_mm == candidate.path.total_length()
 }
 
-fn has_exact_port_identity(candidate: &CandidatePath, local_arc_length_mm: f64) -> bool {
-    if candidate.path.total_length() + ARCLENGTH_TOLERANCE_MM < local_arc_length_mm {
+fn has_certifiable_port_endpoints(candidate: &CandidatePath, local_arc_length_mm: f64) -> bool {
+    if candidate.path.total_length() < local_arc_length_mm {
         return false;
     }
     let edge_delta = (candidate.provenance.end_port_edge_offset_mm
@@ -862,4 +982,93 @@ fn has_exact_port_identity(candidate: &CandidatePath, local_arc_length_mm: f64) 
     }) && end.is_some_and(|point| {
         point.distance_to(candidate.connection.end_port) <= crate::geometry::POSITION_TOLERANCE_MM
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::input::validate_and_normalize;
+    use crate::model::{ConnectionInput, SolveSingleLoopInput};
+    use crate::validation::{CandidateKey, ParentPair, PathProvenance, PrimitiveRole};
+
+    fn exact_port_line_candidate() -> CandidatePath {
+        let normalized = validate_and_normalize(SolveSingleLoopInput {
+            polygon: vec![
+                Point::new(0.0, 0.0),
+                Point::new(600.0, 0.0),
+                Point::new(600.0, 400.0),
+                Point::new(0.0, 400.0),
+            ],
+            connection: ConnectionInput {
+                edge_index: 0,
+                center_offset_mm: 300.0,
+            },
+            requested_spacing_mm: 120.0,
+            wall_clearance_mm: 20.0,
+        })
+        .unwrap();
+        let connection = normalized.connection;
+
+        CandidatePath::from_primitives(
+            vec![PathPrimitive::Line {
+                start: connection.start_port,
+                end: connection.end_port,
+            }],
+            PathProvenance {
+                roles: vec![PrimitiveRole::StartLead],
+                parent_pairs: Vec::<ParentPair>::new(),
+                start_port_edge_offset_mm: connection.start_port_edge_offset_mm,
+                end_port_edge_offset_mm: connection.end_port_edge_offset_mm,
+            },
+            connection,
+            120.0,
+            CandidateKey(vec![1]),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn adaptive_cutoff_retains_the_terminal_interval_lower_bound() {
+        let line = PathPrimitive::Line {
+            start: Point::new(0.0, 0.0),
+            end: Point::new(100.0, 0.0),
+        };
+        let arc = PathPrimitive::Arc {
+            start: Point::new(0.0, 50.0),
+            end: Point::new(80.0, 130.0),
+            center: Point::new(0.0, 130.0),
+            radius_mm: 80.0,
+            sweep_rad: std::f64::consts::FRAC_PI_2,
+        };
+
+        let result = certified_boundary_minimum(
+            &line,
+            &arc,
+            DomainPoint { a_t: 0.0, b_t: 0.0 },
+            DomainPoint { a_t: 1.0, b_t: 1.0 },
+        );
+
+        assert_eq!(result.witness.distance_mm, 50.0);
+        assert!(result.adaptive_lower_bound_mm.unwrap() < 50.0);
+    }
+
+    #[test]
+    fn exact_port_seed_does_not_promote_distinct_endpoint_near_pair() {
+        let candidate = exact_port_line_candidate();
+        let local_arc_length_mm = 50.0 - 0.5 * crate::geometry::POSITION_TOLERANCE_MM;
+        let raw = minimum_nonlocal_distance(&candidate, local_arc_length_mm).unwrap();
+
+        assert_eq!(raw.first_path_offset_mm, 0.0);
+        assert!(raw.second_path_offset_mm < candidate.path.total_length());
+        assert!(
+            raw.second_point.distance_to(candidate.connection.end_port)
+                < crate::geometry::POSITION_TOLERANCE_MM
+        );
+        assert_eq!(
+            minimum_nonlocal_spacing_report(&candidate, local_arc_length_mm)
+                .unwrap_err()
+                .code,
+            ValidationFailureCode::NonlocalSpacingTooSmall
+        );
+    }
 }
