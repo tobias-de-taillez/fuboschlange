@@ -640,6 +640,59 @@ fn multiple_start_lead_roles_are_rejected() {
     );
 }
 
+fn multi_primitive_phase_candidate(parent_pairs: Vec<ParentPair>) -> CandidatePath {
+    let mut candidate = racetrack_candidate(80.0);
+    candidate.provenance.roles[1] = PrimitiveRole::Inbound { winding: 0 };
+    candidate.provenance.roles[2] = PrimitiveRole::Inbound { winding: 0 };
+    candidate.provenance.roles[4] = PrimitiveRole::Outbound { winding: 1 };
+    candidate.provenance.roles[5] = PrimitiveRole::Outbound { winding: 1 };
+    candidate.provenance.parent_pairs = parent_pairs;
+    candidate
+}
+
+#[test]
+fn parent_pairs_must_cover_every_primitive_of_a_multi_primitive_phase() {
+    let (context, _connection) = default_context_and_connection();
+    let candidate = multi_primitive_phase_candidate(vec![ParentPair {
+        first_primitive: 1,
+        first_range: ParameterRange::new(0.5, 0.5),
+        second_primitive: 5,
+        second_range: ParameterRange::new(0.5, 0.5),
+        first_winding: 0,
+        second_winding: 1,
+    }]);
+
+    assert_failure_code(
+        validate_hard_constraints(&candidate, &context),
+        "INVALID_TOPOLOGY_PARENT_PAIR",
+    );
+}
+
+#[test]
+fn complete_multi_pair_mapping_covers_multi_primitive_phases() {
+    let (context, _connection) = default_context_and_connection();
+    let candidate = multi_primitive_phase_candidate(vec![
+        ParentPair {
+            first_primitive: 1,
+            first_range: ParameterRange::FULL,
+            second_primitive: 5,
+            second_range: ParameterRange::FULL,
+            first_winding: 0,
+            second_winding: 1,
+        },
+        ParentPair {
+            first_primitive: 2,
+            first_range: ParameterRange::FULL,
+            second_primitive: 4,
+            second_range: ParameterRange::FULL,
+            first_winding: 0,
+            second_winding: 1,
+        },
+    ]);
+
+    validate_hard_constraints(&candidate, &context).unwrap();
+}
+
 #[test]
 fn malformed_topology_is_rejected() {
     let (context, _connection) = default_context_and_connection();

@@ -26,25 +26,36 @@ pub struct QuantizedPoint {
 }
 
 impl QuantizedPoint {
-    fn try_from_point(point: Point) -> Result<Self, SolverError> {
-        let Some(x) = quantize_coordinate(point.x) else {
+    fn try_from_point(point: Point, origin: Point) -> Result<Self, SolverError> {
+        let Some(x) = quantize_coordinate(point.x - origin.x) else {
             return Err(helper_quantization_range_error());
         };
-        let Some(y) = quantize_coordinate(point.y) else {
+        let Some(y) = quantize_coordinate(point.y - origin.y) else {
             return Err(helper_quantization_range_error());
         };
         Ok(Self { x, y })
     }
 }
 
-fn quantize_coordinate(coordinate_mm: f64) -> Option<i64> {
-    let rounded = (coordinate_mm / TOPOLOGY_QUANTIZATION_MM).round();
-    (rounded >= I64_MIN_AS_F64 && rounded < I64_MAX_EXCLUSIVE_AS_F64).then(|| rounded as i64)
+fn quantize_coordinate(relative_mm: f64) -> Option<i64> {
+    if !relative_mm.is_finite() {
+        return None;
+    }
+    let rounded = (relative_mm / TOPOLOGY_QUANTIZATION_MM).round();
+    if rounded < I64_MIN_AS_F64 || rounded >= I64_MAX_EXCLUSIVE_AS_F64 {
+        return None;
+    }
+    let reconstructed = rounded * TOPOLOGY_QUANTIZATION_MM;
+    if (reconstructed - relative_mm).abs() > TOPOLOGY_QUANTIZATION_MM * 0.5 {
+        return None;
+    }
+    Some(rounded as i64)
 }
 
 #[derive(Clone, Debug)]
 pub struct AllowedRegion {
     pub boundary: Vec<PathPrimitive>,
+    pub quantization_origin: Point,
     pub quantized_segments: Vec<(QuantizedPoint, QuantizedPoint)>,
     pub wall_clearance_mm: f64,
     boundary_polyline: Polyline<f64>,
@@ -67,9 +78,10 @@ impl AllowedRegion {
         validate_offset_loop(loop_polyline)?;
         let boundary = polyline_to_exact_boundary(loop_polyline)?;
         validate_boundary_containment(&boundary, polygon)?;
-        let quantized_segments = quantized_segments_for_boundary(&boundary)?;
+        let (quantization_origin, quantized_segments) = quantized_segments_for_boundary(&boundary)?;
         Ok(Self {
             boundary,
+            quantization_origin,
             quantized_segments,
             wall_clearance_mm,
             boundary_polyline: loop_polyline.clone(),
@@ -225,7 +237,7 @@ fn validate_boundary_containment(
 
 fn quantized_segments_for_boundary(
     boundary: &[PathPrimitive],
-) -> Result<Vec<(QuantizedPoint, QuantizedPoint)>, SolverError> {
+) -> Result<(Point, Vec<(QuantizedPoint, QuantizedPoint)>), SolverError> {
     let mut required_segments = 0usize;
     for primitive in boundary {
         let primitive_segments = tessellation_segment_count(primitive)?;
@@ -238,16 +250,22 @@ fn quantized_segments_for_boundary(
         required_segments = total;
     }
 
+    let quantization_origin = boundary
+        .first()
+        .map(PathPrimitive::start)
+        .ok_or_else(|| internal_validation_failure("HELPER_BOUNDARY_EMPTY"))?;
     let mut result = Vec::new();
     result
         .try_reserve_exact(required_segments)
         .map_err(|_| helper_segment_allocation_error(required_segments))?;
     for primitive in boundary {
         let segment_count = tessellation_segment_count(primitive)?;
-        let mut start = QuantizedPoint::try_from_point(primitive.point_at(0.0))?;
+        let mut start =
+            QuantizedPoint::try_from_point(primitive.point_at(0.0), quantization_origin)?;
         for index in 1..=segment_count {
             let end = QuantizedPoint::try_from_point(
                 primitive.point_at(index as f64 / segment_count as f64),
+                quantization_origin,
             )?;
             if start != end {
                 result.push((start, end));
@@ -255,7 +273,7 @@ fn quantized_segments_for_boundary(
             start = end;
         }
     }
-    Ok(result)
+    Ok((quantization_origin, result))
 }
 
 fn tessellation_segment_count(primitive: &PathPrimitive) -> Result<usize, SolverError> {
@@ -349,6 +367,24 @@ mod tests {
             start: point(start.0, start.1),
             end: point(end.0, end.1),
         }
+    }
+
+    #[test]
+    fn large_in_range_translation_uses_local_quantization_origin() {
+        let origin = 8e15;
+        let size = 2048.0;
+        let boundary = vec![
+            line((origin, origin), (origin + size, origin)),
+            line((origin + size, origin), (origin + size, origin + size)),
+            line((origin + size, origin + size), (origin, origin + size)),
+            line((origin, origin + size), (origin, origin)),
+        ];
+
+        let (quantization_origin, segments) = quantized_segments_for_boundary(&boundary).unwrap();
+
+        assert_eq!(quantization_origin, point(origin, origin));
+        assert_eq!(segments[0].0, QuantizedPoint { x: 0, y: 0 });
+        assert_eq!(segments[0].1, QuantizedPoint { x: 2_048_000, y: 0 });
     }
 
     #[test]

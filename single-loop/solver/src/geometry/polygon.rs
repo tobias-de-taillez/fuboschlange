@@ -87,17 +87,17 @@ impl Polygon {
         (end - start).norm()
     }
 
-    pub fn edge_tangent_for_original(&self, edge_index: usize) -> Vec2 {
+    pub fn edge_tangent_for_original(&self, edge_index: usize) -> Option<Vec2> {
         let (start, end) = self.original_edge(edge_index);
-        (end - start).normalized().unwrap_or(Vec2::ZERO)
+        (end - start).normalized()
     }
 
-    pub fn inward_normal_for_original(&self, edge_index: usize) -> Vec2 {
-        let tangent = self.edge_tangent_for_original(edge_index);
-        match self.winding {
+    pub fn inward_normal_for_original(&self, edge_index: usize) -> Option<Vec2> {
+        let tangent = self.edge_tangent_for_original(edge_index)?;
+        Some(match self.winding {
             Winding::CounterClockwise => tangent.perp_ccw(),
             Winding::Clockwise => -tangent.perp_ccw(),
-        }
+        })
     }
 
     pub fn original_edge_index_for_internal(&self, internal_edge_index: usize) -> usize {

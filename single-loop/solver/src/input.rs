@@ -139,7 +139,9 @@ fn normalize_connection(
         ));
     }
 
-    let edge_tangent = polygon.edge_tangent_for_original(edge_index);
+    let Some(edge_tangent) = polygon.edge_tangent_for_original(edge_index) else {
+        return Err(unrepresentable_connection_geometry(connection.edge_index));
+    };
     let inward_normal = inward_normal_for_connection(polygon.winding(), edge_tangent);
     let (edge_start, _) = polygon.original_edge(edge_index);
 
@@ -154,6 +156,15 @@ fn normalize_connection(
     let second_port_edge_offset_mm = actual_center_offset_mm + CONNECTION_PORT_OFFSET_MM;
     let first_port = edge_start + edge_tangent * first_port_edge_offset_mm;
     let second_port = edge_start + edge_tangent * second_port_edge_offset_mm;
+    if !center.is_finite()
+        || !first_port.is_finite()
+        || !second_port.is_finite()
+        || (second_port_edge_offset_mm - first_port_edge_offset_mm - MIN_NONLOCAL_SPACING_MM).abs()
+            > 1e-9
+        || (first_port.distance_to(second_port) - MIN_NONLOCAL_SPACING_MM).abs() > 1e-6
+    {
+        return Err(unrepresentable_connection_geometry(connection.edge_index));
+    }
 
     Ok(NormalizedConnection {
         edge_index: connection.edge_index,
@@ -228,6 +239,23 @@ fn invalid_connection_edge(edge_index: u32, center_offset_mm: f64) -> SolverErro
         code: SolverErrorCode::InvalidConnectionEdge,
         message: "connection.edgeIndex or connection.centerOffsetMm is invalid".to_string(),
         details,
+    }
+}
+
+fn unrepresentable_connection_geometry(edge_index: u32) -> SolverError {
+    SolverError {
+        code: SolverErrorCode::InvalidConnectionEdge,
+        message: "The selected edge cannot represent distinct 50 mm ports".to_string(),
+        details: BTreeMap::from([
+            (
+                "edgeIndex".to_string(),
+                ErrorDetail::number(edge_index as f64).unwrap(),
+            ),
+            (
+                "reason".to_string(),
+                ErrorDetail::string("PORT_GEOMETRY_UNREPRESENTABLE"),
+            ),
+        ]),
     }
 }
 

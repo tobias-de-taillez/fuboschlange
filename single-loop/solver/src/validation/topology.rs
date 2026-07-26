@@ -207,11 +207,7 @@ fn validate_parent_pairs(
     }
 
     let expected_phases = (0..maximum_winding).step_by(2).collect::<Vec<_>>();
-    if parent_pairs.len() != expected_phases.len() {
-        return Err(ValidationFailure::new(
-            ValidationFailureCode::InvalidTopologyParentPair,
-        ));
-    }
+    let mut previous_phase = None;
 
     for (pair_index, pair) in parent_pairs.iter().enumerate() {
         for previous in &parent_pairs[..pair_index] {
@@ -266,14 +262,102 @@ fn validate_parent_pairs(
                 ValidationFailureCode::InvalidTopologyParentPair,
             ));
         }
-        let expected_first_winding = expected_phases[pair_index];
+        if pair.first_range.end - pair.first_range.start <= RANGE_COVERAGE_TOLERANCE
+            || pair.second_range.end - pair.second_range.start <= RANGE_COVERAGE_TOLERANCE
+        {
+            return Err(ValidationFailure::new(
+                ValidationFailureCode::InvalidTopologyParentPair,
+            ));
+        }
         if first_arm != Arm::Inbound
             || second_arm != Arm::Outbound
-            || first_winding != expected_first_winding
-            || second_winding != expected_first_winding + 1
+            || first_winding % 2 != 0
+            || second_winding != first_winding + 1
+            || !expected_phases.contains(&first_winding)
+            || previous_phase.is_some_and(|previous| first_winding < previous)
         {
             return Err(ValidationFailure::new(
                 ValidationFailureCode::InvalidPrimitiveRolePhase,
+            ));
+        }
+        previous_phase = Some(first_winding);
+    }
+
+    for first_winding in expected_phases {
+        validate_phase_range_coverage(roles, parent_pairs, first_winding, true)?;
+        validate_phase_range_coverage(roles, parent_pairs, first_winding + 1, false)?;
+    }
+
+    Ok(())
+}
+
+const RANGE_COVERAGE_TOLERANCE: f64 = 1e-12;
+
+fn validate_phase_range_coverage(
+    roles: &[PrimitiveRole],
+    parent_pairs: &[crate::validation::ParentPair],
+    winding: usize,
+    first_side: bool,
+) -> Result<(), ValidationFailure> {
+    let expected_primitives = roles
+        .iter()
+        .enumerate()
+        .filter_map(|(index, role)| {
+            winding_and_arm(role)
+                .is_some_and(|(role_winding, _)| role_winding == winding)
+                .then_some(index)
+        })
+        .collect::<Vec<_>>();
+
+    if expected_primitives.is_empty() {
+        return Err(ValidationFailure::new(
+            ValidationFailureCode::InvalidTopologyParentPair,
+        ));
+    }
+
+    for primitive_index in expected_primitives {
+        let mut ranges = parent_pairs
+            .iter()
+            .filter_map(|pair| {
+                let pair_phase = if first_side {
+                    pair.first_winding
+                } else {
+                    pair.second_winding
+                };
+                let pair_primitive = if first_side {
+                    pair.first_primitive
+                } else {
+                    pair.second_primitive
+                };
+                (pair_phase == winding && pair_primitive == primitive_index).then_some(
+                    if first_side {
+                        pair.first_range
+                    } else {
+                        pair.second_range
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
+        ranges.sort_by(|left, right| {
+            left.start
+                .total_cmp(&right.start)
+                .then_with(|| left.end.total_cmp(&right.end))
+        });
+
+        let mut cursor = 0.0;
+        for range in ranges {
+            if range.end - range.start <= RANGE_COVERAGE_TOLERANCE
+                || (range.start - cursor).abs() > RANGE_COVERAGE_TOLERANCE
+            {
+                return Err(ValidationFailure::new(
+                    ValidationFailureCode::InvalidTopologyParentPair,
+                ));
+            }
+            cursor = range.end;
+        }
+        if (cursor - 1.0).abs() > RANGE_COVERAGE_TOLERANCE {
+            return Err(ValidationFailure::new(
+                ValidationFailureCode::InvalidTopologyParentPair,
             ));
         }
     }

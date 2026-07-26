@@ -189,8 +189,8 @@ fn arc_tessellation_reserves_error_for_endpoint_quantization() {
 }
 
 #[test]
-fn huge_finite_translation_returns_helper_quantization_resource_error() {
-    let origin = 1e16;
+fn huge_finite_translation_uses_local_helper_quantization() {
+    let origin = 8e15;
     let normalized = validate_and_normalize(request_with_polygon(
         polygon(&[
             (origin, origin),
@@ -204,14 +204,15 @@ fn huge_finite_translation_returns_helper_quantization_resource_error() {
     ))
     .unwrap();
 
-    let error = assert_error(
-        erode_for_centerline(&normalized),
-        SolverErrorCode::SolverLimitExceeded,
-    );
-    assert_eq!(
-        error.details.get("reason").and_then(|value| value.as_str()),
-        Some("HELPER_QUANTIZATION_RANGE")
-    );
+    let allowed = erode_for_centerline(&normalized).unwrap();
+    assert_eq!(allowed.quantized_segments.len(), 4);
+    assert_eq!(allowed.quantized_segments[0].0.x, 0);
+    assert_eq!(allowed.quantized_segments[0].0.y, 0);
+    assert!(allowed.quantized_segments.iter().all(|(start, end)| {
+        [start.x, start.y, end.x, end.y]
+            .into_iter()
+            .all(|coordinate| coordinate.abs() < 2_000_000_000_000)
+    }));
 }
 
 #[test]

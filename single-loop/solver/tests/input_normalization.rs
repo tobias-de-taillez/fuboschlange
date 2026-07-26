@@ -242,6 +242,22 @@ fn invalid_wall_clearance_values_are_rejected() {
 }
 
 #[test]
+fn huge_finite_edge_rejects_unrepresentable_fifty_mm_ports() {
+    let result = validate_and_normalize(request_with_polygon(
+        polygon(&[(0.0, 0.0), (1e200, 0.0), (1e200, 1e100), (0.0, 1e100)]),
+        0,
+        5e199,
+    ));
+
+    let error = result.expect_err("collapsed ports must not be accepted");
+    assert_eq!(error.code, SolverErrorCode::InvalidConnectionEdge);
+    assert_eq!(
+        error.details.get("reason").and_then(|value| value.as_str()),
+        Some("PORT_GEOMETRY_UNREPRESENTABLE")
+    );
+}
+
+#[test]
 fn invalid_connection_edge_values_are_rejected() {
     let out_of_range = rectangle_request(300.0, 200.0, 9, 120.0);
     assert_error(

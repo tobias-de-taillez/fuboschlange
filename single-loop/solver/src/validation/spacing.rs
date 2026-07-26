@@ -1,3 +1,4 @@
+use crate::constants::MAX_SPACING_CELLS;
 use crate::geometry::{CanonicalPath, ParameterRange, primitive_distance};
 use crate::model::{ErrorDetail, LocatedSpacing, PathPrimitive, SolverError, SolverErrorCode};
 use crate::validation::provenance::ParentPair;
@@ -48,6 +49,15 @@ pub fn spacing_extrema(
     parent_pairs: &[ParentPair],
     tolerance_mm: f64,
 ) -> Result<SpacingExtrema, SolverError> {
+    spacing_extrema_with_budget(path, parent_pairs, tolerance_mm, MAX_SPACING_CELLS)
+}
+
+fn spacing_extrema_with_budget(
+    path: &CanonicalPath,
+    parent_pairs: &[ParentPair],
+    tolerance_mm: f64,
+    max_cells: usize,
+) -> Result<SpacingExtrema, SolverError> {
     if !tolerance_mm.is_finite() || tolerance_mm <= 0.0 || path.primitives().is_empty() {
         return Err(internal_spacing_error("INVALID_SPACING_REQUEST"));
     }
@@ -56,8 +66,13 @@ pub fn spacing_extrema(
     }
 
     let mut minimum = None;
-    let mut heap = BinaryHeap::with_capacity(parent_pairs.len() * 2);
+    let initial_capacity = parent_pairs
+        .len()
+        .checked_mul(2)
+        .ok_or_else(|| spacing_limit_error("MAX_SPACING_CELLS", max_cells, 0))?;
+    let mut heap = BinaryHeap::with_capacity(initial_capacity.min(max_cells));
     let mut next_id = 0;
+    let mut used = 0usize;
 
     for pair in parent_pairs {
         let Some(first) = path.primitives().get(pair.first_primitive) else {
@@ -81,6 +96,9 @@ pub fn spacing_extrema(
         minimum = Some(stable_minimum(minimum, candidate));
 
         for source_is_first in [true, false] {
+            if used >= max_cells {
+                return Err(spacing_limit_error("MAX_SPACING_CELLS", max_cells, used));
+            }
             heap.push(SpacingCell::new(
                 path,
                 pair.first_primitive,
@@ -91,6 +109,7 @@ pub fn spacing_extrema(
                 next_id,
             ));
             next_id += 1;
+            used += 1;
         }
     }
 
@@ -113,11 +132,22 @@ pub fn spacing_extrema(
             maximum = Some(stable_maximum(maximum, sample));
         }
 
-        let (first, second) = split_cell(cell);
+        let Some((first, second)) = split_cell(cell) else {
+            return Err(spacing_limit_error(
+                "SPACING_REFINEMENT_STAGNATED",
+                max_cells,
+                used,
+            ));
+        };
+        if max_cells.saturating_sub(used) < 2 {
+            return Err(spacing_limit_error("MAX_SPACING_CELLS", max_cells, used));
+        }
         heap.push(first.with_id(path, next_id));
         next_id += 1;
+        used += 1;
         heap.push(second.with_id(path, next_id));
         next_id += 1;
+        used += 1;
     }
 
     let maximum = maximum.ok_or_else(|| internal_spacing_error("EMPTY_SPACING_SEARCH"))?;
@@ -209,10 +239,13 @@ fn sample_parameters(range: ParameterRange) -> [f64; 3] {
     [range.start, midpoint(range), range.end]
 }
 
-fn split_cell(cell: SpacingCell) -> (SpacingCell, SpacingCell) {
+fn split_cell(cell: SpacingCell) -> Option<(SpacingCell, SpacingCell)> {
     let range = source_range(&cell);
     let midpoint = midpoint(range);
-    if cell.source_is_first {
+    if midpoint <= range.start || midpoint >= range.end {
+        return None;
+    }
+    Some(if cell.source_is_first {
         (
             SpacingCell {
                 first_range: ParameterRange::new(range.start, midpoint),
@@ -234,7 +267,7 @@ fn split_cell(cell: SpacingCell) -> (SpacingCell, SpacingCell) {
                 ..cell
             },
         )
-    }
+    })
 }
 
 fn midpoint(range: ParameterRange) -> f64 {
@@ -383,11 +416,29 @@ fn validate_range(range: ParameterRange) -> Result<(), SolverError> {
         && range.end.is_finite()
         && range.start >= 0.0
         && range.end <= 1.0
-        && range.start <= range.end
+        && range.start < range.end
     {
         Ok(())
     } else {
         Err(internal_spacing_error("INVALID_PARENT_PAIR"))
+    }
+}
+
+fn spacing_limit_error(reason: &'static str, limit: usize, used: usize) -> SolverError {
+    SolverError {
+        code: SolverErrorCode::SolverLimitExceeded,
+        message: "Spacing diagnostics exceeded their deterministic refinement budget".to_string(),
+        details: BTreeMap::from([
+            ("reason".to_string(), ErrorDetail::string(reason)),
+            (
+                "limit".to_string(),
+                ErrorDetail::number(limit as f64).unwrap(),
+            ),
+            (
+                "used".to_string(),
+                ErrorDetail::number(used as f64).unwrap(),
+            ),
+        ]),
     }
 }
 
@@ -396,5 +447,85 @@ fn internal_spacing_error(reason: &'static str) -> SolverError {
         code: SolverErrorCode::InternalValidationFailure,
         message: "Spacing diagnostics could not be evaluated".to_string(),
         details: BTreeMap::from([("reason".to_string(), ErrorDetail::string(reason))]),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geometry::canonicalize_path;
+    use crate::model::Point;
+    use std::f64::consts::PI;
+
+    fn line(start: (f64, f64), end: (f64, f64)) -> PathPrimitive {
+        PathPrimitive::Line {
+            start: Point::new(start.0, start.1),
+            end: Point::new(end.0, end.1),
+        }
+    }
+
+    fn diagnostic_path() -> CanonicalPath {
+        canonicalize_path(&[
+            line((0.0, 0.0), (100.0, 0.0)),
+            PathPrimitive::Arc {
+                start: Point::new(100.0, 0.0),
+                end: Point::new(100.0, 80.0),
+                center: Point::new(100.0, 40.0),
+                radius_mm: 40.0,
+                sweep_rad: PI,
+            },
+            line((100.0, 80.0), (0.0, 80.0)),
+        ])
+        .unwrap()
+    }
+
+    #[test]
+    fn midpoint_stagnation_returns_explicit_resource_error() {
+        let path = diagnostic_path();
+        let pairs = vec![ParentPair {
+            first_primitive: 0,
+            first_range: ParameterRange::new(1.0 - f64::EPSILON, 1.0),
+            second_primitive: 2,
+            second_range: ParameterRange::new(1.0 - f64::EPSILON, 1.0),
+            first_winding: 0,
+            second_winding: 1,
+        }];
+
+        let error = spacing_extrema_with_budget(&path, &pairs, f64::MIN_POSITIVE, 100)
+            .expect_err("unsplittable parameter intervals must not be requeued");
+        assert_eq!(error.code, SolverErrorCode::SolverLimitExceeded);
+        assert_eq!(
+            error.details.get("reason").and_then(ErrorDetail::as_str),
+            Some("SPACING_REFINEMENT_STAGNATED")
+        );
+    }
+
+    #[test]
+    fn tiny_tolerance_stops_at_exact_spacing_cell_budget() {
+        let path = diagnostic_path();
+        let pairs = vec![ParentPair {
+            first_primitive: 0,
+            first_range: ParameterRange::FULL,
+            second_primitive: 2,
+            second_range: ParameterRange::FULL,
+            first_winding: 0,
+            second_winding: 1,
+        }];
+
+        let error = spacing_extrema_with_budget(&path, &pairs, f64::MIN_POSITIVE, 2)
+            .expect_err("refinement must stop at its deterministic cell budget");
+        assert_eq!(error.code, SolverErrorCode::SolverLimitExceeded);
+        assert_eq!(
+            error.details.get("reason").and_then(ErrorDetail::as_str),
+            Some("MAX_SPACING_CELLS")
+        );
+        assert_eq!(
+            error.details.get("limit").and_then(ErrorDetail::as_number),
+            Some(2.0)
+        );
+        assert_eq!(
+            error.details.get("used").and_then(ErrorDetail::as_number),
+            Some(2.0)
+        );
     }
 }

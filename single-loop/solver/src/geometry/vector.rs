@@ -27,7 +27,7 @@ impl Vec2 {
     }
 
     pub fn norm(self) -> f64 {
-        self.norm_squared().sqrt()
+        self.x.hypot(self.y)
     }
 
     pub fn normalized(self) -> Option<Self> {
