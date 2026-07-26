@@ -2399,6 +2399,31 @@ function buildLoops(groups,ownerOverride,connOrder){
       //   6,0*R            19        10        19         3        45
       //   8,0*R            20        10        20         3        45
       //  12,0*R            18        10        20         3        45
+      // VIER VARIANTEN HIER GEMESSEN UND VERWORFEN (Runde 21). Alle vier waren
+      // nachweislich geladen und haben nachweislich gegriffen (Zaehler:
+      // dedupePath entfernt 7102 Punkte, despike 1114), und alle vier lieferten
+      // in ALLEN 17 Bench-Kennzahlen exakt die Baseline:
+      //
+      //   Baseline                       cross 18  cov 10  rad 18  worstCov 23
+      //   dedupe auf dem GESAMTpfad      18        10      18      23
+      //   dedupe hier, je Durchlauf      18        10      18      23
+      //   despike hier, je Durchlauf     18        10      18      23
+      //   despike + dedupe zusammen      18        10      18      19  (!)
+      //
+      // Der Grund steht in probe-teil.mjs: der schaerfste Punkt eines Plans
+      // wechselt die KLASSE, sobald man eine Klasse entfernt.
+      //   ohne alles    90 Grad, Schenkel 3..35 mm neben rund 400 mm (= 5*R)
+      //   nur dedupe    180-Grad-Kehren, beidseits rund 400 mm
+      //   nur despike   wieder 90 Grad mit 2..15 mm
+      // Der kleinste Radius ist ein MINIMUM ueber alle Ecken. Solange irgendeine
+      // Klasse steht, bewegt sich das Gate nicht — und beide zusammen zu
+      // entfernen kostet Deckung, ohne das Gate zu bewegen.
+      //
+      // Schlussfolgerung, und sie deckt sich mit der Literatur (Pocketing
+      // toolpath computation using an optimization method, CAD 2011: Kruemmung
+      // als HARTE Nebenbedingung beim ERZEUGEN der Kurve, nicht als
+      // nachtraegliches Ausrunden): punktweises Reparieren von Ecken kann dieses
+      // Gate nicht loesen. Die Erzeugung darf gar keine Ecke unter R liefern.
       for(let pass=0;pass<4;pass++) a=resampleArc(smoothToRadius(a,R,60),5.0*R);
       l[k]=a;
     });
