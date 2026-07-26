@@ -2315,7 +2315,14 @@ function buildLoops(groups,ownerOverride,connOrder){
   });
 
   // Stufe 3: routen, zusammensetzen und aus dem Frame zurückdrehen
-  const back=p=>{ const q=rotBack(p,S.W,S.H); return p.arc?{...q,arc:p.arc}:q; };
+  // Der Bogen-MITTELPUNKT muss mitgedreht werden. Ohne das bleibt er im Frame,
+  // waehrend die Stuetzpunkte in Weltkoordinaten liegen, und drawnPoints tastet
+  // den Bogen um ein voellig falsches Zentrum ab. Gemessen: Randzonen-
+  // Stuetzpunkte hoechstens 391 mm von einer Wand, die gezeichnete Kurve dagegen
+  // 9124 mm - bei (1343, 11757), also weit ausserhalb des Raums.
+  const back=p=>{ const q=rotBack(p,S.W,S.H);
+    if(!p.arc) return q;
+    return {...q, arc: p.arc.c ? {...p.arc, c:rotBack(p.arc.c,S.W,S.H)} : p.arc}; };
   const bk=a=>a.map(back);
   const built=raw.map(r=>{
     if(!r.head) return {pts:[]};
@@ -3440,6 +3447,23 @@ function selfChecks(){
   const out=[]; let ok=true; const eq=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
   const A=(n,c)=>{ok=ok&&c;out.push((c?'PASS ':'FAIL ')+n);};
   A('bifilarOrder(4)=[0,2,3,1]',eq(bifilarOrder(4),[0,2,3,1]));
+  // Bogen-MITTELPUNKTE ueberleben die Ruecktransformation. Ein Bogen, dessen
+  // gespeichertes Zentrum nicht mitgedreht wird, wird um ein Zentrum im Frame
+  // abgetastet, waehrend die Stuetzpunkte in der Welt liegen — gemessen hat die
+  // gezeichnete Randzone dadurch 9124 mm Wandabstand gehabt statt 391 mm, also
+  // Rohr weit ausserhalb des Raums. Geprueft wird die Invariante direkt:
+  // nach dem Ruecktransformieren muss |P - Mittelpunkt| immer noch r sein.
+  {
+    const bw=S.W, bh=S.H; S.W=8000; S.H=3200;
+    const Pe={x:1000,y:0}, Ps={x:1000,y:S.randSpacing};
+    const om=omegaTurn(Pe,Ps,{x:1,y:0},S.bendRadius);
+    const rb=p=>{ const q=rotBack(p,S.W,S.H);
+      return p.arc?{...q,arc:p.arc.c?{...p.arc,c:rotBack(p.arc.c,S.W,S.H)}:p.arc}:q; };
+    const worst=Math.max(...om.map(p=>{ const q=rb(p);
+      return Math.abs(Math.hypot(q.x-q.arc.c.x,q.y-q.arc.c.y)-q.arc.r); }));
+    A('Bogenmittelpunkt ueberlebt rotBack',worst<1e-6);
+    S.W=bw; S.H=bh;
+  }
   A('bifilarOrder(5)=[0,2,4,3,1]',eq(bifilarOrder(5),[0,2,4,3,1]));
   // fillet: 90°-Ecke, r=100 -> 900 + 100*pi/2 + 900
   const f=fillet([{x:0,y:0},{x:1000,y:0},{x:1000,y:1000}],100);
