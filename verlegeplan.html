@@ -1314,7 +1314,37 @@ function doubleSpiralField(poly,insOf,s,gate){
     // ponytail: nur den Doppelpunkt entfernen, KEINE zusätzliche Lücke. Ein
     // Schnitt von s*0.9 vor der Naht beseitigt zwar auch die Nadel, kostete
     // aber Kreuzungen (31 -> 51) und Deckung (35% -> 30%).
-    return seamCut(rr);
+    const cut=seamCut(rr);
+    // AUSGANGSSCHLITZ IM AEUSSERSTEN RING.
+    // Der Feldpfad ist inArm (Ringe 0,2,4...) gefolgt vom umgekehrten outArm
+    // (1,3,5...). Er ENDET damit auf Ring 1, nicht auf Ring 0 — und Ring 0 liegt
+    // zwischen diesem Ende und dem Verteiler. Jede Ruecklaufleitung muss ihn
+    // deshalb queren. Attribution ueber die Bench-Kreuzungspunkte: `field x
+    // leadOut` ist mit 52 von 188 Punkten (28 %) die groesste Einzelursache, und
+    // in 7 der 9 Laeufe, die nur 1 bis 3 Kreuzungen von sauber entfernt sind,
+    // ist es das einzige Paar.
+    //
+    // Ring 0 beginnt hier deshalb erst ein Stueck HINTER der Naht. Damit liegt
+    // dort ein Schlitz, durch den der Ruecklauf hinauskommt.
+    //
+    // Die Seite ist entscheidend, nicht die Breite:
+    //   Luecke am ENDE der Kette    crossFails 20, medianCross 9, outFails 1
+    //   Luecke am ANFANG            crossFails 12, medianCross 6, outFails 0
+    // Am Ende haengt der Uebergang Ring 0 -> Ring 2; nimmt man dort Laenge weg,
+    // wird der Sprung kuerzer und steiler (derselbe Befund wie beim Torkanal).
+    // Der Ruecklauf braucht den Schlitz ohnehin am ANFANG, dort liegt sein
+    // Ausgang.
+    //
+    // Die Breite ist dagegen fast egal — 0,25 / 0,5 / 0,75 / 1,0 / 1,25 * s
+    // liefern alle crossFails 12, erst 2,0*s faellt auf 13 zurueck. Es wirkt
+    // also die Verschiebung des Ringanfangs weg vom Nahtfusspunkt, nicht die
+    // Lueckenbreite. 0,5*s liegt mittig im flachen Bereich.
+    if(k===0&&cut.length>3){
+      const g=0.5*S.s; let acc=0, i=0;
+      while(i<cut.length-3&&acc<g){ acc+=len(sub(cut[i+1],cut[i])); i++; }
+      if(i>0) return cut.slice(i);
+    }
+    return cut;
   });
   // Vorlauf rein über die geraden Bahnen, U-Turn, Rücklauf raus über die
   // ungeraden. Beide Arme haben konstant s Abstand -> Gegenstrom.
