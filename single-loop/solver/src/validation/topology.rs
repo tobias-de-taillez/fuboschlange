@@ -1,6 +1,6 @@
-use crate::geometry::POSITION_TOLERANCE_MM;
+use crate::geometry::{POSITION_TOLERANCE_MM, ParameterRange};
 use crate::validation::{CandidatePath, PrimitiveRole, ValidationFailure, ValidationFailureCode};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 pub(crate) fn validate_bifilar_topology(
     candidate: &CandidatePath,
@@ -173,13 +173,18 @@ fn validate_winding_phases(roles: &[PrimitiveRole]) -> Result<usize, ValidationF
     }
 
     let phases = phase_for_winding.into_iter().collect::<Vec<_>>();
-    if phases.len() < 2 || phases[0].0 != 0 {
+    if phases.len() < 2 || phases.len() % 2 != 0 {
         return Err(ValidationFailure::new(
             ValidationFailureCode::InvalidPrimitiveRolePhase,
         ));
     }
-    for pair in phases.windows(2) {
-        if pair[1].0 != pair[0].0 + 1 || pair[1].1 == pair[0].1 {
+    for (expected_winding, (winding, arm)) in phases.iter().enumerate() {
+        let expected_arm = if expected_winding % 2 == 0 {
+            Arm::Inbound
+        } else {
+            Arm::Outbound
+        };
+        if *winding != expected_winding || *arm != expected_arm {
             return Err(ValidationFailure::new(
                 ValidationFailureCode::InvalidPrimitiveRolePhase,
             ));
@@ -201,13 +206,40 @@ fn validate_parent_pairs(
         ));
     }
 
-    let mut covered_phases = BTreeSet::new();
-    let mut previous_phase = None;
+    let expected_phases = (0..maximum_winding).step_by(2).collect::<Vec<_>>();
+    if parent_pairs.len() != expected_phases.len() {
+        return Err(ValidationFailure::new(
+            ValidationFailureCode::InvalidTopologyParentPair,
+        ));
+    }
+
     for (pair_index, pair) in parent_pairs.iter().enumerate() {
-        if parent_pairs[..pair_index].contains(pair) {
-            return Err(ValidationFailure::new(
-                ValidationFailureCode::InvalidTopologyParentPair,
-            ));
+        for previous in &parent_pairs[..pair_index] {
+            if ranges_overlap_on_primitive(
+                pair.first_primitive,
+                pair.first_range,
+                previous.first_primitive,
+                previous.first_range,
+            ) || ranges_overlap_on_primitive(
+                pair.first_primitive,
+                pair.first_range,
+                previous.second_primitive,
+                previous.second_range,
+            ) || ranges_overlap_on_primitive(
+                pair.second_primitive,
+                pair.second_range,
+                previous.first_primitive,
+                previous.first_range,
+            ) || ranges_overlap_on_primitive(
+                pair.second_primitive,
+                pair.second_range,
+                previous.second_primitive,
+                previous.second_range,
+            ) {
+                return Err(ValidationFailure::new(
+                    ValidationFailureCode::InvalidTopologyParentPair,
+                ));
+            }
         }
         let Some(first_role) = roles.get(pair.first_primitive) else {
             return Err(ValidationFailure::new(
@@ -234,35 +266,30 @@ fn validate_parent_pairs(
                 ValidationFailureCode::InvalidTopologyParentPair,
             ));
         }
-        if first_arm == second_arm {
+        let expected_first_winding = expected_phases[pair_index];
+        if first_arm != Arm::Inbound
+            || second_arm != Arm::Outbound
+            || first_winding != expected_first_winding
+            || second_winding != expected_first_winding + 1
+        {
             return Err(ValidationFailure::new(
                 ValidationFailureCode::InvalidPrimitiveRolePhase,
             ));
         }
-
-        let phase = first_winding.min(second_winding);
-        if first_winding.abs_diff(second_winding) != 1 || phase % 2 != 0 {
-            return Err(ValidationFailure::new(
-                ValidationFailureCode::InvalidPrimitiveRolePhase,
-            ));
-        }
-        if previous_phase.is_some_and(|previous| phase < previous) {
-            return Err(ValidationFailure::new(
-                ValidationFailureCode::InvalidPrimitiveRolePhase,
-            ));
-        }
-        previous_phase = Some(phase);
-        covered_phases.insert(phase);
-    }
-
-    let expected_phases = (0..maximum_winding).step_by(2).collect::<BTreeSet<_>>();
-    if covered_phases != expected_phases {
-        return Err(ValidationFailure::new(
-            ValidationFailureCode::InvalidPrimitiveRolePhase,
-        ));
     }
 
     Ok(())
+}
+
+fn ranges_overlap_on_primitive(
+    left_primitive: usize,
+    left_range: ParameterRange,
+    right_primitive: usize,
+    right_range: ParameterRange,
+) -> bool {
+    left_primitive == right_primitive
+        && left_range.start < right_range.end
+        && right_range.start < left_range.end
 }
 
 fn winding_and_arm(role: &PrimitiveRole) -> Option<(usize, Arm)> {

@@ -574,6 +574,40 @@ fn duplicate_parent_phase_data_is_rejected() {
 }
 
 #[test]
+fn winding_zero_must_be_inbound_and_phase_parity_must_not_reverse() {
+    let (context, _connection) = default_context_and_connection();
+    let mut candidate = racetrack_candidate(80.0);
+    candidate.provenance.roles[1] = PrimitiveRole::Inbound { winding: 1 };
+    candidate.provenance.roles[2] = PrimitiveRole::Inbound { winding: 3 };
+    candidate.provenance.roles[4] = PrimitiveRole::Outbound { winding: 2 };
+    candidate.provenance.roles[5] = PrimitiveRole::Outbound { winding: 0 };
+    candidate.provenance.parent_pairs[0].first_winding = 1;
+    candidate.provenance.parent_pairs[0].second_winding = 0;
+    candidate.provenance.parent_pairs[1].first_winding = 3;
+    candidate.provenance.parent_pairs[1].second_winding = 2;
+
+    assert_failure_code(
+        validate_hard_constraints(&candidate, &context),
+        "INVALID_PRIMITIVE_ROLE_PHASE",
+    );
+}
+
+#[test]
+fn same_phase_parent_pair_with_different_overlapping_range_is_rejected() {
+    let (context, _connection) = default_context_and_connection();
+    let mut candidate = racetrack_candidate(80.0);
+    let mut duplicate_phase = candidate.provenance.parent_pairs[0].clone();
+    duplicate_phase.first_range = ParameterRange::new(0.25, 0.75);
+    duplicate_phase.second_range = ParameterRange::new(0.25, 0.75);
+    candidate.provenance.parent_pairs.insert(1, duplicate_phase);
+
+    assert_failure_code(
+        validate_hard_constraints(&candidate, &context),
+        "INVALID_TOPOLOGY_PARENT_PAIR",
+    );
+}
+
+#[test]
 fn parent_metadata_must_match_indexed_role_windings() {
     let (context, _connection) = default_context_and_connection();
     let mut candidate = racetrack_candidate(80.0);
