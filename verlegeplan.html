@@ -2970,6 +2970,30 @@ function scoreOne(groups,own,order){
 const betterZones=(a,b)=>{
   if(!a) return false;
   if(!b) return true;
+  // TOTE ZONEN ALS KRITERIUM: GEMESSEN UND VERWORFEN (Runde 31).
+  //
+  // Befund vorweg, er bleibt gueltig: liefert eine Gruppe keinen Kreis, wird sie
+  // in buildLoops herausgefiltert und ihre FLAECHE FAELLT ERSATZLOS WEG - sie
+  // bleibt unbeheizt, statt an die Nachbarn zurueckzugehen. Gemessen bauen
+  // 8 von 20 Laeufen weniger Kreise als der Modus verlangt:
+  //     Modus 2 -> 1 Kreis,  Deckung 43 %   4100x1700
+  //     Modus 3 -> 2 Kreise, Deckung 28 %   5350x2350   (580 mm Streifen leer)
+  //     Modus 3 -> 1 Kreis,  Deckung 35 %   7300x4500
+  //     ... vier der acht sind Deckungsfehler
+  //
+  // Naheliegend war, dead = groups.length - loops.length in diese Rangfolge
+  // aufzunehmen. Gemessen, 20 Laeufe:
+  //     Baseline                   cross 12  cov 7  rad 17  out 0
+  //     dead nach out              cross 12  cov 7  rad 17  out 0   (greift nie)
+  //     dead als ERSTES Kriterium  cross 17  cov 7  rad 18  out 0
+  // Hinten greift es nie, weil fieldCross/cross/out fast jeden Vergleich schon
+  // entscheiden. Vorne kostet es fuenf Kreuzungen.
+  //
+  // Das ist die eigentliche Auskunft der Messung: die tote Zone KAUFT
+  // Kreuzungsfreiheit. Drei Zonen sind mit dem jetzigen Zuleitungsrouting nicht
+  // kreuzungsfrei anzubinden, und die Suche weicht deshalb auf zwei aus. Ueber
+  // die Rangfolge ist das nicht zu heilen - der richtige Weg ist, die Flaeche
+  // der entfallenen Zone an die NACHBARN zu geben, statt sie liegen zu lassen.
   const k=['fieldCross','cross','out'];
   for(const f of k){ if(a[f]!==b[f]) return a[f]<b[f]; }
   return a.len>b.len;
