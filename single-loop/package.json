@@ -5,7 +5,8 @@
   "scripts": {
     "wasm:build": "wasm-pack build solver --target web --out-dir ../src/wasm/pkg",
     "dev": "npm run wasm:build && vite",
-    "build": "npm run wasm:build && tsc --noEmit && vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.worker.json --noEmit",
+    "build": "npm run wasm:build && npm run typecheck && vite build",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "check": "npm run test && npm run build"

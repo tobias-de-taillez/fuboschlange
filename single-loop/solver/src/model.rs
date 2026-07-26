@@ -84,6 +84,15 @@ pub struct CoverageOutput {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ConstraintCoverageMm {
+    pub lower_bound_mm: f64,
+    pub upper_bound_mm: f64,
+    pub error_bound_mm: f64,
+    pub worst_point: Point,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SpacingDeviations {
     pub min: LocatedSpacing,
     pub max: LocatedSpacing,
@@ -132,7 +141,7 @@ pub struct ConstraintCertificate {
     pub min_wall_clearance_mm: MinWallClearanceMm,
     pub min_nonlocal_spacing_mm: MinNonlocalSpacingMm,
     pub total_length_mm: TotalLengthMm,
-    pub coverage_mm: CoverageOutput,
+    pub coverage_mm: ConstraintCoverageMm,
     pub numeric_tolerance_mm: f64,
 }
 

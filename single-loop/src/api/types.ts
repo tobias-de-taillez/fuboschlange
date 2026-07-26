@@ -48,6 +48,13 @@ export interface CoverageOutput {
   worstPoint: Point;
 }
 
+export interface ConstraintCoverageMm {
+  lowerBoundMm: number;
+  upperBoundMm: number;
+  errorBoundMm: number;
+  worstPoint: Point;
+}
+
 export interface NormalizedConnectionOutput {
   edgeIndex: number;
   requestedCenterOffsetMm: number;
@@ -98,7 +105,7 @@ export interface ConstraintCertificate {
   minWallClearanceMm: MinWallClearanceMm;
   minNonlocalSpacingMm: MinNonlocalSpacingMm;
   totalLengthMm: TotalLengthMm;
-  coverageMm: CoverageOutput;
+  coverageMm: ConstraintCoverageMm;
   numericToleranceMm: number;
 }
 
