@@ -1,18 +1,23 @@
 mod clearance;
 mod containment;
+mod coverage;
 mod intersections;
 mod provenance;
+mod spacing;
 mod topology;
 
 use crate::constants::LOCAL_ARC_LENGTH_MM;
 use crate::geometry::{AllowedRegion, Polygon};
 use crate::model::Point;
 
+pub use crate::model::LocatedSpacing;
 pub use clearance::{
     HardValidationReport, MinBendRadius, MinNonlocalSpacing, MinWallClearance, NonlocalDistance,
     minimum_nonlocal_distance,
 };
+pub use coverage::{CoverageBounds, coverage_bounds};
 pub use provenance::{CandidateKey, CandidatePath, ParentPair, PathProvenance, PrimitiveRole};
+pub use spacing::{SpacingExtrema, spacing_extrema};
 
 #[derive(Clone, Debug)]
 pub struct ValidationContext {
