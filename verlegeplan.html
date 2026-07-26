@@ -259,7 +259,7 @@ const S = {
   // Straight-Skeleton-Offset (rektilinear, exakt) statt Distanzfeld-Isolinien.
   // Isolinien runden konvexe Ecken mit dem Radius des Niveaus ab; dort blieb der
   // Boden unbeheizt. Siehe rectiOffsetter.
-  useSkeleton:true,
+  useSkeleton:true, useBiarc:false,
   // Morph-Spirale nach Abrahamsen. Standardmaessig AUS, bis gemessen.
   useMorphSpiral:false,
   // Kraftmodell-Feinabstimmung nach der Konstruktion. AUS, gemessen:
@@ -477,7 +477,23 @@ const manifoldBarW=nPorts=>Math.max(0,nPorts-1)*MANIFOLD_PITCH;
 // offene Kette eine ganze Ringseite vor der Naht enden, an der Naht liegt also
 // gar keine Luecke, durch die eine Zuleitung aufsteigen koennte. Zwei der drei
 // verbliebenen Gates haengen damit an derselben Stelle.
-const corridorW=()=>laneCount()*LANE()*0.6+LANE()/2;
+// NEU VERMESSEN nach dem Ausgangsschlitz in Ring 0. Der Satz oben — "jede
+// Verschmaelerung kostet GENAU EINEN crossFail" — galt fuer den Stand VOR dem
+// Schlitz. Der Blocker war dort ein einzelner Lauf, in dem die Zuleitung den
+// Endabschnitt des aeussersten Rings quert; genau diese Stelle ist jetzt offen.
+// Damit ist die Verschmaelerung frei, und sie zahlt auf den Radius ein:
+//   Faktor  crossFails  covFails  radFails  medianCross  medianCoverage
+//   0,20        13         10        17          2            41
+//   0,25        12         10        17          2            41
+//   0,30        12         10        17          2            41     <- genommen
+//   0,35        12         10        17          2            40
+//   0,45        12         10        17          2            40
+//   0,50        13         10        18          3            40
+//   0,60        12         10        18          6            40     <- vorher
+// Unter 0,25 kippt es wieder (die Spuren liegen dann so dicht am Feld, dass die
+// Zuleitungen es queren). 0,30 liegt mittig im flachen Bereich und nimmt die
+// bessere Deckung mit.
+const corridorW=()=>laneCount()*LANE()*0.3+LANE()/2;
 // lane -1 = Übergangskanal für Rechteck->Rechteck-Verbinder. Liegt ZWISCHEN
 // Randzone und Korridor: unterhalb der Randzone würde jeder Verbinder die
 // Fensterbahnen durchstoßen.
@@ -1957,7 +1973,79 @@ function biarcMinR(pts,thIn){
   }
   return minR;
 }
+// Biarc-Zeichnung: dieselben Punkte, aber als Folge von Kreisboegen statt als
+// Catmull-Rom. Auswertung nach Lemma 3 des Papers — der Endpunkt des ersten
+// Bogens liegt bei
+//     x* = x0 + l0 * sinc(k0*l0/2) * cos(t0 + k0*l0/2)
+//     y* = y0 + l0 * sinc(k0*l0/2) * sin(t0 + k0*l0/2)
+// Die sinc-Form deckt den Grenzfall k->0 (Gerade) mit ab, ohne Fallunterscheidung.
+function biarcOps(pts,clampArc){
+  const ops=[{kind:'move',to:pts[0]}]; let length=0, minR=Infinity;
+  if(pts.length<2) return {ops,length,minR};
+  const th=biarcTangents(pts);
+  const EPS=1e-9;
+  const emit=(from,t0,k,l,to)=>{
+    length+=Math.abs(l);
+    const r=1/Math.abs(k);
+    // Sehr flacher Bogen: als Gerade zeichnen. Ein Radius von Kilometern ist
+    // zeichnerisch eine Gerade, sprengt aber jedes Raster, das ueber die
+    // Bounding Box laeuft.
+    if(Math.abs(k)<1e-7||Math.abs(l)<EPS||r>1e5){ ops.push({kind:'line',to}); return; }
+    // RAUM-KLEMME, das Gegenstueck zu clampRoom im Bezier-Zweig. Ein Bogen
+    // woelbt ueber die Sehne hinaus; am Rand fuehrt das aus dem Raum. Gemessen
+    // ohne diese Pruefung: outFails 0 -> 2, also Rohr ausserhalb, und das ist
+    // eine harte Anforderung. Geprueft wird die Stelle der groessten Woelbung,
+    // die Bogenmitte bei s = l/2 (Lemma 3).
+    if(clampArc){
+      const h2=k*l/4, s2=sinc_(h2);
+      const mid={x:from.x+(l/2)*s2*Math.cos(t0+h2), y:from.y+(l/2)*s2*Math.sin(t0+h2)};
+      if(!pointInRoom(mid)){ ops.push({kind:'line',to}); return; }
+    }
+    minR=Math.min(minR,r);
+    // Mittelpunkt: linke Normale bei positiver Kruemmung
+    const c={x:from.x-Math.sin(t0)/k, y:from.y+Math.cos(t0)/k};
+    ops.push({kind:'arc',to,r,cw:k<0,large:Math.abs(k*l)>Math.PI,c});
+  };
+  for(let i=0;i+1<pts.length;i++){
+    const p0=pts[i], p1=pts[i+1];
+    const d=len(sub(p1,p0));
+    if(d<EPS) continue;
+    // VORGEGEBENE Boegen (Omega-Kehren) unveraendert durchreichen. Sie sind
+    // exakt konstruiert und tragen ihren Mittelpunkt mit; sie durch die
+    // Biarc-Interpolation zu schicken wuerde genau das zerstoeren.
+    if(p1.arc){
+      let th2=2*Math.asin(Math.min(1,d/(2*p1.arc.r)));
+      if(p1.arc.large) th2=2*Math.PI-th2;
+      ops.push({kind:'arc',to:p1,r:p1.arc.r,cw:p1.arc.cw,large:p1.arc.large,c:p1.arc.c});
+      length+=p1.arc.r*th2; minR=Math.min(minR,p1.arc.r); continue;
+    }
+    if(p0.arc){ ops.push({kind:'line',to:p1}); length+=d; continue; }
+    const om=Math.atan2(p1.y-p0.y,p1.x-p0.x);
+    const kap=(a,b)=>2/d*(Math.sin(om-a)+Math.sin(om-(a+b)/2));
+    const ell=(a,b)=>d/2/(Math.cos((b-a)/4)*sinc_(om-(3*a+b)/4));
+    const t0=th[i], t1=th[i+1];
+    const k0=kap(t0,t1), k1=-kap(t1,t0);
+    const l0=ell(t0,t1), l1=ell(t1,t0);
+    // ENTARTUNGSSCHUTZ. Lemma 2 gilt unter |t1-t0| <= 2*pi-eps und
+    // |omega-t| <= pi-eps; ausserhalb geht cos((t1-t0)/4) gegen null und ell
+    // explodiert. Ohne diese Pruefung entstehen Boegen mit Radien von mehreren
+    // Kilometern, deren Bounding Box das Kreuzungsraster sprengt — gemessen als
+    // "RangeError: Map maximum size exceeded" in crossHits.
+    // Ein Biarc kann nie viel laenger sein als die Sehne; 4*d ist grosszuegig
+    // und faengt genau die entarteten Faelle.
+    const bad = !isFinite(k0)||!isFinite(k1)||!isFinite(l0)||!isFinite(l1)
+             || l0<0 || l1<0 || l0+l1 > 4*d
+             || Math.abs(t1-t0) > 2*Math.PI-0.05;
+    if(bad){ ops.push({kind:'line',to:p1}); length+=d; continue; }
+    const h=k0*l0/2, sc=sinc_(h);
+    const J={x:p0.x+l0*sc*Math.cos(t0+h), y:p0.y+l0*sc*Math.sin(t0+h)};
+    emit(p0,t0,k0,l0,J);
+    emit(J,t0+k0*l0,k1,l1,p1);
+  }
+  return {ops,length,minR};
+}
 function pathCurve(pts,clampRoom){
+  if(S.useBiarc&&pts.length>2){ const b=biarcOps(pts,clampRoom); return {...b,minRDrawn:b.minR}; }
   const ops=[]; let length=0, minR=Infinity;
   if(!pts.length) return {ops,length,minR,minRDrawn:curveMinR(ops)};
   ops.push({kind:'move',to:pts[0]});
