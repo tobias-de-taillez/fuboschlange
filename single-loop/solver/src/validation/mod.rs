@@ -1,3 +1,4 @@
+mod certificate;
 mod clearance;
 mod containment;
 mod coverage;
@@ -11,6 +12,7 @@ use crate::geometry::{AllowedRegion, Polygon};
 use crate::model::Point;
 
 pub use crate::model::LocatedSpacing;
+pub use certificate::build_certificate;
 pub use clearance::{
     HardValidationReport, MinBendRadius, MinNonlocalSpacing, MinWallClearance, NonlocalDistance,
     minimum_nonlocal_distance,

@@ -1,15 +1,18 @@
 use super::ranking::{CandidateScore, compare_candidates};
 use crate::constants::MIN_RADIUS_MM;
-use crate::geometry::AllowedRegion;
+use crate::geometry::{AllowedRegion, ParameterRange};
 use crate::input::NormalizedInput;
 use crate::medial_axis::MedialGraph;
+use crate::model::PathPrimitive;
 use crate::routing::{PortAssignment, RouteBudget, RoutingFixture, route_lead_pair};
 use crate::spiral::generate_all_cores;
 use crate::validation::{
-    CandidatePath, CoverageBounds, HardValidationReport, SpacingExtrema, ValidationContext,
-    coverage_bounds, spacing_extrema,
+    CandidateKey, CandidatePath, CoverageBounds, HardValidationReport, ParentPair, PathProvenance,
+    PrimitiveRole, SpacingExtrema, ValidationContext, coverage_bounds, spacing_extrema,
+    validate_hard_constraints,
 };
 use crate::wavefront::{WavefrontFamilyKind, generate_wavefront_families};
+use std::f64::consts::PI;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TopologySignature {
@@ -134,6 +137,17 @@ pub fn evaluate_spacing(
             }
         }
     }
+    if certified.is_empty()
+        && let Some(fallback) = fallback_racetrack(normalized, &context, spacing_mm)
+    {
+        let score = CandidateScore {
+            coverage_upper_bound_mm: fallback.coverage.upper_bound_mm,
+            spacing_spread_mm: fallback.spacing.max.distance_mm - fallback.spacing.min.distance_mm,
+            total_length_upper_bound_mm: fallback.total_length_upper_bound_mm,
+            key: fallback.candidate.key.clone(),
+        };
+        certified.push((score, fallback));
+    }
     certified.sort_by(|left, right| compare_candidates(&left.0, &right.0));
     if let Some((_, best)) = certified.into_iter().next() {
         SpacingEvaluation::Success(best)
@@ -151,4 +165,91 @@ pub fn evaluate_spacing(
             rejection_summary: rejections,
         }
     }
+}
+
+fn fallback_racetrack(
+    normalized: &NormalizedInput,
+    context: &ValidationContext,
+    spacing_mm: f64,
+) -> Option<CertifiedCandidate> {
+    let connection = &normalized.connection;
+    let radius = (MIN_RADIUS_MM * 2.0).max(normalized.raw.wall_clearance_mm + 90.0);
+    let angle = PI / 6.0;
+    let lead_length = (radius * angle.cos() - 25.0) / angle.sin();
+    let dx = lead_length * angle.sin();
+    let y = lead_length * angle.cos();
+    let local = |base: crate::model::Point, along: f64, inward: f64| {
+        base + connection.edge_tangent * along + connection.inward_normal * inward
+    };
+    let start = connection.start_port;
+    let end = connection.end_port;
+    let s1 = local(start, -dx / 3.0, y / 3.0);
+    let s2 = local(start, -2.0 * dx / 3.0, 2.0 * y / 3.0);
+    let arc_start = local(start, -dx, y);
+    let center = local(arc_start, radius * angle.cos(), radius * angle.sin());
+    let arc_end = local(end, dx, y);
+    let e1 = local(end, 2.0 * dx / 3.0, 2.0 * y / 3.0);
+    let e2 = local(end, dx / 3.0, y / 3.0);
+    let primitives = vec![
+        PathPrimitive::Line { start, end: s1 },
+        PathPrimitive::Line { start: s1, end: s2 },
+        PathPrimitive::Line {
+            start: s2,
+            end: arc_start,
+        },
+        PathPrimitive::Arc {
+            start: arc_start,
+            end: arc_end,
+            center,
+            radius_mm: radius,
+            sweep_rad: -(PI + 2.0 * angle),
+        },
+        PathPrimitive::Line {
+            start: arc_end,
+            end: e1,
+        },
+        PathPrimitive::Line { start: e1, end: e2 },
+        PathPrimitive::Line { start: e2, end },
+    ];
+    let roles = vec![
+        PrimitiveRole::StartLead,
+        PrimitiveRole::StartLead,
+        PrimitiveRole::Inbound { winding: 0 },
+        PrimitiveRole::InnerTurn,
+        PrimitiveRole::Outbound { winding: 1 },
+        PrimitiveRole::EndLead,
+        PrimitiveRole::EndLead,
+    ];
+    let parent_pairs = vec![ParentPair {
+        first_primitive: 2,
+        first_range: ParameterRange::FULL,
+        second_primitive: 4,
+        second_range: ParameterRange::FULL,
+        first_winding: 0,
+        second_winding: 1,
+    }];
+    let candidate = CandidatePath::from_primitives(
+        primitives,
+        PathProvenance {
+            roles,
+            parent_pairs,
+            start_port_edge_offset_mm: connection.start_port_edge_offset_mm,
+            end_port_edge_offset_mm: connection.end_port_edge_offset_mm,
+        },
+        connection.clone(),
+        spacing_mm,
+        CandidateKey(vec![u32::MAX]),
+    )
+    .ok()?;
+    let hard = validate_hard_constraints(&candidate, context).ok()?;
+    let coverage = coverage_bounds(&normalized.polygon, &candidate.path, 0.1, 500_000).ok()?;
+    let spacing = spacing_extrema(&candidate.path, &candidate.provenance.parent_pairs, 0.1).ok()?;
+    let total_length_upper_bound_mm = candidate.path.total_length();
+    Some(CertifiedCandidate {
+        candidate,
+        hard,
+        coverage,
+        spacing,
+        total_length_upper_bound_mm,
+    })
 }
