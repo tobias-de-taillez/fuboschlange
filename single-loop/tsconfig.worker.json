@@ -8,5 +8,5 @@
     "exactOptionalPropertyTypes": true,
     "lib": ["ES2022", "WebWorker"]
   },
-  "include": ["src/api"]
+  "include": ["src/api", "src/worker/protocol.ts", "src/worker/solver.worker.ts"]
 }
