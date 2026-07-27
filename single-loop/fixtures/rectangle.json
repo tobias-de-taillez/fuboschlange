@@ -1,0 +1,1 @@
+[{"name":"rectangle-standard","input":{"polygon":[{"x":0,"y":0},{"x":6000,"y":0},{"x":6000,"y":4000},{"x":0,"y":4000}],"connection":{"edgeIndex":0,"centerOffsetMm":3000},"requestedSpacingMm":150,"wallClearanceMm":75},"expected":{"kind":"success"}}]

@@ -1,0 +1,1 @@
+[{"name":"deep-notch-standard","input":{"polygon":[{"x":0,"y":0},{"x":7000,"y":0},{"x":7000,"y":5000},{"x":4500,"y":5000},{"x":4500,"y":1800},{"x":3500,"y":1800},{"x":3500,"y":5000},{"x":0,"y":5000}],"connection":{"edgeIndex":0,"centerOffsetMm":3500},"requestedSpacingMm":150,"wallClearanceMm":75},"expected":{"kind":"success"}}]
