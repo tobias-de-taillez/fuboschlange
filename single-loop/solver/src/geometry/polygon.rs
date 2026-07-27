@@ -27,7 +27,6 @@ pub struct Polygon {
     winding: Winding,
     internal_edge_for_original: Vec<usize>,
     original_polyline: Polyline<f64>,
-    internal_ccw_polyline: Polyline<f64>,
 }
 
 impl Polygon {
@@ -51,7 +50,6 @@ impl Polygon {
 
         Ok(Self {
             original_polyline: closed_polyline_from_points(&original),
-            internal_ccw_polyline: closed_polyline_from_points(&internal_ccw),
             original,
             internal_ccw,
             original_edges_for_internal,
@@ -118,10 +116,6 @@ impl Polygon {
 
     pub fn exact_boundary_distance(&self, point: Point) -> f64 {
         closed_polyline_boundary_distance(&self.original_polyline, point)
-    }
-
-    pub(crate) fn internal_ccw_polyline(&self) -> &Polyline<f64> {
-        &self.internal_ccw_polyline
     }
 }
 

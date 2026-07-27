@@ -234,7 +234,7 @@ fn ids_embedding_events_and_geometry_are_deterministic() {
 #[test]
 fn translated_regions_preserve_ids_topology_and_embedding() {
     let base = allowed_l_shape();
-    let translated = allowed_l_shape_at(1_000_000_000.0004, -2_000_000_000.0004);
+    let translated = allowed_l_shape_at(1_000_000_000.000_4, -2_000_000_000.000_4);
     let base_graph = build_medial_graph(&base, 137.0).unwrap();
     let translated_graph = build_medial_graph(&translated, 137.0).unwrap();
 
@@ -642,8 +642,13 @@ fn canonical_ids_use_local_quantized_coordinates_then_sources_and_survive_revers
     );
 
     fixtures.reverse();
-    let translated_allowed =
-        allowed_rectangle_at(1_000_000_000.0004, -2_000_000_000.0004, 220.0, 100.0, 10.0);
+    let translated_allowed = allowed_rectangle_at(
+        1_000_000_000.000_4,
+        -2_000_000_000.000_4,
+        220.0,
+        100.0,
+        10.0,
+    );
     let translated = adapt_voronoi_fixture(&translated_allowed, &fixtures).unwrap();
     assert_eq!(
         graph_signature(&base.graph, base_allowed.quantization_origin),
@@ -1085,4 +1090,35 @@ fn abrahamsen_enrichment_adds_perpendicular_guides_on_long_boundary_runs() {
         on_horizontal_side && p.x > 50.0 + 1e-6 && p.x < 1_550.0 - 1e-6
     });
     assert!(has_non_corner_guide_leaf);
+}
+
+#[test]
+fn exact_guide_interval_threshold_is_translation_invariant() {
+    let base = allowed_rectangle_at(0.000_4, -0.000_4, 220.0, 120.0, 10.0);
+    let base_built = build_medial_graph_with_diagnostics(&base, 100.0).unwrap();
+
+    for origin in [
+        100_000_000.000_4,
+        1_000_000_000.000_4,
+        10_000_000_000.000_4,
+        1_000_000_000_000.000_4,
+    ] {
+        let translated = allowed_rectangle_at(origin, -2.0 * origin, 220.0, 120.0, 10.0);
+        let translated_built = build_medial_graph_with_diagnostics(&translated, 100.0).unwrap();
+
+        assert_eq!(
+            base_built.diagnostics.guide_candidates, translated_built.diagnostics.guide_candidates,
+            "guide interval count changed at origin {origin}"
+        );
+        assert_eq!(
+            base_built.diagnostics.guide_branches_added,
+            translated_built.diagnostics.guide_branches_added,
+            "guide branches changed at origin {origin}"
+        );
+        assert_eq!(
+            graph_signature(&base_built.graph, base.quantization_origin),
+            graph_signature(&translated_built.graph, translated.quantization_origin),
+            "graph changed at origin {origin}"
+        );
+    }
 }

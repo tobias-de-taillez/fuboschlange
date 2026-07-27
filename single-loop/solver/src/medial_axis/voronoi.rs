@@ -1,19 +1,20 @@
 use super::graph::{
-    compare_points, compare_polylines, distance, polyline_is_inside_allowed, polyline_length,
-    remove_consecutive_duplicates,
+    ExactLocalBoundary, compare_points, compare_polylines, distance, polyline_length,
+    publish_point, remove_consecutive_duplicates,
 };
 use super::{
     BuiltMedialGraph, EdgeId, MedialAxisError, MedialAxisErrorReason, MedialEdge, MedialGraph,
     MedialGraphDiagnostics, MedialNode, NodeId,
 };
 use crate::constants::TOPOLOGY_QUANTIZATION_MM;
-use crate::geometry::{AllowedRegion, PointClassification, QuantizedPoint};
+use crate::geometry::{AllowedRegion, QuantizedPoint};
 use crate::model::Point;
 use boostvoronoi::diagram::{Diagram, SourceCategory};
 use boostvoronoi::prelude::Builder;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::Arc;
 
 const PARABOLIC_HAUSDORFF_MM: f64 = 0.05;
 const MAX_FINAL_ENDPOINT_MOVEMENT_MM: f64 = TOPOLOGY_QUANTIZATION_MM;
@@ -44,6 +45,7 @@ pub(crate) struct RawEdge {
     pub polyline_local_mm: Vec<Point>,
     pub source_site_ids: [u32; 2],
     original_endpoints_local_mm: Option<[Point; 2]>,
+    endpoint_coordinate_keys: Option<[[i64; 2]; 2]>,
 }
 
 #[derive(Clone, Debug)]
@@ -51,6 +53,7 @@ struct WorkEdge {
     polyline: Vec<Point>,
     source_site_ids: [u32; 2],
     original_endpoints: [Point; 2],
+    endpoint_coordinate_keys: [[i64; 2]; 2],
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -58,12 +61,14 @@ struct EndpointReference {
     edge: usize,
     start: bool,
     point: Point,
+    coordinate_key: [i64; 2],
     source_site_ids: [u32; 2],
 }
 
 #[derive(Clone, Copy, Debug)]
 struct Representative {
     point: Point,
+    coordinate_key: [i64; 2],
     source_site_ids: [u32; 2],
 }
 
@@ -77,12 +82,11 @@ pub fn flatten_parabolic_fixture(
     let points_world_mm = flatten_parabola(focus, directrix, endpoints_quantized)?
         .into_iter()
         .map(|point| {
-            Point::new(
-                point.x + quantization_origin.x,
-                point.y + quantization_origin.y,
+            publish_point(quantization_origin, point, local_coordinate_key(point)).ok_or_else(
+                || MedialAxisError::degenerate(MedialAxisErrorReason::InvalidGraphPosition),
             )
         })
-        .collect();
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(ParabolicFlatteningObservation {
         quantization_origin,
         points_world_mm,
@@ -98,7 +102,9 @@ pub fn adapt_parabolic_voronoi_fixture(
     endpoints_quantized: [[f64; 2]; 2],
     source_site_ids: [u32; 2],
 ) -> Result<BuiltMedialGraph, MedialAxisError> {
+    let boundary = Arc::new(ExactLocalBoundary::from_allowed(allowed)?);
     let mut diagnostics = MedialGraphDiagnostics::default();
+    let mut classification_work = 0usize;
     diagnostics.parabolic_edges_flattened = 1;
     let polyline_local_mm = flatten_parabola(focus, directrix, endpoints_quantized)?;
     let original_endpoints_local_mm = [
@@ -115,8 +121,11 @@ pub fn adapt_parabolic_voronoi_fixture(
             polyline_local_mm,
             source_site_ids,
             original_endpoints_local_mm: Some(original_endpoints_local_mm),
+            endpoint_coordinate_keys: None,
         }],
+        boundary,
         &mut diagnostics,
+        &mut classification_work,
         true,
     )?;
     Ok(BuiltMedialGraph { graph, diagnostics })
@@ -140,7 +149,9 @@ pub fn adapt_voronoi_fixture(
     fixtures: &[AdapterEdgeFixture],
 ) -> Result<BuiltMedialGraph, MedialAxisError> {
     preflight_fixture_input(fixtures)?;
+    let boundary = Arc::new(ExactLocalBoundary::from_allowed(allowed)?);
     let mut diagnostics = MedialGraphDiagnostics::default();
+    let mut classification_work = 0usize;
     let raw = fixtures
         .iter()
         .map(|fixture| RawEdge {
@@ -152,9 +163,17 @@ pub fn adapt_voronoi_fixture(
                 .copied()
                 .zip(fixture.polyline_local_mm.last().copied())
                 .map(|(start, end)| [start, end]),
+            endpoint_coordinate_keys: None,
         })
         .collect();
-    let graph = adapt_raw_edges(allowed, raw, &mut diagnostics, true)?;
+    let graph = adapt_raw_edges(
+        allowed,
+        raw,
+        boundary,
+        &mut diagnostics,
+        &mut classification_work,
+        true,
+    )?;
     Ok(BuiltMedialGraph { graph, diagnostics })
 }
 
@@ -184,6 +203,7 @@ pub(crate) fn build_from_allowed_region(
             MedialAxisErrorReason::GraphResourceLimit,
         ));
     }
+    let boundary = Arc::new(ExactLocalBoundary::from_allowed(allowed)?);
     let segments = allowed
         .quantized_segments
         .iter()
@@ -202,19 +222,33 @@ pub(crate) fn build_from_allowed_region(
             MedialAxisErrorReason::GraphResourceLimit,
         ));
     }
-    let raw = extract_finite_inside_edges(allowed, &segments, &diagram, diagnostics)?;
-    adapt_raw_edges(allowed, raw, diagnostics, false)
+    let mut classification_work = 0usize;
+    let raw = extract_finite_inside_edges(
+        &boundary,
+        &segments,
+        &diagram,
+        diagnostics,
+        &mut classification_work,
+    )?;
+    adapt_raw_edges(
+        allowed,
+        raw,
+        boundary,
+        diagnostics,
+        &mut classification_work,
+        false,
+    )
 }
 
 fn extract_finite_inside_edges(
-    allowed: &AllowedRegion,
+    boundary: &ExactLocalBoundary,
     segments: &[[i64; 4]],
     diagram: &Diagram,
     diagnostics: &mut MedialGraphDiagnostics,
+    classification_work: &mut usize,
 ) -> Result<Vec<RawEdge>, MedialAxisError> {
     let mut result = Vec::new();
     let mut retained_point_count = 0usize;
-    let mut classification_work = 0usize;
     for edge in diagram.edges() {
         let twin = edge
             .twin()
@@ -300,30 +334,12 @@ fn extract_finite_inside_edges(
                 MedialAxisError::degenerate(MedialAxisErrorReason::ZeroLengthEdge)
             })?,
         ];
-        charge_local_boundary_scan_work(
-            &mut classification_work,
-            4,
-            allowed.quantized_segments.len(),
-        )?;
-        snap_endpoints_to_exact_boundary(allowed, &mut polyline_local_mm)?;
-        let public_polyline = polyline_local_mm
-            .iter()
-            .copied()
-            .map(|point| local_to_public(allowed, point))
-            .collect::<Vec<_>>();
-        charge_boundary_classification_work(
-            &mut classification_work,
-            public_polyline.len(),
-            allowed.boundary.len(),
-        )?;
-        let has_interior_sample = public_polyline
-            .iter()
-            .copied()
-            .chain(public_polyline.windows(2).map(|pair| {
-                Point::new((pair[0].x + pair[1].x) * 0.5, (pair[0].y + pair[1].y) * 0.5)
-            }))
-            .any(|point| allowed.classify_point(point) == PointClassification::Inside);
-        if !has_interior_sample || !polyline_is_inside_allowed(&public_polyline, allowed) {
+        charge_local_boundary_scan_work(classification_work, 4, boundary.primitive_count())?;
+        let endpoint_coordinate_keys =
+            snap_endpoints_to_exact_boundary(boundary, &mut polyline_local_mm)?;
+        let certification =
+            boundary.certify_local_polyline(&polyline_local_mm, classification_work)?;
+        if !certification.contained || !certification.has_interior_sample {
             diagnostics.outside_edges_removed += 1;
             continue;
         }
@@ -341,6 +357,7 @@ fn extract_finite_inside_edges(
             polyline_local_mm,
             source_site_ids,
             original_endpoints_local_mm: Some(original_endpoints_local_mm),
+            endpoint_coordinate_keys: Some(endpoint_coordinate_keys),
         });
     }
     Ok(result)
@@ -554,70 +571,38 @@ fn flatten_parabola(
 }
 
 fn snap_endpoints_to_exact_boundary(
-    allowed: &AllowedRegion,
+    boundary: &ExactLocalBoundary,
     polyline_local_mm: &mut [Point],
-) -> Result<(), MedialAxisError> {
+) -> Result<[[i64; 2]; 2], MedialAxisError> {
     if polyline_local_mm.len() < 2 {
         return Err(MedialAxisError::degenerate(
             MedialAxisErrorReason::ZeroLengthEdge,
         ));
     }
-    for index in [0, polyline_local_mm.len() - 1] {
+    let indices = [0, polyline_local_mm.len() - 1];
+    let mut coordinate_keys = [
+        local_coordinate_key(polyline_local_mm[indices[0]]),
+        local_coordinate_key(polyline_local_mm[indices[1]]),
+    ];
+    for (endpoint, index) in indices.into_iter().enumerate() {
         let original = polyline_local_mm[index];
-        let (candidate, candidate_distance) = nearest_local_boundary_point(allowed, original)?;
-        if candidate_distance <= TOPOLOGY_QUANTIZATION_MM {
-            let public_candidate = local_to_public(allowed, candidate);
-            let exact = super::graph::nearest_boundary_location(allowed, public_candidate)?;
-            let correction = exact.point - public_candidate;
-            let corrected = Point::new(candidate.x + correction.x, candidate.y + correction.y);
-            if distance(original, corrected) <= TOPOLOGY_QUANTIZATION_MM {
-                polyline_local_mm[index] = corrected;
-            }
+        let location = boundary.nearest_location(original)?;
+        if location.distance_mm <= TOPOLOGY_QUANTIZATION_MM
+            && distance(original, location.point) <= TOPOLOGY_QUANTIZATION_MM
+        {
+            polyline_local_mm[index] = location.point;
+            coordinate_keys[endpoint] = location.coordinate_key;
         }
     }
-    Ok(())
-}
-
-fn nearest_local_boundary_point(
-    allowed: &AllowedRegion,
-    point: Point,
-) -> Result<(Point, f64), MedialAxisError> {
-    let mut best: Option<(Point, f64)> = None;
-    for (start, end) in &allowed.quantized_segments {
-        let start = Point::new(
-            start.x as f64 * TOPOLOGY_QUANTIZATION_MM,
-            start.y as f64 * TOPOLOGY_QUANTIZATION_MM,
-        );
-        let end = Point::new(
-            end.x as f64 * TOPOLOGY_QUANTIZATION_MM,
-            end.y as f64 * TOPOLOGY_QUANTIZATION_MM,
-        );
-        let direction = end - start;
-        let length_squared = direction.x * direction.x + direction.y * direction.y;
-        if length_squared <= 0.0 {
-            continue;
-        }
-        let parameter = ((point - start).dot(direction) / length_squared).clamp(0.0, 1.0);
-        let candidate = Point::new(
-            start.x + direction.x * parameter,
-            start.y + direction.y * parameter,
-        );
-        let candidate_distance = distance(point, candidate);
-        if best.as_ref().is_none_or(|(_, current_distance)| {
-            candidate_distance < *current_distance
-                || (candidate_distance == *current_distance
-                    && compare_points(&candidate, &best.as_ref().unwrap().0) == Ordering::Less)
-        }) {
-            best = Some((candidate, candidate_distance));
-        }
-    }
-    best.ok_or_else(|| MedialAxisError::degenerate(MedialAxisErrorReason::EmptyBoundary))
+    Ok(coordinate_keys)
 }
 
 fn adapt_raw_edges(
     allowed: &AllowedRegion,
     raw: Vec<RawEdge>,
+    boundary: Arc<ExactLocalBoundary>,
     diagnostics: &mut MedialGraphDiagnostics,
+    classification_work: &mut usize,
     fixture: bool,
 ) -> Result<MedialGraph, MedialAxisError> {
     if raw.is_empty() {
@@ -631,7 +616,6 @@ fn adapt_raw_edges(
         ));
     }
     let mut edges = Vec::with_capacity(raw.len());
-    let mut classification_work = 0usize;
     for raw_edge in raw {
         let original_endpoints = raw_edge.original_endpoints_local_mm;
         let mut polyline = raw_edge.polyline_local_mm;
@@ -647,6 +631,12 @@ fn adapt_raw_edges(
             let fallback = polyline.first().copied().unwrap_or(Point::new(0.0, 0.0));
             [fallback, polyline.last().copied().unwrap_or(fallback)]
         });
+        let mut endpoint_coordinate_keys = raw_edge.endpoint_coordinate_keys.unwrap_or_else(|| {
+            [
+                local_coordinate_key(original_endpoints[0]),
+                local_coordinate_key(original_endpoints[1]),
+            ]
+        });
         remove_consecutive_duplicates(&mut polyline);
         if polyline.len() < 2 || polyline_length(&polyline) <= GEOMETRY_EPSILON_MM {
             diagnostics.zero_length_edges_removed += 1;
@@ -654,44 +644,39 @@ fn adapt_raw_edges(
         }
         let mut source_site_ids = raw_edge.source_site_ids;
         source_site_ids.sort_unstable();
-        if compare_points(
-            polyline.last().ok_or_else(|| {
-                MedialAxisError::degenerate(MedialAxisErrorReason::InvalidPolylineEndpoint)
-            })?,
-            polyline.first().ok_or_else(|| {
-                MedialAxisError::degenerate(MedialAxisErrorReason::InvalidPolylineEndpoint)
-            })?,
-        ) == Ordering::Less
-        {
+        if fixture {
+            charge_local_boundary_scan_work(classification_work, 4, boundary.primitive_count())?;
+            endpoint_coordinate_keys = snap_endpoints_to_exact_boundary(&boundary, &mut polyline)?;
+        }
+        let endpoint_order =
+            local_coordinate_key(*polyline.last().unwrap_or(&Point::new(0.0, 0.0)))
+                .cmp(&local_coordinate_key(
+                    *polyline.first().unwrap_or(&Point::new(0.0, 0.0)),
+                ))
+                .then_with(|| {
+                    compare_points(
+                        polyline.last().unwrap_or(&Point::new(0.0, 0.0)),
+                        polyline.first().unwrap_or(&Point::new(0.0, 0.0)),
+                    )
+                });
+        if endpoint_order == Ordering::Less {
             polyline.reverse();
             original_endpoints.reverse();
+            endpoint_coordinate_keys.reverse();
         }
-        if fixture {
-            charge_local_boundary_scan_work(
-                &mut classification_work,
-                4,
-                allowed.quantized_segments.len(),
-            )?;
-            snap_endpoints_to_exact_boundary(allowed, &mut polyline)?;
-            let public = polyline
-                .iter()
-                .copied()
-                .map(|point| local_to_public(allowed, point))
-                .collect::<Vec<_>>();
-            charge_boundary_classification_work(
-                &mut classification_work,
-                public.len(),
-                allowed.boundary.len(),
-            )?;
-            if !polyline_is_inside_allowed(&public, allowed) {
-                diagnostics.outside_edges_removed += 1;
-                continue;
-            }
+        if fixture
+            && !boundary
+                .certify_local_polyline(&polyline, classification_work)?
+                .contained
+        {
+            diagnostics.outside_edges_removed += 1;
+            continue;
         }
         edges.push(WorkEdge {
             polyline,
             source_site_ids,
             original_endpoints,
+            endpoint_coordinate_keys,
         });
     }
     if edges.is_empty() {
@@ -707,21 +692,19 @@ fn adapt_raw_edges(
     let (representatives, assignments) = snap_endpoints(&edges)?;
     let mut representative_order = (0..representatives.len()).collect::<Vec<_>>();
     representative_order.sort_by(|left, right| {
-        compare_local_quantized_points(
-            &representatives[*left].point,
-            &representatives[*right].point,
-        )
-        .then_with(|| {
-            representatives[*left]
-                .source_site_ids
-                .cmp(&representatives[*right].source_site_ids)
-        })
-        .then_with(|| {
-            compare_points(
-                &representatives[*left].point,
-                &representatives[*right].point,
-            )
-        })
+        local_coordinate_key(representatives[*left].point)
+            .cmp(&local_coordinate_key(representatives[*right].point))
+            .then_with(|| {
+                representatives[*left]
+                    .source_site_ids
+                    .cmp(&representatives[*right].source_site_ids)
+            })
+            .then_with(|| {
+                compare_points(
+                    &representatives[*left].point,
+                    &representatives[*right].point,
+                )
+            })
     });
     let mut node_for_representative = vec![0usize; representatives.len()];
     for (node, representative) in representative_order.iter().copied().enumerate() {
@@ -732,21 +715,28 @@ fn adapt_raw_edges(
         .copied()
         .enumerate()
         .map(|(index, representative)| {
-            let point = local_to_public(allowed, representatives[representative].point);
-            MedialNode {
+            let local = representatives[representative].point;
+            Ok(MedialNode {
                 id: NodeId(index as u32),
-                point,
-                clearance_mm: allowed.exact_boundary_distance(point),
-            }
+                point: publish_point(
+                    allowed.quantization_origin,
+                    local,
+                    representatives[representative].coordinate_key,
+                )
+                .ok_or_else(|| {
+                    MedialAxisError::degenerate(MedialAxisErrorReason::InvalidGraphPosition)
+                })?,
+                clearance_mm: boundary.nearest_location(local)?.distance_mm,
+            })
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, MedialAxisError>>()?;
     let node_source_ids = representative_order
         .iter()
         .map(|representative| representatives[*representative].source_site_ids)
         .collect::<Vec<_>>();
     let node_coordinate_keys = representative_order
         .iter()
-        .map(|representative| local_coordinate_key(representatives[*representative].point))
+        .map(|representative| representatives[*representative].coordinate_key)
         .collect::<Vec<_>>();
 
     let mut edge_data = Vec::with_capacity(edges.len());
@@ -781,11 +771,28 @@ fn adapt_raw_edges(
             diagnostics.zero_length_edges_removed += 1;
             continue;
         }
+        let post_snap_certification =
+            boundary.certify_local_polyline(&edge.polyline, classification_work)?;
+        if !post_snap_certification.contained
+            || (!fixture && !post_snap_certification.has_interior_sample)
+        {
+            diagnostics.outside_edges_removed += 1;
+            continue;
+        }
         if a > b {
             std::mem::swap(&mut a, &mut b);
             edge.polyline.reverse();
         }
-        edge_data.push((a, b, edge.source_site_ids, edge.polyline));
+        let mut coordinate_keys = edge
+            .polyline
+            .iter()
+            .copied()
+            .map(local_coordinate_key)
+            .collect::<Vec<_>>();
+        coordinate_keys[0] = representatives[representative_order[a]].coordinate_key;
+        let last_key = coordinate_keys.len() - 1;
+        coordinate_keys[last_key] = representatives[representative_order[b]].coordinate_key;
+        edge_data.push((a, b, edge.source_site_ids, edge.polyline, coordinate_keys));
     }
     edge_data.sort_by(|left, right| {
         left.0
@@ -799,27 +806,35 @@ fn adapt_raw_edges(
     diagnostics.duplicate_edges_removed += before_final_dedup - edge_data.len();
     let edge_source_ids = edge_data
         .iter()
-        .map(|(_, _, source_ids, _)| *source_ids)
+        .map(|(_, _, source_ids, _, _)| *source_ids)
         .collect::<Vec<_>>();
     let medial_edges = edge_data
         .into_iter()
         .enumerate()
-        .map(|(index, (a, b, _sources, local_polyline))| {
-            let polyline = local_polyline
-                .iter()
-                .copied()
-                .map(|point| local_to_public(allowed, point))
-                .collect::<Vec<_>>();
-            MedialEdge::with_local_polyline(
-                EdgeId(index as u32),
-                NodeId(a as u32),
-                NodeId(b as u32),
-                polyline,
-                local_polyline,
-                allowed.quantization_origin,
-            )
-        })
-        .collect::<Vec<_>>();
+        .map(
+            |(index, (a, b, _sources, local_polyline, local_coordinate_keys))| {
+                let polyline = local_polyline
+                    .iter()
+                    .copied()
+                    .zip(&local_coordinate_keys)
+                    .map(|(point, key)| {
+                        publish_point(allowed.quantization_origin, point, *key).ok_or_else(|| {
+                            MedialAxisError::degenerate(MedialAxisErrorReason::InvalidGraphPosition)
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(MedialEdge::with_local_polyline(
+                    EdgeId(index as u32),
+                    NodeId(a as u32),
+                    NodeId(b as u32),
+                    polyline,
+                    local_polyline,
+                    local_coordinate_keys,
+                    allowed.quantization_origin,
+                ))
+            },
+        )
+        .collect::<Result<Vec<_>, MedialAxisError>>()?;
     let node_local_points = representative_order
         .iter()
         .map(|representative| representatives[*representative].point)
@@ -833,9 +848,10 @@ fn adapt_raw_edges(
         node_source_ids,
         edge_source_ids,
     )?;
+    graph.attach_exact_local_boundary(boundary)?;
     diagnostics.collinear_nodes_collapsed += graph.collapse_collinear_nodes()?;
     graph.sort_leaves_on_boundary(allowed)?;
-    graph.validate(allowed)?;
+    graph.validate_with_local_certification_work(allowed, classification_work)?;
     Ok(graph)
 }
 
@@ -854,17 +870,20 @@ fn snap_endpoints(
             edge,
             start: true,
             point: start,
+            coordinate_key: item.endpoint_coordinate_keys[0],
             source_site_ids: item.source_site_ids,
         });
         endpoints.push(EndpointReference {
             edge,
             start: false,
             point: end,
+            coordinate_key: item.endpoint_coordinate_keys[1],
             source_site_ids: item.source_site_ids,
         });
     }
     endpoints.sort_by(|left, right| {
-        compare_local_quantized_points(&left.point, &right.point)
+        local_coordinate_key(left.point)
+            .cmp(&local_coordinate_key(right.point))
             .then_with(|| left.source_site_ids.cmp(&right.source_site_ids))
             .then_with(|| compare_points(&left.point, &right.point))
             .then_with(|| left.edge.cmp(&right.edge))
@@ -888,21 +907,20 @@ fn snap_endpoints(
                     if distance(endpoint.point, representatives[candidate].point)
                         <= TOPOLOGY_QUANTIZATION_MM
                         && best.is_none_or(|current| {
-                            compare_local_quantized_points(
-                                &representatives[candidate].point,
-                                &representatives[current].point,
-                            )
-                            .then_with(|| {
-                                representatives[candidate]
-                                    .source_site_ids
-                                    .cmp(&representatives[current].source_site_ids)
-                            })
-                            .then_with(|| {
-                                compare_points(
-                                    &representatives[candidate].point,
-                                    &representatives[current].point,
-                                )
-                            }) == Ordering::Less
+                            local_coordinate_key(representatives[candidate].point)
+                                .cmp(&local_coordinate_key(representatives[current].point))
+                                .then_with(|| {
+                                    representatives[candidate]
+                                        .source_site_ids
+                                        .cmp(&representatives[current].source_site_ids)
+                                })
+                                .then_with(|| {
+                                    compare_points(
+                                        &representatives[candidate].point,
+                                        &representatives[current].point,
+                                    )
+                                })
+                                == Ordering::Less
                         })
                     {
                         best = Some(candidate);
@@ -919,6 +937,7 @@ fn snap_endpoints(
             let representative = representatives.len();
             representatives.push(Representative {
                 point: endpoint.point,
+                coordinate_key: endpoint.coordinate_key,
                 source_site_ids: endpoint.source_site_ids,
             });
             grid.entry(cell).or_default().push(representative);
@@ -953,26 +972,6 @@ fn charge_local_boundary_scan_work(
     Ok(())
 }
 
-fn charge_boundary_classification_work(
-    total: &mut usize,
-    point_count: usize,
-    boundary_count: usize,
-) -> Result<(), MedialAxisError> {
-    let work = point_count
-        .checked_mul(boundary_count)
-        .and_then(|work| work.checked_mul(3))
-        .ok_or_else(|| MedialAxisError::resource(MedialAxisErrorReason::GraphResourceLimit))?;
-    *total = total
-        .checked_add(work)
-        .ok_or_else(|| MedialAxisError::resource(MedialAxisErrorReason::GraphResourceLimit))?;
-    if *total > MAX_BOUNDARY_CLASSIFICATION_TESTS {
-        return Err(MedialAxisError::resource(
-            MedialAxisErrorReason::GraphResourceLimit,
-        ));
-    }
-    Ok(())
-}
-
 fn grid_cell(point: Point) -> Result<(i64, i64), MedialAxisError> {
     let coordinate = |value: f64| {
         let scaled = (value / TOPOLOGY_QUANTIZATION_MM).floor();
@@ -991,30 +990,15 @@ fn grid_cell(point: Point) -> Result<(i64, i64), MedialAxisError> {
 }
 
 fn compare_work_edges(left: &WorkEdge, right: &WorkEdge) -> Ordering {
-    let left_start = left.polyline.first();
-    let right_start = right.polyline.first();
-    match (left_start, right_start) {
-        (Some(left_start), Some(right_start)) => {
-            compare_local_quantized_points(left_start, right_start)
-        }
-        (Some(_), None) => Ordering::Less,
-        (None, Some(_)) => Ordering::Greater,
-        (None, None) => Ordering::Equal,
-    }
-    .then_with(|| {
-        compare_local_quantized_points(
-            left.polyline.last().unwrap_or(&Point::new(0.0, 0.0)),
-            right.polyline.last().unwrap_or(&Point::new(0.0, 0.0)),
-        )
-    })
-    .then_with(|| left.source_site_ids.cmp(&right.source_site_ids))
-    .then_with(|| compare_polylines(&left.polyline, &right.polyline))
-}
-
-fn compare_local_quantized_points(left: &Point, right: &Point) -> Ordering {
-    let left = local_coordinate_key(*left);
-    let right = local_coordinate_key(*right);
-    left.cmp(&right)
+    local_coordinate_key(left.polyline[0])
+        .cmp(&local_coordinate_key(right.polyline[0]))
+        .then_with(|| {
+            local_coordinate_key(*left.polyline.last().unwrap_or(&left.polyline[0])).cmp(
+                &local_coordinate_key(*right.polyline.last().unwrap_or(&right.polyline[0])),
+            )
+        })
+        .then_with(|| left.source_site_ids.cmp(&right.source_site_ids))
+        .then_with(|| compare_polylines(&left.polyline, &right.polyline))
 }
 
 fn local_coordinate_key(point: Point) -> [i64; 2] {
@@ -1033,11 +1017,4 @@ fn quantized_local_coordinate(value: f64) -> i64 {
     } else {
         scaled as i64
     }
-}
-
-fn local_to_public(allowed: &AllowedRegion, point: Point) -> Point {
-    Point::new(
-        allowed.quantization_origin.x + point.x,
-        allowed.quantization_origin.y + point.y,
-    )
 }

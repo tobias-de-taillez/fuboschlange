@@ -7,8 +7,10 @@ use super::{
 use crate::constants::TOPOLOGY_QUANTIZATION_MM;
 use crate::input::{NormalizedInput, internal_validation_failure, no_solution_geometry};
 use crate::model::{ErrorDetail, PathPrimitive, Point, SolverError, SolverErrorCode};
-use cavalier_contours::core::math::angle_from_bulge;
-use cavalier_contours::polyline::{PlineSource, Polyline, seg_arc_radius_and_center};
+use cavalier_contours::core::math::{angle_from_bulge, bulge_from_angle};
+use cavalier_contours::polyline::{
+    PlineSource, PlineSourceMut, Polyline, seg_arc_radius_and_center,
+};
 use std::collections::BTreeMap;
 
 const VORONOI_HAUSDORFF_MM: f64 = 0.05;
@@ -58,6 +60,7 @@ pub struct AllowedRegion {
     pub quantization_origin: Point,
     pub quantized_segments: Vec<(QuantizedPoint, QuantizedPoint)>,
     pub wall_clearance_mm: f64,
+    exact_local_boundary: Vec<PathPrimitive>,
     boundary_polyline: Polyline<f64>,
 }
 
@@ -70,31 +73,70 @@ impl AllowedRegion {
         closed_polyline_boundary_distance(&self.boundary_polyline, point)
     }
 
-    fn from_exact_loop(
+    pub(crate) fn exact_local_boundary(&self) -> &[PathPrimitive] {
+        &self.exact_local_boundary
+    }
+
+    fn from_exact_local_loop(
         loop_polyline: &Polyline<f64>,
         polygon: &Polygon,
         wall_clearance_mm: f64,
+        source_origin: Point,
     ) -> Result<Self, SolverError> {
         validate_offset_loop(loop_polyline)?;
-        let boundary = polyline_to_exact_boundary(loop_polyline)?;
+        let source_local_boundary = polyline_to_exact_boundary(loop_polyline)?;
+        let local_quantization_origin = source_local_boundary
+            .first()
+            .map(PathPrimitive::start)
+            .ok_or_else(|| internal_validation_failure("HELPER_BOUNDARY_EMPTY"))?;
+        let exact_local_boundary = translate_boundary(
+            &source_local_boundary,
+            -local_quantization_origin.x,
+            -local_quantization_origin.y,
+        )?;
+        let quantization_origin = Point::new(
+            source_origin.x + local_quantization_origin.x,
+            source_origin.y + local_quantization_origin.y,
+        );
+        if !quantization_origin.is_finite() {
+            return Err(helper_quantization_range_error());
+        }
+        let boundary = translate_boundary(
+            &exact_local_boundary,
+            quantization_origin.x,
+            quantization_origin.y,
+        )?;
+        validate_closed_boundary(&boundary)?;
         validate_boundary_containment(&boundary, polygon)?;
-        let (quantization_origin, quantized_segments) = quantized_segments_for_boundary(&boundary)?;
+        let (local_origin, quantized_segments) =
+            quantized_segments_for_boundary(&exact_local_boundary)?;
+        if local_origin != Point::new(0.0, 0.0) {
+            return Err(internal_validation_failure(
+                "HELPER_LOCAL_BOUNDARY_ORIGIN_INVALID",
+            ));
+        }
+        let boundary_polyline = boundary_polyline_from_exact(&boundary);
         Ok(Self {
             boundary,
             quantization_origin,
             quantized_segments,
             wall_clearance_mm,
-            boundary_polyline: loop_polyline.clone(),
+            exact_local_boundary,
+            boundary_polyline,
         })
     }
 }
 
 pub fn erode_for_centerline(input: &NormalizedInput) -> Result<AllowedRegion, SolverError> {
-    let loops = offset_inward_with_cavalier(&input.polygon, input.raw.wall_clearance_mm)?;
+    let (source_origin, loops) =
+        offset_inward_with_cavalier(&input.polygon, input.raw.wall_clearance_mm)?;
     match loops.as_slice() {
-        [single] => {
-            AllowedRegion::from_exact_loop(single, &input.polygon, input.raw.wall_clearance_mm)
-        }
+        [single] => AllowedRegion::from_exact_local_loop(
+            single,
+            &input.polygon,
+            input.raw.wall_clearance_mm,
+            source_origin,
+        ),
         _ => Err(no_solution_geometry("WALL_INSET_DISCONNECTED_OR_EMPTY")),
     }
 }
@@ -102,10 +144,64 @@ pub fn erode_for_centerline(input: &NormalizedInput) -> Result<AllowedRegion, So
 fn offset_inward_with_cavalier(
     polygon: &Polygon,
     wall_clearance_mm: f64,
-) -> Result<Vec<Polyline<f64>>, SolverError> {
-    Ok(polygon
-        .internal_ccw_polyline()
-        .parallel_offset(wall_clearance_mm))
+) -> Result<(Point, Vec<Polyline<f64>>), SolverError> {
+    let source_origin = polygon.internal_ccw_vertices()[0];
+    let mut local = Polyline::new_closed();
+    for point in polygon.internal_ccw_vertices() {
+        local.add(point.x - source_origin.x, point.y - source_origin.y, 0.0);
+    }
+    Ok((source_origin, local.parallel_offset(wall_clearance_mm)))
+}
+
+fn boundary_polyline_from_exact(boundary: &[PathPrimitive]) -> Polyline<f64> {
+    let mut polyline = Polyline::new_closed();
+    for primitive in boundary {
+        let start = primitive.start();
+        let bulge = match primitive {
+            PathPrimitive::Line { .. } => 0.0,
+            PathPrimitive::Arc { sweep_rad, .. } => bulge_from_angle(*sweep_rad),
+        };
+        polyline.add(start.x, start.y, bulge);
+    }
+    polyline
+}
+
+fn translate_boundary(
+    boundary: &[PathPrimitive],
+    dx: f64,
+    dy: f64,
+) -> Result<Vec<PathPrimitive>, SolverError> {
+    let translate = |point: Point| Point::new(point.x + dx, point.y + dy);
+    let translated = boundary
+        .iter()
+        .map(|primitive| match *primitive {
+            PathPrimitive::Line { start, end } => PathPrimitive::Line {
+                start: translate(start),
+                end: translate(end),
+            },
+            PathPrimitive::Arc {
+                start,
+                end,
+                center,
+                radius_mm,
+                sweep_rad,
+            } => PathPrimitive::Arc {
+                start: translate(start),
+                end: translate(end),
+                center: translate(center),
+                radius_mm,
+                sweep_rad,
+            },
+        })
+        .collect::<Vec<_>>();
+    if translated.iter().any(|primitive| {
+        !primitive.start().is_finite()
+            || !primitive.end().is_finite()
+            || matches!(primitive, PathPrimitive::Arc { center, .. } if !center.is_finite())
+    }) {
+        return Err(helper_quantization_range_error());
+    }
+    Ok(translated)
 }
 
 fn validate_offset_loop(loop_polyline: &Polyline<f64>) -> Result<(), SolverError> {
