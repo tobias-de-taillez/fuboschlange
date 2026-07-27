@@ -44,29 +44,39 @@ pub(crate) fn validate_bifilar_topology(
         ));
     }
 
-    if !matches!(roles.first(), Some(PrimitiveRole::StartLead))
-        || roles
+    let start_lead_count = roles
+        .iter()
+        .take_while(|role| matches!(role, PrimitiveRole::StartLead))
+        .count();
+    let end_lead_count = roles
+        .iter()
+        .rev()
+        .take_while(|role| matches!(role, PrimitiveRole::EndLead))
+        .count();
+    if start_lead_count == 0
+        || end_lead_count == 0
+        || roles[start_lead_count..]
             .iter()
-            .filter(|role| matches!(role, PrimitiveRole::StartLead))
-            .count()
-            != 1
-        || !matches!(roles.last(), Some(PrimitiveRole::EndLead))
-        || roles
+            .any(|role| matches!(role, PrimitiveRole::StartLead))
+        || roles[..roles.len() - end_lead_count]
             .iter()
-            .filter(|role| matches!(role, PrimitiveRole::EndLead))
-            .count()
-            != 1
+            .any(|role| matches!(role, PrimitiveRole::EndLead))
     {
         return Err(ValidationFailure::new(
             ValidationFailureCode::InvalidPrimitiveRoleOrder,
         ));
     }
 
-    let inner_turn_count = roles
+    let inner_turn_indices = roles
         .iter()
-        .filter(|role| matches!(role, PrimitiveRole::InnerTurn))
-        .count();
-    if inner_turn_count != 1 {
+        .enumerate()
+        .filter_map(|(index, role)| matches!(role, PrimitiveRole::InnerTurn).then_some(index))
+        .collect::<Vec<_>>();
+    if inner_turn_indices.is_empty()
+        || inner_turn_indices
+            .windows(2)
+            .any(|indices| indices[1] != indices[0] + 1)
+    {
         return Err(ValidationFailure::new(
             ValidationFailureCode::InvalidTopologyTurnCount,
         ));
@@ -105,7 +115,7 @@ pub(crate) fn validate_bifilar_topology(
                 phase = Phase::Inbound;
             }
             PrimitiveRole::InnerTurn => {
-                if phase != Phase::Inbound || !saw_inbound {
+                if !matches!(phase, Phase::Inbound | Phase::InnerTurn) || !saw_inbound {
                     return Err(ValidationFailure::new(
                         ValidationFailureCode::InvalidTopologyTransition,
                     ));
@@ -130,7 +140,7 @@ pub(crate) fn validate_bifilar_topology(
                 phase = Phase::Outbound;
             }
             PrimitiveRole::EndLead => {
-                if phase != Phase::Outbound || !saw_outbound {
+                if !matches!(phase, Phase::Outbound | Phase::EndLead) || !saw_outbound {
                     return Err(ValidationFailure::new(
                         ValidationFailureCode::InvalidPrimitiveRoleOrder,
                     ));
