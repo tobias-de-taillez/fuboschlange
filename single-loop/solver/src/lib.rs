@@ -3,6 +3,7 @@ pub mod geometry;
 pub mod input;
 pub mod medial_axis;
 pub mod model;
+pub mod plate;
 pub mod routing;
 pub mod search;
 pub mod solver;
