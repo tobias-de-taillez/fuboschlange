@@ -81,21 +81,24 @@ The smallest translational fundamental cell that preserves noppen type is theref
 
 ### 5.2 Conservative replacement bodies
 
-Published approximate plan sizes are 65 mm for a large nopp and 20 mm for a small nopp. The routing model must not pretend to reproduce the undercut three-dimensional shape. It uses conservative two-dimensional replacement bodies that contain the visible plan footprint:
+Published approximate plan sizes are 65 mm for a large nopp and 20 mm for a small nopp. The 65 mm base footprint is below the pipe center and therefore is **not** a valid two-dimensional collision body: expanding it by the pipe radius would incorrectly eliminate the straight and diagonal routes shown to be possible on the plate. Collision geometry must represent the horizontal nopp cross-section at pipe-center elevation, while the larger base footprint is retained only as a rendered plate feature.
 
-- large replacement radius: `33.0 mm`;
-- small replacement radius: `10.5 mm`;
+The reconstructed and versioned profile uses:
+
+- large rendered base radius: `33.0 mm`;
+- large effective radius at pipe-center elevation: `17.5 mm`;
+- small effective radius at pipe-center elevation: `10.5 mm`;
 - calibration allowance: `0.5 mm` outward;
 - pipe radius: `8.0 mm`.
 
 The forbidden centerline radii are consequently:
 
-- large: `41.5 mm`;
+- large: `26.0 mm`;
 - small: `19.0 mm`.
 
-These values deliberately round the published approximate dimensions outward. They are versioned fields of `PlateProfile`, not global constants. A later dimensioned manufacturer CAD profile can replace these bodies without changing graph or validator interfaces.
+The large effective radius is the largest half-millimetre value that conservatively preserves the documented 45-degree channel in the calibrated 75 mm checkerboard motif; the small radius rounds the published 20 mm size outward. Golden route fixtures are part of profile certification, so changing either value cannot silently remove or invent a documented channel. These values are fields of the versioned `PlateProfile`, not global constants. A later dimensioned manufacturer CAD profile can replace them without changing graph or validator interfaces.
 
-For nopp type `k`, replacement body `K_k`, pipe disk `B(8)`, and calibration disk `B(0.5)`, the forbidden centerline field is
+For effective nopp body `K_k`, pipe disk `B(8)`, and calibration disk `B(0.5)`, the forbidden centerline field is
 
 ```text
 F = union over all i,j of (K_type(i,j) + c(i,j)) ⊕ B(8.5)
