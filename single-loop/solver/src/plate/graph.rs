@@ -79,6 +79,7 @@ pub struct PoseEdge {
 pub struct RejectedEdge {
     pub template_id: TemplateId,
     pub template_transform: TemplateTransform,
+    pub primitives: Vec<PathPrimitive>,
     pub code: PlateValidationFailureCode,
     pub witness: Option<Point>,
 }
@@ -127,19 +128,24 @@ pub fn build_embedded_graph(
                             TemplateTransform::new(quarter_turns, reflected, period_i, period_j)
                                 .unwrap();
                         let local = transform.apply(template, instance.profile.period_mm);
-                        let template_certificate = match certify_template(&local, &instance.profile)
-                        {
-                            Ok(certificate) => certificate,
-                            Err(failure) => {
-                                rejected_edges.push(rejected(template.id, transform, failure));
-                                continue;
-                            }
-                        };
                         let primitives = local
                             .primitives
                             .iter()
                             .map(|primitive| instance.transform.primitive_to_world(primitive))
                             .collect::<Vec<_>>();
+                        let template_certificate = match certify_template(&local, &instance.profile)
+                        {
+                            Ok(certificate) => certificate,
+                            Err(failure) => {
+                                rejected_edges.push(rejected(
+                                    template.id,
+                                    transform,
+                                    primitives,
+                                    failure,
+                                ));
+                                continue;
+                            }
+                        };
                         if let Some(failure) = primitives.iter().find_map(|primitive| {
                             validate_world_primitive_against_plate(
                                 primitive,
@@ -151,7 +157,12 @@ pub fn build_embedded_graph(
                             )
                             .err()
                         }) {
-                            rejected_edges.push(rejected(template.id, transform, failure));
+                            rejected_edges.push(rejected(
+                                template.id,
+                                transform,
+                                primitives,
+                                failure,
+                            ));
                             continue;
                         }
                         if edges.len() == limits.max_edges {
@@ -314,11 +325,13 @@ fn period_range(min: f64, max: f64, period: f64) -> Result<(i64, i64), PlateGrap
 fn rejected(
     template_id: TemplateId,
     template_transform: TemplateTransform,
+    primitives: Vec<PathPrimitive>,
     failure: PlateValidationFailure,
 ) -> RejectedEdge {
     RejectedEdge {
         template_id,
         template_transform,
+        primitives,
         code: failure.code,
         witness: failure.witness,
     }

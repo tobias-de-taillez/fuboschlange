@@ -43,6 +43,12 @@ fn embedded_graph_is_deterministic_certified_and_contains_diagonals() {
     assert!(!first.nodes.is_empty());
     assert!(!first.edges.is_empty());
     assert!(!first.rejected_edges.is_empty());
+    assert!(
+        first
+            .rejected_edges
+            .iter()
+            .all(|edge| !edge.primitives.is_empty())
+    );
     assert!(first.edges.iter().all(|edge| edge.certificate.is_some()));
     assert!(first.edges.iter().any(|edge| {
         matches!(
