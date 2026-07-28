@@ -28,7 +28,7 @@ pub struct PlateValidationFailure {
 }
 
 impl PlateValidationFailure {
-    fn new(code: PlateValidationFailureCode) -> Self {
+    pub(crate) fn new(code: PlateValidationFailureCode) -> Self {
         Self {
             code,
             witness: None,
@@ -75,6 +75,13 @@ pub fn validate_primitive_against_plate(
         }
     }
     Ok(())
+}
+
+pub(crate) fn validate_template_primitive_shape(
+    primitive: &PathPrimitive,
+    profile: &PlateProfile,
+) -> Result<(), PlateValidationFailure> {
+    validate_shape(primitive, profile)
 }
 
 fn validate_shape(

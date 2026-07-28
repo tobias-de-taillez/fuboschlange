@@ -42,15 +42,32 @@ impl Heading8 {
     ];
 
     pub const fn degrees(self) -> u16 {
+        self.octant() as u16 * 45
+    }
+
+    pub const fn octant(self) -> u8 {
         match self {
             Self::Deg0 => 0,
-            Self::Deg45 => 45,
-            Self::Deg90 => 90,
-            Self::Deg135 => 135,
-            Self::Deg180 => 180,
-            Self::Deg225 => 225,
-            Self::Deg270 => 270,
-            Self::Deg315 => 315,
+            Self::Deg45 => 1,
+            Self::Deg90 => 2,
+            Self::Deg135 => 3,
+            Self::Deg180 => 4,
+            Self::Deg225 => 5,
+            Self::Deg270 => 6,
+            Self::Deg315 => 7,
+        }
+    }
+
+    pub const fn from_octant(octant: u8) -> Self {
+        match octant % 8 {
+            0 => Self::Deg0,
+            1 => Self::Deg45,
+            2 => Self::Deg90,
+            3 => Self::Deg135,
+            4 => Self::Deg180,
+            5 => Self::Deg225,
+            6 => Self::Deg270,
+            _ => Self::Deg315,
         }
     }
 
