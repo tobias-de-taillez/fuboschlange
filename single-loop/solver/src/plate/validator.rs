@@ -1,6 +1,8 @@
 use crate::geometry::{ParameterRange, PointClassification, Polygon, primitive_distance};
 use crate::model::{PathPrimitive, Point};
-use crate::plate::{Heading8, Nopp, NoppType, PlateProfile, primitive_circle_clearance};
+use crate::plate::{
+    Heading8, Nopp, NoppType, PlateProfile, PlateTransform, primitive_circle_clearance,
+};
 use serde::{Deserialize, Serialize};
 
 const VALIDATION_TOLERANCE_MM: f64 = 1e-6;
@@ -62,6 +64,27 @@ pub fn validate_primitive_against_plate(
     profile: &PlateProfile,
 ) -> Result<(), PlateValidationFailure> {
     validate_shape(primitive, profile)?;
+    validate_spatial_clearance(primitive, polygon, wall_clearance_mm, nopps)
+}
+
+pub fn validate_world_primitive_against_plate(
+    primitive: &PathPrimitive,
+    polygon: &Polygon,
+    wall_clearance_mm: f64,
+    nopps: &[Nopp],
+    profile: &PlateProfile,
+    transform: &PlateTransform,
+) -> Result<(), PlateValidationFailure> {
+    validate_shape(&transform.primitive_to_local(primitive), profile)?;
+    validate_spatial_clearance(primitive, polygon, wall_clearance_mm, nopps)
+}
+
+fn validate_spatial_clearance(
+    primitive: &PathPrimitive,
+    polygon: &Polygon,
+    wall_clearance_mm: f64,
+    nopps: &[Nopp],
+) -> Result<(), PlateValidationFailure> {
     validate_wall_domain(primitive, polygon, wall_clearance_mm)?;
     for nopp in nopps {
         if primitive_circle_clearance(primitive, nopp.center, nopp.forbidden_radius_mm)

@@ -1,5 +1,5 @@
 use crate::geometry::Vec2;
-use crate::model::Point;
+use crate::model::{PathPrimitive, Point};
 
 const FRAME_TOLERANCE_MM: f64 = 1e-12;
 const PHASE_PERIOD_MM: f64 = 75.0;
@@ -95,6 +95,48 @@ impl PlateTransform {
 
     pub fn vector_to_world(&self, local: Vec2) -> Vec2 {
         self.u * local.x + self.v * local.y
+    }
+
+    pub fn primitive_to_world(&self, primitive: &PathPrimitive) -> PathPrimitive {
+        self.transform_primitive(primitive, true)
+    }
+
+    pub fn primitive_to_local(&self, primitive: &PathPrimitive) -> PathPrimitive {
+        self.transform_primitive(primitive, false)
+    }
+
+    fn transform_primitive(&self, primitive: &PathPrimitive, to_world: bool) -> PathPrimitive {
+        let point = |value| {
+            if to_world {
+                self.to_world(value)
+            } else {
+                self.to_local(value)
+            }
+        };
+        let orientation = self.u.x * self.v.y - self.u.y * self.v.x;
+        match primitive {
+            PathPrimitive::Line { start, end } => PathPrimitive::Line {
+                start: point(*start),
+                end: point(*end),
+            },
+            PathPrimitive::Arc {
+                start,
+                end,
+                center,
+                radius_mm,
+                sweep_rad,
+            } => PathPrimitive::Arc {
+                start: point(*start),
+                end: point(*end),
+                center: point(*center),
+                radius_mm: *radius_mm,
+                sweep_rad: if orientation < 0.0 {
+                    -*sweep_rad
+                } else {
+                    *sweep_rad
+                },
+            },
+        }
     }
 }
 
