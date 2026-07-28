@@ -13,6 +13,15 @@ pub mod wavefront;
 
 use wasm_bindgen::prelude::*;
 
+#[wasm_bindgen(js_name = buildPlateModel)]
+pub fn build_plate_model_wasm(input: JsValue) -> Result<JsValue, JsValue> {
+    console_error_panic_hook::set_once();
+    let input = serde_wasm_bindgen::from_value(input)
+        .map_err(|error| JsValue::from_str(&format!("invalid PlateModelInput: {error}")))?;
+    serde_wasm_bindgen::to_value(&plate::build_plate_model(input))
+        .map_err(|error| JsValue::from_str(&format!("cannot serialize PlateModelResult: {error}")))
+}
+
 #[wasm_bindgen(js_name = solveSingleLoop)]
 pub fn solve_single_loop_wasm(input: JsValue) -> Result<JsValue, JsValue> {
     console_error_panic_hook::set_once();

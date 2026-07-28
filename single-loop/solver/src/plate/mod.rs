@@ -1,3 +1,4 @@
+mod api;
 mod collision;
 mod graph;
 mod instance;
@@ -8,6 +9,10 @@ mod transform;
 mod types;
 mod validator;
 
+pub use api::{
+    PlateModel, PlateModelError, PlateModelResult, PlateTransformOutput, PlateValidationSummary,
+    build_plate_model,
+};
 pub use collision::primitive_circle_clearance;
 pub use graph::{
     EmbeddedPoseGraph, PlateEdgeCertificate, PlateGraphError, PlateGraphErrorCode,
