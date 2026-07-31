@@ -3123,6 +3123,30 @@ globalThis.STORE_FACTORY=function makeStore(storage){
     },
   };
 };
+// Teilen-Link: Zustand -> JSON -> lz-string -> URL-Fragment. Das Fragment
+// verlaesst den Browser nie (geht an keinen Server) - Persistenz und
+// Weitergabe ohne jede Infrastruktur. decode ist die Vertrauensgrenze:
+// jeder Muell ergibt null, nie eine Exception; die inhaltliche Pruefung
+// macht danach importProblem() in der UI.
+globalThis.encodeShare=function(room){
+  return LZString.compressToEncodedURIComponent(JSON.stringify({name:room.name, data:room.data}));
+};
+globalThis.decodeShare=function(s){
+  if(!s || typeof s!=='string') return null;
+  let json=null;
+  try{ json=LZString.decompressFromEncodedURIComponent(s); }catch(e){ return null; }
+  if(!json) return null;
+  try{
+    const o=JSON.parse(json);
+    if(!o || typeof o!=='object' || !o.data || typeof o.data!=='object') return null;
+    return {name:typeof o.name==='string'?o.name:'Geteilter Raum', data:o.data};
+  }catch(e){ return null; }
+};
+globalThis.parseShareFragment=function(hash){
+  if(typeof hash!=='string') return null;
+  const m=hash.match(/^#raum=(.+)$/);
+  return m ? globalThis.decodeShare(m[1]) : null;
+};
 // Im Browser sofort eine an localStorage gebundene Instanz; in Node bleibt
 // nur die Factory (die Checks injizieren sich ihren eigenen Speicher).
 if(typeof localStorage!=='undefined'){
@@ -4965,6 +4989,23 @@ globalThis.selfChecks=function(){
         try{ return !!st4 && st4.save('x',{area:1})===false; }
         catch(e){ return false; }
       })());
+    }
+    // --- share: Raum <-> Link-Fragment ---
+    {
+      const room={name:'Küche äöü', data:{pts:[{id:'AA',x:1,y:2}],walls:[['AA','AA']],meas:[],idSeq:27}};
+      const enc=globalThis.encodeShare && encodeShare(room);
+      chk('share: encode liefert URL-sicheren String', !!enc && /^[A-Za-z0-9+$-]+$/.test(enc));
+      chk('share: Roundtrip identisch', !!enc && JSON.stringify(decodeShare(enc))===JSON.stringify(room));
+      chk('share: decode von Muell -> null', globalThis.decodeShare && decodeShare('%%%nichtkomprimiert')===null);
+      chk('share: decode von leer -> null', globalThis.decodeShare && decodeShare('')===null);
+      chk('share: parseShareFragment happy path', (()=>{
+        if(!globalThis.parseShareFragment) return false;
+        const p=parseShareFragment('#raum='+enc);
+        return !!p && p.name==='Küche äöü' && p.data.idSeq===27;
+      })());
+      chk('share: parseShareFragment ohne raum= -> null',
+        globalThis.parseShareFragment && parseShareFragment('#foo=bar')===null
+        && parseShareFragment('')===null && parseShareFragment('#raum=')===null);
     }
   }
   return {ok, out};
