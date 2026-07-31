@@ -57,9 +57,14 @@ pub struct LoopGraphView {
 /// otherwise the "along the edge" / "into the room" rectangle axes below
 /// stop lining up with the physical edge.
 ///
-/// Returns `InvalidConnection` when the edge index is out of range, either
-/// port would land closer than 33 mm to an edge endpoint, or any corner of
-/// the zone rectangle falls outside the polygon.
+/// Returns `InvalidConnection` when: the edge index is out of range; either
+/// port would land closer than 33 mm to an edge endpoint; the zone
+/// rectangle does not contain both ports (possible when `zone_width_mm` is
+/// narrower than the fixed 50 mm port span); any corner of the zone
+/// rectangle falls outside the polygon; or any polygon boundary segment
+/// other than the connection edge itself cuts through the zone rectangle
+/// (the concave-room case a corner-only check cannot see — see
+/// `other_polygon_edges_intersect_rect`).
 ///
 /// Precondition: callers must run `circuit::validate_input` (or otherwise
 /// guarantee `connection.center_offset_mm`, `zone_width_mm`, and
@@ -113,11 +118,41 @@ pub fn build_connection_zone(
         ),
     };
 
+    // Design spec §4: "Die Zone muss beide Ports enthalten ... sonst
+    // INVALID_CONNECTION." Both ports sit exactly on the connection edge,
+    // i.e. at local v = rect_local.min.y (the zone's near edge) by
+    // construction — the only way this can fail is a zone narrower than
+    // the fixed 50 mm port span (zone_width_mm < 50), which
+    // `validate_input` does not forbid (only `> 0`).
+    let start_port_local = transform.to_local(start_port);
+    let end_port_local = transform.to_local(end_port);
+    if !rect_contains_point(&rect_local, start_port_local)
+        || !rect_contains_point(&rect_local, end_port_local)
+    {
+        return Err(invalid_connection(
+            "connection zone does not contain both ports",
+        ));
+    }
+
     let corner_outside_polygon = rect_corners(&rect_local).into_iter().any(|corner| {
         polygon.classify_point(transform.to_world(corner)) == PointClassification::Outside
     });
     if corner_outside_polygon {
         return Err(invalid_connection("connection zone leaves the polygon"));
+    }
+
+    // Four corners inside the polygon does not imply the whole rectangle
+    // is inside for a concave polygon: a notch can cut through the middle
+    // of a rectangle edge without ever crossing a corner. Test every other
+    // polygon boundary segment against the rectangle directly. The
+    // connection edge itself is excluded, not as a style choice but
+    // because it is *always* collinear with part of `rect_local`'s own
+    // v = min.y boundary line (that is how the rectangle was built), so
+    // leaving it in would make every zone reject itself.
+    if other_polygon_edges_intersect_rect(polygon, transform, edge_index, &rect_local) {
+        return Err(invalid_connection(
+            "connection zone is cut by a polygon edge",
+        ));
     }
 
     Ok(ConnectionZone {
@@ -200,6 +235,24 @@ pub fn filter_zone_nopps(instance: &mut PlateInstance, zone: &ConnectionZone) {
 /// or on the boundary of `zone`'s rectangle.
 pub fn zone_contains_local(zone: &ConnectionZone, point: Point) -> bool {
     rect_contains_point(&zone.rect_local, point)
+}
+
+/// Whether any polygon boundary segment other than `connection_edge_index`
+/// touches or crosses `rect` once expressed in `transform`'s local frame.
+/// Conservative like the rest of this module: touching counts (via
+/// `line_intersects_rect`).
+fn other_polygon_edges_intersect_rect(
+    polygon: &Polygon,
+    transform: &PlateTransform,
+    connection_edge_index: usize,
+    rect: &RectMm,
+) -> bool {
+    (0..polygon.original_edge_count())
+        .filter(|&index| index != connection_edge_index)
+        .any(|index| {
+            let (start, end) = polygon.original_edge(index);
+            line_intersects_rect(transform.to_local(start), transform.to_local(end), rect)
+        })
 }
 
 fn primitive_intersects_rect(primitive: &PathPrimitive, rect: &RectMm) -> bool {
