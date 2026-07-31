@@ -249,6 +249,8 @@
   #sugg .grp b{display:block;font-size:13px;font-weight:600;margin-bottom:6px;color:var(--ink)}
   #sugg .chips{display:flex;flex-wrap:wrap;gap:6px}
   #querlist .chips{display:flex;flex-wrap:wrap;gap:6px}
+  #nahlist .chips{display:flex;flex-wrap:wrap;gap:6px}
+  #nahlist .hint{font-size:12.5px;color:var(--muted);margin-top:6px}
   #querlist .hint{font-size:12.5px;color:var(--muted);margin-top:6px}
   #querlist .have{font-size:12.5px;color:var(--meas);margin-bottom:6px}
   button.sg{border:1px dashed var(--todo);color:var(--todo);background:transparent;
@@ -420,6 +422,10 @@
     <section id="nextsec">
       <h3>Als Nächstes messen</h3>
       <div id="sugg">—</div>
+    </section>
+    <section id="nahsec" hidden>
+      <h3>Grenzt aneinander</h3>
+      <div id="nahlist"></div>
     </section>
     <section id="quersec" hidden>
       <h3>Durch die Tür messen</h3>
@@ -4025,6 +4031,47 @@ globalThis.neighborOrigin=function(pts, walls, a, b, t, originR){
   };
 };
 
+// ================= Zwei Waende, eine Wand =================
+// Geht man im Ring durch die Wohnung, grenzt der neue Raum irgendwann auch
+// an einen, zu dem es keine Tuer gibt. Dann muss man sagen koennen: das ist
+// EINE Wand. Kandidaten sind zwei Innenkanten, die einander zugewandt sind,
+// fast parallel liegen, sich ueberlappen und einen wandtypischen Abstand
+// haben. Entschieden wird das nicht von der App - sie schlaegt vor.
+const NAH_WINKEL = 5;      // Grad, bis dahin gilt "fast parallel"
+const NAH_MIN    = 40;     // mm; duenner als das ist keine Wand
+const NAH_MAX    = 600;    // mm; dicker auch nicht
+globalThis.NAH_WINKEL=NAH_WINKEL;
+// waendeA/waendeB: [{a,b,iA,iB,n}] - Innenkante mit ihrer AUSSENnormale,
+// beide im selben Koordinatensystem.
+globalThis.wandKandidaten=function(waendeA, waendeB, opt){
+  const C=globalThis.CORE, o=opt||{};
+  const maxW=o.winkel==null?NAH_WINKEL:o.winkel;
+  const min=o.min==null?NAH_MIN:o.min, max=o.max==null?NAH_MAX:o.max;
+  const cosGrenze=Math.cos(maxW*Math.PI/180);
+  const out=[];
+  waendeA.forEach(wa=>waendeB.forEach(wb=>{
+    // Zugewandt: die beiden Aussennormalen zeigen aufeinander zu, stehen
+    // also gegenlaeufig. Ohne diese Pruefung waere auch die abgewandte
+    // Seite eines Nachbarn ein Kandidat.
+    if(wa.n.x*wb.n.x + wa.n.y*wb.n.y > -cosGrenze) return;
+    const f=globalThis.sharedWallFit(wa.iA, wa.iB, wb.iA, wb.iB);
+    if(!f) return;
+    if(f.winkel>maxW) return;
+    if(f.dicke<min || f.dicke>max) return;
+    // Die andere Wand muss AUSSEN liegen, nicht im eigenen Raum.
+    const mA={x:(wa.iA.x+wa.iB.x)/2, y:(wa.iA.y+wa.iB.y)/2};
+    const mB={x:(wb.iA.x+wb.iB.x)/2, y:(wb.iA.y+wb.iB.y)/2};
+    if((mB.x-mA.x)*wa.n.x + (mB.y-mA.y)*wa.n.y <= 0) return;
+    // Ein Zipfel gemeinsamer Laenge macht noch keine gemeinsame Wand.
+    const noetig=Math.max(300, 0.25*Math.min(f.laengeHier, f.laengeDort));
+    if(f.ueberlappung<noetig) return;
+    out.push({a:wa.a, b:wa.b, fa:wb.a, fb:wb.b,
+              dicke:f.dicke, winkel:f.winkel, ueberlappung:f.ueberlappung});
+  }));
+  // Das plausibelste zuerst: viel gemeinsame Laenge, wenig Schiefstand.
+  return out.sort((x,y)=> (y.ueberlappung-x.ueberlappung) || (x.winkel-y.winkel));
+};
+
 // ================= Messen durch die Tuer =================
 // Durch eine offene Tuer sieht man von einer Ecke des einen Raums eine Ecke
 // des anderen. Genau diese Strecke laesst sich mit dem Laser messen - und
@@ -4429,7 +4476,7 @@ const M={ pts:[], walls:[], meas:[], mode:'draw', sel:[], chain:null,
           // M.meas wie hmeas und opmeas: der Grundriss-Solver dieses Raums
           // darf sie nie als eigene Strecke lesen - ihr zweiter Punkt liegt
           // gar nicht in diesem Raum.
-          qmeas:[], quer:[], querHl:null };
+          qmeas:[], quer:[], querHl:null, nahwaende:[] };
 // Eigene Ansicht der Wandansicht; wallUserView merkt, ob der Nutzer
 // gezoomt hat (dann kein automatisches Einpassen mehr).
 let wallUserView=false;
@@ -4738,6 +4785,7 @@ function recompute(){
   // daran haengenden Raeume, und das soll man sofort sehen.
   loadNeighbors();
   querVorschlaege();
+  nahWandKandidaten();
   render();
 }
 
@@ -5106,6 +5154,67 @@ function querVorschlaege(){
     // das ist eine Antwort und darf nicht wie ein fehlendes Feature aussehen.
     M.quer.push({raum:nb.id, name:nb.name, paare:paare.slice(0,QUER_MAX), gemessen});
   });
+}
+
+// Waende, die an einen Nachbarraum grenzen, aber noch nicht als gemeinsame
+// Wand erklaert sind. Nur ein Vorschlag - verbinden muss der Mensch.
+function nahWandKandidaten(){
+  M.nahwaende=[];
+  if(!M.fit || !neighbors.length) return;
+  const meine=wallBands(M.fit.pts, M.walls, M.thick, THICK_DEFAULT)
+    .filter(b=>!M.shared[wallKey(b.a,b.b)]);
+  if(!meine.length) return;
+  neighbors.forEach(nb=>{
+    const frei=(nb.bands||[]).filter(b=>{
+      const sh=(nb.shared||{})[wallKey(b.a,b.b)];
+      return !sh || sh.room!==currentRoom;
+    });
+    wandKandidaten(meine, frei).forEach(k=>
+      M.nahwaende.push({...k, raum:nb.id, name:nb.name}));
+  });
+  // Je eigener Wand nur der beste Kandidat - mehr waere Rauschen.
+  const gesehen=new Set();
+  M.nahwaende=M.nahwaende.filter(k=>{
+    const w=wallKey(k.a,k.b);
+    if(gesehen.has(w)) return false;
+    gesehen.add(w); return true;
+  });
+}
+function verbindeWand(k){
+  const c=M.nahwaende.find(x=>wallKey(x.a,x.b)===k);
+  if(!c) return;
+  const r=STORE.load(c.raum);
+  if(!r || !r.data) return;
+  snapshot();
+  const t=Math.round(c.dicke), fk=wallKey(c.fa,c.fb);
+  M.shared[k]={room:c.raum, wall:[c.fa,c.fb]};
+  M.thick[k]=t;
+  const d={...r.data, shared:{...(r.data.shared||{})}, thick:{...(r.data.thick||{})}};
+  d.shared[fk]={room:currentRoom, wall:[c.a,c.b]};
+  d.thick[fk]=t;
+  STORE.save(c.raum, {data:d});
+  recompute();
+  renderWallPopup();
+  // Ohne Tuer bestimmt die Verbindung Drehung und Abstand, aber nicht die
+  // Verschiebung laengs der Wand. Das darf nicht unausgesprochen bleiben.
+  setHintLive(`Wand ${c.a}–${c.b} und „${c.name}“ sind jetzt eine Wand, ${t} mm dick. `
+    +`Ohne Tür fehlt der Anker längs der Wand — eine Querstrecke durch eine andere `
+    +`Tür legt ihn fest.`);
+}
+function loeseWand(k){
+  const sh=M.shared[k];
+  if(!sh || sh.tuer) return;
+  snapshot();
+  const r=STORE.load(sh.room);
+  if(r && r.data && r.data.shared){
+    const d={...r.data, shared:{...r.data.shared}};
+    delete d.shared[wallKey(sh.wall[0], sh.wall[1])];
+    STORE.save(sh.room, {data:d});
+  }
+  delete M.shared[k];
+  recompute();
+  renderWallPopup();
+  setHint('Verbindung gelöst — die Wände gelten wieder als zwei.');
 }
 
 // Eingabe einer Querstrecke - dasselbe Feld wie fuer alle anderen Masse.
@@ -6156,6 +6265,20 @@ function renderWallPopup(){
     renderWallPopup();
   };
   tw.append(span, btn);
+  // Grenzt diese Wand an einen Nachbarn, ohne dass es eine Verbindung gibt?
+  const kand=(M.nahwaende||[]).find(x=>wallKey(x.a,x.b)===k);
+  if(kand){
+    const z=document.createElement('div');
+    z.className='nb';
+    z.textContent=`Grenzt an „${kand.name}“ — Abstand ${Math.round(kand.dicke)} mm`
+      + (kand.winkel>0.2 ? `, ${kand.winkel.toFixed(1)}° schief` : '');
+    const bv=document.createElement('button');
+    bv.textContent='als eine Wand festlegen';
+    bv.onclick=()=>verbindeWand(k);
+    z.appendChild(document.createTextNode(' '));
+    z.appendChild(bv);
+    tw.appendChild(z);
+  }
   // Geteilte Wand: was die Lage der beiden Raeume ueber sie sagt.
   const nb=(M.nbchecks||[]).find(c=>c.k===k);
   if(!nb) return;
@@ -6166,6 +6289,15 @@ function renderWallPopup(){
     : `Geteilt mit „${nb.raum}“ · Abstand der Innenkanten `
       +`${Math.round(nb.f.dicke)} mm · dort ${fmtM(nb.f.laengeDort)} m`;
   tw.appendChild(zeile);
+  // Eine ohne Tuer erklaerte Verbindung laesst sich auch wieder loesen. Eine
+  // durch eine Tuer entstandene NICHT: sie traegt die Lage des Nachbarn.
+  if(!M.shared[k].tuer){
+    const bl=document.createElement('button');
+    bl.textContent='Verbindung lösen';
+    bl.onclick=()=>loeseWand(k);
+    zeile.appendChild(document.createTextNode(' '));
+    zeile.appendChild(bl);
+  }
   // Die Lage der beiden Innenkanten IST eine Messung der Wanddicke. Weicht
   // sie vom eingetragenen Wert ab, laesst sie sich uebernehmen - ohne
   // jemanden zu verschieben, denn die Geometrie steht ja bereits so.
@@ -7424,6 +7556,25 @@ function renderPanel(){
     b.onclick=()=>enterMeasurement(b.dataset.a, b.dataset.b, true);
   });
 
+  // --- Waende, die an einen Nachbarn grenzen, aber noch nicht verbunden
+  // sind. Im Ring entsteht genau das: der neue Raum stoesst an einen, zu
+  // dem es keine Tuer gibt.
+  const ns=$('nahsec'), nl=$('nahlist');
+  ns.hidden=!(M.nahwaende && M.nahwaende.length);
+  if(!ns.hidden){
+    nl.innerHTML='<div class="chips">'+M.nahwaende.map(k=>
+        `<button class="sg nw" data-a="${escapeHtml(k.a)}" data-b="${escapeHtml(k.b)}">`
+        +`${escapeHtml(k.a)}–${escapeHtml(k.b)} · ${escapeHtml(k.name)} · `
+        +`${Math.round(k.dicke)} mm</button>`).join('')
+      +'</div><div class="hint">Antippen öffnet die Wand — dort lassen sich '
+      +'die beiden als eine Wand festlegen.</div>';
+    nl.querySelectorAll('button.nw').forEach(b=>{
+      b.onmouseenter=()=>{ M.highlight={a:b.dataset.a,b:b.dataset.b}; drawCanvas(); };
+      b.onmouseleave=()=>{ if(!entryPair){ M.highlight=null; drawCanvas(); } };
+      b.onclick=()=>openWallPopup(b.dataset.a, b.dataset.b);
+    });
+  }
+
   // --- Querstrecken durch die Tuer. Eigener Abschnitt: sie gehoeren nicht
   // zum Netz DIESES Raums, sondern sagen, wie er zum Nachbarn liegt.
   const qs=$('quersec'), ql=$('querlist');
@@ -8400,6 +8551,48 @@ globalThis.selfChecks=function(){
       // Dickenaenderung schlaegt direkt durch - das ist die abgeleitete Dicke
       chk('geteilt: 175 statt 240 liest sich als 175',
         near(sf(a1,b1,{x:4000,y:-175},{x:0,y:-175}).dicke,175,1e-9));
+    }
+  }
+  // --- Zwei Waende als eine erklaeren: welche kommen in Frage? ---
+  {
+    const wk=globalThis.wandKandidaten;
+    chk('nahwand: wandKandidaten vorhanden', typeof wk==='function');
+    if(wk){
+      const w=(a,b,x0,y0,x1,y1,nx,ny)=>({a,b,iA:{x:x0,y:y0},iB:{x:x1,y:y1},n:{x:nx,y:ny}});
+      // Raum A: Rechteck 4000x3000, untere Wand auf y=0, aussen nach unten.
+      const A=[w('A','B', 0,0, 4000,0, 0,-1),
+               w('C','D', 4000,3000, 0,3000, 0,1)];
+      // Raum B liegt darunter, seine Innenkante auf y=-240, aussen nach oben.
+      const B=[w('A','B', 4000,-240, 0,-240, 0,1)];
+      const r=wk(A,B);
+      chk('nahwand: gegenueberliegende Waende werden gefunden',
+        r.length===1 && r[0].a==='A' && r[0].b==='B' && near(r[0].dicke,240,1e-9));
+      chk('nahwand: die abgewandte Wand desselben Raums zaehlt nicht',
+        !r.some(x=>x.a==='C'));
+      chk('nahwand: zu weit weg ist keine Wand',
+        wk(A,[w('A','B', 4000,-1500, 0,-1500, 0,1)]).length===0);
+      chk('nahwand: zu nah ist auch keine Wand',
+        wk(A,[w('A','B', 4000,-20, 0,-20, 0,1)]).length===0);
+      // 10 Grad Schiefstand: das sind zwei Waende, nicht eine
+      const s=10*Math.PI/180;
+      chk('nahwand: deutlicher Schiefstand faellt weg',
+        wk(A,[w('A','B', 4000,-240, 0,-240-4000*Math.sin(s),
+                Math.sin(s),Math.cos(s))]).length===0);
+      chk('nahwand: ein Zipfel Ueberlappung genuegt nicht',
+        wk(A,[w('A','B', 200,-240, 0,-240, 0,1)]).length===0);
+      // Gleiche Lage, aber INNERHALB von Raum A - eine Wand kann nicht im
+      // eigenen Raum liegen.
+      chk('nahwand: eine Wand im eigenen Raum zaehlt nicht',
+        wk(A,[w('A','B', 4000,240, 0,240, 0,1)]).length===0);
+      // Nicht zugewandt: beide Normalen zeigen in dieselbe Richtung
+      chk('nahwand: gleichgerichtete Normalen zaehlen nicht',
+        wk(A,[w('A','B', 0,-240, 4000,-240, 0,-1)]).length===0);
+      chk('nahwand: das plausibelste steht vorn', (()=>{
+        const B2=[w('A','B', 4000,-240, 0,-240, 0,1),
+                  w('X','Y', 2000,-240, 0,-240, 0,1)];
+        const rr=wk(A,B2);
+        return rr.length===2 && rr[0].fa==='A';
+      })());
     }
   }
   // --- Messen durch die Tuer: welche Eckenpaare sieht man? ---
