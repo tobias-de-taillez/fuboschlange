@@ -92,6 +92,8 @@
   #status.warn{background:var(--warn-bg)} #status.warn #statustxt{color:var(--warn)}
   #status.bad{background:var(--bad-bg)}  #status.bad  #statustxt{color:var(--bad)}
   #statustxt{font-weight:600;font-size:14.5px}
+  #roomname{font-size:12px;color:var(--muted);cursor:pointer;margin-bottom:2px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #geo{margin-top:4px;font-size:19px;font-weight:650;font-variant-numeric:tabular-nums}
   #geo small{font-size:12.5px;color:var(--muted);font-weight:500}
   #wallwarn{display:none;padding:8px 14px;background:var(--warn-bg);color:var(--warn);
@@ -190,7 +192,7 @@
     </div>
   </div>
   <div id="panel">
-    <div id="status" class="warn"><div id="statustxt">—</div><div id="geo"></div></div>
+    <div id="status" class="warn"><div id="roomname" title="Antippen: Raum umbenennen">—</div><div id="statustxt">—</div><div id="geo"></div></div>
     <div id="wallwarn"></div>
     <section id="nextsec">
       <h3>Als Nächstes messen</h3>
@@ -3381,7 +3383,48 @@ function recompute(){
   // Ein Aufmass dauert leicht eine halbe Stunde. Ein Reload darf es nicht
   // kosten. Bewusst ohne Debounce: serialize() ist bei den hier realistischen
   // Groessen unter einer Millisekunde.
-  try{ localStorage.setItem('raumaufmass', serialize()); }catch{}
+  if(currentRoom) STORE.save(currentRoom, {data:JSON.parse(serialize()), area:polyAreaM2()});
+}
+
+// ================= Raumbibliothek (Anbindung) =================
+let currentRoom=null;
+
+// Flaeche des aktuellen Fits in m2 - fuer die Bibliotheksliste beim
+// Speichern mitgerechnet, damit die Liste ohne Solver-Laeufe rendert.
+function polyAreaM2(){
+  if(!M.fit) return null;
+  const P=M.fit.pts;
+  const poly=C.wallPolygon(P, M.walls);
+  if(!poly) return null;
+  let a=0;
+  for(let i=0,j=poly.length-1;i<poly.length;j=i++)
+    a+=poly[j].x*poly[i].y-poly[i].x*poly[j].y;
+  return Math.abs(a)/2/1e6;
+}
+
+function openRoom(id){
+  const r=STORE.load(id);
+  if(!r) return;
+  currentRoom=id;
+  STORE.setCurrent(id);
+  deserialize(r.data);
+  userView=false;
+  recompute();
+}
+function newRoom(name){
+  const id=STORE.create(name||'Neuer Raum');
+  openRoom(id);
+  setMode('draw');
+}
+// Ein Import (Datei, Link, Clipboard) legt IMMER einen neuen Raum an und
+// ueberschreibt nie stumm den aktuellen. Rueckgabe: Fehlertext oder null.
+function importAsNewRoom(name, dataObj){
+  const problem=importProblem(dataObj);
+  if(problem) return problem;
+  const id=STORE.create(name||'Importierter Raum');
+  STORE.save(id,{data:dataObj});
+  openRoom(id);
+  return null;
 }
 
 function render(){
@@ -4042,6 +4085,12 @@ $('ring').onclick=()=>{
 
 $('undo').onclick=()=>{ if(!undo()) setHint('Nichts mehr rückgängig zu machen.'); };
 $('fitview').onclick=()=>{ userView=false; autofit(); render(); };
+$('roomname').onclick=()=>{
+  if(!currentRoom) return;
+  const r=STORE.load(currentRoom);
+  const name=prompt('Raum umbenennen:', r?r.name:'');
+  if(name && name.trim()){ STORE.rename(currentRoom, name.trim()); renderPanel(); }
+};
 
 // Die Hotkeys sind auf window gebunden, damit sie ueberall wirken - aber
 // genau deshalb bubbelt auch ein Tastendruck in einem Eingabefeld bis
@@ -4120,6 +4169,8 @@ function renderPanel(){
   const [txt,cls]=statusText();
   $('statustxt').textContent=txt;
   $('status').className=cls;
+  const room=currentRoom?STORE.load(currentRoom):null;
+  $('roomname').textContent=room?room.name:'—';
   $('empty').style.display = M.pts.length ? 'none' : 'flex';
   $('undo').disabled = !undoStack.length;
 
@@ -4343,16 +4394,32 @@ $('clr').onclick=()=>{
   recompute();
 };
 
-// Ein Aufmass dauert leicht eine halbe Stunde. Ein Reload darf es nicht
-// kosten - beim Start das letzte Autosave wiederherstellen, wenn eins da ist.
-try{
-  const gespeichert=localStorage.getItem('raumaufmass');
-  if(gespeichert){
-    const o=JSON.parse(gespeichert);
-    if(o && Array.isArray(o.pts) && o.pts.length) deserialize(o);
+// ================= Boot =================
+// Reihenfolge: Alt-Autosave migrieren -> Link-Fragment importieren ->
+// zuletzt offenen Raum laden -> sonst neuesten -> sonst leeren anlegen.
+STORE.migrate();
+{
+  const shared=parseShareFragment(location.hash);
+  if(shared){
+    // Fragment sofort aus der Adresszeile nehmen: ein Reload soll den Raum
+    // nicht ein zweites Mal importieren.
+    history.replaceState(null,'',location.pathname+location.search);
+    const err=importAsNewRoom(shared.name, shared.data);
+    if(err){ setHint('Geteilter Link ungültig: '+err); }
+    else setHint('Geteilter Raum importiert — als eigener Raum gespeichert.');
   }
-}catch{}
-
+}
+if(!currentRoom){
+  const cur=STORE.currentId();
+  if(cur && STORE.load(cur)) { openRoom(cur); }
+  else {
+    const l=STORE.list();
+    if(l.length) openRoom(l[0].id);
+    else { currentRoom=STORE.create('Mein erster Raum'); STORE.setCurrent(currentRoom); }
+  }
+}
+if(!STORE.storageOk)
+  setHint('Speichern auf diesem Gerät nicht möglich (privater Modus?) — Räume als Datei oder Link sichern.');
 setMode('draw');
 recompute();
 </script>
