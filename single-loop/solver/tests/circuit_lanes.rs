@@ -1,16 +1,18 @@
-//! Task 4 (lane model) is BLOCKED. See `.superpowers/sdd/task-4-report.md`
-//! for the full investigation. In short: `build_lanes` cannot be implemented
-//! as specified by the brief, because the certified `EmbeddedPoseGraph` for
-//! this profile (`BEKOTEC_EN_23_FI_30_16`) contains no edge that transitions
-//! between a straight run and a 90-degree turn -- "corners with the
-//! `BroadTurn90` edge" is not constructible; no `BroadTurn90` instance
-//! anywhere in the graph shares an endpoint with anything else.
+//! Task 4 (lane model) is BLOCKED. In short: `build_lanes` cannot be
+//! implemented as specified by the brief, because the certified
+//! `EmbeddedPoseGraph` for this profile (`BEKOTEC_EN_23_FI_30_16`) contains
+//! no edge that transitions between a straight run and a 90-degree turn --
+//! "corners with the `BroadTurn90` edge" is not constructible; no
+//! `BroadTurn90` instance anywhere in the graph shares an endpoint with
+//! anything else. The full investigation (raw node/edge counts, per-template
+//! connectivity table, all-pairs template co-occurrence scan, options for
+//! resolving it) is written up in the (gitignored, not in version control)
+//! `.superpowers/sdd/task-4-report.md` -- the root-cause explanation below
+//! is self-contained and does not depend on that file surviving.
 //!
 //! The tests below are a characterization of that fact, pinned so it is
 //! caught if the plate layer changes (fixed) or regresses further. They
-//! replace an exploratory `println!`-driven investigation run during Task 4
-//! (see the report for the raw data: node/edge counts, per-template
-//! connectivity table, all-pairs template co-occurrence scan).
+//! replace an exploratory `println!`-driven investigation run during Task 4.
 //!
 //! Root cause: graph nodes are interned by exact `(x, y, heading)`
 //! (`plate::graph::pose_key`), so two edges only chain when one's end pose
