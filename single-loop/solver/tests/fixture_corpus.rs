@@ -22,6 +22,7 @@ fn fixture_corpus_matches_invariants() {
     let mut paths = fs::read_dir(dir)
         .unwrap()
         .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "json"))
         .collect::<Vec<_>>();
     paths.sort();
     for path in paths {

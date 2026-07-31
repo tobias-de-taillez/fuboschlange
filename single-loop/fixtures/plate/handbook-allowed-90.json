@@ -1,0 +1,20 @@
+{
+  "source": "Schlüter-BEKOTEC-THERM technisches Handbuch 2025/2026, Seite 39, Abschnitt \"Verlegung des Heizrohrs\": breite 90-Grad-Umlenkung über mehrere Noppenreihen ist zulässig.",
+  "expectedClassification": "ACCEPTED",
+  "profileVersion": "2026.07.28-1",
+  "template": {
+    "id": "BROAD_TURN90",
+    "start": { "point": { "x": 37.50000000000001, "y": -42.5 }, "heading": "DEG0" },
+    "end": { "point": { "x": 117.5, "y": 37.5 }, "heading": "DEG90" },
+    "primitives": [
+      {
+        "kind": "arc",
+        "start": { "x": 37.50000000000001, "y": -42.5 },
+        "end": { "x": 117.5, "y": 37.5 },
+        "center": { "x": 37.5, "y": 37.5 },
+        "radiusMm": 80.0,
+        "sweepRad": 1.5707963267948966
+      }
+    ]
+  }
+}
