@@ -130,12 +130,34 @@ fn rectangle_inward_arm_occupies_every_second_lane_and_reserves_between() {
     assert_eq!(arm.lane_sequence, vec![0, 2, 4, 6]);
 
     // Teeth beyond the brief's own assertion: `edge_ids` must actually carry
-    // real, ordered provenance for the first occupied ring, not just an
-    // opaque non-empty list -- pins that ring 0's own edges (in ring-walk
-    // order) open the arm's edge list.
+    // real, ordered provenance -- ring 0's own edges (in ring-walk order)
+    // open the arm's edge list, and the *total* length independently
+    // accounts for all four rings' real edge counts plus a 2-edge
+    // lane-change chain between each consecutive pair (0->2, 2->4, 4->6 are
+    // each a certified 2-`BroadTurn90` chain on the real graph -- see the
+    // task report's probe findings; "2" here is not read from the
+    // implementation, it is the independently-verified fact). This catches
+    // a missing chain, a chain collapsing to 1 hop, or a partially-walked
+    // ring -- none of which a mere prefix-match or non-empty check would.
     let lanes = lanes7(&graph);
+    let lane_edge_count = |id: u32| {
+        lanes
+            .iter()
+            .find(|lane| lane.id == id)
+            .unwrap()
+            .edge_ids
+            .len()
+    };
     let ring0 = lanes.iter().find(|lane| lane.id == 0).unwrap();
     assert_eq!(arm.edge_ids[..ring0.edge_ids.len()], ring0.edge_ids[..]);
+    let expected_total = lane_edge_count(0)
+        + 2
+        + lane_edge_count(2)
+        + 2
+        + lane_edge_count(4)
+        + 2
+        + lane_edge_count(6);
+    assert_eq!(arm.edge_ids.len(), expected_total);
 }
 
 #[test]
