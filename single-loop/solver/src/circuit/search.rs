@@ -298,8 +298,9 @@ pub fn backtracking_search(
                     break;
                 }
                 Err(invariant) => {
+                    let alternatives_left = candidates.len() - index - 1;
                     state.journal.record(JournalEntry {
-                        decision: describe_action(action),
+                        decision: describe_action(action, alternatives_left),
                         rejected_by: Some(invariant.name().to_owned()),
                         witness: action.witness,
                     });
@@ -352,7 +353,7 @@ pub fn backtracking_search(
         state.actions_used += 1;
 
         let decision = Decision {
-            description: describe_action(&action),
+            description: describe_action(&action, remaining.len()),
             alternatives_left: remaining.len(),
         };
         state.journal.record(JournalEntry {
@@ -385,23 +386,39 @@ fn undo(state: &mut SearchState, frame: &Frame) {
 }
 
 /// Human-readable description used for both `Decision::description` and
-/// `JournalEntry::decision`. Not a wire contract (unlike `Invariant::name`),
-/// so its exact wording may change freely.
-fn describe_action(action: &Action) -> String {
+/// `JournalEntry::decision`, for both accepted and rejected candidates.
+/// `alternatives_left` is the count of not-yet-tried candidates remaining
+/// after this one at its decision point (matching
+/// `Decision::alternatives_left`'s own meaning on the accepted path) --
+/// included in the text itself so the count ends up visible in the journal
+/// rather than computed (on the accepted path, via `Decision`) and then
+/// discarded. Not a wire contract (unlike `Invariant::name`), so the exact
+/// wording may change freely.
+fn describe_action(action: &Action, alternatives_left: usize) -> String {
     format!(
-        "{} lane {} segment {}",
+        "{} lane {} segment {} ({alternatives_left} alternatives left)",
         action.kind, action.occupy.0, action.occupy.1
     )
 }
 
-/// Cross-lane adjacency margin applied on each side (so two segments'
-/// approximated points may be up to twice this apart and still count as
-/// adjacent). Fixed at 75 mm -- half of the common 150 mm ring spacing
-/// (`fields.rs`'s `CHANNEL_PITCH_MM`, not imported here since this
-/// function's signature has no `spacing_mm` of its own to relate it to).
-/// See `segments_adjacent`'s doc for the resulting limitation at wider
-/// spacings.
-const CROSS_LANE_ADJACENCY_MARGIN_MM: f64 = 75.0;
+/// Half `fields.rs`'s `CHANNEL_PITCH_MM` (75 mm). Ring sides are snapped to
+/// their own nearest legal channel *independently* (see fields.rs's module
+/// doc: "each ring's four sides are snapped independently, not offset by
+/// one shared amount"), so two nominally-`spacing_mm`-apart rings' four
+/// sides need not differ by exactly the same amount on every side --
+/// 37.5 mm is the largest that independent snapping can plausibly move one
+/// side relative to the others. Used, not as a stand-in for half the
+/// spacing (that was the old constant's mistake -- 75 mm is the channel
+/// pitch, a coincidence at exactly 150 mm spacing, not a derivation of "half
+/// the spacing" that generalizes to 225/300), but as slack layered on top
+/// of a spacing derived from the actual geometry below.
+const CHANNEL_PITCH_SLACK_MM: f64 = 37.5;
+
+/// The largest value `circuit::types::ALLOWED_SPACINGS_MM` allows (not
+/// imported here: that constant is private to the `types` module, and this
+/// module does not otherwise depend on it). Used only as the plausibility
+/// ceiling in `segments_adjacent`'s cross-lane branch -- see there.
+const MAX_RING_SPACING_MM: f64 = 300.0;
 
 fn lane_by_id(lanes: &[Lane], id: u32) -> Option<&Lane> {
     lanes.iter().find(|lane| lane.id == id)
@@ -455,23 +472,47 @@ fn segment_perimeter_point(lane: &Lane, index: u32) -> Point {
 ///   closed cycle, `node_ids.first() == node_ids.last()`) wrapping from the
 ///   last index to `0` -- a truncated lane has no edge connecting its two
 ///   open ends, so no wrap.
-/// - Consecutive lanes (`|lane difference| == 1`): adjacent when their
-///   `segment_perimeter_point`s, each expanded by
-///   `CROSS_LANE_ADJACENCY_MARGIN_MM`, overlap on both axes (an
-///   axis-aligned-box overlap test between two point-sized boxes -- see
-///   `segment_perimeter_point`'s doc for why a point, not a real edge
-///   extent, is what's available here).
+/// - Consecutive lanes (`|lane difference| == 1`): adjacent when a
+///   plausibility gate *and* a proximity test both pass. Neither alone is
+///   sound, so both are always evaluated, in this order.
 ///
-/// Known limitation, not fixed here: the 75 mm margin is fixed regardless
-/// of the caller's actual ring spacing. At the common 150 mm spacing, two
-/// consecutive rings' matching corners land exactly on the 150 mm
-/// combined-margin boundary (adjacent, inclusively). At 225 mm or 300 mm
-/// spacing -- both valid values -- consecutive rings' corners are *never*
-/// within the margin, so `terminal_corridor_connected` cannot see
-/// cross-lane adjacency at all at those spacings and would report a
-/// multi-lane reserved corridor as cut even when it is not. Flagged for
-/// whichever later task is the first to call this with more than one lane
-/// at 225/300 mm spacing.
+/// The **plausibility gate** comes first. `inset` is the largest of the
+/// four same-side gaps between `lane_a.rect_local` and `lane_b.rect_local`
+/// (`|min.x_a - min.x_b|`, `|max.x_a - max.x_b|`, and the `y` equivalents)
+/// -- the real, measured nesting offset between this specific pair of
+/// rings, since sides snap independently (see `CHANNEL_PITCH_SLACK_MM`'s
+/// doc) and so need not agree exactly. `inset` must itself look like at
+/// most one certified ring step (`<= MAX_RING_SPACING_MM +
+/// CHANNEL_PITCH_SLACK_MM`); two lanes farther apart than that are not
+/// consecutively nested, whatever their ids claim, and are rejected here
+/// before any point is even compared.
+///
+/// The **proximity test** runs only once the gate passes: adjacent when the
+/// segments' `segment_perimeter_point`s, each expanded by `0.5 * inset +
+/// CHANNEL_PITCH_SLACK_MM`, overlap on both axes (an axis-aligned-box
+/// overlap test between two point-sized boxes -- see
+/// `segment_perimeter_point`'s doc for why a point, not a real edge extent,
+/// is what's available here).
+///
+/// The gate is load-bearing, not a defensive extra: `inset` (used by the
+/// proximity test) is derived from the *same pair* of rects the proximity
+/// test then compares, so for two segments both at index `0`
+/// (`segment_perimeter_point` returns `rect_local.min` exactly for index
+/// `0`), the point-to-point distance on each axis *is* one of the four
+/// terms `inset` maxes over -- meaning `|dx|`/`|dy| <= inset` always holds,
+/// trivially, before slack is even added, for *any* two rects, arbitrarily
+/// far apart. Without the gate, "expand by half the pair's own measured
+/// separation" can never fail for matching corners, no matter how far apart
+/// the rings really are; the gate is the fixed reference point that makes
+/// the proximity test meaningful instead of self-referential.
+///
+/// Known limitation, not fixed here: real per-edge geometry (an
+/// `EmbeddedPoseGraph`, which this function's signature omits) is the only
+/// way to distinguish "these two approximated points happen to coincide"
+/// from "these two segments are genuinely near each other" -- the
+/// perimeter approximation cannot tell those apart, at any margin formula.
+/// Flagged for whichever later task is first positioned to thread the real
+/// graph through a corridor-connectivity check.
 fn segments_adjacent(lanes: &[Lane], a: (u32, u32), b: (u32, u32)) -> bool {
     if a.0 == b.0 {
         return same_lane_adjacent(lanes, a, b);
@@ -482,9 +523,24 @@ fn segments_adjacent(lanes: &[Lane], a: (u32, u32), b: (u32, u32)) -> bool {
     let (Some(lane_a), Some(lane_b)) = (lane_by_id(lanes, a.0), lane_by_id(lanes, b.0)) else {
         return false;
     };
+
+    let rect_a = &lane_a.rect_local;
+    let rect_b = &lane_b.rect_local;
+    let inset = [
+        (rect_a.min.x - rect_b.min.x).abs(),
+        (rect_a.max.x - rect_b.max.x).abs(),
+        (rect_a.min.y - rect_b.min.y).abs(),
+        (rect_a.max.y - rect_b.max.y).abs(),
+    ]
+    .into_iter()
+    .fold(0.0_f64, f64::max);
+    if inset > MAX_RING_SPACING_MM + CHANNEL_PITCH_SLACK_MM {
+        return false;
+    }
+
     let point_a = segment_perimeter_point(lane_a, a.1);
     let point_b = segment_perimeter_point(lane_b, b.1);
-    let margin = 2.0 * CROSS_LANE_ADJACENCY_MARGIN_MM;
+    let margin = inset + 2.0 * CHANNEL_PITCH_SLACK_MM;
     (point_a.x - point_b.x).abs() <= margin && (point_a.y - point_b.y).abs() <= margin
 }
 
