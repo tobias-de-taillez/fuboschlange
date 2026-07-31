@@ -3214,9 +3214,25 @@ globalThis.parseShareFragment=function(hash){
 };
 // Im Browser sofort eine an localStorage gebundene Instanz; in Node bleibt
 // nur die Factory (die Checks injizieren sich ihren eigenen Speicher).
-if(typeof localStorage!=='undefined'){
-  globalThis.STORE=globalThis.STORE_FACTORY(localStorage);
-}
+// localStorage kann beim blossen ZUGRIFF werfen (Chrome "alle Cookies
+// blockieren": SecurityError am Getter - typeof schuetzt davor nicht).
+// Dann laeuft die Sitzung im Speicher weiter: alles funktioniert, nur
+// ueberlebt nichts den Reload - storageOk:false treibt den Hinweis.
+globalThis.STORE=(function(){
+  try{
+    if(typeof localStorage!=='undefined' && localStorage){
+      return globalThis.STORE_FACTORY(localStorage);
+    }
+  }catch(e){}
+  const m=new Map();
+  const st=globalThis.STORE_FACTORY({
+    getItem:k=>m.has(k)?m.get(k):null,
+    setItem:(k,v)=>m.set(k,String(v)),
+    removeItem:k=>m.delete(k),
+  });
+  st.storageOk=false;
+  return st;
+})();
 </script>
 
 <script id="ui">
@@ -3446,7 +3462,14 @@ function recompute(){
   // Ein Aufmass dauert leicht eine halbe Stunde. Ein Reload darf es nicht
   // kosten. Bewusst ohne Debounce: serialize() ist bei den hier realistischen
   // Groessen unter einer Millisekunde.
-  if(currentRoom) STORE.save(currentRoom, {data:JSON.parse(serialize()), area:polyAreaM2()});
+  if(currentRoom && !STORE.save(currentRoom, {data:JSON.parse(serialize()), area:polyAreaM2()})
+     && !recompute.quotaWarned){
+    // Einmal warnen, nicht je Aenderung - aber nie still schlucken: sonst
+    // ist ein 30-Minuten-Aufmass beim Reload weg, ohne dass es je ein
+    // Anzeichen gab.
+    recompute.quotaWarned=true;
+    setHint('Speichern fehlgeschlagen (Speicher voll?) — Raum als Datei oder Link sichern!');
+  }
 }
 
 // ================= Raumbibliothek (Anbindung) =================
@@ -3475,6 +3498,11 @@ function openRoom(id){
   // Der Undo-Stapel gehoert zum Raum: ein Undo nach dem Wechsel wuerde
   // sonst die Geometrie des vorigen Raums in DIESEN Raum speichern.
   undoStack.length=0;
+  // Offene Eingabe/Popover gehoeren zum alten Raum: ein OK nach dem
+  // Wechsel wuerde eine Messung mit fremden Punkt-IDs in DIESEN Raum
+  // druecken - recompute() wirft dann bei jedem Bild.
+  closeEntry();
+  hidePop();
   deserialize(r.data);
   userView=false;
   recompute();
@@ -3489,8 +3517,13 @@ function newRoom(name){
 function importAsNewRoom(name, dataObj){
   const problem=importProblem(dataObj);
   if(problem) return problem;
+  // Fremddateien ohne idSeq: aus den Punkt-IDs zurueckrechnen, sonst erbt
+  // deserialize() den Zaehler des vorigen Raums und vergibt Duplikat-IDs.
+  const data={...dataObj};
+  if(typeof data.idSeq!=='number')
+    data.idSeq=data.pts.reduce((mx,p)=>Math.max(mx, idOrdinal(p.id)+1), 0);
   const id=STORE.create(name||'Importierter Raum');
-  STORE.save(id,{data:dataObj});
+  STORE.save(id,{data});
   openRoom(id);
   return null;
 }
@@ -4255,10 +4288,13 @@ function roomFilePayload(id){
   const r=STORE.load(id);
   if(!r) return null;
   return {
-    name:r.name,
     // Export-Format = importProblem-Form plus Zusatzfelder; ein Reimport
     // laeuft durch dieselbe Validierung wie jeder andere Import.
+    // Spread ZUERST: ein data.name aus einem Fremdimport darf den
+    // aktuellen Raumnamen nicht ueberschreiben.
     ...r.data,
+    name:r.name,
+    sigmaHat:M.an?M.an.sigmaHat:null,
   };
 }
 async function exportRoomAsFile(id){
@@ -4591,21 +4627,9 @@ $('imp').onclick=()=>{
   let o; try{ o=JSON.parse(s); }catch{ alert('Das ist kein gültiges JSON.'); return; }
   const problem=importProblem(o);
   if(problem){ alert('JSON hat nicht die erwartete Form: '+problem); return; }
-  // Vor deserialize() sichern: deserialize() uebernimmt o.idSeq, sobald es
-  // eine Zahl ist - auch wenn die kleiner ist als der hiesige Stand.
-  const localIdSeq=idSeq;
-  snapshot();
-  deserialize(o);
-  // o.pts.length unterschaetzt idSeq, sobald der Export eine Luecke hat.
-  // o.idSeq ist exakt, wenn vorhanden; sonst aus den IDs zurueckrechnen.
-  // Maximum mit dem VOR dem Import gueltigen lokalen Zaehler: ein Import in
-  // eine gefuellte Skizze darf idSeq nie verkleinern.
-  const derivedIdSeq = typeof o.idSeq==='number'
-    ? o.idSeq
-    : o.pts.reduce((mx,p)=>Math.max(mx, idOrdinal(p.id)+1), 0);
-  idSeq=Math.max(localIdSeq, derivedIdSeq);
-  userView=false;
-  recompute();
+  const err=importAsNewRoom('Eingefügter Raum', o);
+  if(err){ alert('JSON hat nicht die erwartete Form: '+err); return; }
+  setHint('Eingefügter Raum — als eigener Raum gespeichert.');
 };
 $('clr').onclick=()=>{
   if(!confirm('Alle Punkte, Wände und Messungen verwerfen?')) return;
@@ -4616,30 +4640,24 @@ $('clr').onclick=()=>{
 };
 
 // ================= Boot =================
-// Reihenfolge: Alt-Autosave migrieren -> Link-Fragment importieren ->
-// zuletzt offenen Raum laden -> sonst neuesten -> sonst leeren anlegen.
+// Reihenfolge: migrieren -> Fragment-Import -> Raum laden -> UI aufbauen -
+// und ERST DANN die Hinweise: setMode() setzt den Modus-Standardhinweis,
+// jeder frueher gesetzte Text waere vor dem ersten Bild wieder weg.
 STORE.migrate();
-{
+// Geteilter Link: beim Kaltstart UND als blosse Hash-Aenderung im offenen
+// Tab (same-document navigation, kein Reload) - ein Pfad fuer beides.
+function importFromHash(){
   const shared=parseShareFragment(location.hash);
-  if(shared){
-    // Fragment sofort aus der Adresszeile nehmen: ein Reload soll den Raum
-    // nicht ein zweites Mal importieren.
-    history.replaceState(null,'',location.pathname+location.search);
-    const err=importAsNewRoom(shared.name, shared.data);
-    if(err){ setHint('Geteilter Link ungültig: '+err); }
-    else setHint('Geteilter Raum importiert — als eigener Raum gespeichert.');
-  }
-}
-// Ein Teilen-Link, der im schon offenen Tab landet, ist nur eine
-// Hash-Aenderung - der Browser laedt nicht neu, der Boot-Import oben
-// laeuft nie. Der Hash-Listener uebernimmt dann denselben Pfad.
-addEventListener('hashchange',()=>{
-  const shared=parseShareFragment(location.hash);
-  if(!shared) return;
+  if(!shared) return null;
   history.replaceState(null,'',location.pathname+location.search);
   const err=importAsNewRoom(shared.name, shared.data);
-  setHint(err ? 'Geteilter Link ungültig: '+err
-              : 'Geteilter Raum importiert — als eigener Raum gespeichert.');
+  return err ? 'Geteilter Link ungültig: '+err
+             : 'Geteilter Raum importiert — als eigener Raum gespeichert.';
+}
+const bootMsg=importFromHash();
+addEventListener('hashchange',()=>{
+  const msg=importFromHash();
+  if(msg) setHint(msg);
 });
 if(!currentRoom){
   // deserialize() wirft auf manuell verbogenen Storage-Daten - das darf
@@ -4658,10 +4676,11 @@ if(!currentRoom){
     currentRoomName='Mein erster Raum';
   }
 }
-if(!STORE.storageOk)
-  setHint('Speichern auf diesem Gerät nicht möglich (privater Modus?) — Räume als Datei oder Link sichern.');
 setMode('draw');
 recompute();
+if(bootMsg) setHint(bootMsg);
+if(!STORE.storageOk)
+  setHint('Speichern auf diesem Gerät nicht möglich (privater Modus?) — Räume als Datei oder Link sichern.');
 </script>
 
 <script id="checks">
@@ -5314,6 +5333,26 @@ globalThis.selfChecks=function(){
         globalThis.parseShareFragment && parseShareFragment('#foo=bar')===null
         && parseShareFragment('')===null && parseShareFragment('#raum=')===null);
     }
+  }
+  // --- store: Nachzuegler aus dem Final-Review ---
+  {
+    const fake=()=>{ const m=new Map(); return {
+      getItem:k=>m.has(k)?m.get(k):null,
+      setItem:(k,v)=>m.set(k,String(v)),
+      removeItem:k=>m.delete(k),
+    };};
+    const st=globalThis.STORE_FACTORY && STORE_FACTORY(fake());
+    chk('store: remove auf nicht-aktuelle id laesst current stehen', (()=>{
+      if(!st) return false;
+      const a=st.create('A'), b=st.create('B');
+      st.setCurrent(a); st.remove(b);
+      return st.currentId()===a && st.list().length===1;
+    })());
+    const raw=fake();
+    raw.setItem('raumaufmass','{{kaputt');
+    const st2=globalThis.STORE_FACTORY && STORE_FACTORY(raw);
+    chk('store: korrupter Alt-Schluessel -> migrate false, Schluessel weg, kein Raum',
+      !!st2 && st2.migrate()===false && raw.getItem('raumaufmass')===null && st2.list().length===0);
   }
   return {ok, out};
 };
