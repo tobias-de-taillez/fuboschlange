@@ -4,7 +4,7 @@ use crate::plate::{
     TemplateTransform, certify_template, validate_world_primitive_against_plate,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 const KEY_SCALE: f64 = 1_000_000.0;
 const TEMPLATE_MARGIN_MM: f64 = 450.0;
@@ -33,7 +33,15 @@ pub struct PlateGraphLimits {
 impl Default for PlateGraphLimits {
     fn default() -> Self {
         Self {
-            max_edge_candidates: 100_000,
+            // Candidates are `2 (reversal) * 8 (orientations) * templates *
+            // Ni * Nj`, with `Ni = W/150 + 7` and `Nj = H/150 + 7`. Closing the
+            // catalogue under path reversal doubled that, which at the previous
+            // 100_000 would have made the *candidate* budget bind at roughly a
+            // 3430 mm square room -- an artificial cliff, since candidates are
+            // only loop iterations and cost nothing in the output. Raised so
+            // that the meaningful budgets below (nodes and edges, which bound
+            // what is actually produced) are what bind first.
+            max_edge_candidates: 200_000,
             max_nodes: 50_000,
             max_edges: 50_000,
         }
@@ -114,29 +122,71 @@ pub fn build_embedded_graph(
     let mut edges = Vec::new();
     let mut rejected_edges = Vec::new();
     let mut candidate_count = 0usize;
+    let mut emitted_geometry = BTreeSet::new();
 
-    for period_j in min_j..=max_j {
-        for period_i in min_i..=max_i {
-            for template in &templates {
-                for reflected in [false, true] {
-                    for quarter_turns in 0..4 {
-                        if candidate_count == limits.max_edge_candidates {
-                            return Err(limit_error(candidate_count, limits.max_edge_candidates));
-                        }
-                        candidate_count += 1;
-                        let transform =
-                            TemplateTransform::new(quarter_turns, reflected, period_i, period_j)
-                                .unwrap();
-                        let local = transform.apply(template, instance.profile.period_mm);
-                        let primitives = local
-                            .primitives
-                            .iter()
-                            .map(|primitive| instance.transform.primitive_to_world(primitive))
-                            .collect::<Vec<_>>();
-                        let template_certificate = match certify_template(&local, &instance.profile)
-                        {
-                            Ok(certificate) => certificate,
-                            Err(failure) => {
+    // The reversal pass runs last, as a whole pass rather than interleaved, so
+    // that an unreversed instance always wins the `emitted_geometry` tie. For a
+    // template that is symmetric under the transform group -- `Straight0` and
+    // `BroadReverse180` are, the other five are not -- every reversed instance
+    // is byte-identical to some mirrored/translated forward instance, and is
+    // dropped here instead of doubling the edge. Dedupe is by exact geometry
+    // rather than by a hand-maintained "this one is symmetric" flag, so a future
+    // symmetric template cannot silently double its family.
+    for reversed in [false, true] {
+        for period_j in min_j..=max_j {
+            for period_i in min_i..=max_i {
+                for template in &templates {
+                    for reflected in [false, true] {
+                        for quarter_turns in 0..4 {
+                            if candidate_count == limits.max_edge_candidates {
+                                return Err(limit_error(
+                                    candidate_count,
+                                    limits.max_edge_candidates,
+                                ));
+                            }
+                            candidate_count += 1;
+                            let transform = TemplateTransform::new(
+                                quarter_turns,
+                                reflected,
+                                reversed,
+                                period_i,
+                                period_j,
+                            )
+                            .unwrap();
+                            let local = transform.apply(template, instance.profile.period_mm);
+                            let primitives = local
+                                .primitives
+                                .iter()
+                                .map(|primitive| instance.transform.primitive_to_world(primitive))
+                                .collect::<Vec<_>>();
+                            // Reversed instances are certified here like every
+                            // other candidate -- no certificate is ever
+                            // inherited from a forward twin, even though the
+                            // geometry is provably identical.
+                            let template_certificate =
+                                match certify_template(&local, &instance.profile) {
+                                    Ok(certificate) => certificate,
+                                    Err(failure) => {
+                                        rejected_edges.push(rejected(
+                                            template.id,
+                                            transform,
+                                            primitives,
+                                            failure,
+                                        ));
+                                        continue;
+                                    }
+                                };
+                            if let Some(failure) = primitives.iter().find_map(|primitive| {
+                                validate_world_primitive_against_plate(
+                                    primitive,
+                                    &instance.polygon,
+                                    wall_clearance_mm,
+                                    &instance.nopps,
+                                    &instance.profile,
+                                    &instance.transform,
+                                )
+                                .err()
+                            }) {
                                 rejected_edges.push(rejected(
                                     template.id,
                                     transform,
@@ -145,59 +195,51 @@ pub fn build_embedded_graph(
                                 ));
                                 continue;
                             }
-                        };
-                        if let Some(failure) = primitives.iter().find_map(|primitive| {
-                            validate_world_primitive_against_plate(
-                                primitive,
-                                &instance.polygon,
-                                wall_clearance_mm,
-                                &instance.nopps,
-                                &instance.profile,
+                            if !emitted_geometry.insert(geometry_key(&local)) {
+                                // Same curve, already an edge: this is a
+                                // symmetric template whose reversal the mirror
+                                // group already covers. Dropping it here is what
+                                // keeps `Straight0` and `BroadReverse180` from
+                                // doubling. (Rejected candidates are not
+                                // deduped -- `rejected_edges` is diagnostic
+                                // output and only its count is published.)
+                                continue;
+                            }
+                            if edges.len() == limits.max_edges {
+                                return Err(limit_error(edges.len(), limits.max_edges));
+                            }
+                            let start = intern_node(
+                                local.start,
                                 &instance.transform,
-                            )
-                            .err()
-                        }) {
-                            rejected_edges.push(rejected(
-                                template.id,
-                                transform,
+                                &mut node_ids,
+                                &mut nodes,
+                                limits.max_nodes,
+                            )?;
+                            let end = intern_node(
+                                local.end,
+                                &instance.transform,
+                                &mut node_ids,
+                                &mut nodes,
+                                limits.max_nodes,
+                            )?;
+                            edges.push(PoseEdge {
+                                id: u32::try_from(edges.len()).map_err(|_| PlateGraphError {
+                                    code: PlateGraphErrorCode::InvalidGeometry,
+                                    used: edges.len(),
+                                    limit: u32::MAX as usize,
+                                })?,
+                                start,
+                                end,
+                                template_id: template.id,
+                                template_transform: transform,
                                 primitives,
-                                failure,
-                            ));
-                            continue;
+                                certificate: Some(PlateEdgeCertificate {
+                                    min_nopp_clearance_mm: template_certificate
+                                        .min_nopp_clearance_mm,
+                                    min_bend_radius_mm: template_certificate.min_bend_radius_mm,
+                                }),
+                            });
                         }
-                        if edges.len() == limits.max_edges {
-                            return Err(limit_error(edges.len(), limits.max_edges));
-                        }
-                        let start = intern_node(
-                            local.start,
-                            &instance.transform,
-                            &mut node_ids,
-                            &mut nodes,
-                            limits.max_nodes,
-                        )?;
-                        let end = intern_node(
-                            local.end,
-                            &instance.transform,
-                            &mut node_ids,
-                            &mut nodes,
-                            limits.max_nodes,
-                        )?;
-                        edges.push(PoseEdge {
-                            id: u32::try_from(edges.len()).map_err(|_| PlateGraphError {
-                                code: PlateGraphErrorCode::InvalidGeometry,
-                                used: edges.len(),
-                                limit: u32::MAX as usize,
-                            })?,
-                            start,
-                            end,
-                            template_id: template.id,
-                            template_transform: transform,
-                            primitives,
-                            certificate: Some(PlateEdgeCertificate {
-                                min_nopp_clearance_mm: template_certificate.min_nopp_clearance_mm,
-                                min_bend_radius_mm: template_certificate.min_bend_radius_mm,
-                            }),
-                        });
                     }
                 }
             }
@@ -293,6 +335,51 @@ fn intern_node(
     ids.insert(key, id);
     nodes.push(node);
     Ok(node)
+}
+
+/// Exact geometric identity of a placed template, quantised on the same 1e-6 mm
+/// grid the pose interner uses. Deliberately keyed on the geometry itself
+/// rather than on a hand-maintained "this template is symmetric" flag: a future
+/// symmetric template then cannot silently double its own family, and a
+/// genuinely new reversal can never be dropped by accident.
+fn geometry_key(template: &crate::plate::MotionTemplate) -> Vec<i64> {
+    let mut key = Vec::with_capacity(6 + template.primitives.len() * 9);
+    for pose in [template.start, template.end] {
+        key.push(tick(pose.point.x));
+        key.push(tick(pose.point.y));
+        key.push(i64::from(pose.heading.octant()));
+    }
+    for primitive in &template.primitives {
+        match primitive {
+            PathPrimitive::Line { start, end } => {
+                key.extend([0, tick(start.x), tick(start.y), tick(end.x), tick(end.y)]);
+            }
+            PathPrimitive::Arc {
+                start,
+                end,
+                center,
+                radius_mm,
+                sweep_rad,
+            } => {
+                key.extend([
+                    1,
+                    tick(start.x),
+                    tick(start.y),
+                    tick(end.x),
+                    tick(end.y),
+                    tick(center.x),
+                    tick(center.y),
+                    tick(*radius_mm),
+                    tick(*sweep_rad),
+                ]);
+            }
+        }
+    }
+    key
+}
+
+fn tick(value: f64) -> i64 {
+    (value * KEY_SCALE).round() as i64
 }
 
 fn pose_key(pose: LocalPose) -> Option<PoseKey> {

@@ -17,7 +17,7 @@ const model: PlateModel = {
     edges: [],
     rejectedEdges: [{
       templateId: "HANDBOOK_REJECTED_TIGHT90",
-      templateTransform: { quarterTurns: 0, reflected: false, periodI: 0, periodJ: 0 },
+      templateTransform: { quarterTurns: 0, reflected: false, reversed: false, periodI: 0, periodJ: 0 },
       primitives: [{ kind: "line", start: { x: 10, y: 10 }, end: { x: 70, y: 10 } }],
       code: "BEND_RADIUS_TOO_SMALL",
       witness: { x: 70, y: 10 },

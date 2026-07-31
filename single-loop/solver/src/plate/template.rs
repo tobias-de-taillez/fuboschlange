@@ -77,6 +77,59 @@ impl MotionTemplate {
             primitives,
         }
     }
+
+    /// The same curve walked backwards.
+    ///
+    /// The pipe is undirected but the pose graph is not, and the 8-element
+    /// symmetry group behind the catalogue (mirror x, rotate 90k, translate)
+    /// does **not** contain path reversal: for an asymmetric shape -- and
+    /// `BroadTurn90`'s 107.5/32.5 leads are asymmetric -- the reverse of a
+    /// certified maneuver is a maneuver the catalogue simply does not have.
+    /// That is what made `{Straight0, BroadTurn90}` a DAG with no closed ring
+    /// anywhere, at any inset, in any room.
+    ///
+    /// Reversal is exact, not approximate: the point set is unchanged, so the
+    /// nopp clearances, the bend radius and the wall domain are all identical.
+    /// Reversed instances are nevertheless certified independently.
+    pub fn reversed(&self) -> Self {
+        Self {
+            id: self.id,
+            start: LocalPose::new(self.end.point, opposite(self.end.heading)),
+            end: LocalPose::new(self.start.point, opposite(self.start.heading)),
+            primitives: self
+                .primitives
+                .iter()
+                .rev()
+                .map(reverse_primitive)
+                .collect(),
+        }
+    }
+}
+
+const fn opposite(heading: Heading8) -> Heading8 {
+    Heading8::from_octant(heading.octant() + 4)
+}
+
+fn reverse_primitive(primitive: &PathPrimitive) -> PathPrimitive {
+    match primitive {
+        PathPrimitive::Line { start, end } => PathPrimitive::Line {
+            start: *end,
+            end: *start,
+        },
+        PathPrimitive::Arc {
+            start,
+            end,
+            center,
+            radius_mm,
+            sweep_rad,
+        } => PathPrimitive::Arc {
+            start: *end,
+            end: *start,
+            center: *center,
+            radius_mm: *radius_mm,
+            sweep_rad: -*sweep_rad,
+        },
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -84,6 +137,10 @@ impl MotionTemplate {
 pub struct TemplateTransform {
     pub quarter_turns: u8,
     pub reflected: bool,
+    /// Walk the placed curve backwards. Composes with the rigid part rather
+    /// than being part of it -- reversal is not a symmetry of the plane, so it
+    /// cannot be folded into `quarter_turns`/`reflected`.
+    pub reversed: bool,
     pub period_i: i64,
     pub period_j: i64,
 }
@@ -92,6 +149,7 @@ impl TemplateTransform {
     pub const fn new(
         quarter_turns: u8,
         reflected: bool,
+        reversed: bool,
         period_i: i64,
         period_j: i64,
     ) -> Option<Self> {
@@ -99,6 +157,7 @@ impl TemplateTransform {
             Some(Self {
                 quarter_turns,
                 reflected,
+                reversed,
                 period_i,
                 period_j,
             })
@@ -108,6 +167,11 @@ impl TemplateTransform {
     }
 
     pub fn apply(self, template: &MotionTemplate, period_mm: f64) -> MotionTemplate {
+        let placed = self.place(template, period_mm);
+        if self.reversed { placed.reversed() } else { placed }
+    }
+
+    fn place(self, template: &MotionTemplate, period_mm: f64) -> MotionTemplate {
         let transform_point = |point| self.transform_point(point, period_mm);
         let primitives = template
             .primitives

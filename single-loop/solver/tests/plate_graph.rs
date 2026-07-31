@@ -220,15 +220,15 @@ fn a_broad_turn_90_bridges_two_straight_edges_at_hand_computed_poses() {
 
     let approach = find_edge(
         TemplateId::Straight0,
-        TemplateTransform::new(0, false, 4, 1).unwrap(),
+        TemplateTransform::new(0, false, false, 4, 1).unwrap(),
     );
     let turn = find_edge(
         TemplateId::BroadTurn90,
-        TemplateTransform::new(0, false, 5, 1).unwrap(),
+        TemplateTransform::new(0, false, false, 5, 1).unwrap(),
     );
     let departure = find_edge(
         TemplateId::Straight0,
-        TemplateTransform::new(3, true, 6, 2).unwrap(),
+        TemplateTransform::new(3, true, false, 6, 2).unwrap(),
     );
 
     assert_eq!(approach.start.local_pose.point, point(600.0, 187.5));
@@ -328,4 +328,185 @@ fn c_reverse_family_is_reachable_from_the_straight_family() {
              unreachable from the straight runs"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Reversal closure (task 3c).
+//
+// The pipe is undirected but the pose graph is not. The 8-element symmetry
+// group behind the catalogue does not contain path reversal, so for the five
+// asymmetric templates the reverse of every certified maneuver was simply
+// absent: `{Straight0, BroadTurn90}` was a directed acyclic graph, every
+// (heading, channel parity) state had exactly one successor, and no closed ring
+// existed anywhere, at any inset, in any room.
+// ---------------------------------------------------------------------------
+
+/// `(x_ticks, y_ticks, octant)` on the same 1e-6 mm grid the graph interns on.
+type PoseTicks = (i64, i64, u8);
+
+fn pose_ticks(pose: single_loop_solver::plate::LocalPose) -> PoseTicks {
+    (
+        (pose.point.x * 1e6).round() as i64,
+        (pose.point.y * 1e6).round() as i64,
+        pose.heading.octant(),
+    )
+}
+
+fn flip(key: PoseTicks) -> PoseTicks {
+    (key.0, key.1, (key.2 + 4) % 8)
+}
+
+#[test]
+fn d_every_accepted_edge_has_an_accepted_reverse() {
+    let graph = rectangle_3000x2400_graph();
+
+    // Determinism, pinned on the fixture where the reversal pass's geometric
+    // dedupe actually fires (the small rectangle in
+    // `embedded_graph_is_deterministic_certified_and_contains_diagonals` need
+    // not produce a single duplicate). `plate_api`'s byte-determinism test
+    // depends on this holding for every room, not just that one.
+    assert_eq!(
+        graph,
+        rectangle_3000x2400_graph(),
+        "the reversal pass is not deterministic"
+    );
+    assert!(
+        graph
+            .edges
+            .iter()
+            .any(|edge| edge.template_transform.reversed),
+        "fixture must contain reversed edges for this test to mean anything"
+    );
+    let pairs: BTreeSet<(PoseTicks, PoseTicks)> = graph
+        .edges
+        .iter()
+        .map(|edge| {
+            (
+                pose_ticks(edge.start.local_pose),
+                pose_ticks(edge.end.local_pose),
+            )
+        })
+        .collect();
+    let missing: Vec<u32> = graph
+        .edges
+        .iter()
+        .filter(|edge| {
+            let start = pose_ticks(edge.start.local_pose);
+            let end = pose_ticks(edge.end.local_pose);
+            !pairs.contains(&(flip(end), flip(start)))
+        })
+        .map(|edge| edge.id)
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "{} of {} accepted edges have no accepted reverse (first few: {:?}); the catalogue is \
+         not closed under path reversal, so directed cycles -- rings, and the spiral's return \
+         arm -- cannot exist",
+        missing.len(),
+        graph.edges.len(),
+        &missing[..missing.len().min(5)]
+    );
+}
+
+#[test]
+fn e_the_outermost_closable_ring_is_a_real_directed_cycle() {
+    // A hand-computed closed ring, counter-clockwise, on the outermost channel
+    // combination the parity system allows for this fixture: rows
+    // y = 187.5 (m = 2) and y = 2212.5 (m = 29), columns x = 112.5 (n = 1) and
+    // x = 2887.5 (n = 38). A uniform inset is impossible -- the horizontal and
+    // vertical insets must differ by an odd multiple of 75 mm.
+    //
+    // Each corner is a left turn, and the nopp it rounds fixes the parity it
+    // needs: E->N and W->S round a nopp of index sum n+m+1 (so n+m must be
+    // even), N->W and S->E one of sum n+m (so n+m must be odd). Here
+    // 38+2 = 40 even, 38+29 = 67 odd, 1+29 = 30 even, 1+2 = 3 odd -- all four
+    // satisfied.
+    //
+    // Which of the two lead-length variants applies is fixed by the individual
+    // parities: the long lead (107.5 + R = 187.5 of reach) sits on the even
+    // side, the short one (R + 32.5 = 112.5) on the odd side. Hence, e.g., the
+    // bottom-right corner reaches 187.5 back along the row (n = 38 even) and
+    // 112.5 up the column (m = 2 even).
+    let ring = [
+        // (corner label, start pose, end pose, straight hops to the next corner)
+        ("BR E->N", (point(2700.0, 187.5), Heading8::Deg0), (point(2887.5, 300.0), Heading8::Deg90), 12),
+        ("TR N->W", (point(2887.5, 2100.0), Heading8::Deg90), (point(2700.0, 2212.5), Heading8::Deg180), 16),
+        ("TL W->S", (point(300.0, 2212.5), Heading8::Deg180), (point(112.5, 2100.0), Heading8::Deg270), 12),
+        ("BL S->E", (point(112.5, 300.0), Heading8::Deg270), (point(300.0, 187.5), Heading8::Deg0), 16),
+    ];
+
+    let graph = rectangle_3000x2400_graph();
+    let edge_between = |from: (Point, Heading8), to: (Point, Heading8)| {
+        let want_start = (
+            (from.0.x * 1e6).round() as i64,
+            (from.0.y * 1e6).round() as i64,
+            from.1.octant(),
+        );
+        let want_end = (
+            (to.0.x * 1e6).round() as i64,
+            (to.0.y * 1e6).round() as i64,
+            to.1.octant(),
+        );
+        graph.edges.iter().find(|edge| {
+            pose_ticks(edge.start.local_pose) == want_start
+                && pose_ticks(edge.end.local_pose) == want_end
+        })
+    };
+
+    let mut reversed_corners = 0;
+    let mut total_edges = 0;
+    for (index, (label, corner_start, corner_end, hops)) in ring.iter().enumerate() {
+        let corner = edge_between(*corner_start, *corner_end)
+            .unwrap_or_else(|| panic!("ring corner {label} is not an accepted edge"));
+        assert_eq!(
+            corner.template_id,
+            TemplateId::BroadTurn90,
+            "ring corner {label} is not a BroadTurn90"
+        );
+        if corner.template_transform.reversed {
+            reversed_corners += 1;
+        }
+        total_edges += 1;
+
+        // Walk the side to the next corner's start, one 150 mm lattice hop at a
+        // time, asserting every hop is a real accepted edge.
+        let heading = corner_end.1;
+        let step = match heading {
+            Heading8::Deg0 => (150.0, 0.0),
+            Heading8::Deg90 => (0.0, 150.0),
+            Heading8::Deg180 => (-150.0, 0.0),
+            Heading8::Deg270 => (0.0, -150.0),
+            other => panic!("ring side has a diagonal heading {other:?}"),
+        };
+        let mut cursor = corner_end.0;
+        for hop in 0..*hops {
+            let next = point(cursor.x + step.0, cursor.y + step.1);
+            edge_between((cursor, heading), (next, heading)).unwrap_or_else(|| {
+                panic!(
+                    "hop {hop} of the side after {label} -- ({}, {}) to ({}, {}) heading {:?} -- \
+                     is not an accepted edge",
+                    cursor.x, cursor.y, next.x, next.y, heading
+                )
+            });
+            cursor = next;
+            total_edges += 1;
+        }
+        let (next_corner_point, next_corner_heading) = ring[(index + 1) % ring.len()].1;
+        assert_eq!(
+            (cursor.x, cursor.y, heading),
+            (
+                next_corner_point.x,
+                next_corner_point.y,
+                next_corner_heading
+            ),
+            "the side after {label} does not land on the next corner"
+        );
+    }
+
+    assert_eq!(total_edges, 60, "the ring should be 4 corners plus 56 straights");
+    assert_eq!(
+        reversed_corners, 2,
+        "exactly two of a ring's four corners are path reversals -- if this is 0, the ring is \
+         being built from the old, one-directional octet and something else is wrong"
+    );
 }

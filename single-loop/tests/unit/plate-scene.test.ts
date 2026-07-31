@@ -28,7 +28,7 @@ const model: PlateModel = {
       start: { id: 0, localPose: { point: { x: 20, y: 40 }, heading: "DEG0" }, worldPoint: { x: 20, y: 40 } },
       end: { id: 1, localPose: { point: { x: 180, y: 120 }, heading: "DEG45" }, worldPoint: { x: 180, y: 120 } },
       templateId: "BROAD_TURN90",
-      templateTransform: { quarterTurns: 0, reflected: false, periodI: 0, periodJ: 0 },
+      templateTransform: { quarterTurns: 0, reflected: false, reversed: false, periodI: 0, periodJ: 0 },
       primitives: [
         { kind: "line", start: { x: 20, y: 40 }, end: { x: 100, y: 40 } },
         { kind: "arc", start: { x: 100, y: 40 }, end: { x: 180, y: 120 }, center: { x: 100, y: 120 }, radiusMm: 80, sweepRad: Math.PI / 2 },
@@ -37,7 +37,7 @@ const model: PlateModel = {
     }],
     rejectedEdges: [{
       templateId: "HANDBOOK_REJECTED_TIGHT90",
-      templateTransform: { quarterTurns: 0, reflected: false, periodI: 0, periodJ: 0 },
+      templateTransform: { quarterTurns: 0, reflected: false, reversed: false, periodI: 0, periodJ: 0 },
       primitives: [{ kind: "line", start: { x: 10, y: 10 }, end: { x: 70, y: 10 } }],
       code: "BEND_RADIUS_TOO_SMALL",
       witness: { x: 70, y: 10 },

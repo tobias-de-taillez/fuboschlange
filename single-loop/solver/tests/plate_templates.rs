@@ -121,19 +121,65 @@ fn every_quarter_turn_reflection_and_period_translation_recertifies() {
     // mirror maps it to (-i, j), all of which preserve `i + j` parity.
     let profile = PlateProfile::bekotec_en_23_fi_30_16();
     for template in profile.templates() {
-        for reflected in [false, true] {
-            for quarter_turns in 0..4 {
-                let transform = TemplateTransform::new(quarter_turns, reflected, -2, 3).unwrap();
-                let transformed = transform.apply(&template, profile.period_mm);
-                certify_template(&transformed, &profile).unwrap_or_else(|failure| {
-                    panic!(
-                        "{:?} does not recertify at quarter_turns={quarter_turns} \
-                         reflected={reflected}: {failure:?}",
-                        template.id
-                    )
-                });
+        for reversed_path in [false, true] {
+            for reflected in [false, true] {
+                for quarter_turns in 0..4 {
+                    let transform =
+                        TemplateTransform::new(quarter_turns, reflected, reversed_path, -2, 3)
+                            .unwrap();
+                    let transformed = transform.apply(&template, profile.period_mm);
+                    certify_template(&transformed, &profile).unwrap_or_else(|failure| {
+                        panic!(
+                            "{:?} does not recertify at quarter_turns={quarter_turns} \
+                             reflected={reflected} reversed={reversed_path}: {failure:?}",
+                            template.id
+                        )
+                    });
+                }
             }
         }
+    }
+}
+
+#[test]
+fn reversal_is_an_exact_involution_that_preserves_the_certificate() {
+    // The escalation condition for task 3c: if reversing a template changed any
+    // certified quantity, the geometry would be direction-dependent somewhere.
+    // It is not -- reversal keeps the point set, so clearance and bend radius
+    // are bit-identical -- but it is certified independently rather than
+    // assumed.
+    let profile = PlateProfile::bekotec_en_23_fi_30_16();
+    for template in profile.templates() {
+        let forward = certify_template(&template, &profile).unwrap();
+        let back = template.reversed();
+        let backward = certify_template(&back, &profile).unwrap_or_else(|failure| {
+            panic!("reversed {:?} does not certify: {failure:?}", template.id)
+        });
+        assert_eq!(
+            forward.min_nopp_clearance_mm, backward.min_nopp_clearance_mm,
+            "{:?}: reversal changed the nopp clearance",
+            template.id
+        );
+        assert_eq!(
+            forward.min_bend_radius_mm, backward.min_bend_radius_mm,
+            "{:?}: reversal changed the bend radius",
+            template.id
+        );
+
+        // Endpoints swap and both headings flip by 180 degrees.
+        assert_eq!(back.start.point, template.end.point);
+        assert_eq!(back.end.point, template.start.point);
+        assert_eq!(
+            back.start.heading,
+            Heading8::from_octant(template.end.heading.octant() + 4)
+        );
+        assert_eq!(
+            back.end.heading,
+            Heading8::from_octant(template.start.heading.octant() + 4)
+        );
+
+        // ...and reversing twice is the identity.
+        assert_eq!(back.reversed(), template);
     }
 }
 

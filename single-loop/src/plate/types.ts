@@ -53,6 +53,7 @@ export interface PoseNode {
 export interface TemplateTransform {
   quarterTurns: number;
   reflected: boolean;
+  reversed: boolean;
   periodI: number;
   periodJ: number;
 }

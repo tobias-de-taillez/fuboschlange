@@ -242,7 +242,7 @@ fn hand_built_graph_and_zone() -> (EmbeddedPoseGraph, ConnectionZone, PlateTrans
     let zone = build_connection_zone(&rect_polygon(), &transform, &connection()).unwrap();
     // zone.rect_local is (300,0)-(600,200) for the `connection()` fixture.
 
-    let placeholder_transform = TemplateTransform::new(0, false, 0, 0).unwrap();
+    let placeholder_transform = TemplateTransform::new(0, false, false, 0, 0).unwrap();
 
     // Line from (250,50) to (650,50): constant y=50, inside the zone's
     // y-range [0,200]; x-range [250,650] straddles the zone's x-range
