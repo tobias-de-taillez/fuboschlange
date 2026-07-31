@@ -15,6 +15,16 @@
 //!   directed_cycle` test (same fixture, same phase: rows y=187.5/2212.5,
 //!   columns x=112.5/2887.5, 60 edges, 2 of the 4 corners are path
 //!   reversals) rather than re-deriving the expectation here.
+//! - `ring_construction_stops_before_a_below_minimum_span_ring` uses a
+//!   second, shorter (3000x1000) fixture: a code review found that
+//!   `ring_channels`' original degeneracy check (`m_bot > m_top ||
+//!   n_left > n_right`) only caught an *inverted* range, not an in-order
+//!   but too-short one, so a below-minimum-span ring could silently reach
+//!   `build_ring` and come back indistinguishable from a zone-clipped
+//!   truncation. Fixed in `fields.rs`'s `ring_channels` (per-axis, per-family
+//!   minimum span, `task-4-diagnosis.md` §1.7/§4.3); this test is the
+//!   regression pin, with its own fixtures (`*_1000` suffix) since it needs
+//!   a field shape the 3000x2400 fixture above cannot exercise.
 
 use single_loop_solver::circuit::{
     ConnectionZone, Field, LoopGraphView, RectMm, build_connection_zone, build_graph_view,
@@ -111,6 +121,77 @@ fn view(graph: &EmbeddedPoseGraph) -> LoopGraphView {
 
 fn edge_by_id(graph: &EmbeddedPoseGraph, id: u32) -> &PoseEdge {
     graph.edges.iter().find(|edge| edge.id == id).unwrap()
+}
+
+// --- A second fixture (3000x1000) for the below-minimum-span regression
+// test: shorter than the 3000x2400 fixture above so a real ring goes
+// degenerate on the height axis well before the field is exhausted, which
+// the 2400-tall fixture never exercises (its 7 rings all clear both axes'
+// minima -- ring 6 sits exactly at the 225mm height floor but never under
+// it).
+
+fn rect_polygon_1000() -> Polygon {
+    Polygon::try_from_original(vec![
+        point(0.0, 0.0),
+        point(3000.0, 0.0),
+        point(3000.0, 1000.0),
+        point(0.0, 1000.0),
+    ])
+    .unwrap()
+}
+
+fn transform_1000() -> PlateTransform {
+    PlateTransform::from_edge(
+        point(0.0, 0.0),
+        point(3000.0, 0.0),
+        point(1500.0, 500.0),
+        0.0,
+        0.0,
+    )
+    .unwrap()
+}
+
+fn field_1000() -> Field {
+    Field {
+        id: 0,
+        rect_local: RectMm {
+            min: point(0.0, 0.0),
+            max: point(3000.0, 1000.0),
+        },
+    }
+}
+
+fn graph_1000() -> EmbeddedPoseGraph {
+    let instance = PlateInstance::new(
+        rect_polygon_1000(),
+        transform_1000(),
+        PlateProfile::bekotec_en_23_fi_30_16(),
+        50_000,
+    )
+    .unwrap();
+    build_embedded_graph(&instance, 75.0, PlateGraphLimits::default()).unwrap()
+}
+
+fn zone_1000() -> ConnectionZone {
+    use single_loop_solver::circuit::ConnectionInput;
+    // Same reasoning as `zone()` above: shallow and centered on the bottom
+    // edge, well below every ring's bottom row and every column-node's
+    // lowest y (150, independent of field height), so it cannot clip a lane.
+    build_connection_zone(
+        &rect_polygon_1000(),
+        &transform_1000(),
+        &ConnectionInput {
+            edge_index: 0,
+            center_offset_mm: 1500.0,
+            zone_width_mm: 300.0,
+            zone_depth_mm: 50.0,
+        },
+    )
+    .unwrap()
+}
+
+fn view_1000(graph: &EmbeddedPoseGraph) -> LoopGraphView {
+    build_graph_view(graph, &zone_1000(), &transform_1000())
 }
 
 #[test]
@@ -251,6 +332,56 @@ fn odd_channel_step_spacing_still_produces_closed_rings() {
             lane.node_ids.first(),
             lane.node_ids.last(),
             "lane {} did not close at spacing 225",
+            lane.id
+        );
+    }
+}
+
+#[test]
+fn ring_construction_stops_before_a_below_minimum_span_ring() {
+    // Reviewer-reported repro, reproduced independently by hand before this
+    // test was written (values below match the reviewer's exactly, which
+    // confirms both derivations agree):
+    //
+    // 3000x1000 field, wall_clearance 75, VA150. `choose_ring_phase`'s own
+    // arithmetic picks phase_even=true for ring 0 (inset_error 112.5+62.5+
+    // 37.5+37.5=250 vs. phase_even=false's 37.5+137.5+112.5+112.5=400) --
+    // diagnosis family I, so the real per-axis minima are height>=225mm /
+    // width>=375mm (task-4-diagnosis.md §1.7/§4.3), axes NOT swapped.
+    //
+    //   ring 0 (k=0, inset 75):  m_bot=2  m_top=11 n_left=1 n_right=38
+    //                            -> height 675mm, width 2775mm. Both clear. Valid.
+    //   ring 1 (k=1, inset 225): m_bot=4  m_top=9  n_left=3 n_right=36
+    //                            -> height 375mm, width 2475mm. Both clear. Valid.
+    //   ring 2 (k=2, inset 375): m_bot=6  m_top=7  n_left=5 n_right=34
+    //                            -> height 75mm (< 225 minimum), width 2175mm.
+    //                            Height fails. This is the exact
+    //                            RingChannels{m_bot:6, m_top:7, n_left:5,
+    //                            n_right:34} the old `m_bot > m_top ||
+    //                            n_left > n_right` check let through (6 <= 7
+    //                            passes it even though the span is far too
+    //                            short) -- construction must stop here.
+    //
+    // Expected lane count: 2 (ids 0 and 1); ring 2 and deeper never appear.
+    let graph = graph_1000();
+    let view = view_1000(&graph);
+    let lanes = build_lanes(&field_1000(), 150.0, &graph, &view, &transform_1000(), 75.0).unwrap();
+    assert_eq!(
+        lanes.len(),
+        2,
+        "ring construction should stop before the 75mm-height ring at k=2"
+    );
+    for lane in &lanes {
+        assert_eq!(
+            lane.node_ids.len(),
+            lane.edge_ids.len() + 1,
+            "lane {} has a node/edge count mismatch (build_ring invariant broken)",
+            lane.id
+        );
+        assert_eq!(
+            lane.node_ids.first(),
+            lane.node_ids.last(),
+            "lane {} does not close (truncated?)",
             lane.id
         );
     }

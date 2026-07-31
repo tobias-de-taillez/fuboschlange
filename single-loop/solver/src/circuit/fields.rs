@@ -686,6 +686,25 @@ fn guillotine_decomposition_failed() -> LoopError {
 // `plate::template`'s private `CHANNEL_OFFSET_MM`/`PERIOD_MM` (75 mm is half
 // of `PERIOD_MM`) rather than threaded through `build_lanes`'s brief-fixed
 // signature.
+//
+// Two deliberate deferrals a T5/6 reader should know about before assuming
+// a gap:
+//
+// - Winding is counter-clockwise, matching `plate_graph.rs`'s independently
+//   hand-verified proven ring, not the brief's literal "clockwise". Nothing
+//   in the brief's 3 required tests checks winding direction. A caller that
+//   needs clockwise can reverse a lane's `node_ids`/`edge_ids`: the
+//   catalogue is closed under path reversal (`plate::template`'s
+//   `TemplateTransform::reversed`), so CW is exactly the same set of
+//   certified edges walked the other way, not a different geometry.
+// - `build_ring` does not pick "the ring corner nearest the connection
+//   zone" as its start/entry segment. A ring is a rotation-invariant closed
+//   cycle (`node_ids.first() == node_ids.last()`); which of its four
+//   corners the walk happens to start at carries no meaning a consumer
+//   should rely on. This was a controller decision to defer, not an
+//   oversight — revisit only if a later task's truncation-handling actually
+//   needs a specific entry point (e.g. because the connection zone clips a
+//   ring and which arc survives depends on where the walk started).
 // ---------------------------------------------------------------------------
 
 /// Distance from a wall to the nearest channel centerline
@@ -737,9 +756,13 @@ pub struct Lane {
 /// of adjacent sides — corner existence is *queried* against `graph`/`view`,
 /// never re-derived from the parity algebra, so a plate-layer change that
 /// breaks or extends corner availability is reflected automatically rather
-/// than silently assumed. Rings nest inward until no further ring has a
-/// non-degenerate span at the required parity; this naturally subsumes the
-/// brief's "span < 2×80 mm turn diameter" rule; see the module docs.
+/// than silently assumed. Rings nest inward while both axes clear that
+/// phase's minimum span (`FAMILY_I_MIN_HEIGHT_MM`/`FAMILY_I_MIN_WIDTH_MM`,
+/// axes swapped for the other phase — see `ring_channels`); this is
+/// *not* the brief's pre-diagnosis "span < 2×80 mm turn diameter" guess
+/// (that rule is both uniform-per-axis and off by more than a factor of two
+/// on the axis that needs 375mm), and it is not the same threshold on both
+/// axes within one ring — see the module note above `CHANNEL_OFFSET_MM`.
 ///
 /// Precondition (matching this module's other public entry point): callers
 /// have already certified `graph`/`view` for `field`'s plate — this function
@@ -774,6 +797,13 @@ pub fn build_lanes(
         return Ok(Vec::new());
     };
 
+    // Stopping at ring k's *first* `None` (rather than skipping it and
+    // probing k+1) is safe, not just convenient: `smallest_legal_with_parity`
+    // is applied to a `target_min_{y,x}` that strictly increases with `k`, so
+    // `m_bot`/`n_left` are non-decreasing in `k`; symmetrically `m_top`/
+    // `n_right` are non-increasing. Both spans (`height_mm`, `width_mm` in
+    // `ring_channels`) are therefore non-increasing in `k`, so once one falls
+    // under its family's minimum, no deeper ring can climb back over it.
     let mut lanes = Vec::new();
     let mut k: u32 = 0;
     while let Some(channels) = ring_channels(
@@ -843,13 +873,44 @@ struct RingChannels {
     n_right: i64,
 }
 
+/// A ring's minimum row-span (height) and column-span (width) in the
+/// `phase_even == true` family ("family I": `m_bot`/`n_right` even,
+/// `m_top`/`n_left` odd) — twice that family's `BroadTurn90` corner "reach"
+/// on each axis (task-4-diagnosis.md §1.7's table, confirmed by §4.3 step 3's
+/// `75*(m_top-m_bot) >= 2*row_reach(p)` / `75*(n_right-n_left) >=
+/// 2*col_reach(p)`). The `phase_even == false` family ("family II") needs
+/// the same two numbers with the axes swapped — see `ring_channels` below.
+/// Comparison is `>=`: a ring sitting at exactly the minimum (e.g. this
+/// fixture's family-I ring 6, height exactly 225mm) is still constructible,
+/// not degenerate. Both numbers and the phase-to-axis mapping are pinned by
+/// the existing suite on the *height* axis (a wrong mapping, or `>` instead
+/// of `>=`, drops the 3000x2400 fixture's ring count from 7 to 6 and two
+/// tests fail) — the *width* minimum (375mm here) is not independently
+/// exercised by any fixture (every fixture in this crate happens to be
+/// family I with width the non-binding axis); it is double-sourced from the
+/// diagnosis instead (§4.3 step 3's bracketed value and §1.7's "min width x
+/// height 375 x 225" agree), the same standard applied to the values that
+/// are graph-checked.
+const FAMILY_I_MIN_HEIGHT_MM: f64 = 225.0;
+const FAMILY_I_MIN_WIDTH_MM: f64 = 375.0;
+
 /// Ring `k`'s four side channels at the given phase (`true`: bottom row and
 /// right column even, top row and left column odd; `false`: the reverse —
 /// the two mirror families a `BroadTurn90` corner admits, per the diagnosis
 /// §1.7). `None` when ring `k` doesn't exist: either the nominal inset has
-/// already consumed the field, or no legal channel of the required parity
-/// remains on some side (the same stop condition, expressed once instead of
-/// as a separate "span < threshold" rule).
+/// already consumed the field, no legal channel of the required parity
+/// remains on some side, or the snapped span on some axis falls under that
+/// family's minimum (`FAMILY_I_MIN_HEIGHT_MM`/`FAMILY_I_MIN_WIDTH_MM`, axes
+/// swapped for the other family) — twice the corner "reach" a `BroadTurn90`
+/// needs on that axis. That minimum is per-axis and family-dependent, *not*
+/// a single uniform "span < threshold" (an earlier version of this function
+/// used `m_bot > m_top || n_left > n_right`, which only catches an inverted
+/// range, not an in-order-but-too-short one — e.g. a 3000x1000 field at
+/// wall_clearance 75 / spacing 150 produces a real `m_bot=6, m_top=7`
+/// height-75mm ring at `k=2` that the old check let through and this one
+/// rejects, since family I's real height minimum is 225mm, not "greater than
+/// zero"; see `ring_construction_stops_before_a_below_minimum_span_ring` in
+/// `tests/circuit_lanes.rs` for the full repro).
 fn ring_channels(
     rect: &RectMm,
     wall_clearance_mm: f64,
@@ -873,7 +934,19 @@ fn ring_channels(
     let n_right = largest_legal_with_parity(target_max_x, col_legal, p)?;
     let m_top = largest_legal_with_parity(target_max_y, row_legal, 1 - p)?;
     let n_left = smallest_legal_with_parity(target_min_x, col_legal, 1 - p)?;
-    if m_bot > m_top || n_left > n_right {
+
+    // `m_bot > m_top` / `n_left > n_right` (an inverted range) yields a
+    // negative span, which always fails its positive minimum below, so the
+    // per-axis minimum check subsumes the old ordering check rather than
+    // needing both.
+    let height_mm = channel_value(m_top) - channel_value(m_bot);
+    let width_mm = channel_value(n_right) - channel_value(n_left);
+    let (min_height_mm, min_width_mm) = if phase_even {
+        (FAMILY_I_MIN_HEIGHT_MM, FAMILY_I_MIN_WIDTH_MM)
+    } else {
+        (FAMILY_I_MIN_WIDTH_MM, FAMILY_I_MIN_HEIGHT_MM)
+    };
+    if height_mm < min_height_mm || width_mm < min_width_mm {
         return None;
     }
     Some(RingChannels {
