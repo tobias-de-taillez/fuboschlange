@@ -125,6 +125,28 @@ fn zone_outside_polygon_is_invalid_connection() {
 }
 
 #[test]
+fn zone_corner_outside_polygon_via_depth_is_invalid_connection() {
+    // The test above (`zone_outside_polygon_is_invalid_connection`) actually
+    // trips the port-endpoint-margin check first: center_offset_mm = 10.0
+    // puts the first port at edge offset -15.0, already invalid before any
+    // corner is examined. That leaves the "any zone corner outside the
+    // polygon" branch itself unexercised. Here `center_offset_mm` stays at
+    // the valid default (450.0, well clear of both edge endpoints) and only
+    // `zone_depth_mm` grows past the room's 750 mm depth, so the corner
+    // check is what actually fires. Verified with an ad-hoc run before
+    // adding this test: 800.0 mm depth on this fixture returns
+    // `InvalidConnection`, 200.0 mm (the default) returns `Ok`.
+    let mut connection = connection();
+    connection.zone_depth_mm = 800.0; // deeper than the 750 mm room
+    assert_eq!(
+        build_connection_zone(&rect_polygon(), &transform(), &connection)
+            .unwrap_err()
+            .code,
+        LoopErrorCode::InvalidConnection
+    );
+}
+
+#[test]
 fn graph_view_drops_zone_crossing_edges_and_keeps_far_edges() {
     let (graph, zone, transform) = fixture();
     let view = build_graph_view(&graph, &zone, &transform);
