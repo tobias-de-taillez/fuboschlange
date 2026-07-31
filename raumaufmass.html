@@ -3233,6 +3233,46 @@ globalThis.computeSuspects=function(w, w0, tieTol){
   w.forEach((x,i)=>{ if(x!=null && x>w0 && x>=wMax*(1-tieTol)) s.add(i); });
   return s;
 };
+// Eingrenzungs-Kandidaten, wenn der w-Test den Schuldigen NICHT isolieren
+// kann: bei Redundanz 1 sind alle w mathematisch identisch - welcher Wert
+// falsch ist, laesst sich aus den vorhandenen Zahlen prinzipiell nicht
+// ablesen. Der Ausweg ist eine WIEDERHOLUNG: trifft sie den Fehler, klafft
+// sie sofort; trifft sie ihn nicht, ist die Strecke entlastet und der
+// Kreis kleiner. Vorgeschlagen werden aktive Paare (dedupliziert), nach
+// groesstem Residuumsbetrag zuerst - eine stabile, erklaerbare Reihenfolge.
+globalThis.narrowCandidates=function(meas, v, cap){
+  const count=new Map();
+  meas.forEach(m=>{ const k=[m.a,m.b].sort().join('|'); count.set(k,(count.get(k)||0)+1); });
+  const seen=new Set(), out=[];
+  meas.forEach((m,i)=>{
+    const k=[m.a,m.b].sort().join('|');
+    if(seen.has(k)) return;
+    seen.add(k);
+    // Schon wiederholte Paare nicht erneut vorschlagen: waere die
+    // Wiederholung inkonsistent, haette der w-Test laengst isoliert -
+    // ein drittes Mal messen bringt nichts Neues.
+    if(count.get(k)>=2) return;
+    out.push({a:m.a, b:m.b, av:Math.abs(v && v[i]!=null ? v[i] : 0)});
+  });
+  out.sort((p,q)=>q.av-p.av);
+  return out.slice(0, cap).map(({a,b})=>({a,b}));
+};
+// Globaltest der Ausgleichung: T = Sum((v_i/sigma_i)^2) gegen das
+// 95-Prozent-Quantil von Chi-Quadrat mit r Freiheitsgraden. Ein fester
+// sigmaHat-Faktor uebersieht, dass sigmaHat mit wachsender Redundanz
+// SINKT, waehrend der Fehler drinbleibt - gemessen am Nutzerfall: nach
+// einer Wiederholung fiel sigmaHat von 15,0 auf 11,3 mm und rutschte
+// unter die alte 2,5-sigma-Schwelle, obwohl die falsche Kante noch im
+// Netz stand. T=10,2 gegen chi2(2)=5,99 warnt dort korrekt weiter.
+globalThis.globalTestFails=function(v, sigmas, r){
+  if(!r || r<=0 || !Array.isArray(v) || !v.length) return false;
+  let T=0;
+  v.forEach((vi,i)=>{ const s=(sigmas && sigmas[i])||5; T+=(vi/s)*(vi/s); });
+  const q=[0,3.84,5.99,7.81,9.49,11.07,12.59,14.07,15.51,16.92,18.31];
+  const crit = r<=10 ? q[r]
+    : r*Math.pow(1-2/(9*r)+1.645*Math.sqrt(2/(9*r)),3);   // Wilson-Hilferty, 95 %
+  return T>crit;
+};
 // Im Browser sofort eine an localStorage gebundene Instanz; in Node bleibt
 // nur die Factory (die Checks injizieren sich ihren eigenen Speicher).
 // localStorage kann beim blossen ZUGRIFF werfen (Chrome "alle Cookies
@@ -3286,11 +3326,15 @@ const GROSS_ERROR_SIGMA = 5; // Vielfaches von sigma, ab dem ein Residuum nicht 
 
 // Bei kleiner Redundanz verschmiert ein grober Fehler ueber alle Messungen,
 // ohne dass ein einzelnes w Baardas Schwelle reisst (gemessen: 50 mm Fehler
-// im 6-Messungen-Rechteck -> sigmaHat 15,5 mm, aber alle w < 3). Ein gruener
-// "Geprueft"-Status waere dann eine Falschauskunft - sigmaHat selbst ist der
-// Alarm: deutlich ueber der angenommenen Messgenauigkeit heisst, die Werte
-// passen schlechter zusammen, als das Messgeraet erklaeren kann.
-const SIGMA_SUSPECT_FACTOR = 2.5; // sigmaHat ueber diesem Vielfachen von SIGMA_DEF: warnen statt gruen
+// im 6-Messungen-Rechteck -> sigmaHat 15,5 mm, aber alle w < 3). Ob das
+// Netz als Ganzes stimmt, entscheidet deshalb der Chi-Quadrat-Globaltest
+// (globalTestFails im store-Block) - ein fester sigmaHat-Faktor uebersah,
+// dass sigmaHat mit jeder Wiederholung sinkt, waehrend der Fehler bleibt.
+const netFails=()=>{
+  if(!M.an || !(M.an.redundancy>0)) return false;
+  const act=C.activeMeas(M.meas);
+  return globalTestFails(M.an.v, act.map(m=>m.sigma??C.SIGMA_DEF), M.an.redundancy);
+};
 
 // Ellipsen sind in Wirklichkeit millimetergross, der Raum aber meterweise
 // gezeichnet - unskaliert verschwindet jede Ellipse unter dem Punktmarker.
@@ -3327,7 +3371,7 @@ const $=id=>document.getElementById(id);
 // verbindet sie sofort - den Raum "ablaufen" statt Punkte- und Wandmodus zu
 // jonglieren. null = kein Zug aktiv.
 const M={ pts:[], walls:[], meas:[], mode:'draw', sel:[], chain:null,
-          fit:null, an:null, sugg:[], suspects:new Set(),
+          fit:null, an:null, sugg:[], suspects:new Set(), narrow:[],
           drag:null, dragMode:null, highlight:null };
 
 // Nutzer hat gezoomt oder verschoben - autofit() haelt sich dann zurueck,
@@ -3484,6 +3528,11 @@ function recompute(){
   // Einmal je Aenderung berechnet, von Tabelle UND Plan konsumiert - die
   // Indizes zaehlen ueber activeMeas, wie an.w selbst.
   M.suspects = M.an ? computeSuspects(M.an.w, BAARDA_W0, TIE_TOL) : new Set();
+  // Streuung auffaellig, aber kein EINZELNER Schuldiger isolierbar (leer =
+  // alle unter der Schwelle, >1 = Gleichstand): dann helfen nur
+  // Wiederholungen. Genau ein Verdaechtiger braucht keine Eingrenzung.
+  M.narrow = (netFails() && M.suspects.size!==1)
+    ? narrowCandidates(C.activeMeas(M.meas), M.an.v, C.SUGGEST_CHECK_MAX) : [];
   render();
   // Ein Aufmass dauert leicht eine halbe Stunde. Ein Reload darf es nicht
   // kosten. Bewusst ohne Debounce: serialize() ist bei den hier realistischen
@@ -4470,9 +4519,12 @@ function statusText(){
     return ['Form eindeutig, aber ungeprüft — ein Tippfehler bliebe unbemerkt. Zur Kontrolle nachmessen.','warn'];
   }
   const txtS=M.an.sigmaHat.toFixed(1).replace('.',',');
-  if(M.an.sigmaHat > SIGMA_SUSPECT_FACTOR*C.SIGMA_DEF)
-    return [`Die Messungen streuen stark (± ${txtS} mm) — vermutlich steckt ein Fehler drin. `
-           +`Eine weitere Kontrollmessung grenzt ihn ein.`,'warn'];
+  if(netFails())
+    return M.suspects.size===1
+      ? ['Eine Messung passt nicht zu den übrigen — im Plan und in der Liste rot markiert. '
+        +'Strecke nachmessen oder Messung stilllegen.','bad']
+      : [`Die Messungen streuen stärker, als die Messgenauigkeit erklärt (± ${txtS} mm) — `
+        +`vermutlich steckt ein Fehler drin. Unter »Als Nächstes messen« stehen die Strecken, die ihn eingrenzen.`,'warn'];
   return [`Geprüft — Messgenauigkeit ± ${txtS} mm.`,'good'];
 }
 
@@ -4676,15 +4728,21 @@ function renderPanel(){
     tb.appendChild(tr);
   });
 
-  // Sind mehrere Zeilen markiert, ist das kein Darstellungsfehler, sondern
-  // eine ehrliche Auskunft: die Daten reichen nicht, um unter den gleich
-  // verdaechtigen Messungen eine einzelne herauszugreifen.
-  const showWhy=suspects.size>1;
+  // Ehrliche Auskunft ueber die Grenzen der Daten: bei mehreren gleich
+  // Verdaechtigen ODER bei auffaelliger Streuung ohne benennbaren
+  // Schuldigen (Redundanz 1: alle w mathematisch identisch) sagt die
+  // Tabelle dazu, WARUM sie den Finger nicht auf eine Zeile legen kann -
+  // sonst liest sich die w-Spalte wie ein kaputtes Ranking.
   const why=$('why');
-  why.textContent = showWhy
-    ? 'Mehrere Messungen sind gleich verdächtig — erst eine weitere Messung würde sie trennen.'
-    : '';
-  why.style.display = showWhy ? '' : 'none';
+  let whyTxt='';
+  if(suspects.size>1)
+    whyTxt='Mehrere Messungen sind gleich verdächtig — erst eine weitere Messung würde sie trennen.';
+  else if(M.narrow.length)
+    whyTxt=M.an && M.an.redundancy===1
+      ? 'Mit nur einer Kontrollmessung im Netz sind alle w mathematisch identisch — welche Messung falsch ist, lässt sich aus diesen Daten nicht ablesen. Eine der vorgeschlagenen Strecken erneut messen grenzt den Fehler ein.'
+      : 'Die Streuung ist auffällig, aber kein einzelnes Maß sticht heraus — eine der vorgeschlagenen Wiederholungen grenzt den Fehler ein.';
+  why.textContent=whyTxt;
+  why.style.display = whyTxt ? '' : 'none';
 
   // --- Vorschlaege, nach Zweck getrennt: erst bestimmen, dann pruefen.
   // Als Chips: Antippen oeffnet die Eingabe direkt fuer dieses Paar und
@@ -4698,12 +4756,23 @@ function renderPanel(){
       + e.map(s=>`<button class="sg${s.repeat?' rep':''}" data-a="${s.a}" data-b="${s.b}">${s.a} ↔ ${s.b}${s.repeat?' nochmal':''}</button>`).join('')
       + '</div></div>';
   };
+  // Eingrenzungs-Chips: Wiederholungen bereits gemessener Strecken, wenn
+  // die Streuung auffaellig ist, aber kein einzelner Schuldiger benennbar
+  // (siehe M.narrow in recompute). Ohne sie stuende hier "Nichts mehr
+  // noetig", waehrend der Status oben einen Fehler meldet - genau die
+  // Sackgasse, in der ein Nutzer mit Redundanz 1 sonst landet.
+  const narrowHtml=M.narrow.length
+    ? `<div class="grp"><b>Fehler eingrenzen — Strecke erneut messen:</b><div class="chips">`
+      + M.narrow.map(s=>`<button class="sg rep" data-a="${s.a}" data-b="${s.b}">${s.a} ↔ ${s.b} nochmal</button>`).join('')
+      + '</div></div>'
+    : '';
   if(!M.an) sg.textContent='Vorschläge erscheinen nach der ersten Messung.';
-  else if(!list.length)
+  else if(!list.length && !narrowHtml)
     sg.textContent = M.an.dof>0
       ? 'Keine messbare Strecke bringt das Netz weiter — fehlt eine Wand im Zug?'
       : 'Nichts mehr nötig — alles gemessen und prüfbar.';
   else sg.innerHTML = grp('Damit die Form eindeutig ist:','bestimmt')
+                    + narrowHtml
                     + grp('Zur Kontrolle der Messungen:','pruefbar');
   sg.querySelectorAll('button.sg').forEach(b=>{
     b.onmouseenter=()=>{ M.highlight={a:b.dataset.a,b:b.dataset.b}; drawCanvas(); };
@@ -5504,6 +5573,59 @@ globalThis.selfChecks=function(){
         (()=>{ const s=cs([3.30,3.25],3.29,0.02);
                return s.size===1 && s.has(0); })());
     }
+  }
+  // --- Redundanz-1-Blindheit und Eingrenzung (Nutzerfall vom 2026-07-31):
+  // 3x4-Rechteck, beide 5er-Diagonalen, C-D absichtlich 3,05 statt 3,00.
+  // Mit nur EINEM redundanten Freiheitsgrad sind alle w identisch - der
+  // w-Test KANN den Schuldigen nicht nennen. narrowCandidates liefert dann
+  // die Wiederholungs-Kandidaten, groesstes Residuum zuerst.
+  {
+    const rect=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:3000},{id:'D',x:0,y:3000}];
+    const meas=[
+      {a:'A',b:'B',d:4000},{a:'B',b:'C',d:3000},{a:'C',b:'D',d:4000},
+      {a:'D',b:'A',d:3050},                       // <- die eine falsche Kante
+      {a:'A',b:'C',d:5000},{a:'B',b:'D',d:5000},
+    ].map(m=>({...m,sigma:5}));
+    const fit=C.solve(rect.map(p=>({...p})), meas);
+    const an=C.analyze(fit.pts, meas);
+    chk('r1-fall: Redundanz ist 1', an.redundancy===1);
+    chk('r1-fall: alle w vorhanden', an.w.length===6 && an.w.every(x=>x!=null));
+    chk('r1-fall: alle w identisch (Spread < 1e-3) - Isolation unmoeglich',
+      (()=>{ const ws=an.w; const mx=Math.max(...ws), mn=Math.min(...ws);
+             return mx-mn < 1e-3; })());
+    chk('r1-fall: narrowCandidates dedupliziert, gedeckelt, groesstes |v| zuerst',
+      (()=>{ const n=globalThis.narrowCandidates(meas, an.v, 3);
+             if(n.length!==3) return false;
+             const I=C.idx(fit.pts);
+             const avOf=c=>{ const i=meas.findIndex(m=>[m.a,m.b].sort().join('|')===[c.a,c.b].sort().join('|'));
+                             return Math.abs(an.v[i]); };
+             return avOf(n[0])>=avOf(n[1]) && avOf(n[1])>=avOf(n[2]); })());
+    chk('r1-fall: mit einer Wiederholung isoliert der w-Test den Fehler',
+      (()=>{ const mit=meas.concat([{a:'D',b:'A',d:3000,sigma:5}]);
+             const fit2=C.solve(rect.map(p=>({...p})), mit);
+             const an2=C.analyze(fit2.pts, mit);
+             const sus=globalThis.computeSuspects(an2.w, 3.29, 0.02);
+             return sus.size===1 && sus.has(3); })());
+    const sig5=meas.map(()=>5);
+    chk('globaltest: r1-Fall schlaegt an', globalThis.globalTestFails(an.v, sig5, an.redundancy)===true);
+    chk('globaltest: sauberes Netz schlaegt nicht an',
+      (()=>{ const sauber=meas.map(m=>({...m, d:(m.a==='D'&&m.b==='A')?3000:m.d}));
+             const f=C.solve(rect.map(p=>({...p})), sauber);
+             const a2=C.analyze(f.pts, sauber);
+             return globalThis.globalTestFails(a2.v, sig5, a2.redundancy)===false; })());
+    chk('globaltest: warnt nach Wiederholung einer UNSCHULDIGEN Strecke weiter',
+      (()=>{ // B-D wiederholt (konsistent 5000): sigmaHat sinkt unter den alten
+             // 2,5-sigma-Faktor, der Fehler in D-A steckt aber noch im Netz.
+             const mit=meas.concat([{a:'B',b:'D',d:5000,sigma:5}]);
+             const f=C.solve(rect.map(p=>({...p})), mit);
+             const a2=C.analyze(f.pts, mit);
+             return globalThis.globalTestFails(a2.v, mit.map(()=>5), a2.redundancy)===true; })());
+    chk('narrow: bereits wiederholte Paare werden nicht erneut vorgeschlagen',
+      (()=>{ const mit=meas.concat([{a:'B',b:'D',d:5000,sigma:5}]);
+             const f=C.solve(rect.map(p=>({...p})), mit);
+             const a2=C.analyze(f.pts, mit);
+             const n=globalThis.narrowCandidates(mit, a2.v, 10);
+             return n.length===5 && !n.some(c=>[c.a,c.b].sort().join('')==='BD'); })());
   }
   return {ok, out};
 };
