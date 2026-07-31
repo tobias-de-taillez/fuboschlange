@@ -4628,6 +4628,17 @@ STORE.migrate();
     else setHint('Geteilter Raum importiert — als eigener Raum gespeichert.');
   }
 }
+// Ein Teilen-Link, der im schon offenen Tab landet, ist nur eine
+// Hash-Aenderung - der Browser laedt nicht neu, der Boot-Import oben
+// laeuft nie. Der Hash-Listener uebernimmt dann denselben Pfad.
+addEventListener('hashchange',()=>{
+  const shared=parseShareFragment(location.hash);
+  if(!shared) return;
+  history.replaceState(null,'',location.pathname+location.search);
+  const err=importAsNewRoom(shared.name, shared.data);
+  setHint(err ? 'Geteilter Link ungültig: '+err
+              : 'Geteilter Raum importiert — als eigener Raum gespeichert.');
+});
 if(!currentRoom){
   // deserialize() wirft auf manuell verbogenen Storage-Daten - das darf
   // den Boot nicht toeten, sonst bleibt die Seite leer statt leerzustarten.
