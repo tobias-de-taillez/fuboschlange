@@ -141,6 +141,27 @@
   .wrow.worst{background:var(--bad-bg)}
   .wgrp{margin-top:10px;margin-bottom:2px;font-size:11.5px;letter-spacing:.05em;
     text-transform:uppercase;color:var(--muted)}
+  /* Öffnungs-Einstellungen: erscheint nur für die gewählte Öffnung, und
+     zeigt nur, was für ihre Art überhaupt gilt. */
+  #opop{position:absolute;left:8px;right:8px;bottom:8px;z-index:6;background:var(--surface);
+    border:1px solid var(--ink);border-radius:8px;padding:10px;
+    box-shadow:0 4px 14px rgba(38,36,31,.18)}
+  #opop[hidden]{display:none}
+  @media(min-width:880px){ #opop{left:auto;width:330px} }
+  #opopHead{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  #opopHead b{flex:1;font-size:14.5px}
+  #opopX{min-height:32px;min-width:36px;padding:0}
+  .oprow{display:flex;gap:6px;align-items:center;margin-bottom:7px;flex-wrap:wrap}
+  .oprow[hidden]{display:none}
+  .oprow label{font-size:12.5px;color:var(--muted);min-width:42px}
+  .oprow select,.oprow input{font:inherit;font-size:14px;padding:6px;border:1px solid var(--line);
+    border-radius:6px;background:var(--surface);color:var(--ink);min-width:0;flex:1}
+  .oprow input{font-variant-numeric:tabular-nums;text-align:right;flex:none;width:66px}
+  .seg{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  .seg button{border:0;border-radius:0;min-height:34px;padding:0 9px;font-size:12.5px;background:var(--surface)}
+  .seg button+button{border-left:1px solid var(--line)}
+  .seg button[aria-pressed=true]{background:var(--ink);color:var(--surface)}
+  #opDel{color:var(--bad);border-color:#e2c4be}
   /* Lösch-Popover */
   #pop{position:absolute;z-index:7;background:var(--surface);border:1px solid var(--line);
     border-radius:8px;padding:8px;box-shadow:0 4px 14px rgba(38,36,31,.18);
@@ -309,6 +330,31 @@
         </div>
       </div>
       <div id="pop" hidden><span id="popLabel"></span><button id="popDel">Löschen</button></div>
+      <div id="opop" hidden>
+        <div id="opopHead"><b id="opopTitle"></b><button id="opopX" aria-label="Schließen">✕</button></div>
+        <div class="oprow">
+          <label>Breite</label><select id="opW"></select>
+          <label>Höhe</label><select id="opH"></select>
+        </div>
+        <div class="oprow" id="opFreeRow" hidden>
+          <input id="opWv" inputmode="decimal" size="5"> ×
+          <input id="opHv" inputmode="decimal" size="5"> mm
+          <button id="opFreeOk">Übernehmen</button>
+        </div>
+        <div class="oprow" id="opTypeRow">
+          <label>Art</label><select id="opType"></select>
+        </div>
+        <div class="oprow" id="opSideRow">
+          <label>Band</label>
+          <div class="seg" id="opHinge">
+            <button data-h="left">links</button><button data-h="right">rechts</button>
+          </div>
+          <div class="seg" id="opDir">
+            <button data-o="0">nach innen</button><button data-o="1">nach außen</button>
+          </div>
+        </div>
+        <div class="oprow"><button id="opDel">Öffnung löschen</button></div>
+      </div>
       <div id="wpop" hidden>
         <div id="wpopHead"><b id="wpopTitle"></b><span id="wpopLen"></span><button id="wpopX" aria-label="Schließen">✕</button></div>
         <table id="wpopTbl"><tbody></tbody></table>
@@ -4977,6 +5023,113 @@ document.querySelectorAll('#wAdd button').forEach(b=>{
     setHint(`${OPEN_LABEL[kind]} eingesetzt — ziehen zum Positionieren.`);
   };
 });
+// ================= Öffnungs-Einstellungen =================
+// Kataloge. Tueren folgen den Baurichtmassen (Rohbau = Tuerblatt zzgl.
+// Zarge), Fenster haben keine vergleichbar feste Normreihe - dort sind es
+// die verbreiteten Groessen, jeweils frei ueberschreibbar.
+const CAT={
+  door:{ w:[610,735,860,985,1110], h:[1885,1985,2110] },
+  window:{ w:[600,800,1000,1200,1400], h:[600,800,1000,1200,1400] },
+  hole:{ w:[400,600,800,1000], h:[400,600,800,1000] },
+};
+// Oeffnungsarten. Bandseite (links/rechts) gilt nur, wo es eine
+// senkrechte Drehachse gibt - bei Kipp, Klapp und Schwing waere sie
+// sinnlos und wird deshalb ausgeblendet.
+const TYPES={
+  door:[['turn','Drehflügel'],['slide','Schiebetür'],['none','ohne Türblatt']],
+  window:[['turntilt','Dreh-Kipp'],['turn','Dreh'],['tilt','Kipp'],
+          ['top','Klapp'],['pivot','Schwing'],['stulp','Stulp (zweiflügelig)'],
+          ['fix','fest verglast']],
+  hole:[],
+};
+const HAS_HINGE=new Set(['turn','turntilt','stulp']);
+const HAS_DIR=new Set(['turn','turntilt','tilt','top','pivot','stulp']);
+
+function selectedOpening(){ return M.openings.find(o=>o.id===M.openSel)||null; }
+
+function fillSel(el, werte, aktuell){
+  el.innerHTML = werte.map(v=>`<option value="${v}"${v===aktuell?' selected':''}>${v} mm</option>`).join('')
+    + `<option value="frei"${werte.includes(aktuell)?'':' selected'}>frei…</option>`;
+}
+function renderOpeningPopup(){
+  const o=selectedOpening();
+  const box=$('opop');
+  box.hidden = !o || M.mode!=='wall';
+  if(box.hidden) return;
+  $('opopTitle').textContent=`${OPEN_LABEL[o.kind]} ${Math.round(o.w)} × ${Math.round(o.h)} mm`;
+  const cat=CAT[o.kind]||CAT.hole;
+  fillSel($('opW'), cat.w, Math.round(o.w));
+  fillSel($('opH'), cat.h, Math.round(o.h));
+  const frei = !cat.w.includes(Math.round(o.w)) || !cat.h.includes(Math.round(o.h));
+  $('opFreeRow').hidden=!frei;
+  $('opWv').value=Math.round(o.w); $('opHv').value=Math.round(o.h);
+  const typen=TYPES[o.kind];
+  $('opTypeRow').hidden=!typen.length;
+  if(typen.length){
+    const t=(o.swing&&o.swing.type)||typen[0][0];
+    $('opType').innerHTML=typen.map(([v,l])=>`<option value="${v}"${v===t?' selected':''}>${l}</option>`).join('');
+  }
+  // Nur zeigen, was fuer diese Art ueberhaupt gilt.
+  const t=o.swing&&o.swing.type;
+  const zeigtBand=!!t&&HAS_HINGE.has(t), zeigtRichtung=!!t&&HAS_DIR.has(t);
+  $('opSideRow').hidden=!(zeigtBand||zeigtRichtung);
+  $('opHinge').style.display=zeigtBand?'':'none';
+  $('opDir').style.display=zeigtRichtung?'':'none';
+  $('opHinge').querySelectorAll('button').forEach(b=>
+    b.setAttribute('aria-pressed', String(o.swing&&o.swing.hinge===b.dataset.h)));
+  $('opDir').querySelectorAll('button').forEach(b=>
+    b.setAttribute('aria-pressed', String(!!(o.swing&&o.swing.out)===(b.dataset.o==='1'))));
+}
+// Groesse aendern heisst: neu in die Wand zwingen. Eine Tuer, die durch
+// die neue Breite hinausragen wuerde, wird geschoben statt abgeschnitten.
+function applySize(o, w, h){
+  const shape=currentShape();
+  if(!shape) return;
+  snapshot();
+  Object.assign(o, clampOpening(shape, {...o, w, h}));
+  recompute();
+}
+$('opW').onchange=()=>{
+  const o=selectedOpening(); if(!o) return;
+  if($('opW').value==='frei'){ $('opFreeRow').hidden=false; return; }
+  applySize(o, +$('opW').value, o.h);
+};
+$('opH').onchange=()=>{
+  const o=selectedOpening(); if(!o) return;
+  if($('opH').value==='frei'){ $('opFreeRow').hidden=false; return; }
+  applySize(o, o.w, +$('opH').value);
+};
+$('opFreeOk').onclick=()=>{
+  const o=selectedOpening(); if(!o) return;
+  const w=parseFloat($('opWv').value.replace(',','.')), h=parseFloat($('opHv').value.replace(',','.'));
+  if(!(w>0&&h>0)){ setHint('Maße müssen Zahlen größer 0 sein.'); return; }
+  applySize(o, w, h);
+};
+$('opType').onchange=()=>{
+  const o=selectedOpening(); if(!o) return;
+  snapshot();
+  const t=$('opType').value;
+  o.swing = t==='none' ? null
+    : {type:t, hinge:(o.swing&&o.swing.hinge)||'left', out:!!(o.swing&&o.swing.out)};
+  recompute();
+};
+$('opHinge').querySelectorAll('button').forEach(b=>{
+  b.onclick=()=>{ const o=selectedOpening(); if(!o||!o.swing) return;
+    snapshot(); o.swing.hinge=b.dataset.h; recompute(); };
+});
+$('opDir').querySelectorAll('button').forEach(b=>{
+  b.onclick=()=>{ const o=selectedOpening(); if(!o||!o.swing) return;
+    snapshot(); o.swing.out=b.dataset.o==='1'; recompute(); };
+});
+$('opDel').onclick=()=>{
+  const o=selectedOpening(); if(!o) return;
+  snapshot();
+  M.openings=M.openings.filter(x=>x.id!==o.id);
+  M.openSel=null;
+  recompute();
+};
+$('opopX').onclick=()=>{ M.openSel=null; render(); };
+
 // Ziehen in der Wandansicht: die Oeffnung bleibt HART in der Wand
 // (anders als die Kreuzungsbremse im Grundriss - eine Tuer halb
 // ausserhalb der Wand ist keine sinnvolle Zwischenlage).
@@ -5368,6 +5521,7 @@ function renderPanel(){
   const wt=document.querySelector('#modes button[data-mode="wall"]');
   if(wt) wt.disabled=!wallTabReady();
   renderWallBar();
+  renderOpeningPopup();
   $('empty').style.display = M.pts.length ? 'none' : 'flex';
   $('undo').disabled = !undoStack.length;
 
