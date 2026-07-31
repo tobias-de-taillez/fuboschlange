@@ -72,6 +72,41 @@
 //! requires that stronger property; stitching a truly continuous path is
 //! left to whichever later task turns this provenance into rendered
 //! geometry.
+//!
+//! ## Why `TerminalCut` is a per-ring chain check, not `terminal_corridor_connected`
+//!
+//! `search.rs`'s `Invariant::TerminalCut` doc points at
+//! `terminal_corridor_connected` as *the* mechanism; that BFS is not usable
+//! here. Its cross-lane adjacency rule only ever connects two segments whose
+//! lane ids differ by exactly 1 (`segments_adjacent`'s `a.0.abs_diff(b.0) !=
+//! 1 => false`), which is correct for a pattern that reserves *consecutive*
+//! rings -- but this pattern reserves every *other* ring ({1, 3, 5, ...}, a
+//! constant Δ2 gap by design, since the occupied rings sit at the evens in
+//! between). Fed this pattern's own reserved set, the BFS can never step
+//! from ring 1 to ring 3 (nothing bridges the Δ2 gap in its adjacency rule),
+//! so it reports every reserved set of more than one ring as disconnected --
+//! including the real, correct one the happy path produces. Using it here
+//! would either reject every real arm past a single reserved ring, or (the
+//! bug this replaces) get worked around with a check so weak it accepts a
+//! genuinely broken corridor (see below).
+//!
+//! What the corridor invariant actually needs to guarantee -- "the return
+//! arm can be walked from the innermost reserved ring back out through ring
+//! 1 to the connection zone" -- has its own natural expression at *ring*
+//! granularity, which is exactly what [`SpiralRules::corridor_reaches_zone`]
+//! implements: every ring with any segment reserved is *fully* reserved (no
+//! partial rings), and consecutive reserved rings are linked by a certified
+//! lane-change chain (reusing [`SpiralRules`]'s own `descend_chains` --
+//! `compute_descend_chains` already builds an entry for every lane id whose
+//! `id + 2` exists, not only the even ones `expand` uses, so the odd
+//! (reserved-ring) pairs 1->3, 3->5, ... are already there; see
+//! `return_chain_tests` below for the real-fixture confirmation). A prior
+//! version of this check only tested whether `zone_segment` itself was in
+//! the reserved set -- true from the very first descend onward and never
+//! revisited, so it could not see a gap deeper in the corridor (a hand-built
+//! `{lane 1, lane 5}` reserved set with lane 3 missing passed it). That
+//! existence test is kept, but demoted to an explicit sanity precondition
+//! (`corridor_reaches_zone`'s point 1) rather than treated as the invariant.
 
 use crate::circuit::fields::Lane;
 use crate::circuit::search::{
@@ -248,13 +283,79 @@ impl SpiralRules {
     /// Whether every segment of `lane_id` is already in
     /// `state.reserved_lane_segments` -- vacuously true if `lane_id` does not
     /// exist among `self.lanes` (nothing to reserve, same "no lane 7" case
-    /// as `reserved_segments_for`).
+    /// as `reserved_segments_for`). `Invariant::Alternation`'s check: "is it
+    /// still fine for lane `lane_id` to be unreserved" (yes, if it can't
+    /// exist at all).
     fn lane_fully_reserved(&self, state: &SearchState, lane_id: u32) -> bool {
-        match self.lane_by_id(lane_id) {
-            Some(lane) => (0..lane.edge_ids.len() as u32)
-                .all(|i| state.reserved_lane_segments.contains(&(lane_id, i))),
-            None => true,
+        self.ring_reservation_status(&state.reserved_lane_segments, lane_id)
+            .unwrap_or(true)
+    }
+
+    /// `Some(true)`/`Some(false)` for whether every segment of `ring` is
+    /// present in `reserved`, or `None` if `ring` does not exist among
+    /// `self.lanes` at all. Shared arithmetic between two different
+    /// invariants that disagree on what a missing ring *means*:
+    /// `lane_fully_reserved` (`Invariant::Alternation`) treats "doesn't
+    /// exist" as vacuously fine (nothing to reserve), while
+    /// `corridor_reaches_zone` (`Invariant::TerminalCut`) treats a reserved
+    /// segment naming a ring that doesn't exist as straightforwardly invalid
+    /// -- see each caller.
+    fn ring_reservation_status(&self, reserved: &BTreeSet<(u32, u32)>, ring: u32) -> Option<bool> {
+        self.lane_by_id(ring)
+            .map(|lane| (0..lane.edge_ids.len() as u32).all(|i| reserved.contains(&(ring, i))))
+    }
+
+    /// `Invariant::TerminalCut`'s real check (see the module doc's "why
+    /// `TerminalCut` is a per-ring chain check, not `terminal_corridor_
+    /// connected`"): whether `reserved` describes a return corridor that can
+    /// actually be walked from its innermost ring back out to
+    /// `self.zone_segment`'s own ring. Three conditions, all required:
+    ///
+    /// 1. `self.zone_segment` itself is reserved -- the amendment's literal
+    ///    text, kept as an explicit sanity precondition (not the invariant
+    ///    itself: it alone cannot see a gap deeper in the corridor, which is
+    ///    exactly the vacuous case this replaces).
+    /// 2. Every ring with *any* segment in `reserved` is *fully* reserved --
+    ///    true by construction under `SpiralRules`' own atomic
+    ///    reservation (`enter_lane_action` reserves a whole ring in one
+    ///    side effect), so this should never actually fire under normal
+    ///    operation; it is still a real check here, not a `debug_assert!`,
+    ///    because `check` is a public trait method a test (or a future
+    ///    caller) can hand any `SearchState` to, and this module never
+    ///    panics on adversarial input (matching `expand`'s own "fail closed,
+    ///    don't panic" stance).
+    /// 3. `reserved`'s distinct rings, sorted ascending, are consecutive
+    ///    lane-change pairs each present in `self.descend_chains` -- reused
+    ///    directly, not recomputed: `compute_descend_chains` already builds
+    ///    an entry for *every* lane id whose `id + 2` exists, which includes
+    ///    the odd (reserved-ring) pairs 1->3, 3->5, ... alongside the even
+    ///    ones `expand` uses for descend actions (confirmed on the real
+    ///    fixture by `return_chain_tests`, below). A gap (e.g. `{1, 5}`
+    ///    without `3`) fails here: `descend_chains[&1].to_lane == 3 != 5`.
+    fn corridor_reaches_zone(&self, reserved: &BTreeSet<(u32, u32)>) -> bool {
+        if reserved.is_empty() {
+            return true;
         }
+        if !reserved.contains(&self.zone_segment) {
+            return false;
+        }
+        let rings: BTreeSet<u32> = reserved.iter().map(|&(ring, _)| ring).collect();
+        if rings
+            .iter()
+            .any(|&ring| self.ring_reservation_status(reserved, ring) != Some(true))
+        {
+            return false;
+        }
+        rings
+            .iter()
+            .copied()
+            .collect::<Vec<u32>>()
+            .windows(2)
+            .all(|pair| {
+                self.descend_chains
+                    .get(&pair[0])
+                    .is_some_and(|chain| chain.to_lane == pair[1])
+            })
     }
 
     /// `Invariant::TurnBudget`'s real check, run only against a `terminate`
@@ -327,9 +428,16 @@ impl PatternRules for SpiralRules {
             return Err(Invariant::ReservedLane);
         }
         if action.kind == "descend" {
-            // Safe: `"descend"` only ever targets `lane_id >= 2` (bootstrap
-            // uses `"start"`, never `"descend"`), so `- 1` cannot underflow.
-            let prev_lane = action.occupy.0 - 1;
+            // `checked_sub`, not `- 1`: `"descend"` only ever targets
+            // `lane_id >= 2` *by this module's own construction*
+            // (bootstrap uses `"start"`, never `"descend"`), but `check` is
+            // a public trait method a test or future caller can hand any
+            // `Action` to -- guarded at this boundary rather than trusted,
+            // failing closed (rejected, not panicking) exactly like
+            // `expand` fails closed on a foreign `SearchState`.
+            let Some(prev_lane) = action.occupy.0.checked_sub(1) else {
+                return Err(Invariant::Alternation);
+            };
             if !self.lane_fully_reserved(state, prev_lane) {
                 return Err(Invariant::Alternation);
             }
@@ -337,9 +445,28 @@ impl PatternRules for SpiralRules {
         if action.occupy == TERMINAL_MARKER && !self.terminate_turn_budget_ok(state) {
             return Err(Invariant::TurnBudget);
         }
+        // `Invariant::TerminalCut` is evaluated on every action, not only
+        // ones that add a reservation. An earlier draft skipped it whenever
+        // `action.reserves` was empty, reasoning that an unchanged input has
+        // an unchanged (already-checked) answer -- true only if every
+        // reservation in `state` was itself built up through a `check`-ed
+        // action on *this* path. That does not hold for a hand-seeded
+        // `SearchState` (exactly what `check` -- a public trait method --
+        // must still handle correctly, and what
+        // `terminal_cut_rejects_a_disconnected_reserved_corridor` below
+        // exercises): a caller can construct a broken reserved set directly
+        // and then check a `"descend"`/`"terminate"` action whose own
+        // `reserves` happens to be empty (e.g. descending to ring 6 reserves
+        // nothing further -- ring 7 doesn't exist), which would let the
+        // pre-existing break through unexamined. Running the check
+        // unconditionally costs nothing extra that matters: the expensive
+        // part (real graph queries) is already fully precomputed, once, in
+        // `self.descend_chains` (see the module doc) -- what runs here on
+        // every call is a handful of `BTreeSet`/`BTreeMap` lookups over at
+        // most a few hundred reserved segments, not a graph traversal.
         let mut simulated_reserved = state.reserved_lane_segments.clone();
         simulated_reserved.extend(action.reserves.iter().copied());
-        if !simulated_reserved.is_empty() && !simulated_reserved.contains(&self.zone_segment) {
+        if !self.corridor_reaches_zone(&simulated_reserved) {
             return Err(Invariant::TerminalCut);
         }
         if state.used_length_mm + action.length_mm
@@ -443,6 +570,19 @@ fn primitives_length_mm(primitives: &[PathPrimitive]) -> f64 {
 /// certified lane-change chain from `k` to `k+2` (see the module doc);
 /// absent for a `k` with no valid chain (that `k`'s `expand` will then never
 /// offer `"descend"`, only `"terminate"`).
+///
+/// This map has two callers with different exclusion needs, both satisfied
+/// by the same "exclude `k+1`" rule for an unrelated reason each: for even
+/// `k` (an occupied ring), entry `k` is the inward arm's own lane-change,
+/// where `k+1` is the *reserved* ring the entry must not cut across; for
+/// odd `k` (a reserved ring), entry `k` is reused by
+/// [`SpiralRules::corridor_reaches_zone`] as the return path's lane-change,
+/// where `k+1` is instead the *occupied* ring the return path must not cut
+/// across. Both are correct only because "the ring strictly between two
+/// reserved-or-occupied rings two apart" happens to be `k+1` regardless of
+/// which parity `k` has -- if `excluded_edge_ids`'s signature ever changes
+/// to something other than `(from, from + 1, to)`, re-derive this for both
+/// callers, not just the inward-arm one it was written for.
 fn compute_descend_chains(
     lanes: &[Lane],
     graph: &EmbeddedPoseGraph,
@@ -481,6 +621,12 @@ fn index_edges_by_start_node(graph: &EmbeddedPoseGraph) -> BTreeMap<u32, Vec<u32
 /// lane-change chain candidates so a chain can never, even coincidentally,
 /// reuse a segment the search will go on to reserve (controller amendment
 /// 5's hard-invariant concern; see the module doc).
+///
+/// Called from [`compute_descend_chains`] with `skipped == from + 1` for
+/// every `from`, which is the *reserved* ring when `from` is even (inward
+/// arm) and the *occupied* ring when `from` is odd (return path, reused by
+/// `corridor_reaches_zone`) -- see that function's doc for why one call
+/// shape correctly serves both.
 fn excluded_edge_ids(lanes: &[Lane], from: u32, skipped: u32, to: u32) -> HashSet<u32> {
     let mut excluded = HashSet::new();
     for id in [from, skipped, to] {
@@ -661,5 +807,126 @@ fn reconstruct_arm(rules: &SpiralRules, state: &SearchState) -> InwardArm {
     InwardArm {
         lane_sequence,
         edge_ids,
+    }
+}
+
+#[cfg(test)]
+mod return_chain_tests {
+    //! Started as a throwaway reviewer-review probe ("does `compute_descend_
+    //! chains` -- which iterates *every* lane id whose `id+2` also exists,
+    //! not just even ones -- already produce usable entries for the odd
+    //! (reserved) ring pairs 1->3 and 3->5, with hop edges that avoid the
+    //! *occupied* middle ring (2, 4 respectively), on the real fixture?");
+    //! confirmed yes (`descend_chains.keys() == [0,1,2,3,4]`) and kept as a
+    //! permanent pin, matching `fields.rs`'s own precedent for a private
+    //! invariant the integration tests can only reach indirectly (via
+    //! `Invariant::TerminalCut`, which is *what* fails, not *why* the
+    //! underlying chain lookup would have failed).
+    use super::*;
+    use crate::circuit::types::ConnectionInput;
+    use crate::circuit::zone::{build_connection_zone, build_graph_view};
+    use crate::geometry::Polygon;
+    use crate::model::Point;
+    use crate::plate::{PlateGraphLimits, PlateInstance, build_embedded_graph};
+
+    fn point(x: f64, y: f64) -> Point {
+        Point::new(x, y)
+    }
+
+    fn rect_polygon() -> Polygon {
+        Polygon::try_from_original(vec![
+            point(0.0, 0.0),
+            point(3000.0, 0.0),
+            point(3000.0, 2400.0),
+            point(0.0, 2400.0),
+        ])
+        .unwrap()
+    }
+
+    fn transform() -> crate::plate::PlateTransform {
+        crate::plate::PlateTransform::from_edge(
+            point(0.0, 0.0),
+            point(3000.0, 0.0),
+            point(1500.0, 1200.0),
+            0.0,
+            0.0,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn odd_ring_pairs_have_certified_return_chains_avoiding_the_occupied_middle_ring() {
+        let instance = PlateInstance::new(
+            rect_polygon(),
+            transform(),
+            PlateProfile::bekotec_en_23_fi_30_16(),
+            50_000,
+        )
+        .unwrap();
+        let graph = build_embedded_graph(&instance, 75.0, PlateGraphLimits::default()).unwrap();
+        let zone = build_connection_zone(
+            &rect_polygon(),
+            &transform(),
+            &ConnectionInput {
+                edge_index: 0,
+                center_offset_mm: 1500.0,
+                zone_width_mm: 300.0,
+                zone_depth_mm: 50.0,
+            },
+        )
+        .unwrap();
+        let view = build_graph_view(&graph, &zone, &transform());
+        let field = crate::circuit::fields::Field {
+            id: 0,
+            rect_local: RectMm {
+                min: point(0.0, 0.0),
+                max: point(3000.0, 2400.0),
+            },
+        };
+        let lanes =
+            crate::circuit::fields::build_lanes(&field, 150.0, &graph, &view, &transform(), 75.0)
+                .unwrap();
+        assert_eq!(lanes.len(), 7, "sanity: real fixture has 7 lanes");
+
+        let chains = compute_descend_chains(&lanes, &graph);
+
+        let chain_1_3 = chains.get(&1);
+        eprintln!("chain from ring 1: {chain_1_3:?}");
+        assert!(
+            chain_1_3.is_some(),
+            "no certified chain found from ring 1 to ring 3"
+        );
+        let chain_1_3 = chain_1_3.unwrap();
+        assert_eq!(chain_1_3.to_lane, 3);
+        let ring2_edges: HashSet<u32> = lanes[2].edge_ids.iter().copied().collect();
+        assert!(
+            chain_1_3
+                .hop_edge_ids
+                .iter()
+                .all(|id| !ring2_edges.contains(id)),
+            "1->3 chain must avoid the occupied middle ring (2)'s own edges"
+        );
+
+        let chain_3_5 = chains.get(&3);
+        eprintln!("chain from ring 3: {chain_3_5:?}");
+        assert!(
+            chain_3_5.is_some(),
+            "no certified chain found from ring 3 to ring 5"
+        );
+        let chain_3_5 = chain_3_5.unwrap();
+        assert_eq!(chain_3_5.to_lane, 5);
+        let ring4_edges: HashSet<u32> = lanes[4].edge_ids.iter().copied().collect();
+        assert!(
+            chain_3_5
+                .hop_edge_ids
+                .iter()
+                .all(|id| !ring4_edges.contains(id)),
+            "3->5 chain must avoid the occupied middle ring (4)'s own edges"
+        );
+
+        eprintln!(
+            "all descend_chains keys: {:?}",
+            chains.keys().collect::<Vec<_>>()
+        );
     }
 }

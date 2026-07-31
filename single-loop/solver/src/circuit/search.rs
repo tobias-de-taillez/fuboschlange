@@ -83,7 +83,16 @@ pub enum Invariant {
     /// `SearchState::reserved_lane_segments`.
     ReservedLane,
     /// The action would disconnect some reserved segment from the
-    /// connection zone (see [`terminal_corridor_connected`]).
+    /// connection zone. [`terminal_corridor_connected`] is *one* way to
+    /// check this -- correct for a rules impl whose reserved segments form a
+    /// corridor of lane-id-adjacent (Δ1) rings, since its cross-lane
+    /// adjacency rule only ever bridges lanes exactly 1 apart. It is not
+    /// the only way: a rules impl whose reservation pattern has a different
+    /// shape (e.g. `circuit::spiral`'s inward arm, which reserves every
+    /// *other* ring -- a constant Δ2 gap by design) needs its own
+    /// corridor-connectivity check shaped to match (see
+    /// `spiral.rs`'s module doc, "why `TerminalCut` is a per-ring chain
+    /// check, not `terminal_corridor_connected`").
     TerminalCut,
     /// The action would leave too little span for a certified turn.
     TurnBudget,

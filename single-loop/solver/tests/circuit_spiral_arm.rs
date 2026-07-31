@@ -20,10 +20,25 @@
 //! `zone_segment` is fixed at `(1, 0)` throughout: lane 1 is always the
 //! first lane reserved (as a side effect of occupying lane 0), so this
 //! doorway segment becomes satisfied from the very first descend onward.
+//!
+//! ## Reviewer follow-up: `TerminalCut` redesign
+//!
+//! The first draft's `TerminalCut` only checked whether `zone_segment`
+//! itself was in the reserved set -- true from the first descend onward and
+//! never revisited, so it could not see a gap deeper in the corridor. Fixed
+//! in `spiral.rs` (`SpiralRules::corridor_reaches_zone`; see its module
+//! doc's "why `TerminalCut` is a per-ring chain check, not
+//! `terminal_corridor_connected`" for the full rationale) to check the
+//! invariant's actual physical meaning: every reserved ring is fully
+//! reserved, and consecutive reserved rings are linked by a certified
+//! lane-change chain, all the way from the innermost reserved ring back to
+//! `zone_segment`'s own ring. `terminal_cut_rejects_a_disconnected_reserved_
+//! corridor` below is the reviewer's own adversarial construction (reserved
+//! = {lane 1, lane 5}, lane 3 missing) that the old check let through.
 
 use single_loop_solver::circuit::{
-    Action, ConnectionInput, ConnectionZone, Field, Journal, Lane, LoopGraphView, PatternRules,
-    RectMm, SearchFailureKind, SearchState, SpiralRules, backtracking_search,
+    Action, ConnectionInput, ConnectionZone, Field, Invariant, Journal, Lane, LoopGraphView,
+    PatternRules, RectMm, SearchFailureKind, SearchState, SpiralRules, backtracking_search,
     build_connection_zone, build_graph_view, build_lanes, plan_inward_arm, turn_budget_ok,
 };
 use single_loop_solver::geometry::Polygon;
@@ -341,6 +356,166 @@ fn spiral_rules_check_rejects_reserved_occupation_directly() {
     };
     assert!(matches!(
         PatternRules::check(&rules, &state, &action),
-        Err(single_loop_solver::circuit::Invariant::ReservedLane)
+        Err(Invariant::ReservedLane)
+    ));
+}
+
+#[test]
+fn terminal_cut_rejects_a_disconnected_reserved_corridor() {
+    // Reviewer's adversarial construction: lane 1 and lane 5 both fully
+    // reserved, lane 3 -- the ring that must link them -- entirely absent.
+    // The first-draft `TerminalCut` (a bare `zone_segment ∈ reserved`
+    // existence check) let this through, since `zone_segment = (1, 0)` is
+    // present. `corridor_reaches_zone`'s stronger, per-ring check must not:
+    // sorted reserved rings are `[1, 5]`, and `descend_chains[&1].to_lane ==
+    // 3 != 5`, so the pair doesn't link.
+    //
+    // A plain `"continue"` action (rather than a `"descend"`) is checked
+    // deliberately, isolating `TerminalCut` from `Alternation`/`ReservedLane`
+    // -- neither of those has anything to say about an action that neither
+    // targets a reserved segment nor enters a new ring.
+    let graph = graph();
+    let lanes = lanes7(&graph);
+    let rules = SpiralRules::new(
+        lanes.clone(),
+        zone_segment(),
+        150.0,
+        PlateProfile::bekotec_en_23_fi_30_16(),
+        &graph,
+    );
+    let lane1 = lanes.iter().find(|lane| lane.id == 1).unwrap();
+    let lane5 = lanes.iter().find(|lane| lane.id == 5).unwrap();
+    let mut reserved: BTreeSet<(u32, u32)> = BTreeSet::new();
+    reserved.extend((0..lane1.edge_ids.len() as u32).map(|i| (1, i)));
+    reserved.extend((0..lane5.edge_ids.len() as u32).map(|i| (5, i))); // lane 3 never reserved
+
+    let state = SearchState {
+        occupied_lane_segments: BTreeSet::new(),
+        reserved_lane_segments: reserved,
+        used_length_mm: 0.0,
+        journal: Journal::new(10),
+        actions_used: 0,
+    };
+    let action = Action {
+        kind: "continue".to_owned(),
+        occupy: (0, 0),
+        reserves: Vec::new(),
+        length_mm: 0.0,
+        witness: None,
+    };
+    assert!(matches!(
+        PatternRules::check(&rules, &state, &action),
+        Err(Invariant::TerminalCut)
+    ));
+}
+
+#[test]
+fn terminal_cut_never_rejects_the_normal_arm_construction() {
+    // Positive control for the redesign: the real happy-path search (0, 2,
+    // 4, 6, reserving 1, 3, 5 in order) must never trip the stronger
+    // `TerminalCut` -- every reservation it makes is atomic and each
+    // consecutive pair is genuinely linked (pinned independently by
+    // `spiral.rs`'s `return_chain_tests`), so the corridor is valid at every
+    // step. Inspects the full journal (not just the `Ok` result) so a
+    // regression that rejects-then-recovers via some other path would still
+    // be caught.
+    let graph = graph();
+    let rules = SpiralRules::new(
+        lanes7(&graph),
+        zone_segment(),
+        150.0,
+        PlateProfile::bekotec_en_23_fi_30_16(),
+        &graph,
+    );
+    let initial = SearchState {
+        occupied_lane_segments: BTreeSet::new(),
+        reserved_lane_segments: BTreeSet::new(),
+        used_length_mm: 0.0,
+        journal: Journal::new(200),
+        actions_used: 0,
+    };
+    let result = backtracking_search(&rules, initial, 100_000).unwrap();
+    assert!(
+        !result
+            .journal
+            .entries()
+            .iter()
+            .any(|e| e.rejected_by.as_deref() == Some("TerminalCut")),
+        "the normal arm construction must never trip TerminalCut"
+    );
+}
+
+#[test]
+fn alternation_rejects_descending_past_an_unreserved_predecessor() {
+    // Natural adversarial state: nothing has ever been reserved (as if lane
+    // 0 were occupied without ever reserving lane 1 -- an inconsistent state
+    // no real `SpiralRules`-driven action can produce, since `enter_lane_
+    // action` always reserves atomically alongside occupation), then a
+    // `"descend"` to lane 2 is attempted. `Alternation` requires lane 1 (2's
+    // predecessor) to be fully reserved first; it is checked (and must
+    // fire) before `TerminalCut` ever runs.
+    let graph = graph();
+    let lanes = lanes7(&graph);
+    let rules = SpiralRules::new(
+        lanes,
+        zone_segment(),
+        150.0,
+        PlateProfile::bekotec_en_23_fi_30_16(),
+        &graph,
+    );
+    let state = SearchState {
+        occupied_lane_segments: BTreeSet::new(),
+        reserved_lane_segments: BTreeSet::new(),
+        used_length_mm: 0.0,
+        journal: Journal::new(10),
+        actions_used: 0,
+    };
+    let action = Action {
+        kind: "descend".to_owned(),
+        occupy: (2, 0),
+        reserves: Vec::new(),
+        length_mm: 0.0,
+        witness: None,
+    };
+    assert!(matches!(
+        PatternRules::check(&rules, &state, &action),
+        Err(Invariant::Alternation)
+    ));
+}
+
+#[test]
+fn descend_to_lane_zero_fails_closed_instead_of_underflowing() {
+    // Reviewer minor: `check`'s `Alternation` arm computes `occupy.0 - 1`
+    // for a `"descend"` action. This module's own `expand` never proposes
+    // `"descend"` to lane 0 (that is what `"start"` is for), but `check` is
+    // a public trait method a foreign caller can hand any `Action` --
+    // guarded with `checked_sub` and rejected (not panicking) exactly like
+    // `expand` fails closed on a foreign `SearchState`.
+    let graph = graph();
+    let lanes = lanes7(&graph);
+    let rules = SpiralRules::new(
+        lanes,
+        zone_segment(),
+        150.0,
+        PlateProfile::bekotec_en_23_fi_30_16(),
+        &graph,
+    );
+    let state = SearchState {
+        occupied_lane_segments: BTreeSet::new(),
+        reserved_lane_segments: BTreeSet::new(),
+        used_length_mm: 0.0,
+        journal: Journal::new(10),
+        actions_used: 0,
+    };
+    let action = Action {
+        kind: "descend".to_owned(),
+        occupy: (0, 0),
+        reserves: Vec::new(),
+        length_mm: 0.0,
+        witness: None,
+    };
+    assert!(matches!(
+        PatternRules::check(&rules, &state, &action),
+        Err(Invariant::Alternation)
     ));
 }
