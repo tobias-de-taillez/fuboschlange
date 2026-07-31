@@ -4174,7 +4174,7 @@ function renderLib(){
     };
     row.querySelector('.del2').onclick=()=>{
       const r=STORE.load(id);
-      if(!confirm(`Raum „${r?r.name:''}” löschen?`)) return;
+      if(!confirm(`Raum „${r?r.name:''}“ löschen?`)) return;
       STORE.remove(id);
       if(id===currentRoom){
         const l=STORE.list();
