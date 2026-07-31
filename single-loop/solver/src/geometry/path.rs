@@ -188,11 +188,11 @@ fn merge_compatible_neighbors(
             primitive
         };
 
-        if let Some(last) = merged.last_mut() {
-            if let Some(candidate) = try_merge(last, &primitive) {
-                *last = candidate;
-                continue;
-            }
+        if let Some(last) = merged.last_mut()
+            && let Some(candidate) = try_merge(last, &primitive)
+        {
+            *last = candidate;
+            continue;
         }
 
         merged.push(primitive);

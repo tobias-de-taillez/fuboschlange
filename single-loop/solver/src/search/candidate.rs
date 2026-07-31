@@ -37,6 +37,7 @@ pub struct RejectionSummary {
 }
 
 #[derive(Clone, Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum SpacingEvaluation {
     Success(CertifiedCandidate),
     LengthOnly {

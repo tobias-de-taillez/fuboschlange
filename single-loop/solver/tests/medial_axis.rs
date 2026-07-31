@@ -109,10 +109,12 @@ fn assert_finite_graph(graph: &MedialGraph) {
     }
 }
 
+type EdgeSignature = (EdgeId, NodeId, NodeId, Vec<(i64, i64)>);
+
 #[derive(Debug, PartialEq, Eq)]
 struct GraphSignature {
     nodes: Vec<(NodeId, i64, i64)>,
-    edges: Vec<(EdgeId, NodeId, NodeId, Vec<(i64, i64)>)>,
+    edges: Vec<EdgeSignature>,
     ccw_edges: Vec<Vec<EdgeId>>,
     leaves: Vec<NodeId>,
 }
@@ -121,14 +123,14 @@ fn local_quantized_coordinate(value: f64) -> i64 {
     (value / 0.001).round() as i64
 }
 
-fn graph_topology_signature(
-    graph: &MedialGraph,
-) -> (
+type TopologySignature = (
     Vec<NodeId>,
     Vec<(EdgeId, NodeId, NodeId)>,
     Vec<Vec<EdgeId>>,
     Vec<NodeId>,
-) {
+);
+
+fn graph_topology_signature(graph: &MedialGraph) -> TopologySignature {
     (
         graph.nodes.iter().map(|node| node.id).collect(),
         graph

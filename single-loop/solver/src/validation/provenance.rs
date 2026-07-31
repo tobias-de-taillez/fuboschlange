@@ -91,12 +91,11 @@ impl CandidatePath {
             .enumerate()
         {
             let mut primitive = validate_single_primitive(primitive)?;
-            if let Some(previous_end) = previous_end {
-                if previous_end.distance_to(primitive.start()) <= POSITION_TOLERANCE_MM
-                    && previous_end != primitive.start()
-                {
-                    primitive = validate_single_primitive(primitive.with_start(previous_end))?;
-                }
+            if let Some(previous_end) = previous_end
+                && previous_end.distance_to(primitive.start()) <= POSITION_TOLERANCE_MM
+                && previous_end != primitive.start()
+            {
+                primitive = validate_single_primitive(primitive.with_start(previous_end))?;
             }
 
             if let Some(previous) = groups.last() {
@@ -119,20 +118,19 @@ impl CandidatePath {
             }
 
             let primitive_length_mm = primitive.length();
-            if let Some(previous) = groups.last_mut() {
-                if previous.role == role {
-                    if let Some(merged) = try_merge_same_role(&previous.primitive, &primitive) {
-                        let start_offset_mm = previous.primitive.length();
-                        previous.primitive = merged;
-                        previous.members.push(GroupMember {
-                            original_index,
-                            start_offset_mm,
-                            primitive_length_mm,
-                        });
-                        previous_end = Some(previous.primitive.end());
-                        continue;
-                    }
-                }
+            if let Some(previous) = groups.last_mut()
+                && previous.role == role
+                && let Some(merged) = try_merge_same_role(&previous.primitive, &primitive)
+            {
+                let start_offset_mm = previous.primitive.length();
+                previous.primitive = merged;
+                previous.members.push(GroupMember {
+                    original_index,
+                    start_offset_mm,
+                    primitive_length_mm,
+                });
+                previous_end = Some(previous.primitive.end());
+                continue;
             }
 
             previous_end = Some(primitive.end());

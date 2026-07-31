@@ -320,11 +320,5 @@ fn intersection_arc_parameter_for_point(arc: &PathPrimitive, point: Point) -> Op
 }
 
 fn clamp_unit(value: f64) -> f64 {
-    if value < 0.0 {
-        0.0
-    } else if value > 1.0 {
-        1.0
-    } else {
-        value
-    }
+    value.clamp(0.0, 1.0)
 }

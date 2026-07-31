@@ -44,7 +44,7 @@ fn quantize_coordinate(relative_mm: f64) -> Option<i64> {
         return None;
     }
     let rounded = (relative_mm / TOPOLOGY_QUANTIZATION_MM).round();
-    if rounded < I64_MIN_AS_F64 || rounded >= I64_MAX_EXCLUSIVE_AS_F64 {
+    if !(I64_MIN_AS_F64..I64_MAX_EXCLUSIVE_AS_F64).contains(&rounded) {
         return None;
     }
     let reconstructed = rounded * TOPOLOGY_QUANTIZATION_MM;

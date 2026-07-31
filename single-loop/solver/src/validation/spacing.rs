@@ -114,10 +114,7 @@ fn spacing_extrema_with_budget(
     }
 
     let mut maximum = None;
-    loop {
-        let Some(cell) = heap.peek().copied() else {
-            break;
-        };
+    while let Some(cell) = heap.peek().copied() {
         let lower_bound_mm = maximum
             .as_ref()
             .map(|spacing: &LocatedSpacing| spacing.distance_mm)

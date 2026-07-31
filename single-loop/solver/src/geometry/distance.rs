@@ -227,7 +227,7 @@ fn lexicographically_smallest_point_on_circle_interval(
 
     candidates
         .into_iter()
-        .min_by(|left, right| compare_point_coordinates(left, right))
+        .min_by(compare_point_coordinates)
         .expect("shared arc interval must yield at least one point")
 }
 
@@ -410,10 +410,10 @@ fn point_to_arc_parameter(point: Point, arc: &PathPrimitive, range: ParameterRan
     let (center, _radius_mm, _start_angle, _sweep_rad) = arc_properties(arc);
     if point.distance_to(center) > PARAMETER_TOLERANCE {
         let point_angle = (point.y - center.y).atan2(point.x - center.x);
-        if let Some(t) = arc_parameter_for_angle(arc, point_angle) {
-            if range.contains(t) {
-                candidates.push(range.clamp(t));
-            }
+        if let Some(t) = arc_parameter_for_angle(arc, point_angle)
+            && range.contains(t)
+        {
+            candidates.push(range.clamp(t));
         }
     }
 

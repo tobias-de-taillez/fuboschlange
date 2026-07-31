@@ -202,10 +202,13 @@ fn stable_max(current: Option<DistanceSample>, candidate: DistanceSample) -> Dis
         Some(current) => match candidate.distance_mm.total_cmp(&current.distance_mm) {
             Ordering::Greater => candidate,
             Ordering::Less => current,
-            Ordering::Equal => compare_points(candidate.point, current.point)
-                .is_lt()
-                .then_some(candidate)
-                .unwrap_or(current),
+            Ordering::Equal => {
+                if compare_points(candidate.point, current.point).is_lt() {
+                    candidate
+                } else {
+                    current
+                }
+            }
         },
     }
 }

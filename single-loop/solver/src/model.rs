@@ -403,6 +403,9 @@ pub struct SingleLoopPlan {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+// Ergebnis-Enums sind kurzlebige Rückgabewerte; Boxing des Plans würde die
+// öffentliche API und alle Aufrufer verkomplizieren, ohne messbaren Gewinn.
+#[allow(clippy::large_enum_variant)]
 pub enum SolveResult {
     Success { plan: SingleLoopPlan },
     Error { error: SolverError },
@@ -446,6 +449,7 @@ struct WireSolveResultError {
 
 #[derive(Deserialize)]
 #[serde(untagged)]
+#[allow(clippy::large_enum_variant)]
 enum WireSolveResult {
     Success(WireSolveResultSuccess),
     Error(WireSolveResultError),

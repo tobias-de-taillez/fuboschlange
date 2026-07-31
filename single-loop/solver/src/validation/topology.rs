@@ -103,12 +103,12 @@ pub(crate) fn validate_bifilar_topology(
                         ValidationFailureCode::InvalidPrimitiveRoleOrder,
                     ));
                 }
-                if let Some(previous) = last_inbound_winding {
-                    if *winding < previous {
-                        return Err(ValidationFailure::new(
-                            ValidationFailureCode::InvalidTopologyWindingOrder,
-                        ));
-                    }
+                if let Some(previous) = last_inbound_winding
+                    && *winding < previous
+                {
+                    return Err(ValidationFailure::new(
+                        ValidationFailureCode::InvalidTopologyWindingOrder,
+                    ));
                 }
                 saw_inbound = true;
                 last_inbound_winding = Some(*winding);
@@ -128,12 +128,12 @@ pub(crate) fn validate_bifilar_topology(
                         ValidationFailureCode::InvalidTopologyTransition,
                     ));
                 }
-                if let Some(previous) = last_outbound_winding {
-                    if *winding > previous {
-                        return Err(ValidationFailure::new(
-                            ValidationFailureCode::InvalidTopologyWindingOrder,
-                        ));
-                    }
+                if let Some(previous) = last_outbound_winding
+                    && *winding > previous
+                {
+                    return Err(ValidationFailure::new(
+                        ValidationFailureCode::InvalidTopologyWindingOrder,
+                    ));
                 }
                 saw_outbound = true;
                 last_outbound_winding = Some(*winding);

@@ -188,14 +188,9 @@ fn validate_simple_polygon(original: &[Point]) -> Result<(), SolverError> {
                 } else {
                     original[0]
                 };
-                let ok = match hit {
+                let ok = matches!(hit,
                     Intersection::Points(ref points)
-                        if points.len() == 1 && same_point(points[0].point, shared) =>
-                    {
-                        true
-                    }
-                    _ => false,
-                };
+                        if points.len() == 1 && same_point(points[0].point, shared));
                 if !ok {
                     return Err(invalid_polygon("ADJACENT_INTERSECTION"));
                 }
@@ -221,10 +216,12 @@ fn ccw_vertices_and_edge_map(original: &[Point], winding: Winding) -> (Vec<Point
     }
 }
 
+type SimplifiedVertices = (Vec<Point>, Vec<Vec<usize>>, Vec<usize>);
+
 fn simplify_ccw_vertices(
     ccw_vertices: &[Point],
     ccw_original_edge: &[usize],
-) -> Result<(Vec<Point>, Vec<Vec<usize>>, Vec<usize>), SolverError> {
+) -> Result<SimplifiedVertices, SolverError> {
     let n = ccw_vertices.len();
     let mut kept_indices = Vec::with_capacity(n);
 
