@@ -111,6 +111,15 @@
   .librow .nm small{color:var(--muted);font-size:12px}
   .librow.cur .nm b{color:var(--accent)}
   .librow button{min-height:32px;padding:0 10px;font-size:12.5px;flex:none}
+  #qrwrap{position:fixed;inset:0;z-index:9;background:rgba(38,36,31,.35);
+    display:flex;align-items:center;justify-content:center}
+  #qrwrap[hidden]{display:none}
+  #qrbox{background:var(--surface);border:1px solid var(--line);border-radius:10px;
+    padding:14px;text-align:center;max-width:340px}
+  #qrhead{display:flex;align-items:center}
+  #qrhead h2{font-size:15px;margin:0;flex:1;text-align:left}
+  #qrcv{margin:10px auto;display:block;image-rendering:pixelated}
+  #qrnote{font-size:12px;color:var(--muted)}
   /* Panel */
   #status{position:sticky;top:0;z-index:3;padding:12px 14px;background:var(--surface);
     border-bottom:1px solid var(--line)}
@@ -226,6 +235,13 @@
           <div id="liblist"></div>
         </div>
       </div>
+      <div id="qrwrap" hidden>
+        <div id="qrbox">
+          <div id="qrhead"><h2>Raum als QR-Code</h2><button id="qrclose" aria-label="Schließen">✕</button></div>
+          <canvas id="qrcv" width="300" height="300"></canvas>
+          <div id="qrnote">Mit der Handy-Kamera scannen — der Raum öffnet sich als Kopie.</div>
+        </div>
+      </div>
       <div id="pop" hidden><span id="popLabel"></span><button id="popDel">Löschen</button></div>
     </div>
   </div>
@@ -265,6 +281,8 @@
       <div class="btnrow">
         <button id="filesave">Als Datei sichern</button>
         <button id="fileopen">Datei öffnen</button>
+        <button id="sharelink">Link teilen</button>
+        <button id="shareqr">QR</button>
       </div>
       <div class="btnrow" style="margin-top:8px">
         <button id="exp">JSON kopieren</button>
@@ -4211,6 +4229,7 @@ addEventListener('keydown',e=>{
   if(e.key==='Escape'){
     hidePop();
     if(!$('libwrap').hidden){ closeLib(); return; }
+    if(!$('qrwrap').hidden){ $('qrwrap').hidden=true; return; }
     if(entryPair){ closeEntry(); return; }
     if(M.sel.length){ M.sel=[]; render(); return; }
     if(M.chain){ M.chain=null; render(); return; }
@@ -4272,6 +4291,49 @@ $('filepick').onchange=async()=>{
   if(err) alert('Datei hat nicht die erwartete Form: '+err);
   else setHint(`„${name}“ importiert — als eigener Raum gespeichert.`);
 };
+
+// ================= Link teilen + QR =================
+function shareUrl(){
+  if(!currentRoom) return null;
+  const r=STORE.load(currentRoom);
+  if(!r) return null;
+  return location.origin+location.pathname+'#raum='+encodeShare({name:r.name, data:r.data});
+}
+$('sharelink').onclick=async()=>{
+  const url=shareUrl();
+  if(!url) return;
+  if(navigator.share){
+    try{ await navigator.share({url, title:'Raumaufmaß'}); return; }
+    catch(e){ if(e && e.name==='AbortError') return; }
+  }
+  try{ await navigator.clipboard.writeText(url); setHint('Link in der Zwischenablage.'); }
+  catch(e){ prompt('Link kopieren mit Strg+C:', url); }
+};
+$('shareqr').onclick=()=>{
+  const url=shareUrl();
+  if(!url) return;
+  // QR-Kapazitaet (Version 40, Level M, Binary) liegt bei ~2,3 KB - ein
+  // normaler Raum (1-3 KB JSON) ist komprimiert weit darunter. Wird es doch
+  // zu viel, sagt der Dialog das, statt einen unlesbaren Code zu malen.
+  try{
+    const q=qrcode(0,'M');
+    q.addData(url);
+    q.make();
+    const n=q.getModuleCount(), cvq=$('qrcv');
+    const s=Math.max(2, Math.floor(300/n)), pad=8;
+    cvq.width=cvq.height=n*s+2*pad;
+    const c=cvq.getContext('2d');
+    c.fillStyle='#fff'; c.fillRect(0,0,cvq.width,cvq.height);
+    c.fillStyle='#000';
+    for(let r2=0;r2<n;r2++) for(let col=0;col<n;col++)
+      if(q.isDark(r2,col)) c.fillRect(pad+col*s, pad+r2*s, s, s);
+    $('qrwrap').hidden=false;
+  }catch(e){
+    alert('Dieser Raum ist zu groß für einen QR-Code — Link oder Datei nutzen.');
+  }
+};
+$('qrclose').onclick=()=>{ $('qrwrap').hidden=true; };
+$('qrwrap').addEventListener('pointerdown',e=>{ if(e.target===$('qrwrap')) $('qrwrap').hidden=true; });
 
 // ================= Panel =================
 
