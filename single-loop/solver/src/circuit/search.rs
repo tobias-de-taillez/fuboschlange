@@ -514,6 +514,18 @@ fn same_lane_adjacent(lanes: &[Lane], a: (u32, u32), b: (u32, u32)) -> bool {
 /// connection zone's own doorway segment, the fixed anchor the reserved
 /// corridor must stay connected to, not a claim that the zone itself is
 /// "reserved".
+///
+/// Precondition: `lanes` must be one field's lanes (as `build_lanes`
+/// returns them). `Lane::id` restarts at `0` per field, and the segment key
+/// this module uses throughout, `(u32, u32)`, is a bare `(lane_id,
+/// segment_index)` pair with no field discriminant (matching the brief's
+/// fixed `SearchState` shape) -- concatenating two fields' lanes into one
+/// slice would make `lane_by_id` resolve to whichever field's lane happens
+/// to share that id first, and would let `segments_adjacent`'s cross-lane
+/// branch treat one field's lane 0 and another field's lane 1 as
+/// consecutive rings. Not enforced here (would need a `Result` return for a
+/// caller misuse, not a real search state); a caller with multiple fields
+/// calls this once per field.
 pub fn terminal_corridor_connected(
     reserved: &BTreeSet<(u32, u32)>,
     lanes: &[Lane],
