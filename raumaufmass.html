@@ -4294,7 +4294,9 @@ function roomFilePayload(id){
     // aktuellen Raumnamen nicht ueberschreiben.
     ...r.data,
     name:r.name,
-    sigmaHat:M.an?M.an.sigmaHat:null,
+    // Nur fuer den OFFENEN Raum ist M.an dessen Analyse - der Datei-Knopf
+    // in der Bibliothek exportiert auch fremde Raeume.
+    sigmaHat:(id===currentRoom&&M.an)?M.an.sigmaHat:null,
   };
 }
 async function exportRoomAsFile(id){
