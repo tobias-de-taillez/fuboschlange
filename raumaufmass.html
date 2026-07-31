@@ -51,6 +51,7 @@
     stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
   #ribbon .sep{flex:none;width:1px;background:var(--line);margin:6px 5px}
   #ribbon #clr{color:var(--bad)}
+  #ribbon button[aria-pressed=true]{background:var(--ink);color:var(--surface)}
   #modes button[disabled]{opacity:.4;cursor:not-allowed}
   /* Wandleiste: nur im Wände-Tab, waehlt die Wand und setzt Oeffnungen */
   #wallbar{display:flex;gap:6px;align-items:center;padding:6px 8px;background:var(--surface);
@@ -274,6 +275,7 @@
       <div id="ribbon">
         <button id="lib" title="Meine Räume"><svg viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg><span>Räume</span></button>
         <button id="undo" title="Rückgängig (Strg+Z)"><svg viewBox="0 0 24 24"><path d="M8 5 4 9l4 4"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg><span>Rückgängig</span></button>
+        <button id="unfold" title="Wandansichten im Grundriss aufklappen"><svg viewBox="0 0 24 24"><path d="M4 20h16"/><path d="M7 20V9l5-4 5 4v11"/></svg><span>Aufklappen</span></button>
         <button id="fitview" title="Ansicht einpassen"><svg viewBox="0 0 24 24"><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5"/></svg><span>Einpassen</span></button>
         <i class="sep"></i>
         <button id="filesave" title="Raum als Datei sichern"><svg viewBox="0 0 24 24"><path d="M12 4v10m0 0 4-4m-4 4-4-4"/><path d="M4 17v3h16v-3"/></svg><span>Sichern</span></button>
@@ -3649,6 +3651,38 @@ globalThis.swingLimit=function(pts, walls, ownWall, hinge, radius, dir0, sense){
   return Math.max(0, frei>0 ? frei-SWING_CLEAR : 0);
 };
 
+// ================= Abwicklung =================
+// Die Waende klappen im Grundriss nach AUSSEN weg, wie ein aufgefalteter
+// Karton. Der Klappgrad haengt vom Abstand zum Fokuspunkt ab: Waende
+// direkt unter dem Fokus bleiben flach (nur eine Linie), ferne stellen
+// sich auf und zeigen ihren Inhalt. Ueber der Raummitte schwebend sind
+// alle gleich weit weg - das ist die symmetrische Uebersicht.
+globalThis.unfoldFactor=function(mitte, fokus, refDist){
+  if(!(refDist>0)) return 0;
+  const d=Math.hypot(mitte.x-fokus.x, mitte.y-fokus.y);
+  return Math.max(0, Math.min(1, d/refDist));
+};
+// Halbe Diagonale der Bounding-Box - der natuerliche Bezug fuer "weit weg".
+globalThis.planRefDist=function(pts){
+  if(!pts.length) return 0;
+  const xs=pts.map(p=>p.x), ys=pts.map(p=>p.y);
+  return Math.hypot(Math.max(...xs)-Math.min(...xs), Math.max(...ys)-Math.min(...ys))/2;
+};
+// Aussennormale einer Wand: die der beiden Normalen, die NICHT in den
+// Raum zeigt. Ohne geschlossenes Polygon gibt es kein Innen - dann die
+// Linksnormale, damit die Abwicklung wenigstens konsistent liegt.
+globalThis.outerNormal=function(pts, walls, a, b){
+  const C=globalThis.CORE, I=C.idx(pts);
+  const A=pts[I[a]], B=pts[I[b]];
+  const L=C.dist(A,B)||1;
+  const n={x:-(B.y-A.y)/L, y:(B.x-A.x)/L};
+  const poly=C.wallPolygon(pts, walls);
+  if(!poly) return n;
+  const mitte={x:(A.x+B.x)/2, y:(A.y+B.y)/2};
+  const probe={x:mitte.x+n.x*1, y:mitte.y+n.y*1};
+  return C.pointInPoly(probe, poly) ? {x:-n.x, y:-n.y} : n;
+};
+
 // ================= Öffnungen einmessen =================
 // Eine Messung bindet EINE Kante der Oeffnung an EINE Bezugskante der
 // Wand: {op, edge:'left'|'right'|'bottom'|'top', d, sigma}. Daraus wird
@@ -3923,6 +3957,8 @@ const M={ pts:[], walls:[], meas:[], mode:'draw', sel:[], chain:null,
 // Eigene Ansicht der Wandansicht; wallUserView merkt, ob der Nutzer
 // gezoomt hat (dann kein automatisches Einpassen mehr).
 let wallUserView=false;
+// Abwicklung ein/aus - sie fuellt das Bild, also nicht ungefragt an.
+let unfoldOn=false;
 let openSeq=1;
 
 // Kreuzt sich irgendein Wandpaar in dieser Lage? Bewusst ueber die
@@ -4092,9 +4128,23 @@ function autofit(){
   // Wand liegt waagerecht UND der Raum fuellt den Schirm.
   const c=Math.cos(VIEW.rot), s2=Math.sin(VIEW.rot);
   const rx=P.map(p=>p.x*c-p.y*s2), ry=P.map(p=>p.x*s2+p.y*c);
-  const w=Math.max(...rx)-Math.min(...rx)||1000, h=Math.max(...ry)-Math.min(...ry)||1000;
+  // Aufgeklappte Waende stehen bis zur Wandhoehe nach aussen - sie
+  // gehoeren in die Bounding-Box, sonst ragen sie aus dem Bild. Ueber den
+  // Rand zu rechnen waere zirkulaer (Rand braucht den Massstab, den er
+  // selbst bestimmt) und lieferte einen negativen Massstab.
+  let auf=0;
+  if(unfoldOn && M.openings.length){
+    const H=cornerHeights(P, M.hmeas);
+    auf=Math.max(...Object.values(H).map(x=>x.h), 0);
+  }
+  const w=(Math.max(...rx)-Math.min(...rx)+2*auf)||1000,
+        h=(Math.max(...ry)-Math.min(...ry)+2*auf)||1000;
+  // Bei aufgeklappten Waenden braucht der Rand Platz fuer die Abwicklung -
+  // sonst ragt sie aus dem Bild (browser-gesehen). Die Wandhoehe steht
+  // rechtwinklig zur Wand, also auf beiden Achsen einplanen.
   const s=Math.min((cv.width-150)/w, (cv.height-150)/h);
-  VIEW={ s, ox:cv.width/2-(Math.min(...rx)+w/2)*s, oy:cv.height/2-(Math.min(...ry)+h/2)*s, rot:VIEW.rot };
+  const mx=(Math.min(...rx)+Math.max(...rx))/2, my=(Math.min(...ry)+Math.max(...ry))/2;
+  VIEW={ s, ox:cv.width/2-mx*s, oy:cv.height/2-my*s, rot:VIEW.rot };
 }
 // Zoom um einen festen Bildpunkt (Geraetepixel): der Weltpunkt darunter
 // bleibt liegen.
@@ -4430,6 +4480,50 @@ function drawOpeningSymbol(o,x,y,w,h,dpr){
   ctx.restore();
 }
 
+// Abwicklung: die Waende mit Inhalt nach aussen weggeklappt. Der
+// Klappgrad kommt aus dem Abstand zum Fokus (Bildschirmmitte), so dass
+// die Uebersicht am besten ist, wenn man ueber der Raummitte schwebt.
+function drawUnfolded(P, I, dpr){
+  if(!unfoldOn || !M.openings.length || !M.fit) return;
+  const fokus=toWorld(cv.width/2, cv.height/2);
+  const ref=planRefDist(P);
+  const mitWaenden=new Set(M.openings.map(o=>[o.a,o.b].sort().join('|')));
+  M.walls.forEach(([a,b])=>{
+    const k=[a,b].sort().join('|');
+    if(!mitWaenden.has(k)) return;
+    if(I[a]==null||I[b]==null) return;
+    const A=P[I[a]], B=P[I[b]];
+    const shape=wallShape(P, M.hmeas, a, b);
+    if(!shape) return;
+    const L=shape.L||1;
+    const u={x:(B.x-A.x)/L, y:(B.y-A.y)/L};
+    const n=outerNormal(P, M.walls, a, b);
+    const f=unfoldFactor({x:(A.x+B.x)/2, y:(A.y+B.y)/2}, fokus, ref);
+    if(f<0.02) return;                       // flach unterm Fokus: nichts zu zeigen
+    // Wandkoordinate -> Welt: entlang der Wand, dann nach aussen geklappt.
+    const w2w=(x,y)=>({x:A.x+u.x*x+n.x*y*f, y:A.y+u.y*x+n.y*y*f});
+    const eck=[w2w(0,0), w2w(L,0), w2w(L,shape.hb), w2w(0,shape.ha)].map(toScr);
+    ctx.save();
+    ctx.globalAlpha=0.35+0.45*f;             // ferne Waende deutlicher
+    ctx.beginPath();
+    eck.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
+    ctx.closePath();
+    ctx.fillStyle=INK.canvas; ctx.fill();
+    ctx.strokeStyle=INK.scale; ctx.lineWidth=1.2*dpr; ctx.stroke();
+    M.openings.filter(o=>[o.a,o.b].sort().join('|')===k).forEach(o=>{
+      const r=[w2w(o.x,o.y), w2w(o.x+o.w,o.y), w2w(o.x+o.w,o.y+o.h), w2w(o.x,o.y+o.h)].map(toScr);
+      ctx.beginPath();
+      r.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
+      ctx.closePath();
+      ctx.fillStyle = o.kind==='hole' ? '#e6e2d5' : '#fff';
+      ctx.fill();
+      ctx.strokeStyle = o.kind==='window' ? INK.meas : INK.wall;
+      ctx.lineWidth=1.4*dpr; ctx.stroke();
+    });
+    ctx.restore();
+  });
+}
+
 // Oeffnungen im Grundriss: Blatt und Schwenkbogen. Der Bogen laeuft bis
 // kurz vor das naechste Hindernis (siehe swingLimit) statt pauschal 90
 // Grad - so ist ablesbar, wieviel Platz die Tuer wirklich braucht.
@@ -4474,7 +4568,7 @@ function drawOpeningsOnPlan(P, I, dpr){
     // dazu. Das counterclockwise-Flag folgt dem Drehsinn.
     ctx.lineWidth=1*dpr; ctx.setLineDash([3*dpr,3*dpr]);
     ctx.beginPath();
-    ctx.arc(a0.x, a0.y, o.w*VIEW.s, dir0+VIEW.rot, dir0+sense*max+VIEW.rot, sense<0);
+    ctx.arc(a0.x, a0.y, Math.max(0, o.w*VIEW.s), dir0+VIEW.rot, dir0+sense*max+VIEW.rot, sense<0);
     ctx.stroke(); ctx.setLineDash([]);
   });
 }
@@ -4529,6 +4623,7 @@ function drawCanvas(){
     ctx.moveTo(pv.x,pv.y); ctx.lineTo(pb.x,pb.y);
     ctx.stroke();
   });
+  drawUnfolded(P, I, dpr);
   drawOpeningsOnPlan(P, I, dpr);
   // Hervorgehobenes Paar breit unterlegen - VOR Messungen und Vorschlaegen,
   // damit deren Strichmuster darauf liegen bleibt. Deckt auch den Fall ab,
@@ -5694,6 +5789,10 @@ $('ring').onclick=()=>{
 
 $('undo').onclick=()=>{ if(!undo()) setHint('Nichts mehr rückgängig zu machen.'); };
 $('fitview').onclick=()=>{ userView=false; autofit(); render(); };
+$('unfold').onclick=()=>{ unfoldOn=!unfoldOn;
+  $('unfold').setAttribute('aria-pressed', String(unfoldOn));
+  setHint(unfoldOn?'Wände aufgeklappt — Fokus verschieben zeigt die gegenüberliegende Wand deutlicher.':'Aufklappen aus.');
+  render(); };
 $('roomname').onclick=()=>{
   if(!currentRoom) return;
   const r=STORE.load(currentRoom);
@@ -7071,6 +7170,31 @@ globalThis.selfChecks=function(){
         (()=>{ const voll={id:'x',x:0,y:0,w:shape.L,h:2400};
                const neu={id:'y',x:0,y:0,w:800,h:1000};
                return globalThis.findFreeSpot(shape,neu,[voll])===null; })());
+    }
+    // --- Abwicklung: Klappgrad und Aussennormale ---
+    {
+      const R=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:3000},{id:'D',x:0,y:3000}];
+      const W=[['A','B'],['B','C'],['C','D'],['D','A']];
+      const uf=globalThis.unfoldFactor, rd=globalThis.planRefDist, on=globalThis.outerNormal;
+      chk('abwicklung: Bezugsweite ist die halbe Diagonale', near(rd(R), 2500, 1e-9));
+      chk('abwicklung: Fokus auf der Wandmitte -> flach (0)',
+        near(uf({x:2000,y:0},{x:2000,y:0},2500), 0, 1e-12));
+      chk('abwicklung: Fokus in der Raummitte -> alle Waende gleich weit auf',
+        (()=>{ const f={x:2000,y:1500};
+               const ab=uf({x:2000,y:0},f,2500), cd=uf({x:2000,y:3000},f,2500);
+               return near(ab,cd,1e-12) && ab>0 && ab<1; })());
+      chk('abwicklung: weiter weg heisst weiter aufgeklappt',
+        uf({x:2000,y:0},{x:2000,y:1500},2500) < uf({x:2000,y:0},{x:2000,y:2500},2500));
+      chk('abwicklung: gedeckelt bei 1',
+        near(uf({x:0,y:0},{x:99999,y:0},2500), 1, 1e-12));
+      chk('abwicklung: Aussennormale zeigt aus dem Raum',
+        (()=>{ const C2=globalThis.CORE, poly=C2.wallPolygon(R,W);
+               return W.every(([a,b])=>{
+                 const n=on(R,W,a,b), I=C2.idx(R);
+                 const m={x:(R[I[a]].x+R[I[b]].x)/2, y:(R[I[a]].y+R[I[b]].y)/2};
+                 return !C2.pointInPoly({x:m.x+n.x*10, y:m.y+n.y*10}, poly)
+                     &&  C2.pointInPoly({x:m.x-n.x*10, y:m.y-n.y*10}, poly);
+               }); })());
     }
     // --- Oeffnungen im Grundriss: Luecke und Schwenkwinkel ---
     {
