@@ -37,15 +37,37 @@
   button{font:inherit;font-size:14px;background:var(--surface);border:1px solid var(--line);
     border-radius:6px;padding:0 12px;min-height:40px;cursor:pointer;color:var(--ink)}
   button:active{background:#eae7dc}
-  /* Werkzeugleiste */
-  #topbar{display:flex;gap:6px;align-items:center;padding:8px;background:var(--surface);
+  /* Werkzeugleiste: Zeile 1 Modi, Zeile 2 Ribbon (Icon + Unterschrift,
+     seitlich wischbar wenn zu schmal). */
+  #topbar{display:flex;flex-direction:column;gap:6px;padding:8px 8px 0;background:var(--surface);
     border-bottom:1px solid var(--line)}
+  #ribbon{display:flex;align-items:stretch;gap:2px;overflow-x:auto;padding-bottom:6px;
+    -webkit-overflow-scrolling:touch}
+  #ribbon button{flex:none;display:flex;flex-direction:column;align-items:center;gap:3px;
+    min-width:58px;min-height:0;padding:6px 6px;border:0;border-radius:6px;background:none;
+    font-size:10.5px;line-height:1.1;color:var(--ink)}
+  #ribbon button:active{background:#eae7dc}
+  #ribbon svg{width:20px;height:20px;stroke:currentColor;fill:none;
+    stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  #ribbon .sep{flex:none;width:1px;background:var(--line);margin:6px 5px}
+  #ribbon #clr{color:var(--bad)}
+  #ribbon button[aria-pressed=true]{background:var(--ink);color:var(--surface)}
+  #modes button[disabled]{opacity:.4;cursor:not-allowed}
+  /* Wandleiste: nur im Wände-Tab, waehlt die Wand und setzt Oeffnungen */
+  #wallbar{display:flex;gap:6px;align-items:center;padding:6px 8px;background:var(--surface);
+    border-bottom:1px solid var(--line);flex-wrap:wrap}
+  #wallbar[hidden]{display:none}
+  #wallbar button{min-height:36px;padding:0 10px}
+  #wPrev,#wNext{min-width:36px;padding:0}
+  #wPick{font:inherit;font-size:14px;padding:7px;border:1px solid var(--line);
+    border-radius:6px;background:var(--surface);color:var(--ink);max-width:150px}
+  #wInfo{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+  #wAdd{display:flex;gap:6px;margin-left:auto}
+  #wAdd button{border-style:dashed}
   #modes{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
   #modes button{border:0;border-radius:0;min-width:72px}
   #modes button+button{border-left:1px solid var(--line)}
   #modes button[aria-pressed=true]{background:var(--ink);color:var(--surface)}
-  #tools{margin-left:auto;display:flex;gap:6px}
-  #tools button{min-width:44px;padding:0;font-size:17px}
   /* Zeichenfläche */
   #canvaswrap{position:relative;flex:1;min-height:0}
   /* NUR die Zeichenflaeche - ein nackter canvas-Selektor traf auch #qrcv
@@ -61,6 +83,9 @@
   /* bottom:56px statt 30: der Hinweistext darunter wird auf schmalen
      Screens zweizeilig (~40px hoch) und wurde sonst ueberdeckt. */
   #ring{position:absolute;right:8px;bottom:56px;z-index:4}
+  /* Erscheint nur, wenn der geschlossene Zug sich tatsaechlich kreuzt. */
+  #untangle{position:absolute;right:8px;bottom:104px;z-index:4;
+    color:var(--bad);border-color:#e2c4be;display:none}
   #empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
     pointer-events:none;padding:24px;text-align:left}
   #empty>div{max-width:360px;color:var(--muted)}
@@ -86,6 +111,82 @@
     #entryVal{flex:1;font-size:22px}
     #entryOk{min-height:48px;min-width:84px}
   }
+  /* Wand-Popup: die Zentrale einer Strecke - Messwerte, Loeschen, +Wert,
+     Einnorden. Desktop als Popover an der Strecke, mobil als Bottom-Sheet. */
+  #wpop{position:absolute;z-index:6;background:var(--surface);border:1px solid var(--ink);
+    border-radius:8px;padding:10px;box-shadow:0 4px 14px rgba(38,36,31,.18);min-width:260px}
+  #wpop[hidden]{display:none}
+  #wpopHead{display:flex;align-items:baseline;gap:8px;margin-bottom:6px}
+  #wpopHead b{font-size:14.5px}
+  #wpopLen{color:var(--muted);font-size:12.5px;flex:1;font-variant-numeric:tabular-nums}
+  #wpopX{min-height:32px;min-width:36px;padding:0}
+  #wpopTbl{margin-bottom:8px}
+  #wpopTbl td input.d{width:70px}
+  #wpopAdd{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+  #wpopVal{font:inherit;font-size:16px;font-variant-numeric:tabular-nums;width:90px;text-align:right;
+    padding:7px;border:1px solid var(--line);border-radius:6px;min-width:0}
+  #wpopOk{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  #wpopThick{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;padding-top:8px;
+    border-top:1px solid var(--line);font-size:13px}
+  #wpopThick .nb{flex-basis:100%;font-size:12.5px;color:var(--muted)}
+  #wpopThick .nb.bad{color:var(--warn)}
+  #wpopThick:empty{display:none}
+  #wpopThick .muted{color:var(--muted)}
+  @media(max-width:879px){
+    #wpop{position:fixed;left:0;right:0;bottom:0;min-width:0;border-radius:12px 12px 0 0;
+      border-left:0;border-right:0;border-bottom:0;
+      padding:12px 14px calc(12px + env(safe-area-inset-bottom))}
+    #wpopVal{flex:1}
+    #wpopOk,#wpopNorth{min-height:44px}
+  }
+  /* Wandliste im Panel */
+  .wrow{display:flex;align-items:center;gap:8px;padding:7px 4px;border-bottom:1px solid #ebe8de;
+    cursor:pointer;font-variant-numeric:tabular-nums}
+  .wrow .wk{font-weight:600;min-width:52px}
+  .wrow .wn{color:var(--muted);font-size:12px;flex:1}
+  .wrow .wlen{margin-left:auto}
+  .wrow.worst{background:var(--bad-bg)}
+  .wgrp{margin-top:10px;margin-bottom:2px;font-size:11.5px;letter-spacing:.05em;
+    text-transform:uppercase;color:var(--muted)}
+  /* Öffnungs-Einstellungen: erscheint nur für die gewählte Öffnung, und
+     zeigt nur, was für ihre Art überhaupt gilt. */
+  /* Schmale Screens: als Blatt von unten ueber dem PANEL, nicht ueber der
+     Zeichnung - sonst verdeckt es die Wand, die man gerade bearbeitet
+     (gemessen: 402px Popup auf 313px Canvas). */
+  #opop{position:fixed;left:0;right:0;bottom:0;z-index:8;background:var(--surface);
+    border:1px solid var(--ink);border-bottom:0;border-radius:12px 12px 0 0;
+    padding:10px 12px calc(10px + env(safe-area-inset-bottom));
+    max-height:52dvh;overflow-y:auto;box-shadow:0 -4px 14px rgba(38,36,31,.18)}
+  #opop[hidden]{display:none}
+  @media(min-width:880px){
+    #opop{position:absolute;left:auto;right:8px;bottom:8px;width:330px;
+      border:1px solid var(--ink);border-radius:8px;max-height:none;
+      box-shadow:0 4px 14px rgba(38,36,31,.18)}
+  }
+  #opopHead{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  #opopHead b{flex:1;font-size:14.5px}
+  #opopX{min-height:32px;min-width:36px;padding:0}
+  .oprow{display:flex;gap:6px;align-items:center;margin-bottom:7px;flex-wrap:wrap}
+  .oprow[hidden]{display:none}
+  .oprow label{font-size:12.5px;color:var(--muted);min-width:42px}
+  .oprow select,.oprow input{font:inherit;font-size:14px;padding:6px;border:1px solid var(--line);
+    border-radius:6px;background:var(--surface);color:var(--ink);min-width:0;flex:1}
+  .oprow input{font-variant-numeric:tabular-nums;text-align:right;flex:none;width:66px}
+  .seg{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  .seg button{border:0;border-radius:0;min-height:34px;padding:0 9px;font-size:12.5px;background:var(--surface)}
+  .seg button+button{border-left:1px solid var(--line)}
+  .seg button[aria-pressed=true]{background:var(--ink);color:var(--surface)}
+  #opDel{color:var(--bad);border-color:#e2c4be}
+  #opMeasBox{border-top:1px solid var(--line);margin-top:8px;padding-top:8px}
+  .mbtn{border-style:dashed;font-size:12.5px;padding:0 8px;min-height:34px}
+  #opState{font-size:12.5px;font-weight:600}
+  #opState.good{color:var(--good)} #opState.warn{color:var(--warn)} #opState.bad{color:var(--bad)}
+  #opMeasList{display:grid;gap:3px;margin-top:6px;font-size:12.5px;
+    font-variant-numeric:tabular-nums}
+  #opMeasList .mrow{display:flex;gap:8px;align-items:center}
+  #opMeasList .mrow.bad{color:var(--bad);font-weight:600}
+  #opMeasList .mrow span:nth-child(2){margin-left:auto}
+  #opMeasList button{min-height:26px;padding:0 7px;font-size:12px}
   /* Lösch-Popover */
   #pop{position:absolute;z-index:7;background:var(--surface);border:1px solid var(--line);
     border-radius:8px;padding:8px;box-shadow:0 4px 14px rgba(38,36,31,.18);
@@ -135,6 +236,10 @@
   #geo small{font-size:12.5px;color:var(--muted);font-weight:500}
   #wallwarn{display:none;padding:8px 14px;background:var(--warn-bg);color:var(--warn);
     border-bottom:1px solid var(--line);font-size:12.5px}
+  #nbwarn{display:none;padding:8px 14px;background:var(--warn-bg);color:var(--warn);
+    border-bottom:1px solid var(--line);font-size:12.5px}
+  #nbwarn b{display:block;font-weight:600;margin-bottom:2px}
+  #nbwarn ul{margin:0;padding-left:16px}
   section{padding:12px 14px;border-bottom:1px solid var(--line)}
   h3{margin:0 0 8px;font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);
     display:flex;align-items:center;justify-content:space-between;font-weight:600}
@@ -166,28 +271,15 @@
   .badge.unchecked{background:var(--warn-bg);color:var(--warn)}
   .badge.suspect{background:var(--bad-bg);color:var(--bad);font-weight:600}
   button.badge{cursor:pointer}
-  #tbl .x{display:none}
-  #tbl.details .x{display:table-cell}
+  /* Info-Kaestchen zu Tabellenwerten: fixed am Viewport, weil die Tabelle
+     selbst im Panel und ggf. seitlich scrollt. */
+  #tip{position:fixed;z-index:11;max-width:270px;background:var(--surface);
+    border:1px solid var(--line);border-radius:8px;padding:8px 10px;
+    font-size:12.5px;line-height:1.45;color:var(--ink);
+    box-shadow:0 4px 14px rgba(38,36,31,.18);pointer-events:none}
+  #tip[hidden]{display:none}
   .rowbtn{min-height:28px;padding:0 8px;font-size:12px}
-  #dtl{min-height:26px;padding:0 10px;font-size:12px;text-transform:none;letter-spacing:0;font-weight:500}
-  #dtl[aria-pressed=true]{background:var(--ink);color:var(--surface);border-color:var(--ink)}
   #why{color:var(--muted);font-size:12.5px;margin-top:6px}
-  /* Wandlängen */
-  #wl{display:grid;grid-template-columns:auto 1fr;gap:3px 14px;font-size:14px;
-    font-variant-numeric:tabular-nums}
-  #wl span:nth-child(even){text-align:right}
-  /* Legende */
-  #legend summary{cursor:pointer;font-size:13px;color:var(--muted)}
-  #legend .rows{margin-top:8px;display:grid;gap:5px;font-size:13px;color:var(--muted)}
-  .sw{display:inline-block;width:26px;height:0;vertical-align:middle;margin-right:8px}
-  .sw-wall{border-bottom:2.5px solid #2a2823}
-  .sw-meas{border-bottom:2px dashed var(--meas)}
-  .sw-todo{border-bottom:2px dotted var(--todo)}
-  .sw-ell{width:13px;height:13px;border:1.5px solid #0b72a3;border-radius:50%;margin-left:6px;margin-right:15px}
-  .sw-ell2{width:13px;height:13px;border:1.5px dashed #8a867c;border-radius:50%;margin-left:6px;margin-right:15px}
-  /* Daten */
-  .btnrow{display:flex;flex-wrap:wrap;gap:8px}
-  #clr{color:var(--bad);border-color:#e2c4be}
 </style>
 
 <div id="app">
@@ -196,11 +288,34 @@
       <div id="modes">
         <button data-mode="draw" aria-pressed="true">Zeichnen</button>
         <button data-mode="measure" aria-pressed="false">Messen</button>
+        <button data-mode="wall" aria-pressed="false" title="Erst verfügbar, wenn die Form des Grundrisses eindeutig ist">Wände</button>
       </div>
-      <div id="tools">
-        <button id="lib" title="Meine Räume" aria-label="Meine Räume">▤</button>
-        <button id="undo" title="Rückgängig (Strg+Z)" aria-label="Rückgängig">↶</button>
-        <button id="fitview" title="Ansicht einpassen" aria-label="Ansicht einpassen">⛶</button>
+      <div id="ribbon">
+        <button id="lib" title="Meine Räume"><svg viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg><span>Räume</span></button>
+        <button id="undo" title="Rückgängig (Strg+Z)"><svg viewBox="0 0 24 24"><path d="M8 5 4 9l4 4"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg><span>Rückgängig</span></button>
+        <button id="unfold" title="Wandansichten im Grundriss aufklappen"><svg viewBox="0 0 24 24"><path d="M4 20h16"/><path d="M7 20V9l5-4 5 4v11"/></svg><span>Aufklappen</span></button>
+        <button id="fitview" title="Ansicht einpassen"><svg viewBox="0 0 24 24"><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5"/></svg><span>Einpassen</span></button>
+        <i class="sep"></i>
+        <button id="filesave" title="Raum als Datei sichern"><svg viewBox="0 0 24 24"><path d="M12 4v10m0 0 4-4m-4 4-4-4"/><path d="M4 17v3h16v-3"/></svg><span>Sichern</span></button>
+        <button id="fileopen" title="Datei als neuen Raum öffnen"><svg viewBox="0 0 24 24"><path d="M12 14V4m0 0 4 4m-4-4-4 4"/><path d="M4 17v3h16v-3"/></svg><span>Öffnen</span></button>
+        <button id="sharelink" title="Raum als Link teilen"><svg viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1"/><path d="M14 10a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg><span>Link</span></button>
+        <button id="shareqr" title="Raum als QR-Code zeigen"><svg viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4z"/><path d="M14 14h3v3h-3zM17 17h3v3h-3z"/></svg><span>QR</span></button>
+        <i class="sep"></i>
+        <button id="exp" title="JSON in die Zwischenablage"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="1"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg><span>Kopieren</span></button>
+        <button id="imp" title="JSON aus der Zwischenablage einfügen"><svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="16" rx="1"/><path d="M9 5V3h6v2"/></svg><span>Einfügen</span></button>
+        <button id="clr" title="Aktuellen Raum leeren"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13"/></svg><span>Verwerfen</span></button>
+      </div>
+    </div>
+    <div id="wallbar" hidden>
+      <button id="wPrev" aria-label="Vorherige Wand">‹</button>
+      <select id="wPick"></select>
+      <button id="wNext" aria-label="Nächste Wand">›</button>
+      <span id="wInfo"></span>
+      <button id="wHeight">Höhe messen</button>
+      <div id="wAdd">
+        <button data-add="door">+ Tür</button>
+        <button data-add="window">+ Fenster</button>
+        <button data-add="hole">+ Loch</button>
       </div>
     </div>
     <div id="canvaswrap">
@@ -216,6 +331,7 @@
         </div>
       </div>
       <button id="ring" title="Alle Ecken in Anlegereihenfolge zu einem geschlossenen Wandzug verbinden">Wandzug schließen</button>
+      <button id="untangle" title="Kreuzungsfreie Anordnung suchen — eingetragene Maße bleiben erhalten">Entwirren</button>
       <div id="hint"></div>
       <div id="entry" hidden>
         <div id="entryLabel"></div>
@@ -245,54 +361,69 @@
         </div>
       </div>
       <div id="pop" hidden><span id="popLabel"></span><button id="popDel">Löschen</button></div>
+      <div id="opop" hidden>
+        <div id="opopHead"><b id="opopTitle"></b><button id="opopX" aria-label="Schließen">✕</button></div>
+        <div class="oprow">
+          <label>Breite</label><select id="opW"></select>
+          <label>Höhe</label><select id="opH"></select>
+        </div>
+        <div class="oprow" id="opFreeRow" hidden>
+          <input id="opWv" inputmode="decimal" size="5"> ×
+          <input id="opHv" inputmode="decimal" size="5"> mm
+          <button id="opFreeOk">Übernehmen</button>
+        </div>
+        <div class="oprow" id="opTypeRow">
+          <label>Art</label><select id="opType"></select>
+        </div>
+        <div class="oprow" id="opSideRow">
+          <label>Band</label>
+          <div class="seg" id="opHinge">
+            <button data-h="left">links</button><button data-h="right">rechts</button>
+          </div>
+          <div class="seg" id="opDir">
+            <button data-o="0">nach innen</button><button data-o="1">nach außen</button>
+          </div>
+        </div>
+        <div id="opMeasBox">
+          <div class="oprow"><label style="min-width:0">Position messen</label><span id="opState"></span></div>
+          <div class="oprow">
+            <button class="mbtn" data-edge="left">von links</button>
+            <button class="mbtn" data-edge="right">von rechts</button>
+            <button class="mbtn" data-edge="bottom">vom Boden</button>
+            <button class="mbtn" data-edge="top">von der Decke</button>
+          </div>
+          <div id="opMeasList"></div>
+        </div>
+        <div class="oprow"><button id="opDel">Öffnung löschen</button></div>
+      </div>
+      <div id="wpop" hidden>
+        <div id="wpopHead"><b id="wpopTitle"></b><span id="wpopLen"></span><button id="wpopX" aria-label="Schließen">✕</button></div>
+        <table id="wpopTbl"><tbody></tbody></table>
+        <div id="wpopAdd">
+          <input id="wpopVal" inputmode="decimal" autocomplete="off" enterkeyhint="done" placeholder="Maß">
+          <span class="unit">m</span>
+          <button id="wpopOk">+ Wert</button>
+          <button id="wpopNorth" title="Diese Wand parallel zur oberen Bildschirmkante drehen">Einnorden</button>
+        </div>
+        <div id="wpopThick"></div>
+      </div>
     </div>
   </div>
+  <div id="tip" hidden></div>
   <div id="panel">
     <div id="status" class="warn"><div id="roomname" title="Antippen: Raum umbenennen">—</div><div id="statustxt">—</div><div id="geo"></div></div>
     <div id="wallwarn"></div>
+    <div id="nbwarn"></div>
     <section id="nextsec">
       <h3>Als Nächstes messen</h3>
       <div id="sugg">—</div>
     </section>
     <section>
-      <h3>Messungen <button id="dtl" aria-pressed="false">Details</button></h3>
-      <div id="tblwrap"><table id="tbl"><thead><tr>
-        <th>Strecke</th><th>Maß [m]</th><th>Status</th>
-        <th class="x">v [mm]</th><th class="x">Red.</th><th class="x">w</th><th class="x">σ [mm]</th><th class="x"></th>
-      </tr></thead><tbody></tbody></table></div>
+      <h3>Wände &amp; Strecken</h3>
+      <div id="wl">—</div>
       <div id="why"></div>
     </section>
-    <section>
-      <h3>Wände</h3>
-      <div id="wl">—</div>
-    </section>
-    <section>
-      <details id="legend"><summary>Legende</summary>
-        <div class="rows">
-          <span><i class="sw sw-wall"></i>Wand</span>
-          <span><i class="sw sw-meas"></i>gemessene Strecke</span>
-          <span><i class="sw sw-todo"></i>noch zu messende Strecke</span>
-          <span><i class="sw sw-ell"></i>Genauigkeit, aus den Messungen berechnet<span id="exagg"></span></span>
-          <span><i class="sw sw-ell2"></i>Genauigkeit, nur angenommen</span>
-          <span><i class="sw" style="color:#b45309;width:auto;margin-right:14px">↔</i>noch beweglich — Messung fehlt</span>
-        </div>
-      </details>
-    </section>
-    <section id="datasec">
-      <h3>Daten</h3>
-      <div class="btnrow">
-        <button id="filesave">Als Datei sichern</button>
-        <button id="fileopen">Datei öffnen</button>
-        <button id="sharelink">Link teilen</button>
-        <button id="shareqr">QR</button>
-      </div>
-      <div class="btnrow" style="margin-top:8px">
-        <button id="exp">JSON kopieren</button>
-        <button id="imp">JSON einfügen</button>
-        <button id="clr">Alles verwerfen</button>
-      </div>
-      <input id="filepick" type="file" accept=".json,application/json" hidden>
-    </section>
+    <input id="filepick" type="file" accept=".json,application/json" hidden>
   </div>
 </div>
 
@@ -3156,10 +3287,22 @@ globalThis.STORE_FACTORY=function makeStore(storage){
       if(patch.name!==undefined) r.name=patch.name;
       if(patch.data!==undefined) r.data=patch.data;
       if(patch.area!==undefined) r.area=patch.area;
+      // origin liegt bewusst NEBEN data: die Lage im Gebaeude gehoert nicht
+      // zum Aufmass des Raums. Datei-Export, Link und Undo arbeiten ueber
+      // data - die Verankerung darf dabei weder mitreisen noch verloren
+      // gehen (recompute speichert je Aenderung nur data und area).
+      if(patch.origin!==undefined) r.origin=patch.origin;
       r.updated=new Date().toISOString();
       return writeRooms(rooms);
     },
     rename(id,name){ return this.save(id,{name}); },
+    // Alle im Gebaeude verankerten Raeume, mit Daten: der aktive Raum
+    // zeichnet daraus seine Nachbarn. Raeume ohne origin sind freistehend
+    // und tauchen hier nie auf - die bestehende Bibliothek bleibt gueltig.
+    withOrigin(){
+      return readRooms().filter(r=>r && r.origin && typeof r.origin==='object')
+                        .map(r=>({id:r.id, name:r.name, origin:r.origin, data:r.data}));
+    },
     remove(id){
       writeRooms(readRooms().filter(r=>r.id!==id));
       if(this.currentId()===id){
@@ -3212,6 +3355,698 @@ globalThis.parseShareFragment=function(hash){
   const m=hash.match(/^#raum=(.+)$/);
   return m ? globalThis.decodeShare(m[1]) : null;
 };
+// Verdaechtigen-Menge aus den normierten Residuen: statistisch auffaellig
+// (w > w0, Baarda) UND innerhalb der Gleichstand-Toleranz des Maximums.
+// DOM-frei HIER statt im ui-Block, damit test/run.mjs sie prueft - dieselbe
+// Menge steuert Tabelle (rote Zeile, Badge) und Plan (rote Messstrecke),
+// und zwei getrennte Implementierungen wuerden irgendwann verschieden luegen.
+globalThis.computeSuspects=function(w, w0, tieTol){
+  if(!Array.isArray(w)) return new Set();
+  const wMax=w.reduce((mx,x)=>(x!=null&&x>mx)?x:mx, -Infinity);
+  const s=new Set();
+  w.forEach((x,i)=>{ if(x!=null && x>w0 && x>=wMax*(1-tieTol)) s.add(i); });
+  return s;
+};
+// Eingrenzungs-Kandidaten, wenn der w-Test den Schuldigen NICHT isolieren
+// kann: bei Redundanz 1 sind alle w mathematisch identisch - welcher Wert
+// falsch ist, laesst sich aus den vorhandenen Zahlen prinzipiell nicht
+// ablesen. Der Ausweg ist eine WIEDERHOLUNG: trifft sie den Fehler, klafft
+// sie sofort; trifft sie ihn nicht, ist die Strecke entlastet und der
+// Kreis kleiner. Vorgeschlagen werden aktive Paare (dedupliziert), nach
+// groesstem Residuumsbetrag zuerst - eine stabile, erklaerbare Reihenfolge.
+globalThis.narrowCandidates=function(meas, v, cap){
+  const count=new Map();
+  meas.forEach(m=>{ const k=[m.a,m.b].sort().join('|'); count.set(k,(count.get(k)||0)+1); });
+  const seen=new Set(), out=[];
+  meas.forEach((m,i)=>{
+    const k=[m.a,m.b].sort().join('|');
+    if(seen.has(k)) return;
+    seen.add(k);
+    // Schon wiederholte Paare nicht erneut vorschlagen: waere die
+    // Wiederholung inkonsistent, haette der w-Test laengst isoliert -
+    // ein drittes Mal messen bringt nichts Neues.
+    if(count.get(k)>=2) return;
+    out.push({a:m.a, b:m.b, av:Math.abs(v && v[i]!=null ? v[i] : 0)});
+  });
+  out.sort((p,q)=>q.av-p.av);
+  return out.slice(0, cap).map(({a,b})=>({a,b}));
+};
+// Globaltest der Ausgleichung: T = Sum((v_i/sigma_i)^2) gegen das
+// 95-Prozent-Quantil von Chi-Quadrat mit r Freiheitsgraden. Ein fester
+// sigmaHat-Faktor uebersieht, dass sigmaHat mit wachsender Redundanz
+// SINKT, waehrend der Fehler drinbleibt - gemessen am Nutzerfall: nach
+// einer Wiederholung fiel sigmaHat von 15,0 auf 11,3 mm und rutschte
+// unter die alte 2,5-sigma-Schwelle, obwohl die falsche Kante noch im
+// Netz stand. T=10,2 gegen chi2(2)=5,99 warnt dort korrekt weiter.
+globalThis.globalTestFails=function(v, sigmas, r){
+  if(!r || r<=0 || !Array.isArray(v) || !v.length) return false;
+  let T=0;
+  v.forEach((vi,i)=>{ const s=(sigmas && sigmas[i])||5; T+=(vi/s)*(vi/s); });
+  const q=[0,3.84,5.99,7.81,9.49,11.07,12.59,14.07,15.51,16.92,18.31];
+  const crit = r<=10 ? q[r]
+    : r*Math.pow(1-2/(9*r)+1.645*Math.sqrt(2/(9*r)),3);   // Wilson-Hilferty, 95 %
+  return T>crit;
+};
+// ================= Sanfte Kreuzungsbremse =================
+// Beim Ziehen einer Ecke soll das Kreuzen zweier Waende SPUERBAR schwer
+// werden, nicht verboten: der Widerstand waechst stufenlos, quer dazu
+// bleibt die Bewegung frei (man gleitet an der Zone entlang statt
+// festzustecken), und mit Nachdruck kommt man hindurch. Kein Nachrechnen
+// der Gesamtlage - nur der aktuelle Schritt wird skaliert. Deshalb kann
+// die Bremse die Form nie umkrempeln.
+const PUSH_THROUGH = 0.06;   // Restdurchlass an der Grenze: nie ganz gesperrt
+
+function ptSegDist(p, a, b){
+  const vx=b.x-a.x, vy=b.y-a.y, L2=vx*vx+vy*vy;
+  const t=L2 ? Math.max(0,Math.min(1,((p.x-a.x)*vx+(p.y-a.y)*vy)/L2)) : 0;
+  return Math.hypot(p.x-(a.x+vx*t), p.y-(a.y+vy*t));
+}
+// Abstand zweier Strecken; 0 wenn sie sich echt kreuzen.
+function segSegDist(p1,p2,p3,p4){
+  const C=globalThis.CORE;
+  if(C.segCross(p1,p2,p3,p4)) return 0;
+  return Math.min(ptSegDist(p1,p3,p4), ptSegDist(p2,p3,p4),
+                  ptSegDist(p3,p1,p2), ptSegDist(p4,p1,p2));
+}
+globalThis.segSegDist=segSegDist;
+
+// Kantenpaare, die der gezogene Punkt gefaehrden kann: seine eigenen
+// Kanten gegen alle, die ihn nicht beruehren.
+function criticalPairs(pts, walls, id){
+  const C=globalThis.CORE, I=C.idx(pts), out=[];
+  const mine=walls.filter(([a,b])=>a===id||b===id);
+  walls.forEach(([c,d])=>{
+    if(c===id||d===id) return;
+    mine.forEach(([a,b])=>{
+      if(a===c||a===d||b===c||b===d) return;      // teilen einen Endpunkt
+      if(I[a]==null||I[b]==null||I[c]==null||I[d]==null) return;
+      out.push([a,b,c,d]);
+    });
+  });
+  return out;
+}
+
+// Dämpft den Zugvektor (dx,dy) des Punktes id. soft = Breite der
+// Weichzone in Weltkoordinaten (der Aufrufer rechnet sie aus Bildschirm-
+// pixeln um, damit sich die Bremse bei jedem Zoom gleich anfuehlt).
+// Liefert {dx,dy,near:[[a,b,c,d],...]} - near sind die Paare in der Zone,
+// die die UI dezent einfaerbt.
+globalThis.dampenDrag=function(pts, walls, id, dx, dy, soft){
+  const C=globalThis.CORE, I=C.idx(pts);
+  const pairs=criticalPairs(pts, walls, id);
+  const near=[];
+  if(!pairs.length || (!dx&&!dy)) return {dx, dy, near};
+  const at=(v)=>{                       // Abstand des Paares bei Versatz v
+    return (a,b,c,d)=>{
+      const P={}, base=I;
+      const shift=q=>q.id===id ? {x:q.x+v.x, y:q.y+v.y} : q;
+      return segSegDist(shift(pts[base[a]]), shift(pts[base[b]]),
+                        pts[base[c]], pts[base[d]]);
+    };
+  };
+  let vx=dx, vy=dy;
+  // Schon gebremste Richtungen. Eine Ecke hat ZWEI Kanten, die derselben
+  // Wand nahekommen - ohne diese Sperre daempft dasselbe Hindernis zweimal,
+  // der Faktor quadriert sich (gemessen 1,7 % statt 12 %) und der
+  // zugesagte Restdurchlass sinkt von 6 % auf 0,4 %: gesperrt statt zaeh.
+  const done=[];
+  pairs.forEach(([a,b,c,d])=>{
+    const d0=at({x:0,y:0})(a,b,c,d);
+    // Schon gekreuzt: NICHT bewachen - sonst waere eine verhedderte
+    // Skizze fuer immer eingefroren und nicht mehr aufzuloesen.
+    if(d0<=0) return;
+    if(d0>=soft*3) return;              // weit weg: kein Aufwand, kein Effekt
+    // Richtung, in der der Abstand waechst - numerisch, zwei Auswertungen.
+    const h=Math.max(soft*0.05, 1e-6);
+    const gx=(at({x:h,y:0})(a,b,c,d)-d0)/h, gy=(at({x:0,y:h})(a,b,c,d)-d0)/h;
+    const gl=Math.hypot(gx,gy);
+    if(gl<1e-12) return;
+    const nx=gx/gl, ny=gy/gl;           // zeigt WEG von der Gefahr
+    const vn=vx*nx+vy*ny;
+    if(vn>=0) return;                   // Bewegung entfernt sich: frei lassen
+    if(d0<soft) near.push([a,b,c,d]);
+    if(done.some(n=>n[0]*nx+n[1]*ny>0.9)) return;   // Richtung schon gebremst
+    done.push([nx,ny]);
+    // Zaeh, aber nie gesperrt: quadratisch einlaufender Faktor plus Rest.
+    const f=Math.max(PUSH_THROUGH, Math.min(1, (d0/soft)*(d0/soft)));
+    vx+=vn*nx*(f-1); vy+=vn*ny*(f-1);   // nur der Normalanteil wird gedaempft
+  });
+  return {dx:vx, dy:vy, near};
+};
+
+// ================= Wandansichten =================
+// Die Deckenhoehe gehoert zur ECKE, nicht zur Wand: die Wand A-B ist dann
+// das Viereck (0,0)-(L,0)-(L,h_B)-(0,h_A). Zwei benachbarte Waende teilen
+// ihre senkrechte Kante damit PER KONSTRUKTION - h_B ist dieselbe Zahl.
+// Eine wandweise Hoehe braeuchte je Ecke zwei konkurrierende Werte, die
+// eine Zwangsbedingung zusammenhaelt; hier ist der Widerspruch nicht
+// einmal formulierbar. Trapez, Dreieck und Dachschraege fallen ab.
+const H_DEFAULT = 2500;   // uebliche Deckenhoehe, bis etwas gemessen ist
+
+// Hoehe je Ecke aus den Hoehenmessungen. Solange nur EIN Wert gemessen
+// ist, gilt er fuer alle Ecken (der Normalfall: ein Raum, eine Decke).
+// Ab dem zweiten abweichenden Wert zaehlt jede Ecke fuer sich, und
+// ungemessene erben den Mittelwert - als "angenommen", nicht als Messung.
+globalThis.cornerHeights=function(pts, meas){
+  const hm=(meas||[]).filter(m=>m.kind==='h' && m.on!==false && Number.isFinite(m.d) && m.d>0);
+  const byId=new Map();
+  hm.forEach(m=>{
+    if(!byId.has(m.at)) byId.set(m.at, []);
+    byId.get(m.at).push(m.d);
+  });
+  const mean=a=>a.reduce((s,x)=>s+x,0)/a.length;
+  const gemessen=new Map();
+  byId.forEach((v,k)=>gemessen.set(k, mean(v)));
+  const werte=[...gemessen.values()];
+  const fallback = werte.length ? mean(werte) : H_DEFAULT;
+  const out={};
+  pts.forEach(p=>{
+    out[p.id] = gemessen.has(p.id)
+      ? {h:gemessen.get(p.id), gemessen:true}
+      : {h:fallback, gemessen:false};
+  });
+  return out;
+};
+
+// Die Wandflaeche als Polygon in Wandkoordinaten (x von Ecke a nach b,
+// y vom Boden). Trapez, weil die beiden Ecken verschieden hoch sein
+// koennen; bei Hoehe 0 an einer Seite ein Dreieck.
+globalThis.wallShape=function(pts, meas, a, b){
+  const C=globalThis.CORE, I=C.idx(pts);
+  if(I[a]==null||I[b]==null) return null;
+  const L=C.dist(pts[I[a]], pts[I[b]]);
+  const H=globalThis.cornerHeights(pts, meas);
+  const ha=H[a]?H[a].h:H_DEFAULT, hb=H[b]?H[b].h:H_DEFAULT;
+  return {L, ha, hb,
+          poly:[{x:0,y:0},{x:L,y:0},{x:L,y:hb},{x:0,y:ha}],
+          gemessen:(H[a]&&H[a].gemessen)&&(H[b]&&H[b].gemessen)};
+};
+
+// Deckenhoehe an der Stelle x einer Wand - in einem Trapez laeuft die
+// Decke schraeg, und genau daran muss sich eine Oeffnung messen lassen.
+globalThis.ceilingAt=function(shape, x){
+  if(!shape || !(shape.L>0)) return shape?shape.ha:0;
+  const t=Math.max(0, Math.min(1, x/shape.L));
+  return shape.ha + (shape.hb-shape.ha)*t;
+};
+
+// Passt die Oeffnung vollstaendig in die Wand? Geprueft wird gegen die
+// SCHRAEGE Decke, nicht gegen ein Rechteck - sonst raschte eine Oeffnung
+// in einer Trapezwand oben durch die Decke.
+globalThis.openingFits=function(shape, op){
+  if(!shape) return false;
+  if(op.x<-1e-6 || op.y<-1e-6) return false;
+  if(op.x+op.w > shape.L+1e-6) return false;
+  const oben=op.y+op.h;
+  return oben <= globalThis.ceilingAt(shape, op.x)+1e-6
+      && oben <= globalThis.ceilingAt(shape, op.x+op.w)+1e-6;
+};
+
+// Oeffnung in die Wand zwingen: waagerecht hart an die Kanten, senkrecht
+// gegen die (ggf. schraege) Decke. Liefert eine neue Oeffnung.
+globalThis.clampOpening=function(shape, op){
+  const o={...op};
+  o.w=Math.min(o.w, shape.L);
+  o.x=Math.max(0, Math.min(shape.L-o.w, o.x));
+  const deckeLinks=globalThis.ceilingAt(shape, o.x);
+  const deckeRechts=globalThis.ceilingAt(shape, o.x+o.w);
+  const platz=Math.min(deckeLinks, deckeRechts);
+  o.h=Math.min(o.h, platz);
+  o.y=Math.max(0, Math.min(platz-o.h, o.y));
+  return o;
+};
+
+// Oeffnungen sind exklusiv: eine Tuer im Fenster ergibt kein Bauteil.
+// Beruehrung (gemeinsame Kante) ist erlaubt, echte Ueberdeckung nicht -
+// zwei Fenster direkt nebeneinander mit gemeinsamem Pfosten sind ein
+// realer Fall, ein Millimeter Ueberlappung dagegen ein Fehler.
+const OVERLAP_EPS = 1;   // mm; darunter gilt es als Beruehrung, nicht als Ueberdeckung
+globalThis.openingsOverlap=function(a, b){
+  return a.x + a.w > b.x + OVERLAP_EPS
+      && b.x + b.w > a.x + OVERLAP_EPS
+      && a.y + a.h > b.y + OVERLAP_EPS
+      && b.y + b.h > a.y + OVERLAP_EPS;
+};
+// Passt die Oeffnung an dieser Stelle - in der Wand UND ohne die anderen
+// zu ueberdecken?
+globalThis.openingPlaceable=function(shape, op, others){
+  if(!globalThis.openingFits(shape, op)) return false;
+  return !(others||[]).some(o=>o.id!==op.id && globalThis.openingsOverlap(op, o));
+};
+// Zug aufloesen: erst die volle Bewegung, sonst nur waagerecht, sonst nur
+// senkrecht, sonst gar nicht. Das laesst die Oeffnung an einer fremden
+// Kante ENTLANGGLEITEN, statt sie stumpf festzuhalten.
+globalThis.slideOpening=function(shape, op, ziel, others){
+  const clamp=globalThis.clampOpening, ok=globalThis.openingPlaceable;
+  const voll=clamp(shape, {...op, x:ziel.x, y:ziel.y});
+  if(ok(shape, voll, others)) return voll;
+  const nurX=clamp(shape, {...op, x:ziel.x, y:op.y});
+  if(ok(shape, nurX, others)) return nurX;
+  const nurY=clamp(shape, {...op, x:op.x, y:ziel.y});
+  if(ok(shape, nurY, others)) return nurY;
+  return {...op};
+};
+// Freien Platz suchen, wenn die Vorbelegung schon besetzt ist. Erst auf
+// der Vorzugshoehe nach rechts wandern, dann in Hoehenstufen - so landet
+// eine zweite Tuer neben der ersten und nicht darueber.
+globalThis.findFreeSpot=function(shape, op, others){
+  if(globalThis.openingPlaceable(shape, op, others)) return op;
+  const schritt=Math.max(50, op.w/4);
+  const hMax=Math.max(shape.ha, shape.hb);
+  for(let dy=0; dy<=hMax; dy+=Math.max(100, op.h/2)){
+    for(const y of (dy===0?[op.y]:[op.y+dy, op.y-dy])){
+      if(y<0) continue;
+      for(let x=0; x<=shape.L-op.w+1e-6; x+=schritt){
+        const k=globalThis.clampOpening(shape, {...op, x, y});
+        if(globalThis.openingPlaceable(shape, k, others)) return k;
+      }
+    }
+  }
+  return null;
+};
+
+// Vorbelegung beim Einsetzen: nichts erscheint an absurder Stelle, auch
+// ohne eine einzige Messung. Tuer steht auf dem Boden, Fenster und
+// Wandloch sitzen mittig im oberen Bereich.
+globalThis.defaultOpening=function(shape, kind){
+  if(kind==='door'){
+    const w=Math.min(985, shape.L), h=Math.min(1985, Math.min(shape.ha,shape.hb));
+    return globalThis.clampOpening(shape, {kind, w, h, x:(shape.L-w)/2, y:0});
+  }
+  const hMit=(shape.ha+shape.hb)/2;
+  const w=shape.L*2/3, h=hMit/3;
+  return globalThis.clampOpening(shape, {kind, w, h, x:(shape.L-w)/2, y:hMit*0.4});
+};
+
+// ================= Öffnungen im Grundriss =================
+// Die Oeffnung liegt in Wandkoordinaten (x entlang der Wand). Fuer den
+// Grundriss werden daraus zwei Weltpunkte: Anfang und Ende der Luecke in
+// der Wandlinie.
+globalThis.openingWorld=function(pts, a, b, op){
+  const C=globalThis.CORE, I=C.idx(pts);
+  if(I[a]==null||I[b]==null) return null;
+  const A=pts[I[a]], B=pts[I[b]];
+  const L=C.dist(A,B);
+  if(!(L>0)) return null;
+  const ux=(B.x-A.x)/L, uy=(B.y-A.y)/L;          // entlang der Wand
+  const t0=Math.max(0,Math.min(L,op.x)), t1=Math.max(0,Math.min(L,op.x+op.w));
+  return {
+    P:{x:A.x+ux*t0, y:A.y+uy*t0},
+    Q:{x:A.x+ux*t1, y:A.y+uy*t1},
+    u:{x:ux, y:uy}, n:{x:-uy, y:ux},             // Normale (Linksdrehung)
+    L,
+  };
+};
+
+// Wie weit kann das Blatt schwingen, bevor es irgendwo anstoesst? Der
+// Strahl wird schrittweise gedreht und gegen alle Waende geprueft. Die
+// EIGENE Wand ist ausgenommen - auf ihr steht das geschlossene Blatt.
+// Gedeckelt bei 180 Grad, und kurz VOR dem Hindernis gestoppt: zeichnete
+// man bis zur Beruehrung, waere der Bogen nicht mehr vom Winkel zwischen
+// zwei Waenden zu unterscheiden.
+const SWING_CLEAR = 4*Math.PI/180;    // Sicherheitsabstand, damit der Radius als Radius lesbar bleibt
+globalThis.swingLimit=function(pts, walls, ownWall, hinge, radius, dir0, sense){
+  const C=globalThis.CORE, I=C.idx(pts);
+  const k=[ownWall[0],ownWall[1]].sort().join('|');
+  const segs=walls.filter(([c,d])=>[c,d].sort().join('|')!==k
+      && I[c]!=null && I[d]!=null).map(([c,d])=>[pts[I[c]],pts[I[d]]]);
+  const step=2*Math.PI/180;
+  let frei=0;
+  for(let ang=step; ang<=Math.PI+1e-9; ang+=step){
+    const th=dir0+sense*ang;
+    const tip={x:hinge.x+Math.cos(th)*radius, y:hinge.y+Math.sin(th)*radius};
+    // Beruehrt das Blatt in dieser Stellung eine Wand?
+    const blockiert=segs.some(([p,q])=>C.segCross(hinge,tip,p,q));
+    if(blockiert) break;
+    frei=ang;
+  }
+  return Math.max(0, frei>0 ? frei-SWING_CLEAR : 0);
+};
+
+// ================= Abwicklung =================
+// Die Waende klappen im Grundriss nach AUSSEN weg, wie ein aufgefalteter
+// Karton. Der Klappgrad haengt vom Abstand zum Fokuspunkt ab: Waende
+// direkt unter dem Fokus bleiben flach (nur eine Linie), ferne stellen
+// sich auf und zeigen ihren Inhalt. Ueber der Raummitte schwebend sind
+// alle gleich weit weg - das ist die symmetrische Uebersicht.
+const VIEW_FADE = 0.3;   // ab diesem cos ist die Wand voll aufgeklappt
+globalThis.unfoldFactor=function(mitte, fokus, refDist, nOut){
+  if(!(refDist>0)) return 0;
+  const vx=mitte.x-fokus.x, vy=mitte.y-fokus.y;
+  const d=Math.hypot(vx,vy);
+  let f=Math.max(0, Math.min(1, d/refDist));
+  // Nur Waende aufklappen, auf die man VON INNEN schaut. Zeigt die
+  // Aussennormale zum Fokus hin (cos < 0), steht der Betrachter
+  // ausserhalb - dann klappte die Wand ihm entgegen, quer ueber den Raum
+  // oder ueber andere Waende. Gemessen an einem U-Raum mit Fokus
+  // ausserhalb: vier von acht Waenden hatten cos <= 0 und klappten
+  // trotzdem voll auf. Betrifft auch die Kerbe eines konkaven Raums.
+  if(nOut && d>1e-9){
+    const cos=(vx*nOut.x+vy*nOut.y)/d;
+    f*=Math.max(0, Math.min(1, cos/VIEW_FADE));
+  }
+  return f;
+};
+// Halbe Diagonale der Bounding-Box - der natuerliche Bezug fuer "weit weg".
+globalThis.planRefDist=function(pts){
+  if(!pts.length) return 0;
+  const xs=pts.map(p=>p.x), ys=pts.map(p=>p.y);
+  return Math.hypot(Math.max(...xs)-Math.min(...xs), Math.max(...ys)-Math.min(...ys))/2;
+};
+// Aussennormale einer Wand: die der beiden Normalen, die NICHT in den
+// Raum zeigt. Ohne geschlossenes Polygon gibt es kein Innen - dann die
+// Linksnormale, damit die Abwicklung wenigstens konsistent liegt.
+globalThis.outerNormal=function(pts, walls, a, b){
+  const C=globalThis.CORE, I=C.idx(pts);
+  const A=pts[I[a]], B=pts[I[b]];
+  const L=C.dist(A,B)||1;
+  const n={x:-(B.y-A.y)/L, y:(B.x-A.x)/L};
+  const poly=C.wallPolygon(pts, walls);
+  if(!poly) return n;
+  const mitte={x:(A.x+B.x)/2, y:(A.y+B.y)/2};
+  const probe={x:mitte.x+n.x*1, y:mitte.y+n.y*1};
+  return C.pointInPoly(probe, poly) ? {x:-n.x, y:-n.y} : n;
+};
+
+// ================= Öffnungen einmessen =================
+// Eine Messung bindet EINE Kante der Oeffnung an EINE Bezugskante der
+// Wand: {op, edge:'left'|'right'|'bottom'|'top', d, sigma}. Daraus wird
+// jeweils die linke untere Ecke zurueckgerechnet:
+//   left   -> x = d                 right -> x = L - w - d
+//   bottom -> y = d                 top   -> y = Decke - h - d
+// Jede Messung betrifft damit NUR x oder NUR y. Das Problem zerfaellt in
+// zwei unabhaengige gewichtete Mittelwerte - kein Gauss-Newton noetig,
+// und die Aussagen (Redundanz, normiertes Residuum) bleiben dieselben
+// wie im Grundriss, weil der Mittelwert genau die Ausgleichung EINER
+// Unbekannten ist.
+function opObs(shape, op, m){
+  const s=m.sigma||5;
+  if(m.edge==='left')   return {achse:'x', wert:m.d, s};
+  if(m.edge==='right')  return {achse:'x', wert:shape.L-op.w-m.d, s};
+  if(m.edge==='bottom') return {achse:'y', wert:m.d, s};
+  if(m.edge==='top'){
+    // Gegen die Decke ueber der Oeffnungsmitte - in einer Trapezwand
+    // laeuft sie schraeg, und genau daran misst man auf der Baustelle.
+    const decke=globalThis.ceilingAt(shape, op.x+op.w/2);
+    return {achse:'y', wert:decke-op.h-m.d, s};
+  }
+  return null;
+}
+// Gewichteter Mittelwert je Achse samt Kontrollgroessen. Bei n Messungen
+// einer Unbekannten ist der Redundanzanteil jeder Messung 1 - 1/n (bei
+// gleichen Gewichten) - dieselbe Groesse, die im Grundriss aus der
+// Hutmatrix kommt, hier in geschlossener Form.
+function axisFit(obs){
+  if(!obs.length) return {n:0, wert:null, v:[], red:[], w:[], sigmaHat:null};
+  let sw=0, swx=0;
+  obs.forEach(o=>{ const g=1/(o.s*o.s); sw+=g; swx+=g*o.wert; });
+  const wert=swx/sw;
+  const v=obs.map(o=>wert-o.wert);
+  const n=obs.length;
+  const red=obs.map(o=>{ const g=1/(o.s*o.s); return Math.max(0, 1-g/sw); });
+  const w=obs.map((o,i)=> red[i]<0.01 ? null : Math.abs(v[i])/(o.s*Math.sqrt(red[i])));
+  const sigmaHat = n>1
+    ? Math.sqrt(obs.reduce((s,o,i)=>s+v[i]*v[i]/(o.s*o.s),0)/(n-1))
+    : null;
+  return {n, wert, v, red, w, sigmaHat};
+}
+// Liefert die eingemessene Lage plus Diagnose. Ohne Messung bleibt die
+// Achse, wie sie ist (gezogen oder vorbelegt) - ehrlich als "geschaetzt".
+globalThis.solveOpening=function(shape, op, meas){
+  const eigene=(meas||[]).filter(m=>m.op===op.id && m.on!==false);
+  const obs=eigene.map(m=>({m, o:opObs(shape, op, m)})).filter(e=>e.o);
+  const xs=obs.filter(e=>e.o.achse==='x'), ys=obs.filter(e=>e.o.achse==='y');
+  const fx=axisFit(xs.map(e=>e.o)), fy=axisFit(ys.map(e=>e.o));
+  const ziel={...op};
+  if(fx.wert!=null) ziel.x=fx.wert;
+  if(fy.wert!=null) ziel.y=fy.wert;
+  // Verdaechtig ist, was Baardas Schwelle reisst - dieselbe Regel wie im
+  // Grundriss, damit "verdaechtig" ueberall dasselbe heisst.
+  // Verdaechtig ist, was Baardas Schwelle reisst UND nahe am groessten w
+  // liegt - exakt computeSuspects wie im Grundriss. Die blosse Schwelle
+  // reicht nicht: ein grober Ausreisser zieht den Mittelwert mit, dann
+  // reissen ALLE Residuen die Schwelle und die Aussage waere wertlos
+  // (gemessen an 1200/1205/1400: w = 16,7 / 15,5 / 32,3).
+  const verdacht=new Set();
+  [[xs,fx],[ys,fy]].forEach(([liste,fit])=>{
+    const s2=globalThis.computeSuspects(fit.w, 3.29, 0.02);
+    s2.forEach(i=>verdacht.add(liste[i].m.id));
+  });
+  return {ziel, x:fx, y:fy, verdacht,
+          rows:obs.map((e,i)=>({m:e.m, achse:e.o.achse}))};
+};
+
+// ================= Entwirren =================
+// Ein geschlossener, teilgemessener Wandzug kann sich beim Skizzieren
+// verheddern (Waende kreuzen sich). Gesucht: eine kreuzungsfreie Lage, die
+// alle eingetragenen Masse weiter erfuellt. Heuristik nach der
+// Extremwertbetrachtung: Ecken stossen praktisch nie mit ~180 Grad
+// (kollinear) und nie mit wenigen Grad (Spitznadel) aufeinander - also
+// Energie E = Sum(-log sin theta) minimieren: sie explodiert an BEIDEN
+// Extremen und ist bei rechtwinkligen Ecken am kleinsten. Kreuzende Lagen
+// sind hart verboten (Energie unendlich).
+function ringAngleEnergy(ring, C){
+  if(!ring || C.ringSelfIntersects(ring)) return Infinity;
+  let E=0;
+  const n=ring.length;
+  for(let i=0;i<n;i++){
+    const p=ring[(i-1+n)%n], q=ring[i], r=ring[(i+1)%n];
+    const v1x=p.x-q.x, v1y=p.y-q.y, v2x=r.x-q.x, v2y=r.y-q.y;
+    const th=Math.atan2(Math.abs(v1x*v2y-v1y*v2x), v1x*v2x+v1y*v2y);   // 0..pi
+    E+=-Math.log(Math.max(Math.sin(th),1e-9));
+  }
+  return E;
+}
+globalThis.ringAngleEnergy=ringAngleEnergy;
+// Deterministischer Zufall (mulberry32): Entwirren soll unter gleichem
+// Seed gleich entscheiden - sonst sind die Selbstchecks Wuerfelwuerfe.
+function mulberry32(seed){
+  let a=seed>>>0;
+  return function(){
+    a|=0; a=(a+0x6D2B79F5)|0;
+    let t=Math.imul(a^(a>>>15), 1|a);
+    t=(t+Math.imul(t^(t>>>7), 61|t))^t;
+    return ((t^(t>>>14))>>>0)/4294967296;
+  };
+}
+// Liefert eine kreuzungsfreie Punktlage (Array wie pts) oder null.
+// Kandidaten: 1) der aktuelle Zustand, 2) ein regelmaessiges Polygon in
+// Anlegereihenfolge (per Konstruktion kreuzungsfrei, dann von solve() auf
+// die Masse gezogen), 3) zufaellige Stoerungen entlang der freien Moden
+// des Netzes, jeweils mit solve() als Korrektor. Gewinnt die kleinste
+// Winkel-Energie unter den kreuzungsfreien, masshaltigen Lagen.
+globalThis.untangle=function(pts, walls, meas, tries, seed){
+  const C=globalThis.CORE;
+  const ring0=C.wallPolygonRing(pts, walls);
+  if(!ring0) return null;
+  const order=ring0.map(p=>p.id);
+  const rnd=mulberry32(seed==null?1:seed);
+  const act=C.activeMeas(meas);
+  // Zielkantenlaenge: Mittel der gemessenen Werte, sonst der Skizze.
+  let mean=0;
+  if(act.length) mean=act.reduce((s,m)=>s+m.d,0)/act.length;
+  else { for(let i=0;i<ring0.length;i++) mean+=Math.hypot(
+      ring0[i].x-ring0[(i+1)%ring0.length].x, ring0[i].y-ring0[(i+1)%ring0.length].y)/ring0.length; }
+  const evalCand=(cand)=>{
+    // Masse halten: solve() ist der Korrektor; ohne Messungen bleibt die
+    // Lage wie vorgeschlagen.
+    const fit=act.length ? C.solve(cand, meas) : {pts:cand, converged:true};
+    const P=fit.pts;
+    // Masshaltigkeit ist Pflicht: eine "entwirrte" Lage, die eingetragene
+    // Werte verbiegt, waere eine Luege.
+    if(act.length && C.residuals(P, meas).some(v=>Math.abs(v)>50)) return null;
+    const I=C.idx(P);
+    const ring=order.map(id=>P[I[id]]);
+    return {P, E:ringAngleEnergy(ring, C)};
+  };
+  let best=null;
+  const consider=r=>{ if(r && r.E<Infinity && (!best || r.E<best.E)) best=r; };
+  consider(evalCand(pts.map(p=>({...p}))));
+  // Regelmaessiges Polygon in Zug-Reihenfolge um den Schwerpunkt.
+  {
+    const n=order.length;
+    const R=mean/(2*Math.sin(Math.PI/n));
+    const I=C.idx(pts);
+    const cx=pts.reduce((s,p)=>s+p.x,0)/pts.length, cy=pts.reduce((s,p)=>s+p.y,0)/pts.length;
+    const cand=pts.map(p=>({...p}));
+    order.forEach((id,k)=>{
+      const a=2*Math.PI*k/n;
+      cand[I[id]].x=cx+R*Math.cos(a);
+      cand[I[id]].y=cy+R*Math.sin(a);
+    });
+    consider(evalCand(cand));
+  }
+  // Moden-Stoerungen des jeweils besten Stands: hin- und herschieben in
+  // den Richtungen, die die Messungen freilassen.
+  for(let t=0;t<(tries==null?24:tries);t++){
+    const base=(best?best.P:pts).map(p=>({...p}));
+    if(act.length){
+      const an=C.analyze(base, meas);
+      if(an.modes.length){
+        const amp=mean*0.35;
+        an.modes.forEach(mo=>{
+          const c=(rnd()*2-1)*amp;
+          base.forEach((p,i)=>{ p.x+=c*mo[2*i]; p.y+=c*mo[2*i+1]; });
+        });
+      } else break;                      // starr bestimmt: nichts zu schieben
+    } else {
+      base.forEach(p=>{ p.x+=(rnd()*2-1)*mean*0.3; p.y+=(rnd()*2-1)*mean*0.3; });
+    }
+    consider(evalCand(base));
+  }
+  return best ? best.P : null;
+};
+
+// ================= Gebaeude: Raeume im gemeinsamen System =================
+// origin verankert die Innenkontur eines Raums im Gebaeude:
+//   p_gebaeude = R(origin.rot) * p_lokal + (origin.x, origin.y)
+// roomTransform liefert die starre Abbildung von EINEM Raumsystem ins
+// andere. Damit zeichnet der aktive Raum seine Nachbarn in seinen eigenen
+// Koordinaten - gerendert wird nie in Gebaeudekoordinaten, und der ganze
+// bestehende Zeichenweg (toScr, autofit, Einnorden) bleibt unberuehrt.
+globalThis.roomTransform=function(from, to){
+  const rf=(from&&from.rot)||0, rt=(to&&to.rot)||0;
+  const dx=((from&&from.x)||0)-((to&&to.x)||0),
+        dy=((from&&from.y)||0)-((to&&to.y)||0);
+  // R(-rt) auf die Verschiebung: cos(-rt)=cos(rt), sin(-rt)=-sin(rt)
+  const c=Math.cos(rt), s=Math.sin(rt);
+  return {rot:rf-rt, x:dx*c+dy*s, y:-dx*s+dy*c};
+};
+globalThis.applyRoomTransform=function(T, p){
+  const c=Math.cos(T.rot), s=Math.sin(T.rot);
+  return {...p, x:p.x*c-p.y*s+T.x, y:p.x*s+p.y*c+T.y};
+};
+
+// Uebliche Wanddicken in mm - Vorschlaege, keine Auswahlpflicht.
+globalThis.WALL_THICKNESS=[100,115,125,175,240,300,365];
+globalThis.THICK_DEFAULT=240;   // angenommen, solange nichts bekannt ist
+
+// Wandkoerper: das gemessene Polygon ist die INNENkontur, die Dicke wird
+// nach AUSSEN aufgetragen. Je Wand ein Viereck aus den beiden Innenecken
+// und den beiden AUSSENecken; die Aussenecke ist der Schnitt der beiden
+// versetzten Parallelen, also eine Gehrung. Weil beide Waende einer Ecke
+// denselben Schnittpunkt bekommen, stossen ihre Vierecke luecken- und
+// ueberlappungsfrei aneinander - und wo drei Raeume zusammenlaufen, deckt
+// die Gehrung die dreieckige Spitze mit ab, ohne dass sie je beschrieben
+// werden muesste.
+globalThis.wallBands=function(pts, walls, thick, defT){
+  const C=globalThis.CORE, I=C.idx(pts);
+  const ring=C.wallPolygon(pts, walls);
+  if(!ring || ring.length<3) return [];
+  const n=ring.length;
+  // Umlaufsinn einmal: daraus folgt die Aussennormale jeder Kante direkt.
+  // outerNormal je Wand zu fragen baute den Ring je Wand neu - im Zug waere
+  // das ein Dutzend Polygonaufbauten pro Bild.
+  let A2=0;
+  for(let i=0,j=n-1;i<n;j=i++) A2+=ring[j].x*ring[i].y-ring[i].x*ring[j].y;
+  const ccw=A2>0;
+  const key=(a,b)=>[a,b].sort().join('|');
+  const t0=(defT>0)?defT:globalThis.THICK_DEFAULT;
+  const seg=[];
+  for(let i=0;i<n;i++){
+    const p=ring[i], q=ring[(i+1)%n];
+    const L=C.dist(p,q);
+    if(!(L>0)) return [];
+    const u={x:(q.x-p.x)/L, y:(q.y-p.y)/L};
+    const k=key(p.id, q.id);
+    const gemessen=!!(thick && thick[k]>0);
+    seg.push({a:p.id, b:q.id, p, q, u, L, t:gemessen?thick[k]:t0,
+              assumed:!gemessen,
+              // Im Gegenuhrzeigersinn liegt aussen RECHTS der Laufrichtung.
+              n: ccw ? {x:u.y, y:-u.x} : {x:-u.y, y:u.x}});
+  }
+  // Gehrung an der gemeinsamen Ecke v der Waende s1 und s2. Symmetrisch in
+  // s1/s2 - beide Waende bekommen denselben Punkt, auch im Ersatzfall.
+  const ecke=(s1, s2, v)=>{
+    const A={x:v.x+s1.n.x*s1.t, y:v.y+s1.n.y*s1.t};
+    const B={x:v.x+s2.n.x*s2.t, y:v.y+s2.n.y*s2.t};
+    const mitte={x:(A.x+B.x)/2, y:(A.y+B.y)/2};
+    const cr=s1.u.x*s2.u.y - s1.u.y*s2.u.x;
+    if(Math.abs(cr)<1e-9) return mitte;                    // parallel
+    const s=((B.x-A.x)*s2.u.y - (B.y-A.y)*s2.u.x)/cr;
+    const X={x:A.x+s1.u.x*s, y:A.y+s1.u.y*s};
+    // Sehr spitze Ecken treiben die Gehrung ins Weite. Dann fuer BEIDE
+    // Waende derselbe Ersatzpunkt - je Wand ein eigener risse die Ecke auf.
+    const grenze=6*Math.max(s1.t, s2.t);
+    return C.dist(X,v)>grenze ? mitte : X;
+  };
+  const out=[];
+  for(let i=0;i<n;i++){
+    const s=seg[i], vor=seg[(i-1+n)%n], nach=seg[(i+1)%n];
+    out.push({a:s.a, b:s.b, t:s.t, L:s.L, assumed:s.assumed, u:s.u, n:s.n,
+              iA:{x:s.p.x,y:s.p.y}, iB:{x:s.q.x,y:s.q.y},
+              oA:ecke(s, vor, s.p), oB:ecke(s, nach, s.q)});
+  }
+  return out;
+};
+
+// Verankerung eines Nachbarraums, der hinter der Wand a-b entsteht.
+// Die Innenkontur des Nachbarn liegt um die Dicke t nach AUSSEN versetzt;
+// in SEINEM System soll die geerbte Wand von (0,0) nach (L,0) laufen und
+// der Quellraum unter ihr liegen (negatives y) - dann zeichnet der Nutzer
+// den neuen Raum wie gewohnt nach oben weg.
+// Rueckgabe: origin des neuen Raums, Wandlaenge und welche Quellecke zu
+// seinem Punkt A wurde.
+globalThis.neighborOrigin=function(pts, walls, a, b, t, originR){
+  const C=globalThis.CORE, I=C.idx(pts);
+  if(I[a]==null||I[b]==null) return null;
+  const A=pts[I[a]], B=pts[I[b]], L=C.dist(A,B);
+  if(!(L>0) || !(t>0)) return null;
+  const n=globalThis.outerNormal(pts, walls, a, b);
+  const u={x:(B.x-A.x)/L, y:(B.y-A.y)/L};
+  const Ao={x:A.x+n.x*t, y:A.y+n.y*t}, Bo={x:B.x+n.x*t, y:B.y+n.y*t};
+  // Die lokale y-Achse des neuen Raums ist die Linksnormale seiner
+  // Laufrichtung. Zeigt sie zum Quellraum zurueck, laeuft die Wand
+  // andersherum - dann faengt sie an der anderen Ecke an.
+  const flip=(-u.y*n.x + u.x*n.y) < 0;
+  const P0=flip?Bo:Ao;
+  const dir=flip?{x:-u.x,y:-u.y}:u;
+  const rotR=(originR&&originR.rot)||0;
+  const c=Math.cos(rotR), s=Math.sin(rotR);
+  return {
+    origin:{ x:((originR&&originR.x)||0) + P0.x*c - P0.y*s,
+             y:((originR&&originR.y)||0) + P0.x*s + P0.y*c,
+             rot:rotR + Math.atan2(dir.y, dir.x) },
+    L, vonEcke: flip?b:a, bisEcke: flip?a:b,
+  };
+};
+
+// Passen zwei Raeume an ihrer gemeinsamen Wand noch zusammen? Verglichen
+// werden die beiden Innenkanten - unsere (a1-b1) und die des Nachbarn
+// (a2-b2), beide in UNSEREN Koordinaten. Geliefert wird, was man daraus
+// ablesen kann; die Bewertung macht die UI.
+//   dicke   - Lotabstand der beiden Kanten: die Wanddicke, wie sie in der
+//             Geometrie wirklich steht
+//   winkel  - Grad zwischen den Kanten; ueber null heisst, die Raeume
+//             stehen schief zueinander
+//   laengeD - wie viel laenger die Wand drueben gemessen wurde
+//   versatz - wie weit die fremde Wand an einem Ende ueber unsere
+//             hinausragt oder dahinter zurueckbleibt
+globalThis.sharedWallFit=function(a1, b1, a2, b2){
+  const C=globalThis.CORE;
+  const L1=C.dist(a1,b1), L2=C.dist(a2,b2);
+  if(!(L1>0) || !(L2>0)) return null;
+  const u1={x:(b1.x-a1.x)/L1, y:(b1.y-a1.y)/L1};
+  let p=a2, q=b2;
+  // Die Wand drueben laeuft in aller Regel andersherum um den Raum. Fuer
+  // den Vergleich zeigen beide in dieselbe Richtung.
+  if(((q.x-p.x)*u1.x + (q.y-p.y)*u1.y) < 0){ const t=p; p=q; q=t; }
+  const u2={x:(q.x-p.x)/L2, y:(q.y-p.y)/L2};
+  const cos=Math.max(-1, Math.min(1, u1.x*u2.x + u1.y*u2.y));
+  const n1={x:-u1.y, y:u1.x};
+  const d0=(p.x-a1.x)*n1.x + (p.y-a1.y)*n1.y;
+  const d1=(q.x-a1.x)*n1.x + (q.y-a1.y)*n1.y;
+  const s0=(p.x-a1.x)*u1.x + (p.y-a1.y)*u1.y;
+  const s1=(q.x-a1.x)*u1.x + (q.y-a1.y)*u1.y;
+  return {
+    dicke: Math.abs((d0+d1)/2),
+    winkel: Math.acos(cos)*180/Math.PI,
+    laengeHier: L1, laengeDort: L2, laengeD: L2-L1,
+    versatz: Math.max(Math.abs(s0), Math.abs(s1-L1)),
+    ueberlappung: Math.max(0, Math.min(L1,s1) - Math.max(0,s0)),
+  };
+};
+
 // Im Browser sofort eine an localStorage gebundene Instanz; in Node bleibt
 // nur die Factory (die Checks injizieren sich ihren eigenen Speicher).
 // localStorage kann beim blossen ZUGRIFF werfen (Chrome "alle Cookies
@@ -3265,11 +4100,15 @@ const GROSS_ERROR_SIGMA = 5; // Vielfaches von sigma, ab dem ein Residuum nicht 
 
 // Bei kleiner Redundanz verschmiert ein grober Fehler ueber alle Messungen,
 // ohne dass ein einzelnes w Baardas Schwelle reisst (gemessen: 50 mm Fehler
-// im 6-Messungen-Rechteck -> sigmaHat 15,5 mm, aber alle w < 3). Ein gruener
-// "Geprueft"-Status waere dann eine Falschauskunft - sigmaHat selbst ist der
-// Alarm: deutlich ueber der angenommenen Messgenauigkeit heisst, die Werte
-// passen schlechter zusammen, als das Messgeraet erklaeren kann.
-const SIGMA_SUSPECT_FACTOR = 2.5; // sigmaHat ueber diesem Vielfachen von SIGMA_DEF: warnen statt gruen
+// im 6-Messungen-Rechteck -> sigmaHat 15,5 mm, aber alle w < 3). Ob das
+// Netz als Ganzes stimmt, entscheidet deshalb der Chi-Quadrat-Globaltest
+// (globalTestFails im store-Block) - ein fester sigmaHat-Faktor uebersah,
+// dass sigmaHat mit jeder Wiederholung sinkt, waehrend der Fehler bleibt.
+const netFails=()=>{
+  if(!M.an || !(M.an.redundancy>0)) return false;
+  const act=C.activeMeas(M.meas);
+  return globalTestFails(M.an.v, act.map(m=>m.sigma??C.SIGMA_DEF), M.an.redundancy);
+};
 
 // Ellipsen sind in Wirklichkeit millimetergross, der Raum aber meterweise
 // gezeichnet - unskaliert verschwindet jede Ellipse unter dem Punktmarker.
@@ -3286,6 +4125,7 @@ function niceFactor(raw){
 // Interaktion. Trefferradien in CSS-px und fingertauglich - der alte Wert 14
 // war in Geraetepixeln gerechnet und auf einem Retina-Handy halb so gross,
 // wie er aussah.
+const SOFT_PX = 26;      // Weichzone der Kreuzungsbremse, CSS-px
 const HIT_R = 24;        // Punkt-Trefferradius
 const WALL_R = 18;       // Wand-Trefferradius
 const TAP_SLOP = 8;      // mehr Bewegung als das: kein Tap mehr, sondern Zug
@@ -3294,18 +4134,55 @@ const LONGPRESS_MS = 550;
 // Zeichenfarben, abgestimmt auf die CSS-Tokens im Kopf der Datei.
 const INK = {
   wall:'#2a2823', meas:'#2e7d4f', measHl:'#14532d', todo:'#c73e2e', todoHl:'#8f1f14',
+  measBad:'#b3261e', measBadHl:'#7f1a14', labelBadBg:'rgba(247,228,224,.95)',
   point:'#26241f', accent:'#c2410c', grid:'#e6e2d5', scale:'#57534a',
   ellMeasured:'#0b72a3', ellAssumed:'#8a867c', mode:'#b45309',
   canvas:'#f6f4ee', labelBg:'rgba(246,244,238,.92)',
 };
 
 const $=id=>document.getElementById(id);
+// Raumnamen kommen vom Nutzer und landen in innerHTML - einmal richtig
+// entschaerfen statt an jeder Stelle nur die spitze Klammer.
+const ESC={'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'};
+const escapeHtml=s=>String(s==null?'':s).replace(/[&<>"']/g, c=>ESC[c]);
 
 // M.chain: letzter Punkt des aktiven Zeichenzugs. Tippen legt Ecken an und
 // verbindet sie sofort - den Raum "ablaufen" statt Punkte- und Wandmodus zu
 // jonglieren. null = kein Zug aktiv.
 const M={ pts:[], walls:[], meas:[], mode:'draw', sel:[], chain:null,
-          fit:null, an:null, sugg:[], drag:null, dragMode:null, highlight:null };
+          fit:null, an:null, sugg:[], suspects:new Set(), narrow:[],
+          drag:null, dragMode:null, highlight:null, nearPairs:[],
+          openings:[], hmeas:[], opmeas:[], wallSel:null, openSel:null,
+          // Wanddicke und geteilte Wand haengen an der Wand, aber Waende
+          // sind ueberall im Programm Paare [a,b] - eine Karte ueber
+          // pairKey ist dasselbe, ohne jede Zeile umzuschreiben, die
+          // [a,b] auseinandernimmt. pairKey sortiert, die Dicke ist also
+          // unabhaengig von der Zeichenrichtung.
+          thick:{}, shared:{}, nbchecks:[] };
+// Eigene Ansicht der Wandansicht; wallUserView merkt, ob der Nutzer
+// gezoomt hat (dann kein automatisches Einpassen mehr).
+let wallUserView=false;
+// Abwicklung ein/aus - sie fuellt das Bild, also nicht ungefragt an.
+let unfoldOn=false;
+let openSeq=1;
+
+// Kreuzt sich irgendein Wandpaar in dieser Lage? Bewusst ueber die
+// WANDLISTE statt ueber den Ring: waehrend des Zeichnens ist der Zug noch
+// offen, und ringSelfIntersects haette dort nichts geprueft - der
+// Mess-Korrektor durfte dann ungebremst kreuzen (browser-gesehen).
+function crossingPairs(pts){
+  const I=C.idx(pts), W=M.walls, out=[];
+  for(let i=0;i<W.length;i++) for(let j=i+1;j<W.length;j++){
+    const [a,b]=W[i], [c,d]=W[j];
+    if(a===c||a===d||b===c||b===d) continue;       // teilen einen Endpunkt
+    if(I[a]==null||I[b]==null||I[c]==null||I[d]==null) continue;
+    if(C.segCross(pts[I[a]],pts[I[b]],pts[I[c]],pts[I[d]])) out.push([a,b,c,d]);
+  }
+  return out;
+}
+const wallsCross=pts=>crossingPairs(pts).length>0;
+// Schluessel einer Wand, richtungsunabhaengig - fuer M.thick und M.shared.
+const wallKey=(a,b)=>[a,b].sort().join('|');
 
 // Nutzer hat gezoomt oder verschoben - autofit() haelt sich dann zurueck,
 // bis "Einpassen" gedrueckt wird oder eine neue Szene entsteht.
@@ -3318,14 +4195,32 @@ const serialize=()=>JSON.stringify({
   pts:M.pts.map(p=>({id:p.id,x:p.x,y:p.y})),
   walls:M.walls.map(w=>[...w]),
   meas:M.meas.map(m=>({...m})),
-  idSeq,
+  openings:M.openings.map(o=>({...o})),
+  hmeas:M.hmeas.map(m=>({...m})),
+  opmeas:M.opmeas.map(m=>({...m})),
+  thick:{...M.thick}, shared:{...M.shared},
+  idSeq, openSeq,
 });
 function deserialize(o){
   M.pts=o.pts.map(p=>({...p}));
   M.walls=o.walls.map(w=>[...w]);
   M.meas=o.meas.map(m=>({...m}));
+  // Oeffnungen sind optional: aeltere Raeume und Fremdimporte haben sie
+  // nicht, und ein fehlendes Feld darf kein Fehler sein.
+  M.openings=Array.isArray(o.openings) ? o.openings.map(x=>({...x})) : [];
+  // Hoehen liegen BEWUSST getrennt von den Grundriss-Messungen: der
+  // Solver darf sie nie als Strecke lesen (jacobian erwartet a/b).
+  M.hmeas=Array.isArray(o.hmeas) ? o.hmeas.map(x=>({...x})) : [];
+  M.opmeas=Array.isArray(o.opmeas) ? o.opmeas.map(x=>({...x})) : [];
+  // Wie die Oeffnungen optional: aeltere Raeume und Fremdimporte kennen
+  // weder Dicke noch geteilte Wand.
+  M.thick=(o.thick && typeof o.thick==='object') ? {...o.thick} : {};
+  M.shared=(o.shared && typeof o.shared==='object') ? {...o.shared} : {};
   if(typeof o.idSeq==='number') idSeq=o.idSeq;
+  if(typeof o.openSeq==='number') openSeq=o.openSeq;
+  else openSeq=M.openings.length+1;
   M.sel=[]; M.chain=null; M.drag=null; M.fit=null; M.an=null;
+  M.wallSel=null; M.openSel=null;
 }
 
 // Formvalidierung fuer alles, was deserialize() bekommt - VOLLSTAENDIG und
@@ -3381,7 +4276,13 @@ function pushSnapshot(s){
 function snapshot(){ pushSnapshot(serialize()); }
 function undo(){
   if(!undoStack.length) return false;
+  // deserialize() raeumt die Auswahl - beim Undo einer Messung soll das
+  // Popup aber offen bleiben, sonst verliert man nach jedem Schritt den
+  // Kontext. Auswahl zurueckholen, falls es sie noch gibt.
+  const wandVor=M.wallSel, offenVor=M.openSel;
   deserialize(JSON.parse(undoStack.pop()));
+  if(wandVor && M.walls.some(([a,b])=>a===wandVor.a&&b===wandVor.b)) M.wallSel=wandVor;
+  if(offenVor && M.openings.some(o=>o.id===offenVor)) M.openSel=offenVor;
   recompute();
   return true;
 }
@@ -3408,22 +4309,69 @@ function idOrdinal(id){
 // --- Weltkoordinaten (mm) <-> Bildschirm (Geraetepixel im Canvas)
 const cv=$('cv'), ctx=cv.getContext('2d');
 const DPR=()=>devicePixelRatio||1;
-let VIEW={s:1, ox:0, oy:0};
-const toScr=p=>({x:p.x*VIEW.s+VIEW.ox, y:p.y*VIEW.s+VIEW.oy});
-const toWorld=(x,y)=>({x:(x-VIEW.ox)/VIEW.s, y:(y-VIEW.oy)/VIEW.s});
+// rot dreht nur die ANSICHT (Einnorden einer Wand auf die Waagerechte) -
+// Weltkoordinaten bleiben unberuehrt, Beschriftungen werden an der
+// gedrehten Position gezeichnet, aber selbst nicht mitgedreht. Nicht
+// persistiert: eine Darstellungslaune wie Zoom und Pan.
+let VIEW={s:1, ox:0, oy:0, rot:0};
+// Zuletzt eingenordete Wand: bleibt beim Entwirren als Orientierung fix.
+// Hier oben deklariert, weil openRoom() sie zuruecksetzt und weiter oben
+// in der Datei steht (let ist bis zur Deklaration in der TDZ).
+let northWallPair=null;
+// Nachbarraeume des aktiven Raums, bereits in DESSEN Koordinaten
+// umgerechnet. Einmal je Raumwechsel gefuellt, nicht je Bild: renderPanel
+// hat genau diesen Fehler schon einmal gemacht (Bibliothek je Frame parsen).
+// Hier oben deklariert, weil openRoom() sie nachlaedt und weiter oben steht.
+let neighbors=[];
+let hoverRoom=null;    // Nachbar unter dem Mauszeiger (schimmert gruen)
+let swim=null;         // laufende Fahrt zum Nachbarraum
+const toScr=p=>{
+  const c=Math.cos(VIEW.rot), s2=Math.sin(VIEW.rot);
+  return {x:(p.x*c-p.y*s2)*VIEW.s+VIEW.ox, y:(p.x*s2+p.y*c)*VIEW.s+VIEW.oy};
+};
+const toWorld=(x,y)=>{
+  const c=Math.cos(VIEW.rot), s2=Math.sin(VIEW.rot);
+  const xr=(x-VIEW.ox)/VIEW.s, yr=(y-VIEW.oy)/VIEW.s;
+  return {x:xr*c+yr*s2, y:-xr*s2+yr*c};
+};
 // Pointer-Event -> Geraetepixel relativ zum Canvas.
 function evDev(e){
   const r=cv.getBoundingClientRect();
   return {x:(e.clientX-r.left)*DPR(), y:(e.clientY-r.top)*DPR()};
 }
 
+// Ansicht, die eine Punktmenge bei gegebener Drehung einpasst - ohne VIEW
+// anzufassen. Getrennt von autofit(), weil die Fahrt zum Nachbarraum ihr
+// Ziel braucht, bevor sie dort ankommt.
+function fitView(P, rot, auf){
+  // Bounding-Box der GEDREHTEN Punkte: eingenordet eingepasst heisst, die
+  // Wand liegt waagerecht UND der Raum fuellt den Schirm.
+  const c=Math.cos(rot), s2=Math.sin(rot);
+  const rx=P.map(p=>p.x*c-p.y*s2), ry=P.map(p=>p.x*s2+p.y*c);
+  const a=auf||0;
+  const w=(Math.max(...rx)-Math.min(...rx)+2*a)||1000,
+        h=(Math.max(...ry)-Math.min(...ry)+2*a)||1000;
+  const s=Math.min((cv.width-150)/w, (cv.height-150)/h);
+  const mx=(Math.min(...rx)+Math.max(...rx))/2, my=(Math.min(...ry)+Math.max(...ry))/2;
+  return { s, ox:cv.width/2-mx*s, oy:cv.height/2-my*s, rot };
+}
+
 function autofit(){
   const P=M.fit?M.fit.pts:M.pts;
-  if(!P.length){ VIEW={s:1,ox:cv.width/2,oy:cv.height/2}; return; }
-  const xs=P.map(p=>p.x), ys=P.map(p=>p.y);
-  const w=Math.max(...xs)-Math.min(...xs)||1000, h=Math.max(...ys)-Math.min(...ys)||1000;
-  const s=Math.min((cv.width-150)/w, (cv.height-150)/h);
-  VIEW={ s, ox:cv.width/2-(Math.min(...xs)+w/2)*s, oy:cv.height/2-(Math.min(...ys)+h/2)*s };
+  if(!P.length){ VIEW={s:1,ox:cv.width/2,oy:cv.height/2,rot:VIEW.rot}; return; }
+  // Aufgeklappte Waende stehen bis zur Wandhoehe nach aussen - sie
+  // gehoeren in die Bounding-Box, sonst ragen sie aus dem Bild. Ueber den
+  // Rand zu rechnen waere zirkulaer (Rand braucht den Massstab, den er
+  // selbst bestimmt) und lieferte einen negativen Massstab.
+  let auf=0;
+  if(unfoldOn && M.openings.length){
+    const H=cornerHeights(P, M.hmeas);
+    auf=Math.max(...Object.values(H).map(x=>x.h), 0);
+  }
+  // Der Wandkoerper steht IMMER nach aussen, nicht nur beim Aufklappen -
+  // sonst schneidet der Bildrand die Aussenkante ab.
+  auf=Math.max(auf, Math.max(THICK_DEFAULT, ...Object.values(M.thick||{})));
+  VIEW=fitView(P, VIEW.rot, auf);
 }
 // Zoom um einen festen Bildpunkt (Geraetepixel): der Weltpunkt darunter
 // bleibt liegen.
@@ -3432,6 +4380,19 @@ function zoomAt(dx,dy,f){
   VIEW.ox=dx+(VIEW.ox-dx)*f;
   VIEW.oy=dy+(VIEW.oy-dy)*f;
   userView=true;
+}
+// Einnorden: die Wand a-b parallel zur oberen Bildschirmkante drehen.
+// Reine Ansichtssache. Dieselbe Wand nochmal einnorden dreht zurueck auf 0.
+function northWall(a,b,force){
+  const P=M.fit?M.fit.pts:M.pts, I=C.idx(P);
+  if(I[a]==null||I[b]==null) return;
+  const p=P[I[a]], q=P[I[b]];
+  const target=-Math.atan2(q.y-p.y, q.x-p.x);
+  // force: nach dem Entwirren neu ausrichten, ohne den Toggle auszuloesen.
+  VIEW.rot = (!force && Math.abs(VIEW.rot-target)<1e-9) ? 0 : target;
+  userView=false;   // eingenordet UND eingepasst - halbe Drehungen sehen verloren aus
+  autofit();
+  render();
 }
 
 function recompute(){
@@ -3458,6 +4419,32 @@ function recompute(){
   // Kandidat auf, im Zug waere das ein Ruckeln.
   M.sugg = (M.an && M.pts.length>=3)
     ? C.suggest(M.fit?M.fit.pts:M.pts, M.walls, M.meas) : [];
+  // Einmal je Aenderung berechnet, von Tabelle UND Plan konsumiert - die
+  // Indizes zaehlen ueber activeMeas, wie an.w selbst.
+  M.suspects = M.an ? computeSuspects(M.an.w, BAARDA_W0, TIE_TOL) : new Set();
+  // Eingemessene Oeffnungen an ihre Messungen ziehen - auch beim LADEN,
+  // sonst zeigt die App eine Lage, die den eigenen Messwerten
+  // widerspricht (browser-gesehen: 1220 gespeichert, 1200 gemessen).
+  // Messungen schlagen Ziehen; ohne Messung bleibt die Lage unberuehrt.
+  if(M.openings.length && M.opmeas.length && M.fit){
+    const P=M.fit.pts;
+    M.openings.forEach(o=>{
+      if(!M.opmeas.some(m=>m.op===o.id && m.on!==false)) return;
+      const sh=wallShape(P, M.hmeas, o.a, o.b);
+      if(!sh) return;
+      const r=solveOpening(sh, o, M.opmeas);
+      const andere=M.openings.filter(x=>x!==o && [x.a,x.b].sort().join('|')===[o.a,o.b].sort().join('|'));
+      const platz=clampOpening(sh, r.ziel);
+      if(openingPlaceable(sh, platz, andere)){ o.x=platz.x; o.y=platz.y; }
+    });
+  }
+  // Streuung auffaellig, aber kein EINZELNER Schuldiger isolierbar (leer =
+  // alle unter der Schwelle, >1 = Gleichstand): dann helfen nur
+  // Wiederholungen. Genau ein Verdaechtiger braucht keine Eingrenzung.
+  M.narrow = (netFails() && M.suspects.size!==1)
+    ? narrowCandidates(C.activeMeas(M.meas), M.an.v, C.SUGGEST_CHECK_MAX) : [];
+  // Einmal je Aenderung, nicht je Bild - wie suspects und sugg.
+  refreshNbChecks();
   render();
   // Ein Aufmass dauert leicht eine halbe Stunde. Ein Reload darf es nicht
   // kosten. Bewusst ohne Debounce: serialize() ist bei den hier realistischen
@@ -3495,6 +4482,10 @@ function openRoom(id){
   currentRoom=id;
   currentRoomName=r.name;
   STORE.setCurrent(id);
+  // Einnordung gehoert zum Raum, nicht zur Sitzung: sonst haengt die
+  // Ansicht des naechsten Raums an einer Wand, die es dort nicht gibt
+  // (browser-gesehen: schraeges Raster im frisch geoeffneten Raum).
+  VIEW.rot=0; northWallPair=null;
   // Der Undo-Stapel gehoert zum Raum: ein Undo nach dem Wechsel wuerde
   // sonst die Geometrie des vorigen Raums in DIESEN Raum speichern.
   undoStack.length=0;
@@ -3505,6 +4496,7 @@ function openRoom(id){
   hidePop();
   deserialize(r.data);
   userView=false;
+  loadNeighbors();
   recompute();
 }
 function newRoom(name){
@@ -3528,8 +4520,272 @@ function importAsNewRoom(name, dataObj){
   return null;
 }
 
-function render(){
+// ================= Gebaeude: Nachbarraeume =================
+// Nur wenn der AKTIVE Raum selbst verankert ist, gibt es ein Gebaeude.
+// Ein freistehender Raum (kein origin) sieht aus wie immer - alte Aufmasse
+// und Einzelraeume aendern ihr Verhalten nicht.
+function loadNeighbors(){
+  neighbors=[]; hoverRoom=null;
+  const self=currentRoom ? STORE.load(currentRoom) : null;
+  if(!self || !self.origin) return;
+  STORE.withOrigin().forEach(r=>{
+    if(r.id===currentRoom) return;
+    const d=r.data||{};
+    if(!Array.isArray(d.pts) || d.pts.length<2 || !Array.isArray(d.walls)) return;
+    // ponytail: ohne aktive Messung stehen die Punkte noch in Klickpixeln -
+    // erst scaleSketch rechnet mit der ersten Messung auf mm um. So ein Raum
+    // haette neben einem vermessenen jede beliebige Groesse.
+    if(!Array.isArray(d.meas) || !d.meas.some(m=>m.on!==false)) return;
+    const T=roomTransform(r.origin, self.origin);
+    const pts=d.pts.map(p=>applyRoomTransform(T,p));
+    neighbors.push({id:r.id, name:r.name, walls:d.walls, pts, T,
+                    thick:d.thick||{},
+                    openings:Array.isArray(d.openings)?d.openings:[],
+                    poly:C.wallPolygon(pts, d.walls),
+                    bands:wallBands(pts, d.walls, d.thick||{}, THICK_DEFAULT)});
+  });
+  refreshNbChecks();
+}
+// Geschlossener Raum: Treffer ueber die Flaeche. Ein frisch durch eine Tuer
+// angelegter Nachbar hat aber erst ZWEI Punkte und damit kein Polygon - waere
+// nur die Flaeche der Griff, kaeme man nie wieder zu ihm zurueck. Fuer den
+// Fall zaehlt die Naehe zu seinen Waenden.
+function neighborAt(wx,wy){
+  const p={x:wx,y:wy};
+  for(const n of neighbors) if(n.poly && C.pointInPoly(p, n.poly)) return n.id;
+  const tol=16*DPR()/VIEW.s;
+  // Eine geerbte Wand liegt nur die Wanddicke neben der eigenen - bei
+  // 115 mm sind das wenige Bildschirmpixel. Der Strich des Nachbarn darf
+  // der eigenen Wand die Tipps nicht wegnehmen: er gewinnt nur, wenn er
+  // wirklich naeher liegt.
+  const P=M.fit?M.fit.pts:M.pts, IO=C.idx(P);
+  let eigen=Infinity;
+  for(const [a,b] of M.walls){
+    if(IO[a]==null||IO[b]==null) continue;
+    eigen=Math.min(eigen, distToSeg(p, P[IO[a]], P[IO[b]]).d);
+  }
+  let best=null, bestD=tol;
+  for(const n of neighbors){
+    if(n.poly) continue;
+    const I=C.idx(n.pts);
+    for(const [a,b] of n.walls){
+      if(I[a]==null||I[b]==null) continue;
+      // distToSeg liefert {d,t}, nicht die blosse Zahl.
+      const d=distToSeg(p, n.pts[I[a]], n.pts[I[b]]).d;
+      if(d<bestD && d<eigen){ bestD=d; best=n.id; }
+    }
+  }
+  return best;
+}
+function roomCentre(P){
+  return {x:P.reduce((s,p)=>s+p.x,0)/P.length, y:P.reduce((s,p)=>s+p.y,0)/P.length};
+}
+// Raumname in der Raummitte, hell und UNTER allem anderen - so wie in einer
+// Bauzeichnung. Die Diagonalen tragen ihre Masse genau dort; als Wasserzeichen
+// stoert der Name sie nicht. Rueckgabe: Trefferfeld fuers Umbenennen.
+function drawRoomLabel(name, P, dpr, col, px){
+  if(!name || !P.length) return null;
+  const s=toScr(roomCentre(P));
+  // Etwas unter die Mitte: genau dort kreuzen sich die Diagonalen, und deren
+  // Massbeschriftung sitzt mit deckendem Kaestchen auf dem Mittelpunkt
+  // (browser-gesehen - der Name verschwand komplett darunter).
+  s.y += 26*dpr;
+  ctx.save();
+  ctx.font=`${px*dpr}px system-ui`; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillStyle=col;
+  ctx.fillText(name, s.x, s.y);
+  const w=ctx.measureText(name).width;
+  ctx.restore();
+  return {x:s.x-w/2, y:s.y-px*dpr*0.7, w, h:px*dpr*1.4};
+}
+let ownLabelRect=null;
+
+function drawNeighbors(dpr){
+  if(!neighbors.length) return;
+  neighbors.forEach(n=>{
+    const hot=(n.id===hoverRoom);
+    if(n.poly){
+      ctx.beginPath();
+      n.poly.forEach((p,i)=>{ const s=toScr(p); i?ctx.lineTo(s.x,s.y):ctx.moveTo(s.x,s.y); });
+      ctx.closePath();
+      // ponytail: der "Schimmer" ist eine ruhige Toenung, keine Animation -
+      // ein pulsender Raum neben dem Aufmass zieht den Blick vom Messen weg.
+      ctx.fillStyle = hot ? 'rgba(47,140,90,.15)' : 'rgba(42,40,35,.035)';
+      ctx.fill();
+    }
+    // Wandkoerper des Nachbarn, blass: erst damit liest sich der Plan als
+    // Gebaeude und nicht als Sammlung von Umrissen.
+    n.bands.forEach(b=>{
+      const gaps=n.openings
+        .filter(o=>wallKey(o.a,o.b)===wallKey(b.a,b.b))
+        .map(o=>o.a===b.a ? [o.x,o.x+o.w] : [b.L-(o.x+o.w), b.L-o.x])
+        .sort((p,q)=>p[0]-q[0]);
+      drawBand(b, gaps, dpr, b.assumed?BAND.nachbarAnn:BAND.nachbarMess, false);
+    });
+    const I=C.idx(n.pts);
+    ctx.strokeStyle = hot ? '#2f8c5a' : '#bdb8a9';
+    ctx.lineWidth = (hot?2.5:1.5)*dpr;
+    ctx.beginPath();
+    n.walls.forEach(([a,b])=>{
+      if(I[a]==null||I[b]==null) return;
+      const p=toScr(n.pts[I[a]]), q=toScr(n.pts[I[b]]);
+      ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y);
+    });
+    ctx.stroke();
+    drawRoomLabel(n.name, n.pts, dpr, hot?'#2f8c5a':'#a8a396', 13);
+  });
+}
+
+// Nachbarraum hinter einer Tuer anlegen. Der neue Raum bekommt KEIN
+// Vorgabe-Rechteck, sondern genau die geerbte Wand: zwei Punkte, um die
+// Wanddicke nach aussen versetzt, und ihre Laenge als fertige Messung.
+// Alles Weitere zeichnet der Nutzer wie gewohnt.
+function fragWanddicke(vorschlag){
+  const s=prompt('Wie dick ist diese Wand? Angabe in mm.\n'
+    +'Üblich: '+WALL_THICKNESS.join(', '), String(vorschlag));
+  if(s===null) return null;                    // Abbruch heisst Abbruch
+  const t=parseFloat(String(s).replace(',','.'));
+  if(!isFinite(t) || t<20 || t>1000){
+    setHint('Wanddicke muss zwischen 20 und 1000 mm liegen — nichts angelegt.');
+    return null;
+  }
+  return t;
+}
+function createNeighborRoom(opId){
+  const o=M.openings.find(x=>x.id===opId);
+  if(!o || !currentRoom) return;
+  const P=M.fit?M.fit.pts:M.pts;
+  const k=wallKey(o.a, o.b);
+  const t=fragWanddicke(M.thick[k] || 240);
+  if(t==null) return;
+  // Der Quellraum wird mit dem ersten Nachbarn zum Gebaeude. {0,0,0} ist
+  // die einzige sinnvolle Verankerung: sein eigenes System wird das des
+  // Gebaeudes.
+  const self=STORE.load(currentRoom);
+  const originR=self.origin || {x:0,y:0,rot:0};
+  if(!self.origin) STORE.save(currentRoom, {origin:originR});
+  const nb=neighborOrigin(P, M.walls, o.a, o.b, t, originR);
+  if(!nb){ setHint('Diese Wand taugt nicht als gemeinsame Wand.'); return; }
+
+  // Kein snapshot(): der Undo-Stapel gehoert zum Raum und wird beim Wechsel
+  // geleert - er koennte hier nichts zurueckholen. Wer den Nachbarn wieder
+  // los will, loescht ihn in der Bibliothek; dann kommt auch das Plus zurueck.
+  M.thick[k]=t;
+  const id=STORE.create('Neuer Raum');
+  M.shared[k]={room:id, wall:['A','B']};
+  recompute();                                  // Quellraum sichern
+
+  const L=Math.round(nb.L);
+  STORE.save(id, {
+    origin:nb.origin,
+    data:{ pts:[{id:'A',x:0,y:0},{id:'B',x:L,y:0}],
+           walls:[['A','B']],
+           // von:'nachbar' - dieser Wert stammt NICHT aus einer Messung in
+           // diesem Raum. Das Wand-Popup sagt es dazu, sonst sucht man
+           // spaeter vergeblich, wann man ihn eingetippt hat.
+           meas:[{a:'A',b:'B',d:L, von:'nachbar'}],
+           openings:[], hmeas:[], opmeas:[],
+           thick:{'A|B':t},
+           shared:{'A|B':{room:currentRoom, wall:[o.a,o.b]}},
+           idSeq:2, openSeq:1 },
+  });
+  openRoom(id);
+  setMode('draw');
+  M.chain='B';                                  // Zug liegt am Wandende an
+  render();
+  // setHintLive statt setHint: das hier ist keine Quittung, die nach vier
+  // Sekunden verschwinden darf - es erklaert, warum der neue Raum schon
+  // eine Wand hat und wo die Tuer geblieben ist.
+  setHintLive(`Wand A–B mit ${fmtM(L)} m aus „${self.name}“ übernommen `
+    +`(${t} mm dick). Die Tür gehört beiden Räumen und bleibt dort `
+    +`eingetragen. Nächste Ecke antippen.`);
+}
+
+// ================= Passen die Nachbarn zusammen? =================
+// Eine geteilte Wand hat zwei Innenkanten - unsere und die des Nachbarn.
+// Solange beide Raeume nur aus dem Anlegen stammen, liegen sie per
+// Konstruktion richtig. Sobald aber einer der beiden nachgemessen wird,
+// verschieben seine Messungen die Kante, und die beiden Aufmasse koennen
+// sich widersprechen. Das wird gemeldet, nicht stillschweigend geglaettet.
+const NB_TOL_MM  = 10;   // darunter: Messrauschen, nur anzeigen
+const NB_WARN_MM = 20;   // darueber: als Widerspruch melden
+const NB_WARN_DEG= 1;
+function sharedChecks(){
+  const out=[];
+  if(!M.fit || !neighbors.length) return out;
+  const P=M.fit.pts, I=C.idx(P);
+  Object.keys(M.shared).forEach(k=>{
+    const sh=M.shared[k];
+    const n=neighbors.find(x=>x.id===sh.room);
+    if(!n || !sh.wall) return;
+    const [a,b]=k.split('|');
+    const J=C.idx(n.pts), [pa,pb]=sh.wall;
+    if(I[a]==null||I[b]==null||J[pa]==null||J[pb]==null) return;
+    const f=sharedWallFit(P[I[a]], P[I[b]], n.pts[J[pa]], n.pts[J[pb]]);
+    if(!f) return;
+    const t=M.thick[k]>0 ? M.thick[k] : THICK_DEFAULT;
+    const probleme=[];
+    if(Math.abs(f.laengeD)>NB_WARN_MM)
+      probleme.push(`hier ${fmtM(f.laengeHier)} m, in „${n.name}“ `
+        +`${fmtM(f.laengeDort)} m — ${Math.round(Math.abs(f.laengeD))} mm Unterschied`);
+    if(f.versatz>NB_WARN_MM)
+      probleme.push(`die Wände stehen ${Math.round(f.versatz)} mm gegeneinander versetzt`);
+    if(f.winkel>NB_WARN_DEG)
+      probleme.push(`die Räume stehen ${f.winkel.toFixed(1)}° schief zueinander`);
+    if(Math.abs(f.dicke-t)>NB_WARN_MM)
+      probleme.push(`die Lage ergibt ${Math.round(f.dicke)} mm Wanddicke, eingetragen sind ${t} mm`);
+    out.push({a, b, k, f, t, raum:n.name, probleme});
+  });
+  return out;
+}
+function refreshNbChecks(){ M.nbchecks=sharedChecks(); }
+
+const SWIM_MS=300;
+// Hinueberschwimmen statt springen. Die Fahrt laeuft noch im System des
+// AKTIVEN Raums; erst beim Ankommen wird gewechselt.
+function swimTo(id){
+  const n=neighbors.find(x=>x.id===id);
+  if(!n || swim) return;
+  closeEntry(); if(wpopPair) closeWallPopup(); hidePop();
+  // Waehrend der Fahrt darf autofit die Ansicht nicht zurueckreissen -
+  // drawCanvas passt sonst je Bild wieder auf den aktiven Raum ein.
+  userView=true;
+  hoverRoom=null; cv.style.cursor='';
+  swim={id, to:fitView(n.pts, VIEW.rot), T:n.T,
+        from:{s:VIEW.s, ox:VIEW.ox, oy:VIEW.oy}, t0:performance.now()};
+  requestAnimationFrame(stepSwim);
+  // Sicherung: im Hintergrund-Tab liefert der Browser keine Frames mehr
+  // (browser-gesehen: document.hidden -> requestAnimationFrame schweigt).
+  // Ohne diesen Nachschlag bliebe die Fahrt stehen und der Raumwechsel
+  // faende nie statt - beim Zurueckkommen sitzt man im falschen Raum.
+  setTimeout(stepSwim, SWIM_MS+60);
+}
+function stepSwim(now){
+  if(!swim) return;
+  const k=Math.min(1,((now||performance.now())-swim.t0)/SWIM_MS);
+  const e=k<.5 ? 2*k*k : 1-2*(1-k)*(1-k);   // sanft an, sanft aus
+  VIEW.s = swim.from.s +(swim.to.s -swim.from.s )*e;
+  VIEW.ox= swim.from.ox+(swim.to.ox-swim.from.ox)*e;
+  VIEW.oy= swim.from.oy+(swim.to.oy-swim.from.oy)*e;
   drawCanvas();
+  if(k<1){ requestAnimationFrame(stepSwim); return; }
+  // Ankommen: dasselbe Bild, nur im System des Zielraums. Aus
+  //   Schirm = s*R(rot)*(R(f)*p + t) + o
+  // folgt VIEW_Ziel = { s, rot+f, toScr(t) } - exakt und ohne autofit noch
+  // einmal zu befragen: dessen Rand fuer die Abwicklung haengt am AKTIVEN
+  // Raum und wuerde beim Wechsel genau den Sprung erzeugen, den die Fahrt
+  // vermeiden soll.
+  const T=swim.T, id=swim.id;
+  const o=toScr({x:T.x, y:T.y}), s=VIEW.s, rot=VIEW.rot+T.rot;
+  swim=null;
+  openRoom(id);
+  VIEW={s, rot, ox:o.x, oy:o.y};
+  userView=true;
+  render();
+}
+
+function render(){
+  if(M.mode==='wall') drawWallView(); else drawCanvas();
   renderPanel();
 }
 
@@ -3545,14 +4801,22 @@ function pickStep(minPx){
 
 function drawGrid(dpr){
   const step=pickStep(45*dpr);
-  const w0=toWorld(0,0), w1=toWorld(cv.width,cv.height);
+  // Sichtfenster in Weltkoordinaten: bei gedrehter Ansicht ist es ein
+  // gedrehtes Rechteck - die Bounding-Box der vier Ecken ueberdeckt es,
+  // und die Linien laufen als WELT-Segmente durch toScr (Ueberstand wird
+  // vom Canvas geclippt, das ist billiger als exaktes Zuschneiden).
+  const corners=[toWorld(0,0), toWorld(cv.width,0), toWorld(0,cv.height), toWorld(cv.width,cv.height)];
+  const x0=Math.min(...corners.map(c=>c.x)), x1=Math.max(...corners.map(c=>c.x));
+  const y0=Math.min(...corners.map(c=>c.y)), y1=Math.max(...corners.map(c=>c.y));
   ctx.strokeStyle=INK.grid; ctx.lineWidth=Math.max(1,0.75*dpr);
   ctx.beginPath();
-  for(let x=Math.floor(w0.x/step)*step; x<=w1.x; x+=step){
-    const s=toScr({x,y:0}); ctx.moveTo(s.x,0); ctx.lineTo(s.x,cv.height);
+  for(let x=Math.floor(x0/step)*step; x<=x1; x+=step){
+    const a=toScr({x,y:y0}), b=toScr({x,y:y1});
+    ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y);
   }
-  for(let y=Math.floor(w0.y/step)*step; y<=w1.y; y+=step){
-    const s=toScr({x:0,y}); ctx.moveTo(0,s.y); ctx.lineTo(cv.width,s.y);
+  for(let y=Math.floor(y0/step)*step; y<=y1; y+=step){
+    const a=toScr({x:x0,y}), b=toScr({x:x1,y});
+    ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y);
   }
   ctx.stroke();
 }
@@ -3576,6 +4840,380 @@ function drawScalebar(dpr){
 // Vorschlag soll nur die Hervorhebung im Plan aktualisieren, nicht das Panel
 // neu aufbauen - sonst zerstoert render() genau die Zeile, auf der der
 // Cursor gerade steht.
+// ================= Wandansicht =================
+// Eigene Ansicht mit eigenem Massstab: die Wand wird eingepasst, x laeuft
+// von Ecke a nach b, y vom Boden nach oben. Auf dem Schirm zeigt y nach
+// unten - deshalb spiegelt wToScr die Hoehe.
+let WV={s:1, ox:0, oy:0};
+const wToScr=p=>({x:p.x*WV.s+WV.ox, y:WV.oy-p.y*WV.s});
+const wToWall=(sx,sy)=>({x:(sx-WV.ox)/WV.s, y:(WV.oy-sy)/WV.s});
+
+function currentShape(){
+  if(!M.wallSel) return null;
+  const P=M.fit?M.fit.pts:M.pts;
+  return wallShape(P, M.hmeas, M.wallSel.a, M.wallSel.b);
+}
+function wallFit(shape){
+  if(!shape) return;
+  const hMax=Math.max(shape.ha, shape.hb)||1;
+  // Rand knapp halten - die Wand soll die Flaeche fuellen, nicht darin schweben.
+  const pad=34*DPR();
+  const s=Math.min((cv.width-2*pad)/(shape.L||1), (cv.height-2*pad)/hMax);
+  WV={ s, ox:(cv.width-shape.L*s)/2, oy:(cv.height+hMax*s)/2 };
+}
+
+// Oeffnungen dieser Wand, in Anlegereihenfolge.
+function wallOpenings(){
+  if(!M.wallSel) return [];
+  const k=[M.wallSel.a,M.wallSel.b].sort().join('|');
+  return M.openings.filter(o=>[o.a,o.b].sort().join('|')===k);
+}
+
+const OPEN_LABEL={door:'Tür', window:'Fenster', hole:'Loch'};
+
+function drawWallView(){
+  const dpr=DPR();
+  cv.width=cv.clientWidth*dpr; cv.height=cv.clientHeight*dpr;
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.clearRect(0,0,cv.width,cv.height);
+  if(!cv.width||!cv.height) return;
+  const shape=currentShape();
+  if(!shape) return;
+  if(!wallUserView) wallFit(shape);
+  // Wandflaeche als Trapez - die Decke laeuft schraeg, wenn die beiden
+  // Ecken verschieden hoch sind.
+  const poly=shape.poly.map(wToScr);
+  ctx.beginPath();
+  poly.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
+  ctx.closePath();
+  ctx.fillStyle=INK.canvas; ctx.fill();
+  ctx.strokeStyle=INK.wall; ctx.lineWidth=2.5*dpr; ctx.stroke();
+  // Boden kraeftiger: er ist die Bezugskante fuer jede Hoehenangabe.
+  const b0=wToScr({x:0,y:0}), b1=wToScr({x:shape.L,y:0});
+  ctx.lineWidth=4*dpr; ctx.beginPath();
+  ctx.moveTo(b0.x,b0.y); ctx.lineTo(b1.x,b1.y); ctx.stroke();
+  // Oeffnungen
+  wallOpenings().forEach(o=>{
+    const p=wToScr({x:o.x, y:o.y+o.h}), q=wToScr({x:o.x+o.w, y:o.y});
+    const w=q.x-p.x, h=q.y-p.y;
+    const sel=M.openSel===o.id;
+    ctx.fillStyle = o.kind==='hole' ? '#e6e2d5' : '#fff';
+    ctx.fillRect(p.x,p.y,w,h);
+    ctx.strokeStyle = sel?INK.accent:INK.wall;
+    ctx.lineWidth=(sel?3:2)*dpr;
+    ctx.strokeRect(p.x,p.y,w,h);
+    drawOpeningSymbol(o,p.x,p.y,w,h,dpr);
+    // Beschriftung nur, wenn sie hineinpasst - sonst ueberlagern sich die
+    // Texte mehrerer Oeffnungen zu Unlesbarkeit (browser-gesehen).
+    ctx.font=`${11*dpr}px system-ui`; ctx.textAlign='center';
+    const txt=`${OPEN_LABEL[o.kind]} ${Math.round(o.w)}×${Math.round(o.h)}`;
+    const kurz=OPEN_LABEL[o.kind];
+    const passt=ctx.measureText(txt).width < w-8*dpr;
+    const passtKurz=ctx.measureText(kurz).width < w-8*dpr;
+    if(passt||passtKurz){
+      ctx.fillStyle=INK.canvas;
+      const tw=ctx.measureText(passt?txt:kurz).width;
+      ctx.fillRect(p.x+w/2-tw/2-3*dpr, p.y+h/2-8*dpr, tw+6*dpr, 14*dpr);
+      ctx.fillStyle=sel?INK.accent:INK.scale;
+      ctx.fillText(passt?txt:kurz, p.x+w/2, p.y+h/2+4*dpr);
+    }
+    ctx.textAlign='start';
+  });
+  // Masse der Wand selbst
+  ctx.fillStyle=INK.scale; ctx.font=`${12*dpr}px system-ui`; ctx.textAlign='center';
+  ctx.fillText(`${fmtM(shape.L)} m`, (b0.x+b1.x)/2, b0.y+20*dpr);
+  // Hoehen INNEN beschriften: aussen wurden sie am Canvasrand
+  // abgeschnitten, sobald die Wand die Flaeche gut ausnutzt.
+  ctx.textAlign='left';
+  const hl=wToScr({x:0,y:shape.ha});
+  ctx.fillText(`${fmtM(shape.ha)} m`, hl.x+8*dpr, hl.y+16*dpr);
+  if(Math.abs(shape.ha-shape.hb)>1){
+    ctx.textAlign='right';
+    const hr=wToScr({x:shape.L,y:shape.hb});
+    ctx.fillText(`${fmtM(shape.hb)} m`, hr.x-8*dpr, hr.y+16*dpr);
+  }
+  ctx.textAlign='start';
+  // Hinweis nur, wenn er stimmt: EINE gemessene Hoehe fuer den ganzen Raum
+  // ist der Normalfall, kein Mangel. Erst wenn verschiedene Hoehen im Spiel
+  // sind und ausgerechnet diese Wand erbt, ist "geschaetzt" die Wahrheit.
+  const gem=M.hmeas.filter(m=>m.on!==false).length;
+  const hinweis = !gem ? 'Höhe angenommen — Kante antippen zum Messen'
+    : (!shape.gemessen && new Set(M.hmeas.filter(m=>m.on!==false).map(m=>Math.round(m.d))).size>1)
+      ? 'Höhe dieser Wand geschätzt — Kante antippen zum Messen' : '';
+  if(hinweis){
+    ctx.fillStyle=INK.mode; ctx.font=`${11.5*dpr}px system-ui`;
+    ctx.fillText(hinweis, 14*dpr, 22*dpr);
+  }
+}
+
+// Aufrisssymbolik nach DIN-Praxis: Dreiecke, deren Spitze auf die
+// Bandseite zeigt. Durchgezogen = nach innen oeffnend, gestrichelt =
+// nach aussen. Fest verglast und Loch bekommen kein Symbol.
+function drawOpeningSymbol(o,x,y,w,h,dpr){
+  const t=o.swing&&o.swing.type;
+  if(!t||t==='fix'||o.kind==='hole') return;
+  ctx.save();
+  ctx.strokeStyle=INK.scale; ctx.lineWidth=1.2*dpr;
+  if(o.swing.out) ctx.setLineDash([4*dpr,3*dpr]);
+  const tri=(ax,ay,bx,by,cx,cy)=>{
+    ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(bx,by); ctx.lineTo(cx,cy);
+    ctx.closePath(); ctx.stroke();
+  };
+  const links=o.swing.hinge==='left';
+  if(t==='turn'||t==='turntilt'){
+    // Dreh: Spitze auf der Bandseite
+    if(links) tri(x,y+h/2, x+w,y, x+w,y+h);
+    else      tri(x+w,y+h/2, x,y, x,y+h);
+  }
+  if(t==='tilt'||t==='turntilt') tri(x+w/2,y+h, x,y, x+w,y);   // Kipp: Achse unten
+  if(t==='top')  tri(x+w/2,y, x,y+h, x+w,y+h);                 // Klapp: Achse oben
+  if(t==='pivot'){                                             // Schwing: Achse mittig
+    tri(x,y+h/2, x+w,y, x+w,y+h);
+    tri(x+w,y+h/2, x,y, x,y+h);
+  }
+  ctx.restore();
+}
+
+// Marker fuer Waende, die schon eine Wandansicht haben - unabhaengig
+// davon, ob die Abwicklung eingeschaltet ist. So sieht man auf einen
+// Blick, welche Waende nur in ihrer LAENGE bekannt sind und welche schon
+// mit Oeffnungen vermessen wurden.
+function drawWallMarks(P, I, dpr){
+  const bemasst=new Set(M.openings.map(o=>[o.a,o.b].sort().join('|')));
+  if(!bemasst.size) return;
+  M.walls.forEach(([a,b])=>{
+    if(!bemasst.has([a,b].sort().join('|'))) return;
+    if(I[a]==null||I[b]==null) return;
+    const A=P[I[a]], B=P[I[b]];
+    const n=outerNormal(P, M.walls, a, b);
+    const m={x:(A.x+B.x)/2, y:(A.y+B.y)/2};
+    // Zwei kurze Striche aussen an der Wandmitte - ruhig genug, um im
+    // Plan nicht mit Messstrecken verwechselt zu werden.
+    const L=C.dist(A,B)||1;
+    const u={x:(B.x-A.x)/L, y:(B.y-A.y)/L};
+    ctx.strokeStyle=INK.meas; ctx.lineWidth=2*dpr;
+    [-1,1].forEach(k=>{
+      const b0=toScr({x:m.x+u.x*k*90, y:m.y+u.y*k*90});
+      const b1=toScr({x:m.x+u.x*k*90+n.x*180, y:m.y+u.y*k*90+n.y*180});
+      ctx.beginPath(); ctx.moveTo(b0.x,b0.y); ctx.lineTo(b1.x,b1.y); ctx.stroke();
+    });
+  });
+}
+
+// Abwicklung: die Waende mit Inhalt nach aussen weggeklappt. Der
+// Klappgrad kommt aus dem Abstand zum Fokus (Bildschirmmitte), so dass
+// die Uebersicht am besten ist, wenn man ueber der Raummitte schwebt.
+function drawUnfolded(P, I, dpr){
+  if(!unfoldOn || !M.openings.length || !M.fit) return;
+  const fokus=toWorld(cv.width/2, cv.height/2);
+  const ref=planRefDist(P);
+  const mitWaenden=new Set(M.openings.map(o=>[o.a,o.b].sort().join('|')));
+  M.walls.forEach(([a,b])=>{
+    const k=[a,b].sort().join('|');
+    if(!mitWaenden.has(k)) return;
+    if(I[a]==null||I[b]==null) return;
+    const A=P[I[a]], B=P[I[b]];
+    const shape=wallShape(P, M.hmeas, a, b);
+    if(!shape) return;
+    const L=shape.L||1;
+    const u={x:(B.x-A.x)/L, y:(B.y-A.y)/L};
+    const n=outerNormal(P, M.walls, a, b);
+    const f=unfoldFactor({x:(A.x+B.x)/2, y:(A.y+B.y)/2}, fokus, ref, n);
+    if(f<0.02) return;                       // flach unterm Fokus: nichts zu zeigen
+    // Wandkoordinate -> Welt: entlang der Wand, dann nach aussen geklappt.
+    const w2w=(x,y)=>({x:A.x+u.x*x+n.x*y*f, y:A.y+u.y*x+n.y*y*f});
+    const eck=[w2w(0,0), w2w(L,0), w2w(L,shape.hb), w2w(0,shape.ha)].map(toScr);
+    ctx.save();
+    ctx.globalAlpha=0.35+0.45*f;             // ferne Waende deutlicher
+    ctx.beginPath();
+    eck.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
+    ctx.closePath();
+    ctx.fillStyle=INK.canvas; ctx.fill();
+    ctx.strokeStyle=INK.scale; ctx.lineWidth=1.2*dpr; ctx.stroke();
+    M.openings.filter(o=>[o.a,o.b].sort().join('|')===k).forEach(o=>{
+      const r=[w2w(o.x,o.y), w2w(o.x+o.w,o.y), w2w(o.x+o.w,o.y+o.h), w2w(o.x,o.y+o.h)].map(toScr);
+      ctx.beginPath();
+      r.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
+      ctx.closePath();
+      ctx.fillStyle = o.kind==='hole' ? '#e6e2d5' : '#fff';
+      ctx.fill();
+      ctx.strokeStyle = o.kind==='window' ? INK.meas : INK.wall;
+      ctx.lineWidth=1.4*dpr; ctx.stroke();
+    });
+    ctx.restore();
+  });
+}
+
+// Oeffnungen im Grundriss: Blatt und Schwenkbogen. Der Bogen laeuft bis
+// kurz vor das naechste Hindernis (siehe swingLimit) statt pauschal 90
+// Grad - so ist ablesbar, wieviel Platz die Tuer wirklich braucht.
+function drawOpeningsOnPlan(P, I, dpr){
+  if(!M.openings.length) return;
+  M.openings.forEach(o=>{
+    const r=openingWorld(P, o.a, o.b, o);
+    if(!r) return;
+    // Fenster und Loecher: nur die Bruestungslinie in der Luecke.
+    if(o.kind!=='door' || !o.swing || o.swing.type==='slide' || o.swing.type==='none'){
+      const p=toScr(r.P), q=toScr(r.Q);
+      ctx.strokeStyle = o.kind==='window' ? INK.meas : INK.scale;
+      ctx.lineWidth=1.6*dpr;
+      ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
+      return;
+    }
+    // Drehtuer: Angel auf der Bandseite, Blatt so lang wie die Oeffnung.
+    const links=o.swing.hinge==='left';
+    const angel=links?r.P:r.Q;
+    const dir0=Math.atan2(links?r.u.y:-r.u.y, links?r.u.x:-r.u.x);
+    // Nach innen heisst: auf die Seite, auf der die Raumflaeche liegt.
+    const poly=C.wallPolygon(P, M.walls);
+    let sense=+1;
+    if(poly){
+      const probe={x:angel.x+r.n.x*10, y:angel.y+r.n.y*10};
+      const innen=C.pointInPoly(probe, poly);
+      // Kreuzprodukt u x n ist +1; das Blatt dreht zur Normalen hin,
+      // wenn sie nach innen zeigt (bzw. umgekehrt bei "nach aussen").
+      const zurNormalen = links ? +1 : -1;
+      sense = (innen !== !!o.swing.out) ? zurNormalen : -zurNormalen;
+    }
+    const max=swingLimit(P, M.walls, [o.a,o.b], angel, o.w, dir0, sense);
+    const a0=toScr(angel);
+    const tipW={x:angel.x+Math.cos(dir0+sense*max)*o.w,
+                y:angel.y+Math.sin(dir0+sense*max)*o.w};
+    const t=toScr(tipW);
+    ctx.strokeStyle=INK.scale;
+    ctx.lineWidth=2*dpr;
+    ctx.beginPath(); ctx.moveTo(a0.x,a0.y); ctx.lineTo(t.x,t.y); ctx.stroke();
+    // Bogen. Der Grundriss spiegelt y NICHT (anders als die Wandansicht),
+    // also gelten die Weltwinkel direkt - nur die Ansichtsdrehung kommt
+    // dazu. Das counterclockwise-Flag folgt dem Drehsinn.
+    ctx.lineWidth=1*dpr; ctx.setLineDash([3*dpr,3*dpr]);
+    ctx.beginPath();
+    ctx.arc(a0.x, a0.y, Math.max(0, o.w*VIEW.s), dir0+VIEW.rot, dir0+sense*max+VIEW.rot, sense<0);
+    ctx.stroke(); ctx.setLineDash([]);
+  });
+}
+
+// ================= Wandkoerper im Grundriss =================
+// Farben der Wandflaeche: gemessene Dicke satt, angenommene blass und mit
+// gestrichelter Aussenkante - eine angenommene Dicke ist eine Aussage, die
+// der Nutzer nie gemacht hat, und darf nicht wie eine Messung aussehen.
+const BAND={ mess:'#d9d4c5', ann:'#eceae1', kante:'#b9b3a3',
+             nachbarMess:'#e6e2d7', nachbarAnn:'#f0eee7', streit:'#f2ddd8' };
+
+// Alle Luecken in dieser Wand, in Wandkoordinaten (0..L ab Ecke a) - die
+// eigenen Oeffnungen und die des Raums auf der anderen Seite. Die geteilte
+// Wand steht in M.shared, sie muss nicht aus der Geometrie erraten werden.
+function wallGaps(a, b, L, iA, iB){
+  const k=wallKey(a,b), out=[];
+  M.openings.forEach(o=>{
+    if(wallKey(o.a,o.b)!==k) return;
+    out.push(o.a===a ? [o.x, o.x+o.w] : [L-(o.x+o.w), L-o.x]);
+  });
+  const sh=M.shared[k];
+  if(sh){
+    const n=neighbors.find(x=>x.id===sh.room);
+    if(n){
+      const I=C.idx(n.pts);
+      n.openings.forEach(o=>{
+        if(wallKey(o.a,o.b)!==wallKey(sh.wall[0],sh.wall[1])) return;
+        if(I[o.a]==null) return;
+        // Laeuft die Wand drueben andersherum? Entscheidet der Vergleich
+        // zweier Abstaende, keine Toleranz: der Anfangspunkt der fremden
+        // Wand liegt naeher an genau einer unserer beiden Ecken.
+        const p=n.pts[I[o.a]];
+        const gleich=C.dist(p,iA)<=C.dist(p,iB);
+        out.push(gleich ? [o.x, o.x+o.w] : [L-(o.x+o.w), L-o.x]);
+      });
+    }
+  }
+  return out.map(([x0,x1])=>[Math.max(0,Math.min(L,x0)), Math.max(0,Math.min(L,x1))])
+            .filter(([x0,x1])=>x1-x0>1)
+            .sort((p,q)=>p[0]-q[0]);
+}
+// Die Wand als Flaeche, an ihren Oeffnungen unterbrochen. Jedes Stueck
+// reicht bis zur Gehrung, damit die Ecken geschlossen bleiben.
+function drawBand(band, gaps, dpr, fuell, kante, streit){
+  const {iA,iB,oA,oB,L,u}=band;
+  const stuecke=[]; let von=0;
+  gaps.forEach(([x0,x1])=>{ if(x0>von) stuecke.push([von,x0]); von=Math.max(von,x1); });
+  if(von<L) stuecke.push([von,L]);
+  // Innen- und Aussenkante laufen parallel, also derselbe Anteil auf beiden.
+  const misch=(p,q,f)=>({x:p.x+(q.x-p.x)*f, y:p.y+(q.y-p.y)*f});
+  stuecke.forEach(([x0,x1])=>{
+    const f0=x0/L, f1=x1/L;
+    const P=[misch(iA,iB,f0), misch(iA,iB,f1), misch(oA,oB,f1), misch(oA,oB,f0)]
+      .map(toScr);
+    ctx.beginPath();
+    P.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
+    ctx.closePath();
+    ctx.fillStyle=streit?BAND.streit:fuell; ctx.fill();
+    if(!kante) return;
+    // Nur die AUSSENkante zeichnen - die Innenkante ist die Wandlinie
+    // selbst und wird gleich ohnehin gezogen.
+    ctx.beginPath(); ctx.moveTo(P[3].x,P[3].y); ctx.lineTo(P[2].x,P[2].y);
+    ctx.strokeStyle=streit?INK.measBad:BAND.kante;
+    ctx.lineWidth=(streit?2:1)*dpr;
+    ctx.setLineDash(band.assumed?[4*dpr,3*dpr]:[]);
+    ctx.stroke(); ctx.setLineDash([]);
+  });
+}
+function drawOwnBands(dpr){
+  if(!M.fit) return;
+  const P=M.drag?M.pts:M.fit.pts;
+  const bands=wallBands(P, M.walls, M.thick, THICK_DEFAULT);
+  // Eine Wand, die nicht zum Nachbarn passt, traegt ihre Meldung auch im
+  // Plan - sonst muesste man erst das Popup oeffnen, um zu sehen, WELCHE.
+  const bad=new Set((M.nbchecks||[]).filter(c=>c.probleme.length).map(c=>c.k));
+  bands.forEach(b=>drawBand(b, wallGaps(b.a,b.b,b.L,b.iA,b.iB), dpr,
+                            b.assumed?BAND.ann:BAND.mess, true,
+                            bad.has(wallKey(b.a,b.b))));
+}
+
+// Hinter jeder Tuer, hinter der noch kein Raum liegt, ein Plus: dort geht
+// es weiter. Nur im geschlossenen Raum - ohne Polygon waere gar nicht
+// entschieden, welche Seite der Wand "hinter" ist.
+const PLUS_R=13;         // Radius auf dem Schirm, CSS-px
+const PLUS_ABSTAND=26;   // Abstand von der Wand, CSS-px
+const RAUM_PROBE=600;    // mm nach aussen: sicher jenseits jeder Wanddicke
+let doorPluses=[];
+function drawDoorPluses(P, I, dpr){
+  doorPluses=[];
+  if(!M.fit || !M.openings.length) return;
+  const poly=C.wallPolygon(P, M.walls);
+  if(!poly) return;
+  M.openings.forEach(o=>{
+    if(o.kind!=='door') return;
+    // Hinter EINER Wand liegt EIN Raum: ist die Wand schon geteilt, gibt es
+    // fuer keine ihrer Tueren noch etwas anzulegen. Der Eintrag entscheidet
+    // das zuverlaessig - die Geometrie allein nicht, denn ein frisch
+    // angelegter Nachbar ist nur ein Strich (browser-gesehen: das Plus kam
+    // zurueck, sobald die Trefferzone knapper wurde).
+    // ...solange es diesen Raum noch gibt. Wird der Nachbar geloescht, muss
+    // das Plus zurueckkommen, sonst ist die Tuer fuer immer verbaut.
+    const sh=M.shared[wallKey(o.a,o.b)];
+    if(sh && neighbors.some(n=>n.id===sh.room)) return;
+    const r=openingWorld(P, o.a, o.b, o);
+    if(!r) return;
+    const n=outerNormal(P, M.walls, o.a, o.b);
+    const mid={x:(r.P.x+r.Q.x)/2, y:(r.P.y+r.Q.y)/2};
+    // Und ein unabhaengig gezeichneter Raum dahinter zaehlt auch, ganz ohne
+    // Eintrag - dafuer die Probe nach aussen.
+    if(neighborAt(mid.x+n.x*RAUM_PROBE, mid.y+n.y*RAUM_PROBE)) return;
+    const d=PLUS_ABSTAND*dpr/VIEW.s;
+    const s=toScr({x:mid.x+n.x*d, y:mid.y+n.y*d});
+    doorPluses.push({x:s.x, y:s.y, r:PLUS_R*dpr, op:o.id});
+    ctx.save();
+    ctx.beginPath(); ctx.arc(s.x, s.y, PLUS_R*dpr, 0, 2*Math.PI);
+    ctx.fillStyle=INK.canvas; ctx.fill();
+    ctx.strokeStyle=INK.accent; ctx.lineWidth=1.5*dpr; ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(s.x-6*dpr, s.y); ctx.lineTo(s.x+6*dpr, s.y);
+    ctx.moveTo(s.x, s.y-6*dpr); ctx.lineTo(s.x, s.y+6*dpr);
+    ctx.lineWidth=2*dpr; ctx.stroke();
+    ctx.restore();
+  });
+}
+
 function drawCanvas(){
   const dpr=DPR();
   cv.width=cv.clientWidth*dpr; cv.height=cv.clientHeight*dpr;
@@ -3595,13 +5233,47 @@ function drawCanvas(){
   // Raster und Massstab erst, wenn die Koordinaten Millimeter sind - vorher
   // waere beides eine Aussage ueber Bildschirmpixel.
   if(M.fit){ drawGrid(dpr); drawScalebar(dpr); }
-  // Waende
-  ctx.strokeStyle=INK.wall; ctx.lineWidth=2.5*dpr; ctx.lineCap='round';
+  // Nachbarraeume und beide Raumnamen liegen UNTER dem aktiven Aufmass:
+  // Kontext, kein Vordergrund.
+  drawNeighbors(dpr);
+  drawOwnBands(dpr);
+  ownLabelRect = (currentRoom && P.length && currentRoomName && currentRoomName!=='—')
+    ? drawRoomLabel(currentRoomName, P, dpr, 'rgba(42,40,35,.30)', 15) : null;
+  // Waende. Waehrend eines Zugs toenen sich die Paare, die sich fast
+  // beruehren (M.nearPairs) - erklaert wortlos, warum der Punkt hinter
+  // dem Finger zurueckbleibt; Zaehigkeit ohne Grund wirkt wie ein Ruckler.
+  const nearIds=new Set();
+  if(M.drag) M.nearPairs.forEach(([a,b,c,d])=>{
+    nearIds.add([a,b].sort().join('|')); nearIds.add([c,d].sort().join('|'));
+  });
+  ctx.lineCap='round';
   M.walls.forEach(([a,b])=>{
     if(I[a]==null||I[b]==null) return;
-    const p=toScr(P[I[a]]), q=toScr(P[I[b]]);
-    ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
+    const hot=nearIds.has([a,b].sort().join('|'));
+    ctx.strokeStyle=hot?INK.mode:INK.wall;
+    ctx.lineWidth=(hot?4:2.5)*dpr;
+    // Oeffnungen unterbrechen die Wandlinie - so sieht man im Grundriss,
+    // wo eine Tuer oder ein Fenster sitzt, nicht nur in der Wandansicht.
+    // Oeffnungen unterbrechen die Wandlinie - auch die des Raums auf der
+    // anderen Seite, sonst laeuft die Linie quer durch die Luecke, die der
+    // Wandkoerper dort schon zeigt.
+    const A=P[I[a]], B=P[I[b]], L=C.dist(A,B);
+    const gaps=L>0 ? wallGaps(a,b,L,A,B) : [];
+    ctx.beginPath();
+    let von=0;
+    const auf=f=>toScr({x:A.x+(B.x-A.x)*f, y:A.y+(B.y-A.y)*f});
+    gaps.forEach(([x0,x1])=>{
+      if(x0>von){ const p=auf(von/L), q=auf(x0/L); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); }
+      von=Math.max(von,x1);
+    });
+    const p=auf(L>0?von/L:0), q=toScr(B);
+    ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y);
+    ctx.stroke();
   });
+  drawUnfolded(P, I, dpr);
+  drawWallMarks(P, I, dpr);
+  drawOpeningsOnPlan(P, I, dpr);
+  drawDoorPluses(P, I, dpr);
   // Hervorgehobenes Paar breit unterlegen - VOR Messungen und Vorschlaegen,
   // damit deren Strichmuster darauf liegen bleibt. Deckt auch den Fall ab,
   // dass eine blosse Wand angetippt wurde (Eingabe offen): die ist weder
@@ -3613,13 +5285,17 @@ function drawCanvas(){
     ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
     ctx.restore();
   }
-  // Messungen
+  // Messungen. Verdaechtige (M.suspects, gleiche Indizes wie an.w) in Rot
+  // und dicker: die Frage "wo muss ich nachmessen?" beantwortet der Plan
+  // selbst, nicht erst die Tabelle.
+  const actM=C.activeMeas(M.meas);
   ctx.setLineDash([6*dpr,4*dpr]);
-  C.activeMeas(M.meas).forEach(m=>{
+  actM.forEach((m,mi)=>{
     if(I[m.a]==null||I[m.b]==null) return;
     const hl = M.highlight && ((M.highlight.a===m.a&&M.highlight.b===m.b)||(M.highlight.a===m.b&&M.highlight.b===m.a));
-    ctx.strokeStyle = hl ? INK.measHl : INK.meas;
-    ctx.lineWidth   = (hl?3:1.5)*dpr;
+    const sus=M.suspects.has(mi);
+    ctx.strokeStyle = sus ? (hl?INK.measBadHl:INK.measBad) : (hl?INK.measHl:INK.meas);
+    ctx.lineWidth   = (hl?3 : sus?2.5 : 1.5)*dpr;
     const p=toScr(P[I[m.a]]), q=toScr(P[I[m.b]]);
     ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
   });
@@ -3645,18 +5321,23 @@ function drawCanvas(){
   // sonst heraus.
   ctx.font=`${12*dpr}px system-ui`; ctx.textAlign='center';
   const gezeigt=new Set();
-  C.activeMeas(M.meas).forEach(m=>{
+  actM.forEach(m=>{
     if(I[m.a]==null||I[m.b]==null) return;
     const k=[m.a,m.b].sort().join('|');
     if(gezeigt.has(k)) return;
     gezeigt.add(k);
-    const alle=C.activeMeas(M.meas).filter(x=>[x.a,x.b].sort().join('|')===k);
+    const alle=actM.filter(x=>[x.a,x.b].sort().join('|')===k);
+    // Ist EINE Messung des Paars verdaechtig, traegt das Label die Warnung -
+    // das Paar teilt sich einen Beschriftungsplatz.
+    const susPair=alle.some(x=>M.suspects.has(actM.indexOf(x)));
     const p=toScr(P[I[m.a]]), q=toScr(P[I[m.b]]);
     const txt=alle.length>1 ? `${fmtM(m.d)} (${alle.length}×)` : fmtM(m.d);
     const mx=(p.x+q.x)/2, my=(p.y+q.y)/2;
     const tw=ctx.measureText(txt).width;
-    ctx.fillStyle=INK.labelBg; ctx.fillRect(mx-tw/2-4*dpr, my-8*dpr, tw+8*dpr, 15*dpr);
-    ctx.fillStyle=INK.meas; ctx.fillText(txt, mx, my+3.5*dpr);
+    ctx.fillStyle=susPair?INK.labelBadBg:INK.labelBg;
+    ctx.fillRect(mx-tw/2-4*dpr, my-8*dpr, tw+8*dpr, 15*dpr);
+    ctx.fillStyle=susPair?INK.measBad:INK.meas;
+    ctx.fillText(txt, mx, my+3.5*dpr);
   });
   ctx.textAlign='start';
   // Punkte: weisser Rand haelt den Marker auf Linien lesbar. Auswahl und
@@ -3723,9 +5404,13 @@ function drawCanvas(){
       }
     });
   }
-  // Legende nachfuehren: null blendet sie aus, sonst bliebe eine Zahl aus
-  // einer frueheren Zeichnung stehen.
-  $('exagg').textContent = exagg!=null ? ` — hier ×${exagg} überhöht` : '';
+  // Die Ueberhoehung gehoert zur Zeichnung, nicht in eine Legende: klein
+  // unten rechts, nur wenn Ellipsen ueberhaupt gezeichnet wurden.
+  if(exagg!=null){
+    ctx.font=`${11*dpr}px system-ui`; ctx.textAlign='right'; ctx.fillStyle=INK.scale;
+    ctx.fillText(`Genauigkeits-Ellipsen ×${exagg} überhöht`, cv.width-10*dpr, cv.height-10*dpr);
+    ctx.textAlign='start';
+  }
 }
 
 // ================= Treffer =================
@@ -3756,10 +5441,32 @@ function nearestWall(wx,wy){
   });
   return (best && bd*VIEW.s < WALL_R*DPR()) ? best : null;
 }
+// Naechste GEMESSENE Strecke (auch Diagonalen) - damit eine im Plan rot
+// markierte Messung direkt antippbar ist, um nachzumessen. Waende deckt
+// nearestWall schon ab; das hier faengt den Rest.
+function nearestMeas(wx,wy){
+  const P=M.drag?M.pts:(M.fit?M.fit.pts:M.pts), I=C.idx(P);
+  let best=null, bd=Infinity;
+  C.activeMeas(M.meas).forEach(m=>{
+    if(I[m.a]==null||I[m.b]==null) return;
+    const r=distToSeg({x:wx,y:wy}, P[I[m.a]], P[I[m.b]]);
+    if(r.t<0.15||r.t>0.85) return;
+    if(r.d<bd){ bd=r.d; best={a:m.a,b:m.b}; }
+  });
+  return (best && bd*VIEW.s < WALL_R*DPR()) ? best : null;
+}
 
 // ================= Masseingabe =================
 
 let entryPair=null;
+// Ecke, deren Hoehe gerade eingetippt wird (siehe enterHeight weiter
+// unten). Hier oben deklariert, weil closeEntry und der OK-Knopf sie
+// lesen und in der Datei frueher stehen.
+let heightAt=null;
+// Kante, deren Abstand gerade eingetippt wird, und Zaehler fuer die
+// Messungs-IDs. Oben deklariert, weil closeEntry und der OK-Knopf sie
+// lesen und weiter vorn stehen (let ist bis zur Deklaration in der TDZ).
+let opMeasEdge=null, opMeasSeq=1;
 // Gefuehrter Fluss: Eingabe kam von einem Vorschlags-Chip. Nach dem
 // Bestaetigen springt sie automatisch zum naechsten Vorschlag - auf der
 // Baustelle heisst das: Chip antippen, dann nur noch messen, tippen, OK,
@@ -3774,6 +5481,7 @@ const isDesktop=()=>matchMedia('(min-width:880px)').matches;
 function enterMeasurement(a,b,guided=false){
   const P=M.fit?M.fit.pts:M.pts, I=C.idx(P);
   if(I[a]==null||I[b]==null) return;
+  if(wpopPair) closeWallPopup();     // Eingabe und Wand-Popup nie gleichzeitig
   entryPair={a,b}; entryGuided=guided;
   // Solange die Eingabe offen ist, zeigt der Plan die Strecke an - auf Touch
   // gibt es kein Hover, das das sonst uebernehmen wuerde.
@@ -3813,7 +5521,7 @@ function placeEntry(){
   box.style.left=x+'px'; box.style.top=y+'px';
 }
 function closeEntry(){
-  entryPair=null; entryGuided=false;
+  entryPair=null; entryGuided=false; heightAt=null; opMeasEdge=null;
   $('entry').hidden=true;
   M.highlight=null;
   drawCanvas();
@@ -3838,19 +5546,19 @@ function commitEntry(){
     setHint('Nichts mehr zu messen — Form bestimmt und geprüft.');
   }
 }
-$('entryOk').onclick=commitEntry;
+$('entryOk').onclick=()=>{ if(opMeasEdge) commitOpMeasure(); else if(heightAt) commitHeight(); else commitEntry(); };
 $('entryX').onclick=closeEntry;
 $('entryVal').addEventListener('keydown',e=>{
   e.stopPropagation();                       // Modus-Kuerzel duerfen hier nicht feuern
-  if(e.key==='Enter') commitEntry();
+  if(e.key==='Enter'){ if(opMeasEdge) commitOpMeasure(); else if(heightAt) commitHeight(); else commitEntry(); }
   if(e.key==='Escape') closeEntry();
 });
 // Eine rote Fehlermarkierung darf nicht stehen bleiben, sobald der Nutzer
 // weitertippt.
 $('entryVal').addEventListener('input',()=>$('entryVal').classList.remove('bad'));
 if(window.visualViewport){
-  visualViewport.addEventListener('resize',placeEntry);
-  visualViewport.addEventListener('scroll',placeEntry);
+  visualViewport.addEventListener('resize',()=>{ placeEntry(); placeWpop(); });
+  visualViewport.addEventListener('scroll',()=>{ placeEntry(); placeWpop(); });
 }
 
 // ================= Loesch-Popover =================
@@ -3886,6 +5594,197 @@ function deleteWall(a,b){
   M.walls.splice(at,1);
   recompute();
 }
+
+// ================= Wand-Popup =================
+// Die Zentrale einer Strecke: alle Messwerte als Tabelle (Verdaechtige rot,
+// x loescht direkt), neuen Wert eintragen, Wand einnorden. Oeffnet per Tap
+// auf die Strecke im Plan oder auf ihre Zeile in der Wandliste.
+let wpopPair=null;
+
+function openWallPopup(a,b){
+  closeEntry();
+  hidePop();
+  wpopPair={a,b};
+  M.highlight={a,b};
+  renderWallPopup();
+  $('wpop').hidden=false;
+  placeWpop();
+  drawCanvas();
+}
+function closeWallPopup(){
+  wpopPair=null;
+  $('wpop').hidden=true;
+  if(!entryPair) M.highlight=null;
+  drawCanvas();
+}
+function placeWpop(){
+  const box=$('wpop');
+  if(box.hidden) return;
+  if(!isDesktop()){
+    box.style.left=box.style.top='';
+    const vv=window.visualViewport;
+    box.style.transform = vv
+      ? `translateY(${-(innerHeight - vv.height - vv.offsetTop)}px)` : '';
+    return;
+  }
+  box.style.transform='';
+  if(!wpopPair) return;
+  const P=M.fit?M.fit.pts:M.pts, I=C.idx(P);
+  if(I[wpopPair.a]==null||I[wpopPair.b]==null) return;
+  const mid={x:(P[I[wpopPair.a]].x+P[I[wpopPair.b]].x)/2,
+             y:(P[I[wpopPair.a]].y+P[I[wpopPair.b]].y)/2};
+  const s=toScr(mid), dpr=DPR(), wrap=$('canvaswrap');
+  const x=Math.max(8, Math.min(wrap.clientWidth-box.offsetWidth-8, s.x/dpr-box.offsetWidth/2));
+  const y=Math.max(8, Math.min(wrap.clientHeight-box.offsetHeight-8, s.y/dpr+14));
+  box.style.left=x+'px'; box.style.top=y+'px';
+}
+function renderWallPopup(){
+  if(!wpopPair) return;
+  const {a,b}=wpopPair;
+  const k=[a,b].sort().join('|');
+  const isWall=M.walls.some(([x,y])=>[x,y].sort().join('|')===k);
+  const P=M.fit?M.fit.pts:M.pts, I=C.idx(P);
+  $('wpopTitle').textContent=(isWall?'Wand ':'Strecke ')+a+'–'+b;
+  $('wpopLen').textContent=(M.fit && I[a]!=null && I[b]!=null)
+    ? fmtM(C.dist(P[I[a]],P[I[b]]))+' m ausgeglichen' : '';
+  const act=C.activeMeas(M.meas);
+  const tb=document.querySelector('#wpopTbl tbody');
+  tb.innerHTML='';
+  M.meas.forEach(m=>{
+    if([m.a,m.b].sort().join('|')!==k) return;
+    const ai=act.indexOf(m);                     // -1 fuer stillgelegte
+    const w=(ai>=0 && M.an) ? M.an.w[ai] : null;
+    const sus=ai>=0 && M.suspects.has(ai);
+    const tr=document.createElement('tr');
+    if(sus) tr.className='worst';
+    const badge = m.on===false ? '<button class="badge">aus — einschalten</button>'
+      : sus ? '<span class="badge suspect">verdächtig</span>'
+      : w!=null ? '<span class="badge ok">geprüft</span>'
+      : '<span class="badge unchecked">ungeprüft</span>';
+    tr.innerHTML=`<td><input class="d" inputmode="decimal" value="${fmtM(m.d)}"></td>`
+      +`<td>${m.von==='nachbar' ? 'vom Nachbarn' : (w==null?'—':'w '+w.toFixed(1))}</td>`
+      +`<td>${badge}</td>`
+      +`<td><button class="rowbtn del" title="Diesen Messwert löschen">×</button></td>`;
+    const inp=tr.querySelector('.d');
+    inp.onchange=()=>{
+      const d=parseFloat(inp.value.replace(',','.'))*1000;
+      // Wer den Wert selbst eintippt, hat ihn gemessen - der Vermerk
+      // "vom Nachbarn" gilt dann nicht mehr.
+      if(isFinite(d)&&d>0){ snapshot(); m.d=d; delete m.von; recompute(); }
+      else { inp.value=fmtM(m.d); setHint('Ungültig — Maß muss eine Zahl größer 0 sein.'); }
+    };
+    if(sus) attachTip(tr.children[2],
+      `w = ${w.toFixed(1)}: dieser Wert weicht am stärksten vom Rest ab — wahrscheinlich falsch gemessen oder vertippt. × löscht ihn.`);
+    const offBtn=m.on===false ? tr.querySelector('button.badge') : null;
+    if(offBtn) offBtn.onclick=()=>{ snapshot(); m.on=true; recompute(); };
+    tr.querySelector('.del').onclick=()=>{
+      snapshot();
+      M.meas.splice(M.meas.indexOf(m),1);
+      recompute();
+    };
+    tb.appendChild(tr);
+  });
+  if(!tb.children.length){
+    tb.innerHTML='<tr><td style="text-align:left;color:var(--muted)">Noch kein Messwert.</td></tr>';
+  }
+  // Wanddicke. Nur fuer echte Waende - eine Diagonale hat keine.
+  const tw=$('wpopThick');
+  tw.innerHTML='';
+  if(!isWall) return;
+  const t=M.thick[k];
+  const span=document.createElement('span');
+  span.textContent = t>0 ? `Wanddicke ${t} mm`
+                         : `Wanddicke ${THICK_DEFAULT} mm (angenommen)`;
+  if(!(t>0)) span.className='muted';
+  const btn=document.createElement('button');
+  btn.textContent = t>0 ? 'ändern' : 'eintragen';
+  btn.onclick=()=>{
+    const neu=fragWanddicke(t>0?t:THICK_DEFAULT);
+    if(neu==null) return;
+    const alt=t>0?t:THICK_DEFAULT;
+    snapshot();
+    M.thick[k]=neu;
+    // Die Wand gehoert zwei Raeumen. Die Dicke drueben mitfuehren - und den
+    // Nachbarn um die Differenz verschieben: seine Innenkontur liegt per
+    // Definition genau diese Dicke von unserer entfernt. Ohne das Nachruecken
+    // zeigte der Plan eine Fuge, die keiner der beiden Raeume behauptet.
+    const sh=M.shared[k];
+    if(sh && Math.abs(neu-alt)>1e-9){
+      const r=STORE.load(sh.room), self=STORE.load(currentRoom);
+      if(r && r.data && r.origin && self && self.origin){
+        const Pn=M.fit?M.fit.pts:M.pts;
+        const nrm=outerNormal(Pn, M.walls, a, b);
+        const c=Math.cos(self.origin.rot), s2=Math.sin(self.origin.rot);
+        const d={...r.data, thick:{...(r.data.thick||{})}};
+        d.thick[wallKey(sh.wall[0], sh.wall[1])]=neu;
+        STORE.save(sh.room, {data:d, origin:{
+          x:r.origin.x+(nrm.x*c-nrm.y*s2)*(neu-alt),
+          y:r.origin.y+(nrm.x*s2+nrm.y*c)*(neu-alt),
+          rot:r.origin.rot}});
+      }
+    }
+    recompute();
+    loadNeighbors();
+    renderWallPopup();
+    render();
+  };
+  tw.append(span, btn);
+  // Geteilte Wand: was die Lage der beiden Raeume ueber sie sagt.
+  const nb=(M.nbchecks||[]).find(c=>c.k===k);
+  if(!nb) return;
+  const zeile=document.createElement('div');
+  zeile.className='nb'+(nb.probleme.length?' bad':'');
+  zeile.textContent = nb.probleme.length
+    ? `„${nb.raum}“: ${nb.probleme.join('; ')}.`
+    : `Geteilt mit „${nb.raum}“ · Abstand der Innenkanten `
+      +`${Math.round(nb.f.dicke)} mm · dort ${fmtM(nb.f.laengeDort)} m`;
+  tw.appendChild(zeile);
+  // Die Lage der beiden Innenkanten IST eine Messung der Wanddicke. Weicht
+  // sie vom eingetragenen Wert ab, laesst sie sich uebernehmen - ohne
+  // jemanden zu verschieben, denn die Geometrie steht ja bereits so.
+  if(Math.abs(nb.f.dicke-nb.t)<=1) return;
+  const uebn=document.createElement('button');
+  uebn.textContent=`${Math.round(nb.f.dicke)} mm übernehmen`;
+  uebn.onclick=()=>{
+    snapshot();
+    const neu=Math.round(nb.f.dicke);
+    M.thick[k]=neu;
+    const sh=M.shared[k];
+    const r=sh && STORE.load(sh.room);
+    if(r && r.data){
+      const d={...r.data, thick:{...(r.data.thick||{})}};
+      d.thick[wallKey(sh.wall[0], sh.wall[1])]=neu;
+      STORE.save(sh.room, {data:d});
+    }
+    recompute(); loadNeighbors(); renderWallPopup(); render();
+  };
+  zeile.appendChild(document.createTextNode(' '));
+  zeile.appendChild(uebn);
+}
+$('wpopX').onclick=closeWallPopup;
+$('wpopOk').onclick=()=>{
+  if(!wpopPair) return;
+  const inp=$('wpopVal');
+  const d=parseFloat(inp.value.replace(',','.'))*1000;
+  if(!isFinite(d)||d<=0){ inp.style.borderColor='var(--bad)'; return; }
+  if(d<100 && !confirm(`${fmtM(d)} m ist sehr kurz — als Meter gemeint?\n\nOK = so übernehmen`)) return;
+  inp.style.borderColor='';
+  snapshot();
+  M.meas.push({a:wpopPair.a, b:wpopPair.b, d, sigma:C.SIGMA_DEF, on:true});
+  inp.value='';
+  recompute();
+};
+$('wpopVal').addEventListener('keydown',e=>{
+  e.stopPropagation();
+  if(e.key==='Enter') $('wpopOk').click();
+  if(e.key==='Escape') closeWallPopup();
+});
+$('wpopNorth').onclick=()=>{
+  if(!wpopPair) return;
+  northWallPair={...wpopPair};
+  northWall(wpopPair.a, wpopPair.b);
+  placeWpop();
+};
 
 // ================= Gesten =================
 // Ein Pointer-Modell fuer Maus UND Finger. Ein Tipp legt an oder waehlt aus,
@@ -3970,8 +5869,27 @@ cv.addEventListener('pointerdown',e=>{
   }
 });
 
+// Maus ueber einem Nachbarraum: er schimmert gruen und der Zeiger wird zur
+// Hand. Auf Touch gibt es keinen Hover - dort genuegt das Antippen.
+function updateHover(e){
+  const d=evDev(e), w=toWorld(d.x,d.y);
+  const ueberPlus=doorPluses.some(p=>Math.hypot(d.x-p.x, d.y-p.y)<=p.r+6*DPR());
+  const id=(!ueberPlus && neighbors.length) ? neighborAt(w.x,w.y) : null;
+  cv.style.cursor=(id||ueberPlus)?'pointer':'';
+  if(id===hoverRoom) return;
+  hoverRoom=id;
+  drawCanvas();
+}
+cv.addEventListener('pointerleave',()=>{
+  if(hoverRoom===null) return;
+  hoverRoom=null; cv.style.cursor=''; drawCanvas();
+});
+
 cv.addEventListener('pointermove',e=>{
-  if(!pointers.has(e.pointerId)) return;
+  if(!pointers.has(e.pointerId)){
+    if(e.pointerType==='mouse' && M.mode!=='wall' && !swim) updateHover(e);
+    return;
+  }
   pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
   if(pinch){ if(pointers.size>=2) updatePinch(); return; }
   if(!gesture) return;
@@ -3984,19 +5902,41 @@ cv.addEventListener('pointermove',e=>{
     const d=evDev(e), w=toWorld(d.x,d.y);
     const i=M.pts.findIndex(x=>x.id===gesture.id);
     if(i<0) return;
-    const dx=w.x-M.pts[i].x, dy=w.y-M.pts[i].y;
+    const rawDx=w.x-M.pts[i].x, rawDy=w.y-M.pts[i].y;
+    // Sanfte Kreuzungsbremse: nur der aktuelle Schritt wird gedaempft,
+    // nie die Gesamtlage neu gerechnet. Weichzone in BILDSCHIRMpixeln,
+    // damit sich der Widerstand bei jedem Zoom gleich anfuehlt.
+    const soft=SOFT_PX*DPR()/VIEW.s;
+    const damp=dampenDrag(M.pts, M.walls, gesture.id, rawDx, rawDy, soft);
+    const dx=damp.dx, dy=damp.dy;
+    M.nearPairs=damp.near;
     // Ziehen kennt drei Lagen: noch keine Messung (Skizze frei), dof > 0
     // (der Punkt folgt der Maus so weit, wie die Messungen es zulassen),
     // dof = 0 (die Form ist bestimmt, es bleibt das Verschieben des Ganzen).
     if(!M.an){
       M.dragMode='frei';
-      M.pts[i].x=w.x; M.pts[i].y=w.y;
+      M.pts[i].x+=dx; M.pts[i].y+=dy;
     } else if(M.an.dof>0){
       M.dragMode='moden';
-      const mv=C.dragAlongModes(M.pts, M.an.modes, i, dx, dy);
-      if(mv){
+      // Der Korrektor bewegt auch Nachbarpunkte und kann dadurch selbst
+      // eine Kreuzung erzeugen, die der Finger nicht direkt verursacht.
+      // Dann den Schritt halbieren statt zu verwerfen: kleine Schritte
+      // sehen wie zusaetzliche Zaehigkeit aus, ein Verwerfen wie ein Ruck.
+      const vorher=M.pts.map(p=>({...p}));
+      const crossedBefore=wallsCross(vorher);
+      let f=1, ok=false;
+      for(let tryN=0; tryN<4 && !ok; tryN++, f/=2){
+        const mv=C.dragAlongModes(vorher, M.an.modes, i, dx*f, dy*f);
+        if(!mv) break;
         const fit=C.solve(mv, M.meas);       // Korrektor: zurueck auf die Messungen
+        if(!crossedBefore){
+          const bad=crossingPairs(fit.pts);
+          // Was die Bisektion verhindert, wird auch getoent - sonst waere
+          // der Widerstand im Mess-Fall unerklaert.
+          if(bad.length){ M.nearPairs=bad; continue; }
+        }
         fit.pts.forEach((p,q)=>{ M.pts[q].x=p.x; M.pts[q].y=p.y; });
+        ok=true;
       }
     } else {
       M.dragMode='starr';
@@ -4030,7 +5970,7 @@ function endPointer(e){
     return;
   }
   if(g.t==='point'){
-    M.drag=null; M.dragMode=null; setHint(null);
+    M.drag=null; M.dragMode=null; M.nearPairs=[]; setHint(null);
     if(g.moved){ recompute(); return; }
     if(!g.popOpen) tapPointDraw(g.id);
     return;
@@ -4043,12 +5983,33 @@ function endPointer(e){
   if(g.moved){ render(); return; }
   if(e.type==='pointercancel' || g.popOpen) return;
   const d=evDev(e), w=toWorld(d.x,d.y);
+  // Raumname und Nachbarraum liegen im Leeren - beim Zeichnen wuerde ein
+  // Tipp dort sonst eine Ecke setzen. Also nur ohne laufenden Zug, gleiche
+  // Regel wie beim Wand-Tap weiter unten.
+  if(M.mode==='measure' || M.chain==null){
+    // Plus zuerst: es liegt bewusst dicht an der Wand, und ein Wand-Tap
+    // wuerde es sonst schlucken.
+    const plus=doorPluses.find(p=>Math.hypot(d.x-p.x, d.y-p.y)<=p.r+6*DPR());
+    if(plus){ createNeighborRoom(plus.op); return; }
+    if(ownLabelRect && d.x>=ownLabelRect.x && d.x<=ownLabelRect.x+ownLabelRect.w
+       && d.y>=ownLabelRect.y && d.y<=ownLabelRect.y+ownLabelRect.h){
+      renameCurrentRoom(); return;
+    }
+    const nb=neighborAt(w.x,w.y);
+    if(nb){ swimTo(nb); return; }
+  }
   if(M.mode==='measure'){
-    const wall=g.wall||nearestWall(w.x,w.y);
-    if(wall){ M.sel=[]; render(); enterMeasurement(wall.a,wall.b); }
-    else if(entryPair) closeEntry();
+    // Wand zuerst, dann jede gemessene Strecke (Diagonalen): Tap oeffnet
+    // die Wand-Zentrale - messen, pruefen, loeschen, einnorden an einem Ort.
+    const seg=g.wall||nearestWall(w.x,w.y)||nearestMeas(w.x,w.y);
+    if(seg){ M.sel=[]; render(); openWallPopup(seg.a,seg.b); }
+    else { if(entryPair) closeEntry(); if(wpopPair) closeWallPopup(); }
     return;
   }
+  // Zeichnen-Modus: ohne aktiven Kettenzug oeffnet ein Wand-Tap ebenfalls
+  // die Wand-Zentrale; mit Kette gewinnt das Punktsetzen (man tippt beim
+  // Zeichnen zwangslaeufig nahe an Waenden).
+  if(M.chain==null && g.wall){ openWallPopup(g.wall.a,g.wall.b); return; }
   addPoint(w);
 }
 cv.addEventListener('pointerup',endPointer);
@@ -4116,7 +6077,7 @@ function tapPointMeasure(id){
   if(M.sel.length===2){
     const [a,b]=M.sel; M.sel=[];
     if(a===b){ render(); return; }
-    enterMeasurement(a,b);
+    openWallPopup(a,b);
   } else render();
 }
 
@@ -4147,9 +6108,369 @@ function finishIfClosed(){
 
 // ================= Modi, Werkzeuge =================
 
+// ================= Wände-Tab =================
+// Erst sinnvoll, wenn die Form des Grundrisses eindeutig ist - vorher
+// waeren Wandlaengen Skizzenpixel und jede Wandansicht eine Erfindung.
+const wallTabReady=()=>!!(M.an && M.an.dof===0 && M.walls.length);
+
+function serializeOpenings(){ return M.openings.map(o=>({...o})); }
+
+function pickWall(a,b){
+  M.wallSel={a,b}; M.openSel=null; wallUserView=false;
+  render();
+}
+function wallList(){ return M.walls.map(([a,b])=>({a,b})); }
+
+function renderWallBar(){
+  const bar=$('wallbar');
+  bar.hidden = M.mode!=='wall';
+  if(bar.hidden) return;
+  const list=wallList();
+  const sel=$('wPick');
+  sel.innerHTML=list.map(w=>`<option value="${w.a}|${w.b}"${
+    M.wallSel&&M.wallSel.a===w.a&&M.wallSel.b===w.b?' selected':''}>Wand ${w.a}–${w.b}</option>`).join('');
+  const shape=currentShape();
+  const n=wallOpenings().length;
+  $('wInfo').textContent = shape
+    ? `${fmtM(shape.L)} m breit · ${n} ${n===1?'Öffnung':'Öffnungen'}`
+    : '';
+}
+$('wPick').onchange=()=>{
+  const [a,b]=$('wPick').value.split('|');
+  pickWall(a,b);
+};
+const stepWall=d=>{
+  const list=wallList();
+  if(!list.length) return;
+  const i=list.findIndex(w=>M.wallSel&&w.a===M.wallSel.a&&w.b===M.wallSel.b);
+  const n=list[( (i<0?0:i) + d + list.length)%list.length];
+  pickWall(n.a,n.b);
+};
+$('wPrev').onclick=()=>stepWall(-1);
+$('wNext').onclick=()=>stepWall(1);
+
+document.querySelectorAll('#wAdd button').forEach(b=>{
+  b.onclick=()=>{
+    const shape=currentShape();
+    if(!shape) return;
+    const kind=b.dataset.add;
+    const vorschlag=defaultOpening(shape, kind);
+    vorschlag.id='o'+openSeq;
+    // Vorbelegung kann besetzt sein - dann daneben einsetzen statt
+    // uebereinander. Ist die Wand voll, ehrlich absagen.
+    const platz=findFreeSpot(shape, vorschlag, wallOpenings());
+    if(!platz){
+      setHint('Kein freier Platz mehr in dieser Wand — erst Platz schaffen oder kleiner wählen.');
+      return;
+    }
+    snapshot();
+    const o={...platz};
+    o.id='o'+(openSeq++);
+    o.kind=kind;
+    o.a=M.wallSel.a; o.b=M.wallSel.b;
+    // Vorbelegte Oeffnungsart: die in Deutschland uebliche.
+    if(kind==='door') o.swing={type:'turn', hinge:'left', out:false};
+    if(kind==='window') o.swing={type:'turntilt', hinge:'left', out:false};
+    M.openings.push(o);
+    M.openSel=o.id;
+    recompute();
+    setHint(`${OPEN_LABEL[kind]} eingesetzt — ziehen zum Positionieren.`);
+  };
+});
+// ================= Höhenmessung =================
+// Nutzt dasselbe Eingabefeld wie die Grundriss-Masse; heightAt haelt fest,
+// zu WELCHER Ecke der eingetippte Wert gehoert. Die erste Hoehe gilt fuer
+// alle Ecken (ein Raum, eine Decke); ab der zweiten abweichenden zaehlt
+// jede Ecke fuer sich - siehe cornerHeights.
+function enterHeight(pointId){
+  if(wpopPair) closeWallPopup();
+  entryPair=null; entryGuided=false;
+  heightAt=pointId;
+  const vorhanden=M.hmeas.filter(m=>m.at===pointId && m.on!==false);
+  $('entryLabel').textContent = vorhanden.length
+    ? `Höhe an Ecke ${pointId} — bisher ${vorhanden.map(m=>fmtM(m.d)).join(' · ')} m, weiterer Wert:`
+    : `Raumhöhe an Ecke ${pointId}`;
+  const box=$('entry');
+  box.hidden=false;
+  box.style.left=box.style.top='';
+  box.style.transform='';
+  if(isDesktop()){
+    const wrap=$('canvaswrap');
+    box.style.left=Math.max(8,(wrap.clientWidth-260)/2)+'px';
+    box.style.top='12px';
+  }
+  const inp=$('entryVal');
+  inp.value=''; inp.classList.remove('bad'); inp.focus();
+}
+function commitHeight(){
+  const inp=$('entryVal');
+  const d=parseFloat(inp.value.replace(',','.'))*1000;
+  if(!isFinite(d)||d<=0){ inp.classList.add('bad'); return; }
+  if(d<1000 && !confirm(`${fmtM(d)} m ist sehr niedrig — als Meter gemeint?\n\nOK = so übernehmen`)) return;
+  snapshot();
+  M.hmeas.push({kind:'h', at:heightAt, d, sigma:C.SIGMA_DEF, on:true});
+  heightAt=null;
+  $('entry').hidden=true;
+  recompute();
+  setHint('Höhe übernommen.');
+}
+$('wHeight').onclick=()=>{ if(M.wallSel) enterHeight(M.wallSel.a); };
+
+// ================= Öffnungs-Einstellungen =================
+// Kataloge. Tueren folgen den Baurichtmassen (Rohbau = Tuerblatt zzgl.
+// Zarge), Fenster haben keine vergleichbar feste Normreihe - dort sind es
+// die verbreiteten Groessen, jeweils frei ueberschreibbar.
+const CAT={
+  door:{ w:[610,735,860,985,1110], h:[1885,1985,2110] },
+  window:{ w:[600,800,1000,1200,1400], h:[600,800,1000,1200,1400] },
+  hole:{ w:[400,600,800,1000], h:[400,600,800,1000] },
+};
+// Oeffnungsarten. Bandseite (links/rechts) gilt nur, wo es eine
+// senkrechte Drehachse gibt - bei Kipp, Klapp und Schwing waere sie
+// sinnlos und wird deshalb ausgeblendet.
+const TYPES={
+  door:[['turn','Drehflügel'],['slide','Schiebetür'],['none','ohne Türblatt']],
+  window:[['turntilt','Dreh-Kipp'],['turn','Dreh'],['tilt','Kipp'],
+          ['top','Klapp'],['pivot','Schwing'],['stulp','Stulp (zweiflügelig)'],
+          ['fix','fest verglast']],
+  hole:[],
+};
+const HAS_HINGE=new Set(['turn','turntilt','stulp']);
+const HAS_DIR=new Set(['turn','turntilt','tilt','top','pivot','stulp']);
+
+function selectedOpening(){ return M.openings.find(o=>o.id===M.openSel)||null; }
+
+function fillSel(el, werte, aktuell){
+  el.innerHTML = werte.map(v=>`<option value="${v}"${v===aktuell?' selected':''}>${v} mm</option>`).join('')
+    + `<option value="frei"${werte.includes(aktuell)?'':' selected'}>frei…</option>`;
+}
+function renderOpeningPopup(){
+  const o=selectedOpening();
+  const box=$('opop');
+  box.hidden = !o || M.mode!=='wall';
+  if(box.hidden) return;
+  $('opopTitle').textContent=`${OPEN_LABEL[o.kind]} ${Math.round(o.w)} × ${Math.round(o.h)} mm`;
+  const cat=CAT[o.kind]||CAT.hole;
+  fillSel($('opW'), cat.w, Math.round(o.w));
+  fillSel($('opH'), cat.h, Math.round(o.h));
+  const frei = !cat.w.includes(Math.round(o.w)) || !cat.h.includes(Math.round(o.h));
+  $('opFreeRow').hidden=!frei;
+  $('opWv').value=Math.round(o.w); $('opHv').value=Math.round(o.h);
+  const typen=TYPES[o.kind];
+  $('opTypeRow').hidden=!typen.length;
+  if(typen.length){
+    const t=(o.swing&&o.swing.type)||typen[0][0];
+    $('opType').innerHTML=typen.map(([v,l])=>`<option value="${v}"${v===t?' selected':''}>${l}</option>`).join('');
+  }
+  // Nur zeigen, was fuer diese Art ueberhaupt gilt.
+  const t=o.swing&&o.swing.type;
+  const zeigtBand=!!t&&HAS_HINGE.has(t), zeigtRichtung=!!t&&HAS_DIR.has(t);
+  $('opSideRow').hidden=!(zeigtBand||zeigtRichtung);
+  $('opHinge').style.display=zeigtBand?'':'none';
+  $('opDir').style.display=zeigtRichtung?'':'none';
+  $('opHinge').querySelectorAll('button').forEach(b=>
+    b.setAttribute('aria-pressed', String(o.swing&&o.swing.hinge===b.dataset.h)));
+  $('opDir').querySelectorAll('button').forEach(b=>
+    b.setAttribute('aria-pressed', String(!!(o.swing&&o.swing.out)===(b.dataset.o==='1'))));
+}
+// Groesse aendern heisst: neu in die Wand zwingen. Eine Tuer, die durch
+// die neue Breite hinausragen wuerde, wird geschoben statt abgeschnitten.
+function applySize(o, w, h){
+  const shape=currentShape();
+  if(!shape) return;
+  const andere=wallOpenings().filter(x=>x.id!==o.id);
+  const gross=clampOpening(shape, {...o, w, h});
+  if(!openingPlaceable(shape, gross, andere)){
+    // Erst am Platz versuchen, dann daneben - und nur absagen, wenn es
+    // wirklich nirgends passt. Stilles Abschneiden waere eine Luege.
+    const platz=findFreeSpot(shape, gross, andere);
+    if(!platz){
+      setHint('Diese Größe überdeckt eine andere Öffnung — kein freier Platz in der Wand.');
+      renderOpeningPopup();
+  renderOpeningMeasures();
+      return;
+    }
+    snapshot(); Object.assign(o, platz); recompute();
+    setHint('Größe geändert — Öffnung ist ausgewichen.');
+    return;
+  }
+  snapshot();
+  Object.assign(o, gross);
+  recompute();
+}
+$('opW').onchange=()=>{
+  const o=selectedOpening(); if(!o) return;
+  if($('opW').value==='frei'){ $('opFreeRow').hidden=false; return; }
+  applySize(o, +$('opW').value, o.h);
+};
+$('opH').onchange=()=>{
+  const o=selectedOpening(); if(!o) return;
+  if($('opH').value==='frei'){ $('opFreeRow').hidden=false; return; }
+  applySize(o, o.w, +$('opH').value);
+};
+$('opFreeOk').onclick=()=>{
+  const o=selectedOpening(); if(!o) return;
+  const w=parseFloat($('opWv').value.replace(',','.')), h=parseFloat($('opHv').value.replace(',','.'));
+  if(!(w>0&&h>0)){ setHint('Maße müssen Zahlen größer 0 sein.'); return; }
+  applySize(o, w, h);
+};
+$('opType').onchange=()=>{
+  const o=selectedOpening(); if(!o) return;
+  snapshot();
+  const t=$('opType').value;
+  o.swing = t==='none' ? null
+    : {type:t, hinge:(o.swing&&o.swing.hinge)||'left', out:!!(o.swing&&o.swing.out)};
+  recompute();
+};
+$('opHinge').querySelectorAll('button').forEach(b=>{
+  b.onclick=()=>{ const o=selectedOpening(); if(!o||!o.swing) return;
+    snapshot(); o.swing.hinge=b.dataset.h; recompute(); };
+});
+$('opDir').querySelectorAll('button').forEach(b=>{
+  b.onclick=()=>{ const o=selectedOpening(); if(!o||!o.swing) return;
+    snapshot(); o.swing.out=b.dataset.o==='1'; recompute(); };
+});
+$('opDel').onclick=()=>{
+  const o=selectedOpening(); if(!o) return;
+  snapshot();
+  M.openings=M.openings.filter(x=>x.id!==o.id);
+  M.openSel=null;
+  recompute();
+};
+$('opopX').onclick=()=>{ M.openSel=null; render(); };
+
+// Positionsmessungen der gewaehlten Oeffnung. Vier Knoepfe statt
+// Klick-Klick-Messen: auf der Baustelle misst man vom Rand, vom Boden
+// oder von der Decke - genau diese vier Angaben tippt man ein.
+const EDGE_LABEL={left:'von links', right:'von rechts', bottom:'vom Boden', top:'von der Decke'};
+
+function applyOpeningFit(o){
+  const shape=currentShape();
+  if(!shape) return null;
+  const r=solveOpening(shape, o, M.opmeas);
+  // Die eingemessene Lage muss trotzdem in die Wand passen und darf keine
+  // Nachbarin ueberdecken - Messungen heben die Exklusivitaet nicht auf.
+  const andere=wallOpenings().filter(x=>x.id!==o.id);
+  const platz=clampOpening(shape, r.ziel);
+  if(openingPlaceable(shape, platz, andere)){ o.x=platz.x; o.y=platz.y; }
+  return r;
+}
+
+function renderOpeningMeasures(){
+  const o=selectedOpening();
+  const box=$('opMeasBox');
+  if(!o){ box.hidden=true; return; }
+  box.hidden=false;
+  const shape=currentShape();
+  const r=shape ? solveOpening(shape, o, M.opmeas) : null;
+  const st=$('opState');
+  if(!r || (!r.x.n && !r.y.n)){
+    st.textContent='geschätzt — noch nicht gemessen'; st.className='warn';
+  } else if(!r.x.n || !r.y.n){
+    st.textContent=`${r.x.n?'':'Breite'}${(!r.x.n&&!r.y.n)?' und ':''}${r.y.n?'':'Höhe'} fehlt noch`;
+    st.className='warn';
+  } else if(r.verdacht.size){
+    st.textContent='eine Messung passt nicht'; st.className='bad';
+  } else if(r.x.n>1 || r.y.n>1){
+    const sh=[r.x.sigmaHat, r.y.sigmaHat].filter(v=>v!=null);
+    st.textContent=sh.length ? `geprüft — ± ${Math.max(...sh).toFixed(1).replace('.',',')} mm` : 'geprüft';
+    st.className='good';
+  } else { st.textContent='bestimmt, ungeprüft'; st.className='warn'; }
+  const liste=M.opmeas.filter(m=>m.op===o.id);
+  $('opMeasList').innerHTML = liste.map(m=>{
+    const schlecht=r&&r.verdacht.has(m.id);
+    return `<div class="mrow${schlecht?' bad':''}" data-id="${m.id}">`
+      +`<span>${EDGE_LABEL[m.edge]}</span><span>${fmtM(m.d)} m</span>`
+      +`${schlecht?'<span>verdächtig</span>':''}`
+      +`<button data-del="${m.id}">×</button></div>`;
+  }).join('');
+  $('opMeasList').querySelectorAll('button[data-del]').forEach(b=>{
+    b.onclick=()=>{
+      snapshot();
+      M.opmeas=M.opmeas.filter(m=>m.id!==b.dataset.del);
+      const sel=selectedOpening(); if(sel) applyOpeningFit(sel);
+      recompute();
+    };
+  });
+}
+document.querySelectorAll('.mbtn').forEach(b=>{
+  b.onclick=()=>{
+    const o=selectedOpening(); if(!o) return;
+    opMeasEdge=b.dataset.edge;
+    heightAt=null; entryPair=null;
+    $('entryLabel').textContent=`${OPEN_LABEL[o.kind]}: Abstand ${EDGE_LABEL[opMeasEdge]}`;
+    const box=$('entry');
+    box.hidden=false; box.style.transform='';
+    if(isDesktop()){
+      const wrap=$('canvaswrap');
+      box.style.left=Math.max(8,(wrap.clientWidth-260)/2)+'px'; box.style.top='12px';
+    } else { box.style.left=box.style.top=''; }
+    const inp=$('entryVal'); inp.value=''; inp.classList.remove('bad'); inp.focus();
+  };
+});
+function commitOpMeasure(){
+  const o=selectedOpening();
+  const inp=$('entryVal');
+  const d=parseFloat(inp.value.replace(',','.'))*1000;
+  if(!o || !isFinite(d) || d<0){ inp.classList.add('bad'); return; }
+  snapshot();
+  M.opmeas.push({id:'om'+(opMeasSeq++), op:o.id, edge:opMeasEdge, d, sigma:C.SIGMA_DEF, on:true});
+  opMeasEdge=null;
+  $('entry').hidden=true;
+  applyOpeningFit(o);
+  recompute();
+}
+// Ziehen in der Wandansicht: die Oeffnung bleibt HART in der Wand
+// (anders als die Kreuzungsbremse im Grundriss - eine Tuer halb
+// ausserhalb der Wand ist keine sinnvolle Zwischenlage).
+let wallDrag=null;
+function openingAt(wx,wy){
+  const list=wallOpenings();
+  for(let i=list.length-1;i>=0;i--){
+    const o=list[i];
+    if(wx>=o.x && wx<=o.x+o.w && wy>=o.y && wy<=o.y+o.h) return o;
+  }
+  return null;
+}
+cv.addEventListener('pointerdown',e=>{
+  if(M.mode!=='wall') return;
+  const d=evDev(e), w=wToWall(d.x,d.y);
+  const o=openingAt(w.x,w.y);
+  if(!o){
+    // Senkrechte Wandkante angetippt: das ist die Hoehe an genau dieser
+    // Ecke - der kuerzeste Weg von "sehe die Kante" zu "messe sie".
+    const shape=currentShape();
+    const nah=28*DPR()/WV.s;
+    if(shape && w.y>-nah && w.y<Math.max(shape.ha,shape.hb)+nah){
+      if(Math.abs(w.x)<nah){ enterHeight(M.wallSel.a); render(); return; }
+      if(Math.abs(w.x-shape.L)<nah){ enterHeight(M.wallSel.b); render(); return; }
+    }
+  }
+  M.openSel=o?o.id:null;
+  if(o) wallDrag={id:o.id, gx:w.x-o.x, gy:w.y-o.y, snap:serialize()};
+  render();
+},true);
+addEventListener('pointermove',e=>{
+  if(M.mode!=='wall'||!wallDrag) return;
+  const shape=currentShape();
+  const o=M.openings.find(x=>x.id===wallDrag.id);
+  if(!shape||!o) return;
+  if(wallDrag.snap){ pushSnapshot(wallDrag.snap); wallDrag.snap=null; }
+  const d=evDev(e), w=wToWall(d.x,d.y);
+  // Oeffnungen sind exklusiv: slideOpening laesst sie an einer fremden
+  // Kante entlanggleiten statt sie stumpf festzuhalten.
+  const moved=slideOpening(shape, o, {x:w.x-wallDrag.gx, y:w.y-wallDrag.gy}, wallOpenings());
+  o.x=moved.x; o.y=moved.y; o.w=moved.w; o.h=moved.h;
+  render();
+});
+addEventListener('pointerup',()=>{
+  if(wallDrag){ wallDrag=null; recompute(); }
+});
+
 const MODE_HINTS={
   draw:'Antippen setzt Ecken und verbindet sie · Ziehen verschiebt · gedrückt halten löscht.',
   measure:'Wand oder zwei Ecken antippen, Maß in Metern eintippen.',
+  wall:'Öffnung einsetzen und ziehen — sie bleibt immer innerhalb der Wand.',
 };
 let hintTimer=null;
 // setHint(text): fluechtige Meldung, faellt nach ein paar Sekunden auf den
@@ -4164,11 +6485,23 @@ function setHint(txt){
 function setHintLive(txt){ clearTimeout(hintTimer); hintTimer=null; $('hint').textContent=txt; }
 
 function setMode(mode){
+  if(mode==='wall' && !wallTabReady()){
+    setHint('Wandansichten erst, wenn die Form des Grundrisses eindeutig ist.');
+    return;
+  }
   M.mode=mode; M.sel=[];
   if(mode!=='draw') M.chain=null;
   if(entryPair && mode!=='measure') closeEntry();
+  if(wpopPair) closeWallPopup();
   hidePop();
+  // Beim Betreten des Wände-Tabs die erste Wand waehlen, damit sofort
+  // etwas zu sehen ist.
+  if(mode==='wall' && !M.wallSel && M.walls.length){
+    M.wallSel={a:M.walls[0][0], b:M.walls[0][1]};
+    wallUserView=false;
+  }
   $('ring').style.display = mode==='draw' ? '' : 'none';
+  $('untangle').style.display='none';
   document.querySelectorAll('#modes button[data-mode]').forEach(x=>
     x.setAttribute('aria-pressed', String(x.dataset.mode===mode)));
   setHint(null);
@@ -4177,6 +6510,29 @@ function setMode(mode){
 document.querySelectorAll('#modes button[data-mode]').forEach(b=>{
   b.onclick=()=>setMode(b.dataset.mode);
 });
+
+// Entwirren: kreuzungsfreie Lage suchen (siehe untangle im store-Block).
+// Jeder Klick wuerfelt mit neuem Seed - gefaellt die Loesung nicht,
+// nochmal druecken. Undo nimmt sie komplett zurueck.
+let untangleSeed=1;
+$('untangle').onclick=()=>{
+  snapshot();
+  const u=untangle(M.pts, M.walls, M.meas, 24, untangleSeed++);
+  if(!u){
+    undoStack.pop();
+    setHint('Keine kreuzungsfreie Anordnung gefunden — Ecken von Hand ziehen hilft dem nächsten Versuch.');
+    return;
+  }
+  const I=C.idx(M.pts);
+  u.forEach(p=>{ const q=M.pts[I[p.id]]; if(q){ q.x=p.x; q.y=p.y; } });
+  recompute();
+  // Die eingenordete Wand bleibt oben-parallel liegen - daran orientiert
+  // man sich; ohne Nordwand einfach neu einpassen.
+  if(northWallPair) northWall(northWallPair.a, northWallPair.b, true);
+  else { userView=false; autofit(); }
+  render();
+  setHint('Entwirrt — Maße gehalten, Wände kreuzungsfrei.');
+};
 
 $('ring').onclick=()=>{
   if(M.pts.length<3){ setHint('Mindestens 3 Ecken nötig.'); return; }
@@ -4191,12 +6547,18 @@ $('ring').onclick=()=>{
 
 $('undo').onclick=()=>{ if(!undo()) setHint('Nichts mehr rückgängig zu machen.'); };
 $('fitview').onclick=()=>{ userView=false; autofit(); render(); };
-$('roomname').onclick=()=>{
+$('unfold').onclick=()=>{ unfoldOn=!unfoldOn;
+  $('unfold').setAttribute('aria-pressed', String(unfoldOn));
+  setHint(unfoldOn?'Wände aufgeklappt — Fokus verschieben zeigt die gegenüberliegende Wand deutlicher.':'Aufklappen aus.');
+  render(); };
+// Zwei Wege zum selben Dialog: die Statuskarte und der Name im Plan.
+function renameCurrentRoom(){
   if(!currentRoom) return;
   const r=STORE.load(currentRoom);
   const name=prompt('Raum umbenennen:', r?r.name:'');
-  if(name && name.trim()){ STORE.rename(currentRoom, name.trim()); currentRoomName=name.trim(); renderPanel(); }
-};
+  if(name && name.trim()){ STORE.rename(currentRoom, name.trim()); currentRoomName=name.trim(); render(); }
+}
+$('roomname').onclick=renameCurrentRoom;
 
 // ================= Bibliothek (Overlay) =================
 const fmtDate=iso=>{
@@ -4209,7 +6571,7 @@ function renderLib(){
   if(!list.length){ el.innerHTML='<div style="padding:14px 4px;color:var(--muted)">Noch keine Räume.</div>'; return; }
   el.innerHTML=list.map(r=>
     `<div class="librow${r.id===currentRoom?' cur':''}" data-id="${r.id}">
-       <div class="nm"><b>${r.name.replace(/</g,'&lt;')}</b>
+       <div class="nm"><b>${escapeHtml(r.name)}</b>
          <small>zuletzt ${fmtDate(r.updated)}${r.area!=null?` · ${fmt2(r.area)} m²`:''}</small></div>
        <button class="ren" title="Umbenennen">Name</button>
        <button class="exp2" title="Als Datei sichern">Datei</button>
@@ -4224,7 +6586,12 @@ function renderLib(){
     row.querySelector('.ren').onclick=()=>{
       const r=STORE.load(id);
       const name=prompt('Raum umbenennen:', r?r.name:'');
-      if(name && name.trim()){ STORE.rename(id,name.trim()); if(id===currentRoom) currentRoomName=name.trim(); renderLib(); renderPanel(); }
+      if(name && name.trim()){
+        STORE.rename(id,name.trim());
+        if(id===currentRoom) currentRoomName=name.trim();
+        loadNeighbors();   // ein Nachbar traegt seinen Namen im Plan
+        renderLib(); render();
+      }
     };
     row.querySelector('.exp2').onclick=()=>{
       if(typeof exportRoomAsFile==='function') exportRoomAsFile(id);
@@ -4237,6 +6604,11 @@ function renderLib(){
       if(id===currentRoom){
         const l=STORE.list();
         if(l.length) openRoom(l[0].id); else newRoom('Neuer Raum');
+      } else {
+        // Ein geloeschter Nachbar darf nicht als Geist im Plan stehen
+        // bleiben - die Liste wird sonst erst beim naechsten Raumwechsel neu
+        // gelesen.
+        loadNeighbors(); render();
       }
       renderLib();
     };
@@ -4265,6 +6637,7 @@ addEventListener('keydown',e=>{
     hidePop();
     if(!$('qrwrap').hidden){ $('qrwrap').hidden=true; return; }
     if(!$('libwrap').hidden){ closeLib(); return; }
+    if(wpopPair){ closeWallPopup(); return; }
     if(entryPair){ closeEntry(); return; }
     if(M.sel.length){ M.sel=[]; render(); return; }
     if(M.chain){ M.chain=null; render(); return; }
@@ -4419,10 +6792,41 @@ function statusText(){
     return ['Form eindeutig, aber ungeprüft — ein Tippfehler bliebe unbemerkt. Zur Kontrolle nachmessen.','warn'];
   }
   const txtS=M.an.sigmaHat.toFixed(1).replace('.',',');
-  if(M.an.sigmaHat > SIGMA_SUSPECT_FACTOR*C.SIGMA_DEF)
-    return [`Die Messungen streuen stark (± ${txtS} mm) — vermutlich steckt ein Fehler drin. `
-           +`Eine weitere Kontrollmessung grenzt ihn ein.`,'warn'];
+  if(netFails())
+    return M.suspects.size===1
+      ? ['Eine Messung passt nicht zu den übrigen — im Plan und in der Liste rot markiert. '
+        +'Strecke nachmessen oder Messung stilllegen.','bad']
+      : [`Die Messungen streuen stärker, als die Messgenauigkeit erklärt (± ${txtS} mm) — `
+        +`vermutlich steckt ein Fehler drin. Unter »Als Nächstes messen« stehen die Strecken, die ihn eingrenzen.`,'warn'];
   return [`Geprüft — Messgenauigkeit ± ${txtS} mm.`,'good'];
+}
+
+// ================= Info-Kaestchen =================
+// Ein gemeinsames Info-Kaestchen fuer Tabellenwerte. Hover zeigt, Verlassen
+// versteckt; auf Touch zeigt der Tipp auf die Zelle dasselbe Kaestchen und
+// der naechste Tipp irgendwo anders schliesst es (title-Attribute koennen
+// Handys nicht anzeigen - deshalb ein eigenes Element).
+function showTip(el, text){
+  const tip=$('tip');
+  tip.textContent=text;
+  tip.hidden=false;
+  const r=el.getBoundingClientRect(), tw=tip.offsetWidth, th2=tip.offsetHeight;
+  let x=Math.max(8, Math.min(innerWidth-tw-8, r.left+r.width/2-tw/2));
+  let y=r.top-th2-8;
+  if(y<8) y=r.bottom+8;
+  tip.style.left=x+'px'; tip.style.top=y+'px';
+}
+function hideTip(){ $('tip').hidden=true; }
+addEventListener('pointerdown',e=>{
+  // Tap ausserhalb einer Tip-Zelle schliesst das Kaestchen (Touch-Pfad).
+  if(!(e.target.closest && e.target.closest('[data-tip]'))) hideTip();
+});
+function attachTip(el, text){
+  if(!text) return;
+  el.dataset.tip='1';
+  el.onmouseenter=()=>showTip(el, text);
+  el.onmouseleave=hideTip;
+  el.addEventListener('pointerdown',()=>showTip(el, text));
 }
 
 function renderPanel(){
@@ -4430,6 +6834,13 @@ function renderPanel(){
   $('statustxt').textContent=txt;
   $('status').className=cls;
   $('roomname').textContent=currentRoomName;
+  // Der Wände-Tab bleibt gesperrt, solange der Grundriss nicht eindeutig
+  // ist - vorher waeren Wandlaengen Skizzenpixel.
+  const wt=document.querySelector('#modes button[data-mode="wall"]');
+  if(wt) wt.disabled=!wallTabReady();
+  renderWallBar();
+  renderOpeningPopup();
+  renderOpeningMeasures();
   $('empty').style.display = M.pts.length ? 'none' : 'flex';
   $('undo').disabled = !undoStack.length;
 
@@ -4461,109 +6872,94 @@ function renderPanel(){
   const wwEl=$('wallwarn');
   const ring=C.wallPolygonRing(M.pts, M.walls);
   const ringBroken = M.walls.length>0 && !C.wallPolygon(M.pts, M.walls);
+  // Entwirren nur anbieten, wenn es etwas zu entwirren gibt: geschlossener
+  // Zug, der sich kreuzt, im Zeichnen-Modus.
+  $('untangle').style.display =
+    (M.mode==='draw' && ring && C.ringSelfIntersects(ring)) ? 'block' : 'none';
   wwEl.style.display = ringBroken ? 'block' : 'none';
   if(ringBroken) wwEl.textContent = (ring && C.ringSelfIntersects(ring))
     ? 'Wände kreuzen sich — Fläche und Vorschlagsfilter sind ausgesetzt.'
     : 'Wandzug nicht geschlossen (oder eine Ecke hat nicht genau zwei Wände) — '
      +'die Vorschläge können deshalb Strecken enthalten, die sich nicht direkt messen lassen.';
 
-  // --- Messliste. Kompakt: Strecke, Mass, Status. Die Statistik-Spalten
-  // (v, Redundanzanteil, w, sigma) und die Verwaltungsknoepfe wohnen hinter
-  // dem Details-Schalter - fuer die Baustelle zaehlt nur "passt / pruefen".
-  const tb=document.querySelector('#tbl tbody');
-  tb.innerHTML='';
+  // Widersprueche zu den Nachbarraeumen. Bewusst eine eigene Meldung neben
+  // dem Netzzustand: das Aufmass DIESES Raums kann tadellos sein und
+  // trotzdem nicht zum Nachbarn passen.
+  const nbEl=$('nbwarn');
+  const nbBad=(M.nbchecks||[]).filter(c=>c.probleme.length);
+  nbEl.style.display = nbBad.length ? 'block' : 'none';
+  if(nbBad.length){
+    nbEl.innerHTML='<b>Passt nicht zum Nachbarraum</b><ul>'
+      + nbBad.map(c=>`<li>Wand ${escapeHtml(c.a)}–${escapeHtml(c.b)}: `
+          + escapeHtml(c.probleme.join('; ')) + '.</li>').join('')
+      + '</ul>';
+  }
+
+  // --- Wandliste. Die Waende SIND die Objekte des Aufmasses; ihre
+  // Messwerte wohnen im Wand-Popup (openWallPopup), nicht mehr in einer
+  // globalen Tabelle. Nicht-Wand-Strecken laufen als Gruppe "Diagonalen".
   const act=C.activeMeas(M.meas);
-  // Nicht die eine "schlimmste" Messung suchen, sondern alle, die gleich
-  // verdaechtig sind: ueber Baardas Grenzwert UND innerhalb TIE_TOL des
-  // groessten w im Feld. Ein klarer Spitzenreiter liefert genau eine
-  // markierte Zeile, ein Unentschieden markiert alle gleich weit vorne.
-  const wMax=M.an ? M.an.w.reduce((mx,x)=>(x!=null&&x>mx)?x:mx, -Infinity) : -Infinity;
-  const suspects=new Set();
-  if(M.an) M.an.w.forEach((x,i)=>{
-    if(x!=null && x>BAARDA_W0 && x>=wMax*(1-TIE_TOL)) suspects.add(i);
-  });
-
-  // absteigend nach w sortiert anzeigen, aber die Originalindizes behalten
-  const rows=act.map((m,i)=>({m,i,w:M.an?M.an.w[i]:null}));
-  rows.sort((p,q)=>(q.w??-1)-(p.w??-1));
-
-  // Das Verdachts-Badge ist selbst der Stilllegen-Knopf: der wichtigste
-  // Handgriff beim Ausreisser darf nicht hinter Details + Seitwaertsscrollen
-  // vergraben sein. Die Zeile bleibt danach als "aus" stehen, Undo geht.
-  const badge=(w,i)=>{
-    if(suspects.has(i)) return `<button class="badge suspect" title="normiertes Residuum w = ${w.toFixed(1)} — Antippen legt die Messung still, der Wert bleibt in der Liste">verdächtig · stilllegen</button>`;
-    if(w!=null) return `<span class="badge ok" title="normiertes Residuum w = ${w.toFixed(1)}">geprüft</span>`;
-    return '<span class="badge unchecked" title="Diese Messung geht ungeprüft ins Ergebnis ein.">ungeprüft</span>';
-  };
-
-  rows.forEach(({m,i,w})=>{
-    const tr=document.createElement('tr');
-    if(suspects.has(i)) tr.className='worst';
-    // Verknuepfung zur Zeichnung: Zeile beruehrt oder erste Zelle angetippt
-    // -> die zugehoerige Strecke wird im Plan hervorgehoben. Auf Touch gibt
-    // es kein Hover, deshalb zusaetzlich der Tipp aufs Kuerzel.
-    tr.onmouseenter=()=>{ M.highlight={a:m.a,b:m.b}; drawCanvas(); };
-    tr.onmouseleave=()=>{ if(!entryPair){ M.highlight=null; drawCanvas(); } };
-    const red=M.an?M.an.red[i]:null;
-    const v=M.an?M.an.v[i]:null;
-    tr.innerHTML=
-      `<td>${m.a}–${m.b}</td>`+
-      `<td><input class="d" inputmode="decimal" value="${fmtM(m.d)}"></td>`+
-      `<td>${badge(w,i)}</td>`+
-      `<td class="x">${v==null?'—':v.toFixed(1)}</td>`+
-      `<td class="x">${red==null?'—':red.toFixed(2)}</td>`+
-      `<td class="x">${w==null?'—':w.toFixed(1)}</td>`+
-      `<td class="x"><input class="sig" inputmode="decimal" value="${m.sigma??C.SIGMA_DEF}"></td>`+
-      `<td class="x"><button class="rowbtn tog" title="Messung stilllegen">aus</button>`+
-      `<button class="rowbtn del" title="Messung löschen">×</button></td>`;
-    tr.children[0].onclick=()=>{
-      const on=M.highlight && M.highlight.a===m.a && M.highlight.b===m.b;
-      M.highlight=on?null:{a:m.a,b:m.b};
-      drawCanvas();
+  const suspects=M.suspects;
+  {
+    const wk=(a2,b2)=>[a2,b2].sort().join('|');
+    const wallSet=new Set(M.walls.map(([a2,b2])=>wk(a2,b2)));
+    const byPair=new Map();
+    act.forEach((m,i)=>{
+      const k=wk(m.a,m.b);
+      if(!byPair.has(k)) byPair.set(k,{a:m.a,b:m.b,n:0,sus:false,unchecked:false});
+      const e=byPair.get(k);
+      e.n++;
+      if(suspects.has(i)) e.sus=true;
+      if(!M.an || M.an.w[i]==null) e.unchecked=true;
+    });
+    M.meas.filter(m=>m.on===false).forEach(m=>{
+      const k=wk(m.a,m.b);
+      if(!byPair.has(k)) byPair.set(k,{a:m.a,b:m.b,n:0,sus:false,unchecked:true});
+      byPair.get(k).n++;
+    });
+    const rowHtml=(a2,b2)=>{
+      const e=byPair.get(wk(a2,b2));
+      const len=(M.fit && I[a2]!=null && I[b2]!=null) ? fmtM(C.dist(P[I[a2]],P[I[b2]]))+'\u00a0m' : '\u2014';
+      // Badge = schlechtester Status der Werte dieser Strecke: verdaechtig
+      // schlaegt ungeprueft schlaegt geprueft; ganz ohne Wert: "ohne Mass".
+      const badge = e&&e.sus ? '<span class="badge suspect">verd\u00e4chtig</span>'
+        : e&&!e.unchecked ? '<span class="badge ok">gepr\u00fcft</span>'
+        : e ? '<span class="badge unchecked">ungepr\u00fcft</span>'
+        : '<span class="badge">ohne Ma\u00df</span>';
+      const cnt=e?e.n:0;
+      return `<div class="wrow${e&&e.sus?' worst':''}" data-a="${a2}" data-b="${b2}">`
+        +`<span class="wk">${a2}\u2013${b2}</span><span class="wn">${cnt?cnt+(cnt===1?'\u00a0Wert':'\u00a0Werte'):''}</span>`
+        +`<span class="wlen">${len}</span>${badge}</div>`;
     };
-    const inp=tr.querySelector('.d');
-    inp.onchange=()=>{
-      const d=parseFloat(inp.value.replace(',','.'))*1000;
-      if(isFinite(d)&&d>0){ snapshot(); m.d=d; recompute(); }
-      else { inp.value=fmtM(m.d); setHint('Ungültig — Maß muss eine Zahl größer 0 sein.'); }
-    };
-    const sig=tr.querySelector('.sig');
-    sig.onchange=()=>{
-      const s=parseFloat(sig.value.replace(',','.'));
-      if(isFinite(s)&&s>0){ snapshot(); m.sigma=s; recompute(); }
-      else { sig.value=m.sigma??C.SIGMA_DEF; setHint('σ muss eine Zahl größer 0 sein.'); }
-    };
-    tr.querySelector('.tog').onclick=()=>{ snapshot(); m.on=false; recompute(); };
-    tr.querySelector('.del').onclick=()=>{ snapshot(); M.meas.splice(M.meas.indexOf(m),1); recompute(); };
-    const sus=tr.querySelector('button.badge.suspect');
-    if(sus) sus.onclick=()=>{ snapshot(); m.on=false; recompute(); };
-    tb.appendChild(tr);
-  });
+    const wallRows=M.walls.map(([a2,b2])=>rowHtml(a2,b2)).join('');
+    const diagRows=[...byPair.values()].filter(e=>!wallSet.has(wk(e.a,e.b)))
+      .map(e=>rowHtml(e.a,e.b)).join('');
+    const wl=$('wl');
+    wl.innerHTML = (wallRows||diagRows)
+      ? wallRows + (diagRows?'<div class="wgrp">Diagonalen</div>'+diagRows:'')
+      : '<span style="color:var(--muted)">Noch keine W\u00e4nde.</span>';
+    wl.querySelectorAll('.wrow').forEach(row=>{
+      row.onmouseenter=()=>{ M.highlight={a:row.dataset.a,b:row.dataset.b}; drawCanvas(); };
+      row.onmouseleave=()=>{ if(!entryPair && !wpopPair){ M.highlight=null; drawCanvas(); } };
+      row.onclick=()=>openWallPopup(row.dataset.a,row.dataset.b);
+    });
+  }
 
-  // Stillgelegte Messungen bleiben sichtbar, sonst findet man sie nie wieder.
-  // Das Badge selbst ist der Einschalter - auch in der Kompaktansicht.
-  M.meas.filter(m=>m.on===false).forEach(m=>{
-    const tr=document.createElement('tr');
-    tr.className='off';
-    tr.innerHTML=
-      `<td>${m.a}–${m.b}</td>`+
-      `<td style="padding-right:10px">${fmtM(m.d)}</td>`+
-      `<td><button class="badge" title="Antippen schaltet die Messung wieder ein.">aus — einschalten</button></td>`+
-      `<td class="x">—</td><td class="x">—</td><td class="x">—</td>`+
-      `<td class="x">${m.sigma??C.SIGMA_DEF}</td><td class="x"></td>`;
-    tr.querySelector('button').onclick=()=>{ snapshot(); m.on=true; recompute(); };
-    tb.appendChild(tr);
-  });
-
-  // Sind mehrere Zeilen markiert, ist das kein Darstellungsfehler, sondern
-  // eine ehrliche Auskunft: die Daten reichen nicht, um unter den gleich
-  // verdaechtigen Messungen eine einzelne herauszugreifen.
-  const showWhy=suspects.size>1;
+  // Ehrliche Auskunft ueber die Grenzen der Daten: bei mehreren gleich
+  // Verdaechtigen ODER bei auffaelliger Streuung ohne benennbaren
+  // Schuldigen (Redundanz 1: alle w mathematisch identisch) sagt die
+  // Tabelle dazu, WARUM sie den Finger nicht auf eine Zeile legen kann -
+  // sonst liest sich die w-Spalte wie ein kaputtes Ranking.
   const why=$('why');
-  why.textContent = showWhy
-    ? 'Mehrere Messungen sind gleich verdächtig — erst eine weitere Messung würde sie trennen.'
-    : '';
-  why.style.display = showWhy ? '' : 'none';
+  let whyTxt='';
+  if(suspects.size>1)
+    whyTxt='Mehrere Messungen sind gleich verdächtig — erst eine weitere Messung würde sie trennen.';
+  else if(M.narrow.length)
+    whyTxt=M.an && M.an.redundancy===1
+      ? 'Mit nur einer Kontrollmessung im Netz sind alle w mathematisch identisch — welche Messung falsch ist, lässt sich aus diesen Daten nicht ablesen. Eine der vorgeschlagenen Strecken erneut messen grenzt den Fehler ein.'
+      : 'Die Streuung ist auffällig, aber kein einzelnes Maß sticht heraus — eine der vorgeschlagenen Wiederholungen grenzt den Fehler ein.';
+  why.textContent=whyTxt;
+  why.style.display = whyTxt ? '' : 'none';
 
   // --- Vorschlaege, nach Zweck getrennt: erst bestimmen, dann pruefen.
   // Als Chips: Antippen oeffnet die Eingabe direkt fuer dieses Paar und
@@ -4577,12 +6973,23 @@ function renderPanel(){
       + e.map(s=>`<button class="sg${s.repeat?' rep':''}" data-a="${s.a}" data-b="${s.b}">${s.a} ↔ ${s.b}${s.repeat?' nochmal':''}</button>`).join('')
       + '</div></div>';
   };
+  // Eingrenzungs-Chips: Wiederholungen bereits gemessener Strecken, wenn
+  // die Streuung auffaellig ist, aber kein einzelner Schuldiger benennbar
+  // (siehe M.narrow in recompute). Ohne sie stuende hier "Nichts mehr
+  // noetig", waehrend der Status oben einen Fehler meldet - genau die
+  // Sackgasse, in der ein Nutzer mit Redundanz 1 sonst landet.
+  const narrowHtml=M.narrow.length
+    ? `<div class="grp"><b>Fehler eingrenzen — Strecke erneut messen:</b><div class="chips">`
+      + M.narrow.map(s=>`<button class="sg rep" data-a="${s.a}" data-b="${s.b}">${s.a} ↔ ${s.b} nochmal</button>`).join('')
+      + '</div></div>'
+    : '';
   if(!M.an) sg.textContent='Vorschläge erscheinen nach der ersten Messung.';
-  else if(!list.length)
+  else if(!list.length && !narrowHtml)
     sg.textContent = M.an.dof>0
       ? 'Keine messbare Strecke bringt das Netz weiter — fehlt eine Wand im Zug?'
       : 'Nichts mehr nötig — alles gemessen und prüfbar.';
   else sg.innerHTML = grp('Damit die Form eindeutig ist:','bestimmt')
+                    + narrowHtml
                     + grp('Zur Kontrolle der Messungen:','pruefbar');
   sg.querySelectorAll('button.sg').forEach(b=>{
     b.onmouseenter=()=>{ M.highlight={a:b.dataset.a,b:b.dataset.b}; drawCanvas(); };
@@ -4590,24 +6997,8 @@ function renderPanel(){
     b.onclick=()=>enterMeasurement(b.dataset.a, b.dataset.b, true);
   });
 
-  // --- Wandlaengen: erst mit Fit sind es Millimeter, vorher Skizzenpixel.
-  const wl=$('wl');
-  if(!M.walls.length){
-    wl.innerHTML='<span style="grid-column:1/-1;color:var(--muted)">Noch keine Wände.</span>';
-  } else if(!M.fit){
-    wl.innerHTML='<span style="grid-column:1/-1;color:var(--muted)">Längen folgen mit der ersten Messung.</span>';
-  } else {
-    wl.innerHTML=M.walls
-      .map(([a,b])=>`<span>${a}–${b}</span><span>${fmtM(C.dist(P[I[a]],P[I[b]]))} m</span>`).join('');
-  }
+  if(wpopPair) renderWallPopup();
 }
-
-$('dtl').onclick=()=>{
-  const b=$('dtl');
-  const on=b.getAttribute('aria-pressed')!=='true';
-  b.setAttribute('aria-pressed',String(on));
-  $('tbl').classList.toggle('details',on);
-};
 
 // ================= Daten =================
 
@@ -5358,6 +7749,607 @@ globalThis.selfChecks=function(){
     const st2=globalThis.STORE_FACTORY && STORE_FACTORY(raw);
     chk('store: korrupter Alt-Schluessel -> migrate false, Schluessel weg, kein Raum',
       !!st2 && st2.migrate()===false && raw.getItem('raumaufmass')===null && st2.list().length===0);
+  }
+  // --- Gebaeude: origin und die Abbildung zwischen zwei Raumsystemen ---
+  {
+    const rt=globalThis.roomTransform, ap=globalThis.applyRoomTransform;
+    chk('gebaeude: Transformationen vorhanden', typeof rt==='function' && typeof ap==='function');
+    if(rt && ap){
+      const o={x:1234,y:-567,rot:0.7};
+      const T0=rt(o,o), p={id:'A',x:300,y:900};
+      const q0=ap(T0,p);
+      chk('roomTransform: gleiches System -> Identitaet',
+        near(T0.rot,0,1e-12) && near(q0.x,p.x,1e-9) && near(q0.y,p.y,1e-9));
+      const a={x:0,y:0,rot:0}, b={x:5000,y:2000,rot:Math.PI/2};
+      const inA=ap(rt(b,a), p);
+      // Raum B liegt um 90 Grad gedreht bei (5000,2000): (300,900) wird zu
+      // (5000-900, 2000+300).
+      chk('roomTransform: 90 Grad + Versatz von Hand nachgerechnet',
+        near(inA.x,4100,1e-6) && near(inA.y,2300,1e-6));
+      const back=ap(rt(a,b), inA);
+      chk('roomTransform: hin und zurueck trifft denselben Punkt',
+        near(back.x,p.x,1e-6) && near(back.y,p.y,1e-6));
+      chk('roomTransform: id bleibt erhalten', back.id==='A');
+    }
+    const fake=()=>{ const m=new Map(); return {
+      getItem:k=>m.has(k)?m.get(k):null,
+      setItem:(k,v)=>m.set(k,String(v)),
+      removeItem:k=>m.delete(k),
+    };};
+    const st=globalThis.STORE_FACTORY && STORE_FACTORY(fake());
+    if(st){
+      const a=st.create('Küche'), b=st.create('Flur');
+      chk('store: ohne origin ist die Bibliothek kein Gebaeude', st.withOrigin().length===0);
+      st.save(a,{origin:{x:0,y:0,rot:0}});
+      chk('store: origin ueberlebt save', !!st.load(a).origin && st.load(a).origin.x===0);
+      chk('store: withOrigin liefert nur verankerte Raeume, mit Daten',
+        st.withOrigin().length===1 && st.withOrigin()[0].id===a && !!st.withOrigin()[0].data);
+      st.save(a,{area:12.5});
+      chk('store: spaeteres save ohne origin loescht die Verankerung nicht', !!st.load(a).origin);
+      chk('store: freistehender Raum bleibt freistehend', !st.load(b).origin);
+    }
+  }
+  // --- Nachbarraum hinter einer Tuer: Verankerung der geerbten Wand ---
+  {
+    const no=globalThis.neighborOrigin, rt=globalThis.roomTransform,
+          ap=globalThis.applyRoomTransform;
+    chk('nachbar: neighborOrigin vorhanden', typeof no==='function');
+    if(no && rt && ap){
+      // Quadrat gegen den Uhrzeigersinn; Wand A-B ist die untere Kante.
+      const pts=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},
+                 {id:'C',x:4000,y:3000},{id:'D',x:0,y:3000}];
+      const walls=[['A','B'],['B','C'],['C','D'],['D','A']];
+      const oR={x:0,y:0,rot:0};
+      const r=no(pts, walls, 'A', 'B', 240, oR);
+      chk('nachbar: Wandlaenge uebernommen', !!r && near(r.L,4000,1e-9));
+      if(r){
+        const T=rt(r.origin, oR);
+        const p0=ap(T,{x:0,y:0}), p1=ap(T,{x:r.L,y:0});
+        // Beide Punkte muessen auf der um 240 nach AUSSEN versetzten
+        // Parallelen liegen - also bei y=-240, weil der Raum oberhalb liegt.
+        chk('nachbar: (0,0) landet auf der versetzten Wand',
+          near(p0.y,-240,1e-6) && (near(p0.x,0,1e-6)||near(p0.x,4000,1e-6)));
+        chk('nachbar: (L,0) landet am anderen Ende derselben Wand',
+          near(p1.y,-240,1e-6) && near(Math.abs(p1.x-p0.x),4000,1e-6));
+        // Der Quellraum liegt in SEINEM System unter der geerbten Wand.
+        const mitteQuelle=ap(rt(oR, r.origin), {x:2000,y:1500});
+        chk('nachbar: Quellraum liegt unter der geerbten Wand', mitteQuelle.y<0);
+        chk('nachbar: geerbte Ecken benannt',
+          (r.vonEcke==='A'||r.vonEcke==='B') && r.vonEcke!==r.bisEcke);
+      }
+      // Gegenprobe mit der gegenueberliegenden Wand: dort zeigt die
+      // Aussennormale in die andere Richtung, die Laufrichtung dreht sich.
+      const r2=no(pts, walls, 'C', 'D', 300, oR);
+      if(r2){
+        const T2=rt(r2.origin, oR);
+        const q0=ap(T2,{x:0,y:0});
+        chk('nachbar: Gegenwand versetzt nach der anderen Seite',
+          near(q0.y,3300,1e-6));
+        chk('nachbar: Quellraum auch dort unter der Wand',
+          ap(rt(oR,r2.origin),{x:2000,y:1500}).y<0);
+      }
+      chk('nachbar: unbrauchbare Eingaben -> null',
+        no(pts,walls,'A','B',0,oR)===null && no(pts,walls,'A','X',240,oR)===null);
+      // Gedrehter Quellraum: die Verankerung muss die Drehung mittragen.
+      const oR2={x:1000,y:-500,rot:0.9};
+      const r3=no(pts, walls, 'A', 'B', 240, oR2);
+      if(r3){
+        // Im GEBAEUDE muss der Ursprung des Nachbarn genau auf der um 240
+        // versetzten Ecke des Quellraums liegen - unabhaengig davon, wie
+        // der Quellraum selbst im Gebaeude steht.
+        const welt=o=>ap({rot:o.rot, x:o.x, y:o.y}, {x:0,y:0});
+        const g=welt(r3.origin);
+        // Die Wand laeuft im neuen Raum von B nach A (sonst laege der
+        // Quellraum ueber ihr), sein Ursprung ist also die versetzte
+        // Ecke B: (4000, -240) im System des Quellraums.
+        const versetzt=ap({rot:oR2.rot, x:oR2.x, y:oR2.y}, {x:4000,y:-240});
+        chk('nachbar: gedrehter Quellraum -> versetzte Ecke im Gebaeude',
+          near(g.x,versetzt.x,1e-6) && near(g.y,versetzt.y,1e-6));
+        chk('nachbar: Drehung des Quellraums schlaegt durch',
+          near(r3.origin.rot-r.origin.rot, oR2.rot, 1e-9));
+      }
+    }
+  }
+  // --- der frisch angelegte Nachbarraum rechnet sich ohne Absturz ---
+  {
+    const pts=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0}];
+    const meas=[{a:'A',b:'B',d:4000}];
+    const fit=C.solve(pts, meas);
+    const an=C.analyze(fit.pts, meas);
+    chk('nachbar: zwei Punkte, eine Messung -> loesbar',
+      !!fit && fit.pts.every(p=>isFinite(p.x)&&isFinite(p.y)));
+    chk('nachbar: Laenge bleibt erhalten', near(C.dist(fit.pts[0],fit.pts[1]),4000,1e-6));
+    chk('nachbar: Analyse ohne Redundanz, aber ohne Absturz',
+      !!an && an.redundancy===0);
+  }
+  // --- Wandkoerper: Innenkontur + Dicke nach aussen, Ecken per Gehrung ---
+  {
+    const wb=globalThis.wallBands;
+    chk('band: wallBands vorhanden', typeof wb==='function');
+    if(wb){
+      const rechteck=(w,h)=>({
+        pts:[{id:'A',x:0,y:0},{id:'B',x:w,y:0},{id:'C',x:w,y:h},{id:'D',x:0,y:h}],
+        walls:[['A','B'],['B','C'],['C','D'],['D','A']]});
+      const r=rechteck(4000,3000);
+      const b=wb(r.pts, r.walls, {}, 240);
+      chk('band: je Wand ein Koerper', b.length===4);
+      chk('band: ohne Eintrag gilt der angenommene Wert',
+        b.every(x=>x.t===240 && x.assumed===true));
+      // Aussenecken eines Rechtecks: genau die um 240 nach aussen
+      // versetzten Ecken - also (-240,-240) bis (4240,3240).
+      const alle=b.flatMap(x=>[x.oA,x.oB]);
+      chk('band: Aussenkontur ist das um 240 vergroesserte Rechteck',
+        alle.every(p=>near(Math.min(Math.abs(p.x+240),Math.abs(p.x-4240)),0,1e-6)
+                   && near(Math.min(Math.abs(p.y+240),Math.abs(p.y-3240)),0,1e-6)));
+      // Die entscheidende Eigenschaft: benachbarte Vierecke teilen die Ecke.
+      const teiltEcken=bs=>bs.every(x=>{
+        const nach=bs.find(y=>y.a===x.b);
+        return nach && near(x.oB.x,nach.oA.x,1e-9) && near(x.oB.y,nach.oA.y,1e-9);
+      });
+      chk('band: Nachbarwaende teilen ihre Aussenecke', teiltEcken(b));
+      // Flaeche der vier Vierecke = Umfang*t + 4*t^2 (jede Ecke einmal)
+      const flaeche=q=>{
+        const P=[q.iA,q.iB,q.oB,q.oA]; let a=0;
+        for(let i=0,j=3;i<4;j=i++) a+=P[j].x*P[i].y-P[i].x*P[j].y;
+        return Math.abs(a)/2;
+      };
+      chk('band: Gesamtflaeche = Umfang*t + 4*t²',
+        near(b.reduce((s,q)=>s+flaeche(q),0), 14000*240+4*240*240, 1e-6));
+      // Unterschiedliche Dicken je Wand: die Gehrung muss beide tragen.
+      const b2=wb(r.pts, r.walls, {'A|B':300}, 240);
+      chk('band: eingetragene Dicke schlaegt den angenommenen Wert',
+        b2.some(x=>x.t===300 && x.assumed===false) && b2.some(x=>x.assumed===true));
+      chk('band: gemischte Dicken teilen die Ecke trotzdem', teiltEcken(b2));
+      // Sehr spitze Ecke: der Ersatzpunkt muss fuer BEIDE Waende gelten,
+      // sonst klafft genau dort die Wand auf.
+      const spitz={pts:[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:3800,y:200}],
+                   walls:[['A','B'],['B','C'],['C','A']]};
+      const b3=wb(spitz.pts, spitz.walls, {}, 240);
+      chk('band: spitze Ecke reisst nicht auf', b3.length===3 && teiltEcken(b3));
+      chk('band: spitze Ecke bleibt in der Naehe der Ecke',
+        b3.every(x=>C.dist(x.oA,x.iA)<6*240+1 && C.dist(x.oB,x.iB)<6*240+1));
+      chk('band: offener Wandzug -> nichts zu zeichnen',
+        wb(r.pts, [['A','B'],['B','C']], {}, 240).length===0);
+    }
+  }
+  // --- geteilte Wand: passen die beiden Raeume noch zusammen? ---
+  {
+    const sf=globalThis.sharedWallFit;
+    chk('geteilt: sharedWallFit vorhanden', typeof sf==='function');
+    if(sf){
+      // Unsere Wand laeuft von (0,0) nach (4000,0), der Raum liegt oberhalb.
+      // Die Wand des Nachbarn liegt 240 darunter und laeuft ANDERSHERUM.
+      const a1={x:0,y:0}, b1={x:4000,y:0};
+      const r=sf(a1,b1, {x:4000,y:-240}, {x:0,y:-240});
+      chk('geteilt: Dicke ist der Lotabstand', !!r && near(r.dicke,240,1e-9));
+      chk('geteilt: parallele Waende -> 0 Grad', near(r.winkel,0,1e-9));
+      chk('geteilt: gleiche Laenge -> kein Unterschied, kein Versatz',
+        near(r.laengeD,0,1e-9) && near(r.versatz,0,1e-9));
+      chk('geteilt: volle Ueberlappung', near(r.ueberlappung,4000,1e-9));
+      // Gegenprobe mit GLEICHER Laufrichtung: dasselbe Ergebnis, die
+      // Richtungsangleichung darf nichts verfaelschen.
+      const r2=sf(a1,b1, {x:0,y:-240}, {x:4000,y:-240});
+      chk('geteilt: Laufrichtung des Nachbarn ist egal',
+        near(r2.dicke,240,1e-9) && near(r2.winkel,0,1e-9) && near(r2.versatz,0,1e-9));
+      // 20mm laenger, an EINEM Ende ueberstehend
+      const r3=sf(a1,b1, {x:4020,y:-240}, {x:0,y:-240});
+      chk('geteilt: laengere Nachbarwand wird als Differenz gemeldet',
+        near(r3.laengeD,20,1e-9) && near(r3.versatz,20,1e-9));
+      // Verschoben, aber gleich lang: reiner Versatz ohne Laengenunterschied
+      const r4=sf(a1,b1, {x:4030,y:-240}, {x:30,y:-240});
+      chk('geteilt: reiner Versatz ohne Laengenunterschied',
+        near(r4.laengeD,0,1e-9) && near(r4.versatz,30,1e-9));
+      // Schiefstellung: 1 Grad verdreht
+      const w=1*Math.PI/180;
+      const r5=sf(a1,b1, {x:4000*Math.cos(w), y:-240+4000*Math.sin(w)}, {x:0,y:-240});
+      chk('geteilt: Schiefstellung wird in Grad gemeldet', near(r5.winkel,1,1e-6));
+      chk('geteilt: entartete Eingaben -> null',
+        sf(a1,a1,{x:0,y:-240},{x:4000,y:-240})===null);
+      // Dickenaenderung schlaegt direkt durch - das ist die abgeleitete Dicke
+      chk('geteilt: 175 statt 240 liest sich als 175',
+        near(sf(a1,b1,{x:4000,y:-175},{x:0,y:-175}).dicke,175,1e-9));
+    }
+  }
+  // --- computeSuspects: eine Quelle fuer Tabelle UND Plan-Markierung ---
+  {
+    const cs=globalThis.computeSuspects;
+    chk('suspects: Funktion vorhanden', typeof cs==='function');
+    if(cs){
+      chk('suspects: leer/kein w -> leere Menge',
+        cs([],3.29,0.02).size===0 && cs(null,3.29,0.02).size===0);
+      chk('suspects: alle unpruefbar (null) -> leere Menge',
+        cs([null,null],3.29,0.02).size===0);
+      chk('suspects: unter Schwelle -> leere Menge',
+        cs([1.2,3.28,0.4],3.29,0.02).size===0);
+      chk('suspects: klarer Spitzenreiter -> genau er',
+        (()=>{ const s=cs([1.0,14.05,2.2,null],3.29,0.02);
+               return s.size===1 && s.has(1); })());
+      chk('suspects: Gleichstand innerhalb Toleranz -> beide',
+        (()=>{ const s=cs([7.20,7.15,1.0],3.29,0.02);
+               return s.size===2 && s.has(0) && s.has(1); })());
+      chk('suspects: knapp ausserhalb Toleranz -> nur Maximum',
+        (()=>{ const s=cs([7.20,6.90,1.0],3.29,0.02);
+               return s.size===1 && s.has(0); })());
+      chk('suspects: ueber Schwelle noetig, Naehe zum Maximum reicht nicht',
+        (()=>{ const s=cs([3.30,3.25],3.29,0.02);
+               return s.size===1 && s.has(0); })());
+    }
+  }
+  // --- Redundanz-1-Blindheit und Eingrenzung (Nutzerfall vom 2026-07-31):
+  // 3x4-Rechteck, beide 5er-Diagonalen, C-D absichtlich 3,05 statt 3,00.
+  // Mit nur EINEM redundanten Freiheitsgrad sind alle w identisch - der
+  // w-Test KANN den Schuldigen nicht nennen. narrowCandidates liefert dann
+  // die Wiederholungs-Kandidaten, groesstes Residuum zuerst.
+  {
+    const rect=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:3000},{id:'D',x:0,y:3000}];
+    const meas=[
+      {a:'A',b:'B',d:4000},{a:'B',b:'C',d:3000},{a:'C',b:'D',d:4000},
+      {a:'D',b:'A',d:3050},                       // <- die eine falsche Kante
+      {a:'A',b:'C',d:5000},{a:'B',b:'D',d:5000},
+    ].map(m=>({...m,sigma:5}));
+    const fit=C.solve(rect.map(p=>({...p})), meas);
+    const an=C.analyze(fit.pts, meas);
+    chk('r1-fall: Redundanz ist 1', an.redundancy===1);
+    chk('r1-fall: alle w vorhanden', an.w.length===6 && an.w.every(x=>x!=null));
+    chk('r1-fall: alle w identisch (Spread < 1e-3) - Isolation unmoeglich',
+      (()=>{ const ws=an.w; const mx=Math.max(...ws), mn=Math.min(...ws);
+             return mx-mn < 1e-3; })());
+    chk('r1-fall: narrowCandidates dedupliziert, gedeckelt, groesstes |v| zuerst',
+      (()=>{ const n=globalThis.narrowCandidates(meas, an.v, 3);
+             if(n.length!==3) return false;
+             const I=C.idx(fit.pts);
+             const avOf=c=>{ const i=meas.findIndex(m=>[m.a,m.b].sort().join('|')===[c.a,c.b].sort().join('|'));
+                             return Math.abs(an.v[i]); };
+             return avOf(n[0])>=avOf(n[1]) && avOf(n[1])>=avOf(n[2]); })());
+    chk('r1-fall: mit einer Wiederholung isoliert der w-Test den Fehler',
+      (()=>{ const mit=meas.concat([{a:'D',b:'A',d:3000,sigma:5}]);
+             const fit2=C.solve(rect.map(p=>({...p})), mit);
+             const an2=C.analyze(fit2.pts, mit);
+             const sus=globalThis.computeSuspects(an2.w, 3.29, 0.02);
+             return sus.size===1 && sus.has(3); })());
+    const sig5=meas.map(()=>5);
+    chk('globaltest: r1-Fall schlaegt an', globalThis.globalTestFails(an.v, sig5, an.redundancy)===true);
+    chk('globaltest: sauberes Netz schlaegt nicht an',
+      (()=>{ const sauber=meas.map(m=>({...m, d:(m.a==='D'&&m.b==='A')?3000:m.d}));
+             const f=C.solve(rect.map(p=>({...p})), sauber);
+             const a2=C.analyze(f.pts, sauber);
+             return globalThis.globalTestFails(a2.v, sig5, a2.redundancy)===false; })());
+    chk('globaltest: warnt nach Wiederholung einer UNSCHULDIGEN Strecke weiter',
+      (()=>{ // B-D wiederholt (konsistent 5000): sigmaHat sinkt unter den alten
+             // 2,5-sigma-Faktor, der Fehler in D-A steckt aber noch im Netz.
+             const mit=meas.concat([{a:'B',b:'D',d:5000,sigma:5}]);
+             const f=C.solve(rect.map(p=>({...p})), mit);
+             const a2=C.analyze(f.pts, mit);
+             return globalThis.globalTestFails(a2.v, mit.map(()=>5), a2.redundancy)===true; })());
+    chk('narrow: bereits wiederholte Paare werden nicht erneut vorgeschlagen',
+      (()=>{ const mit=meas.concat([{a:'B',b:'D',d:5000,sigma:5}]);
+             const f=C.solve(rect.map(p=>({...p})), mit);
+             const a2=C.analyze(f.pts, mit);
+             const n=globalThis.narrowCandidates(mit, a2.v, 10);
+             return n.length===5 && !n.some(c=>[c.a,c.b].sort().join('')==='BD'); })());
+  }
+  // --- Entwirren: Winkel-Energie + kreuzungsfreie Lagesuche ---
+  {
+    const sq=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:4000},{id:'D',x:0,y:4000}];
+    const spitz=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:4000},{id:'D',x:3990,y:30}];
+    chk('entwirren: Quadrat hat kleinere Winkel-Energie als Spitznadel-Viereck',
+      globalThis.ringAngleEnergy(sq, C) < globalThis.ringAngleEnergy(spitz, C));
+    chk('entwirren: gekreuzter Ring hat Energie unendlich',
+      globalThis.ringAngleEnergy(
+        [{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:0,y:3000},{id:'D',x:4000,y:3000}], C)===Infinity);
+    // Verhedderte Skizze: Zug A-B-C-D-A, aber C und D vertauscht gezeichnet
+    // -> bow-tie. Eine Wand gemessen. untangle muss eine kreuzungsfreie,
+    // masshaltige Lage liefern.
+    const bow=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:0,y:3000},{id:'D',x:4000,y:3000}];
+    const walls=[['A','B'],['B','C'],['C','D'],['D','A']];
+    const meas1=[{a:'A',b:'B',d:4000,sigma:5,on:true}];
+    const u=globalThis.untangle(bow.map(p=>({...p})), walls, meas1, 24, 7);
+    chk('entwirren: liefert Lage', !!u && u.length===4);
+    chk('entwirren: Lage ist kreuzungsfrei',
+      (()=>{ if(!u) return false;
+             const r=C.wallPolygonRing(u, walls);
+             return !!r && !C.ringSelfIntersects(r); })());
+    chk('entwirren: Masse bleiben erfuellt (<5mm)',
+      (()=>{ if(!u) return false;
+             return C.residuals(u, meas1).every(v=>Math.abs(v)<5); })());
+    chk('entwirren: deterministisch unter gleichem Seed',
+      (()=>{ const u2=globalThis.untangle(bow.map(p=>({...p})), walls, meas1, 24, 7);
+             return !!u&&!!u2 && u.every((p,i)=>Math.abs(p.x-u2[i].x)<1e-9 && Math.abs(p.y-u2[i].y)<1e-9); })());
+    chk('entwirren: offener Zug -> null',
+      globalThis.untangle(bow.map(p=>({...p})), [['A','B'],['B','C']], meas1, 8, 1)===null);
+  }
+  // --- Wandansichten: Hoehe an der Ecke, Wandflaeche, Oeffnungen ---
+  {
+    const pts=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:3000}];
+    const ch=globalThis.cornerHeights, ws=globalThis.wallShape;
+    chk('wand: ohne Messung -> Standardhoehe, als angenommen markiert',
+      (()=>{ const H=ch(pts,[]);
+             return H.A.h===2500 && H.A.gemessen===false && H.C.h===2500; })());
+    chk('wand: EINE Hoehenmessung gilt fuer alle Ecken',
+      (()=>{ const H=ch(pts,[{kind:'h',at:'B',d:2620,on:true}]);
+             return H.B.h===2620 && H.B.gemessen===true
+                 && H.A.h===2620 && H.A.gemessen===false; })());
+    chk('wand: zwei verschiedene Hoehen -> je Ecke eigener Wert, Rest erbt Mittel',
+      (()=>{ const H=ch(pts,[{kind:'h',at:'A',d:2400,on:true},{kind:'h',at:'B',d:2600,on:true}]);
+             return H.A.h===2400 && H.B.h===2600 && near(H.C.h,2500,1e-9) && !H.C.gemessen; })());
+    chk('wand: mehrere Messungen derselben Ecke werden gemittelt',
+      (()=>{ const H=ch(pts,[{kind:'h',at:'A',d:2400,on:true},{kind:'h',at:'A',d:2410,on:true}]);
+             return near(H.A.h,2405,1e-9); })());
+    chk('wand: stillgelegte Hoehenmessung zaehlt nicht',
+      (()=>{ const H=ch(pts,[{kind:'h',at:'A',d:9999,on:false}]);
+             return H.A.h===2500 && !H.A.gemessen; })());
+
+    // DIE Kerneigenschaft: benachbarte Waende teilen ihre senkrechte Kante,
+    // weil beide dieselbe Eckhoehe lesen. Ein Widerspruch ist nicht
+    // formulierbar - genau dafuer haengt die Hoehe an der Ecke.
+    chk('wand: Nachbarwaende teilen die gemeinsame Kante exakt',
+      (()=>{ const m=[{kind:'h',at:'A',d:2400,on:true},{kind:'h',at:'B',d:2800,on:true},
+                      {kind:'h',at:'C',d:2600,on:true}];
+             const ab=ws(pts,m,'A','B'), bc=ws(pts,m,'B','C');
+             return ab.hb===bc.ha && ab.hb===2800; })());
+    chk('wand: Laenge kommt aus dem Grundriss, Form ist ein Trapez',
+      (()=>{ const s=ws(pts,[{kind:'h',at:'A',d:2400,on:true},{kind:'h',at:'B',d:2800,on:true}],'A','B');
+             return near(s.L,4000,1e-9) && s.ha===2400 && s.hb===2800 && s.poly.length===4; })());
+
+    const shape={L:4000, ha:2400, hb:2800,
+                 poly:[{x:0,y:0},{x:4000,y:0},{x:4000,y:2800},{x:0,y:2400}]};
+    chk('wand: Decke laeuft im Trapez schraeg',
+      near(globalThis.ceilingAt(shape,0),2400,1e-9)
+      && near(globalThis.ceilingAt(shape,4000),2800,1e-9)
+      && near(globalThis.ceilingAt(shape,2000),2600,1e-9));
+    chk('oeffnung: passt innerhalb der Wand',
+      globalThis.openingFits(shape,{x:1000,y:0,w:1000,h:2000})===true);
+    chk('oeffnung: ragt seitlich hinaus -> passt nicht',
+      globalThis.openingFits(shape,{x:3500,y:0,w:1000,h:2000})===false);
+    chk('oeffnung: stoesst an die SCHRAEGE Decke -> passt nicht',
+      // an x=0 ist die Decke 2400; eine 2450 hohe Oeffnung dort passt nicht,
+      // obwohl sie unter der hoechsten Wandkante (2800) bliebe.
+      globalThis.openingFits(shape,{x:0,y:0,w:500,h:2450})===false);
+    chk('oeffnung: clamp schiebt in die Wand zurueck',
+      (()=>{ const o=globalThis.clampOpening(shape,{x:-500,y:-200,w:1000,h:2000});
+             return o.x===0 && o.y===0 && globalThis.openingFits(shape,o); })());
+    chk('oeffnung: clamp respektiert die schraege Decke',
+      (()=>{ const o=globalThis.clampOpening(shape,{x:0,y:2000,w:500,h:1000});
+             return globalThis.openingFits(shape,o) && o.h<=2400+1e-6; })());
+    chk('oeffnung: Tuer-Vorbelegung steht auf dem Boden und passt',
+      (()=>{ const o=globalThis.defaultOpening(shape,'door');
+             return o.y===0 && o.w===985 && globalThis.openingFits(shape,o); })());
+    chk('oeffnung: Fenster-Vorbelegung sitzt mittig im oberen Bereich',
+      (()=>{ const o=globalThis.defaultOpening(shape,'window');
+             return near(o.x+o.w/2, shape.L/2, 1e-9) && o.y>0
+                 && globalThis.openingFits(shape,o); })());
+    // --- Oeffnungen sind exklusiv ---
+    {
+      const A={id:'a',x:1000,y:0,w:1000,h:2000};
+      const ov=globalThis.openingsOverlap;
+      chk('exklusiv: echte Ueberdeckung erkannt',
+        ov(A,{id:'b',x:1500,y:500,w:1000,h:1000})===true);
+      chk('exklusiv: Beruehrung an der Kante ist erlaubt',
+        ov(A,{id:'b',x:2000,y:0,w:800,h:2000})===false);
+      chk('exklusiv: uebereinander ohne Hoehenueberschneidung ist erlaubt',
+        ov(A,{id:'b',x:1000,y:2000,w:1000,h:400})===false);
+      chk('exklusiv: daneben ist erlaubt',
+        ov(A,{id:'b',x:2500,y:0,w:500,h:2000})===false);
+      chk('exklusiv: placeable prueft Wand UND Nachbarn',
+        globalThis.openingPlaceable(shape,{id:'b',x:1500,y:0,w:900,h:1500},[A])===false
+        && globalThis.openingPlaceable(shape,{id:'b',x:2100,y:0,w:900,h:1500},[A])===true);
+      chk('exklusiv: eine Oeffnung kollidiert nicht mit sich selbst',
+        globalThis.openingPlaceable(shape,A,[A])===true);
+      chk('exklusiv: Zug gleitet waagerecht an der Nachbarin entlang',
+        (()=>{ // B links von A, Ziel liegt rechts UND tiefer -> x wird
+               // blockiert, die Hoehenaenderung muss trotzdem durchgehen
+               const B={id:'b',x:0,y:0,w:900,h:1000};
+               const r=globalThis.slideOpening(shape,B,{x:1200,y:1400},[A]);
+               return r.y===1400 && r.x===0; })());
+      chk('exklusiv: voll blockierter Zug laesst die Oeffnung stehen',
+        (()=>{ const B={id:'b',x:0,y:0,w:900,h:2000};
+               const r=globalThis.slideOpening(shape,B,{x:1100,y:0},[A]);
+               return r.x===0 && r.y===0; })());
+      chk('exklusiv: freier Platz wird gefunden, wenn die Vorbelegung besetzt ist',
+        (()=>{ const neu={id:'c',x:1000,y:0,w:800,h:1900};
+               const f=globalThis.findFreeSpot(shape,neu,[A]);
+               return !!f && globalThis.openingPlaceable(shape,f,[A]); })());
+      chk('exklusiv: volle Wand -> kein Platz, ehrliches null',
+        (()=>{ const voll={id:'x',x:0,y:0,w:shape.L,h:2400};
+               const neu={id:'y',x:0,y:0,w:800,h:1000};
+               return globalThis.findFreeSpot(shape,neu,[voll])===null; })());
+    }
+    // --- Abwicklung: Klappgrad und Aussennormale ---
+    {
+      const R=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:3000},{id:'D',x:0,y:3000}];
+      const W=[['A','B'],['B','C'],['C','D'],['D','A']];
+      const uf=globalThis.unfoldFactor, rd=globalThis.planRefDist, on=globalThis.outerNormal;
+      chk('abwicklung: Bezugsweite ist die halbe Diagonale', near(rd(R), 2500, 1e-9));
+      chk('abwicklung: Fokus auf der Wandmitte -> flach (0)',
+        near(uf({x:2000,y:0},{x:2000,y:0},2500), 0, 1e-12));
+      chk('abwicklung: Fokus in der Raummitte -> alle Waende gleich weit auf',
+        (()=>{ const f={x:2000,y:1500};
+               const ab=uf({x:2000,y:0},f,2500), cd=uf({x:2000,y:3000},f,2500);
+               return near(ab,cd,1e-12) && ab>0 && ab<1; })());
+      chk('abwicklung: weiter weg heisst weiter aufgeklappt',
+        uf({x:2000,y:0},{x:2000,y:1500},2500) < uf({x:2000,y:0},{x:2000,y:2500},2500));
+      chk('abwicklung: Blick von aussen -> Wand bleibt flach',
+        (()=>{ const n={x:0,y:-1};            // Aussennormale zeigt nach -y
+               // Fokus liegt AUSSERHALB (bei y<0), schaut also von aussen
+               return near(uf({x:2000,y:0},{x:2000,y:-3000},2500,n), 0, 1e-12); })());
+      chk('abwicklung: Blick von innen -> Wand klappt auf',
+        (()=>{ const n={x:0,y:-1};
+               return uf({x:2000,y:0},{x:2000,y:1500},2500,n) > 0.5; })());
+      chk('abwicklung: streifender Blick faellt sanft auf null',
+        (()=>{ const n={x:0,y:-1};
+               const steil=uf({x:2000,y:0},{x:2000,y:2000},2500,n);
+               const streif=uf({x:2000,y:0},{x:3800,y:200},2500,n);
+               return streif<steil && streif>=0; })());
+      chk('abwicklung: gedeckelt bei 1',
+        near(uf({x:0,y:0},{x:99999,y:0},2500), 1, 1e-12));
+      chk('abwicklung: Aussennormale zeigt aus dem Raum',
+        (()=>{ const C2=globalThis.CORE, poly=C2.wallPolygon(R,W);
+               return W.every(([a,b])=>{
+                 const n=on(R,W,a,b), I=C2.idx(R);
+                 const m={x:(R[I[a]].x+R[I[b]].x)/2, y:(R[I[a]].y+R[I[b]].y)/2};
+                 return !C2.pointInPoly({x:m.x+n.x*10, y:m.y+n.y*10}, poly)
+                     &&  C2.pointInPoly({x:m.x-n.x*10, y:m.y-n.y*10}, poly);
+               }); })());
+    }
+    // --- Oeffnungen im Grundriss: Luecke und Schwenkwinkel ---
+    {
+      // 4 x 3 Rechteck, Tuer mittig in der unteren Wand A-B.
+      const R=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:3000},{id:'D',x:0,y:3000}];
+      const W=[['A','B'],['B','C'],['C','D'],['D','A']];
+      const ow=globalThis.openingWorld, sl=globalThis.swingLimit;
+      chk('grundriss: Luecke sitzt an der richtigen Stelle der Wandlinie',
+        (()=>{ const r=ow(R,'A','B',{x:1500,w:1000});
+               return near(r.P.x,1500,1e-9) && near(r.P.y,0,1e-9)
+                   && near(r.Q.x,2500,1e-9) && near(r.L,4000,1e-9); })());
+      chk('grundriss: Normale steht senkrecht auf der Wand',
+        (()=>{ const r=ow(R,'A','B',{x:0,w:1000});
+               return near(r.u.x*r.n.x+r.u.y*r.n.y,0,1e-12) && near(Math.hypot(r.n.x,r.n.y),1,1e-12); })());
+      chk('grundriss: freies Blatt in der Raummitte schwingt fast 180 Grad',
+        (()=>{ // Angel bei (1500,0), Blatt 1000 lang, dreht in den Raum (+y)
+               const a=sl(R,W,['A','B'],{x:1500,y:0},1000,0,+1);
+               return a > Math.PI-0.12 && a <= Math.PI; })());
+      chk('grundriss: schmaler Raum -> Blatt stoppt an der Gegenwand',
+        (()=>{ // Raum nur 600 tief, Blatt 900 lang: es kann nicht weit
+               // aufgehen, ohne gegen die gegenueberliegende Wand zu stossen.
+               const flach=[{id:'A',x:0,y:0},{id:'B',x:3000,y:0},
+                            {id:'C',x:3000,y:600},{id:'D',x:0,y:600}];
+               const a=sl(flach,W,['A','B'],{x:1000,y:0},900,0,+1);
+               // sin(a) muss unter 600/900 bleiben -> hoechstens ~42 Grad
+               return a>0.2 && a < Math.asin(600/900); })());
+      chk('grundriss: Sicherheitsabstand - der Bogen beruehrt die Wand nie ganz',
+        (()=>{ const flach=[{id:'A',x:0,y:0},{id:'B',x:3000,y:0},
+                            {id:'C',x:3000,y:600},{id:'D',x:0,y:600}];
+               const a=sl(flach,W,['A','B'],{x:1000,y:0},900,0,+1);
+               const tip={x:1000+Math.cos(a)*900, y:Math.sin(a)*900};
+               // Spitze bleibt sichtbar unter der Gegenwand, nicht darauf
+               return tip.y < 600-20; })());
+      chk('grundriss: Blatt laenger als der Raum -> deutlich unter 90 Grad',
+        (()=>{ const eng=[{id:'A',x:0,y:0},{id:'B',x:3000,y:0},
+                          {id:'C',x:3000,y:400},{id:'D',x:0,y:400}];
+               const a=sl(eng,W,['A','B'],{x:1000,y:0},900,0,+1);
+               return a>0 && a<Math.PI/4; })());
+      chk('grundriss: Drehsinn kehrt die Richtung um (nach aussen)',
+        (()=>{ const rein=sl(R,W,['A','B'],{x:1500,y:0},1000,0,+1);
+               const raus=sl(R,W,['A','B'],{x:1500,y:0},1000,0,-1);
+               // nach aussen ist nichts im Weg -> voller Bogen
+               return raus>=rein-1e-9 && raus>Math.PI-0.12; })());
+    }
+    // --- Oeffnungen einmessen ---
+    {
+      const so=globalThis.solveOpening;
+      const op={id:'o1', x:0, y:0, w:1000, h:2000};
+      chk('einmessen: links gemessen -> x uebernommen',
+        (()=>{ const r=so(shape, op, [{id:'m1',op:'o1',edge:'left',d:1200,sigma:5}]);
+               return near(r.ziel.x,1200,1e-9) && r.x.n===1; })());
+      chk('einmessen: rechts gemessen -> x von der anderen Seite gerechnet',
+        (()=>{ const r=so(shape, op, [{id:'m1',op:'o1',edge:'right',d:800,sigma:5}]);
+               // L 4000, Breite 1000, 800 vom rechten Rand -> x = 2200
+               return near(r.ziel.x,2200,1e-9); })());
+      chk('einmessen: Boden und Decke bestimmen y',
+        (()=>{ const r=so(shape, op, [{id:'m1',op:'o1',edge:'bottom',d:900,sigma:5}]);
+               return near(r.ziel.y,900,1e-9); })());
+      chk('einmessen: Decke wird ueber der Oeffnungsmitte gerechnet (Trapez)',
+        (()=>{ // Oeffnung x=1500 w=1000 -> Mitte 2000; Decke dort:
+               // 2400 + (2800-2400)*2000/4000 = 2600
+               const mitte={...op, x:1500};
+               const r=so(shape, mitte, [{id:'m1',op:'o1',edge:'top',d:100,sigma:5}]);
+               return near(r.ziel.y, 2600-2000-100, 1e-9); })());
+      chk('einmessen: eine Messung je Achse -> bestimmt, aber nichts pruefbar',
+        (()=>{ const r=so(shape, op, [{id:'m1',op:'o1',edge:'left',d:1200,sigma:5},
+                                      {id:'m2',op:'o1',edge:'bottom',d:0,sigma:5}]);
+               return r.x.n===1 && r.y.n===1 && r.x.w[0]===null && r.x.sigmaHat===null; })());
+      chk('einmessen: zwei passende Messungen -> Mittel, kleine Residuen, pruefbar',
+        (()=>{ const r=so(shape, op, [{id:'m1',op:'o1',edge:'left',d:1200,sigma:5},
+                                      {id:'m2',op:'o1',edge:'right',d:1800,sigma:5}]);
+               // rechts 1800 -> x = 4000-1000-1800 = 1200, deckungsgleich
+               return near(r.ziel.x,1200,1e-9) && r.x.n===2
+                   && r.x.v.every(v=>Math.abs(v)<1e-9) && r.x.red.every(x=>near(x,0.5,1e-9)); })());
+      chk('einmessen: widersprechende Messungen -> Mittel und sichtbare Residuen',
+        (()=>{ const r=so(shape, op, [{id:'m1',op:'o1',edge:'left',d:1200,sigma:5},
+                                      {id:'m2',op:'o1',edge:'right',d:1700,sigma:5}]);
+               // rechts 1700 -> x = 1300; Mittel 1250, Residuen +-50
+               return near(r.ziel.x,1250,1e-9)
+                   && r.x.v.map(Math.abs).every(a=>near(a,50,1e-9))
+                   && r.x.sigmaHat>0; })());
+      chk('einmessen: grober Ausreisser wird als verdaechtig benannt',
+        (()=>{ const r=so(shape, op, [{id:'m1',op:'o1',edge:'left',d:1200,sigma:5},
+                                      {id:'m2',op:'o1',edge:'left',d:1205,sigma:5},
+                                      {id:'m3',op:'o1',edge:'left',d:1400,sigma:5}]);
+               return r.verdacht.has('m3') && !r.verdacht.has('m1'); })());
+      chk('einmessen: genaueres sigma zieht das Ergebnis staerker',
+        (()=>{ const r=so(shape, op, [{id:'m1',op:'o1',edge:'left',d:1000,sigma:1},
+                                      {id:'m2',op:'o1',edge:'left',d:2000,sigma:10}]);
+               return r.ziel.x<1100; })());
+      chk('einmessen: stillgelegte Messung zaehlt nicht',
+        (()=>{ const r=so(shape, op, [{id:'m1',op:'o1',edge:'left',d:9999,sigma:5,on:false}]);
+               return r.x.n===0 && r.ziel.x===op.x; })());
+      chk('einmessen: ohne Messung bleibt die Lage unveraendert',
+        (()=>{ const r=so(shape, {...op, x:777, y:333}, []);
+               return r.ziel.x===777 && r.ziel.y===333 && r.x.n===0; })());
+    }
+    chk('oeffnung: Vorbelegung passt auch in eine winzige Wand',
+      (()=>{ const eng={L:700, ha:1800, hb:1800,
+                        poly:[{x:0,y:0},{x:700,y:0},{x:700,y:1800},{x:0,y:1800}]};
+             return ['door','window','hole'].every(k=>
+               globalThis.openingFits(eng, globalThis.defaultOpening(eng,k))); })());
+  }
+  // --- Sanfte Kreuzungsbremse ---
+  {
+    const dd=globalThis.segSegDist;
+    chk('bremse: kreuzende Strecken -> Abstand 0',
+      dd({x:0,y:0},{x:10,y:10},{x:0,y:10},{x:10,y:0})===0);
+    chk('bremse: parallele Strecken -> echter Abstand',
+      near(dd({x:0,y:0},{x:10,y:0},{x:0,y:5},{x:10,y:5}), 5, 1e-9));
+    chk('bremse: Abstand ueber Endpunkte',
+      near(dd({x:0,y:0},{x:10,y:0},{x:13,y:4},{x:20,y:4}), 5, 1e-9));
+
+    // U-Form: A-B-C-D offen gezeichnet, plus eine ferne Wand E-F, die der
+    // gezogene Punkt B beim Wandern nach unten kreuzen wuerde.
+    //   B(0,0)-A(0,4000) ist die Kante an B; E-F liegt waagerecht bei y=-1000.
+    const pts=[{id:'A',x:0,y:4000},{id:'B',x:0,y:0},
+               {id:'E',x:-2000,y:-1000},{id:'F',x:2000,y:-1000}];
+    const walls=[['A','B'],['E','F']];
+    const soft=500;
+    const dmp=globalThis.dampenDrag;
+    chk('bremse: Bewegung WEG von der Gefahr bleibt ungebremst',
+      (()=>{ const r=dmp(pts,walls,'B',0,300,soft);
+             return near(r.dy,300,1e-9) && r.near.length===0; })());
+    chk('bremse: Bewegung quer zur Gefahr bleibt ungebremst (Gleiten)',
+      (()=>{ const nah=pts.map(p=>p.id==='B'?{...p,y:-800}:p);   // 200 vor der Wand
+             const r=dmp(nah,walls,'B',400,0,soft);
+             return near(r.dx,400,1e-6) && near(r.dy,0,1e-6); })());
+    chk('bremse: Bewegung AUF die Gefahr zu wird stark gedaempft',
+      (()=>{ const nah=pts.map(p=>p.id==='B'?{...p,y:-800}:p);
+             const r=dmp(nah,walls,'B',0,-400,soft);
+             return Math.abs(r.dy) < 400*0.25 && r.near.length===1; })());
+    chk('bremse: nie ganz gesperrt - Rest kommt durch',
+      (()=>{ const kante=pts.map(p=>p.id==='B'?{...p,y:-999.9}:p);
+             const r=dmp(kante,walls,'B',0,-400,soft);
+             return Math.abs(r.dy) > 0 && Math.abs(r.dy) < 400*0.1; })());
+    chk('bremse: bereits gekreuztes Paar wird nicht bewacht',
+      (()=>{ const durch=pts.map(p=>p.id==='B'?{...p,y:-2000}:p);   // A-B kreuzt E-F
+             const r=dmp(durch,walls,'B',0,-400,soft);
+             return near(r.dy,-400,1e-9) && r.near.length===0; })());
+    chk('bremse: weit entfernt -> unveraendert, kein Aufwand',
+      (()=>{ const r=dmp(pts,walls,'B',0,-100,soft);
+             return near(r.dy,-100,1e-9); })());
+    // Zwei Kanten EINER Ecke naehern sich derselben Wand. Ohne
+    // Richtungs-Sperre daempft dasselbe Hindernis zweimal und der
+    // Restdurchlass faellt unter die Zusage (browser-gemessen 1,7 % statt
+    // 12 %). Ecke B liegt hier zwischen zwei Kanten A-B und B-C.
+    {
+      const ecke=[{id:'A',x:-3000,y:4000},{id:'B',x:0,y:0},{id:'C',x:3000,y:4000},
+                  {id:'E',x:-4000,y:-300},{id:'F',x:4000,y:-300}];
+      const w2=[['A','B'],['B','C'],['E','F']];
+      const r=dmp(ecke,w2,'B',0,-400,soft);
+      const einKanten=dmp(ecke,[['A','B'],['E','F']],'B',0,-400,soft);
+      chk('bremse: zwei Kanten einer Ecke daempfen nicht doppelt',
+        near(r.dy, einKanten.dy, 1e-6) && r.near.length===2);
+      chk('bremse: Restdurchlass haelt die Zusage auch an der Ecke',
+        (()=>{ const kante=ecke.map(p=>p.id==='B'?{...p,y:-299.9}:p);
+               const rr=dmp(kante,w2,'B',0,-400,soft);
+               return Math.abs(rr.dy) >= 400*0.05; })());
+    }
   }
   return {ok, out};
 };

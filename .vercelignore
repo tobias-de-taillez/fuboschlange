@@ -1,0 +1,11 @@
+# Nur das Aufmaßwerkzeug geht online. Alles andere im Repo gehört zum
+# Verlegeplaner oder zur Entwicklung und hätte auf der öffentlichen
+# Adresse nichts zu suchen.
+docs
+test
+paper
+verlegeplan.html
+verlegeplan_heatmap.html
+*.mjs
+*.json
+!vercel.json
