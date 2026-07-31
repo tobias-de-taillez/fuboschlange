@@ -260,6 +260,24 @@ pub struct TemplateCertificate {
 //                (0, 37.5) and (37.5, 0), Deg135 reaches (0, 37.5) and
 //                (112.5, 0), and so on round the octants.
 //
+// Path reversal (`MotionTemplate::reversed`) keeps each endpoint where it is and
+// turns its heading by 180 degrees, so the reversed catalogue's endpoint classes
+// are the forward classes read off the *opposite* heading:
+//
+//   Deg0   <- forward Deg180 : (0, 37.5), (0, 112.5)      [unchanged]
+//   Deg90  <- forward Deg270 : (37.5, 0), (112.5, 0)      [unchanged]
+//   Deg45  <- forward Deg225 : (0, 112.5), (112.5, 0)     [NEW]
+//   Deg135 <- forward Deg315 : (37.5, 0), (0, 112.5)      [NEW]
+//   Deg225 <- forward Deg45  : (0, 37.5), (37.5, 0)       [NEW]
+//   Deg315 <- forward Deg135 : (0, 37.5), (112.5, 0)      [NEW]
+//
+// The axial classes are already 180-degree symmetric, so reversal adds nothing
+// there. The diagonal ones are not: forward Deg45 nodes sit on diagonals
+// c = 37.5 (mod 150) and forward Deg225 nodes on c = 112.5, disjoint sets, which
+// is what made every diagonal channel one-way. After reversal closure each
+// diagonal heading admits all four residues, and roughly a third of the graph's
+// nodes sit on pairs the forward table alone calls impossible.
+//
 // Every template below starts and ends exactly on that lattice, so the embedded
 // pose graph interns shared nodes and the families chain. A pure tangent arc
 // between two orthogonal channels can never do this: it ends 80 mm short of the

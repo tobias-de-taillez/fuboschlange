@@ -31,19 +31,28 @@ pub struct PlateGraphLimits {
 }
 
 impl Default for PlateGraphLimits {
+    /// Sized so a large room still *builds* its graph and then fails on
+    /// something meaningful (loop length, coverage) rather than on graph size.
+    ///
+    /// Measured after reversal closure: ~3400 accepted edges per m^2 of room
+    /// (24 576 edges for the 7.2 m^2 fixture), and candidates run about 2.9x
+    /// edges (69 552 / 24 576) since candidates are
+    /// `2 (reversal) * 8 (orientations) * templates * Ni * Nj` with
+    /// `Ni = W/150 + 7`, `Nj = H/150 + 7`. Clearing a ~60 m^2 room therefore
+    /// needs roughly 205 000 edges and 590 000 candidates; the values below
+    /// carry that with headroom. Nodes run well under edges (6 840 vs 24 576 on
+    /// the fixture), so 100 000 is generous.
+    ///
+    /// Memory is ~O(edges x primitives per edge) -- every edge owns its world
+    /// primitives, and rejected candidates own theirs too. If these budgets ever
+    /// bite in practice, the fix is a compact edge representation (store the
+    /// transform and re-derive primitives on demand) rather than a further
+    /// raise.
     fn default() -> Self {
         Self {
-            // Candidates are `2 (reversal) * 8 (orientations) * templates *
-            // Ni * Nj`, with `Ni = W/150 + 7` and `Nj = H/150 + 7`. Closing the
-            // catalogue under path reversal doubled that, which at the previous
-            // 100_000 would have made the *candidate* budget bind at roughly a
-            // 3430 mm square room -- an artificial cliff, since candidates are
-            // only loop iterations and cost nothing in the output. Raised so
-            // that the meaningful budgets below (nodes and edges, which bound
-            // what is actually produced) are what bind first.
-            max_edge_candidates: 200_000,
-            max_nodes: 50_000,
-            max_edges: 50_000,
+            max_edge_candidates: 800_000,
+            max_nodes: 100_000,
+            max_edges: 250_000,
         }
     }
 }
@@ -123,6 +132,7 @@ pub fn build_embedded_graph(
     let mut rejected_edges = Vec::new();
     let mut candidate_count = 0usize;
     let mut emitted_geometry = BTreeSet::new();
+    let mut rejected_geometry = BTreeSet::new();
 
     // The reversal pass runs last, as a whole pass rather than interleaved, so
     // that an unreversed instance always wins the `emitted_geometry` tie. For a
@@ -154,6 +164,7 @@ pub fn build_embedded_graph(
                             )
                             .unwrap();
                             let local = transform.apply(template, instance.profile.period_mm);
+                            let key = geometry_key(&local);
                             let primitives = local
                                 .primitives
                                 .iter()
@@ -167,12 +178,15 @@ pub fn build_embedded_graph(
                                 match certify_template(&local, &instance.profile) {
                                     Ok(certificate) => certificate,
                                     Err(failure) => {
-                                        rejected_edges.push(rejected(
+                                        push_rejected(
+                                            &mut rejected_edges,
+                                            &mut rejected_geometry,
+                                            key,
                                             template.id,
                                             transform,
                                             primitives,
                                             failure,
-                                        ));
+                                        );
                                         continue;
                                     }
                                 };
@@ -187,22 +201,24 @@ pub fn build_embedded_graph(
                                 )
                                 .err()
                             }) {
-                                rejected_edges.push(rejected(
+                                push_rejected(
+                                    &mut rejected_edges,
+                                    &mut rejected_geometry,
+                                    key,
                                     template.id,
                                     transform,
                                     primitives,
                                     failure,
-                                ));
+                                );
                                 continue;
                             }
-                            if !emitted_geometry.insert(geometry_key(&local)) {
+                            if !emitted_geometry.insert(key) {
                                 // Same curve, already an edge: this is a
                                 // symmetric template whose reversal the mirror
                                 // group already covers. Dropping it here is what
                                 // keeps `Straight0` and `BroadReverse180` from
-                                // doubling. (Rejected candidates are not
-                                // deduped -- `rejected_edges` is diagnostic
-                                // output and only its count is published.)
+                                // doubling. See `geometry_key` for the margin
+                                // invariant this relies on.
                                 continue;
                             }
                             if edges.len() == limits.max_edges {
@@ -342,6 +358,28 @@ fn intern_node(
 /// rather than on a hand-maintained "this template is symmetric" flag: a future
 /// symmetric template then cannot silently double its own family, and a
 /// genuinely new reversal can never be dropped by accident.
+///
+/// "Exact" means exact *after* quantisation, and the quantisation is doing real
+/// work rather than being a formality. A reversed instance and its forward twin
+/// reach the same arc by different f64 paths -- the twin runs
+/// `mirror -> rotate -> translate`, the reversal additionally re-derives the
+/// endpoint through `atan2` and negates the sweep -- so their coordinates
+/// routinely differ in the last few ulps (~1e-14 mm on an 80 mm arc). Comparing
+/// raw f64 would therefore miss most duplicates and double those families;
+/// 1e-6 mm is eight orders of magnitude above that noise and eight below any
+/// real geometric difference in this catalogue.
+///
+/// **Margin invariant.** Dedupe only works if the forward twin of an accepted
+/// reversed instance was itself enumerated. Enumeration covers period offsets
+/// out to `TEMPLATE_MARGIN_MM` (450 mm) beyond the plate's local bounds, while
+/// acceptance additionally requires the whole curve to sit inside those bounds.
+/// The largest twin offset in this catalogue is `BroadReverse180`'s, 450 mm in
+/// +y (its reversal equals its own y-mirror shifted by three periods);
+/// `Straight0`'s is 150 mm. Since an accepted `BroadReverse180` also fits its
+/// own 225 mm extent inside the bounds, its twin's period index stays at least
+/// 337.5 mm inside the enumerated range. **A future symmetric template whose
+/// twin offset exceeds `TEMPLATE_MARGIN_MM` would silently double instead of
+/// deduping -- the margin has to grow with it.**
 fn geometry_key(template: &crate::plate::MotionTemplate) -> Vec<i64> {
     let mut key = Vec::with_capacity(6 + template.primitives.len() * 9);
     for pose in [template.start, template.end] {
@@ -409,18 +447,47 @@ fn period_range(min: f64, max: f64, period: f64) -> Result<(i64, i64), PlateGrap
     Ok((min as i64, max as i64))
 }
 
-fn rejected(
+/// Records a rejected candidate, deduped on the same geometric key as accepted
+/// edges (plus the failure code, so two genuinely different verdicts on one
+/// curve could never merge).
+///
+/// This list is not private diagnostics: `PlateModel` publishes it in full and
+/// `plate-scene.ts` draws a `<path>` per entry plus a witness circle. Without
+/// this, closing the catalogue under reversal would have doubled every
+/// rejection stroke in the rendered overlay for the two symmetric families.
+#[allow(clippy::too_many_arguments)]
+fn push_rejected(
+    rejected_edges: &mut Vec<RejectedEdge>,
+    seen: &mut BTreeSet<Vec<i64>>,
+    mut key: Vec<i64>,
     template_id: TemplateId,
     template_transform: TemplateTransform,
     primitives: Vec<PathPrimitive>,
     failure: PlateValidationFailure,
-) -> RejectedEdge {
-    RejectedEdge {
+) {
+    key.push(failure_code_ordinal(failure.code));
+    if !seen.insert(key) {
+        return;
+    }
+    rejected_edges.push(RejectedEdge {
         template_id,
         template_transform,
         primitives,
         code: failure.code,
         witness: failure.witness,
+    });
+}
+
+const fn failure_code_ordinal(code: PlateValidationFailureCode) -> i64 {
+    match code {
+        PlateValidationFailureCode::InvalidPrimitive => 0,
+        PlateValidationFailureCode::UnsupportedHeading => 1,
+        PlateValidationFailureCode::BendRadiusTooSmall => 2,
+        PlateValidationFailureCode::OutsideWallDomain => 3,
+        PlateValidationFailureCode::NoppCollision => 4,
+        PlateValidationFailureCode::PositionDiscontinuity => 5,
+        PlateValidationFailureCode::TangentDiscontinuity => 6,
+        PlateValidationFailureCode::InvalidTemplateProvenance => 7,
     }
 }
 

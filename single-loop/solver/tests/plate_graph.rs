@@ -1,5 +1,5 @@
 use single_loop_solver::geometry::Polygon;
-use single_loop_solver::model::Point;
+use single_loop_solver::model::{PathPrimitive, Point};
 use single_loop_solver::plate::{
     EmbeddedPoseGraph, Heading8, PlateGraphErrorCode, PlateGraphLimits, PlateInstance, PlateProfile,
     PlateTransform, TemplateId, TemplateTransform, build_embedded_graph, validate_embedded_graph,
@@ -508,5 +508,113 @@ fn e_the_outermost_closable_ring_is_a_real_directed_cycle() {
         reversed_corners, 2,
         "exactly two of a ring's four corners are path reversals -- if this is 0, the ring is \
          being built from the old, one-directional octet and something else is wrong"
+    );
+}
+
+#[test]
+fn f_symmetric_families_are_never_emitted_as_reversed_instances() {
+    // `Straight0` and `BroadReverse180` are symmetric under the transform group:
+    // every reversed placement of them is byte-identical to some mirrored,
+    // translated forward placement, so the reversal pass must drop all of them.
+    // If this ever counts anything but zero, those two families have silently
+    // doubled and every downstream edge count is inflated.
+    let graph = rectangle_3000x2400_graph();
+    for family in [TemplateId::Straight0, TemplateId::BroadReverse180] {
+        let total = graph
+            .edges
+            .iter()
+            .filter(|edge| edge.template_id == family)
+            .count();
+        let reversed = graph
+            .edges
+            .iter()
+            .filter(|edge| edge.template_id == family && edge.template_transform.reversed)
+            .count();
+        assert!(total > 0, "fixture must contain {family:?} edges");
+        assert_eq!(
+            reversed, 0,
+            "{family:?} is symmetric, so none of its {total} accepted edges should come from the \
+             reversal pass -- {reversed} did, which means the dedupe stopped working"
+        );
+    }
+
+    // The five asymmetric families must, conversely, be genuinely doubled.
+    for family in [
+        TemplateId::Straight45,
+        TemplateId::BroadTurn45,
+        TemplateId::BroadTurn90,
+        TemplateId::BroadTurn135,
+        TemplateId::TeardropReverse,
+    ] {
+        let (forward, reversed): (Vec<_>, Vec<_>) = graph
+            .edges
+            .iter()
+            .filter(|edge| edge.template_id == family)
+            .partition(|edge| !edge.template_transform.reversed);
+        assert_eq!(
+            forward.len(),
+            reversed.len(),
+            "{family:?} should contribute one reversed edge per forward edge"
+        );
+        assert!(!forward.is_empty(), "fixture must contain {family:?} edges");
+    }
+}
+
+#[test]
+fn g_no_two_accepted_edges_share_the_same_geometry() {
+    // The dedupe's actual contract, independent of which families happen to be
+    // symmetric: no curve is ever emitted twice. Keyed exactly as
+    // `plate::graph::geometry_key` does -- 1e-6 mm ticks, because a reversed
+    // instance and its forward twin reach the same arc by different f64 paths
+    // and differ in the last few ulps.
+    let graph = rectangle_3000x2400_graph();
+    let mut keys = BTreeSet::new();
+    let mut duplicates = 0usize;
+    for edge in &graph.edges {
+        let mut key = vec![
+            (edge.start.world_point.x * 1e6).round() as i64,
+            (edge.start.world_point.y * 1e6).round() as i64,
+            i64::from(edge.start.local_pose.heading.octant()),
+            (edge.end.world_point.x * 1e6).round() as i64,
+            (edge.end.world_point.y * 1e6).round() as i64,
+            i64::from(edge.end.local_pose.heading.octant()),
+        ];
+        for primitive in &edge.primitives {
+            match primitive {
+                PathPrimitive::Line { start, end } => key.extend([
+                    0,
+                    (start.x * 1e6).round() as i64,
+                    (start.y * 1e6).round() as i64,
+                    (end.x * 1e6).round() as i64,
+                    (end.y * 1e6).round() as i64,
+                ]),
+                PathPrimitive::Arc {
+                    start,
+                    end,
+                    center,
+                    radius_mm,
+                    sweep_rad,
+                } => key.extend([
+                    1,
+                    (start.x * 1e6).round() as i64,
+                    (start.y * 1e6).round() as i64,
+                    (end.x * 1e6).round() as i64,
+                    (end.y * 1e6).round() as i64,
+                    (center.x * 1e6).round() as i64,
+                    (center.y * 1e6).round() as i64,
+                    (radius_mm * 1e6).round() as i64,
+                    (sweep_rad * 1e6).round() as i64,
+                ]),
+            }
+        }
+        if !keys.insert(key) {
+            duplicates += 1;
+        }
+    }
+    assert_eq!(
+        keys.len(),
+        graph.edges.len(),
+        "{duplicates} of {} accepted edges duplicate another edge's exact geometry",
+        graph.edges.len()
     );
 }

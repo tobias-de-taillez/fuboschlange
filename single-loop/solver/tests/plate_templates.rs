@@ -205,6 +205,35 @@ fn expected_residues(heading: Heading8) -> [(f64, f64); 2] {
     }
 }
 
+/// The same table for the reversed catalogue, hand-written rather than computed
+/// from `expected_residues`, so a transcription error in one cannot hide in the
+/// other. Reversal keeps each endpoint where it is and turns its heading by
+/// 180 degrees, so these are the forward classes of the opposite heading;
+/// `the_reversed_residue_table_is_the_forward_table_turned_180_degrees` pins
+/// exactly that relationship.
+fn expected_reversed_residues(heading: Heading8) -> [(f64, f64); 2] {
+    match heading {
+        // Axial classes are already 180-degree symmetric.
+        Heading8::Deg0 | Heading8::Deg180 => [(0.0, 37.5), (0.0, 112.5)],
+        Heading8::Deg90 | Heading8::Deg270 => [(37.5, 0.0), (112.5, 0.0)],
+        // Diagonal classes are not -- every one of these four is new.
+        Heading8::Deg45 => [(0.0, 112.5), (112.5, 0.0)],
+        Heading8::Deg135 => [(37.5, 0.0), (0.0, 112.5)],
+        Heading8::Deg225 => [(0.0, 37.5), (37.5, 0.0)],
+        Heading8::Deg315 => [(0.0, 37.5), (112.5, 0.0)],
+    }
+}
+
+fn residue(point: Point) -> (f64, f64) {
+    (point.x.rem_euclid(150.0), point.y.rem_euclid(150.0))
+}
+
+fn on_lattice(residue: (f64, f64), allowed: [(f64, f64); 2]) -> bool {
+    allowed
+        .iter()
+        .any(|(x, y)| (residue.0 - x).abs() < 1e-9 && (residue.1 - y).abs() < 1e-9)
+}
+
 #[test]
 fn both_endpoints_of_every_template_sit_on_the_shared_anchor_lattice() {
     let profile = PlateProfile::bekotec_en_23_fi_30_16();
@@ -212,28 +241,80 @@ fn both_endpoints_of_every_template_sit_on_the_shared_anchor_lattice() {
     assert_eq!(templates.len(), 7, "catalogue size changed; update this test");
 
     for template in templates {
-        for (label, pose) in [("start", template.start), ("end", template.end)] {
-            let residue = (
-                pose.point.x.rem_euclid(150.0),
-                pose.point.y.rem_euclid(150.0),
-            );
-            let allowed = expected_residues(pose.heading);
-            let hit = allowed.iter().any(|(x, y)| {
-                (residue.0 - x).abs() < 1e-9 && (residue.1 - y).abs() < 1e-9
-            });
-            assert!(
-                hit,
-                "{:?} {label} pose {:?} at ({}, {}) has residue ({}, {}) mod 150, which is not \
-                 on the anchor lattice for that heading (allowed: {allowed:?}) -- it cannot chain \
-                 with a straight run",
-                template.id,
-                pose.heading,
-                pose.point.x,
-                pose.point.y,
-                residue.0,
-                residue.1
-            );
+        for (reversed, subject) in [(false, template.clone()), (true, template.reversed())] {
+            for (label, pose) in [("start", subject.start), ("end", subject.end)] {
+                let residue = residue(pose.point);
+                let allowed = if reversed {
+                    expected_reversed_residues(pose.heading)
+                } else {
+                    expected_residues(pose.heading)
+                };
+                assert!(
+                    on_lattice(residue, allowed),
+                    "{:?}{} {label} pose {:?} at ({}, {}) has residue ({}, {}) mod 150, which is \
+                     not on the anchor lattice for that heading (allowed: {allowed:?}) -- it \
+                     cannot chain with a straight run",
+                    subject.id,
+                    if reversed { " reversed" } else { "" },
+                    pose.heading,
+                    pose.point.x,
+                    pose.point.y,
+                    residue.0,
+                    residue.1
+                );
+            }
         }
+    }
+}
+
+#[test]
+fn the_reversed_residue_table_is_the_forward_table_turned_180_degrees() {
+    // Pins the derivation, so the two hand-written tables cannot drift apart.
+    for heading in Heading8::ALL {
+        let opposite = Heading8::from_octant(heading.octant() + 4);
+        let mut reversed = expected_reversed_residues(heading);
+        let mut forward = expected_residues(opposite);
+        let order = |set: &mut [(f64, f64); 2]| {
+            set.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        };
+        order(&mut reversed);
+        order(&mut forward);
+        assert_eq!(
+            reversed, forward,
+            "reversed residues for {heading:?} should be the forward residues for {opposite:?}"
+        );
+    }
+
+    // ...and two concrete reversed templates that the forward table alone would
+    // have called impossible. Straight45 runs (0,37.5)Deg45 -> (150,187.5)Deg45;
+    // reversed it starts at (150,187.5) -- residue (0,37.5) -- heading Deg225,
+    // which the forward table restricts to (0,112.5)/(112.5,0). BroadTurn135
+    // ends at (150,187.5) Deg135; reversed that becomes a Deg315 start on the
+    // same residue, likewise absent from the forward Deg315 class.
+    let profile = PlateProfile::bekotec_en_23_fi_30_16();
+    let find = |id: TemplateId| {
+        profile
+            .templates()
+            .into_iter()
+            .find(|template| template.id == id)
+            .unwrap()
+    };
+    for (id, heading) in [
+        (TemplateId::Straight45, Heading8::Deg225),
+        (TemplateId::BroadTurn135, Heading8::Deg315),
+    ] {
+        let reversed = find(id).reversed();
+        assert_eq!(reversed.start.point, point(150.0, 187.5));
+        assert_eq!(reversed.start.heading, heading);
+        assert_eq!(residue(reversed.start.point), (0.0, 37.5));
+        assert!(
+            !on_lattice((0.0, 37.5), expected_residues(heading)),
+            "{heading:?} at (0,37.5) should be absent from the forward table"
+        );
+        assert!(
+            on_lattice((0.0, 37.5), expected_reversed_residues(heading)),
+            "{heading:?} at (0,37.5) should be present in the reversed table"
+        );
     }
 }
 
