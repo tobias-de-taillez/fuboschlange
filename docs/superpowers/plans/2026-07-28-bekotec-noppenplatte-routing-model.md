@@ -59,7 +59,7 @@ Expected: `git status --short` lists only this plan until it is committed.
 - Produces: `PlateProfile::bekotec_en_23_fi_30_16()`, `NoppType`, `Heading8`, `PlateModelInput`, `PlateModelErrorCode`, and shared serialized output types.
 - Consumes: existing `model::{Point, PathPrimitive}`.
 
-- [ ] **Step 1: Write failing profile and JSON-contract tests**
+- [x] **Step 1: Write failing profile and JSON-contract tests**
 
 Create tests asserting the fixed dimensions, eight headings, finite input contract, camelCase JSON, and rejection of unknown profile names:
 
@@ -85,7 +85,7 @@ fn heading8_contains_exactly_the_eight_45_degree_directions() {
 }
 ```
 
-- [ ] **Step 2: Run the focused test and confirm RED**
+- [x] **Step 2: Run the focused test and confirm RED**
 
 Run:
 
@@ -95,7 +95,7 @@ cargo test --manifest-path single-loop/solver/Cargo.toml --test plate_profile
 
 Expected: compilation fails because `single_loop_solver::plate` does not exist.
 
-- [ ] **Step 3: Implement minimal contracts and profile**
+- [x] **Step 3: Implement minimal contracts and profile**
 
 Use serde camelCase contracts. Keep `PlateModelInput.profile` as a closed enum and validate all numeric values with explicit constructors; no NaN may enter a profile or output. Export the module from `lib.rs`:
 
@@ -105,7 +105,7 @@ pub mod plate;
 
 `Heading8` stores an integer octant, not a float, and exposes exact vectors using `FRAC_1_SQRT_2`.
 
-- [ ] **Step 4: Run focused tests and Clippy**
+- [x] **Step 4: Run focused tests and Clippy**
 
 ```bash
 cargo test --manifest-path single-loop/solver/Cargo.toml --test plate_profile
@@ -114,7 +114,7 @@ cargo clippy --manifest-path single-loop/solver/Cargo.toml --lib -- -D warnings
 
 Expected: PASS; no warnings.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add single-loop/solver/src/lib.rs single-loop/solver/src/plate single-loop/solver/tests/plate_profile.rs
@@ -134,7 +134,7 @@ git commit -m "feat(single-loop): define BEKOTEC plate profile"
 - Consumes: `PlateProfile`, `Point`, existing `Vec2`, normalized polygon edge.
 - Produces: `PlateTransform::from_edge`, `to_world`, `to_local`, `NoppIndex`, `Nopp::at_index`, and bounded deterministic `motif_indices_for_bounds`.
 
-- [ ] **Step 1: Write failing transform and motif tests**
+- [x] **Step 1: Write failing transform and motif tests**
 
 Cover phase canonicalization, local/world roundtrip, connection-edge alignment, negative checkerboard indices, and 150 mm type preservation:
 
@@ -146,7 +146,7 @@ assert_eq!(transform.phase_u_mm(), 74.0); // input -1 mm
 assert_relative_eq!(transform.to_local(transform.to_world(p)).x, p.x, epsilon=1e-9);
 ```
 
-- [ ] **Step 2: Confirm RED**
+- [x] **Step 2: Confirm RED**
 
 ```bash
 cargo test --manifest-path single-loop/solver/Cargo.toml --test plate_transform --test plate_motif
@@ -154,11 +154,11 @@ cargo test --manifest-path single-loop/solver/Cargo.toml --test plate_transform 
 
 Expected: unresolved transform/motif imports.
 
-- [ ] **Step 3: Implement transform and lazy motif enumeration**
+- [x] **Step 3: Implement transform and lazy motif enumeration**
 
 Canonicalize with `rem_euclid(75.0)`. Derive `u` from the selected nonzero polygon edge and choose the polygon-interior perpendicular using polygon orientation. Enumerate integer index ranges from the inverse-transformed expanded world AABB; sort by `(j,i)` and impose an exact configured cell budget.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 ```bash
 cargo test --manifest-path single-loop/solver/Cargo.toml --test plate_transform --test plate_motif
@@ -166,7 +166,7 @@ cargo test --manifest-path single-loop/solver/Cargo.toml --test plate_transform 
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add single-loop/solver/src/plate single-loop/solver/tests/plate_transform.rs single-loop/solver/tests/plate_motif.rs
@@ -185,7 +185,7 @@ git commit -m "feat(single-loop): embed periodic noppen motif"
 - Consumes: `PathPrimitive`, `Nopp`, `PlateProfile`, normalized `Polygon`.
 - Produces: `primitive_circle_clearance`, `validate_primitive_in_wall_domain`, `PlateValidationFailure`, and `PlateValidationFailureCode`.
 
-- [ ] **Step 1: Write failing analytic tests**
+- [x] **Step 1: Write failing analytic tests**
 
 Include line/circle and arc/circle separation, tangency rejection, concave polygon escape, 80 mm radius acceptance, 79.999 mm rejection, cardinal and 45-degree heading acceptance, and 22.5-degree line rejection:
 
@@ -196,7 +196,7 @@ assert_eq!(validate_heading(line_22_5).unwrap_err().code,
 assert!(primitive_circle_clearance(&arc, center, 26.0) > 0.0);
 ```
 
-- [ ] **Step 2: Confirm RED**
+- [x] **Step 2: Confirm RED**
 
 ```bash
 cargo test --manifest-path single-loop/solver/Cargo.toml --test plate_collision
@@ -204,11 +204,11 @@ cargo test --manifest-path single-loop/solver/Cargo.toml --test plate_collision
 
 Expected: unresolved collision APIs.
 
-- [ ] **Step 3: Implement exact primitive/circle distance and domain checks**
+- [x] **Step 3: Implement exact primitive/circle distance and domain checks**
 
 For a line, project the circle center onto `[0,1]`. For an arc, compare radial projection when the center angle lies in the arc sweep and both endpoints otherwise. Reject contact within the profile numeric tolerance. Reuse analytic primitive/boundary intersections; do not accept a primitive from sampled points alone.
 
-- [ ] **Step 4: Run collision and existing geometry suites**
+- [x] **Step 4: Run collision and existing geometry suites**
 
 ```bash
 cargo test --manifest-path single-loop/solver/Cargo.toml --test plate_collision --test analytic_geometry --test polygon_offset
@@ -216,7 +216,7 @@ cargo test --manifest-path single-loop/solver/Cargo.toml --test plate_collision 
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add single-loop/solver/src/plate single-loop/solver/tests/plate_collision.rs
@@ -235,7 +235,7 @@ git commit -m "feat(single-loop): certify plate primitive clearance"
 - Consumes: canonical `PathPrimitive`, `Heading8`, `PlateProfile`, local motif collision checks.
 - Produces: `MotionTemplate`, `TemplateId`, `TemplateTransform`, `PlateProfile::templates()`, and `certify_template`.
 
-- [ ] **Step 1: Write failing catalogue and handbook-fixture tests**
+- [x] **Step 1: Write failing catalogue and handbook-fixture tests**
 
 Tests must require:
 
@@ -252,7 +252,7 @@ assert_eq!(certify_template(&tight_u_turn()).unwrap_err().code,
 
 Every accepted template must have exact endpoint poses, G1 joins, arc radius at least 80 mm, collision clearance, and deterministic symmetry copies.
 
-- [ ] **Step 2: Confirm RED**
+- [x] **Step 2: Confirm RED**
 
 ```bash
 cargo test --manifest-path single-loop/solver/Cargo.toml --test plate_templates
@@ -260,13 +260,13 @@ cargo test --manifest-path single-loop/solver/Cargo.toml --test plate_templates
 
 Expected: missing template catalogue.
 
-- [ ] **Step 3: Implement straight and broad-turn templates**
+- [x] **Step 3: Implement straight and broad-turn templates**
 
 Use exact tangent constructions. The canonical 90-degree fixture uses an 80 mm quarter arc centered in the safe checkerboard phase near `(37.5,37.5)` with exact straight stubs as required. Generate rotations and reflections from canonical local geometry, then canonicalize endpoints from transformed primitive endpoints rather than snapping.
 
 For the teardrop, use one deterministic bounded-curvature `RLR`/`LRL` local construction between adjacent opposite-heading lane poses. This construction runs only while creating immutable profile templates; graph construction never invokes a free-form router. Reject any candidate not independently certified and select the lexicographically smallest shortest certified candidate.
 
-- [ ] **Step 4: Run template tests twice for determinism**
+- [x] **Step 4: Run template tests twice for determinism**
 
 ```bash
 cargo test --manifest-path single-loop/solver/Cargo.toml --test plate_templates
@@ -275,7 +275,7 @@ cargo test --manifest-path single-loop/solver/Cargo.toml --test plate_templates
 
 Expected: both runs PASS with identical serialized catalogue fixture.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add single-loop/solver/src/plate single-loop/solver/tests/plate_templates.rs
@@ -295,7 +295,7 @@ git commit -m "feat(single-loop): certify BEKOTEC motion templates"
 - Consumes: normalized room, `PlateTransform`, motif, profile anchors/templates, collision validator.
 - Produces: `PlateInstance`, `PoseNode`, `PoseEdge`, `RejectedEdge`, `EmbeddedPoseGraph`, and `build_embedded_graph`.
 
-- [ ] **Step 1: Write failing graph tests**
+- [x] **Step 1: Write failing graph tests**
 
 Require stable IDs, accepted cardinal and diagonal edges, bounded counts, rejected-edge witnesses, and no unchecked edge:
 
@@ -310,7 +310,7 @@ assert!(validate_embedded_graph(&first, &fixture()).is_ok());
 
 Add rectangle, L, U, and C fixtures; these tests validate graph construction only, not graph connectivity or a heating loop.
 
-- [ ] **Step 2: Confirm RED**
+- [x] **Step 2: Confirm RED**
 
 ```bash
 cargo test --manifest-path single-loop/solver/Cargo.toml --test plate_graph
@@ -318,11 +318,11 @@ cargo test --manifest-path single-loop/solver/Cargo.toml --test plate_graph
 
 Expected: missing graph APIs.
 
-- [ ] **Step 3: Implement lazy candidate emission and independent acceptance**
+- [x] **Step 3: Implement lazy candidate emission and independent acceptance**
 
 Enumerate cells, anchor phases, headings, and template transforms in stable integer order. Before expensive validation, reject candidates whose AABB misses the wall-safe domain. Record every later rejection with typed code, template ID, transformed cell, primitive index, and witness point. Stop on the first exact node/edge budget excess with `SOLVER_LIMIT_EXCEEDED`.
 
-- [ ] **Step 4: Run graph and metamorphic tests**
+- [x] **Step 4: Run graph and metamorphic tests**
 
 ```bash
 cargo test --manifest-path single-loop/solver/Cargo.toml --test plate_graph --test metamorphic
@@ -330,7 +330,7 @@ cargo test --manifest-path single-loop/solver/Cargo.toml --test plate_graph --te
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add single-loop/solver/src/plate single-loop/solver/tests/plate_graph.rs
@@ -349,7 +349,7 @@ git commit -m "feat(single-loop): embed certified plate pose graph"
 - Consumes: `PlateModelInput`, normalization, transform, instance, graph, validator.
 - Produces: `build_plate_model(PlateModelInput) -> PlateModelResult` and WASM export `buildPlateModel`.
 
-- [ ] **Step 1: Write failing API contract tests**
+- [x] **Step 1: Write failing API contract tests**
 
 Assert camelCase roundtrip, stable JSON bytes, typed errors for invalid profile/phase/polygon/wall clearance/no usable cell/budget, and that successful output has no `plan`, `path`, or heating-loop success field:
 
@@ -360,7 +360,7 @@ assert!(json.get("heatingLoop").is_none());
 assert_eq!(json["profile"], "BEKOTEC_EN_23_FI_30_16");
 ```
 
-- [ ] **Step 2: Confirm RED**
+- [x] **Step 2: Confirm RED**
 
 ```bash
 cargo test --manifest-path single-loop/solver/Cargo.toml --test plate_api
@@ -368,7 +368,7 @@ cargo test --manifest-path single-loop/solver/Cargo.toml --test plate_api
 
 Expected: missing API.
 
-- [ ] **Step 3: Implement orchestration and WASM export**
+- [x] **Step 3: Implement orchestration and WASM export**
 
 Normalize the polygon using existing robust input geometry without invoking the old solver. Build and independently validate the plate graph, convert internal IDs and witnesses to serialized outputs, and export:
 
@@ -379,7 +379,7 @@ pub fn build_plate_model_wasm(input: JsValue) -> Result<JsValue, JsValue>;
 
 Malformed JavaScript input returns a rejected JS result only when deserialization itself fails; geometric failures serialize as typed `PlateModelResult::Error`.
 
-- [ ] **Step 4: Run API and WASM build**
+- [x] **Step 4: Run API and WASM build**
 
 ```bash
 cargo test --manifest-path single-loop/solver/Cargo.toml --test plate_api
@@ -388,7 +388,7 @@ cd single-loop && npm run wasm:build
 
 Expected: PASS and generated TypeScript/WASM package.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add single-loop/solver/src/lib.rs single-loop/solver/src/plate single-loop/solver/tests/plate_api.rs
@@ -408,11 +408,11 @@ git commit -m "feat(single-loop): expose BEKOTEC plate model API"
 - Consumes: generated WASM `buildPlateModel`, serialized Rust contracts.
 - Produces: `buildPlateModel(input)`, `renderPlateScene(svg, model, layers)`, and layer toggles.
 
-- [ ] **Step 1: Write failing TS contract and renderer tests**
+- [x] **Step 1: Write failing TS contract and renderer tests**
 
 Use a fixture with one large and one small nopp, forbidden circles, one horizontal edge, one diagonal edge, and one rejected edge. Assert escaped deterministic SVG, exact arc commands, CSS layer names, and no pipe-plan class.
 
-- [ ] **Step 2: Confirm RED**
+- [x] **Step 2: Confirm RED**
 
 ```bash
 cd single-loop && npm test -- --run tests/unit/plate-model.test.ts tests/unit/plate-scene.test.ts
@@ -420,11 +420,11 @@ cd single-loop && npm test -- --run tests/unit/plate-model.test.ts tests/unit/pl
 
 Expected: module resolution failures.
 
-- [ ] **Step 3: Implement typed adapter and renderer**
+- [x] **Step 3: Implement typed adapter and renderer**
 
 The adapter calls WASM synchronously for this bounded debug milestone and validates the discriminated result. The renderer builds these `<g>` layers in fixed order: `room`, `wall-domain`, `raster`, `cells`, `noppen`, `forbidden`, `anchors`, `accepted-edges`, `rejected-edges`, `witnesses`. Use existing `pathData` for exact primitives and DOM APIs or escaped numeric-only templates; never inject error text as markup.
 
-- [ ] **Step 4: Run tests and typecheck**
+- [x] **Step 4: Run tests and typecheck**
 
 ```bash
 cd single-loop
@@ -434,7 +434,7 @@ npm run typecheck
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add single-loop/src/plate single-loop/src/render/plate-scene.ts single-loop/tests/unit/plate-*.test.ts
@@ -454,11 +454,11 @@ git commit -m "feat(single-loop): render BEKOTEC plate diagnostics"
 - Consumes: plate API and renderer.
 - Produces: a separate Vite entry at `plate.html`; the existing `index.html` solver remains untouched by this milestone.
 
-- [ ] **Step 1: Write failing page-state test**
+- [x] **Step 1: Write failing page-state test**
 
 Test phase inputs, wall clearance, selected connection edge, layer toggles, error rendering, and that clicking “Noppenmodell aufbauen” invokes only `buildPlateModel`, never `solveSingleLoop`.
 
-- [ ] **Step 2: Confirm RED**
+- [x] **Step 2: Confirm RED**
 
 ```bash
 cd single-loop && npm test -- --run tests/unit/plate-page.test.ts
@@ -466,11 +466,11 @@ cd single-loop && npm test -- --run tests/unit/plate-page.test.ts
 
 Expected: missing page controller.
 
-- [ ] **Step 3: Implement the page and multi-entry build**
+- [x] **Step 3: Implement the page and multi-entry build**
 
 Add numeric phase controls constrained to `[0,75)`, wall clearance, a profile readout, counts, validation status, and SVG checkboxes. Configure Rollup inputs for both `index.html` and `plate.html` via `fileURLToPath(new URL(..., import.meta.url))`. Display a prominent “Nur Noppenmodell – kein Heizkreis” label.
 
-- [ ] **Step 4: Run UI gates**
+- [x] **Step 4: Run UI gates**
 
 ```bash
 cd single-loop
@@ -481,7 +481,7 @@ npm run build
 
 Expected: PASS; `dist/index.html` and `dist/plate.html` both exist.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add single-loop/plate.html single-loop/src/plate-main.ts single-loop/src/styles.css single-loop/vite.config.ts single-loop/tests/unit/plate-page.test.ts
@@ -502,11 +502,11 @@ git commit -m "feat(single-loop): add noppen model debug page"
 - Consumes: complete plate API.
 - Produces: traceable manufacturer-derived regression fixtures and documented debug-page usage.
 
-- [ ] **Step 1: Add golden tests before fixture implementation**
+- [x] **Step 1: Add golden tests before fixture implementation**
 
 Each JSON fixture records source document/page, expected classification, canonical primitives, profile version, and expected rejection code where applicable. The Rust test loads all files in lexical order and certifies the expected result.
 
-- [ ] **Step 2: Confirm fixture tests fail before all fixtures exist**
+- [x] **Step 2: Confirm fixture tests fail before all fixtures exist**
 
 ```bash
 cargo test --manifest-path single-loop/solver/Cargo.toml --test plate_golden
@@ -514,7 +514,7 @@ cargo test --manifest-path single-loop/solver/Cargo.toml --test plate_golden
 
 Expected: FAIL naming the first missing or uncertified fixture.
 
-- [ ] **Step 3: Add fixtures and concise README instructions**
+- [x] **Step 3: Add fixtures and concise README instructions**
 
 Document:
 
@@ -526,7 +526,7 @@ npm run dev
 
 State explicitly that this page validates the routing substrate and does not generate a loop.
 
-- [ ] **Step 4: Run complete fresh verification**
+- [x] **Step 4: Run complete fresh verification**
 
 ```bash
 cargo test --release --manifest-path single-loop/solver/Cargo.toml
@@ -539,7 +539,7 @@ npm run build
 
 Expected: every command exits 0. Inspect `plate.html` with rectangle, L, U, and C polygons and confirm horizontal, vertical, diagonal, accepted-turn, rejected-turn, forbidden-body, and witness layers are visible.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add single-loop/fixtures/plate single-loop/solver/tests/plate_golden.rs single-loop/README.md
