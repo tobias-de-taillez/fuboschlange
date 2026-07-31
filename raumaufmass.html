@@ -37,15 +37,24 @@
   button{font:inherit;font-size:14px;background:var(--surface);border:1px solid var(--line);
     border-radius:6px;padding:0 12px;min-height:40px;cursor:pointer;color:var(--ink)}
   button:active{background:#eae7dc}
-  /* Werkzeugleiste */
-  #topbar{display:flex;gap:6px;align-items:center;padding:8px;background:var(--surface);
+  /* Werkzeugleiste: Zeile 1 Modi, Zeile 2 Ribbon (Icon + Unterschrift,
+     seitlich wischbar wenn zu schmal). */
+  #topbar{display:flex;flex-direction:column;gap:6px;padding:8px 8px 0;background:var(--surface);
     border-bottom:1px solid var(--line)}
+  #ribbon{display:flex;align-items:stretch;gap:2px;overflow-x:auto;padding-bottom:6px;
+    -webkit-overflow-scrolling:touch}
+  #ribbon button{flex:none;display:flex;flex-direction:column;align-items:center;gap:3px;
+    min-width:58px;min-height:0;padding:6px 6px;border:0;border-radius:6px;background:none;
+    font-size:10.5px;line-height:1.1;color:var(--ink)}
+  #ribbon button:active{background:#eae7dc}
+  #ribbon svg{width:20px;height:20px;stroke:currentColor;fill:none;
+    stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  #ribbon .sep{flex:none;width:1px;background:var(--line);margin:6px 5px}
+  #ribbon #clr{color:var(--bad)}
   #modes{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
   #modes button{border:0;border-radius:0;min-width:72px}
   #modes button+button{border-left:1px solid var(--line)}
   #modes button[aria-pressed=true]{background:var(--ink);color:var(--surface)}
-  #tools{margin-left:auto;display:flex;gap:6px}
-  #tools button{min-width:44px;padding:0;font-size:17px}
   /* Zeichenfläche */
   #canvaswrap{position:relative;flex:1;min-height:0}
   /* NUR die Zeichenflaeche - ein nackter canvas-Selektor traf auch #qrcv
@@ -86,6 +95,37 @@
     #entryVal{flex:1;font-size:22px}
     #entryOk{min-height:48px;min-width:84px}
   }
+  /* Wand-Popup: die Zentrale einer Strecke - Messwerte, Loeschen, +Wert,
+     Einnorden. Desktop als Popover an der Strecke, mobil als Bottom-Sheet. */
+  #wpop{position:absolute;z-index:6;background:var(--surface);border:1px solid var(--ink);
+    border-radius:8px;padding:10px;box-shadow:0 4px 14px rgba(38,36,31,.18);min-width:260px}
+  #wpop[hidden]{display:none}
+  #wpopHead{display:flex;align-items:baseline;gap:8px;margin-bottom:6px}
+  #wpopHead b{font-size:14.5px}
+  #wpopLen{color:var(--muted);font-size:12.5px;flex:1;font-variant-numeric:tabular-nums}
+  #wpopX{min-height:32px;min-width:36px;padding:0}
+  #wpopTbl{margin-bottom:8px}
+  #wpopTbl td input.d{width:70px}
+  #wpopAdd{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+  #wpopVal{font:inherit;font-size:16px;font-variant-numeric:tabular-nums;width:90px;text-align:right;
+    padding:7px;border:1px solid var(--line);border-radius:6px;min-width:0}
+  #wpopOk{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  @media(max-width:879px){
+    #wpop{position:fixed;left:0;right:0;bottom:0;min-width:0;border-radius:12px 12px 0 0;
+      border-left:0;border-right:0;border-bottom:0;
+      padding:12px 14px calc(12px + env(safe-area-inset-bottom))}
+    #wpopVal{flex:1}
+    #wpopOk,#wpopNorth{min-height:44px}
+  }
+  /* Wandliste im Panel */
+  .wrow{display:flex;align-items:center;gap:8px;padding:7px 4px;border-bottom:1px solid #ebe8de;
+    cursor:pointer;font-variant-numeric:tabular-nums}
+  .wrow .wk{font-weight:600;min-width:52px}
+  .wrow .wn{color:var(--muted);font-size:12px;flex:1}
+  .wrow .wlen{margin-left:auto}
+  .wrow.worst{background:var(--bad-bg)}
+  .wgrp{margin-top:10px;margin-bottom:2px;font-size:11.5px;letter-spacing:.05em;
+    text-transform:uppercase;color:var(--muted)}
   /* Lösch-Popover */
   #pop{position:absolute;z-index:7;background:var(--surface);border:1px solid var(--line);
     border-radius:8px;padding:8px;box-shadow:0 4px 14px rgba(38,36,31,.18);
@@ -166,9 +206,6 @@
   .badge.unchecked{background:var(--warn-bg);color:var(--warn)}
   .badge.suspect{background:var(--bad-bg);color:var(--bad);font-weight:600}
   button.badge{cursor:pointer}
-  #tbl .x{display:none}
-  #tbl.details .x{display:table-cell}
-  #tbl th[data-key]{cursor:pointer;user-select:none;-webkit-user-select:none}
   /* Info-Kaestchen zu Tabellenwerten: fixed am Viewport, weil die Tabelle
      selbst im Panel und ggf. seitlich scrollt. */
   #tip{position:fixed;z-index:11;max-width:270px;background:var(--surface);
@@ -177,25 +214,7 @@
     box-shadow:0 4px 14px rgba(38,36,31,.18);pointer-events:none}
   #tip[hidden]{display:none}
   .rowbtn{min-height:28px;padding:0 8px;font-size:12px}
-  #dtl{min-height:26px;padding:0 10px;font-size:12px;text-transform:none;letter-spacing:0;font-weight:500}
-  #dtl[aria-pressed=true]{background:var(--ink);color:var(--surface);border-color:var(--ink)}
   #why{color:var(--muted);font-size:12.5px;margin-top:6px}
-  /* Wandlängen */
-  #wl{display:grid;grid-template-columns:auto 1fr;gap:3px 14px;font-size:14px;
-    font-variant-numeric:tabular-nums}
-  #wl span:nth-child(even){text-align:right}
-  /* Legende */
-  #legend summary{cursor:pointer;font-size:13px;color:var(--muted)}
-  #legend .rows{margin-top:8px;display:grid;gap:5px;font-size:13px;color:var(--muted)}
-  .sw{display:inline-block;width:26px;height:0;vertical-align:middle;margin-right:8px}
-  .sw-wall{border-bottom:2.5px solid #2a2823}
-  .sw-meas{border-bottom:2px dashed var(--meas)}
-  .sw-todo{border-bottom:2px dotted var(--todo)}
-  .sw-ell{width:13px;height:13px;border:1.5px solid #0b72a3;border-radius:50%;margin-left:6px;margin-right:15px}
-  .sw-ell2{width:13px;height:13px;border:1.5px dashed #8a867c;border-radius:50%;margin-left:6px;margin-right:15px}
-  /* Daten */
-  .btnrow{display:flex;flex-wrap:wrap;gap:8px}
-  #clr{color:var(--bad);border-color:#e2c4be}
 </style>
 
 <div id="app">
@@ -205,10 +224,19 @@
         <button data-mode="draw" aria-pressed="true">Zeichnen</button>
         <button data-mode="measure" aria-pressed="false">Messen</button>
       </div>
-      <div id="tools">
-        <button id="lib" title="Meine Räume" aria-label="Meine Räume">▤</button>
-        <button id="undo" title="Rückgängig (Strg+Z)" aria-label="Rückgängig">↶</button>
-        <button id="fitview" title="Ansicht einpassen" aria-label="Ansicht einpassen">⛶</button>
+      <div id="ribbon">
+        <button id="lib" title="Meine Räume"><svg viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg><span>Räume</span></button>
+        <button id="undo" title="Rückgängig (Strg+Z)"><svg viewBox="0 0 24 24"><path d="M8 5 4 9l4 4"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg><span>Rückgängig</span></button>
+        <button id="fitview" title="Ansicht einpassen"><svg viewBox="0 0 24 24"><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5"/></svg><span>Einpassen</span></button>
+        <i class="sep"></i>
+        <button id="filesave" title="Raum als Datei sichern"><svg viewBox="0 0 24 24"><path d="M12 4v10m0 0 4-4m-4 4-4-4"/><path d="M4 17v3h16v-3"/></svg><span>Sichern</span></button>
+        <button id="fileopen" title="Datei als neuen Raum öffnen"><svg viewBox="0 0 24 24"><path d="M12 14V4m0 0 4 4m-4-4-4 4"/><path d="M4 17v3h16v-3"/></svg><span>Öffnen</span></button>
+        <button id="sharelink" title="Raum als Link teilen"><svg viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1"/><path d="M14 10a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg><span>Link</span></button>
+        <button id="shareqr" title="Raum als QR-Code zeigen"><svg viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4z"/><path d="M14 14h3v3h-3zM17 17h3v3h-3z"/></svg><span>QR</span></button>
+        <i class="sep"></i>
+        <button id="exp" title="JSON in die Zwischenablage"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="1"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg><span>Kopieren</span></button>
+        <button id="imp" title="JSON aus der Zwischenablage einfügen"><svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="16" rx="1"/><path d="M9 5V3h6v2"/></svg><span>Einfügen</span></button>
+        <button id="clr" title="Aktuellen Raum leeren"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13"/></svg><span>Verwerfen</span></button>
       </div>
     </div>
     <div id="canvaswrap">
@@ -253,6 +281,16 @@
         </div>
       </div>
       <div id="pop" hidden><span id="popLabel"></span><button id="popDel">Löschen</button></div>
+      <div id="wpop" hidden>
+        <div id="wpopHead"><b id="wpopTitle"></b><span id="wpopLen"></span><button id="wpopX" aria-label="Schließen">✕</button></div>
+        <table id="wpopTbl"><tbody></tbody></table>
+        <div id="wpopAdd">
+          <input id="wpopVal" inputmode="decimal" autocomplete="off" enterkeyhint="done" placeholder="Maß">
+          <span class="unit">m</span>
+          <button id="wpopOk">+ Wert</button>
+          <button id="wpopNorth" title="Diese Wand parallel zur oberen Bildschirmkante drehen">Einnorden</button>
+        </div>
+      </div>
     </div>
   </div>
   <div id="tip" hidden></div>
@@ -264,44 +302,11 @@
       <div id="sugg">—</div>
     </section>
     <section>
-      <h3>Messungen <button id="dtl" aria-pressed="false">Details</button></h3>
-      <div id="tblwrap"><table id="tbl"><thead><tr>
-        <th data-key="pair">Strecke</th><th data-key="d">Maß [m]</th><th data-key="status">Status</th>
-        <th class="x" data-key="v">v [mm]</th><th class="x" data-key="red">Red.</th><th class="x" data-key="w">w</th><th class="x" data-key="sig">σ [mm]</th><th class="x"></th>
-      </tr></thead><tbody></tbody></table></div>
+      <h3>Wände &amp; Strecken</h3>
+      <div id="wl">—</div>
       <div id="why"></div>
     </section>
-    <section>
-      <h3>Wände</h3>
-      <div id="wl">—</div>
-    </section>
-    <section>
-      <details id="legend"><summary>Legende</summary>
-        <div class="rows">
-          <span><i class="sw sw-wall"></i>Wand</span>
-          <span><i class="sw sw-meas"></i>gemessene Strecke</span>
-          <span><i class="sw sw-todo"></i>noch zu messende Strecke</span>
-          <span><i class="sw sw-ell"></i>Genauigkeit, aus den Messungen berechnet<span id="exagg"></span></span>
-          <span><i class="sw sw-ell2"></i>Genauigkeit, nur angenommen</span>
-          <span><i class="sw" style="color:#b45309;width:auto;margin-right:14px">↔</i>noch beweglich — Messung fehlt</span>
-        </div>
-      </details>
-    </section>
-    <section id="datasec">
-      <h3>Daten</h3>
-      <div class="btnrow">
-        <button id="filesave">Als Datei sichern</button>
-        <button id="fileopen">Datei öffnen</button>
-        <button id="sharelink">Link teilen</button>
-        <button id="shareqr">QR</button>
-      </div>
-      <div class="btnrow" style="margin-top:8px">
-        <button id="exp">JSON kopieren</button>
-        <button id="imp">JSON einfügen</button>
-        <button id="clr">Alles verwerfen</button>
-      </div>
-      <input id="filepick" type="file" accept=".json,application/json" hidden>
-    </section>
+    <input id="filepick" type="file" accept=".json,application/json" hidden>
   </div>
 </div>
 
@@ -3475,9 +3480,20 @@ function idOrdinal(id){
 // --- Weltkoordinaten (mm) <-> Bildschirm (Geraetepixel im Canvas)
 const cv=$('cv'), ctx=cv.getContext('2d');
 const DPR=()=>devicePixelRatio||1;
-let VIEW={s:1, ox:0, oy:0};
-const toScr=p=>({x:p.x*VIEW.s+VIEW.ox, y:p.y*VIEW.s+VIEW.oy});
-const toWorld=(x,y)=>({x:(x-VIEW.ox)/VIEW.s, y:(y-VIEW.oy)/VIEW.s});
+// rot dreht nur die ANSICHT (Einnorden einer Wand auf die Waagerechte) -
+// Weltkoordinaten bleiben unberuehrt, Beschriftungen werden an der
+// gedrehten Position gezeichnet, aber selbst nicht mitgedreht. Nicht
+// persistiert: eine Darstellungslaune wie Zoom und Pan.
+let VIEW={s:1, ox:0, oy:0, rot:0};
+const toScr=p=>{
+  const c=Math.cos(VIEW.rot), s2=Math.sin(VIEW.rot);
+  return {x:(p.x*c-p.y*s2)*VIEW.s+VIEW.ox, y:(p.x*s2+p.y*c)*VIEW.s+VIEW.oy};
+};
+const toWorld=(x,y)=>{
+  const c=Math.cos(VIEW.rot), s2=Math.sin(VIEW.rot);
+  const xr=(x-VIEW.ox)/VIEW.s, yr=(y-VIEW.oy)/VIEW.s;
+  return {x:xr*c+yr*s2, y:-xr*s2+yr*c};
+};
 // Pointer-Event -> Geraetepixel relativ zum Canvas.
 function evDev(e){
   const r=cv.getBoundingClientRect();
@@ -3486,11 +3502,14 @@ function evDev(e){
 
 function autofit(){
   const P=M.fit?M.fit.pts:M.pts;
-  if(!P.length){ VIEW={s:1,ox:cv.width/2,oy:cv.height/2}; return; }
-  const xs=P.map(p=>p.x), ys=P.map(p=>p.y);
-  const w=Math.max(...xs)-Math.min(...xs)||1000, h=Math.max(...ys)-Math.min(...ys)||1000;
+  if(!P.length){ VIEW={s:1,ox:cv.width/2,oy:cv.height/2,rot:VIEW.rot}; return; }
+  // Bounding-Box der GEDREHTEN Punkte: eingenordet eingepasst heisst, die
+  // Wand liegt waagerecht UND der Raum fuellt den Schirm.
+  const c=Math.cos(VIEW.rot), s2=Math.sin(VIEW.rot);
+  const rx=P.map(p=>p.x*c-p.y*s2), ry=P.map(p=>p.x*s2+p.y*c);
+  const w=Math.max(...rx)-Math.min(...rx)||1000, h=Math.max(...ry)-Math.min(...ry)||1000;
   const s=Math.min((cv.width-150)/w, (cv.height-150)/h);
-  VIEW={ s, ox:cv.width/2-(Math.min(...xs)+w/2)*s, oy:cv.height/2-(Math.min(...ys)+h/2)*s };
+  VIEW={ s, ox:cv.width/2-(Math.min(...rx)+w/2)*s, oy:cv.height/2-(Math.min(...ry)+h/2)*s, rot:VIEW.rot };
 }
 // Zoom um einen festen Bildpunkt (Geraetepixel): der Weltpunkt darunter
 // bleibt liegen.
@@ -3499,6 +3518,18 @@ function zoomAt(dx,dy,f){
   VIEW.ox=dx+(VIEW.ox-dx)*f;
   VIEW.oy=dy+(VIEW.oy-dy)*f;
   userView=true;
+}
+// Einnorden: die Wand a-b parallel zur oberen Bildschirmkante drehen.
+// Reine Ansichtssache. Dieselbe Wand nochmal einnorden dreht zurueck auf 0.
+function northWall(a,b){
+  const P=M.fit?M.fit.pts:M.pts, I=C.idx(P);
+  if(I[a]==null||I[b]==null) return;
+  const p=P[I[a]], q=P[I[b]];
+  const target=-Math.atan2(q.y-p.y, q.x-p.x);
+  VIEW.rot = Math.abs(VIEW.rot-target)<1e-9 ? 0 : target;
+  userView=false;   // eingenordet UND eingepasst - halbe Drehungen sehen verloren aus
+  autofit();
+  render();
 }
 
 function recompute(){
@@ -3620,14 +3651,22 @@ function pickStep(minPx){
 
 function drawGrid(dpr){
   const step=pickStep(45*dpr);
-  const w0=toWorld(0,0), w1=toWorld(cv.width,cv.height);
+  // Sichtfenster in Weltkoordinaten: bei gedrehter Ansicht ist es ein
+  // gedrehtes Rechteck - die Bounding-Box der vier Ecken ueberdeckt es,
+  // und die Linien laufen als WELT-Segmente durch toScr (Ueberstand wird
+  // vom Canvas geclippt, das ist billiger als exaktes Zuschneiden).
+  const corners=[toWorld(0,0), toWorld(cv.width,0), toWorld(0,cv.height), toWorld(cv.width,cv.height)];
+  const x0=Math.min(...corners.map(c=>c.x)), x1=Math.max(...corners.map(c=>c.x));
+  const y0=Math.min(...corners.map(c=>c.y)), y1=Math.max(...corners.map(c=>c.y));
   ctx.strokeStyle=INK.grid; ctx.lineWidth=Math.max(1,0.75*dpr);
   ctx.beginPath();
-  for(let x=Math.floor(w0.x/step)*step; x<=w1.x; x+=step){
-    const s=toScr({x,y:0}); ctx.moveTo(s.x,0); ctx.lineTo(s.x,cv.height);
+  for(let x=Math.floor(x0/step)*step; x<=x1; x+=step){
+    const a=toScr({x,y:y0}), b=toScr({x,y:y1});
+    ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y);
   }
-  for(let y=Math.floor(w0.y/step)*step; y<=w1.y; y+=step){
-    const s=toScr({x:0,y}); ctx.moveTo(0,s.y); ctx.lineTo(cv.width,s.y);
+  for(let y=Math.floor(y0/step)*step; y<=y1; y+=step){
+    const a=toScr({x:x0,y}), b=toScr({x:x1,y});
+    ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y);
   }
   ctx.stroke();
 }
@@ -3807,9 +3846,13 @@ function drawCanvas(){
       }
     });
   }
-  // Legende nachfuehren: null blendet sie aus, sonst bliebe eine Zahl aus
-  // einer frueheren Zeichnung stehen.
-  $('exagg').textContent = exagg!=null ? ` — hier ×${exagg} überhöht` : '';
+  // Die Ueberhoehung gehoert zur Zeichnung, nicht in eine Legende: klein
+  // unten rechts, nur wenn Ellipsen ueberhaupt gezeichnet wurden.
+  if(exagg!=null){
+    ctx.font=`${11*dpr}px system-ui`; ctx.textAlign='right'; ctx.fillStyle=INK.scale;
+    ctx.fillText(`Genauigkeits-Ellipsen ×${exagg} überhöht`, cv.width-10*dpr, cv.height-10*dpr);
+    ctx.textAlign='start';
+  }
 }
 
 // ================= Treffer =================
@@ -3872,6 +3915,7 @@ const isDesktop=()=>matchMedia('(min-width:880px)').matches;
 function enterMeasurement(a,b,guided=false){
   const P=M.fit?M.fit.pts:M.pts, I=C.idx(P);
   if(I[a]==null||I[b]==null) return;
+  if(wpopPair) closeWallPopup();     // Eingabe und Wand-Popup nie gleichzeitig
   entryPair={a,b}; entryGuided=guided;
   // Solange die Eingabe offen ist, zeigt der Plan die Strecke an - auf Touch
   // gibt es kein Hover, das das sonst uebernehmen wuerde.
@@ -3947,8 +3991,8 @@ $('entryVal').addEventListener('keydown',e=>{
 // weitertippt.
 $('entryVal').addEventListener('input',()=>$('entryVal').classList.remove('bad'));
 if(window.visualViewport){
-  visualViewport.addEventListener('resize',placeEntry);
-  visualViewport.addEventListener('scroll',placeEntry);
+  visualViewport.addEventListener('resize',()=>{ placeEntry(); placeWpop(); });
+  visualViewport.addEventListener('scroll',()=>{ placeEntry(); placeWpop(); });
 }
 
 // ================= Loesch-Popover =================
@@ -3984,6 +4028,123 @@ function deleteWall(a,b){
   M.walls.splice(at,1);
   recompute();
 }
+
+// ================= Wand-Popup =================
+// Die Zentrale einer Strecke: alle Messwerte als Tabelle (Verdaechtige rot,
+// x loescht direkt), neuen Wert eintragen, Wand einnorden. Oeffnet per Tap
+// auf die Strecke im Plan oder auf ihre Zeile in der Wandliste.
+let wpopPair=null;
+let northWallPair=null;   // zuletzt eingenordete Wand - bleibt beim Entwirren fix
+
+function openWallPopup(a,b){
+  closeEntry();
+  hidePop();
+  wpopPair={a,b};
+  M.highlight={a,b};
+  renderWallPopup();
+  $('wpop').hidden=false;
+  placeWpop();
+  drawCanvas();
+}
+function closeWallPopup(){
+  wpopPair=null;
+  $('wpop').hidden=true;
+  if(!entryPair) M.highlight=null;
+  drawCanvas();
+}
+function placeWpop(){
+  const box=$('wpop');
+  if(box.hidden) return;
+  if(!isDesktop()){
+    box.style.left=box.style.top='';
+    const vv=window.visualViewport;
+    box.style.transform = vv
+      ? `translateY(${-(innerHeight - vv.height - vv.offsetTop)}px)` : '';
+    return;
+  }
+  box.style.transform='';
+  if(!wpopPair) return;
+  const P=M.fit?M.fit.pts:M.pts, I=C.idx(P);
+  if(I[wpopPair.a]==null||I[wpopPair.b]==null) return;
+  const mid={x:(P[I[wpopPair.a]].x+P[I[wpopPair.b]].x)/2,
+             y:(P[I[wpopPair.a]].y+P[I[wpopPair.b]].y)/2};
+  const s=toScr(mid), dpr=DPR(), wrap=$('canvaswrap');
+  const x=Math.max(8, Math.min(wrap.clientWidth-box.offsetWidth-8, s.x/dpr-box.offsetWidth/2));
+  const y=Math.max(8, Math.min(wrap.clientHeight-box.offsetHeight-8, s.y/dpr+14));
+  box.style.left=x+'px'; box.style.top=y+'px';
+}
+function renderWallPopup(){
+  if(!wpopPair) return;
+  const {a,b}=wpopPair;
+  const k=[a,b].sort().join('|');
+  const isWall=M.walls.some(([x,y])=>[x,y].sort().join('|')===k);
+  const P=M.fit?M.fit.pts:M.pts, I=C.idx(P);
+  $('wpopTitle').textContent=(isWall?'Wand ':'Strecke ')+a+'–'+b;
+  $('wpopLen').textContent=(M.fit && I[a]!=null && I[b]!=null)
+    ? fmtM(C.dist(P[I[a]],P[I[b]]))+' m ausgeglichen' : '';
+  const act=C.activeMeas(M.meas);
+  const tb=document.querySelector('#wpopTbl tbody');
+  tb.innerHTML='';
+  M.meas.forEach(m=>{
+    if([m.a,m.b].sort().join('|')!==k) return;
+    const ai=act.indexOf(m);                     // -1 fuer stillgelegte
+    const w=(ai>=0 && M.an) ? M.an.w[ai] : null;
+    const sus=ai>=0 && M.suspects.has(ai);
+    const tr=document.createElement('tr');
+    if(sus) tr.className='worst';
+    const badge = m.on===false ? '<button class="badge">aus — einschalten</button>'
+      : sus ? '<span class="badge suspect">verdächtig</span>'
+      : w!=null ? '<span class="badge ok">geprüft</span>'
+      : '<span class="badge unchecked">ungeprüft</span>';
+    tr.innerHTML=`<td><input class="d" inputmode="decimal" value="${fmtM(m.d)}"></td>`
+      +`<td>${w==null?'—':'w '+w.toFixed(1)}</td>`
+      +`<td>${badge}</td>`
+      +`<td><button class="rowbtn del" title="Diesen Messwert löschen">×</button></td>`;
+    const inp=tr.querySelector('.d');
+    inp.onchange=()=>{
+      const d=parseFloat(inp.value.replace(',','.'))*1000;
+      if(isFinite(d)&&d>0){ snapshot(); m.d=d; recompute(); }
+      else { inp.value=fmtM(m.d); setHint('Ungültig — Maß muss eine Zahl größer 0 sein.'); }
+    };
+    if(sus) attachTip(tr.children[2],
+      `w = ${w.toFixed(1)}: dieser Wert weicht am stärksten vom Rest ab — wahrscheinlich falsch gemessen oder vertippt. × löscht ihn.`);
+    const offBtn=m.on===false ? tr.querySelector('button.badge') : null;
+    if(offBtn) offBtn.onclick=()=>{ snapshot(); m.on=true; recompute(); };
+    tr.querySelector('.del').onclick=()=>{
+      snapshot();
+      M.meas.splice(M.meas.indexOf(m),1);
+      recompute();
+    };
+    tb.appendChild(tr);
+  });
+  if(!tb.children.length){
+    tb.innerHTML='<tr><td style="text-align:left;color:var(--muted)">Noch kein Messwert.</td></tr>';
+  }
+}
+$('wpopX').onclick=closeWallPopup;
+$('wpopOk').onclick=()=>{
+  if(!wpopPair) return;
+  const inp=$('wpopVal');
+  const d=parseFloat(inp.value.replace(',','.'))*1000;
+  if(!isFinite(d)||d<=0){ inp.style.borderColor='var(--bad)'; return; }
+  if(d<100 && !confirm(`${fmtM(d)} m ist sehr kurz — als Meter gemeint?\n\nOK = so übernehmen`)) return;
+  inp.style.borderColor='';
+  snapshot();
+  M.meas.push({a:wpopPair.a, b:wpopPair.b, d, sigma:C.SIGMA_DEF, on:true});
+  inp.value='';
+  recompute();
+};
+$('wpopVal').addEventListener('keydown',e=>{
+  e.stopPropagation();
+  if(e.key==='Enter') $('wpopOk').click();
+  if(e.key==='Escape') closeWallPopup();
+});
+$('wpopNorth').onclick=()=>{
+  if(!wpopPair) return;
+  northWallPair={...wpopPair};
+  northWall(wpopPair.a, wpopPair.b);
+  placeWpop();
+};
 
 // ================= Gesten =================
 // Ein Pointer-Modell fuer Maus UND Finger. Ein Tipp legt an oder waehlt aus,
@@ -4142,13 +4303,17 @@ function endPointer(e){
   if(e.type==='pointercancel' || g.popOpen) return;
   const d=evDev(e), w=toWorld(d.x,d.y);
   if(M.mode==='measure'){
-    // Wand zuerst, dann jede gemessene Strecke (Diagonalen): eine rot
-    // markierte Messung im Plan ist damit direkt der Nachmess-Knopf.
+    // Wand zuerst, dann jede gemessene Strecke (Diagonalen): Tap oeffnet
+    // die Wand-Zentrale - messen, pruefen, loeschen, einnorden an einem Ort.
     const seg=g.wall||nearestWall(w.x,w.y)||nearestMeas(w.x,w.y);
-    if(seg){ M.sel=[]; render(); enterMeasurement(seg.a,seg.b); }
-    else if(entryPair) closeEntry();
+    if(seg){ M.sel=[]; render(); openWallPopup(seg.a,seg.b); }
+    else { if(entryPair) closeEntry(); if(wpopPair) closeWallPopup(); }
     return;
   }
+  // Zeichnen-Modus: ohne aktiven Kettenzug oeffnet ein Wand-Tap ebenfalls
+  // die Wand-Zentrale; mit Kette gewinnt das Punktsetzen (man tippt beim
+  // Zeichnen zwangslaeufig nahe an Waenden).
+  if(M.chain==null && g.wall){ openWallPopup(g.wall.a,g.wall.b); return; }
   addPoint(w);
 }
 cv.addEventListener('pointerup',endPointer);
@@ -4216,7 +4381,7 @@ function tapPointMeasure(id){
   if(M.sel.length===2){
     const [a,b]=M.sel; M.sel=[];
     if(a===b){ render(); return; }
-    enterMeasurement(a,b);
+    openWallPopup(a,b);
   } else render();
 }
 
@@ -4365,6 +4530,7 @@ addEventListener('keydown',e=>{
     hidePop();
     if(!$('qrwrap').hidden){ $('qrwrap').hidden=true; return; }
     if(!$('libwrap').hidden){ closeLib(); return; }
+    if(wpopPair){ closeWallPopup(); return; }
     if(entryPair){ closeEntry(); return; }
     if(M.sel.length){ M.sel=[]; render(); return; }
     if(M.chain){ M.chain=null; render(); return; }
@@ -4528,22 +4694,7 @@ function statusText(){
   return [`Geprüft — Messgenauigkeit ± ${txtS} mm.`,'good'];
 }
 
-// ================= Tabellen-Extras: Sortierung + Info-Kaestchen =================
-// Sortier-Zustand der Messliste. dir 1 = aufsteigend, -1 = absteigend,
-// 0 = keine Wahl -> Standard (w absteigend). Nicht persistiert: eine
-// Sitzungs-Laune, kein Dokumentzustand.
-let tblSort={col:null, dir:0};
-document.querySelectorAll('#tbl th[data-key]').forEach(th=>{
-  th.dataset.base=th.textContent;
-  th.onclick=()=>{
-    if(tblSort.col===th.dataset.key){
-      tblSort.dir = tblSort.dir===1 ? -1 : tblSort.dir===-1 ? 0 : 1;
-      if(tblSort.dir===0) tblSort.col=null;
-    } else tblSort={col:th.dataset.key, dir:1};
-    renderPanel();
-  };
-});
-
+// ================= Info-Kaestchen =================
 // Ein gemeinsames Info-Kaestchen fuer Tabellenwerte. Hover zeigt, Verlassen
 // versteckt; auf Touch zeigt der Tipp auf die Zelle dasselbe Kaestchen und
 // der naechste Tipp irgendwo anders schliesst es (title-Attribute koennen
@@ -4613,120 +4764,55 @@ function renderPanel(){
     : 'Wandzug nicht geschlossen (oder eine Ecke hat nicht genau zwei Wände) — '
      +'die Vorschläge können deshalb Strecken enthalten, die sich nicht direkt messen lassen.';
 
-  // --- Messliste. Kompakt: Strecke, Mass, Status. Die Statistik-Spalten
-  // (v, Redundanzanteil, w, sigma) und die Verwaltungsknoepfe wohnen hinter
-  // dem Details-Schalter - fuer die Baustelle zaehlt nur "passt / pruefen".
-  const tb=document.querySelector('#tbl tbody');
-  tb.innerHTML='';
+  // --- Wandliste. Die Waende SIND die Objekte des Aufmasses; ihre
+  // Messwerte wohnen im Wand-Popup (openWallPopup), nicht mehr in einer
+  // globalen Tabelle. Nicht-Wand-Strecken laufen als Gruppe "Diagonalen".
   const act=C.activeMeas(M.meas);
-  // Wer verdaechtig ist, entscheidet computeSuspects (store-Block, getestet) -
-  // dieselbe Menge faerbt hier die Zeile und im Plan die Messstrecke rot.
   const suspects=M.suspects;
-
-  // Anzeige-Reihenfolge: eine per Header-Klick gewaehlte Spalte, sonst der
-  // Standard "w absteigend" (Verdaechtiges zuoberst). Originalindizes bleiben
-  // erhalten, die braucht jede Statistik-Spalte.
-  const rows=act.map((m,i)=>({m,i,w:M.an?M.an.w[i]:null,
-                              v:M.an?M.an.v[i]:null, red:M.an?M.an.red[i]:null}));
-  const SORT_VAL={
-    pair:r=>r.m.a+'–'+r.m.b, d:r=>r.m.d, status:r=>r.w??-Infinity,
-    v:r=>r.v??-Infinity, red:r=>r.red??-Infinity, w:r=>r.w??-Infinity,
-    sig:r=>r.m.sigma??C.SIGMA_DEF,
-  };
-  if(tblSort.dir && SORT_VAL[tblSort.col]){
-    const f=SORT_VAL[tblSort.col];
-    rows.sort((p,q)=>{
-      const a=f(p), b=f(q);
-      const c=(typeof a==='string') ? a.localeCompare(b) : a-b;
-      return tblSort.dir*c || p.i-q.i;
+  {
+    const wk=(a2,b2)=>[a2,b2].sort().join('|');
+    const wallSet=new Set(M.walls.map(([a2,b2])=>wk(a2,b2)));
+    const byPair=new Map();
+    act.forEach((m,i)=>{
+      const k=wk(m.a,m.b);
+      if(!byPair.has(k)) byPair.set(k,{a:m.a,b:m.b,n:0,sus:false,unchecked:false});
+      const e=byPair.get(k);
+      e.n++;
+      if(suspects.has(i)) e.sus=true;
+      if(!M.an || M.an.w[i]==null) e.unchecked=true;
     });
-  } else rows.sort((p,q)=>(q.w??-1)-(p.w??-1));
-  // Sortier-Indikator in den Headern nachfuehren.
-  document.querySelectorAll('#tbl th[data-key]').forEach(th=>{
-    th.textContent=th.dataset.base
-      +(tblSort.col===th.dataset.key && tblSort.dir ? (tblSort.dir>0?' ▲':' ▼') : '');
-  });
-
-  // Das Verdachts-Badge ist selbst der Stilllegen-Knopf: der wichtigste
-  // Handgriff beim Ausreisser darf nicht hinter Details + Seitwaertsscrollen
-  // vergraben sein. Die Zeile bleibt danach als "aus" stehen, Undo geht.
-  const badge=(w,i)=>{
-    if(suspects.has(i)) return `<button class="badge suspect" title="normiertes Residuum w = ${w.toFixed(1)} — Antippen legt die Messung still, der Wert bleibt in der Liste">verdächtig · stilllegen</button>`;
-    if(w!=null) return `<span class="badge ok" title="normiertes Residuum w = ${w.toFixed(1)}">geprüft</span>`;
-    return '<span class="badge unchecked" title="Diese Messung geht ungeprüft ins Ergebnis ein.">ungeprüft</span>';
-  };
-
-  rows.forEach(({m,i,w,v,red})=>{
-    const tr=document.createElement('tr');
-    if(suspects.has(i)) tr.className='worst';
-    // Verknuepfung zur Zeichnung: Zeile beruehrt oder erste Zelle angetippt
-    // -> die zugehoerige Strecke wird im Plan hervorgehoben. Auf Touch gibt
-    // es kein Hover, deshalb zusaetzlich der Tipp aufs Kuerzel.
-    tr.onmouseenter=()=>{ M.highlight={a:m.a,b:m.b}; drawCanvas(); };
-    tr.onmouseleave=()=>{ if(!entryPair){ M.highlight=null; drawCanvas(); } };
-    tr.innerHTML=
-      `<td>${m.a}–${m.b}</td>`+
-      `<td><input class="d" inputmode="decimal" value="${fmtM(m.d)}"></td>`+
-      `<td>${badge(w,i)}</td>`+
-      `<td class="x">${v==null?'—':v.toFixed(1)}</td>`+
-      `<td class="x">${red==null?'—':red.toFixed(2)}</td>`+
-      `<td class="x">${w==null?'—':w.toFixed(1)}</td>`+
-      `<td class="x"><input class="sig" inputmode="decimal" value="${m.sigma??C.SIGMA_DEF}"></td>`+
-      `<td class="x"><button class="rowbtn tog" title="Messung stilllegen">aus</button>`+
-      `<button class="rowbtn del" title="Messung löschen">×</button></td>`;
-    // Info-Kaestchen je Wertzelle: erklaert DIESEN Wert, nicht das Konzept
-    // im Allgemeinen - auf der Baustelle zaehlt "was heisst das hier".
-    attachTip(tr.children[2], suspects.has(i)
-      ? `w = ${w.toFixed(1)}: diese Messung weicht am stärksten vom Rest ab — wahrscheinlich falsch gemessen oder vertippt. Antippen legt sie still; besser: Strecke nachmessen.`
-      : w!=null
-        ? `Geprüft: andere Messungen kontrollieren diese, normiertes Residuum w = ${w.toFixed(1)} (unauffällig unter ${BAARDA_W0}).`
-        : 'Ungeprüft: keine andere Messung kontrolliert dieses Maß — ein Tippfehler hier bliebe unbemerkt.');
-    attachTip(tr.children[3], v==null ? 'Verbesserung v: erst berechenbar, wenn Messungen einander kontrollieren.'
-      : `Verbesserung v = ${v.toFixed(1)} mm: der Ausgleich ${v>=0?'streckt':'staucht'} dieses Maß um ${Math.abs(v).toFixed(1)} mm, damit alle Messungen zusammenpassen. Groß gegenüber σ heißt: hier klemmt es.`);
-    attachTip(tr.children[4], red==null ? 'Redundanzanteil: erst berechenbar, wenn Messungen einander kontrollieren.'
-      : `Redundanzanteil ${red.toFixed(2)}: wie stark andere Messungen dieses Maß kontrollieren — 0 = gar nicht (unprüfbar), nahe 1 = fast vollständig.`);
-    attachTip(tr.children[5], w==null ? 'w: nicht prüfbar — es fehlt eine Kontrollmessung für dieses Maß.'
-      : `Normiertes Residuum w = ${w.toFixed(1)}: Abweichung in Vielfachen der Messgenauigkeit. Über ${BAARDA_W0} gilt als Ausreißer (Baarda-Test).`);
-    attachTip(tr.children[6],
-      `Angenommene Messgenauigkeit σ = ±${m.sigma??C.SIGMA_DEF} mm. Anpassen, wenn anders gemessen wurde — Zollstock z. B. 20 statt 5.`);
-    tr.children[0].onclick=()=>{
-      const on=M.highlight && M.highlight.a===m.a && M.highlight.b===m.b;
-      M.highlight=on?null:{a:m.a,b:m.b};
-      drawCanvas();
+    M.meas.filter(m=>m.on===false).forEach(m=>{
+      const k=wk(m.a,m.b);
+      if(!byPair.has(k)) byPair.set(k,{a:m.a,b:m.b,n:0,sus:false,unchecked:true});
+      byPair.get(k).n++;
+    });
+    const rowHtml=(a2,b2)=>{
+      const e=byPair.get(wk(a2,b2));
+      const len=(M.fit && I[a2]!=null && I[b2]!=null) ? fmtM(C.dist(P[I[a2]],P[I[b2]]))+'\u00a0m' : '\u2014';
+      // Badge = schlechtester Status der Werte dieser Strecke: verdaechtig
+      // schlaegt ungeprueft schlaegt geprueft; ganz ohne Wert: "ohne Mass".
+      const badge = e&&e.sus ? '<span class="badge suspect">verd\u00e4chtig</span>'
+        : e&&!e.unchecked ? '<span class="badge ok">gepr\u00fcft</span>'
+        : e ? '<span class="badge unchecked">ungepr\u00fcft</span>'
+        : '<span class="badge">ohne Ma\u00df</span>';
+      const cnt=e?e.n:0;
+      return `<div class="wrow${e&&e.sus?' worst':''}" data-a="${a2}" data-b="${b2}">`
+        +`<span class="wk">${a2}\u2013${b2}</span><span class="wn">${cnt?cnt+(cnt===1?'\u00a0Wert':'\u00a0Werte'):''}</span>`
+        +`<span class="wlen">${len}</span>${badge}</div>`;
     };
-    const inp=tr.querySelector('.d');
-    inp.onchange=()=>{
-      const d=parseFloat(inp.value.replace(',','.'))*1000;
-      if(isFinite(d)&&d>0){ snapshot(); m.d=d; recompute(); }
-      else { inp.value=fmtM(m.d); setHint('Ungültig — Maß muss eine Zahl größer 0 sein.'); }
-    };
-    const sig=tr.querySelector('.sig');
-    sig.onchange=()=>{
-      const s=parseFloat(sig.value.replace(',','.'));
-      if(isFinite(s)&&s>0){ snapshot(); m.sigma=s; recompute(); }
-      else { sig.value=m.sigma??C.SIGMA_DEF; setHint('σ muss eine Zahl größer 0 sein.'); }
-    };
-    tr.querySelector('.tog').onclick=()=>{ snapshot(); m.on=false; recompute(); };
-    tr.querySelector('.del').onclick=()=>{ snapshot(); M.meas.splice(M.meas.indexOf(m),1); recompute(); };
-    const sus=tr.querySelector('button.badge.suspect');
-    if(sus) sus.onclick=()=>{ snapshot(); m.on=false; recompute(); };
-    tb.appendChild(tr);
-  });
-
-  // Stillgelegte Messungen bleiben sichtbar, sonst findet man sie nie wieder.
-  // Das Badge selbst ist der Einschalter - auch in der Kompaktansicht.
-  M.meas.filter(m=>m.on===false).forEach(m=>{
-    const tr=document.createElement('tr');
-    tr.className='off';
-    tr.innerHTML=
-      `<td>${m.a}–${m.b}</td>`+
-      `<td style="padding-right:10px">${fmtM(m.d)}</td>`+
-      `<td><button class="badge" title="Antippen schaltet die Messung wieder ein.">aus — einschalten</button></td>`+
-      `<td class="x">—</td><td class="x">—</td><td class="x">—</td>`+
-      `<td class="x">${m.sigma??C.SIGMA_DEF}</td><td class="x"></td>`;
-    tr.querySelector('button').onclick=()=>{ snapshot(); m.on=true; recompute(); };
-    tb.appendChild(tr);
-  });
+    const wallRows=M.walls.map(([a2,b2])=>rowHtml(a2,b2)).join('');
+    const diagRows=[...byPair.values()].filter(e=>!wallSet.has(wk(e.a,e.b)))
+      .map(e=>rowHtml(e.a,e.b)).join('');
+    const wl=$('wl');
+    wl.innerHTML = (wallRows||diagRows)
+      ? wallRows + (diagRows?'<div class="wgrp">Diagonalen</div>'+diagRows:'')
+      : '<span style="color:var(--muted)">Noch keine W\u00e4nde.</span>';
+    wl.querySelectorAll('.wrow').forEach(row=>{
+      row.onmouseenter=()=>{ M.highlight={a:row.dataset.a,b:row.dataset.b}; drawCanvas(); };
+      row.onmouseleave=()=>{ if(!entryPair && !wpopPair){ M.highlight=null; drawCanvas(); } };
+      row.onclick=()=>openWallPopup(row.dataset.a,row.dataset.b);
+    });
+  }
 
   // Ehrliche Auskunft ueber die Grenzen der Daten: bei mehreren gleich
   // Verdaechtigen ODER bei auffaelliger Streuung ohne benennbaren
@@ -4780,24 +4866,8 @@ function renderPanel(){
     b.onclick=()=>enterMeasurement(b.dataset.a, b.dataset.b, true);
   });
 
-  // --- Wandlaengen: erst mit Fit sind es Millimeter, vorher Skizzenpixel.
-  const wl=$('wl');
-  if(!M.walls.length){
-    wl.innerHTML='<span style="grid-column:1/-1;color:var(--muted)">Noch keine Wände.</span>';
-  } else if(!M.fit){
-    wl.innerHTML='<span style="grid-column:1/-1;color:var(--muted)">Längen folgen mit der ersten Messung.</span>';
-  } else {
-    wl.innerHTML=M.walls
-      .map(([a,b])=>`<span>${a}–${b}</span><span>${fmtM(C.dist(P[I[a]],P[I[b]]))} m</span>`).join('');
-  }
+  if(wpopPair) renderWallPopup();
 }
-
-$('dtl').onclick=()=>{
-  const b=$('dtl');
-  const on=b.getAttribute('aria-pressed')!=='true';
-  b.setAttribute('aria-pressed',String(on));
-  $('tbl').classList.toggle('details',on);
-};
 
 // ================= Daten =================
 
