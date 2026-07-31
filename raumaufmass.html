@@ -4230,8 +4230,8 @@ addEventListener('keydown',e=>{
   if(t && (t.tagName==='INPUT' || t.tagName==='TEXTAREA' || t.isContentEditable)) return;
   if(e.key==='Escape'){
     hidePop();
-    if(!$('libwrap').hidden){ closeLib(); return; }
     if(!$('qrwrap').hidden){ $('qrwrap').hidden=true; return; }
+    if(!$('libwrap').hidden){ closeLib(); return; }
     if(entryPair){ closeEntry(); return; }
     if(M.sel.length){ M.sel=[]; render(); return; }
     if(M.chain){ M.chain=null; render(); return; }
