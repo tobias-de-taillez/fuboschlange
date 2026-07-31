@@ -4678,9 +4678,12 @@ if(!currentRoom){
 }
 setMode('draw');
 recompute();
-if(bootMsg) setHint(bootMsg);
+// setHintLive statt setHint: Boot-Meldungen duerfen nicht nach vier
+// Sekunden verschwinden, bevor ueberhaupt jemand hingesehen hat - sie
+// stehen, bis die erste Aktion den Modus-Hinweis zurueckholt.
+if(bootMsg) setHintLive(bootMsg);
 if(!STORE.storageOk)
-  setHint('Speichern auf diesem Gerät nicht möglich (privater Modus?) — Räume als Datei oder Link sichern.');
+  setHintLive('Speichern auf diesem Gerät nicht möglich (privater Modus?) — Räume als Datei oder Link sichern.');
 </script>
 
 <script id="checks">
