@@ -1,68 +1,234 @@
 <!doctype html>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <title>Raumaufmaß</title>
 <style>
+  /* Gestaltungslinie: technisches Messwerkzeug auf Papier. Warmweiß, Tinte,
+     genau ein Akzent, semantische Statusfarben, tabellarische Ziffern.
+     Bewusst NICHT: Gradients, Glow, Glassmorphism, große Radien, Webfonts. */
+  :root{
+    --paper:#efece4;    /* App-Hintergrund */
+    --surface:#fbfaf7;  /* Panel, Karten */
+    --canvas:#f6f4ee;   /* Zeichenfläche */
+    --ink:#26241f;
+    --muted:#6f6a5e;
+    --line:#d9d4c7;
+    --accent:#c2410c;   /* Auswahl, primäre Aktion */
+    --good:#1a6b34; --good-bg:#e5efe3;
+    --warn:#8a5a10; --warn-bg:#f5ecd7;
+    --bad:#b3261e;  --bad-bg:#f7e4e0;
+    --meas:#2e7d4f;     /* gemessene Strecke im Plan */
+    --todo:#c73e2e;     /* fehlende Strecke im Plan */
+  }
   *{box-sizing:border-box}
-  body{font:14px/1.45 system-ui,sans-serif;margin:0;display:flex;height:100vh}
-  #left{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
-  #right{width:420px;border-left:1px solid #ccc;overflow:auto;padding:12px}
-  #status{padding:10px 12px;border-bottom:1px solid #ccc;font-weight:600}
-  #status.warn{background:#fff4e0}
-  #status.bad{background:#ffe9e9}
-  #status.good{background:#eaf7ea}
-  #wallwarn{display:none;padding:6px 12px;background:#fff4e0;border-bottom:1px solid #ccc;font-size:12px}
-  #modes{padding:8px 12px;border-bottom:1px solid #eee;display:flex;gap:8px}
-  #modes button{padding:6px 12px;cursor:pointer}
-  #modes button[aria-pressed=true]{background:#333;color:#fff}
-  canvas{flex:1;min-height:0;display:block;cursor:crosshair}
-  table{border-collapse:collapse;width:100%;font-size:13px}
-  th,td{border-bottom:1px solid #eee;padding:4px 6px;text-align:right}
+  html,body{height:100%}
+  body{margin:0;font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    background:var(--paper);color:var(--ink);height:100dvh;display:flex;flex-direction:column;
+    overscroll-behavior:none}
+  #app{flex:1;display:flex;flex-direction:column;min-height:0}
+  #stage{position:relative;display:flex;flex-direction:column;min-width:0;height:52dvh;flex:none}
+  #panel{flex:1;min-height:0;overflow-y:auto;background:var(--surface);
+    border-top:1px solid var(--line);-webkit-overflow-scrolling:touch}
+  @media(min-width:880px){
+    #app{flex-direction:row}
+    #stage{flex:1;height:auto}
+    #panel{flex:none;width:400px;border-top:0;border-left:1px solid var(--line)}
+  }
+  button{font:inherit;font-size:14px;background:var(--surface);border:1px solid var(--line);
+    border-radius:6px;padding:0 12px;min-height:40px;cursor:pointer;color:var(--ink)}
+  button:active{background:#eae7dc}
+  /* Werkzeugleiste */
+  #topbar{display:flex;gap:8px;align-items:center;padding:8px;background:var(--surface);
+    border-bottom:1px solid var(--line)}
+  #modes{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  #modes button{border:0;border-radius:0;min-width:82px}
+  #modes button+button{border-left:1px solid var(--line)}
+  #modes button[aria-pressed=true]{background:var(--ink);color:var(--surface)}
+  #tools{margin-left:auto;display:flex;gap:6px}
+  #tools button{min-width:44px;padding:0;font-size:17px}
+  /* Zeichenfläche */
+  #canvaswrap{position:relative;flex:1;min-height:0}
+  canvas{position:absolute;inset:0;width:100%;height:100%;display:block;background:var(--canvas);
+    cursor:crosshair;touch-action:none}
+  #hint{position:absolute;left:8px;bottom:6px;max-width:calc(100% - 16px);font-size:12.5px;
+    color:var(--muted);pointer-events:none;background:rgba(246,244,238,.88);
+    padding:2px 5px;border-radius:4px}
+  #hint:empty{display:none}
+  #empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    pointer-events:none;padding:24px;text-align:left}
+  #empty>div{max-width:360px;color:var(--muted)}
+  #empty h2{font-size:16px;margin:0 0 8px;color:var(--ink)}
+  #empty ol{margin:0;padding-left:20px;font-size:14px}
+  #empty li{margin:5px 0}
+  /* Maßeingabe */
+  #entry{position:absolute;z-index:6;background:var(--surface);border:1px solid var(--ink);
+    border-radius:8px;padding:10px;box-shadow:0 4px 14px rgba(38,36,31,.18);min-width:230px}
+  #entry[hidden]{display:none}
+  #entryLabel{font-size:12.5px;color:var(--muted);margin-bottom:6px}
+  #entryRow{display:flex;gap:8px;align-items:center}
+  #entryVal{font:inherit;font-size:18px;font-variant-numeric:tabular-nums;width:110px;text-align:right;
+    padding:8px;border:1px solid var(--line);border-radius:6px;min-width:0}
+  #entryVal.bad{border-color:var(--bad);background:var(--bad-bg)}
+  #entry .unit{color:var(--muted)}
+  #entryOk{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600;min-width:64px}
+  #entryX{min-width:44px}
+  @media(max-width:879px){
+    #entry{position:fixed;left:0;right:0;bottom:0;min-width:0;border-radius:12px 12px 0 0;
+      border-left:0;border-right:0;border-bottom:0;
+      padding:12px 14px calc(12px + env(safe-area-inset-bottom))}
+    #entryVal{flex:1;font-size:22px}
+    #entryOk{min-height:48px;min-width:84px}
+  }
+  /* Lösch-Popover */
+  #pop{position:absolute;z-index:7;background:var(--surface);border:1px solid var(--line);
+    border-radius:8px;padding:8px;box-shadow:0 4px 14px rgba(38,36,31,.18);
+    display:flex;gap:10px;align-items:center;font-size:13.5px;white-space:nowrap}
+  #pop[hidden]{display:none}
+  #popDel{color:#fff;background:var(--bad);border-color:var(--bad)}
+  /* Panel */
+  #status{position:sticky;top:0;z-index:3;padding:12px 14px;background:var(--surface);
+    border-bottom:1px solid var(--line)}
+  #status.good{background:var(--good-bg)} #status.good #statustxt{color:var(--good)}
+  #status.warn{background:var(--warn-bg)} #status.warn #statustxt{color:var(--warn)}
+  #status.bad{background:var(--bad-bg)}  #status.bad  #statustxt{color:var(--bad)}
+  #statustxt{font-weight:600;font-size:14.5px}
+  #geo{margin-top:4px;font-size:19px;font-weight:650;font-variant-numeric:tabular-nums}
+  #geo small{font-size:12.5px;color:var(--muted);font-weight:500}
+  #wallwarn{display:none;padding:8px 14px;background:var(--warn-bg);color:var(--warn);
+    border-bottom:1px solid var(--line);font-size:12.5px}
+  section{padding:12px 14px;border-bottom:1px solid var(--line)}
+  h3{margin:0 0 8px;font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);
+    display:flex;align-items:center;justify-content:space-between;font-weight:600}
+  /* Vorschlags-Chips */
+  #sugg .grp{margin-bottom:8px}
+  #sugg .grp:last-child{margin-bottom:0}
+  #sugg .grp b{display:block;font-size:13px;font-weight:600;margin-bottom:6px;color:var(--ink)}
+  #sugg .chips{display:flex;flex-wrap:wrap;gap:6px}
+  button.sg{border:1px dashed var(--todo);color:var(--todo);background:transparent;
+    font-variant-numeric:tabular-nums}
+  button.sg:active{background:var(--bad-bg)}
+  button.sg.rep{border-style:dotted;border-color:var(--warn);color:var(--warn)}
+  /* Messliste. Die Detailspalten sprengen ein Handy-Panel - der Wrapper
+     scrollt dann seitlich, statt das Layout zu zerreissen. */
+  #tblwrap{overflow-x:auto}
+  table{border-collapse:collapse;width:100%;font-size:14px;font-variant-numeric:tabular-nums}
+  th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:600}
+  th,td{border-bottom:1px solid #ebe8de;padding:6px;text-align:right;white-space:nowrap}
   th:first-child,td:first-child{text-align:left}
-  .badge{background:#eee;border-radius:3px;padding:1px 5px;font-size:11px}
-  .badge.unchecked{background:#ffe0b2}
-  tr.worst td{background:#ffecec}
-  h3{margin:14px 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:.04em}
+  td input{font:inherit;font-variant-numeric:tabular-nums;text-align:right;border:1px solid transparent;
+    border-radius:4px;padding:4px;background:transparent;width:70px}
+  td input.sig{width:44px}
+  td input:hover,td input:focus{border-color:var(--line);background:var(--surface)}
+  tr.worst td{background:var(--bad-bg)}
+  tr.off td{opacity:.55}
+  .badge{font-size:11.5px;border-radius:4px;padding:2px 6px;background:#ebe8de;color:var(--muted);
+    border:0;min-height:0;white-space:nowrap}
+  .badge.ok{background:var(--good-bg);color:var(--good)}
+  .badge.unchecked{background:var(--warn-bg);color:var(--warn)}
+  .badge.suspect{background:var(--bad-bg);color:var(--bad);font-weight:600}
+  button.badge{cursor:pointer}
+  #tbl .x{display:none}
+  #tbl.details .x{display:table-cell}
+  .rowbtn{min-height:28px;padding:0 8px;font-size:12px}
+  #dtl{min-height:26px;padding:0 10px;font-size:12px;text-transform:none;letter-spacing:0;font-weight:500}
+  #dtl[aria-pressed=true]{background:var(--ink);color:var(--surface);border-color:var(--ink)}
+  #why{color:var(--muted);font-size:12.5px;margin-top:6px}
+  /* Wandlängen */
+  #wl{display:grid;grid-template-columns:auto 1fr;gap:3px 14px;font-size:14px;
+    font-variant-numeric:tabular-nums}
+  #wl span:nth-child(even){text-align:right}
+  /* Legende */
+  #legend summary{cursor:pointer;font-size:13px;color:var(--muted)}
+  #legend .rows{margin-top:8px;display:grid;gap:5px;font-size:13px;color:var(--muted)}
+  .sw{display:inline-block;width:26px;height:0;vertical-align:middle;margin-right:8px}
+  .sw-wall{border-bottom:2.5px solid #2a2823}
+  .sw-meas{border-bottom:2px dashed var(--meas)}
+  .sw-todo{border-bottom:2px dotted var(--todo)}
+  .sw-ell{width:13px;height:13px;border:1.5px solid #0b72a3;border-radius:50%;margin-left:6px;margin-right:15px}
+  .sw-ell2{width:13px;height:13px;border:1.5px dashed #8a867c;border-radius:50%;margin-left:6px;margin-right:15px}
+  /* Daten */
+  .btnrow{display:flex;flex-wrap:wrap;gap:8px}
+  #clr{color:var(--bad);border-color:#e2c4be}
 </style>
 
-<div id="left">
-  <div id="status">—</div>
-  <div id="wallwarn"></div>
-  <div id="modes">
-    <button data-mode="point"   aria-pressed="true">1 Punkt</button>
-    <button data-mode="wall"    aria-pressed="false">2 Wand</button>
-    <button data-mode="measure" aria-pressed="false">3 Messung</button>
-    <button id="ring" title="Alle Punkte in Anlegereihenfolge zu einem geschlossenen Wandzug verbinden">Wandzug schließen</button>
-    <span id="hint" style="align-self:center;color:#666"></span>
-    <span style="align-self:center;color:#666;margin-left:auto;font-size:12px">
-      <span style="color:#3a7">– – –</span> gemessen &nbsp;
-      <span style="color:#d33">· · ·</span> noch zu messen &nbsp;
-      <span style="color:#07a">◯</span> gemessene Genauigkeit &nbsp;
-      <span style="color:#999">◌</span> angenommen &nbsp;
-      <span style="color:#c60">↔</span> noch beweglich<span id="exagg"></span>
-    </span>
+<div id="app">
+  <div id="stage">
+    <div id="topbar">
+      <div id="modes">
+        <button data-mode="draw" aria-pressed="true">Zeichnen</button>
+        <button data-mode="measure" aria-pressed="false">Messen</button>
+      </div>
+      <button id="ring" title="Alle Ecken in Anlegereihenfolge zu einem geschlossenen Wandzug verbinden">Schließen</button>
+      <div id="tools">
+        <button id="undo" title="Rückgängig (Strg+Z)" aria-label="Rückgängig">↶</button>
+        <button id="fitview" title="Ansicht einpassen" aria-label="Ansicht einpassen">⛶</button>
+      </div>
+    </div>
+    <div id="canvaswrap">
+      <canvas id="cv"></canvas>
+      <div id="empty">
+        <div>
+          <h2>Raum aufmessen</h2>
+          <ol>
+            <li>Die Ecken des Raums antippen — der Reihe nach, wie du ihn abläufst. Die Skizze muss nicht stimmen, nur die Reihenfolge.</li>
+            <li>Zum Schluss den ersten Punkt nochmal antippen — der Wandzug schließt sich.</li>
+            <li>Dann die vorgeschlagenen Strecken mit dem Laser messen und eintragen. Die Zeichnung zieht sich von selbst gerade.</li>
+          </ol>
+        </div>
+      </div>
+      <div id="hint"></div>
+      <div id="entry" hidden>
+        <div id="entryLabel"></div>
+        <div id="entryRow">
+          <input id="entryVal" inputmode="decimal" autocomplete="off" enterkeyhint="done">
+          <span class="unit">m</span>
+          <button id="entryOk">OK</button>
+          <button id="entryX" aria-label="Abbrechen">✕</button>
+        </div>
+      </div>
+      <div id="pop" hidden><span id="popLabel"></span><button id="popDel">Löschen</button></div>
+    </div>
   </div>
-  <canvas id="cv"></canvas>
-  <div id="entry" style="display:none;position:absolute;z-index:5;background:#fff;
-       border:1px solid #333;border-radius:4px;padding:6px 8px;box-shadow:0 2px 8px #0003">
-    <div id="entryLabel" style="font-size:12px;color:#444;margin-bottom:4px"></div>
-    <input id="entryVal" inputmode="decimal" size="8" style="text-align:right"> m
-    <button id="entryOk">✓</button>
+  <div id="panel">
+    <div id="status" class="warn"><div id="statustxt">—</div><div id="geo"></div></div>
+    <div id="wallwarn"></div>
+    <section id="nextsec">
+      <h3>Als Nächstes messen</h3>
+      <div id="sugg">—</div>
+    </section>
+    <section>
+      <h3>Messungen <button id="dtl" aria-pressed="false">Details</button></h3>
+      <div id="tblwrap"><table id="tbl"><thead><tr>
+        <th>Strecke</th><th>Maß [m]</th><th>Status</th>
+        <th class="x">v [mm]</th><th class="x">Red.</th><th class="x">w</th><th class="x">σ [mm]</th><th class="x"></th>
+      </tr></thead><tbody></tbody></table></div>
+      <div id="why"></div>
+    </section>
+    <section>
+      <h3>Wände</h3>
+      <div id="wl">—</div>
+    </section>
+    <section>
+      <details id="legend"><summary>Legende</summary>
+        <div class="rows">
+          <span><i class="sw sw-wall"></i>Wand</span>
+          <span><i class="sw sw-meas"></i>gemessene Strecke</span>
+          <span><i class="sw sw-todo"></i>noch zu messende Strecke</span>
+          <span><i class="sw sw-ell"></i>Genauigkeit, aus den Messungen berechnet<span id="exagg"></span></span>
+          <span><i class="sw sw-ell2"></i>Genauigkeit, nur angenommen</span>
+          <span><i class="sw" style="color:#b45309;width:auto;margin-right:14px">↔</i>noch beweglich — Messung fehlt</span>
+        </div>
+      </details>
+    </section>
+    <section id="datasec">
+      <h3>Daten</h3>
+      <div class="btnrow">
+        <button id="exp">JSON kopieren</button>
+        <button id="imp">JSON einfügen</button>
+        <button id="clr">Alles verwerfen</button>
+      </div>
+    </section>
   </div>
-</div>
-<div id="right">
-  <h3>Messungen</h3>
-  <table id="tbl"><thead><tr>
-    <th>von→nach</th><th>d [m]</th><th>v [mm]</th><th>Red.</th><th>w</th><th>σ [mm]</th><th></th>
-  </tr></thead><tbody></tbody></table>
-  <div id="why" style="color:#666;font-size:12px;margin-top:4px"></div>
-  <h3>Noch messen</h3>
-  <div id="sugg"></div>
-  <h3>Export</h3>
-  <button id="exp">JSON in die Zwischenablage</button>
-  <button id="imp">JSON einfügen</button>
-  <button id="clr">Alles verwerfen</button>
-  <pre id="wl" style="font-size:12px;white-space:pre-wrap"></pre>
-  <div id="geo" style="font-size:13px;margin-top:6px"></div>
 </div>
 
 <script id="core">
@@ -575,37 +741,60 @@ const TIE_TOL   = 0.02; // Toleranzband ums groesste w (2% relativ): alles darin
 // Bei redundancy===0 ist jedes Residuum strukturell exakt 0 - ABER nur, wenn
 // die Messungen zueinander passen. Widersprechen sie sich (z.B. ein Zahlendreher),
 // kann der Fit nicht alle gleichzeitig erfuellen und verteilt den Widerspruch
-// als grosse Residuen ueber das Netz. w ist hier ueberall null (siehe Badge
-// "nicht pruefbar"), also gibt es keinen normierten Test - aber "nicht pruefbar"
-// heisst nicht "nichts wissen": ein Residuum von mehreren sigma ist unter
+// als grosse Residuen ueber das Netz. w ist hier ueberall null, also gibt es
+// keinen normierten Test - aber ein Residuum von mehreren sigma ist unter
 // normalem Messrauschen praktisch ausgeschlossen und beweist damit einen
 // Widerspruch in den Daten, unabhaengig von jeder Redundanz. Verglichen wird
-// je Messung gegen ihr EIGENES sigma (sigma ist pro Messung ueberschreibbar),
-// nicht gegen einen globalen Wert - eine mit sigma=20 grosszuegig eingetragene
-// Zollstockmessung soll nicht beim gleichen Millimeterbetrag Alarm ausloesen
-// wie eine Lasermessung mit sigma=5.
+// je Messung gegen ihr EIGENES sigma.
 const GROSS_ERROR_SIGMA = 5; // Vielfaches von sigma, ab dem ein Residuum nicht mehr als Messrauschen erklaerbar ist
 
+// Bei kleiner Redundanz verschmiert ein grober Fehler ueber alle Messungen,
+// ohne dass ein einzelnes w Baardas Schwelle reisst (gemessen: 50 mm Fehler
+// im 6-Messungen-Rechteck -> sigmaHat 15,5 mm, aber alle w < 3). Ein gruener
+// "Geprueft"-Status waere dann eine Falschauskunft - sigmaHat selbst ist der
+// Alarm: deutlich ueber der angenommenen Messgenauigkeit heisst, die Werte
+// passen schlechter zusammen, als das Messgeraet erklaeren kann.
+const SIGMA_SUSPECT_FACTOR = 2.5; // sigmaHat ueber diesem Vielfachen von SIGMA_DEF: warnen statt gruen
+
 // Ellipsen sind in Wirklichkeit millimetergross, der Raum aber meterweise
-// gezeichnet - unskaliert verschwindet jede Ellipse unter dem Punktmarker
-// (siehe drawCanvas()). EIN Faktor je Zeichnung haelt die Punkte zueinander
-// ehrlich: doppelt so unsicher gemessen muss doppelt so gross gezeichnet
-// werden, nicht jeder Punkt einzeln auf Sichtbarkeit getrimmt. Die Liste ist
-// zugleich die Rundung auf einen sprechbaren Wert (1-2-5-Folge) und der
-// Deckel (500) - ein fast perfektes Netz bekommt so nie eine absurde
-// Ueberhoehung angezeigt.
+// gezeichnet - unskaliert verschwindet jede Ellipse unter dem Punktmarker.
+// EIN Faktor je Zeichnung haelt die Punkte zueinander ehrlich (siehe
+// drawCanvas()); die Liste ist zugleich Rundung auf einen sprechbaren Wert
+// (1-2-5-Folge) und Deckel.
 const ELLIPSE_TARGET_PX = 30;  // Zielgroesse der groessten Halbachse, CSS-px
 const ELLIPSE_FACTORS = [1, 2, 5, 10, 20, 50, 100, 200, 500];
-
-// Kleinster Faktor aus ELLIPSE_FACTORS, der raw mindestens erreicht.
-// Aufrunden statt runden, sonst verfehlt die Zeichnung ihr eigenes
-// Sichtbarkeitsziel knapp.
 function niceFactor(raw){
   for(const f of ELLIPSE_FACTORS) if(f>=raw*(1-1e-9)) return f;
   return ELLIPSE_FACTORS[ELLIPSE_FACTORS.length-1];
 }
 
-const M={ pts:[], walls:[], meas:[], mode:'point', sel:[], fit:null, an:null, sugg:[], drag:null, dragMode:null, highlight:null };
+// Interaktion. Trefferradien in CSS-px und fingertauglich - der alte Wert 14
+// war in Geraetepixeln gerechnet und auf einem Retina-Handy halb so gross,
+// wie er aussah.
+const HIT_R = 24;        // Punkt-Trefferradius
+const WALL_R = 18;       // Wand-Trefferradius
+const TAP_SLOP = 8;      // mehr Bewegung als das: kein Tap mehr, sondern Zug
+const LONGPRESS_MS = 550;
+
+// Zeichenfarben, abgestimmt auf die CSS-Tokens im Kopf der Datei.
+const INK = {
+  wall:'#2a2823', meas:'#2e7d4f', measHl:'#14532d', todo:'#c73e2e', todoHl:'#8f1f14',
+  point:'#26241f', accent:'#c2410c', grid:'#e6e2d5', scale:'#57534a',
+  ellMeasured:'#0b72a3', ellAssumed:'#8a867c', mode:'#b45309',
+  canvas:'#f6f4ee', labelBg:'rgba(246,244,238,.92)',
+};
+
+const $=id=>document.getElementById(id);
+
+// M.chain: letzter Punkt des aktiven Zeichenzugs. Tippen legt Ecken an und
+// verbindet sie sofort - den Raum "ablaufen" statt Punkte- und Wandmodus zu
+// jonglieren. null = kein Zug aktiv.
+const M={ pts:[], walls:[], meas:[], mode:'draw', sel:[], chain:null,
+          fit:null, an:null, sugg:[], drag:null, dragMode:null, highlight:null };
+
+// Nutzer hat gezoomt oder verschoben - autofit() haelt sich dann zurueck,
+// bis "Einpassen" gedrueckt wird oder eine neue Szene entsteht.
+let userView=false;
 
 // Ein Zustand ist genau das, was der Nutzer eingegeben hat: Punkte, Waende,
 // Messungen. Fit und Analyse werden daraus jederzeit neu gerechnet und
@@ -621,18 +810,15 @@ function deserialize(o){
   M.walls=o.walls.map(w=>[...w]);
   M.meas=o.meas.map(m=>({...m}));
   if(typeof o.idSeq==='number') idSeq=o.idSeq;
-  M.sel=[]; M.drag=null; M.fit=null; M.an=null;
+  M.sel=[]; M.chain=null; M.drag=null; M.fit=null; M.an=null;
 }
 
 // Formvalidierung fuer alles, was deserialize() bekommt - VOLLSTAENDIG und
 // VOR jeder Zustandsaenderung. deserialize() ersetzt M.pts/M.walls/M.meas
-// nacheinander und wirft mittendrin (z.B. beim Spreaden einer Wand, die kein
-// Array ist), wenn die Form nur oberflaechlich (Array.isArray) geprueft
-// wurde - der Zustand waere dann halb ersetzt, ohne dass irgendwo eine
-// Meldung erscheint. Gibt die erste gefundene Unstimmigkeit als Text
-// zurueck, sonst null. Eine Funktion, damit imp und ein kuenftiger Aufrufer
-// (z.B. clr) dieselbe Pruefung teilen koennen, statt sie mehrfach leicht
-// verschieden zu implementieren.
+// nacheinander und wirft mittendrin, wenn die Form nur oberflaechlich
+// geprueft wurde - der Zustand waere dann halb ersetzt, ohne dass irgendwo
+// eine Meldung erscheint. Gibt die erste gefundene Unstimmigkeit als Text
+// zurueck, sonst null.
 function importProblem(o){
   if(!o || typeof o!=='object') return 'Datenstruktur fehlt.';
   if(!Array.isArray(o.pts)) return 'pts fehlt oder ist keine Liste.';
@@ -662,8 +848,7 @@ function importProblem(o){
     // sigma ist optional - fehlt es, greift SIGMA_DEF (siehe analyze()). Ist es
     // aber da, muss es eine echte, positive Zahl sein: sigma:0 ergaebe in
     // analyze() eine Division durch 0 und damit ein literales Infinity in der
-    // w-Spalte. null/undefined zaehlen als "fehlt", nicht als ungueltiger Wert -
-    // an().w liest sigma ebenfalls per "??", nicht per Praesenzpruefung.
+    // w-Spalte. null/undefined zaehlen als "fehlt", nicht als ungueltiger Wert.
     if(m.sigma!=null && (!Number.isFinite(m.sigma) || !(m.sigma>0)))
       return `Messung ${m.a}–${m.b}: σ muss, wenn angegeben, eine Zahl größer 0 sein.`;
   }
@@ -698,42 +883,62 @@ function nextId(){
 }
 // Umkehrung von nextId(): aus einer ID die urspruengliche laufende Nummer
 // zurueckrechnen (bijektive Basis-26, A=0). Fuer den Import gebraucht: nach
-// einer Luecke (ein Punkt wurde vor dem Export geloescht) ist o.pts.length
-// keine verlaessliche Naeherung fuer idSeq mehr - siehe imp-Handler.
+// einer Luecke ist o.pts.length keine verlaessliche Naeherung fuer idSeq mehr.
 function idOrdinal(id){
   let n=0;
   for(const ch of String(id)) n=n*26+(ch.charCodeAt(0)-64);
   return n-1;
 }
 
-// --- Weltkoordinaten (mm) <-> Bildschirm
-const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+// --- Weltkoordinaten (mm) <-> Bildschirm (Geraetepixel im Canvas)
+const cv=$('cv'), ctx=cv.getContext('2d');
+const DPR=()=>devicePixelRatio||1;
 let VIEW={s:1, ox:0, oy:0};
 const toScr=p=>({x:p.x*VIEW.s+VIEW.ox, y:p.y*VIEW.s+VIEW.oy});
 const toWorld=(x,y)=>({x:(x-VIEW.ox)/VIEW.s, y:(y-VIEW.oy)/VIEW.s});
+// Pointer-Event -> Geraetepixel relativ zum Canvas.
+function evDev(e){
+  const r=cv.getBoundingClientRect();
+  return {x:(e.clientX-r.left)*DPR(), y:(e.clientY-r.top)*DPR()};
+}
 
 function autofit(){
   const P=M.fit?M.fit.pts:M.pts;
   if(!P.length){ VIEW={s:1,ox:cv.width/2,oy:cv.height/2}; return; }
   const xs=P.map(p=>p.x), ys=P.map(p=>p.y);
   const w=Math.max(...xs)-Math.min(...xs)||1000, h=Math.max(...ys)-Math.min(...ys)||1000;
-  const s=Math.min((cv.width-80)/w, (cv.height-80)/h);
+  const s=Math.min((cv.width-150)/w, (cv.height-150)/h);
   VIEW={ s, ox:cv.width/2-(Math.min(...xs)+w/2)*s, oy:cv.height/2-(Math.min(...ys)+h/2)*s };
+}
+// Zoom um einen festen Bildpunkt (Geraetepixel): der Weltpunkt darunter
+// bleibt liegen.
+function zoomAt(dx,dy,f){
+  VIEW.s*=f;
+  VIEW.ox=dx+(VIEW.ox-dx)*f;
+  VIEW.oy=dy+(VIEW.oy-dy)*f;
+  userView=true;
 }
 
 function recompute(){
+  const hadFit=!!M.fit;
+  // Ein Hover-Highlight stammt immer aus einer Panel-Zeile, und die wird
+  // gleich neu gebaut - ihr mouseleave feuert dann nie. Nur die offene
+  // Masseingabe haelt ihr Highlight selbst (enterMeasurement setzt es neu).
+  if(!entryPair) M.highlight=null;
   if(M.pts.length>=2 && C.activeMeas(M.meas).length){
     M.fit=C.solve(M.pts, M.meas);
     M.an=C.analyze(M.fit.pts, M.meas);
     // Skizze auf den Fit ziehen: solve() liefert frische Punkte in mm, M.pts
     // bliebe sonst auf Klick-Pixeln stehen, waehrend render/hit/autofit ab
     // hier M.fit.pts zeigen. Ziehen und Neuanlage schreiben aber immer in
-    // M.pts - ohne Angleich liefen beide Arrays auseinander und ein einzelner
-    // gezogener Punkt wuerde die Skizzenform zerstoeren. Nur x/y auf den
-    // bestehenden Objekten aktualisieren, id bleibt unangetastet.
+    // M.pts - ohne Angleich liefen beide Arrays auseinander.
     const I=C.idx(M.pts);
     M.fit.pts.forEach(fp=>{ const p=M.pts[I[fp.id]]; if(p){ p.x=fp.x; p.y=fp.y; } });
   } else { M.fit=null; M.an=null; }
+  // Mit der ersten Messung springen die Koordinaten von Skizzenpixeln auf
+  // Millimeter (scaleSketch) - eine gemerkte Nutzer-Ansicht zeigte dann ins
+  // Leere. Neue Szene, neue Einpassung.
+  if(!hadFit && M.fit) userView=false;
   // Einmal je Aenderung, nicht je Bild: suggest() ruft intern analyze() je
   // Kandidat auf, im Zug waere das ein Ruckeln.
   M.sugg = (M.an && M.pts.length>=3)
@@ -750,41 +955,89 @@ function render(){
   renderPanel();
 }
 
+// ================= Zeichnung =================
+
+// Rasterschritt in mm so, dass die Linien auf dem Schirm weder kleben noch
+// verhungern - gleiche 1-2-5-Logik wie beim Massstabsbalken.
+function pickStep(minPx){
+  const cand=[100,200,500,1000,2000,5000,10000,20000,50000];
+  for(const s of cand) if(s*VIEW.s>=minPx) return s;
+  return cand[cand.length-1];
+}
+
+function drawGrid(dpr){
+  const step=pickStep(45*dpr);
+  const w0=toWorld(0,0), w1=toWorld(cv.width,cv.height);
+  ctx.strokeStyle=INK.grid; ctx.lineWidth=Math.max(1,0.75*dpr);
+  ctx.beginPath();
+  for(let x=Math.floor(w0.x/step)*step; x<=w1.x; x+=step){
+    const s=toScr({x,y:0}); ctx.moveTo(s.x,0); ctx.lineTo(s.x,cv.height);
+  }
+  for(let y=Math.floor(w0.y/step)*step; y<=w1.y; y+=step){
+    const s=toScr({x:0,y}); ctx.moveTo(0,s.y); ctx.lineTo(cv.width,s.y);
+  }
+  ctx.stroke();
+}
+
+// Oben links, nicht unten: unten wohnt die Hinweiszeile, und zwei
+// uebereinandergelegte Textzeilen sind keine.
+function drawScalebar(dpr){
+  const step=pickStep(70*dpr);
+  const len=step*VIEW.s, x=14*dpr, y=20*dpr;
+  ctx.strokeStyle=INK.scale; ctx.fillStyle=INK.scale; ctx.lineWidth=1.5*dpr;
+  ctx.beginPath();
+  ctx.moveTo(x,y); ctx.lineTo(x+len,y);
+  ctx.moveTo(x,y-4*dpr); ctx.lineTo(x,y+4*dpr);
+  ctx.moveTo(x+len,y-4*dpr); ctx.lineTo(x+len,y+4*dpr);
+  ctx.stroke();
+  ctx.font=`${11*dpr}px system-ui`; ctx.textAlign='left';
+  ctx.fillText(step>=1000 ? (step/1000)+' m' : step+' mm', x+len+6*dpr, y+3.5*dpr);
+}
+
 // Reines Zeichnen, ohne die Tabelle anzufassen: ein Hover auf Zeile oder
 // Vorschlag soll nur die Hervorhebung im Plan aktualisieren, nicht das Panel
-// neu aufbauen - sonst zerstoert render() per renderPanel() genau die Zeile,
-// auf der der Cursor gerade steht (ungespeicherte Eingabe weg, Fokus weg,
-// mouseleave feuert nie, weil das Element unter dem Cursor verschwindet).
+// neu aufbauen - sonst zerstoert render() genau die Zeile, auf der der
+// Cursor gerade steht.
 function drawCanvas(){
-  const dpr=devicePixelRatio||1;
+  const dpr=DPR();
   cv.width=cv.clientWidth*dpr; cv.height=cv.clientHeight*dpr;
   ctx.setTransform(1,0,0,1,0,0);
   ctx.clearRect(0,0,cv.width,cv.height);
   // Waehrend eines Drags aus M.pts zeichnen und die View festhalten: liefe
-  // autofit() bei jeder Mausbewegung neu, wuerde die Skalierung springen und
-  // der Punkt unter dem Cursor wegrutschen statt ihm zu folgen. Vor dem ersten
-  // Fit genauso: ohne Loesung gibt es keinen sinnvollen Massstab, und ein Refit
-  // zwischen zwei Klicks wuerde jeden Klick in einem anderen Bezugsrahmen lesen
-  // als dem, der beim Zeichnen zu sehen war - die Skizze verzerrt sich, bevor
-  // der Solver sie ueberhaupt bekommt.
-  if(!M.drag && M.fit) autofit();
+  // autofit() bei jeder Bewegung neu, wuerde die Skalierung springen und der
+  // Punkt unter dem Finger wegrutschen. Vor dem ersten Fit genauso: ohne
+  // Loesung gibt es keinen sinnvollen Massstab. Und eine vom Nutzer gewaehlte
+  // Ansicht (userView) wird grundsaetzlich nicht angefasst.
+  if(!M.drag && M.fit && !userView) autofit();
   const P=M.drag?M.pts:(M.fit?M.fit.pts:M.pts), I=C.idx(P);
+  // Raster und Massstab erst, wenn die Koordinaten Millimeter sind - vorher
+  // waere beides eine Aussage ueber Bildschirmpixel.
+  if(M.fit){ drawGrid(dpr); drawScalebar(dpr); }
   // Waende
-  ctx.strokeStyle='#333'; ctx.lineWidth=2*dpr;
+  ctx.strokeStyle=INK.wall; ctx.lineWidth=2.5*dpr; ctx.lineCap='round';
   M.walls.forEach(([a,b])=>{
     if(I[a]==null||I[b]==null) return;
     const p=toScr(P[I[a]]), q=toScr(P[I[b]]);
     ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
   });
+  // Hervorgehobenes Paar breit unterlegen - VOR Messungen und Vorschlaegen,
+  // damit deren Strichmuster darauf liegen bleibt. Deckt auch den Fall ab,
+  // dass eine blosse Wand angetippt wurde (Eingabe offen): die ist weder
+  // Messung noch Vorschlag und bekaeme sonst gar kein Echo im Plan.
+  if(M.highlight && I[M.highlight.a]!=null && I[M.highlight.b]!=null){
+    const p=toScr(P[I[M.highlight.a]]), q=toScr(P[I[M.highlight.b]]);
+    ctx.save();
+    ctx.strokeStyle=INK.accent; ctx.globalAlpha=.30; ctx.lineWidth=7*dpr; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
+    ctx.restore();
+  }
   // Messungen
   ctx.setLineDash([6*dpr,4*dpr]);
   C.activeMeas(M.meas).forEach(m=>{
     if(I[m.a]==null||I[m.b]==null) return;
-    // Hervorhebung: Tabellenzeile oder Vorschlag im Panel gehovert - Paar ist
-    // ungerichtet, A→B und B→A meinen dieselbe Strecke.
     const hl = M.highlight && ((M.highlight.a===m.a&&M.highlight.b===m.b)||(M.highlight.a===m.b&&M.highlight.b===m.a));
-    ctx.strokeStyle = hl ? '#063' : '#3a7';
-    ctx.lineWidth   = (hl?3:1)*dpr;
+    ctx.strokeStyle = hl ? INK.measHl : INK.meas;
+    ctx.lineWidth   = (hl?3:1.5)*dpr;
     const p=toScr(P[I[m.a]]), q=toScr(P[I[m.b]]);
     ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
   });
@@ -795,10 +1048,8 @@ function drawCanvas(){
   if(M.sugg.length){
     M.sugg.forEach(sg=>{
       if(I[sg.a]==null||I[sg.b]==null) return;
-      // Analog zu den Messungen: dieselbe ungerichtete Paarpruefung gegen
-      // M.highlight, nur dunkleres Rot statt dunkleres Gruen.
       const hl = M.highlight && ((M.highlight.a===sg.a&&M.highlight.b===sg.b)||(M.highlight.a===sg.b&&M.highlight.b===sg.a));
-      ctx.strokeStyle = hl ? '#900' : '#d33';
+      ctx.strokeStyle = hl ? INK.todoHl : INK.todo;
       ctx.lineWidth   = (hl?3:1.5)*dpr;
       const p=toScr(P[I[sg.a]]), q=toScr(P[I[sg.b]]);
       ctx.setLineDash(sg.why==='bestimmt' ? [2*dpr,4*dpr] : [1*dpr,6*dpr]);
@@ -806,9 +1057,11 @@ function drawCanvas(){
     });
     ctx.setLineDash([]);
   }
-  // Jede Messung beschriftet - sonst sieht man Striche und weiss nicht, welcher
-  // 4,25 m ist. Bei mehreren Werten fuers selbe Paar die Anzahl dazu.
-  ctx.font=`${11*dpr}px system-ui`; ctx.textAlign='center';
+  // Jede Messung beschriftet - sonst sieht man Striche und weiss nicht,
+  // welcher 4,25 m ist. Bei mehreren Werten fuers selbe Paar die Anzahl dazu.
+  // Hintergrund nach gemessener Textbreite, nicht fest - "12,345 (3×)" ragte
+  // sonst heraus.
+  ctx.font=`${12*dpr}px system-ui`; ctx.textAlign='center';
   const gezeigt=new Set();
   C.activeMeas(M.meas).forEach(m=>{
     if(I[m.a]==null||I[m.b]==null) return;
@@ -819,31 +1072,39 @@ function drawCanvas(){
     const p=toScr(P[I[m.a]]), q=toScr(P[I[m.b]]);
     const txt=alle.length>1 ? `${fmtM(m.d)} (${alle.length}×)` : fmtM(m.d);
     const mx=(p.x+q.x)/2, my=(p.y+q.y)/2;
-    ctx.fillStyle='#fff'; ctx.fillRect(mx-22*dpr, my-8*dpr, 44*dpr, 14*dpr);
-    ctx.fillStyle='#3a7'; ctx.fillText(txt, mx, my+3*dpr);
+    const tw=ctx.measureText(txt).width;
+    ctx.fillStyle=INK.labelBg; ctx.fillRect(mx-tw/2-4*dpr, my-8*dpr, tw+8*dpr, 15*dpr);
+    ctx.fillStyle=INK.meas; ctx.fillText(txt, mx, my+3.5*dpr);
   });
   ctx.textAlign='start';
-  // Punkte zuerst zeichnen, Ellipsen/Pfeile erst danach darueber: eine
-  // Ellipse, die kleiner als der Punktmarker waere, muss als Ring auf dem
-  // Marker sichtbar bleiben statt darunter zu verschwinden.
-  P.forEach((pt,i)=>{
+  // Punkte: weisser Rand haelt den Marker auf Linien lesbar. Auswahl und
+  // aktiver Zeichenzug in der Akzentfarbe.
+  P.forEach(pt=>{
     const p=toScr(pt);
-    ctx.fillStyle=M.sel.includes(pt.id)?'#c30':'#036';
-    ctx.beginPath(); ctx.arc(p.x,p.y,5*dpr,0,7); ctx.fill();
-    ctx.fillStyle='#000'; ctx.font=`${12*dpr}px system-ui`;
-    ctx.fillText(pt.id, p.x+8*dpr, p.y-8*dpr);
+    ctx.fillStyle=INK.canvas;
+    ctx.beginPath(); ctx.arc(p.x,p.y,9*dpr,0,7); ctx.fill();
+    ctx.fillStyle=M.sel.includes(pt.id)?INK.accent:INK.point;
+    ctx.beginPath(); ctx.arc(p.x,p.y,6.5*dpr,0,7); ctx.fill();
+    if(M.chain===pt.id){
+      ctx.strokeStyle=INK.accent; ctx.lineWidth=2.5*dpr;
+      ctx.beginPath(); ctx.arc(p.x,p.y,10.5*dpr,0,7); ctx.stroke();
+    }
+    ctx.font=`600 ${13*dpr}px system-ui`;
+    ctx.strokeStyle=INK.canvas; ctx.lineWidth=4*dpr; ctx.lineJoin='round';
+    ctx.strokeText(pt.id, p.x+11*dpr, p.y-9*dpr);
+    ctx.fillStyle=INK.point;
+    ctx.fillText(pt.id, p.x+11*dpr, p.y-9*dpr);
   });
   if(M.drag && M.dragMode){
-    document.getElementById('hint').textContent =
-      {frei:'Skizze frei — noch keine Messung',
-       moden:'Punkt folgt den Messungen',
-       starr:'Raum ist bestimmt — nur verschiebbar, Maß ändern statt ziehen'}[M.dragMode];
+    setHintLive({frei:'Skizze frei — noch keine Messung',
+      moden:'Punkt folgt den Messungen',
+      starr:'Raum ist bestimmt — nur verschiebbar, Maß ändern statt ziehen'}[M.dragMode]);
   }
   // Unsicherheiten. Drei Faelle, die verschieden aussehen muessen:
   // ueberbestimmt -> Ellipse aus sigmaHat; bestimmt -> Ellipse aus dem
   // angenommenen sigma; beweglich -> Pfeil, weil eine Ellipse dort unendlich
   // gross waere und die Zeichnung damit luegen wuerde.
-  let exagg=null;   // Ueberhoehungsfaktor dieser Zeichnung, fuer die Legende
+  let exagg=null;
   if(M.an){
     const moving=new Array(P.length).fill(false);
     M.an.modes.forEach(mo=>{
@@ -853,10 +1114,6 @@ function drawCanvas(){
       });
     });
     const cov=M.an.dof===0 ? C.covariance(P, M.meas, M.an.sigmaHat) : null;
-    // Ellipsen vorab in mm berechnen: der Ueberhoehungsfaktor braucht die
-    // groesste Halbachse der GANZEN Zeichnung, bevor die erste Ellipse auf
-    // den Bildschirm kommt - und es darf nur EIN Faktor fuer alle Punkte
-    // gelten, sonst verzerrt sich ihre Groesse zueinander (siehe Konstanten).
     const ell = cov ? P.map((_,i)=> moving[i] ? null : C.ellipse(cov[i])) : null;
     const maxA = ell ? ell.reduce((mx,e)=> e && e.a>mx ? e.a : mx, 0) : 0;
     if(maxA>0) exagg = niceFactor(ELLIPSE_TARGET_PX*dpr/(maxA*VIEW.s));
@@ -864,7 +1121,7 @@ function drawCanvas(){
     P.forEach((pt,i)=>{
       const c=toScr(pt);
       if(moving[i]){
-        ctx.strokeStyle='#c60';
+        ctx.strokeStyle=INK.mode;
         M.an.modes.forEach(mo=>{
           const nrm=Math.hypot(...mo)||1;
           const dx=mo[2*i]/nrm, dy=mo[2*i+1]/nrm;
@@ -875,7 +1132,7 @@ function drawCanvas(){
         });
       } else if(ell && ell[i]){
         const e=ell[i];
-        ctx.strokeStyle=M.an.sigmaHat!=null?'#07a':'#999';
+        ctx.strokeStyle=M.an.sigmaHat!=null?INK.ellMeasured:INK.ellAssumed;
         ctx.setLineDash(M.an.sigmaHat!=null?[]:[3*dpr,3*dpr]);
         ctx.save(); ctx.translate(c.x,c.y); ctx.rotate(e.ang);
         ctx.beginPath();
@@ -885,17 +1142,17 @@ function drawCanvas(){
     });
   }
   // Legende nachfuehren: null blendet sie aus, sonst bliebe eine Zahl aus
-  // einer frueheren Zeichnung stehen, sobald z.B. alle Punkte beweglich sind
-  // und gar keine Ellipse mehr gezeichnet wird.
-  document.getElementById('exagg').innerHTML = exagg!=null
-    ? ` &nbsp; Ellipsen ×${exagg} überhöht` : '';
+  // einer frueheren Zeichnung stehen.
+  $('exagg').textContent = exagg!=null ? ` — hier ×${exagg} überhöht` : '';
 }
+
+// ================= Treffer =================
 
 function hit(wx,wy){
   const P=M.fit?M.fit.pts:M.pts;
   let best=null, bd=Infinity;
   P.forEach(p=>{ const d=C.dist(p,{x:wx,y:wy}); if(d<bd){bd=d;best=p;} });
-  return (best && bd*VIEW.s < 14) ? best : null;
+  return (best && bd*VIEW.s < HIT_R*DPR()) ? best : null;
 }
 
 // Abstand eines Punktes zu einer Strecke, plus Fusspunkt-Parameter.
@@ -904,8 +1161,8 @@ function distToSeg(p,a,b){
   const t=L2? Math.max(0,Math.min(1,((p.x-a.x)*vx+(p.y-a.y)*vy)/L2)) : 0;
   return {d:Math.hypot(p.x-(a.x+vx*t), p.y-(a.y+vy*t)), t};
 }
-// Naechste Wand unter dem Cursor. Nur die mittleren 70 Prozent zaehlen -
-// nahe den Enden soll der Eckpunkt gewinnen, sonst kaeme man nicht mehr an ihn heran.
+// Naechste Wand unterm Finger. Nur die mittleren 70 Prozent zaehlen - nahe
+// den Enden soll der Eckpunkt gewinnen, sonst kaeme man nicht mehr an ihn heran.
 function nearestWall(wx,wy){
   const P=M.drag?M.pts:(M.fit?M.fit.pts:M.pts), I=C.idx(P);
   let best=null, bd=Infinity;
@@ -915,221 +1172,475 @@ function nearestWall(wx,wy){
     if(r.t<0.15||r.t>0.85) return;
     if(r.d<bd){ bd=r.d; best={a,b}; }
   });
-  return (best && bd*VIEW.s < 12) ? best : null;
+  return (best && bd*VIEW.s < WALL_R*DPR()) ? best : null;
 }
 
+// ================= Masseingabe =================
+
 let entryPair=null;
+// Gefuehrter Fluss: Eingabe kam von einem Vorschlags-Chip. Nach dem
+// Bestaetigen springt sie automatisch zum naechsten Vorschlag - auf der
+// Baustelle heisst das: Chip antippen, dann nur noch messen, tippen, OK,
+// messen, tippen, OK, bis nichts mehr fehlt.
+let entryGuided=false;
+const isDesktop=()=>matchMedia('(min-width:880px)').matches;
+
 // Mass fuer ein Paar eintragen. Einheit ist METER - die Tabelle zeigt Meter,
 // der Laser zeigt Meter, und die frueher hier verlangten Millimeter waren die
 // Ursache dafuer, dass ein getipptes "4.250" einen 4,25-mm-Raum ergab, ohne
-// dass eine Pruefung anschlug: sind alle Masse gleich falsch, ist das Netz
-// konsistent, und Geometrie ist massstabsinvariant.
-function enterMeasurement(a,b){
+// dass eine Pruefung anschlug.
+function enterMeasurement(a,b,guided=false){
   const P=M.fit?M.fit.pts:M.pts, I=C.idx(P);
   if(I[a]==null||I[b]==null) return;
-  entryPair={a,b};
-  const mid={x:(P[I[a]].x+P[I[b]].x)/2, y:(P[I[a]].y+P[I[b]].y)/2};
-  const s=toScr(mid), dpr=devicePixelRatio||1;
-  const box=document.getElementById('entry');
-  box.style.display='block';
-  // toScr() gibt Koordinaten relativ zur Canvas-Ecke, #entry haengt aber an
-  // #left - und die Canvas ist darin nicht die erste Zeile (Status/Modi stehen
-  // darueber). Ohne den Versatz der Canvas selbst landet das Feld am Kopf von
-  // #left statt an der Wand (browser-vermessen: cv.offsetTop ~90px).
-  box.style.left=(s.x/dpr+cv.offsetLeft-60)+'px';
-  box.style.top =(s.y/dpr+cv.offsetTop-18)+'px';
+  entryPair={a,b}; entryGuided=guided;
+  // Solange die Eingabe offen ist, zeigt der Plan die Strecke an - auf Touch
+  // gibt es kein Hover, das das sonst uebernehmen wuerde.
+  M.highlight={a,b};
   const vorhanden=M.meas.filter(m=>(m.a===a&&m.b===b)||(m.a===b&&m.b===a));
-  document.getElementById('entryLabel').textContent = vorhanden.length
-    ? `${a}–${b} — bisher ${vorhanden.map(m=>fmtM(m.d)).join(', ')} m, weiterer Wert:`
-    : `${a}–${b}`;
-  const inp=document.getElementById('entryVal');
-  // Carried-over aus Task 5: eine rote Fehlermarkierung (siehe commitEntry)
-  // darf nicht ins naechste Paar hinueberhaengen - dieses Feld hier hat noch
-  // gar keinen abgelehnten Wert gesehen. Einzige Ausnahme von "enterMeasurement
-  // unangetastet": der Brief zaehlt diesen Fix explizit zu Task 8.
-  inp.value=''; inp.style.background=''; inp.focus();
+  $('entryLabel').textContent = vorhanden.length
+    ? `${a}–${b} — bisher ${vorhanden.map(m=>fmtM(m.d)).join(' · ')} m, weiterer Wert:`
+    : `Strecke ${a}–${b}`;
+  const box=$('entry');
+  box.hidden=false;
+  placeEntry();
+  const inp=$('entryVal');
+  inp.value=''; inp.classList.remove('bad'); inp.focus();
+  drawCanvas();
 }
-function closeEntry(){ entryPair=null; document.getElementById('entry').style.display='none'; }
+function placeEntry(){
+  const box=$('entry');
+  if(box.hidden) return;
+  if(!isDesktop()){
+    // Fixe Leiste am unteren Rand; die VisualViewport-Verschiebung hebt sie
+    // ueber die eingeblendete Tastatur (siehe Listener unten).
+    box.style.left=box.style.top='';
+    const vv=window.visualViewport;
+    box.style.transform = vv
+      ? `translateY(${-(innerHeight - vv.height - vv.offsetTop)}px)` : '';
+    return;
+  }
+  box.style.transform='';
+  if(!entryPair) return;
+  const P=M.fit?M.fit.pts:M.pts, I=C.idx(P);
+  const mid={x:(P[I[entryPair.a]].x+P[I[entryPair.b]].x)/2,
+             y:(P[I[entryPair.a]].y+P[I[entryPair.b]].y)/2};
+  const s=toScr(mid), dpr=DPR();
+  const wrap=$('canvaswrap');
+  const x=Math.max(8, Math.min(wrap.clientWidth-box.offsetWidth-8, s.x/dpr-box.offsetWidth/2));
+  const y=Math.max(8, Math.min(wrap.clientHeight-box.offsetHeight-8, s.y/dpr+14));
+  box.style.left=x+'px'; box.style.top=y+'px';
+}
+function closeEntry(){
+  entryPair=null; entryGuided=false;
+  $('entry').hidden=true;
+  M.highlight=null;
+  drawCanvas();
+}
 function commitEntry(){
   if(!entryPair) return;
-  const inp=document.getElementById('entryVal');
+  const inp=$('entryVal');
   const d=parseFloat(inp.value.replace(',','.'))*1000;
-  if(!isFinite(d)||d<=0){ inp.style.background='#fdd'; return; }
+  if(!isFinite(d)||d<=0){ inp.classList.add('bad'); return; }
   if(d<100 && !confirm(`${fmtM(d)} m ist sehr kurz — als Meter gemeint?\n\nOK = so übernehmen`)) return;
   snapshot();
   M.meas.push({a:entryPair.a, b:entryPair.b, d, sigma:C.SIGMA_DEF, on:true});
+  const wasGuided=entryGuided;
   closeEntry();
   recompute();
+  // Der gefuehrte Fluss laeuft die Vorschlagsliste ab, bis sie leer ist.
+  // Kein Endlos-Risiko: jede bestaetigte Messung verkuerzt die Liste.
+  if(wasGuided && M.sugg.length){
+    const s=M.sugg[0];
+    enterMeasurement(s.a, s.b, true);
+  } else if(wasGuided){
+    setHint('Nichts mehr zu messen — Form bestimmt und geprüft.');
+  }
 }
-document.getElementById('entryOk').onclick=commitEntry;
-document.getElementById('entryVal').addEventListener('keydown',e=>{
+$('entryOk').onclick=commitEntry;
+$('entryX').onclick=closeEntry;
+$('entryVal').addEventListener('keydown',e=>{
   e.stopPropagation();                       // Modus-Kuerzel duerfen hier nicht feuern
   if(e.key==='Enter') commitEntry();
   if(e.key==='Escape') closeEntry();
 });
-// Carried-over aus Task 5: die rote Fehlermarkierung einer abgelehnten Eingabe
-// (siehe commitEntry) blieb stehen, auch nachdem ein gueltiger Wert eingetippt
-// wurde. enterMeasurement() selbst bleibt unangetastet - hier wird stattdessen
-// bei jeder Eingabeaenderung zurueckgesetzt.
-document.getElementById('entryVal').addEventListener('input',()=>{
-  document.getElementById('entryVal').style.background='';
-});
+// Eine rote Fehlermarkierung darf nicht stehen bleiben, sobald der Nutzer
+// weitertippt.
+$('entryVal').addEventListener('input',()=>$('entryVal').classList.remove('bad'));
+if(window.visualViewport){
+  visualViewport.addEventListener('resize',placeEntry);
+  visualViewport.addEventListener('scroll',placeEntry);
+}
+
+// ================= Loesch-Popover =================
+// Ein Bestaetigungsknopf statt Sofort-Loeschen: auf Touch ist der lange
+// Druck leicht aus Versehen ausgeloest, und das Popover kostet einen Tipp,
+// kein Nachdenken.
+
+function showPop(devX,devY,label,onDel){
+  const pop=$('pop'), dpr=DPR(), wrap=$('canvaswrap');
+  $('popLabel').textContent=label;
+  $('popDel').onclick=()=>{ hidePop(); onDel(); };
+  pop.hidden=false;
+  const x=Math.max(8, Math.min(wrap.clientWidth-pop.offsetWidth-8, devX/dpr-pop.offsetWidth/2));
+  const y=Math.max(8, Math.min(wrap.clientHeight-pop.offsetHeight-8, devY/dpr-pop.offsetHeight-14));
+  pop.style.left=x+'px'; pop.style.top=y+'px';
+}
+function hidePop(){ $('pop').hidden=true; }
+
+function deletePoint(id){
+  snapshot();
+  M.pts=M.pts.filter(p=>p.id!==id);
+  M.walls=M.walls.filter(([a,b])=>a!==id&&b!==id);
+  M.meas=M.meas.filter(m=>m.a!==id&&m.b!==id);
+  M.sel=[];
+  if(M.chain===id) M.chain=null;
+  recompute();
+}
+function deleteWall(a,b){
+  const k=[a,b].sort().join('|');
+  const at=M.walls.findIndex(w=>[w[0],w[1]].sort().join('|')===k);
+  if(at<0) return;
+  snapshot();
+  M.walls.splice(at,1);
+  recompute();
+}
+
+// ================= Gesten =================
+// Ein Pointer-Modell fuer Maus UND Finger. Ein Tipp legt an oder waehlt aus,
+// ein Zug verschiebt Punkt oder Ansicht, zwei Finger zoomen, langes Druecken
+// loescht. Der Punkt entsteht deshalb erst beim Loslassen, nicht beim
+// Druecken - vorher ist nicht bekannt, ob ein Zug daraus wird.
+
+const pointers=new Map();      // pointerId -> letzte Client-Position
+let gesture=null;              // {t:'point'|'selpt'|'bg', ...}
+let pinch=null;                // {d0, cx0, cy0, view0}
+let lpTimer=null;
+let lastPtrType='mouse';
+
+function armLongpress(fn){ cancelLongpress(); lpTimer=setTimeout(()=>{ lpTimer=null; fn(); }, LONGPRESS_MS); }
+function cancelLongpress(){ if(lpTimer){ clearTimeout(lpTimer); lpTimer=null; } }
 
 // Der Snapshot eines Zugs gehoert der ERSTEN echten Bewegung, nicht dem
-// Mausdruck: sonst frisst ein blosser Klick ohne Drag (Auswahl, Wandwechsel)
-// das naechste Strg+Z. mousedown merkt den Vorzustand nur vor; mousemove
-// committet ihn beim ersten Schritt, mouseup verwirft ihn ohne Bewegung.
-let dragSnapshot=null;
+// Druecken: sonst frisst ein blosser Tipp ohne Zug das naechste Undo.
+function startPinch(){
+  const [p1,p2]=[...pointers.values()];
+  const r=cv.getBoundingClientRect(), dpr=DPR();
+  pinch={ d0:Math.hypot(p1.x-p2.x,p1.y-p2.y)||1,
+          cx0:((p1.x+p2.x)/2-r.left)*dpr, cy0:((p1.y+p2.y)/2-r.top)*dpr,
+          view0:{...VIEW} };
+  cancelLongpress();
+  gesture=null;
+  if(M.drag){ M.drag=null; M.dragMode=null; }
+}
+function updatePinch(){
+  const [p1,p2]=[...pointers.values()];
+  const r=cv.getBoundingClientRect(), dpr=DPR();
+  const d=Math.hypot(p1.x-p2.x,p1.y-p2.y)||1;
+  const cx=((p1.x+p2.x)/2-r.left)*dpr, cy=((p1.y+p2.y)/2-r.top)*dpr;
+  const f=d/pinch.d0;
+  VIEW.s=pinch.view0.s*f;
+  VIEW.ox=cx+(pinch.view0.ox-pinch.cx0)*f;
+  VIEW.oy=cy+(pinch.view0.oy-pinch.cy0)*f;
+  userView=true;
+  render();
+}
 
-cv.addEventListener('mousedown',e=>{
-  const r=cv.getBoundingClientRect(), dpr=devicePixelRatio||1;
-  const w=toWorld((e.clientX-r.left)*dpr, (e.clientY-r.top)*dpr);
+cv.addEventListener('pointerdown',e=>{
+  // Nur die Primaertaste zeichnet. Ein Rechtsklick kommt hier ebenfalls als
+  // pointerdown an und wuerde sonst beim Loslassen eine Ecke setzen - der
+  // gehoert dem contextmenu-Handler.
+  if(e.pointerType==='mouse' && e.button!==0){ lastPtrType='mouse'; return; }
+  cv.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  lastPtrType=e.pointerType;
+  // Ein Tipp, der nur das offene Loesch-Popover wegdrueckt, darf nicht
+  // nebenbei eine Ecke setzen oder eine Eingabe oeffnen.
+  const popOpen=!$('pop').hidden;
+  hidePop();
+  if(pointers.size===2){ startPinch(); return; }
+  if(pointers.size>2 || pinch) return;
+  const d=evDev(e), w=toWorld(d.x,d.y);
   const h=hit(w.x,w.y);
-  if(M.mode==='point'){
-    if(h){ dragSnapshot=serialize(); M.drag=h.id; return; }
-    snapshot(); M.pts.push({id:nextId(), x:w.x, y:w.y}); recompute(); return;
+  if(h){
+    if(M.mode==='draw'){
+      gesture={t:'point',id:h.id,x0:e.clientX,y0:e.clientY,lx:e.clientX,ly:e.clientY,
+               moved:false,snap:serialize(),popOpen};
+      M.drag=h.id; M.dragMode=null;
+      armLongpress(()=>{
+        gesture=null; M.drag=null; M.dragMode=null;
+        const s=toScr(M.fit?M.fit.pts[C.idx(M.fit.pts)[h.id]]:h);
+        showPop(s.x,s.y,`Ecke ${h.id} löschen?`,()=>deletePoint(h.id));
+      });
+    } else {
+      gesture={t:'selpt',id:h.id,x0:e.clientX,y0:e.clientY,moved:false,popOpen};
+    }
+    return;
   }
-  if(M.mode==='measure' && !h){
-    const wall=nearestWall(w.x,w.y);
-    // Carried-over aus Task 5: eine halb angefangene Punktauswahl (M.sel hat
-    // schon einen Eintrag) darf nicht stehen bleiben, wenn stattdessen eine
-    // Wand getroffen wird - sonst bleibt der erste Punkt optisch markiert,
-    // waehrend das Eingabefeld schon fuer das Wandpaar offen ist. render()
-    // vor dem Oeffnen des Feldes, damit die Markierung sofort verschwindet.
-    if(wall){ M.sel=[]; render(); enterMeasurement(wall.a, wall.b); return; }
+  const wall=nearestWall(w.x,w.y);
+  gesture={t:'bg',x0:e.clientX,y0:e.clientY,lx:e.clientX,ly:e.clientY,moved:false,wall,popOpen};
+  if(wall && M.mode==='draw'){
+    armLongpress(()=>{
+      gesture=null;
+      const P=M.fit?M.fit.pts:M.pts, I=C.idx(P);
+      const mid=toScr({x:(P[I[wall.a]].x+P[I[wall.b]].x)/2, y:(P[I[wall.a]].y+P[I[wall.b]].y)/2});
+      showPop(mid.x,mid.y,`Wand ${wall.a}–${wall.b} löschen?`,()=>deleteWall(wall.a,wall.b));
+    });
   }
-  if(!h) return;
-  M.sel.push(h.id);
+});
+
+cv.addEventListener('pointermove',e=>{
+  if(!pointers.has(e.pointerId)) return;
+  pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pinch){ if(pointers.size>=2) updatePinch(); return; }
+  if(!gesture) return;
+  const moved=Math.hypot(e.clientX-gesture.x0,e.clientY-gesture.y0)>TAP_SLOP;
+  if(moved && !gesture.moved){ gesture.moved=true; cancelLongpress(); }
+  if(gesture.t==='point' && gesture.moved){
+    // Erste echte Bewegung dieses Zugs: jetzt erst den beim Druecken
+    // gemerkten Vorzustand auf den Undo-Stapel legen.
+    if(gesture.snap){ pushSnapshot(gesture.snap); gesture.snap=null; }
+    const d=evDev(e), w=toWorld(d.x,d.y);
+    const i=M.pts.findIndex(x=>x.id===gesture.id);
+    if(i<0) return;
+    const dx=w.x-M.pts[i].x, dy=w.y-M.pts[i].y;
+    // Ziehen kennt drei Lagen: noch keine Messung (Skizze frei), dof > 0
+    // (der Punkt folgt der Maus so weit, wie die Messungen es zulassen),
+    // dof = 0 (die Form ist bestimmt, es bleibt das Verschieben des Ganzen).
+    if(!M.an){
+      M.dragMode='frei';
+      M.pts[i].x=w.x; M.pts[i].y=w.y;
+    } else if(M.an.dof>0){
+      M.dragMode='moden';
+      const mv=C.dragAlongModes(M.pts, M.an.modes, i, dx, dy);
+      if(mv){
+        const fit=C.solve(mv, M.meas);       // Korrektor: zurueck auf die Messungen
+        fit.pts.forEach((p,q)=>{ M.pts[q].x=p.x; M.pts[q].y=p.y; });
+      }
+    } else {
+      M.dragMode='starr';
+      M.pts.forEach(p=>{ p.x+=dx; p.y+=dy; });
+    }
+    render();
+    return;
+  }
+  if(gesture.t==='bg' && gesture.moved){
+    // Zug im Leeren verschiebt die Ansicht.
+    const dpr=DPR();
+    VIEW.ox+=(e.clientX-gesture.lx)*dpr;
+    VIEW.oy+=(e.clientY-gesture.ly)*dpr;
+    gesture.lx=e.clientX; gesture.ly=e.clientY;
+    userView=true;
+    render();
+  }
+});
+
+function endPointer(e){
+  pointers.delete(e.pointerId);
+  cancelLongpress();
+  if(pinch){
+    // Bleibt ein Finger liegen, soll daraus kein versehentlicher Tipp werden.
+    if(pointers.size<2){ pinch=null; gesture=null; }
+    return;
+  }
+  const g=gesture; gesture=null;
+  if(!g){
+    if(M.drag){ M.drag=null; M.dragMode=null; recompute(); }
+    return;
+  }
+  if(g.t==='point'){
+    M.drag=null; M.dragMode=null; setHint(null);
+    if(g.moved){ recompute(); return; }
+    if(!g.popOpen) tapPointDraw(g.id);
+    return;
+  }
+  if(g.t==='selpt'){
+    if(!g.moved && !g.popOpen) tapPointMeasure(g.id);
+    return;
+  }
+  // g.t==='bg'
+  if(g.moved){ render(); return; }
+  if(e.type==='pointercancel' || g.popOpen) return;
+  const d=evDev(e), w=toWorld(d.x,d.y);
+  if(M.mode==='measure'){
+    const wall=g.wall||nearestWall(w.x,w.y);
+    if(wall){ M.sel=[]; render(); enterMeasurement(wall.a,wall.b); }
+    else if(entryPair) closeEntry();
+    return;
+  }
+  addPoint(w);
+}
+cv.addEventListener('pointerup',endPointer);
+cv.addEventListener('pointercancel',endPointer);
+
+// Rechtsklick (Maus): gleiches Loesch-Popover wie der lange Druck. Auf Touch
+// feuert Android bei langem Druck zusaetzlich contextmenu - dann regelt schon
+// der eigene Timer, hier nur den Browserdialog unterdruecken.
+cv.addEventListener('contextmenu',e=>{
+  e.preventDefault();
+  if(lastPtrType!=='mouse') return;
+  const d=evDev(e), w=toWorld(d.x,d.y);
+  const h=hit(w.x,w.y);
+  if(h){
+    const s=toScr(h);
+    showPop(s.x,s.y,`Ecke ${h.id} löschen?`,()=>deletePoint(h.id));
+    return;
+  }
+  const wall=nearestWall(w.x,w.y);
+  if(wall){
+    showPop(d.x,d.y,`Wand ${wall.a}–${wall.b} löschen?`,()=>deleteWall(wall.a,wall.b));
+  }
+});
+
+// Mausrad und Trackpad-Pinch (ctrlKey) zoomen um den Cursor.
+cv.addEventListener('wheel',e=>{
+  e.preventDefault();
+  const d=evDev(e);
+  const f=Math.exp(-e.deltaY*(e.ctrlKey?0.01:0.0015));
+  zoomAt(d.x,d.y,f);
+  render();
+},{passive:false});
+
+// ================= Tipp-Aktionen =================
+
+// Zeichnen-Modus, Tipp auf bestehenden Punkt: Zug fortsetzen. Vom aktiven
+// Kettenende entsteht eine Wand zu diesem Punkt - der Tipp auf den ERSTEN
+// Punkt schliesst so ganz von selbst den Ring. Nochmaliges Tippen aufs
+// Kettenende laesst den Zug los.
+function tapPointDraw(id){
+  hidePop();
+  if(M.chain==null){ M.chain=id; setHint('Zug aufgenommen — nächste Ecke antippen verbindet.'); render(); return; }
+  if(M.chain===id){ M.chain=null; setHint('Zug abgelegt.'); render(); return; }
+  const a=M.chain, b=id;
+  const k=[a,b].sort().join('|');
+  const at=M.walls.findIndex(w=>[w[0],w[1]].sort().join('|')===k);
+  if(at>=0){
+    // Wand existiert schon: Tipp toggelt sie weg (wie bisher), der Zug
+    // wandert trotzdem weiter.
+    snapshot(); M.walls.splice(at,1); M.chain=b; recompute(); return;
+  }
+  if(C.wallCrossesExisting(M.fit?M.fit.pts:M.pts, M.walls, a, b)){
+    setHint('Diese Wand würde eine bestehende kreuzen — nicht angelegt.');
+    render(); return;
+  }
+  snapshot();
+  M.walls.push([a,b]);
+  M.chain=b;
+  finishIfClosed();
+  recompute();
+}
+
+function tapPointMeasure(id){
+  M.sel.push(id);
   if(M.sel.length===2){
     const [a,b]=M.sel; M.sel=[];
     if(a===b){ render(); return; }
-    if(M.mode==='wall'){
-      const k=[a,b].sort().join('|');
-      const at=M.walls.findIndex(w2=>[w2[0],w2[1]].sort().join('|')===k);
-      // Nur beim Anlegen pruefen, nicht beim Entfernen (siehe "Klick toggelt"
-      // unten) - eine Wand zu entfernen kann nie eine neue Kreuzung erzeugen.
-      if(at<0 && C.wallCrossesExisting(M.fit?M.fit.pts:M.pts, M.walls, a, b)){
-        document.getElementById('hint').textContent =
-          'Diese Wand würde eine bestehende kreuzen — nicht angelegt.';
-        render(); return;
-      }
-      snapshot();
-      if(at>=0) M.walls.splice(at,1); else M.walls.push([a,b]);   // Klick toggelt
-      recompute();
-    } else {
-      enterMeasurement(a,b);
-    }
+    enterMeasurement(a,b);
   } else render();
-});
+}
 
-// Rechtsklick loescht einen Punkt samt allem, was auf ihn zeigt. Ohne die
-// Kaskade blieben verwaiste Verweise in walls/meas stehen und jacobian liefe
-// auf undefined. Ein Fehlklick ist auf einem Klick-Canvas sicher, und ein
-// uebriger Punkt kostet dauerhaft 2 Freiheitsgrade.
-cv.addEventListener('contextmenu',e=>{
-  e.preventDefault();
-  const r=cv.getBoundingClientRect(), dpr=devicePixelRatio||1;
-  const w=toWorld((e.clientX-r.left)*dpr, (e.clientY-r.top)*dpr);
-  const h=hit(w.x,w.y);
-  if(!h) return;
+// Zeichnen-Modus, Tipp ins Leere: neue Ecke, vom Kettenende sofort
+// angebunden. So entsteht der Raum in einem Durchgang - antippen, antippen,
+// antippen, zurueck zum ersten Punkt.
+function addPoint(w){
   snapshot();
-  M.pts=M.pts.filter(p=>p.id!==h.id);
-  M.walls=M.walls.filter(([a,b])=>a!==h.id&&b!==h.id);
-  M.meas=M.meas.filter(m=>m.a!==h.id&&m.b!==h.id);
-  M.sel=[];
-  recompute();
-});
-
-// Ziehen kennt drei Lagen:
-//  - noch keine Messung: die Skizze ist frei
-//  - dof > 0: der Punkt folgt der Maus so weit, wie die Messungen es zulassen
-//  - dof = 0: die Form ist bestimmt, es bleibt das Verschieben des ganzen Raums
-cv.addEventListener('mousemove',e=>{
-  if(!M.drag) return;
-  const r=cv.getBoundingClientRect(), dpr=devicePixelRatio||1;
-  const w=toWorld((e.clientX-r.left)*dpr, (e.clientY-r.top)*dpr);
-  const i=M.pts.findIndex(x=>x.id===M.drag);
-  if(i<0) return;
-  // Erste echte Bewegung dieses Zugs: jetzt erst den bei mousedown gemerkten
-  // Vorzustand auf den Undo-Stapel legen (siehe dragSnapshot oben).
-  if(dragSnapshot){ pushSnapshot(dragSnapshot); dragSnapshot=null; }
-  const dx=w.x-M.pts[i].x, dy=w.y-M.pts[i].y;
-  if(!M.an){
-    M.dragMode='frei';
-    M.pts[i].x=w.x; M.pts[i].y=w.y;
-  } else if(M.an.dof>0){
-    M.dragMode='moden';
-    const moved=C.dragAlongModes(M.pts, M.an.modes, i, dx, dy);
-    if(moved){
-      const fit=C.solve(moved, M.meas);     // Korrektor: zurueck auf die Messungen
-      fit.pts.forEach((p,q)=>{ M.pts[q].x=p.x; M.pts[q].y=p.y; });
-    }
-  } else {
-    M.dragMode='starr';
-    M.pts.forEach(p=>{ p.x+=dx; p.y+=dy; });
+  const p={id:nextId(), x:w.x, y:w.y};
+  M.pts.push(p);
+  if(M.chain!=null){
+    if(!C.wallCrossesExisting(M.pts, M.walls, M.chain, p.id)) M.walls.push([M.chain,p.id]);
+    else setHint('Wand würde eine bestehende kreuzen — Ecke ohne Wand angelegt.');
   }
+  M.chain=p.id;
+  recompute();
+}
+
+// Ist der Wandzug mit der letzten Aktion geschlossen worden, ist das
+// Zeichnen erledigt: Zug loslassen und in den Messen-Modus wechseln - genau
+// dahin, wo der Nutzer als Naechstes muss.
+function finishIfClosed(){
+  if(!C.wallPolygonRing(M.pts, M.walls)) return;
+  M.chain=null;
+  setMode('measure');
+  setHint('Wandzug geschlossen — jetzt die vorgeschlagenen Strecken messen.');
+}
+
+// ================= Modi, Werkzeuge =================
+
+const MODE_HINTS={
+  draw:'Antippen setzt Ecken und verbindet sie · Ziehen verschiebt · gedrückt halten löscht.',
+  measure:'Wand oder zwei Ecken antippen, Maß in Metern eintippen.',
+};
+let hintTimer=null;
+// setHint(text): fluechtige Meldung, faellt nach ein paar Sekunden auf den
+// Modus-Standard zurueck. setHint(null) springt sofort dorthin.
+function setHint(txt){
+  clearTimeout(hintTimer); hintTimer=null;
+  if(txt==null){ $('hint').textContent=MODE_HINTS[M.mode]; return; }
+  $('hint').textContent=txt;
+  hintTimer=setTimeout(()=>{ $('hint').textContent=MODE_HINTS[M.mode]; }, 4000);
+}
+// Fuer den Live-Text waehrend eines Zugs: ohne Timeout, ohne Timer-Gefummel.
+function setHintLive(txt){ clearTimeout(hintTimer); hintTimer=null; $('hint').textContent=txt; }
+
+function setMode(mode){
+  M.mode=mode; M.sel=[];
+  if(mode!=='draw') M.chain=null;
+  if(entryPair && mode!=='measure') closeEntry();
+  hidePop();
+  document.querySelectorAll('#modes button[data-mode]').forEach(x=>
+    x.setAttribute('aria-pressed', String(x.dataset.mode===mode)));
+  setHint(null);
   render();
-});
-addEventListener('mouseup',()=>{
-  dragSnapshot=null;                        // ohne Bewegung: verwerfen, nicht committen
-  if(M.drag){ M.drag=null; M.dragMode=null; recompute(); }
+}
+document.querySelectorAll('#modes button[data-mode]').forEach(b=>{
+  b.onclick=()=>setMode(b.dataset.mode);
 });
 
-// [data-mode] statt button schlechthin: #modes enthaelt seit Task 8 auch den
-// Ring-Knopf, der keinen Modus ist und daher weder mitschaltet noch ein
-// aria-pressed bekommen soll.
-document.querySelectorAll('#modes button[data-mode]').forEach(b=>{
-  b.onclick=()=>{
-    M.mode=b.dataset.mode; M.sel=[];
-    document.querySelectorAll('#modes button[data-mode]').forEach(x=>
-      x.setAttribute('aria-pressed', String(x===b)));
-    document.getElementById('hint').textContent=
-      {point:'Klicken legt an, Ziehen verschiebt, Rechtsklick löscht',
-       wall:'Zwei Punkte klicken (nochmal klicken entfernt die Wand)',
-       measure:'Zwei Punkte klicken, dann Maß eintippen'}[M.mode];
-    render();
-  };
-});
-document.getElementById('ring').onclick=()=>{
-  if(M.pts.length<3){ alert('Mindestens 3 Punkte nötig.'); return; }
+$('ring').onclick=()=>{
+  if(M.pts.length<3){ setHint('Mindestens 3 Ecken nötig.'); return; }
   snapshot();
   // In Anlegereihenfolge verbinden - genau so, wie der Nutzer den Raum
   // abgelaufen ist. Ersetzt den bestehenden Zug, statt ihn zu ergaenzen.
   M.walls=M.pts.map((p,i)=>[p.id, M.pts[(i+1)%M.pts.length].id]);
+  M.chain=null;
+  finishIfClosed();
   recompute();
 };
-// Die Hotkeys 1/2/3 sind auf window gebunden, damit sie ueberall im Dokument
-// wirken - aber genau deshalb bubbelt auch ein Tastendruck im Ueberschreib-
-// Feld der Messtabelle (<input>, siehe renderPanel) bis hierher. Ohne diese
-// Sperre wechselt der Moduswechsel-Klick den Modus, renderPanel() baut die
-// Tabelle neu auf und reisst das Eingabefeld mitten in der Eingabe aus dem
-// DOM - jede Ziffer 1, 2 oder 3 im Mass wuerde das Feld zerstoeren statt sie
-// einzutragen.
+
+$('undo').onclick=()=>{ if(!undo()) setHint('Nichts mehr rückgängig zu machen.'); };
+$('fitview').onclick=()=>{ userView=false; autofit(); render(); };
+
+// Die Hotkeys sind auf window gebunden, damit sie ueberall wirken - aber
+// genau deshalb bubbelt auch ein Tastendruck in einem Eingabefeld bis
+// hierher. Ohne die Sperre wuerde eine getippte "1" im Mass den Modus
+// wechseln und das Feld aus dem DOM reissen.
 addEventListener('keydown',e=>{
   const t=e.target;
   if(t && (t.tagName==='INPUT' || t.tagName==='TEXTAREA' || t.isContentEditable)) return;
   if(e.key==='Escape'){
+    hidePop();
     if(entryPair){ closeEntry(); return; }
     if(M.sel.length){ M.sel=[]; render(); return; }
+    if(M.chain){ M.chain=null; render(); return; }
   }
   if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='z'){
     e.preventDefault();
-    if(!undo()) document.getElementById('hint').textContent='Nichts mehr rückgängig zu machen.';
+    if(!undo()) setHint('Nichts mehr rückgängig zu machen.');
     return;
   }
-  const b=document.querySelector(`#modes button[data-mode="${
-    {1:'point',2:'wall',3:'measure'}[e.key]}"]`);
-  if(b) b.click();
+  const mode={1:'draw',2:'measure'}[e.key];
+  if(mode) setMode(mode);
 });
-addEventListener('resize',render);
+addEventListener('resize',()=>{ render(); placeEntry(); });
 
-const fmtM=mm=>(mm/1000).toFixed(3);
+// ================= Panel =================
+
+const fmtM=mm=>(mm/1000).toFixed(3).replace('.',',');
+const fmt2=x=>x.toFixed(2).replace('.',',');
 
 // Groesstes |v_i|/sigma_i ueber alle aktiven Messungen - je Messung gegen ihr
-// EIGENES sigma normiert (siehe Kommentar an GROSS_ERROR_SIGMA), nicht gegen
-// einen globalen Wert. Nur fuer den redundancy===0-Fall gedacht: dort ist w
-// ueberall null, das ist also die einzige Kennzahl, die dort noch etwas ueber
-// die Groesse der Widerspruechlichkeit aussagen kann.
+// EIGENES sigma normiert. Nur fuer den redundancy===0-Fall gedacht: dort ist
+// w ueberall null, das ist also die einzige Kennzahl, die dort noch etwas
+// ueber die Groesse der Widerspruechlichkeit aussagen kann.
 function worstResidualRatio(){
   const act=C.activeMeas(M.meas);
   let ratio=0, v=0;
@@ -1140,75 +1651,90 @@ function worstResidualRatio(){
   return {ratio, v};
 }
 
+// Klartext statt Geodaesie: die Statuszeile beantwortet "wie weit bin ich,
+// was fehlt, stimmt etwas nicht" - die Fachbegriffe (Redundanz, w, sigma)
+// wohnen in der Detailansicht der Tabelle.
 function statusText(){
-  if(M.pts.length<3) return ['Zu wenig Punkte — mindestens 3 anlegen.','warn'];
-  if(!M.an) return ['Noch keine Messung eingetragen.','warn'];
+  if(M.pts.length<3) return ['Ecken antippen — mindestens drei.','warn'];
+  if(!M.an){
+    if(!M.walls.length) return ['Skizze anlegen: Ecken antippen, sie verbinden sich von selbst.','warn'];
+    return ['Skizze steht — im Modus »Messen« Wand antippen und Maß eintippen.','warn'];
+  }
   if(M.fit && !M.fit.converged)
     return ['Ausgleichung nicht konvergiert — Ergebnis ist nicht belastbar.','bad'];
   if(M.an.dof>0)
-    return [`Unterbestimmt — ${M.an.dof} ${M.an.dof===1?'Messung fehlt':'Messungen fehlen'}. `
-           +`Gezeigt wird der beste zur Skizze passende Fit.`,'warn'];
+    return [`Noch ${M.an.dof} ${M.an.dof===1?'Messung':'Messungen'}, dann ist die Form eindeutig.`,'warn'];
   if(M.an.redundancy===0){
-    // "Nicht pruefbar" ist nur die halbe Wahrheit: sie gilt fuer die einzelne
-    // Messung (siehe Badge in der Tabelle), nicht fuer das Netz als Ganzes.
-    // Passen die Messungen nicht zueinander, kann der Fit sie nicht alle
-    // gleichzeitig erfuellen und die Residuen werden gross - das ist harter
-    // Beweis fuer einen Fehler, auch wenn keine einzelne Messung isoliert
-    // werden kann. Diese Unterscheidung ist am Residuum sichtbar, obwohl
-    // "redundancy===0" fuer beide Faelle identisch ist.
+    // "Nicht pruefbar" gilt fuer die einzelne Messung, nicht fuers Netz:
+    // passen die Messungen nicht zueinander, verteilt der Fit den Widerspruch
+    // als grosse Residuen - harter Beweis fuer einen Fehler, auch wenn keine
+    // einzelne Messung isoliert werden kann.
     const {ratio,v}=worstResidualRatio();
     if(ratio>GROSS_ERROR_SIGMA)
-      return [`Bestimmt, aber widersprüchlich — die Messungen passen nicht zueinander `
-             +`(größte Abweichung ${v.toFixed(0)} mm, das ist mehr als ${GROSS_ERROR_SIGMA}× die angenommene `
-             +`Messgenauigkeit). Mindestens eine Messung ist falsch — welche, lässt sich ohne `
-             +`weitere Messung nicht bestimmen.`,'bad'];
-    return ['Bestimmt, aber keine Messung überprüfbar — jede Messung geht ungeprüft ein.','warn'];
+      return [`Mindestens ein Maß ist falsch — größte Abweichung ${v.toFixed(0)} mm. `
+             +`Welche Messung, lässt sich erst mit einer Kontrollmessung sagen.`,'bad'];
+    return ['Form eindeutig, aber ungeprüft — ein Tippfehler bliebe unbemerkt. Zur Kontrolle nachmessen.','warn'];
   }
-  return [`Überbestimmt — σ̂ = ${M.an.sigmaHat.toFixed(1)} mm`,'good'];
+  const txtS=M.an.sigmaHat.toFixed(1).replace('.',',');
+  if(M.an.sigmaHat > SIGMA_SUSPECT_FACTOR*C.SIGMA_DEF)
+    return [`Die Messungen streuen stark (± ${txtS} mm) — vermutlich steckt ein Fehler drin. `
+           +`Eine weitere Kontrollmessung grenzt ihn ein.`,'warn'];
+  return [`Geprüft — Messgenauigkeit ± ${txtS} mm.`,'good'];
 }
 
 function renderPanel(){
   const [txt,cls]=statusText();
-  const st=document.getElementById('status');
-  st.textContent=txt; st.className=cls;
+  $('statustxt').textContent=txt;
+  $('status').className=cls;
+  $('empty').style.display = M.pts.length ? 'none' : 'flex';
+  $('undo').disabled = !undoStack.length;
 
-  // Wandring kaputt -> Messbarkeitsfilter in suggest() ist aus (siehe dort),
-  // Vorschlaege koennen also Strecken enthalten, die real durch eine Wand
-  // laufen. Eigener, von statusText() unabhaengiger Hinweis: das ist kein
-  // Netzzustand (unter-/ueberbestimmt/widerspruechlich), sondern eine Aussage
-  // ueber den Wandzug, die mit jedem dieser Zustaende gleichzeitig gelten
-  // kann. wallPolygon() liefert aus zwei verschiedenen Gruenden null - nicht
-  // geschlossen (reine Adjazenzfrage) oder geschlossen, aber gekreuzt (eine
-  // geometrische Frage) - und die beiden brauchen unterschiedliche Hinweise.
-  // M.pts reicht fuer beide, ein Fit wird dafuer nicht gebraucht; waehrend
-  // eines Zugs haelt das die Meldung synchron mit der Live-Position (siehe
-  // mousemove-Handler, der ebenfalls M.pts schreibt).
-  const wwEl=document.getElementById('wallwarn');
-  const ring = C.wallPolygonRing(M.pts, M.walls);
+  const P=M.drag?M.pts:(M.fit?M.fit.pts:M.pts), I=C.idx(P);
+
+  // Flaeche und Umfang sind DAS Ergebnis des Aufmasses - direkt unter den
+  // Status. Erst mit dem ersten Fit sind die Koordinaten Millimeter; vorher
+  // waere die Zahl eine Aussage ueber Bildschirmpixel.
+  const poly=C.wallPolygon(P, M.walls);
+  const geo=$('geo');
+  if(poly && M.fit){
+    let a=0, u=0;
+    for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+      a+=poly[j].x*poly[i].y-poly[i].x*poly[j].y;
+      u+=C.dist(poly[j],poly[i]);
+    }
+    geo.innerHTML=`${fmt2(Math.abs(a)/2/1e6)} m² <small>· Umfang ${fmt2(u/1000)} m</small>`;
+  } else if(poly){
+    geo.innerHTML='<small>Fläche folgt mit der ersten Messung.</small>';
+  } else {
+    geo.innerHTML='<small>Fläche folgt, sobald der Wandzug geschlossen ist.</small>';
+  }
+
+  // Wandring kaputt -> Messbarkeitsfilter in suggest() ist aus (siehe dort).
+  // Eigener, von statusText() unabhaengiger Hinweis: das ist kein Netzzustand,
+  // sondern eine Aussage ueber den Wandzug. "Nicht geschlossen" und "kreuzt
+  // sich" sind verschiedene Meldungen (wallPolygon liefert aus beiden
+  // Gruenden null, wallPolygonRing nur im ersten Fall).
+  const wwEl=$('wallwarn');
+  const ring=C.wallPolygonRing(M.pts, M.walls);
   const ringBroken = M.walls.length>0 && !C.wallPolygon(M.pts, M.walls);
   wwEl.style.display = ringBroken ? 'block' : 'none';
   if(ringBroken) wwEl.textContent = (ring && C.ringSelfIntersects(ring))
     ? 'Wände kreuzen sich — Fläche und Vorschlagsfilter sind ausgesetzt.'
-    : 'Wandzug nicht geschlossen (oder ein Punkt hat nicht genau zwei Wände) — '
-     +'die Vorschlagsliste ist deshalb ungefiltert und kann Strecken enthalten, '
-     +'die sich nicht direkt messen lassen.';
+    : 'Wandzug nicht geschlossen (oder eine Ecke hat nicht genau zwei Wände) — '
+     +'die Vorschläge können deshalb Strecken enthalten, die sich nicht direkt messen lassen.';
 
+  // --- Messliste. Kompakt: Strecke, Mass, Status. Die Statistik-Spalten
+  // (v, Redundanzanteil, w, sigma) und die Verwaltungsknoepfe wohnen hinter
+  // dem Details-Schalter - fuer die Baustelle zaehlt nur "passt / pruefen".
   const tb=document.querySelector('#tbl tbody');
   tb.innerHTML='';
   const act=C.activeMeas(M.meas);
   // Nicht die eine "schlimmste" Messung suchen, sondern alle, die gleich
-  // verdaechtig sind: ueber Baardas Grenzwert (statistisch ueberhaupt ein
-  // Ausreisser) UND innerhalb TIE_TOL des groessten w im Feld (mathematisch
-  // nicht vom Spitzenwert zu unterscheiden). Ein klarer Spitzenreiter liefert
-  // so genau eine markierte Zeile, ein Unentschieden markiert alle gleich
-  // weit vorne liegenden (siehe Konstanten-Kommentar oben).
+  // verdaechtig sind: ueber Baardas Grenzwert UND innerhalb TIE_TOL des
+  // groessten w im Feld. Ein klarer Spitzenreiter liefert genau eine
+  // markierte Zeile, ein Unentschieden markiert alle gleich weit vorne.
   const wMax=M.an ? M.an.w.reduce((mx,x)=>(x!=null&&x>mx)?x:mx, -Infinity) : -Infinity;
   const suspects=new Set();
-  // Beide Bedingungen gelten pro Zeile, nicht nur fuers Feld-Maximum: sonst
-  // koennte eine Zeile knapp unter BAARDA_W0 allein deshalb mitmarkiert
-  // werden, weil ein anderer, selbst nur knapp ueber der Schwelle liegender
-  // Wert zufaellig in der Naehe liegt - genau die Art Scheinbefund, die das
-  // Werkzeug vermeiden soll.
   if(M.an) M.an.w.forEach((x,i)=>{
     if(x!=null && x>BAARDA_W0 && x>=wMax*(1-TIE_TOL)) suspects.add(i);
   });
@@ -1217,116 +1743,131 @@ function renderPanel(){
   const rows=act.map((m,i)=>({m,i,w:M.an?M.an.w[i]:null}));
   rows.sort((p,q)=>(q.w??-1)-(p.w??-1));
 
+  // Das Verdachts-Badge ist selbst der Stilllegen-Knopf: der wichtigste
+  // Handgriff beim Ausreisser darf nicht hinter Details + Seitwaertsscrollen
+  // vergraben sein. Die Zeile bleibt danach als "aus" stehen, Undo geht.
+  const badge=(w,i)=>{
+    if(suspects.has(i)) return `<button class="badge suspect" title="normiertes Residuum w = ${w.toFixed(1)} — Antippen legt die Messung still, der Wert bleibt in der Liste">verdächtig · stilllegen</button>`;
+    if(w!=null) return `<span class="badge ok" title="normiertes Residuum w = ${w.toFixed(1)}">geprüft</span>`;
+    return '<span class="badge unchecked" title="Diese Messung geht ungeprüft ins Ergebnis ein.">ungeprüft</span>';
+  };
+
   rows.forEach(({m,i,w})=>{
     const tr=document.createElement('tr');
     if(suspects.has(i)) tr.className='worst';
-    // Verknuepfung zur Zeichnung: Zeile gehovert -> die zugehoerige Strecke
-    // wird im Plan hervorgehoben (siehe drawCanvas(), Messungen-Block).
+    // Verknuepfung zur Zeichnung: Zeile beruehrt oder erste Zelle angetippt
+    // -> die zugehoerige Strecke wird im Plan hervorgehoben. Auf Touch gibt
+    // es kein Hover, deshalb zusaetzlich der Tipp aufs Kuerzel.
     tr.onmouseenter=()=>{ M.highlight={a:m.a,b:m.b}; drawCanvas(); };
-    tr.onmouseleave=()=>{ M.highlight=null; drawCanvas(); };
+    tr.onmouseleave=()=>{ if(!entryPair){ M.highlight=null; drawCanvas(); } };
     const red=M.an?M.an.red[i]:null;
     const v=M.an?M.an.v[i]:null;
     tr.innerHTML=
-      `<td>${m.a}→${m.b}</td>`+
-      `<td><input value="${fmtM(m.d)}" size="6" style="text-align:right"></td>`+
-      `<td>${v==null?'—':v.toFixed(1)}</td>`+
-      `<td>${red==null?'—':red.toFixed(2)}</td>`+
-      `<td>${w==null?'<span class="badge unchecked">nicht prüfbar</span>':w.toFixed(1)}</td>`+
-      `<td><input class="sig" value="${m.sigma??C.SIGMA_DEF}" size="3" style="text-align:right"></td>`+
-      `<td><button title="Messung stilllegen/reaktivieren">${m.on===false?'aus':'an'}</button>`+
-      `<button title="Messung löschen">×</button></td>`;
-    const [inp]=tr.getElementsByTagName('input');
+      `<td>${m.a}–${m.b}</td>`+
+      `<td><input class="d" inputmode="decimal" value="${fmtM(m.d)}"></td>`+
+      `<td>${badge(w,i)}</td>`+
+      `<td class="x">${v==null?'—':v.toFixed(1)}</td>`+
+      `<td class="x">${red==null?'—':red.toFixed(2)}</td>`+
+      `<td class="x">${w==null?'—':w.toFixed(1)}</td>`+
+      `<td class="x"><input class="sig" inputmode="decimal" value="${m.sigma??C.SIGMA_DEF}"></td>`+
+      `<td class="x"><button class="rowbtn tog" title="Messung stilllegen">aus</button>`+
+      `<button class="rowbtn del" title="Messung löschen">×</button></td>`;
+    tr.children[0].onclick=()=>{
+      const on=M.highlight && M.highlight.a===m.a && M.highlight.b===m.b;
+      M.highlight=on?null:{a:m.a,b:m.b};
+      drawCanvas();
+    };
+    const inp=tr.querySelector('.d');
     inp.onchange=()=>{
       const d=parseFloat(inp.value.replace(',','.'))*1000;
       if(isFinite(d)&&d>0){ snapshot(); m.d=d; recompute(); }
-      else { inp.value=fmtM(m.d); alert('Ungültig: Maß muss eine Zahl größer 0 sein.'); }
+      else { inp.value=fmtM(m.d); setHint('Ungültig — Maß muss eine Zahl größer 0 sein.'); }
     };
     const sig=tr.querySelector('.sig');
     sig.onchange=()=>{
-      const v=parseFloat(sig.value.replace(',','.'));
-      if(isFinite(v)&&v>0){ snapshot(); m.sigma=v; recompute(); }
-      else { sig.value=m.sigma??C.SIGMA_DEF; alert('σ muss eine Zahl größer 0 sein.'); }
+      const s=parseFloat(sig.value.replace(',','.'));
+      if(isFinite(s)&&s>0){ snapshot(); m.sigma=s; recompute(); }
+      else { sig.value=m.sigma??C.SIGMA_DEF; setHint('σ muss eine Zahl größer 0 sein.'); }
     };
-    const [tog,del]=tr.getElementsByTagName('button');
-    tog.onclick=()=>{ snapshot(); m.on=(m.on===false); recompute(); };
-    del.onclick=()=>{ snapshot(); M.meas.splice(M.meas.indexOf(m),1); recompute(); };
+    tr.querySelector('.tog').onclick=()=>{ snapshot(); m.on=false; recompute(); };
+    tr.querySelector('.del').onclick=()=>{ snapshot(); M.meas.splice(M.meas.indexOf(m),1); recompute(); };
+    const sus=tr.querySelector('button.badge.suspect');
+    if(sus) sus.onclick=()=>{ snapshot(); m.on=false; recompute(); };
     tb.appendChild(tr);
   });
 
-  // Stillgelegte Messungen bleiben sichtbar, sonst findet man sie nie wieder
+  // Stillgelegte Messungen bleiben sichtbar, sonst findet man sie nie wieder.
+  // Das Badge selbst ist der Einschalter - auch in der Kompaktansicht.
   M.meas.filter(m=>m.on===false).forEach(m=>{
     const tr=document.createElement('tr');
-    tr.style.opacity='.45';
-    tr.innerHTML=`<td>${m.a}→${m.b}</td><td>${fmtM(m.d)}</td><td>—</td><td>—</td>`+
-                 `<td><span class="badge">stillgelegt</span></td><td>${m.sigma??C.SIGMA_DEF}</td>`+
-                 `<td><button>an</button></td>`;
-    tr.getElementsByTagName('button')[0].onclick=()=>{ snapshot(); m.on=true; recompute(); };
+    tr.className='off';
+    tr.innerHTML=
+      `<td>${m.a}–${m.b}</td>`+
+      `<td style="padding-right:10px">${fmtM(m.d)}</td>`+
+      `<td><button class="badge" title="Antippen schaltet die Messung wieder ein.">aus — einschalten</button></td>`+
+      `<td class="x">—</td><td class="x">—</td><td class="x">—</td>`+
+      `<td class="x">${m.sigma??C.SIGMA_DEF}</td><td class="x"></td>`;
+    tr.querySelector('button').onclick=()=>{ snapshot(); m.on=true; recompute(); };
     tb.appendChild(tr);
   });
 
   // Sind mehrere Zeilen markiert, ist das kein Darstellungsfehler, sondern
-  // eine ehrliche Auskunft: Die Daten reichen nicht, um unter den gleich
-  // verdaechtigen Messungen eine einzelne herauszugreifen. Bei genau einer
-  // markierten Zeile (klarer Spitzenreiter) oder keiner (nichts auffaellig)
-  // bleibt der Satz weg.
+  // eine ehrliche Auskunft: die Daten reichen nicht, um unter den gleich
+  // verdaechtigen Messungen eine einzelne herauszugreifen.
   const showWhy=suspects.size>1;
-  const why=document.getElementById('why');
+  const why=$('why');
   why.textContent = showWhy
-    ? 'Mehrere Messungen sind gleich verdächtig — die normierten Residuen liegen praktisch gleichauf; erst eine weitere Messung würde sie trennen.'
+    ? 'Mehrere Messungen sind gleich verdächtig — erst eine weitere Messung würde sie trennen.'
     : '';
   why.style.display = showWhy ? '' : 'none';
 
-  // --- Vorschläge, nach Zweck getrennt. Ungetrennt stünden hier fünf Einträge,
-  //     während die Statuszeile "3 Messungen fehlen" meldet.
-  // P wie in drawCanvas() hergeleitet (waehrend eines Drags aus M.pts, sonst aus
-  // dem Fit) und nur einmal berechnet - keine zweite, abweichende Herleitung
-  // fuer Vorschlaege und Wandlaengen getrennt.
-  const P=M.drag?M.pts:(M.fit?M.fit.pts:M.pts), I=C.idx(P);
-  const sg=document.getElementById('sugg');
+  // --- Vorschlaege, nach Zweck getrennt: erst bestimmen, dann pruefen.
+  // Als Chips: Antippen oeffnet die Eingabe direkt fuer dieses Paar und
+  // startet den gefuehrten Fluss (siehe enterMeasurement).
+  const sg=$('sugg');
   const list=M.sugg;
-  // Als Knoepfe statt reinem Text: Hover verknuepft mit der Zeichnung (wie bei
-  // den Tabellenzeilen), Klick oeffnet die Eingabe direkt fuer dieses Paar -
-  // ohne den Umweg ueber zwei Punktklicks im Plan.
-  const grp=(t,w)=>{
-    const e=list.filter(s=>s.why===w);
+  const grp=(t,why2)=>{
+    const e=list.filter(s=>s.why===why2);
     if(!e.length) return '';
-    return `<div style="margin-bottom:6px"><b>${t}</b><br>`
-      + e.map((s,i)=>`<button class="sg" data-a="${s.a}" data-b="${s.b}">${s.a} ↔ ${s.b}${s.repeat?' (nochmal)':''}</button>`).join(' ')
-      + '</div>';
+    return `<div class="grp"><b>${t}</b><div class="chips">`
+      + e.map(s=>`<button class="sg${s.repeat?' rep':''}" data-a="${s.a}" data-b="${s.b}">${s.a} ↔ ${s.b}${s.repeat?' nochmal':''}</button>`).join('')
+      + '</div></div>';
   };
-  if(!M.an) sg.textContent='—';
+  if(!M.an) sg.textContent='Vorschläge erscheinen nach der ersten Messung.';
   else if(!list.length)
     sg.textContent = M.an.dof>0
       ? 'Keine messbare Strecke bringt das Netz weiter — fehlt eine Wand im Zug?'
-      : 'Nichts mehr nötig.';
-  else sg.innerHTML = grp('Damit der Raum bestimmt ist:','bestimmt')
-                    + grp('Damit die Messungen prüfbar werden:','pruefbar');
+      : 'Nichts mehr nötig — alles gemessen und prüfbar.';
+  else sg.innerHTML = grp('Damit die Form eindeutig ist:','bestimmt')
+                    + grp('Zur Kontrolle der Messungen:','pruefbar');
   sg.querySelectorAll('button.sg').forEach(b=>{
     b.onmouseenter=()=>{ M.highlight={a:b.dataset.a,b:b.dataset.b}; drawCanvas(); };
-    b.onmouseleave=()=>{ M.highlight=null; drawCanvas(); };
-    b.onclick=()=>{ M.highlight=null; enterMeasurement(b.dataset.a, b.dataset.b); };
+    b.onmouseleave=()=>{ if(!entryPair){ M.highlight=null; drawCanvas(); } };
+    b.onclick=()=>enterMeasurement(b.dataset.a, b.dataset.b, true);
   });
 
-  // --- Wandlängen
-  document.getElementById('wl').textContent = M.walls
-    .map(([a,b])=>`${a}–${b}  ${fmtM(C.dist(P[I[a]],P[I[b]]))} m`).join('\n');
-
-  // Flaeche nur, wenn der Wandzug geschlossen ist - sonst ist sie nicht definiert.
-  const poly=C.wallPolygon(P, M.walls);
-  const g=document.getElementById('geo');
-  if(poly){
-    let a=0, u=0;
-    for(let i=0,j=poly.length-1;i<poly.length;j=i++){
-      a+=poly[j].x*poly[i].y-poly[i].x*poly[j].y;
-      u+=C.dist(poly[j],poly[i]);
-    }
-    g.textContent=`Fläche ${(Math.abs(a)/2/1e6).toFixed(2)} m² · Umfang ${(u/1000).toFixed(2)} m`;
+  // --- Wandlaengen: erst mit Fit sind es Millimeter, vorher Skizzenpixel.
+  const wl=$('wl');
+  if(!M.walls.length){
+    wl.innerHTML='<span style="grid-column:1/-1;color:var(--muted)">Noch keine Wände.</span>';
+  } else if(!M.fit){
+    wl.innerHTML='<span style="grid-column:1/-1;color:var(--muted)">Längen folgen mit der ersten Messung.</span>';
   } else {
-    g.textContent='Fläche erst mit geschlossenem Wandzug';
+    wl.innerHTML=M.walls
+      .map(([a,b])=>`<span>${a}–${b}</span><span>${fmtM(C.dist(P[I[a]],P[I[b]]))} m</span>`).join('');
   }
 }
 
-document.getElementById('exp').onclick=async()=>{
+$('dtl').onclick=()=>{
+  const b=$('dtl');
+  const on=b.getAttribute('aria-pressed')!=='true';
+  b.setAttribute('aria-pressed',String(on));
+  $('tbl').classList.toggle('details',on);
+};
+
+// ================= Daten =================
+
+$('exp').onclick=async()=>{
   const P=M.drag?M.pts:(M.fit?M.fit.pts:M.pts);
   const json=JSON.stringify({
     pts:P.map(p=>({id:p.id, x:Math.round(p.x), y:Math.round(p.y)})),
@@ -1335,10 +1876,10 @@ document.getElementById('exp').onclick=async()=>{
     idSeq,   // sonst muss ein Reimport ihn aus den IDs zurückrechnen (siehe imp)
     sigmaHat:M.an?M.an.sigmaHat:null,
   }, null, 2);
-  try{ await navigator.clipboard.writeText(json); alert('JSON kopiert.'); }
+  try{ await navigator.clipboard.writeText(json); setHint('JSON liegt in der Zwischenablage.'); }
   catch{ prompt('Kopieren mit Strg+C:', json); }
 };
-document.getElementById('imp').onclick=()=>{
+$('imp').onclick=()=>{
   const s=prompt('JSON aus einem Export hier einfügen:');
   if(!s) return;
   let o; try{ o=JSON.parse(s); }catch{ alert('Das ist kein gültiges JSON.'); return; }
@@ -1349,27 +1890,27 @@ document.getElementById('imp').onclick=()=>{
   const localIdSeq=idSeq;
   snapshot();
   deserialize(o);
-  // o.pts.length unterschaetzt idSeq, sobald der Export eine Luecke hat (ein
-  // Punkt wurde vor dem Export geloescht). o.idSeq ist exakt, wenn vorhanden;
-  // sonst aus den IDs zurueckrechnen (idOrdinal, Umkehrung von nextId).
-  // Maximum mit dem VOR dem Import gueltigen lokalen Zaehler: Ein Import in
-  // eine schon gefuellte Skizze darf idSeq nie verkleinern, sonst vergibt die
-  // naechste neue ID wieder eine, die es schon gibt.
+  // o.pts.length unterschaetzt idSeq, sobald der Export eine Luecke hat.
+  // o.idSeq ist exakt, wenn vorhanden; sonst aus den IDs zurueckrechnen.
+  // Maximum mit dem VOR dem Import gueltigen lokalen Zaehler: ein Import in
+  // eine gefuellte Skizze darf idSeq nie verkleinern.
   const derivedIdSeq = typeof o.idSeq==='number'
     ? o.idSeq
     : o.pts.reduce((mx,p)=>Math.max(mx, idOrdinal(p.id)+1), 0);
   idSeq=Math.max(localIdSeq, derivedIdSeq);
+  userView=false;
   recompute();
 };
-document.getElementById('clr').onclick=()=>{
+$('clr').onclick=()=>{
   if(!confirm('Alle Punkte, Wände und Messungen verwerfen?')) return;
   snapshot();
   deserialize({pts:[],walls:[],meas:[]});
+  userView=false;
   recompute();
 };
 
-// Ein Aufmass dauert leicht eine halbe Stunde. Ein Reload darf es nicht kosten -
-// beim Start das letzte Autosave wiederherstellen, wenn eins da ist.
+// Ein Aufmass dauert leicht eine halbe Stunde. Ein Reload darf es nicht
+// kosten - beim Start das letzte Autosave wiederherstellen, wenn eins da ist.
 try{
   const gespeichert=localStorage.getItem('raumaufmass');
   if(gespeichert){
@@ -1378,6 +1919,7 @@ try{
   }
 }catch{}
 
+setMode('draw');
 recompute();
 </script>
 
