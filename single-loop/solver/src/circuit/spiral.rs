@@ -107,14 +107,114 @@
 //! `{lane 1, lane 5}` reserved set with lane 3 missing passed it). That
 //! existence test is kept, but demoted to an explicit sanity precondition
 //! (`corridor_reaches_zone`'s point 1) rather than treated as the invariant.
+//!
+//! ## Turn and return construction (Task 7): matched by pose, not by lane
+//!
+//! [`complete_spiral`] turns [`InwardArm`] provenance into a full
+//! [`SpiralPath`] by finding two more kinds of real, certified edge, neither
+//! of which can be looked up through any `Lane`'s own `node_ids`/`edge_ids`:
+//!
+//! - **The turn.** Task 6's probe (see `task-6-report.md`) already
+//!   established that a reverse-family (`TeardropReverse`/`BroadReverse180`)
+//!   edge departs the arm's final pose and lands exactly on the innermost
+//!   reserved ring's channel coordinates -- but at the *opposite* heading
+//!   from that ring's own forward-walk node there, i.e. a different interned
+//!   `PoseNode` at the same point. [`select_turn_edge`] therefore searches
+//!   `graph.edges` directly by pose (start pose == the arm's final pose, end
+//!   point on the target ring's `rect_local` boundary), restricted to the
+//!   two reverse-family `TemplateId`s, taking the deterministically smallest
+//!   id. The end-point-on-target-ring filter is load-bearing: more than one
+//!   reverse-family edge can depart the same start pose on this catalogue
+//!   (the lattice is periodic), and only the one that actually lands on the
+//!   target ring's own rectangle is the real Kehre -- see
+//!   [`select_turn_edge`]'s doc for the real-fixture confirmation (3
+//!   candidates depart the same pose; exactly 1 lands on ring 5).
+//! - **The return walk.** Each reserved ring must be walked back out to the
+//!   connection zone, in the *reverse* direction of its own forward
+//!   (CCW-walk) `edge_ids` -- but the edges realizing that reversed walk are
+//!   not `edge_ids`' own entries read backwards; they are the *separate*,
+//!   independently-certified edges occupying the pose-flipped (point same,
+//!   heading opposite) coordinates, per the same Kehre-matching fact above.
+//!   [`find_reversed_counterpart`] finds each one by pose query, for every
+//!   forward edge a reserved ring's own `edge_ids` and every reserved-pair
+//!   lane-change chain's `hop_edge_ids` (`compute_descend_chains` already
+//!   has entries for the odd, reserved-ring pairs -- see the previous
+//!   section). Confirmed empirically before any of this was written (this
+//!   task's own Step-1 probe): on the real fixture, all 20+36+52 forward
+//!   edges of rings 5, 3, and 1, and all 4 chain hop edges of 1->3 and 3->5,
+//!   have exactly one pose-flipped counterpart each -- zero missing, zero
+//!   ambiguous.
+//! - **Where a ring's reversed walk *starts*.** The turn (or a reversed
+//!   chain) does not generally land on a reserved ring's own `node_ids[0]`
+//!   -- that point is an arbitrary artifact of wherever `build_ring`
+//!   happened to start describing the cycle (`fields.rs`'s own module doc
+//!   already disclaims meaning in it), unrelated to where a differently-
+//!   positioned turn or chain edge lands. Confirmed empirically (not
+//!   assumed): on the real fixture, the ring-5 turn lands one 150mm lattice
+//!   hop short of ring 5's own `node_ids[0]`. So [`walk_ring_backward`]
+//!   first finds *which* node of the ring's own walk the arriving pose
+//!   corresponds to ([`ring_entry_index`]), then rotates the reversed walk
+//!   to start exactly there -- covering the ring's full cycle exactly once,
+//!   ending back at the same entry pose it started from (a closed loop,
+//!   walked in full, necessarily returns to its own start).
+//!
+//! **Continuity is a two-seam contract, not an end-to-end one.** Matching
+//! `InwardArm::edge_ids`'s own "provenance, not a chained path" property
+//! (see above), [`SpiralPath`]'s three edge-id lists are not asserted G1-
+//! continuous with each other throughout -- only at the two seams the
+//! brief's own test checks: the arm's last pose equals the turn's first
+//! pose (true by construction: the turn's start pose *is* the arm's final
+//! pose, the query key), and the turn's last pose equals the return
+//! sequence's first pose (true by construction: [`walk_ring_backward`]'s
+//! rotation starts exactly at the turn's own end pose). Nothing beyond that
+//! is continuous by construction, and generally isn't: a ring's reversed lap
+//! ends back where the turn or chain dropped it off, not wherever the *next*
+//! chain to the next reserved ring happens to depart from -- exactly the
+//! same "ring end and lane-change start need not coincide" property Task 6
+//! already found and documented for the inward arm. A later task turning
+//! this provenance into rendered, chained geometry inherits that same
+//! obligation the inward arm always had.
+//!
+//! **A missing certified edge is a dead end, not something to repair.**
+//! [`complete_spiral`] never invents geometry: if any required turn or
+//! return edge does not exist in `graph`, it returns immediately with
+//! `SearchFailureKind::Geometry` and a single journal entry naming the
+//! return lane (see [`dead_end`]) -- unlike [`plan_inward_arm`]'s
+//! backtracking search, there are no alternatives to try here (the turn and
+//! every return edge are each the *unique* deterministically-smallest
+//! certified answer to a fixed pose query, not one candidate among several
+//! this function chooses between), so there is nothing to backtrack into.
+//! The caller (whoever backtracks the arm itself, e.g. by re-running
+//! [`plan_inward_arm`] with a shorter length budget) is expected to react to
+//! the failure, not this function.
+//!
+//! **`turn_budget_ok` is necessary, not sufficient, for a real turn to
+//! exist.** Found while testing an arm that backs off early (Task 6's own
+//! `descent_stops_before_violating_turn_budget` scenario): `SpiralRules`'s
+//! dimensional check only measures cross-channel *distance* between two
+//! rings' `rect_local`s, which says nothing about whether the arm's actual
+//! closing-node *position* (not just the ring-to-ring distance) lines up
+//! with a certified template's real endpoint lattice. On the real fixture,
+//! ring 4 to ring 5 measures the same 150mm `TeardropReverse` bridges from
+//! ring 6 -- `turn_budget_ok` reports `true` -- but every reverse-family
+//! edge departing ring 4's own closing node lands 37.5mm short of ring 5's
+//! actual rectangle (outside it, not on it), so no certified turn exists
+//! there at all. `complete_spiral` correctly reports this as a
+//! `SearchFailureKind::Geometry` dead end rather than inventing one; fixing
+//! `terminate_turn_budget_ok` itself (a positional, not just dimensional,
+//! feasibility check) is Task 6 territory and out of this task's scope --
+//! flagged here for whichever later task next touches that invariant.
 
 use crate::circuit::fields::Lane;
 use crate::circuit::search::{
-    Action, Invariant, Journal, PatternRules, SearchFailure, SearchState, backtracking_search,
+    Action, Invariant, Journal, PatternRules, SearchFailure, SearchFailureKind, SearchState,
+    backtracking_search,
 };
-use crate::circuit::types::RectMm;
-use crate::model::PathPrimitive;
-use crate::plate::{EmbeddedPoseGraph, Heading8, MotionTemplate, PlateProfile, PoseEdge};
+use crate::circuit::types::{JournalEntry, RectMm};
+use crate::model::{PathPrimitive, Point};
+use crate::plate::{
+    EmbeddedPoseGraph, Heading8, LocalPose, MotionTemplate, PlateProfile, PoseEdge, TemplateId,
+};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 /// Sentinel `(lane, segment)` marking "the arm has terminated" in
@@ -550,8 +650,7 @@ pub fn turn_budget_ok(cross_distance_mm: f64, profile: &PlateProfile) -> bool {
 /// reverse heading at all (`Straight0`/`Straight45`) or turns by something
 /// other than 180 degrees (`BroadTurn45`/`90`/`135`).
 fn reverse_span_mm(template: &MotionTemplate) -> Option<f64> {
-    let opposite = Heading8::from_octant(template.start.heading.octant() + 4);
-    if template.end.heading != opposite {
+    if template.end.heading != opposite_heading(template.start.heading) {
         return None;
     }
     let displacement = template.end.point - template.start.point;
@@ -808,6 +907,359 @@ fn reconstruct_arm(rules: &SpiralRules, state: &SearchState) -> InwardArm {
         lane_sequence,
         edge_ids,
     }
+}
+
+// ---------------------------------------------------------------------------
+// Task 7: turn insertion and return construction. See the module doc's
+// "Turn and return construction" section for the design; everything below
+// is its implementation.
+// ---------------------------------------------------------------------------
+
+/// The full certified path realizing one completed spiral: the inward arm's
+/// own provenance (`inward_edge_ids`, verbatim `arm.edge_ids`), the single
+/// certified reverse-family edge connecting the arm's final pose to the
+/// innermost reserved ring (`turn_edge_ids`), and the reserved rings walked
+/// back out to the connection zone (`return_edge_ids`). See the module doc.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SpiralPath {
+    pub inward_edge_ids: Vec<u32>,
+    pub turn_edge_ids: Vec<u32>,
+    pub return_edge_ids: Vec<u32>,
+}
+
+/// The 180-degree-opposite heading (see `plate::template`'s own private
+/// `opposite`, which this mirrors -- that one is not `pub(crate)`, so this
+/// module keeps its own copy rather than depending on an internal of a
+/// different module). Shared by `reverse_span_mm` (Task 6) and every
+/// pose-flip query below (Task 7).
+fn opposite_heading(heading: Heading8) -> Heading8 {
+    Heading8::from_octant(heading.octant() + 4)
+}
+
+/// The deterministically smallest-id certified edge in `graph` whose start
+/// pose is exactly `from` and whose end pose is exactly `to`, within
+/// `GEOMETRY_EPSILON_MM`. `None` if no certified edge realizes that exact
+/// pose pair.
+fn find_edge_by_pose(
+    graph: &EmbeddedPoseGraph,
+    from: LocalPose,
+    to: LocalPose,
+) -> Option<&PoseEdge> {
+    graph
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.start.local_pose.heading == from.heading
+                && edge.end.local_pose.heading == to.heading
+                && (edge.start.local_pose.point - from.point).norm() < GEOMETRY_EPSILON_MM
+                && (edge.end.local_pose.point - to.point).norm() < GEOMETRY_EPSILON_MM
+        })
+        .min_by_key(|edge| edge.id)
+}
+
+/// The certified edge realizing `edge`'s exact path reversal in `graph`:
+/// same two poses, endpoints swapped, each heading flipped 180 degrees (see
+/// the module doc's "Turn and return construction", controller amendment 2,
+/// "KEHRE MATCHING"). Matched purely by pose, never by template identity or
+/// `Lane::node_ids`/`edge_ids` membership -- with the catalogue reversal-
+/// closed (`plate::template`'s own module doc), this is typically a
+/// *different* template placement than `edge` itself, not "`edge` with
+/// `template_transform.reversed` flipped" (that placement is certified
+/// independently and may not even be the one this finds, if a smaller-id
+/// edge happens to realize the same two poses another way).
+fn find_reversed_counterpart<'a>(
+    graph: &'a EmbeddedPoseGraph,
+    edge: &PoseEdge,
+) -> Option<&'a PoseEdge> {
+    let from = LocalPose::new(
+        edge.end.local_pose.point,
+        opposite_heading(edge.end.local_pose.heading),
+    );
+    let to = LocalPose::new(
+        edge.start.local_pose.point,
+        opposite_heading(edge.start.local_pose.heading),
+    );
+    find_edge_by_pose(graph, from, to)
+}
+
+/// Whether `point` sits on `rect`'s boundary -- one of its four channel
+/// sides -- within `GEOMETRY_EPSILON_MM`, not merely on one side's infinite
+/// line but within the perpendicular span of that side too.
+fn point_on_rect_boundary(point: Point, rect: &RectMm) -> bool {
+    let on_vertical_side = (point.x - rect.min.x).abs() < GEOMETRY_EPSILON_MM
+        || (point.x - rect.max.x).abs() < GEOMETRY_EPSILON_MM;
+    let on_horizontal_side = (point.y - rect.min.y).abs() < GEOMETRY_EPSILON_MM
+        || (point.y - rect.max.y).abs() < GEOMETRY_EPSILON_MM;
+    let within_y =
+        point.y >= rect.min.y - GEOMETRY_EPSILON_MM && point.y <= rect.max.y + GEOMETRY_EPSILON_MM;
+    let within_x =
+        point.x >= rect.min.x - GEOMETRY_EPSILON_MM && point.x <= rect.max.x + GEOMETRY_EPSILON_MM;
+    (on_vertical_side && within_y) || (on_horizontal_side && within_x)
+}
+
+/// The deterministically smallest certified reverse-family edge whose start
+/// pose is `from` (the arm's final pose) and whose end point lies on
+/// `target_ring`'s own channel rectangle boundary (controller amendment 4).
+/// Reverse-family is checked by `TemplateId` allowlist, matching this task's
+/// own `turn_uses_only_certified_reverse_templates_with_80_mm_arcs` test --
+/// every template `reverse_span_mm` accepts on this catalogue *is* one of
+/// these two (`turn_budget_ok`'s own catalogue scan), so the two never
+/// disagree here, but this function's contract is specifically "produce only
+/// `TeardropReverse`/`BroadReverse180` edges", which the allowlist states
+/// directly rather than incidentally.
+///
+/// The end-point-on-target-ring filter is load-bearing, not defensive: on
+/// the real fixture, three reverse-family edges depart the same start pose
+/// (the lattice is periodic -- two land on interior points that belong to
+/// neither ring), and only the one landing on `target_ring`'s own boundary
+/// is the real Kehre. Picking the smallest id *before* this filter would
+/// silently choose a spurious edge that shares a start pose but goes
+/// nowhere relevant.
+fn select_turn_edge<'a>(
+    graph: &'a EmbeddedPoseGraph,
+    from: LocalPose,
+    target_ring: &Lane,
+) -> Option<&'a PoseEdge> {
+    graph
+        .edges
+        .iter()
+        .filter(|edge| {
+            matches!(
+                edge.template_id,
+                TemplateId::TeardropReverse | TemplateId::BroadReverse180
+            ) && edge.start.local_pose.heading == from.heading
+                && (edge.start.local_pose.point - from.point).norm() < GEOMETRY_EPSILON_MM
+                && point_on_rect_boundary(edge.end.local_pose.point, &target_ring.rect_local)
+        })
+        .min_by_key(|edge| edge.id)
+}
+
+/// The index `k` into `ring.edge_ids` such that `ring.edge_ids[k]`'s own
+/// (forward) start pose is the pose-flip of `entry_pose` -- i.e. the point
+/// in `ring`'s forward walk that the return path is re-entering at, from
+/// outside the ring (the turn, for the innermost reserved ring, or a
+/// reversed lane-change chain, for every ring after it). `None` if
+/// `entry_pose` does not correspond to any node of `ring`'s own forward
+/// walk.
+///
+/// This is *not* always `0`: a ring's own `node_ids[0]`/`node_ids.last()`
+/// (its arbitrary, meaning-free start/end corner -- `fields.rs`'s own
+/// module doc) generally sits at a *different* point than wherever a turn
+/// or chain edge happens to land (confirmed empirically on the real
+/// fixture: the ring-5 turn lands one lattice hop short of `node_ids[0]`).
+/// `complete_spiral` rotates the ring's reversed walk to start exactly here
+/// rather than assuming it starts at `node_ids[0]`.
+fn ring_entry_index(
+    ring: &Lane,
+    edge_by_id: &BTreeMap<u32, &PoseEdge>,
+    entry_pose: LocalPose,
+) -> Option<usize> {
+    let target = LocalPose::new(entry_pose.point, opposite_heading(entry_pose.heading));
+    ring.edge_ids.iter().position(|&id| {
+        let start = edge_by_id[&id].start.local_pose;
+        start.heading == target.heading && (start.point - target.point).norm() < GEOMETRY_EPSILON_MM
+    })
+}
+
+/// The reversed, rotated walk of `ring`'s full cycle, starting exactly at
+/// `entry_pose` (see [`ring_entry_index`]): every one of `ring.edge_ids`'
+/// `len` edges, each replaced by [`find_reversed_counterpart`], in the
+/// order that begins departing `entry_pose` and -- since this is a closed
+/// cycle walked in full -- ends arriving back at `entry_pose` again.
+/// `Err` (a [`dead_end`]) if `entry_pose` matches no node of `ring`'s own
+/// walk, or if any required reversed edge does not exist in `graph`.
+fn walk_ring_backward(
+    graph: &EmbeddedPoseGraph,
+    edge_by_id: &BTreeMap<u32, &PoseEdge>,
+    ring: &Lane,
+    entry_pose: LocalPose,
+    resolved_so_far: usize,
+) -> Result<Vec<u32>, SearchFailure> {
+    let len = ring.edge_ids.len();
+    let entry_index = ring_entry_index(ring, edge_by_id, entry_pose).ok_or_else(|| {
+        dead_end(
+            format!(
+                "return lane {}: arrival pose does not match any node of this ring's own walk",
+                ring.id
+            ),
+            resolved_so_far,
+        )
+    })?;
+
+    let mut walked = Vec::with_capacity(len);
+    for offset in 1..=len {
+        let idx = (entry_index + len - offset) % len;
+        let forward_id = ring.edge_ids[idx];
+        let reversed = find_reversed_counterpart(graph, edge_by_id[&forward_id]).ok_or_else(|| {
+            dead_end(
+                format!(
+                    "return lane {}: no certified reversed counterpart for graph edge {forward_id}",
+                    ring.id
+                ),
+                resolved_so_far + walked.len(),
+            )
+        })?;
+        walked.push(reversed.id);
+    }
+    Ok(walked)
+}
+
+/// Free-standing counterpart to `SpiralRules::lane_by_id`: `complete_spiral`
+/// has no `SpiralRules` instance (its own signature, per the brief, takes
+/// `lanes`/`graph` directly rather than a rules struct) to call that private
+/// method on.
+fn lane_by_id(lanes: &[Lane], id: u32) -> Option<&Lane> {
+    lanes.iter().find(|lane| lane.id == id)
+}
+
+/// Every ring reserved as a side effect of `arm`'s own construction: `lane
+/// id + 1` for each occupied lane id, kept only if that ring actually exists
+/// among `lanes` -- the same "no lane past the structural end" semantics as
+/// `SpiralRules::reserved_segments_for`, recomputed here at ring (not
+/// segment) granularity for the same reason as `lane_by_id` above.
+fn reserved_ring_ids(arm: &InwardArm, lanes: &[Lane]) -> BTreeSet<u32> {
+    let lane_ids: BTreeSet<u32> = lanes.iter().map(|lane| lane.id).collect();
+    arm.lane_sequence
+        .iter()
+        .filter_map(|&occupied| {
+            let reserved = occupied + 1;
+            lane_ids.contains(&reserved).then_some(reserved)
+        })
+        .collect()
+}
+
+/// A hard-stop failure from `complete_spiral`: a certified edge the return
+/// construction needs does not exist in `graph` at all. This is not a
+/// `PatternRules::check` rejection -- no `Invariant` variant describes "this
+/// edge is simply missing" -- so the lone journal entry's `rejected_by` is
+/// `None`; `decision` alone names what is missing and where (see the module
+/// doc, "a missing certified edge is a dead end, not something to repair").
+/// `actions_used` is how many turn/return edges were successfully resolved
+/// before this one, for a caller that wants a sense of how far construction
+/// got (no test in this task's brief inspects it).
+fn dead_end(decision: String, actions_used: usize) -> SearchFailure {
+    SearchFailure {
+        kind: SearchFailureKind::Geometry,
+        actions_used,
+        journal_tail: vec![JournalEntry {
+            decision,
+            rejected_by: None,
+            witness: None,
+        }],
+    }
+}
+
+/// Completes `arm` into a full [`SpiralPath`]: the turn from the arm's final
+/// pose to the innermost reserved ring, and the reserved rings walked back
+/// out to the connection zone. See the module doc's "Turn and return
+/// construction" for the design. `lanes`/`graph` are the same values
+/// `plan_inward_arm` was called with (this function does not re-derive or
+/// re-validate the arm itself).
+///
+/// A degenerate `arm` with no edges at all (only possible if `lanes` itself
+/// is empty -- see `SpiralRules::expand`'s `None` branch) or with nothing
+/// reserved (a single-ring arm, `lanes` has no ring 1) has nothing to turn
+/// or return through; both return an otherwise-empty `SpiralPath` rather
+/// than an error, matching `plan_inward_arm`'s own treatment of an empty
+/// state as a trivial success rather than a failure.
+pub fn complete_spiral(
+    arm: &InwardArm,
+    lanes: &[Lane],
+    graph: &EmbeddedPoseGraph,
+) -> Result<SpiralPath, SearchFailure> {
+    let Some(&last_edge_id) = arm.edge_ids.last() else {
+        return Ok(SpiralPath {
+            inward_edge_ids: arm.edge_ids.clone(),
+            turn_edge_ids: Vec::new(),
+            return_edge_ids: Vec::new(),
+        });
+    };
+    let edge_by_id: BTreeMap<u32, &PoseEdge> =
+        graph.edges.iter().map(|edge| (edge.id, edge)).collect();
+    let arm_final_pose = edge_by_id[&last_edge_id].end.local_pose;
+
+    let descending_reserved: Vec<u32> = reserved_ring_ids(arm, lanes).into_iter().rev().collect();
+    let Some(&innermost_reserved) = descending_reserved.first() else {
+        return Ok(SpiralPath {
+            inward_edge_ids: arm.edge_ids.clone(),
+            turn_edge_ids: Vec::new(),
+            return_edge_ids: Vec::new(),
+        });
+    };
+
+    let target_ring = lane_by_id(lanes, innermost_reserved).ok_or_else(|| {
+        dead_end(
+            format!("return lane {innermost_reserved} does not exist"),
+            0,
+        )
+    })?;
+    let turn_edge = select_turn_edge(graph, arm_final_pose, target_ring).ok_or_else(|| {
+        dead_end(
+            format!(
+                "no certified reverse-template edge connects the arm's final pose to \
+                 return lane {innermost_reserved}"
+            ),
+            0,
+        )
+    })?;
+
+    let descend_chains = compute_descend_chains(lanes, graph);
+    let mut return_edge_ids = Vec::new();
+    // The pose the return path is currently arriving at: the turn's own end
+    // pose for the innermost reserved ring, and (after each ring's lap) the
+    // last reversed lane-change edge's end pose for every ring after it --
+    // *not* whatever pose a ring's own lap happens to end at (that is
+    // always back at this same entry pose; see `walk_ring_backward`'s doc
+    // and the module doc's "continuity is a two-seam contract").
+    let mut current_pose = turn_edge.end.local_pose;
+    for (index, &ring_id) in descending_reserved.iter().enumerate() {
+        let ring = lane_by_id(lanes, ring_id).ok_or_else(|| {
+            dead_end(
+                format!("return lane {ring_id} does not exist"),
+                return_edge_ids.len(),
+            )
+        })?;
+        let lap = walk_ring_backward(
+            graph,
+            &edge_by_id,
+            ring,
+            current_pose,
+            return_edge_ids.len(),
+        )?;
+        return_edge_ids.extend(lap);
+
+        if let Some(&next_ring_id) = descending_reserved.get(index + 1) {
+            let chain = descend_chains.get(&next_ring_id).ok_or_else(|| {
+                dead_end(
+                    format!(
+                        "return lane {ring_id}: no certified lane-change chain to \
+                         return lane {next_ring_id}"
+                    ),
+                    return_edge_ids.len(),
+                )
+            })?;
+            for &forward_id in chain.hop_edge_ids.iter().rev() {
+                let reversed = find_reversed_counterpart(graph, edge_by_id[&forward_id])
+                    .ok_or_else(|| {
+                        dead_end(
+                            format!(
+                                "return lane {ring_id}: no certified reversed counterpart \
+                                 for lane-change edge {forward_id}"
+                            ),
+                            return_edge_ids.len(),
+                        )
+                    })?;
+                current_pose = reversed.end.local_pose;
+                return_edge_ids.push(reversed.id);
+            }
+        }
+    }
+
+    Ok(SpiralPath {
+        inward_edge_ids: arm.edge_ids.clone(),
+        turn_edge_ids: vec![turn_edge.id],
+        return_edge_ids,
+    })
 }
 
 #[cfg(test)]
