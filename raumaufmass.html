@@ -250,6 +250,14 @@
   #sugg .chips{display:flex;flex-wrap:wrap;gap:6px}
   #querlist .chips{display:flex;flex-wrap:wrap;gap:6px}
   #nahlist .chips{display:flex;flex-wrap:wrap;gap:6px}
+  #ringlist .grp{margin-bottom:10px}
+  #ringlist .grp:last-child{margin-bottom:0}
+  #ringlist .kopf{font-weight:600;font-size:13px;margin-bottom:2px}
+  #ringlist .kopf.bad{color:var(--warn)}
+  #ringlist .kopf.ok{color:var(--good)}
+  #ringlist .weg{font-size:12.5px;color:var(--muted);margin-bottom:6px}
+  #ringlist .tipp{font-size:12.5px;margin-bottom:6px}
+  #ringlist .chips{display:flex;flex-wrap:wrap;gap:6px}
   #nahlist .hint{font-size:12.5px;color:var(--muted);margin-top:6px}
   #querlist .hint{font-size:12.5px;color:var(--muted);margin-top:6px}
   #querlist .have{font-size:12.5px;color:var(--meas);margin-bottom:6px}
@@ -422,6 +430,10 @@
     <section id="nextsec">
       <h3>Als Nächstes messen</h3>
       <div id="sugg">—</div>
+    </section>
+    <section id="ringsec" hidden>
+      <h3>Der Ring</h3>
+      <div id="ringlist"></div>
     </section>
     <section id="nahsec" hidden>
       <h3>Grenzt aneinander</h3>
@@ -4324,6 +4336,66 @@ globalThis.buildingOrigins=function(rooms){
   return {origins, wurzeln, kanten, schluss};
 };
 
+// ================= Der Ring schliesst sich =================
+// Sobald ein Raum an zwei bereits liegende grenzt, ist seine Lage
+// ueberbestimmt. Die Ableitung folgt weiter dem Baum; jede Verbindung, die
+// keine Baumkante ist, ist eine Schlusskante. Dort steht der Schlussfehler
+// des Rings - und der wird gemeldet, nicht verteilt.
+
+// Der Weg im Baum zwischen zwei Raeumen: zusammen mit der Schlusskante
+// ergibt er den Ring. Ueber ihn haben sich die Fehler aufaddiert.
+globalThis.ringPfad=function(kanten, von, zu){
+  if(von===zu) return [von];
+  const adj=new Map();
+  (kanten||[]).forEach(e=>{
+    if(!adj.has(e.von)) adj.set(e.von,[]);
+    if(!adj.has(e.zu)) adj.set(e.zu,[]);
+    adj.get(e.von).push(e.zu); adj.get(e.zu).push(e.von);
+  });
+  const vor=new Map([[von,null]]), q=[von];
+  while(q.length){
+    const h=q.shift();
+    for(const n of (adj.get(h)||[])){
+      if(vor.has(n)) continue;
+      vor.set(n,h);
+      if(n===zu){
+        const p=[]; let c=zu;
+        while(c!=null){ p.push(c); c=vor.get(c); }
+        return p.reverse();
+      }
+      q.push(n);
+    }
+  }
+  return null;
+};
+
+// Wie weit klafft der Ring an seiner Schlusskante? Verglichen werden die
+// beiden Innenkanten, die dort EINE Wand sein sollten.
+globalThis.schlussFehler=function(rooms, b){
+  const C=globalThis.CORE;
+  const byId=new Map(rooms.map(r=>[r.id,r]));
+  return ((b&&b.schluss)||[]).map(s=>{
+    const ra=byId.get(s.a), rb=byId.get(s.b);
+    const oa=b.origins[s.a], ob=b.origins[s.b];
+    if(!ra||!rb||!oa||!ob||!ra.data||!rb.data) return null;
+    const Ia=C.idx(ra.data.pts||[]), Ib=C.idx(rb.data.pts||[]);
+    const [a1,a2]=s.wand.split('|'), [b1,b2]=s.gegenwand.split('|');
+    if(Ia[a1]==null||Ia[a2]==null||Ib[b1]==null||Ib[b2]==null) return null;
+    const T=globalThis.roomTransform(ob, oa);
+    const f=globalThis.sharedWallFit(
+      ra.data.pts[Ia[a1]], ra.data.pts[Ia[a2]],
+      globalThis.applyRoomTransform(T, rb.data.pts[Ib[b1]]),
+      globalThis.applyRoomTransform(T, rb.data.pts[Ib[b2]]));
+    if(!f) return null;
+    const t=(ra.data.thick||{})[s.wand] || (rb.data.thick||{})[s.gegenwand]
+          || globalThis.THICK_DEFAULT;
+    return {a:s.a, b:s.b, wand:s.wand, gegenwand:s.gegenwand,
+            dicke:f.dicke, soll:t, klaffen:f.dicke-t,
+            winkel:f.winkel, versatz:f.versatz,
+            ring:globalThis.ringPfad(b.kanten, s.a, s.b) || [s.a, s.b]};
+  }).filter(Boolean);
+};
+
 // Passen zwei Raeume an ihrer gemeinsamen Wand noch zusammen? Verglichen
 // werden die beiden Innenkanten - unsere (a1-b1) und die des Nachbarn
 // (a2-b2), beide in UNSEREN Koordinaten. Geliefert wird, was man daraus
@@ -4476,7 +4548,7 @@ const M={ pts:[], walls:[], meas:[], mode:'draw', sel:[], chain:null,
           // M.meas wie hmeas und opmeas: der Grundriss-Solver dieses Raums
           // darf sie nie als eigene Strecke lesen - ihr zweiter Punkt liegt
           // gar nicht in diesem Raum.
-          qmeas:[], quer:[], querHl:null, nahwaende:[] };
+          qmeas:[], quer:[], querHl:null, nahwaende:[], ring:[] };
 // Eigene Ansicht der Wandansicht; wallUserView merkt, ob der Nutzer
 // gezoomt hat (dann kein automatisches Einpassen mehr).
 let wallUserView=false;
@@ -4501,6 +4573,8 @@ function crossingPairs(pts){
 const wallsCross=pts=>crossingPairs(pts).length>0;
 // Schluessel einer Wand, richtungsunabhaengig - fuer M.thick und M.shared.
 const wallKey=(a,b)=>[a,b].sort().join('|');
+// Gradangaben mit deutschem Dezimalkomma - toFixed liefert einen Punkt.
+const fmtGrad=v=>v.toFixed(1).replace('.', ',');
 
 // Nutzer hat gezoomt oder verschoben - autofit() haelt sich dann zurueck,
 // bis "Einpassen" gedrueckt wird oder eine neue Szene entsteht.
@@ -4885,7 +4959,36 @@ function loadNeighbors(){
   });
   // Ein Nachbar kann verschwunden sein, waehrend der Zeiger auf ihm stand.
   if(hoverRoom && !neighbors.some(n=>n.id===hoverRoom)) hoverRoom=null;
+  ringFehler(alle);
   refreshNbChecks();
+}
+
+// Wie gut ist die Form eines Raums FUER SICH bestimmt? Dieselbe Frage, die
+// die Statuskarte fuer den offenen Raum beantwortet - hier fuer jeden Raum
+// auf dem Ring, denn dort sammelt sich der Fehler auf.
+function raumGuete(r){
+  const d=(r&&r.data)||{};
+  if(!Array.isArray(d.pts)||d.pts.length<3||!Array.isArray(d.meas)) return null;
+  if(!C.activeMeas(d.meas).length) return {red:0, sugg:[]};
+  try{
+    const fit=C.solve(d.pts, d.meas);
+    const an=C.analyze(fit.pts, d.meas);
+    return {red:an?an.redundancy:0, sugg:C.suggest(fit.pts, d.walls||[], d.meas)};
+  }catch(e){ return {red:0, sugg:[]}; }
+}
+// Schlussfehler je Ring, angereichert um die Raeume auf dem Weg und darum,
+// wo am ehesten nachzumessen ist.
+function ringFehler(alle){
+  M.ring=[];
+  if(!building || !building.schluss || !building.schluss.length) return;
+  const namen=new Map(alle.map(r=>[r.id, r.name]));
+  M.ring=schlussFehler(alle, building).map(s=>{
+    const raeume=s.ring.map(id=>{
+      const g=raumGuete(alle.find(r=>r.id===id));
+      return {id, name:namen.get(id)||'Raum', red:g?g.red:0, sugg:(g&&g.sugg)||[]};
+    }).sort((x,y)=>x.red-y.red);
+    return {...s, nameA:namen.get(s.a)||'Raum', nameB:namen.get(s.b)||'Raum', raeume};
+  });
 }
 // Geschlossener Raum: Treffer ueber die Flaeche. Ein frisch durch eine Tuer
 // angelegter Nachbar hat aber erst ZWEI Punkte und damit kein Polygon - waere
@@ -5083,7 +5186,7 @@ function sharedChecks(){
     if(f.versatz>NB_WARN_MM)
       probleme.push(`die Wände stehen ${Math.round(f.versatz)} mm gegeneinander versetzt`);
     if(f.winkel>NB_WARN_DEG)
-      probleme.push(`die Räume stehen ${f.winkel.toFixed(1)}° schief zueinander`);
+      probleme.push(`die Räume stehen ${fmtGrad(f.winkel)}° schief zueinander`);
     if(Math.abs(f.dicke-t)>NB_WARN_MM)
       probleme.push(`die Lage ergibt ${Math.round(f.dicke)} mm Wanddicke, eingetragen sind ${t} mm`);
     out.push({a, b, k, f, t, raum:n.name, probleme});
@@ -6271,7 +6374,7 @@ function renderWallPopup(){
     const z=document.createElement('div');
     z.className='nb';
     z.textContent=`Grenzt an „${kand.name}“ — Abstand ${Math.round(kand.dicke)} mm`
-      + (kand.winkel>0.2 ? `, ${kand.winkel.toFixed(1)}° schief` : '');
+      + (kand.winkel>0.2 ? `, ${fmtGrad(kand.winkel)}° schief` : '');
     const bv=document.createElement('button');
     bv.textContent='als eine Wand festlegen';
     bv.onclick=()=>verbindeWand(k);
@@ -7556,6 +7659,51 @@ function renderPanel(){
     b.onclick=()=>enterMeasurement(b.dataset.a, b.dataset.b, true);
   });
 
+  // --- Der Ring. Wenn ein Raum an zwei bereits liegende grenzt, ist seine
+  // Lage ueberbestimmt; der Rest, der dabei uebrigbleibt, steht hier. Er
+  // wird gemeldet und ZUGEORDNET, nicht ueber die Raeume verteilt.
+  const rs=$('ringsec'), rl=$('ringlist');
+  rs.hidden=!(M.ring && M.ring.length);
+  if(!rs.hidden){
+    rl.innerHTML=M.ring.map(s=>{
+      const schief=s.winkel>NB_WARN_DEG, weit=Math.abs(s.klaffen)>NB_WARN_MM;
+      const kopf = (schief||weit)
+        ? `${Math.abs(Math.round(s.klaffen))} mm ${s.klaffen>0?'zu weit':'zu eng'}`
+          + (schief?`, ${fmtGrad(s.winkel)}° schief`:'')
+        : `schließt auf ${Math.abs(Math.round(s.klaffen))} mm genau`;
+      // Ein Winkel am Ringschluss stammt aus der FORM eines Raums, eine
+      // reine Weite eher aus einer Laenge oder einer Wanddicke. Das
+      // entscheidet, wonach zu suchen ist.
+      const offen=s.raeume.filter(r=>r.sugg.length);
+      let tipp;
+      if(!(schief||weit)) tipp='';
+      else if(offen.length){
+        // Alle noch ungepruefften Raeume des Rings anbieten, nicht nur einen:
+        // welcher den Fehler traegt, weiss die App nicht - sie weiss nur,
+        // welche Raeume ihn ueberhaupt verstecken koennen.
+        tipp='<div class="tipp">Noch ungeprüft auf diesem Ring — dort nachmessen:</div>'
+          +'<div class="chips">'+offen.slice(0,3).map(r=>{
+            const v=r.sugg[0];
+            return `<button class="sg rg" data-r="${escapeHtml(r.id)}" `
+              +`data-a="${escapeHtml(v.a)}" data-b="${escapeHtml(v.b)}">`
+              +`${escapeHtml(r.name)}: ${escapeHtml(v.a)} ↔ ${escapeHtml(v.b)}</button>`;
+          }).join('')+'</div>';
+      } else {
+        tipp='<div class="tipp">Alle Räume auf dem Ring sind in sich geprüft — '
+          +'dann steckt der Rest in einer Wanddicke oder in der Lage einer Tür.</div>';
+      }
+      return `<div class="grp">`
+        +`<div class="kopf ${(schief||weit)?'bad':'ok'}">Wand ${escapeHtml(s.wand.replace('|','–'))} `
+        +`zwischen „${escapeHtml(s.nameA)}“ und „${escapeHtml(s.nameB)}“: ${kopf}.</div>`
+        +`<div class="weg">Über ${s.ring.map(id=>escapeHtml(
+            (M.ring[0].raeume.find(r=>r.id===id)||{}).name||'Raum')).join(' → ')}</div>`
+        +tipp+`</div>`;
+    }).join('');
+    rl.querySelectorAll('button.rg').forEach(b=>{
+      b.onclick=()=>{ openRoom(b.dataset.r); enterMeasurement(b.dataset.a, b.dataset.b, false); };
+    });
+  }
+
   // --- Waende, die an einen Nachbarn grenzen, aber noch nicht verbunden
   // sind. Im Ring entsteht genau das: der neue Raum stoesst an einen, zu
   // dem es keine Tuer gibt.
@@ -8551,6 +8699,55 @@ globalThis.selfChecks=function(){
       // Dickenaenderung schlaegt direkt durch - das ist die abgeleitete Dicke
       chk('geteilt: 175 statt 240 liest sich als 175',
         near(sf(a1,b1,{x:4000,y:-175},{x:0,y:-175}).dicke,175,1e-9));
+    }
+  }
+  // --- Der Ring: Weg im Baum und Schlussfehler ---
+  {
+    const rp=globalThis.ringPfad, sfz=globalThis.schlussFehler;
+    chk('ring: ringPfad vorhanden', typeof rp==='function' && typeof sfz==='function');
+    if(rp){
+      // Baum a-b-c-d, Schlusskante spaeter zwischen a und d
+      const k=[{von:'a',zu:'b'},{von:'b',zu:'c'},{von:'c',zu:'d'}];
+      chk('ring: Weg durch den ganzen Baum',
+        JSON.stringify(rp(k,'a','d'))===JSON.stringify(['a','b','c','d']));
+      chk('ring: Weg rueckwaerts ist derselbe, nur umgedreht',
+        JSON.stringify(rp(k,'d','a'))===JSON.stringify(['d','c','b','a']));
+      chk('ring: Weg zu sich selbst', JSON.stringify(rp(k,'b','b'))===JSON.stringify(['b']));
+      chk('ring: kein Weg -> null', rp(k,'a','x')===null);
+      chk('ring: Abzweig wird nicht mitgeschleppt',
+        JSON.stringify(rp(k.concat([{von:'b',zu:'z'}]),'a','c'))===JSON.stringify(['a','b','c']));
+    }
+    if(sfz){
+      // Zwei Raeume, kuenstlich als Schlusskante gefuehrt: der zweite liegt
+      // 40mm zu weit weg und 1 Grad schief.
+      const rechteckR=(w,h)=>({
+        pts:[{id:'A',x:0,y:0},{id:'B',x:w,y:0},{id:'C',x:w,y:h},{id:'D',x:0,y:h}],
+        walls:[['A','B'],['B','C'],['C','D'],['D','A']],
+        meas:[{a:'A',b:'B',d:w}], openings:[], thick:{}, shared:{}});
+      const A={id:'a', data:rechteckR(4000,3000)};
+      const B={id:'b', data:rechteckR(4000,2000)};
+      A.data.thick={'A|B':240};
+      const kante=[{a:'a', b:'b', wand:'A|B', gegenwand:'A|B'}];
+      // Reiner Abstandsfehler: 280 statt der eingetragenen 240
+      const b0={ origins:{a:{x:0,y:0,rot:0}, b:{x:4000,y:-280,rot:Math.PI}},
+                 kanten:[], schluss:kante };
+      const r=sfz([A,B], b0);
+      chk('ring: Schlussfehler wird gerechnet', r.length===1);
+      chk('ring: Klaffen gegen die Solldicke',
+        near(r[0].dicke,280,1e-6) && near(r[0].soll,240,1e-9)
+        && near(r[0].klaffen,40,1e-6) && near(r[0].winkel,0,1e-9));
+      // Schiefstand: 1 Grad verdreht. Der Abstand waechst dabei zwangslaeufig
+      // mit, weil das ferne Wandende wegschwenkt - gemeldet wird der Mittelwert.
+      const w=1*Math.PI/180;
+      const r2=sfz([A,B], {origins:{a:{x:0,y:0,rot:0}, b:{x:4000,y:-280,rot:Math.PI+w}},
+                           kanten:[], schluss:kante});
+      chk('ring: Schiefstand in Grad', near(r2[0].winkel,1,1e-6));
+      chk('ring: Schiefstand zieht den gemeldeten Abstand mit',
+        near(r2[0].dicke, 280+4000*Math.sin(w)/2, 1e-3));
+      chk('ring: ohne Baumkanten bleibt der Ring die Schlusskante selbst',
+        JSON.stringify(r[0].ring)===JSON.stringify(['a','b']));
+      chk('ring: keine Schlusskante -> nichts zu melden',
+        sfz([A,B], {origins:b0.origins, kanten:[], schluss:[]}).length===0);
     }
   }
   // --- Zwei Waende als eine erklaeren: welche kommen in Frage? ---
