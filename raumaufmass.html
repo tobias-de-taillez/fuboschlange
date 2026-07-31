@@ -3064,9 +3064,13 @@ globalThis.STORE_FACTORY=function makeStore(storage){
   return {
     storageOk,
     list(){
+      // Neueste zuerst. Zwei Anlagen in derselben Millisekunde tragen
+      // denselben ISO-Zeitstempel - dann entscheidet die Array-Position:
+      // rooms waechst per push, spaeterer Index heisst neuer.
       return readRooms()
-        .map(r=>({id:r.id,name:r.name,updated:r.updated,area:r.area??null}))
-        .sort((a,b)=>String(b.updated).localeCompare(String(a.updated)));
+        .map((r,i)=>({id:r.id,name:r.name,updated:r.updated,area:r.area??null,_i:i}))
+        .sort((a,b)=>String(b.updated).localeCompare(String(a.updated)) || b._i-a._i)
+        .map(({_i,...r})=>r);
     },
     load(id){
       const r=readRooms().find(r=>r.id===id);
