@@ -1,5 +1,6 @@
 mod fields;
 mod search;
+mod spiral;
 mod types;
 mod zone;
 
@@ -8,6 +9,7 @@ pub use search::{
     Action, Decision, Invariant, Journal, PatternRules, SearchFailure, SearchFailureKind,
     SearchState, backtracking_search, terminal_corridor_connected,
 };
+pub use spiral::{InwardArm, SpiralRules, plan_inward_arm, turn_budget_ok};
 pub use types::{
     ConnectionInput, ConnectionOutput, CoverageOutput, FieldDiagnostics, JournalEntry,
     LocatedSpacing, LoopConstraintCertificate, LoopError, LoopErrorCode, LoopPattern, LoopPlan,
