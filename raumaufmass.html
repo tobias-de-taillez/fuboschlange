@@ -263,10 +263,15 @@
     <section id="datasec">
       <h3>Daten</h3>
       <div class="btnrow">
+        <button id="filesave">Als Datei sichern</button>
+        <button id="fileopen">Datei öffnen</button>
+      </div>
+      <div class="btnrow" style="margin-top:8px">
         <button id="exp">JSON kopieren</button>
         <button id="imp">JSON einfügen</button>
         <button id="clr">Alles verwerfen</button>
       </div>
+      <input id="filepick" type="file" accept=".json,application/json" hidden>
     </section>
   </div>
 </div>
@@ -4219,6 +4224,54 @@ addEventListener('keydown',e=>{
   if(mode) setMode(mode);
 });
 addEventListener('resize',()=>{ render(); placeEntry(); });
+
+// ================= Datei sichern / oeffnen =================
+const slug=s=>String(s||'raum').toLowerCase()
+  .replace(/ä/g,'ae').replace(/ö/g,'oe').replace(/ü/g,'ue').replace(/ß/g,'ss')
+  .replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')||'raum';
+
+function roomFilePayload(id){
+  const r=STORE.load(id);
+  if(!r) return null;
+  return {
+    name:r.name,
+    // Export-Format = importProblem-Form plus Zusatzfelder; ein Reimport
+    // laeuft durch dieselbe Validierung wie jeder andere Import.
+    ...r.data,
+  };
+}
+async function exportRoomAsFile(id){
+  const payload=roomFilePayload(id);
+  if(!payload) return;
+  const json=JSON.stringify(payload,null,2);
+  const fname=`${slug(payload.name)}-${new Date().toISOString().slice(0,10)}.json`;
+  const file=new File([json], fname, {type:'application/json'});
+  // Handy: Share-Sheet (iCloud/Drive/Mail); Desktop oder ohne Share: Download.
+  if(navigator.canShare && navigator.canShare({files:[file]})){
+    try{ await navigator.share({files:[file], title:payload.name}); return; }
+    catch(e){ if(e && e.name==='AbortError') return; }   // abgebrochen: kein Fehler
+  }
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([json],{type:'application/json'}));
+  a.download=fname;
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
+  setHint(`Gespeichert als ${fname} (Downloads).`);
+}
+$('filesave').onclick=()=>{ if(currentRoom) exportRoomAsFile(currentRoom); };
+$('fileopen').onclick=()=>$('filepick').click();
+$('filepick').onchange=async()=>{
+  const f=$('filepick').files[0];
+  $('filepick').value='';
+  if(!f) return;
+  let o=null;
+  try{ o=JSON.parse(await f.text()); }catch(e){ alert('Das ist keine gültige JSON-Datei.'); return; }
+  const name=(o && typeof o.name==='string' && o.name.trim()) ? o.name.trim()
+    : f.name.replace(/\.json$/i,'');
+  const err=importAsNewRoom(name, o);
+  if(err) alert('Datei hat nicht die erwartete Form: '+err);
+  else setHint(`„${name}" importiert — als eigener Raum gespeichert.`);
+};
 
 // ================= Panel =================
 
