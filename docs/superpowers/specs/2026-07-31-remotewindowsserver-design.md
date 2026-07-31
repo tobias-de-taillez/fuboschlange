@@ -46,8 +46,8 @@ Die Konfigurationsdatei wird atomar geschrieben und mit restriktiven Dateirechte
 2. Diese Regeln verlangen natürliche, vorlesefreundliche Sätze, kurze Absätze und möglichst wenig ungeeignete Markdown-Struktur. Die gewählte Stimme bestimmt die Sprache.
 3. Bei `agent_settled` wird ausschließlich die finale Assistant-Antwort verwendet.
 4. `prepareSpeech()` zerlegt den Text in sprechbare Chunks.
-5. Die Chunks werden mit Session-ID, Message-ID und fortlaufender Sequenznummer in ihrer Reihenfolge übertragen.
-6. Jeder Chunk wird erst nach erfolgreicher Bestätigung als zugestellt betrachtet. Temporäre Netzwerkfehler werden begrenzt wiederholt; bei endgültigem Fehler bleibt die Pi-Antwort erfolgreich und die Bridge meldet den Fehler sichtbar.
+5. Die vollständige geordnete Chunk-Liste wird mit Session-ID und Message-ID in einem authentifizierten Request übertragen.
+6. Der gesamte Request wird erst nach erfolgreicher Bestätigung als zugestellt betrachtet. Temporäre Netzwerkfehler werden begrenzt wiederholt; bei endgültigem Fehler bleibt die Pi-Antwort erfolgreich und die Bridge meldet den Fehler sichtbar.
 
 Es wird keine Streaming-Zwischenantwort übertragen. Tool-Ausgaben, Thinking und abgebrochene Antworten werden nicht gesprochen.
 
@@ -57,9 +57,9 @@ Der lokale Modus startet einen HTTP-Server auf `100.80.187.52:8765`. Der Server:
 
 - akzeptiert nur Requests vom konfigurierten Remote-Adresseintrag `100.87.111.111`;
 - authentifiziert jeden Request mit HMAC-SHA256 über das Shared Secret und einen kanonischen Request-String;
-- validiert Session-ID, Message-ID, Sequenznummer, Stimme und Chunk-Größe;
-- dedupliziert bereits bestätigte `(sessionId, messageEntryId, sequence)`-Kombinationen;
-- übergibt neue Chunks an die vorhandene `pi-speech`-Queue;
+- validiert Session-ID, Message-ID, Stimme, Chunk-Liste und Chunk-Größen;
+- dedupliziert bereits bestätigte `(sessionId, messageEntryId)`-Kombinationen;
+- übergibt die vollständige Chunk-Liste als einen Job an die vorhandene `pi-speech`-Queue;
 - antwortet erst nach erfolgreicher Queue-Übergabe mit einer Bestätigung.
 
 Die lokale Extension erzeugt selbst kein alternatives Audio-Backend. Dadurch bleibt die bisherige lokale Piper/GLaDOS-Konfiguration unverändert.
@@ -77,13 +77,12 @@ Der Request enthält mindestens:
   "protocol": 1,
   "sessionId": "...",
   "messageEntryId": "...",
-  "sequence": 0,
   "voice": "german",
-  "text": "..."
+  "chunks": ["...", "..."]
 }
 ```
 
-Die bestehende lokale Queue bleibt die einzige Stelle, die FIFO, Worker-Lock und Audioausgabe kontrolliert.
+Die bestehende lokale Queue bleibt die einzige Stelle, die FIFO, Worker-Lock, Nachrichtendeduplizierung und Audioausgabe kontrolliert.
 
 ## Commands und Status
 
