@@ -3369,6 +3369,101 @@ globalThis.dampenDrag=function(pts, walls, id, dx, dy, soft){
   return {dx:vx, dy:vy, near};
 };
 
+// ================= Wandansichten =================
+// Die Deckenhoehe gehoert zur ECKE, nicht zur Wand: die Wand A-B ist dann
+// das Viereck (0,0)-(L,0)-(L,h_B)-(0,h_A). Zwei benachbarte Waende teilen
+// ihre senkrechte Kante damit PER KONSTRUKTION - h_B ist dieselbe Zahl.
+// Eine wandweise Hoehe braeuchte je Ecke zwei konkurrierende Werte, die
+// eine Zwangsbedingung zusammenhaelt; hier ist der Widerspruch nicht
+// einmal formulierbar. Trapez, Dreieck und Dachschraege fallen ab.
+const H_DEFAULT = 2500;   // uebliche Deckenhoehe, bis etwas gemessen ist
+
+// Hoehe je Ecke aus den Hoehenmessungen. Solange nur EIN Wert gemessen
+// ist, gilt er fuer alle Ecken (der Normalfall: ein Raum, eine Decke).
+// Ab dem zweiten abweichenden Wert zaehlt jede Ecke fuer sich, und
+// ungemessene erben den Mittelwert - als "angenommen", nicht als Messung.
+globalThis.cornerHeights=function(pts, meas){
+  const hm=(meas||[]).filter(m=>m.kind==='h' && m.on!==false && Number.isFinite(m.d) && m.d>0);
+  const byId=new Map();
+  hm.forEach(m=>{
+    if(!byId.has(m.at)) byId.set(m.at, []);
+    byId.get(m.at).push(m.d);
+  });
+  const mean=a=>a.reduce((s,x)=>s+x,0)/a.length;
+  const gemessen=new Map();
+  byId.forEach((v,k)=>gemessen.set(k, mean(v)));
+  const werte=[...gemessen.values()];
+  const fallback = werte.length ? mean(werte) : H_DEFAULT;
+  const out={};
+  pts.forEach(p=>{
+    out[p.id] = gemessen.has(p.id)
+      ? {h:gemessen.get(p.id), gemessen:true}
+      : {h:fallback, gemessen:false};
+  });
+  return out;
+};
+
+// Die Wandflaeche als Polygon in Wandkoordinaten (x von Ecke a nach b,
+// y vom Boden). Trapez, weil die beiden Ecken verschieden hoch sein
+// koennen; bei Hoehe 0 an einer Seite ein Dreieck.
+globalThis.wallShape=function(pts, meas, a, b){
+  const C=globalThis.CORE, I=C.idx(pts);
+  if(I[a]==null||I[b]==null) return null;
+  const L=C.dist(pts[I[a]], pts[I[b]]);
+  const H=globalThis.cornerHeights(pts, meas);
+  const ha=H[a]?H[a].h:H_DEFAULT, hb=H[b]?H[b].h:H_DEFAULT;
+  return {L, ha, hb,
+          poly:[{x:0,y:0},{x:L,y:0},{x:L,y:hb},{x:0,y:ha}],
+          gemessen:(H[a]&&H[a].gemessen)&&(H[b]&&H[b].gemessen)};
+};
+
+// Deckenhoehe an der Stelle x einer Wand - in einem Trapez laeuft die
+// Decke schraeg, und genau daran muss sich eine Oeffnung messen lassen.
+globalThis.ceilingAt=function(shape, x){
+  if(!shape || !(shape.L>0)) return shape?shape.ha:0;
+  const t=Math.max(0, Math.min(1, x/shape.L));
+  return shape.ha + (shape.hb-shape.ha)*t;
+};
+
+// Passt die Oeffnung vollstaendig in die Wand? Geprueft wird gegen die
+// SCHRAEGE Decke, nicht gegen ein Rechteck - sonst raschte eine Oeffnung
+// in einer Trapezwand oben durch die Decke.
+globalThis.openingFits=function(shape, op){
+  if(!shape) return false;
+  if(op.x<-1e-6 || op.y<-1e-6) return false;
+  if(op.x+op.w > shape.L+1e-6) return false;
+  const oben=op.y+op.h;
+  return oben <= globalThis.ceilingAt(shape, op.x)+1e-6
+      && oben <= globalThis.ceilingAt(shape, op.x+op.w)+1e-6;
+};
+
+// Oeffnung in die Wand zwingen: waagerecht hart an die Kanten, senkrecht
+// gegen die (ggf. schraege) Decke. Liefert eine neue Oeffnung.
+globalThis.clampOpening=function(shape, op){
+  const o={...op};
+  o.w=Math.min(o.w, shape.L);
+  o.x=Math.max(0, Math.min(shape.L-o.w, o.x));
+  const deckeLinks=globalThis.ceilingAt(shape, o.x);
+  const deckeRechts=globalThis.ceilingAt(shape, o.x+o.w);
+  const platz=Math.min(deckeLinks, deckeRechts);
+  o.h=Math.min(o.h, platz);
+  o.y=Math.max(0, Math.min(platz-o.h, o.y));
+  return o;
+};
+
+// Vorbelegung beim Einsetzen: nichts erscheint an absurder Stelle, auch
+// ohne eine einzige Messung. Tuer steht auf dem Boden, Fenster und
+// Wandloch sitzen mittig im oberen Bereich.
+globalThis.defaultOpening=function(shape, kind){
+  if(kind==='door'){
+    const w=Math.min(985, shape.L), h=Math.min(1985, Math.min(shape.ha,shape.hb));
+    return globalThis.clampOpening(shape, {kind, w, h, x:(shape.L-w)/2, y:0});
+  }
+  const hMit=(shape.ha+shape.hb)/2;
+  const w=shape.L*2/3, h=hMit/3;
+  return globalThis.clampOpening(shape, {kind, w, h, x:(shape.L-w)/2, y:hMit*0.4});
+};
+
 // ================= Entwirren =================
 // Ein geschlossener, teilgemessener Wandzug kann sich beim Skizzieren
 // verheddern (Waende kreuzen sich). Gesucht: eine kreuzungsfreie Lage, die
@@ -6001,6 +6096,72 @@ globalThis.selfChecks=function(){
              return !!u&&!!u2 && u.every((p,i)=>Math.abs(p.x-u2[i].x)<1e-9 && Math.abs(p.y-u2[i].y)<1e-9); })());
     chk('entwirren: offener Zug -> null',
       globalThis.untangle(bow.map(p=>({...p})), [['A','B'],['B','C']], meas1, 8, 1)===null);
+  }
+  // --- Wandansichten: Hoehe an der Ecke, Wandflaeche, Oeffnungen ---
+  {
+    const pts=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:3000}];
+    const ch=globalThis.cornerHeights, ws=globalThis.wallShape;
+    chk('wand: ohne Messung -> Standardhoehe, als angenommen markiert',
+      (()=>{ const H=ch(pts,[]);
+             return H.A.h===2500 && H.A.gemessen===false && H.C.h===2500; })());
+    chk('wand: EINE Hoehenmessung gilt fuer alle Ecken',
+      (()=>{ const H=ch(pts,[{kind:'h',at:'B',d:2620,on:true}]);
+             return H.B.h===2620 && H.B.gemessen===true
+                 && H.A.h===2620 && H.A.gemessen===false; })());
+    chk('wand: zwei verschiedene Hoehen -> je Ecke eigener Wert, Rest erbt Mittel',
+      (()=>{ const H=ch(pts,[{kind:'h',at:'A',d:2400,on:true},{kind:'h',at:'B',d:2600,on:true}]);
+             return H.A.h===2400 && H.B.h===2600 && near(H.C.h,2500,1e-9) && !H.C.gemessen; })());
+    chk('wand: mehrere Messungen derselben Ecke werden gemittelt',
+      (()=>{ const H=ch(pts,[{kind:'h',at:'A',d:2400,on:true},{kind:'h',at:'A',d:2410,on:true}]);
+             return near(H.A.h,2405,1e-9); })());
+    chk('wand: stillgelegte Hoehenmessung zaehlt nicht',
+      (()=>{ const H=ch(pts,[{kind:'h',at:'A',d:9999,on:false}]);
+             return H.A.h===2500 && !H.A.gemessen; })());
+
+    // DIE Kerneigenschaft: benachbarte Waende teilen ihre senkrechte Kante,
+    // weil beide dieselbe Eckhoehe lesen. Ein Widerspruch ist nicht
+    // formulierbar - genau dafuer haengt die Hoehe an der Ecke.
+    chk('wand: Nachbarwaende teilen die gemeinsame Kante exakt',
+      (()=>{ const m=[{kind:'h',at:'A',d:2400,on:true},{kind:'h',at:'B',d:2800,on:true},
+                      {kind:'h',at:'C',d:2600,on:true}];
+             const ab=ws(pts,m,'A','B'), bc=ws(pts,m,'B','C');
+             return ab.hb===bc.ha && ab.hb===2800; })());
+    chk('wand: Laenge kommt aus dem Grundriss, Form ist ein Trapez',
+      (()=>{ const s=ws(pts,[{kind:'h',at:'A',d:2400,on:true},{kind:'h',at:'B',d:2800,on:true}],'A','B');
+             return near(s.L,4000,1e-9) && s.ha===2400 && s.hb===2800 && s.poly.length===4; })());
+
+    const shape={L:4000, ha:2400, hb:2800,
+                 poly:[{x:0,y:0},{x:4000,y:0},{x:4000,y:2800},{x:0,y:2400}]};
+    chk('wand: Decke laeuft im Trapez schraeg',
+      near(globalThis.ceilingAt(shape,0),2400,1e-9)
+      && near(globalThis.ceilingAt(shape,4000),2800,1e-9)
+      && near(globalThis.ceilingAt(shape,2000),2600,1e-9));
+    chk('oeffnung: passt innerhalb der Wand',
+      globalThis.openingFits(shape,{x:1000,y:0,w:1000,h:2000})===true);
+    chk('oeffnung: ragt seitlich hinaus -> passt nicht',
+      globalThis.openingFits(shape,{x:3500,y:0,w:1000,h:2000})===false);
+    chk('oeffnung: stoesst an die SCHRAEGE Decke -> passt nicht',
+      // an x=0 ist die Decke 2400; eine 2450 hohe Oeffnung dort passt nicht,
+      // obwohl sie unter der hoechsten Wandkante (2800) bliebe.
+      globalThis.openingFits(shape,{x:0,y:0,w:500,h:2450})===false);
+    chk('oeffnung: clamp schiebt in die Wand zurueck',
+      (()=>{ const o=globalThis.clampOpening(shape,{x:-500,y:-200,w:1000,h:2000});
+             return o.x===0 && o.y===0 && globalThis.openingFits(shape,o); })());
+    chk('oeffnung: clamp respektiert die schraege Decke',
+      (()=>{ const o=globalThis.clampOpening(shape,{x:0,y:2000,w:500,h:1000});
+             return globalThis.openingFits(shape,o) && o.h<=2400+1e-6; })());
+    chk('oeffnung: Tuer-Vorbelegung steht auf dem Boden und passt',
+      (()=>{ const o=globalThis.defaultOpening(shape,'door');
+             return o.y===0 && o.w===985 && globalThis.openingFits(shape,o); })());
+    chk('oeffnung: Fenster-Vorbelegung sitzt mittig im oberen Bereich',
+      (()=>{ const o=globalThis.defaultOpening(shape,'window');
+             return near(o.x+o.w/2, shape.L/2, 1e-9) && o.y>0
+                 && globalThis.openingFits(shape,o); })());
+    chk('oeffnung: Vorbelegung passt auch in eine winzige Wand',
+      (()=>{ const eng={L:700, ha:1800, hb:1800,
+                        poly:[{x:0,y:0},{x:700,y:0},{x:700,y:1800},{x:0,y:1800}]};
+             return ['door','window','hole'].every(k=>
+               globalThis.openingFits(eng, globalThis.defaultOpening(eng,k))); })());
   }
   // --- Sanfte Kreuzungsbremse ---
   {
