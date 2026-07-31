@@ -12,6 +12,17 @@ pub struct PlateProfile {
     pub large_effective_radius_mm: f64,
     pub small_effective_radius_mm: f64,
     pub calibration_allowance_mm: f64,
+    /// Human-approved laying tolerance. Template and edge certification accept a
+    /// nopp clearance down to `-laying_tolerance_mm`: an overlap of well under a
+    /// tenth of a millimetre with the forbidden disc is inside real-world laying
+    /// tolerance on a nopp plate, so rejecting it buys nothing and costs whole
+    /// maneuver families. Certificates keep reporting the true *signed*
+    /// clearance, so nothing is hidden by this allowance.
+    ///
+    /// This does not relax `forbidden_radius`: the 0.5 mm
+    /// `calibration_allowance_mm` and the 8 mm pipe radius are still baked into
+    /// every disc, on top of this.
+    pub laying_tolerance_mm: f64,
 }
 
 impl PlateProfile {
@@ -27,6 +38,7 @@ impl PlateProfile {
             large_effective_radius_mm: 17.5,
             small_effective_radius_mm: 10.5,
             calibration_allowance_mm: 0.5,
+            laying_tolerance_mm: 0.1,
         }
     }
 

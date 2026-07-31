@@ -82,9 +82,11 @@ fn touch_map(graph: &EmbeddedPoseGraph) -> HashMap<u32, Vec<u32>> {
 
 #[test]
 fn straight0_chains_form_long_connected_runs() {
-    // Sanity baseline for the tests below: Straight0 *does* chain to itself
-    // extensively (a ring's straight sides are buildable in isolation).
-    // What's missing is only the corner transition -- established next.
+    // Sanity baseline for the tests below: Straight0 chains to itself
+    // extensively, so a ring's straight sides are buildable on their own. This
+    // was already true while the graph was disconnected -- it isolates "the
+    // straight runs are fine" from "the turns now attach to them", which is
+    // what the next two tests establish.
     let graph = graph();
     let touches = touch_map(&graph);
     let straight0_both_ends_shared = graph

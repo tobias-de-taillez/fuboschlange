@@ -64,7 +64,7 @@ pub fn validate_primitive_against_plate(
     profile: &PlateProfile,
 ) -> Result<(), PlateValidationFailure> {
     validate_shape(primitive, profile)?;
-    validate_spatial_clearance(primitive, polygon, wall_clearance_mm, nopps)
+    validate_spatial_clearance(primitive, polygon, wall_clearance_mm, nopps, profile)
 }
 
 pub fn validate_world_primitive_against_plate(
@@ -76,7 +76,7 @@ pub fn validate_world_primitive_against_plate(
     transform: &PlateTransform,
 ) -> Result<(), PlateValidationFailure> {
     validate_shape(&transform.primitive_to_local(primitive), profile)?;
-    validate_spatial_clearance(primitive, polygon, wall_clearance_mm, nopps)
+    validate_spatial_clearance(primitive, polygon, wall_clearance_mm, nopps, profile)
 }
 
 fn validate_spatial_clearance(
@@ -84,11 +84,16 @@ fn validate_spatial_clearance(
     polygon: &Polygon,
     wall_clearance_mm: f64,
     nopps: &[Nopp],
+    profile: &PlateProfile,
 ) -> Result<(), PlateValidationFailure> {
     validate_wall_domain(primitive, polygon, wall_clearance_mm)?;
+    // Nopp clearance -- and only nopp clearance -- is judged against the
+    // profile's laying tolerance, so that an edge accepted by
+    // `certify_template` is not then rejected here for the same micrometres.
+    // The wall-domain check above stays strict.
     for nopp in nopps {
         if primitive_circle_clearance(primitive, nopp.center, nopp.forbidden_radius_mm)
-            <= VALIDATION_TOLERANCE_MM
+            < -profile.laying_tolerance_mm
         {
             return Err(PlateValidationFailure {
                 code: PlateValidationFailureCode::NoppCollision,

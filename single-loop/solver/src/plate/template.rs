@@ -14,6 +14,13 @@ const TEMPLATE_NOPP_LIMIT: usize = 10_000;
 
 /// Every catalogue arc bends at exactly the profile floor (5 x 16 mm pipe).
 const TURN_RADIUS_MM: f64 = 80.0;
+/// Channels run midway between nopp rows: `CHANNEL_OFFSET_MM + 75k`. Mirrors
+/// `PlateProfile::pitch_mm / 2`, spelled out here because the whole lattice
+/// derivation below is written in terms of it.
+const CHANNEL_OFFSET_MM: f64 = 37.5;
+/// The translation quantum of `TemplateTransform` (`PlateProfile::period_mm`),
+/// and therefore the spacing of anchor nodes along a channel.
+const PERIOD_MM: f64 = 150.0;
 /// A 180-degree reverse across two channels 150 mm apart cannot be a semicircle
 /// (that would need radius 75 mm). The teardrop dives out of the entry channel
 /// on a short co-radial arc first, so the big arc spans 2 * 80 mm of lateral
@@ -203,14 +210,14 @@ impl PlateProfile {
             // are joined by a single edge.
             straight_template(
                 TemplateId::Straight0,
-                Point::new(0.0, 37.5),
-                Point::new(150.0, 37.5),
+                Point::new(0.0, CHANNEL_OFFSET_MM),
+                Point::new(PERIOD_MM, CHANNEL_OFFSET_MM),
                 Heading8::Deg0,
             ),
             straight_template(
                 TemplateId::Straight45,
-                Point::new(0.0, 37.5),
-                Point::new(150.0, 187.5),
+                Point::new(0.0, CHANNEL_OFFSET_MM),
+                Point::new(PERIOD_MM, CHANNEL_OFFSET_MM + PERIOD_MM),
                 Heading8::Deg45,
             ),
             broad_turn_45(),
@@ -255,22 +262,31 @@ fn broad_turn_90() -> MotionTemplate {
     path.finish(TemplateId::BroadTurn90, end, Heading8::Deg90)
 }
 
-/// Channel y = 112.5 to the anti-diagonal channel x + y = -37.5, the long way
-/// round: a right-hand 225-degree arc, which nets the same +135 degrees.
+/// Channel y = 37.5 to the anti-diagonal channel x + y = 337.5: lead-in
+/// `220 - 80*sqrt(2)`, one 135-degree arc, lead-out `70*sqrt(2) - 80`.
 ///
-/// A direct 135-degree arc is impossible here at any radius. Whichever channels
-/// it joins, its centre is pinned to `y = 37.5 + R` and `x = -R*(1+sqrt(2))`
-/// (mod 75), which puts two nopps in the same column on adjacent rows --
-/// opposite checkerboard colours -- at 25.99 mm and 19.44 mm from an R = 80 arc.
-/// Whichever parity is chosen, one of them is large (26.0) and collides. Swept
-/// over R = 80..400 mm in 0.05 mm steps and all four parities, the best
-/// clearance anywhere is -0.0098 mm. The reflex arc's centre sits at
-/// `y = 37.5 - R` instead, which moves it clear; it certifies at exactly 80 mm.
+/// This one lives on the laying tolerance, deliberately and with the numbers on
+/// the table. Whichever channels a 135-degree arc joins, its centre is pinned to
+/// `y = 37.5 + R` and `x = -R*(1+sqrt(2))` (mod 75) -- there is no free phase
+/// left, only the radius and the two checkerboard parities. That puts two nopps
+/// in the same column on adjacent rows, hence necessarily opposite colours, at
+/// `dx = 80*sqrt(2) - 70` from the centre: one at `dy = -42.5` (19.444 mm from
+/// an R = 80 arc) and one at `dy = +32.5` (25.990 mm). The parity chosen here
+/// leaves the near one small (19.0, so +0.444 mm) and the far one large (26.0,
+/// so **-0.0098 mm**). The opposite parity is far worse (-6.56 mm), and no
+/// radius rescues it: swept over R = 80..400 mm in 0.05 mm steps across all four
+/// parities, -0.0098 mm is the best clearance that exists.
+///
+/// 9.8 micrometres of overlap with a disc that already carries an 8 mm pipe
+/// radius plus a 0.5 mm calibration allowance is inside laying tolerance, so
+/// `laying_tolerance_mm` admits it (human decision, 2026-07-31) rather than
+/// forcing a 225-degree reflex detour that costs 77 mm of extra pipe and sweeps
+/// a 160 mm circle. `certify_template` reports the -0.0098 mm as-is.
 fn broad_turn_135() -> MotionTemplate {
-    let end = Point::new(-37.5, 0.0);
-    let mut path = Composite::new(Point::new(0.0, 112.5), Heading8::Deg0);
-    path.line(TURN_RADIUS_MM * SQRT_2 - 70.0);
-    path.arc(TURN_RADIUS_MM, -5.0 * FRAC_PI_4);
+    let end = Point::new(150.0, 187.5);
+    let mut path = Composite::new(Point::new(0.0, CHANNEL_OFFSET_MM), Heading8::Deg0);
+    path.line(220.0 - TURN_RADIUS_MM * SQRT_2);
+    path.arc(TURN_RADIUS_MM, 3.0 * FRAC_PI_4);
     path.line_to(end);
     path.finish(TemplateId::BroadTurn135, end, Heading8::Deg135)
 }
@@ -450,7 +466,12 @@ pub fn certify_template(
                 center,
                 profile.forbidden_radius(nopp_type(*index)),
             );
-            if clearance <= POSITION_TOLERANCE_MM {
+            // Accept down to `-laying_tolerance_mm`, not down to zero: a
+            // sub-tenth-of-a-millimetre bite out of the forbidden disc is inside
+            // real-world laying tolerance. `min_nopp_clearance_mm` keeps the
+            // true signed value either way, so a template living on that
+            // allowance is visible in its certificate rather than hidden by it.
+            if clearance < -profile.laying_tolerance_mm {
                 return Err(PlateValidationFailure {
                     code: PlateValidationFailureCode::NoppCollision,
                     witness: Some(center),
