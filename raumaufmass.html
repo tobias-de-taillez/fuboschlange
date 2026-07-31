@@ -3275,10 +3275,22 @@ globalThis.STORE_FACTORY=function makeStore(storage){
       if(patch.name!==undefined) r.name=patch.name;
       if(patch.data!==undefined) r.data=patch.data;
       if(patch.area!==undefined) r.area=patch.area;
+      // origin liegt bewusst NEBEN data: die Lage im Gebaeude gehoert nicht
+      // zum Aufmass des Raums. Datei-Export, Link und Undo arbeiten ueber
+      // data - die Verankerung darf dabei weder mitreisen noch verloren
+      // gehen (recompute speichert je Aenderung nur data und area).
+      if(patch.origin!==undefined) r.origin=patch.origin;
       r.updated=new Date().toISOString();
       return writeRooms(rooms);
     },
     rename(id,name){ return this.save(id,{name}); },
+    // Alle im Gebaeude verankerten Raeume, mit Daten: der aktive Raum
+    // zeichnet daraus seine Nachbarn. Raeume ohne origin sind freistehend
+    // und tauchen hier nie auf - die bestehende Bibliothek bleibt gueltig.
+    withOrigin(){
+      return readRooms().filter(r=>r && r.origin && typeof r.origin==='object')
+                        .map(r=>({id:r.id, name:r.name, origin:r.origin, data:r.data}));
+    },
     remove(id){
       writeRooms(readRooms().filter(r=>r.id!==id));
       if(this.currentId()===id){
@@ -3873,6 +3885,26 @@ globalThis.untangle=function(pts, walls, meas, tries, seed){
   return best ? best.P : null;
 };
 
+// ================= Gebaeude: Raeume im gemeinsamen System =================
+// origin verankert die Innenkontur eines Raums im Gebaeude:
+//   p_gebaeude = R(origin.rot) * p_lokal + (origin.x, origin.y)
+// roomTransform liefert die starre Abbildung von EINEM Raumsystem ins
+// andere. Damit zeichnet der aktive Raum seine Nachbarn in seinen eigenen
+// Koordinaten - gerendert wird nie in Gebaeudekoordinaten, und der ganze
+// bestehende Zeichenweg (toScr, autofit, Einnorden) bleibt unberuehrt.
+globalThis.roomTransform=function(from, to){
+  const rf=(from&&from.rot)||0, rt=(to&&to.rot)||0;
+  const dx=((from&&from.x)||0)-((to&&to.x)||0),
+        dy=((from&&from.y)||0)-((to&&to.y)||0);
+  // R(-rt) auf die Verschiebung: cos(-rt)=cos(rt), sin(-rt)=-sin(rt)
+  const c=Math.cos(rt), s=Math.sin(rt);
+  return {rot:rf-rt, x:dx*c+dy*s, y:-dx*s+dy*c};
+};
+globalThis.applyRoomTransform=function(T, p){
+  const c=Math.cos(T.rot), s=Math.sin(T.rot);
+  return {...p, x:p.x*c-p.y*s+T.x, y:p.x*s+p.y*c+T.y};
+};
+
 // Im Browser sofort eine an localStorage gebundene Instanz; in Node bleibt
 // nur die Factory (die Checks injizieren sich ihren eigenen Speicher).
 // localStorage kann beim blossen ZUGRIFF werfen (Chrome "alle Cookies
@@ -4127,6 +4159,13 @@ let VIEW={s:1, ox:0, oy:0, rot:0};
 // Hier oben deklariert, weil openRoom() sie zuruecksetzt und weiter oben
 // in der Datei steht (let ist bis zur Deklaration in der TDZ).
 let northWallPair=null;
+// Nachbarraeume des aktiven Raums, bereits in DESSEN Koordinaten
+// umgerechnet. Einmal je Raumwechsel gefuellt, nicht je Bild: renderPanel
+// hat genau diesen Fehler schon einmal gemacht (Bibliothek je Frame parsen).
+// Hier oben deklariert, weil openRoom() sie nachlaedt und weiter oben steht.
+let neighbors=[];
+let hoverRoom=null;    // Nachbar unter dem Mauszeiger (schimmert gruen)
+let swim=null;         // laufende Fahrt zum Nachbarraum
 const toScr=p=>{
   const c=Math.cos(VIEW.rot), s2=Math.sin(VIEW.rot);
   return {x:(p.x*c-p.y*s2)*VIEW.s+VIEW.ox, y:(p.x*s2+p.y*c)*VIEW.s+VIEW.oy};
@@ -4142,13 +4181,25 @@ function evDev(e){
   return {x:(e.clientX-r.left)*DPR(), y:(e.clientY-r.top)*DPR()};
 }
 
+// Ansicht, die eine Punktmenge bei gegebener Drehung einpasst - ohne VIEW
+// anzufassen. Getrennt von autofit(), weil die Fahrt zum Nachbarraum ihr
+// Ziel braucht, bevor sie dort ankommt.
+function fitView(P, rot, auf){
+  // Bounding-Box der GEDREHTEN Punkte: eingenordet eingepasst heisst, die
+  // Wand liegt waagerecht UND der Raum fuellt den Schirm.
+  const c=Math.cos(rot), s2=Math.sin(rot);
+  const rx=P.map(p=>p.x*c-p.y*s2), ry=P.map(p=>p.x*s2+p.y*c);
+  const a=auf||0;
+  const w=(Math.max(...rx)-Math.min(...rx)+2*a)||1000,
+        h=(Math.max(...ry)-Math.min(...ry)+2*a)||1000;
+  const s=Math.min((cv.width-150)/w, (cv.height-150)/h);
+  const mx=(Math.min(...rx)+Math.max(...rx))/2, my=(Math.min(...ry)+Math.max(...ry))/2;
+  return { s, ox:cv.width/2-mx*s, oy:cv.height/2-my*s, rot };
+}
+
 function autofit(){
   const P=M.fit?M.fit.pts:M.pts;
   if(!P.length){ VIEW={s:1,ox:cv.width/2,oy:cv.height/2,rot:VIEW.rot}; return; }
-  // Bounding-Box der GEDREHTEN Punkte: eingenordet eingepasst heisst, die
-  // Wand liegt waagerecht UND der Raum fuellt den Schirm.
-  const c=Math.cos(VIEW.rot), s2=Math.sin(VIEW.rot);
-  const rx=P.map(p=>p.x*c-p.y*s2), ry=P.map(p=>p.x*s2+p.y*c);
   // Aufgeklappte Waende stehen bis zur Wandhoehe nach aussen - sie
   // gehoeren in die Bounding-Box, sonst ragen sie aus dem Bild. Ueber den
   // Rand zu rechnen waere zirkulaer (Rand braucht den Massstab, den er
@@ -4158,14 +4209,7 @@ function autofit(){
     const H=cornerHeights(P, M.hmeas);
     auf=Math.max(...Object.values(H).map(x=>x.h), 0);
   }
-  const w=(Math.max(...rx)-Math.min(...rx)+2*auf)||1000,
-        h=(Math.max(...ry)-Math.min(...ry)+2*auf)||1000;
-  // Bei aufgeklappten Waenden braucht der Rand Platz fuer die Abwicklung -
-  // sonst ragt sie aus dem Bild (browser-gesehen). Die Wandhoehe steht
-  // rechtwinklig zur Wand, also auf beiden Achsen einplanen.
-  const s=Math.min((cv.width-150)/w, (cv.height-150)/h);
-  const mx=(Math.min(...rx)+Math.max(...rx))/2, my=(Math.min(...ry)+Math.max(...ry))/2;
-  VIEW={ s, ox:cv.width/2-mx*s, oy:cv.height/2-my*s, rot:VIEW.rot };
+  VIEW=fitView(P, VIEW.rot, auf);
 }
 // Zoom um einen festen Bildpunkt (Geraetepixel): der Weltpunkt darunter
 // bleibt liegen.
@@ -4288,6 +4332,7 @@ function openRoom(id){
   hidePop();
   deserialize(r.data);
   userView=false;
+  loadNeighbors();
   recompute();
 }
 function newRoom(name){
@@ -4309,6 +4354,128 @@ function importAsNewRoom(name, dataObj){
   STORE.save(id,{data});
   openRoom(id);
   return null;
+}
+
+// ================= Gebaeude: Nachbarraeume =================
+// Nur wenn der AKTIVE Raum selbst verankert ist, gibt es ein Gebaeude.
+// Ein freistehender Raum (kein origin) sieht aus wie immer - alte Aufmasse
+// und Einzelraeume aendern ihr Verhalten nicht.
+function loadNeighbors(){
+  neighbors=[]; hoverRoom=null;
+  const self=currentRoom ? STORE.load(currentRoom) : null;
+  if(!self || !self.origin) return;
+  STORE.withOrigin().forEach(r=>{
+    if(r.id===currentRoom) return;
+    const d=r.data||{};
+    if(!Array.isArray(d.pts) || d.pts.length<2 || !Array.isArray(d.walls)) return;
+    // ponytail: ohne aktive Messung stehen die Punkte noch in Klickpixeln -
+    // erst scaleSketch rechnet mit der ersten Messung auf mm um. So ein Raum
+    // haette neben einem vermessenen jede beliebige Groesse.
+    if(!Array.isArray(d.meas) || !d.meas.some(m=>m.on!==false)) return;
+    const T=roomTransform(r.origin, self.origin);
+    const pts=d.pts.map(p=>applyRoomTransform(T,p));
+    neighbors.push({id:r.id, name:r.name, walls:d.walls, pts, T,
+                    poly:C.wallPolygon(pts, d.walls)});
+  });
+}
+// Treffer nur ueber ein geschlossenes Raumpolygon: ein offener Wandzug ist
+// noch kein Raum, in den man hineinfahren koennte.
+function neighborAt(wx,wy){
+  for(const n of neighbors) if(n.poly && C.pointInPoly({x:wx,y:wy}, n.poly)) return n.id;
+  return null;
+}
+function roomCentre(P){
+  return {x:P.reduce((s,p)=>s+p.x,0)/P.length, y:P.reduce((s,p)=>s+p.y,0)/P.length};
+}
+// Raumname in der Raummitte, hell und UNTER allem anderen - so wie in einer
+// Bauzeichnung. Die Diagonalen tragen ihre Masse genau dort; als Wasserzeichen
+// stoert der Name sie nicht. Rueckgabe: Trefferfeld fuers Umbenennen.
+function drawRoomLabel(name, P, dpr, col, px){
+  if(!name || !P.length) return null;
+  const s=toScr(roomCentre(P));
+  // Etwas unter die Mitte: genau dort kreuzen sich die Diagonalen, und deren
+  // Massbeschriftung sitzt mit deckendem Kaestchen auf dem Mittelpunkt
+  // (browser-gesehen - der Name verschwand komplett darunter).
+  s.y += 26*dpr;
+  ctx.save();
+  ctx.font=`${px*dpr}px system-ui`; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillStyle=col;
+  ctx.fillText(name, s.x, s.y);
+  const w=ctx.measureText(name).width;
+  ctx.restore();
+  return {x:s.x-w/2, y:s.y-px*dpr*0.7, w, h:px*dpr*1.4};
+}
+let ownLabelRect=null;
+
+function drawNeighbors(dpr){
+  if(!neighbors.length) return;
+  neighbors.forEach(n=>{
+    const hot=(n.id===hoverRoom);
+    if(n.poly){
+      ctx.beginPath();
+      n.poly.forEach((p,i)=>{ const s=toScr(p); i?ctx.lineTo(s.x,s.y):ctx.moveTo(s.x,s.y); });
+      ctx.closePath();
+      // ponytail: der "Schimmer" ist eine ruhige Toenung, keine Animation -
+      // ein pulsender Raum neben dem Aufmass zieht den Blick vom Messen weg.
+      ctx.fillStyle = hot ? 'rgba(47,140,90,.15)' : 'rgba(42,40,35,.035)';
+      ctx.fill();
+    }
+    const I=C.idx(n.pts);
+    ctx.strokeStyle = hot ? '#2f8c5a' : '#bdb8a9';
+    ctx.lineWidth = (hot?2.5:1.5)*dpr;
+    ctx.beginPath();
+    n.walls.forEach(([a,b])=>{
+      if(I[a]==null||I[b]==null) return;
+      const p=toScr(n.pts[I[a]]), q=toScr(n.pts[I[b]]);
+      ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y);
+    });
+    ctx.stroke();
+    drawRoomLabel(n.name, n.pts, dpr, hot?'#2f8c5a':'#a8a396', 13);
+  });
+}
+
+const SWIM_MS=300;
+// Hinueberschwimmen statt springen. Die Fahrt laeuft noch im System des
+// AKTIVEN Raums; erst beim Ankommen wird gewechselt.
+function swimTo(id){
+  const n=neighbors.find(x=>x.id===id);
+  if(!n || swim) return;
+  closeEntry(); if(wpopPair) closeWallPopup(); hidePop();
+  // Waehrend der Fahrt darf autofit die Ansicht nicht zurueckreissen -
+  // drawCanvas passt sonst je Bild wieder auf den aktiven Raum ein.
+  userView=true;
+  hoverRoom=null; cv.style.cursor='';
+  swim={id, to:fitView(n.pts, VIEW.rot), T:n.T,
+        from:{s:VIEW.s, ox:VIEW.ox, oy:VIEW.oy}, t0:performance.now()};
+  requestAnimationFrame(stepSwim);
+  // Sicherung: im Hintergrund-Tab liefert der Browser keine Frames mehr
+  // (browser-gesehen: document.hidden -> requestAnimationFrame schweigt).
+  // Ohne diesen Nachschlag bliebe die Fahrt stehen und der Raumwechsel
+  // faende nie statt - beim Zurueckkommen sitzt man im falschen Raum.
+  setTimeout(stepSwim, SWIM_MS+60);
+}
+function stepSwim(now){
+  if(!swim) return;
+  const k=Math.min(1,((now||performance.now())-swim.t0)/SWIM_MS);
+  const e=k<.5 ? 2*k*k : 1-2*(1-k)*(1-k);   // sanft an, sanft aus
+  VIEW.s = swim.from.s +(swim.to.s -swim.from.s )*e;
+  VIEW.ox= swim.from.ox+(swim.to.ox-swim.from.ox)*e;
+  VIEW.oy= swim.from.oy+(swim.to.oy-swim.from.oy)*e;
+  drawCanvas();
+  if(k<1){ requestAnimationFrame(stepSwim); return; }
+  // Ankommen: dasselbe Bild, nur im System des Zielraums. Aus
+  //   Schirm = s*R(rot)*(R(f)*p + t) + o
+  // folgt VIEW_Ziel = { s, rot+f, toScr(t) } - exakt und ohne autofit noch
+  // einmal zu befragen: dessen Rand fuer die Abwicklung haengt am AKTIVEN
+  // Raum und wuerde beim Wechsel genau den Sprung erzeugen, den die Fahrt
+  // vermeiden soll.
+  const T=swim.T, id=swim.id;
+  const o=toScr({x:T.x, y:T.y}), s=VIEW.s, rot=VIEW.rot+T.rot;
+  swim=null;
+  openRoom(id);
+  VIEW={s, rot, ox:o.x, oy:o.y};
+  userView=true;
+  render();
 }
 
 function render(){
@@ -4639,6 +4806,11 @@ function drawCanvas(){
   // Raster und Massstab erst, wenn die Koordinaten Millimeter sind - vorher
   // waere beides eine Aussage ueber Bildschirmpixel.
   if(M.fit){ drawGrid(dpr); drawScalebar(dpr); }
+  // Nachbarraeume und beide Raumnamen liegen UNTER dem aktiven Aufmass:
+  // Kontext, kein Vordergrund.
+  drawNeighbors(dpr);
+  ownLabelRect = (currentRoom && P.length && currentRoomName && currentRoomName!=='—')
+    ? drawRoomLabel(currentRoomName, P, dpr, 'rgba(42,40,35,.30)', 15) : null;
   // Waende. Waehrend eines Zugs toenen sich die Paare, die sich fast
   // beruehren (M.nearPairs) - erklaert wortlos, warum der Punkt hinter
   // dem Finger zurueckbleibt; Zaehigkeit ohne Grund wirkt wie ein Ruckler.
@@ -5193,8 +5365,26 @@ cv.addEventListener('pointerdown',e=>{
   }
 });
 
+// Maus ueber einem Nachbarraum: er schimmert gruen und der Zeiger wird zur
+// Hand. Auf Touch gibt es keinen Hover - dort genuegt das Antippen.
+function updateHover(e){
+  const d=evDev(e), w=toWorld(d.x,d.y);
+  const id=neighbors.length ? neighborAt(w.x,w.y) : null;
+  if(id===hoverRoom) return;
+  hoverRoom=id;
+  cv.style.cursor=id?'pointer':'';
+  drawCanvas();
+}
+cv.addEventListener('pointerleave',()=>{
+  if(hoverRoom===null) return;
+  hoverRoom=null; cv.style.cursor=''; drawCanvas();
+});
+
 cv.addEventListener('pointermove',e=>{
-  if(!pointers.has(e.pointerId)) return;
+  if(!pointers.has(e.pointerId)){
+    if(e.pointerType==='mouse' && M.mode!=='wall' && !swim) updateHover(e);
+    return;
+  }
   pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
   if(pinch){ if(pointers.size>=2) updatePinch(); return; }
   if(!gesture) return;
@@ -5288,6 +5478,17 @@ function endPointer(e){
   if(g.moved){ render(); return; }
   if(e.type==='pointercancel' || g.popOpen) return;
   const d=evDev(e), w=toWorld(d.x,d.y);
+  // Raumname und Nachbarraum liegen im Leeren - beim Zeichnen wuerde ein
+  // Tipp dort sonst eine Ecke setzen. Also nur ohne laufenden Zug, gleiche
+  // Regel wie beim Wand-Tap weiter unten.
+  if(M.mode==='measure' || M.chain==null){
+    if(ownLabelRect && d.x>=ownLabelRect.x && d.x<=ownLabelRect.x+ownLabelRect.w
+       && d.y>=ownLabelRect.y && d.y<=ownLabelRect.y+ownLabelRect.h){
+      renameCurrentRoom(); return;
+    }
+    const nb=neighborAt(w.x,w.y);
+    if(nb){ swimTo(nb); return; }
+  }
   if(M.mode==='measure'){
     // Wand zuerst, dann jede gemessene Strecke (Diagonalen): Tap oeffnet
     // die Wand-Zentrale - messen, pruefen, loeschen, einnorden an einem Ort.
@@ -5841,12 +6042,14 @@ $('unfold').onclick=()=>{ unfoldOn=!unfoldOn;
   $('unfold').setAttribute('aria-pressed', String(unfoldOn));
   setHint(unfoldOn?'Wände aufgeklappt — Fokus verschieben zeigt die gegenüberliegende Wand deutlicher.':'Aufklappen aus.');
   render(); };
-$('roomname').onclick=()=>{
+// Zwei Wege zum selben Dialog: die Statuskarte und der Name im Plan.
+function renameCurrentRoom(){
   if(!currentRoom) return;
   const r=STORE.load(currentRoom);
   const name=prompt('Raum umbenennen:', r?r.name:'');
-  if(name && name.trim()){ STORE.rename(currentRoom, name.trim()); currentRoomName=name.trim(); renderPanel(); }
-};
+  if(name && name.trim()){ STORE.rename(currentRoom, name.trim()); currentRoomName=name.trim(); render(); }
+}
+$('roomname').onclick=renameCurrentRoom;
 
 // ================= Bibliothek (Overlay) =================
 const fmtDate=iso=>{
@@ -5874,7 +6077,12 @@ function renderLib(){
     row.querySelector('.ren').onclick=()=>{
       const r=STORE.load(id);
       const name=prompt('Raum umbenennen:', r?r.name:'');
-      if(name && name.trim()){ STORE.rename(id,name.trim()); if(id===currentRoom) currentRoomName=name.trim(); renderLib(); renderPanel(); }
+      if(name && name.trim()){
+        STORE.rename(id,name.trim());
+        if(id===currentRoom) currentRoomName=name.trim();
+        loadNeighbors();   // ein Nachbar traegt seinen Namen im Plan
+        renderLib(); render();
+      }
     };
     row.querySelector('.exp2').onclick=()=>{
       if(typeof exportRoomAsFile==='function') exportRoomAsFile(id);
@@ -5887,6 +6095,11 @@ function renderLib(){
       if(id===currentRoom){
         const l=STORE.list();
         if(l.length) openRoom(l[0].id); else newRoom('Neuer Raum');
+      } else {
+        // Ein geloeschter Nachbar darf nicht als Geist im Plan stehen
+        // bleiben - die Liste wird sonst erst beim naechsten Raumwechsel neu
+        // gelesen.
+        loadNeighbors(); render();
       }
       renderLib();
     };
@@ -7014,6 +7227,45 @@ globalThis.selfChecks=function(){
     const st2=globalThis.STORE_FACTORY && STORE_FACTORY(raw);
     chk('store: korrupter Alt-Schluessel -> migrate false, Schluessel weg, kein Raum',
       !!st2 && st2.migrate()===false && raw.getItem('raumaufmass')===null && st2.list().length===0);
+  }
+  // --- Gebaeude: origin und die Abbildung zwischen zwei Raumsystemen ---
+  {
+    const rt=globalThis.roomTransform, ap=globalThis.applyRoomTransform;
+    chk('gebaeude: Transformationen vorhanden', typeof rt==='function' && typeof ap==='function');
+    if(rt && ap){
+      const o={x:1234,y:-567,rot:0.7};
+      const T0=rt(o,o), p={id:'A',x:300,y:900};
+      const q0=ap(T0,p);
+      chk('roomTransform: gleiches System -> Identitaet',
+        near(T0.rot,0,1e-12) && near(q0.x,p.x,1e-9) && near(q0.y,p.y,1e-9));
+      const a={x:0,y:0,rot:0}, b={x:5000,y:2000,rot:Math.PI/2};
+      const inA=ap(rt(b,a), p);
+      // Raum B liegt um 90 Grad gedreht bei (5000,2000): (300,900) wird zu
+      // (5000-900, 2000+300).
+      chk('roomTransform: 90 Grad + Versatz von Hand nachgerechnet',
+        near(inA.x,4100,1e-6) && near(inA.y,2300,1e-6));
+      const back=ap(rt(a,b), inA);
+      chk('roomTransform: hin und zurueck trifft denselben Punkt',
+        near(back.x,p.x,1e-6) && near(back.y,p.y,1e-6));
+      chk('roomTransform: id bleibt erhalten', back.id==='A');
+    }
+    const fake=()=>{ const m=new Map(); return {
+      getItem:k=>m.has(k)?m.get(k):null,
+      setItem:(k,v)=>m.set(k,String(v)),
+      removeItem:k=>m.delete(k),
+    };};
+    const st=globalThis.STORE_FACTORY && STORE_FACTORY(fake());
+    if(st){
+      const a=st.create('Küche'), b=st.create('Flur');
+      chk('store: ohne origin ist die Bibliothek kein Gebaeude', st.withOrigin().length===0);
+      st.save(a,{origin:{x:0,y:0,rot:0}});
+      chk('store: origin ueberlebt save', !!st.load(a).origin && st.load(a).origin.x===0);
+      chk('store: withOrigin liefert nur verankerte Raeume, mit Daten',
+        st.withOrigin().length===1 && st.withOrigin()[0].id===a && !!st.withOrigin()[0].data);
+      st.save(a,{area:12.5});
+      chk('store: spaeteres save ohne origin loescht die Verankerung nicht', !!st.load(a).origin);
+      chk('store: freistehender Raum bleibt freistehend', !st.load(b).origin);
+    }
   }
   // --- computeSuspects: eine Quelle fuer Tabelle UND Plan-Markierung ---
   {
