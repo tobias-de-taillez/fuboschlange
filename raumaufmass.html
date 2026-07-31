@@ -54,6 +54,9 @@
     color:var(--muted);pointer-events:none;background:rgba(246,244,238,.88);
     padding:2px 5px;border-radius:4px}
   #hint:empty{display:none}
+  /* Schwebt im Zeichnen-Modus unten rechts ueber dem Plan - in der Topbar
+     brach er das 375-px-Layout (gemessen: "Messen" wurde abgeschnitten). */
+  #ring{position:absolute;right:8px;bottom:30px;z-index:4}
   #empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
     pointer-events:none;padding:24px;text-align:left}
   #empty>div{max-width:360px;color:var(--muted)}
@@ -181,7 +184,6 @@
         <button data-mode="draw" aria-pressed="true">Zeichnen</button>
         <button data-mode="measure" aria-pressed="false">Messen</button>
       </div>
-      <button id="ring" title="Alle Ecken in Anlegereihenfolge zu einem geschlossenen Wandzug verbinden">Schließen</button>
       <div id="tools">
         <button id="lib" title="Meine Räume" aria-label="Meine Räume">▤</button>
         <button id="undo" title="Rückgängig (Strg+Z)" aria-label="Rückgängig">↶</button>
@@ -200,6 +202,7 @@
           </ol>
         </div>
       </div>
+      <button id="ring" title="Alle Ecken in Anlegereihenfolge zu einem geschlossenen Wandzug verbinden">Wandzug schließen</button>
       <div id="hint"></div>
       <div id="entry" hidden>
         <div id="entryLabel"></div>
@@ -4105,6 +4108,7 @@ function setMode(mode){
   if(mode!=='draw') M.chain=null;
   if(entryPair && mode!=='measure') closeEntry();
   hidePop();
+  $('ring').style.display = mode==='draw' ? '' : 'none';
   document.querySelectorAll('#modes button[data-mode]').forEach(x=>
     x.setAttribute('aria-pressed', String(x.dataset.mode===mode)));
   setHint(null);
@@ -4164,7 +4168,7 @@ function renderLib(){
     };
     row.querySelector('.exp2').onclick=()=>{
       if(typeof exportRoomAsFile==='function') exportRoomAsFile(id);
-      else setHint('Datei-Export kommt im nächsten Schritt.');
+      else { closeLib(); setHint('Datei-Export kommt im nächsten Schritt.'); }
     };
     row.querySelector('.del2').onclick=()=>{
       const r=STORE.load(id);
@@ -4182,7 +4186,12 @@ function openLib(){ renderLib(); $('libwrap').hidden=false; }
 function closeLib(){ $('libwrap').hidden=true; }
 $('lib').onclick=openLib;
 $('libclose').onclick=closeLib;
-$('libnew').onclick=()=>{ newRoom(prompt('Name des neuen Raums:','Neuer Raum')||'Neuer Raum'); closeLib(); };
+$('libnew').onclick=()=>{
+  const name=prompt('Name des neuen Raums:','Neuer Raum');
+  if(name===null) return;                       // Abbrechen heisst abbrechen
+  newRoom(name.trim()||'Neuer Raum');
+  closeLib();
+};
 $('libwrap').addEventListener('pointerdown',e=>{ if(e.target===$('libwrap')) closeLib(); });
 
 // Die Hotkeys sind auf window gebunden, damit sie ueberall wirken - aber
