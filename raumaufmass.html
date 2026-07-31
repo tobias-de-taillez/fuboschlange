@@ -4950,13 +4950,19 @@ globalThis.selfChecks=function(){
       const st3=globalThis.STORE_FACTORY && STORE_FACTORY(raw);
       chk('store: kaputtes JSON -> leere Bibliothek statt Absturz', !!st3 && st3.list().length===0);
     }
-    // Quota-Fehler: setItem wirft -> save false, storageOk false
+    // Quota-Fehler: setItem wirft -> save false, storageOk false. Der Fake
+    // KANN lesen (ein vorbefuellter Raum), nur schreiben wirft - sonst
+    // liefe save() in den unknown-id-Zweig und der Quota-Pfad in
+    // writeRooms() bliebe ungeprueft (genau das war hier passiert).
     {
-      const boom={getItem:()=>null,setItem:()=>{throw new Error('QuotaExceeded');},removeItem:()=>{}};
+      const pre=JSON.stringify([{id:'x',name:'X',updated:'2026-01-01T00:00:00.000Z',
+        area:null,data:{pts:[],walls:[],meas:[],idSeq:0}}]);
+      const boom={getItem:k=>k==='raumaufmass.rooms'?pre:null,
+                  setItem:()=>{throw new Error('QuotaExceeded');},removeItem:()=>{}};
       const st4=globalThis.STORE_FACTORY && STORE_FACTORY(boom);
       chk('store: werfender Storage -> storageOk false', !!st4 && st4.storageOk===false);
       chk('store: save bei vollem Storage -> false statt Exception', (()=>{
-        try{ const id=st4.create('X'); return st4.save(id,{area:1})===false || st4.list().length===0; }
+        try{ return !!st4 && st4.save('x',{area:1})===false; }
         catch(e){ return false; }
       })());
     }
