@@ -1,8 +1,13 @@
 mod fields;
+mod search;
 mod types;
 mod zone;
 
 pub use fields::{Field, Lane, build_lanes, decompose_fields};
+pub use search::{
+    Action, Decision, Invariant, Journal, PatternRules, SearchFailure, SearchFailureKind,
+    SearchState, backtracking_search, terminal_corridor_connected,
+};
 pub use types::{
     ConnectionInput, ConnectionOutput, CoverageOutput, FieldDiagnostics, JournalEntry,
     LocatedSpacing, LoopConstraintCertificate, LoopError, LoopErrorCode, LoopPattern, LoopPlan,
