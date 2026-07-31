@@ -126,8 +126,10 @@
   #wpopVal{font:inherit;font-size:16px;font-variant-numeric:tabular-nums;width:90px;text-align:right;
     padding:7px;border:1px solid var(--line);border-radius:6px;min-width:0}
   #wpopOk{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
-  #wpopThick{display:flex;gap:8px;align-items:center;margin-top:8px;padding-top:8px;
+  #wpopThick{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;padding-top:8px;
     border-top:1px solid var(--line);font-size:13px}
+  #wpopThick .nb{flex-basis:100%;font-size:12.5px;color:var(--muted)}
+  #wpopThick .nb.bad{color:var(--warn)}
   #wpopThick:empty{display:none}
   #wpopThick .muted{color:var(--muted)}
   @media(max-width:879px){
@@ -234,6 +236,10 @@
   #geo small{font-size:12.5px;color:var(--muted);font-weight:500}
   #wallwarn{display:none;padding:8px 14px;background:var(--warn-bg);color:var(--warn);
     border-bottom:1px solid var(--line);font-size:12.5px}
+  #nbwarn{display:none;padding:8px 14px;background:var(--warn-bg);color:var(--warn);
+    border-bottom:1px solid var(--line);font-size:12.5px}
+  #nbwarn b{display:block;font-weight:600;margin-bottom:2px}
+  #nbwarn ul{margin:0;padding-left:16px}
   section{padding:12px 14px;border-bottom:1px solid var(--line)}
   h3{margin:0 0 8px;font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);
     display:flex;align-items:center;justify-content:space-between;font-weight:600}
@@ -407,6 +413,7 @@
   <div id="panel">
     <div id="status" class="warn"><div id="roomname" title="Antippen: Raum umbenennen">—</div><div id="statustxt">—</div><div id="geo"></div></div>
     <div id="wallwarn"></div>
+    <div id="nbwarn"></div>
     <section id="nextsec">
       <h3>Als Nächstes messen</h3>
       <div id="sugg">—</div>
@@ -4004,6 +4011,42 @@ globalThis.neighborOrigin=function(pts, walls, a, b, t, originR){
   };
 };
 
+// Passen zwei Raeume an ihrer gemeinsamen Wand noch zusammen? Verglichen
+// werden die beiden Innenkanten - unsere (a1-b1) und die des Nachbarn
+// (a2-b2), beide in UNSEREN Koordinaten. Geliefert wird, was man daraus
+// ablesen kann; die Bewertung macht die UI.
+//   dicke   - Lotabstand der beiden Kanten: die Wanddicke, wie sie in der
+//             Geometrie wirklich steht
+//   winkel  - Grad zwischen den Kanten; ueber null heisst, die Raeume
+//             stehen schief zueinander
+//   laengeD - wie viel laenger die Wand drueben gemessen wurde
+//   versatz - wie weit die fremde Wand an einem Ende ueber unsere
+//             hinausragt oder dahinter zurueckbleibt
+globalThis.sharedWallFit=function(a1, b1, a2, b2){
+  const C=globalThis.CORE;
+  const L1=C.dist(a1,b1), L2=C.dist(a2,b2);
+  if(!(L1>0) || !(L2>0)) return null;
+  const u1={x:(b1.x-a1.x)/L1, y:(b1.y-a1.y)/L1};
+  let p=a2, q=b2;
+  // Die Wand drueben laeuft in aller Regel andersherum um den Raum. Fuer
+  // den Vergleich zeigen beide in dieselbe Richtung.
+  if(((q.x-p.x)*u1.x + (q.y-p.y)*u1.y) < 0){ const t=p; p=q; q=t; }
+  const u2={x:(q.x-p.x)/L2, y:(q.y-p.y)/L2};
+  const cos=Math.max(-1, Math.min(1, u1.x*u2.x + u1.y*u2.y));
+  const n1={x:-u1.y, y:u1.x};
+  const d0=(p.x-a1.x)*n1.x + (p.y-a1.y)*n1.y;
+  const d1=(q.x-a1.x)*n1.x + (q.y-a1.y)*n1.y;
+  const s0=(p.x-a1.x)*u1.x + (p.y-a1.y)*u1.y;
+  const s1=(q.x-a1.x)*u1.x + (q.y-a1.y)*u1.y;
+  return {
+    dicke: Math.abs((d0+d1)/2),
+    winkel: Math.acos(cos)*180/Math.PI,
+    laengeHier: L1, laengeDort: L2, laengeD: L2-L1,
+    versatz: Math.max(Math.abs(s0), Math.abs(s1-L1)),
+    ueberlappung: Math.max(0, Math.min(L1,s1) - Math.max(0,s0)),
+  };
+};
+
 // Im Browser sofort eine an localStorage gebundene Instanz; in Node bleibt
 // nur die Factory (die Checks injizieren sich ihren eigenen Speicher).
 // localStorage kann beim blossen ZUGRIFF werfen (Chrome "alle Cookies
@@ -4098,6 +4141,10 @@ const INK = {
 };
 
 const $=id=>document.getElementById(id);
+// Raumnamen kommen vom Nutzer und landen in innerHTML - einmal richtig
+// entschaerfen statt an jeder Stelle nur die spitze Klammer.
+const ESC={'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'};
+const escapeHtml=s=>String(s==null?'':s).replace(/[&<>"']/g, c=>ESC[c]);
 
 // M.chain: letzter Punkt des aktiven Zeichenzugs. Tippen legt Ecken an und
 // verbindet sie sofort - den Raum "ablaufen" statt Punkte- und Wandmodus zu
@@ -4111,7 +4158,7 @@ const M={ pts:[], walls:[], meas:[], mode:'draw', sel:[], chain:null,
           // pairKey ist dasselbe, ohne jede Zeile umzuschreiben, die
           // [a,b] auseinandernimmt. pairKey sortiert, die Dicke ist also
           // unabhaengig von der Zeichenrichtung.
-          thick:{}, shared:{} };
+          thick:{}, shared:{}, nbchecks:[] };
 // Eigene Ansicht der Wandansicht; wallUserView merkt, ob der Nutzer
 // gezoomt hat (dann kein automatisches Einpassen mehr).
 let wallUserView=false;
@@ -4396,6 +4443,8 @@ function recompute(){
   // Wiederholungen. Genau ein Verdaechtiger braucht keine Eingrenzung.
   M.narrow = (netFails() && M.suspects.size!==1)
     ? narrowCandidates(C.activeMeas(M.meas), M.an.v, C.SUGGEST_CHECK_MAX) : [];
+  // Einmal je Aenderung, nicht je Bild - wie suspects und sugg.
+  refreshNbChecks();
   render();
   // Ein Aufmass dauert leicht eine halbe Stunde. Ein Reload darf es nicht
   // kosten. Bewusst ohne Debounce: serialize() ist bei den hier realistischen
@@ -4495,6 +4544,7 @@ function loadNeighbors(){
                     poly:C.wallPolygon(pts, d.walls),
                     bands:wallBands(pts, d.walls, d.thick||{}, THICK_DEFAULT)});
   });
+  refreshNbChecks();
 }
 // Geschlossener Raum: Treffer ueber die Flaeche. Ein frisch durch eine Tuer
 // angelegter Nachbar hat aber erst ZWEI Punkte und damit kein Polygon - waere
@@ -4630,7 +4680,10 @@ function createNeighborRoom(opId){
     origin:nb.origin,
     data:{ pts:[{id:'A',x:0,y:0},{id:'B',x:L,y:0}],
            walls:[['A','B']],
-           meas:[{a:'A',b:'B',d:L}],
+           // von:'nachbar' - dieser Wert stammt NICHT aus einer Messung in
+           // diesem Raum. Das Wand-Popup sagt es dazu, sonst sucht man
+           // spaeter vergeblich, wann man ihn eingetippt hat.
+           meas:[{a:'A',b:'B',d:L, von:'nachbar'}],
            openings:[], hmeas:[], opmeas:[],
            thick:{'A|B':t},
            shared:{'A|B':{room:currentRoom, wall:[o.a,o.b]}},
@@ -4647,6 +4700,45 @@ function createNeighborRoom(opId){
     +`(${t} mm dick). Die Tür gehört beiden Räumen und bleibt dort `
     +`eingetragen. Nächste Ecke antippen.`);
 }
+
+// ================= Passen die Nachbarn zusammen? =================
+// Eine geteilte Wand hat zwei Innenkanten - unsere und die des Nachbarn.
+// Solange beide Raeume nur aus dem Anlegen stammen, liegen sie per
+// Konstruktion richtig. Sobald aber einer der beiden nachgemessen wird,
+// verschieben seine Messungen die Kante, und die beiden Aufmasse koennen
+// sich widersprechen. Das wird gemeldet, nicht stillschweigend geglaettet.
+const NB_TOL_MM  = 10;   // darunter: Messrauschen, nur anzeigen
+const NB_WARN_MM = 20;   // darueber: als Widerspruch melden
+const NB_WARN_DEG= 1;
+function sharedChecks(){
+  const out=[];
+  if(!M.fit || !neighbors.length) return out;
+  const P=M.fit.pts, I=C.idx(P);
+  Object.keys(M.shared).forEach(k=>{
+    const sh=M.shared[k];
+    const n=neighbors.find(x=>x.id===sh.room);
+    if(!n || !sh.wall) return;
+    const [a,b]=k.split('|');
+    const J=C.idx(n.pts), [pa,pb]=sh.wall;
+    if(I[a]==null||I[b]==null||J[pa]==null||J[pb]==null) return;
+    const f=sharedWallFit(P[I[a]], P[I[b]], n.pts[J[pa]], n.pts[J[pb]]);
+    if(!f) return;
+    const t=M.thick[k]>0 ? M.thick[k] : THICK_DEFAULT;
+    const probleme=[];
+    if(Math.abs(f.laengeD)>NB_WARN_MM)
+      probleme.push(`hier ${fmtM(f.laengeHier)} m, in „${n.name}“ `
+        +`${fmtM(f.laengeDort)} m — ${Math.round(Math.abs(f.laengeD))} mm Unterschied`);
+    if(f.versatz>NB_WARN_MM)
+      probleme.push(`die Wände stehen ${Math.round(f.versatz)} mm gegeneinander versetzt`);
+    if(f.winkel>NB_WARN_DEG)
+      probleme.push(`die Räume stehen ${f.winkel.toFixed(1)}° schief zueinander`);
+    if(Math.abs(f.dicke-t)>NB_WARN_MM)
+      probleme.push(`die Lage ergibt ${Math.round(f.dicke)} mm Wanddicke, eingetragen sind ${t} mm`);
+    out.push({a, b, k, f, t, raum:n.name, probleme});
+  });
+  return out;
+}
+function refreshNbChecks(){ M.nbchecks=sharedChecks(); }
 
 const SWIM_MS=300;
 // Hinueberschwimmen statt springen. Die Fahrt laeuft noch im System des
@@ -5006,7 +5098,7 @@ function drawOpeningsOnPlan(P, I, dpr){
 // gestrichelter Aussenkante - eine angenommene Dicke ist eine Aussage, die
 // der Nutzer nie gemacht hat, und darf nicht wie eine Messung aussehen.
 const BAND={ mess:'#d9d4c5', ann:'#eceae1', kante:'#b9b3a3',
-             nachbarMess:'#e6e2d7', nachbarAnn:'#f0eee7' };
+             nachbarMess:'#e6e2d7', nachbarAnn:'#f0eee7', streit:'#f2ddd8' };
 
 // Alle Luecken in dieser Wand, in Wandkoordinaten (0..L ab Ecke a) - die
 // eigenen Oeffnungen und die des Raums auf der anderen Seite. Die geteilte
@@ -5040,7 +5132,7 @@ function wallGaps(a, b, L, iA, iB){
 }
 // Die Wand als Flaeche, an ihren Oeffnungen unterbrochen. Jedes Stueck
 // reicht bis zur Gehrung, damit die Ecken geschlossen bleiben.
-function drawBand(band, gaps, dpr, fuell, kante){
+function drawBand(band, gaps, dpr, fuell, kante, streit){
   const {iA,iB,oA,oB,L,u}=band;
   const stuecke=[]; let von=0;
   gaps.forEach(([x0,x1])=>{ if(x0>von) stuecke.push([von,x0]); von=Math.max(von,x1); });
@@ -5054,12 +5146,13 @@ function drawBand(band, gaps, dpr, fuell, kante){
     ctx.beginPath();
     P.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
     ctx.closePath();
-    ctx.fillStyle=fuell; ctx.fill();
+    ctx.fillStyle=streit?BAND.streit:fuell; ctx.fill();
     if(!kante) return;
     // Nur die AUSSENkante zeichnen - die Innenkante ist die Wandlinie
     // selbst und wird gleich ohnehin gezogen.
     ctx.beginPath(); ctx.moveTo(P[3].x,P[3].y); ctx.lineTo(P[2].x,P[2].y);
-    ctx.strokeStyle=BAND.kante; ctx.lineWidth=1*dpr;
+    ctx.strokeStyle=streit?INK.measBad:BAND.kante;
+    ctx.lineWidth=(streit?2:1)*dpr;
     ctx.setLineDash(band.assumed?[4*dpr,3*dpr]:[]);
     ctx.stroke(); ctx.setLineDash([]);
   });
@@ -5068,8 +5161,12 @@ function drawOwnBands(dpr){
   if(!M.fit) return;
   const P=M.drag?M.pts:M.fit.pts;
   const bands=wallBands(P, M.walls, M.thick, THICK_DEFAULT);
+  // Eine Wand, die nicht zum Nachbarn passt, traegt ihre Meldung auch im
+  // Plan - sonst muesste man erst das Popup oeffnen, um zu sehen, WELCHE.
+  const bad=new Set((M.nbchecks||[]).filter(c=>c.probleme.length).map(c=>c.k));
   bands.forEach(b=>drawBand(b, wallGaps(b.a,b.b,b.L,b.iA,b.iB), dpr,
-                            b.assumed?BAND.ann:BAND.mess, true));
+                            b.assumed?BAND.ann:BAND.mess, true,
+                            bad.has(wallKey(b.a,b.b))));
 }
 
 // Hinter jeder Tuer, hinter der noch kein Raum liegt, ein Plus: dort geht
@@ -5565,13 +5662,15 @@ function renderWallPopup(){
       : w!=null ? '<span class="badge ok">geprüft</span>'
       : '<span class="badge unchecked">ungeprüft</span>';
     tr.innerHTML=`<td><input class="d" inputmode="decimal" value="${fmtM(m.d)}"></td>`
-      +`<td>${w==null?'—':'w '+w.toFixed(1)}</td>`
+      +`<td>${m.von==='nachbar' ? 'vom Nachbarn' : (w==null?'—':'w '+w.toFixed(1))}</td>`
       +`<td>${badge}</td>`
       +`<td><button class="rowbtn del" title="Diesen Messwert löschen">×</button></td>`;
     const inp=tr.querySelector('.d');
     inp.onchange=()=>{
       const d=parseFloat(inp.value.replace(',','.'))*1000;
-      if(isFinite(d)&&d>0){ snapshot(); m.d=d; recompute(); }
+      // Wer den Wert selbst eintippt, hat ihn gemessen - der Vermerk
+      // "vom Nachbarn" gilt dann nicht mehr.
+      if(isFinite(d)&&d>0){ snapshot(); m.d=d; delete m.von; recompute(); }
       else { inp.value=fmtM(m.d); setHint('Ungültig — Maß muss eine Zahl größer 0 sein.'); }
     };
     if(sus) attachTip(tr.children[2],
@@ -5630,6 +5729,37 @@ function renderWallPopup(){
     render();
   };
   tw.append(span, btn);
+  // Geteilte Wand: was die Lage der beiden Raeume ueber sie sagt.
+  const nb=(M.nbchecks||[]).find(c=>c.k===k);
+  if(!nb) return;
+  const zeile=document.createElement('div');
+  zeile.className='nb'+(nb.probleme.length?' bad':'');
+  zeile.textContent = nb.probleme.length
+    ? `„${nb.raum}“: ${nb.probleme.join('; ')}.`
+    : `Geteilt mit „${nb.raum}“ · Abstand der Innenkanten `
+      +`${Math.round(nb.f.dicke)} mm · dort ${fmtM(nb.f.laengeDort)} m`;
+  tw.appendChild(zeile);
+  // Die Lage der beiden Innenkanten IST eine Messung der Wanddicke. Weicht
+  // sie vom eingetragenen Wert ab, laesst sie sich uebernehmen - ohne
+  // jemanden zu verschieben, denn die Geometrie steht ja bereits so.
+  if(Math.abs(nb.f.dicke-nb.t)<=1) return;
+  const uebn=document.createElement('button');
+  uebn.textContent=`${Math.round(nb.f.dicke)} mm übernehmen`;
+  uebn.onclick=()=>{
+    snapshot();
+    const neu=Math.round(nb.f.dicke);
+    M.thick[k]=neu;
+    const sh=M.shared[k];
+    const r=sh && STORE.load(sh.room);
+    if(r && r.data){
+      const d={...r.data, thick:{...(r.data.thick||{})}};
+      d.thick[wallKey(sh.wall[0], sh.wall[1])]=neu;
+      STORE.save(sh.room, {data:d});
+    }
+    recompute(); loadNeighbors(); renderWallPopup(); render();
+  };
+  zeile.appendChild(document.createTextNode(' '));
+  zeile.appendChild(uebn);
 }
 $('wpopX').onclick=closeWallPopup;
 $('wpopOk').onclick=()=>{
@@ -6441,7 +6571,7 @@ function renderLib(){
   if(!list.length){ el.innerHTML='<div style="padding:14px 4px;color:var(--muted)">Noch keine Räume.</div>'; return; }
   el.innerHTML=list.map(r=>
     `<div class="librow${r.id===currentRoom?' cur':''}" data-id="${r.id}">
-       <div class="nm"><b>${r.name.replace(/</g,'&lt;')}</b>
+       <div class="nm"><b>${escapeHtml(r.name)}</b>
          <small>zuletzt ${fmtDate(r.updated)}${r.area!=null?` · ${fmt2(r.area)} m²`:''}</small></div>
        <button class="ren" title="Umbenennen">Name</button>
        <button class="exp2" title="Als Datei sichern">Datei</button>
@@ -6751,6 +6881,19 @@ function renderPanel(){
     ? 'Wände kreuzen sich — Fläche und Vorschlagsfilter sind ausgesetzt.'
     : 'Wandzug nicht geschlossen (oder eine Ecke hat nicht genau zwei Wände) — '
      +'die Vorschläge können deshalb Strecken enthalten, die sich nicht direkt messen lassen.';
+
+  // Widersprueche zu den Nachbarraeumen. Bewusst eine eigene Meldung neben
+  // dem Netzzustand: das Aufmass DIESES Raums kann tadellos sein und
+  // trotzdem nicht zum Nachbarn passen.
+  const nbEl=$('nbwarn');
+  const nbBad=(M.nbchecks||[]).filter(c=>c.probleme.length);
+  nbEl.style.display = nbBad.length ? 'block' : 'none';
+  if(nbBad.length){
+    nbEl.innerHTML='<b>Passt nicht zum Nachbarraum</b><ul>'
+      + nbBad.map(c=>`<li>Wand ${escapeHtml(c.a)}–${escapeHtml(c.b)}: `
+          + escapeHtml(c.probleme.join('; ')) + '.</li>').join('')
+      + '</ul>';
+  }
 
   // --- Wandliste. Die Waende SIND die Objekte des Aufmasses; ihre
   // Messwerte wohnen im Wand-Popup (openWallPopup), nicht mehr in einer
@@ -7767,6 +7910,44 @@ globalThis.selfChecks=function(){
         b3.every(x=>C.dist(x.oA,x.iA)<6*240+1 && C.dist(x.oB,x.iB)<6*240+1));
       chk('band: offener Wandzug -> nichts zu zeichnen',
         wb(r.pts, [['A','B'],['B','C']], {}, 240).length===0);
+    }
+  }
+  // --- geteilte Wand: passen die beiden Raeume noch zusammen? ---
+  {
+    const sf=globalThis.sharedWallFit;
+    chk('geteilt: sharedWallFit vorhanden', typeof sf==='function');
+    if(sf){
+      // Unsere Wand laeuft von (0,0) nach (4000,0), der Raum liegt oberhalb.
+      // Die Wand des Nachbarn liegt 240 darunter und laeuft ANDERSHERUM.
+      const a1={x:0,y:0}, b1={x:4000,y:0};
+      const r=sf(a1,b1, {x:4000,y:-240}, {x:0,y:-240});
+      chk('geteilt: Dicke ist der Lotabstand', !!r && near(r.dicke,240,1e-9));
+      chk('geteilt: parallele Waende -> 0 Grad', near(r.winkel,0,1e-9));
+      chk('geteilt: gleiche Laenge -> kein Unterschied, kein Versatz',
+        near(r.laengeD,0,1e-9) && near(r.versatz,0,1e-9));
+      chk('geteilt: volle Ueberlappung', near(r.ueberlappung,4000,1e-9));
+      // Gegenprobe mit GLEICHER Laufrichtung: dasselbe Ergebnis, die
+      // Richtungsangleichung darf nichts verfaelschen.
+      const r2=sf(a1,b1, {x:0,y:-240}, {x:4000,y:-240});
+      chk('geteilt: Laufrichtung des Nachbarn ist egal',
+        near(r2.dicke,240,1e-9) && near(r2.winkel,0,1e-9) && near(r2.versatz,0,1e-9));
+      // 20mm laenger, an EINEM Ende ueberstehend
+      const r3=sf(a1,b1, {x:4020,y:-240}, {x:0,y:-240});
+      chk('geteilt: laengere Nachbarwand wird als Differenz gemeldet',
+        near(r3.laengeD,20,1e-9) && near(r3.versatz,20,1e-9));
+      // Verschoben, aber gleich lang: reiner Versatz ohne Laengenunterschied
+      const r4=sf(a1,b1, {x:4030,y:-240}, {x:30,y:-240});
+      chk('geteilt: reiner Versatz ohne Laengenunterschied',
+        near(r4.laengeD,0,1e-9) && near(r4.versatz,30,1e-9));
+      // Schiefstellung: 1 Grad verdreht
+      const w=1*Math.PI/180;
+      const r5=sf(a1,b1, {x:4000*Math.cos(w), y:-240+4000*Math.sin(w)}, {x:0,y:-240});
+      chk('geteilt: Schiefstellung wird in Grad gemeldet', near(r5.winkel,1,1e-6));
+      chk('geteilt: entartete Eingaben -> null',
+        sf(a1,a1,{x:0,y:-240},{x:4000,y:-240})===null);
+      // Dickenaenderung schlaegt direkt durch - das ist die abgeleitete Dicke
+      chk('geteilt: 175 statt 240 liest sich als 175',
+        near(sf(a1,b1,{x:4000,y:-175},{x:0,y:-175}).dicke,175,1e-9));
     }
   }
   // --- computeSuspects: eine Quelle fuer Tabelle UND Plan-Markierung ---
