@@ -3282,6 +3282,93 @@ globalThis.globalTestFails=function(v, sigmas, r){
     : r*Math.pow(1-2/(9*r)+1.645*Math.sqrt(2/(9*r)),3);   // Wilson-Hilferty, 95 %
   return T>crit;
 };
+// ================= Sanfte Kreuzungsbremse =================
+// Beim Ziehen einer Ecke soll das Kreuzen zweier Waende SPUERBAR schwer
+// werden, nicht verboten: der Widerstand waechst stufenlos, quer dazu
+// bleibt die Bewegung frei (man gleitet an der Zone entlang statt
+// festzustecken), und mit Nachdruck kommt man hindurch. Kein Nachrechnen
+// der Gesamtlage - nur der aktuelle Schritt wird skaliert. Deshalb kann
+// die Bremse die Form nie umkrempeln.
+const PUSH_THROUGH = 0.06;   // Restdurchlass an der Grenze: nie ganz gesperrt
+
+function ptSegDist(p, a, b){
+  const vx=b.x-a.x, vy=b.y-a.y, L2=vx*vx+vy*vy;
+  const t=L2 ? Math.max(0,Math.min(1,((p.x-a.x)*vx+(p.y-a.y)*vy)/L2)) : 0;
+  return Math.hypot(p.x-(a.x+vx*t), p.y-(a.y+vy*t));
+}
+// Abstand zweier Strecken; 0 wenn sie sich echt kreuzen.
+function segSegDist(p1,p2,p3,p4){
+  const C=globalThis.CORE;
+  if(C.segCross(p1,p2,p3,p4)) return 0;
+  return Math.min(ptSegDist(p1,p3,p4), ptSegDist(p2,p3,p4),
+                  ptSegDist(p3,p1,p2), ptSegDist(p4,p1,p2));
+}
+globalThis.segSegDist=segSegDist;
+
+// Kantenpaare, die der gezogene Punkt gefaehrden kann: seine eigenen
+// Kanten gegen alle, die ihn nicht beruehren.
+function criticalPairs(pts, walls, id){
+  const C=globalThis.CORE, I=C.idx(pts), out=[];
+  const mine=walls.filter(([a,b])=>a===id||b===id);
+  walls.forEach(([c,d])=>{
+    if(c===id||d===id) return;
+    mine.forEach(([a,b])=>{
+      if(a===c||a===d||b===c||b===d) return;      // teilen einen Endpunkt
+      if(I[a]==null||I[b]==null||I[c]==null||I[d]==null) return;
+      out.push([a,b,c,d]);
+    });
+  });
+  return out;
+}
+
+// Dämpft den Zugvektor (dx,dy) des Punktes id. soft = Breite der
+// Weichzone in Weltkoordinaten (der Aufrufer rechnet sie aus Bildschirm-
+// pixeln um, damit sich die Bremse bei jedem Zoom gleich anfuehlt).
+// Liefert {dx,dy,near:[[a,b,c,d],...]} - near sind die Paare in der Zone,
+// die die UI dezent einfaerbt.
+globalThis.dampenDrag=function(pts, walls, id, dx, dy, soft){
+  const C=globalThis.CORE, I=C.idx(pts);
+  const pairs=criticalPairs(pts, walls, id);
+  const near=[];
+  if(!pairs.length || (!dx&&!dy)) return {dx, dy, near};
+  const at=(v)=>{                       // Abstand des Paares bei Versatz v
+    return (a,b,c,d)=>{
+      const P={}, base=I;
+      const shift=q=>q.id===id ? {x:q.x+v.x, y:q.y+v.y} : q;
+      return segSegDist(shift(pts[base[a]]), shift(pts[base[b]]),
+                        pts[base[c]], pts[base[d]]);
+    };
+  };
+  let vx=dx, vy=dy;
+  // Schon gebremste Richtungen. Eine Ecke hat ZWEI Kanten, die derselben
+  // Wand nahekommen - ohne diese Sperre daempft dasselbe Hindernis zweimal,
+  // der Faktor quadriert sich (gemessen 1,7 % statt 12 %) und der
+  // zugesagte Restdurchlass sinkt von 6 % auf 0,4 %: gesperrt statt zaeh.
+  const done=[];
+  pairs.forEach(([a,b,c,d])=>{
+    const d0=at({x:0,y:0})(a,b,c,d);
+    // Schon gekreuzt: NICHT bewachen - sonst waere eine verhedderte
+    // Skizze fuer immer eingefroren und nicht mehr aufzuloesen.
+    if(d0<=0) return;
+    if(d0>=soft*3) return;              // weit weg: kein Aufwand, kein Effekt
+    // Richtung, in der der Abstand waechst - numerisch, zwei Auswertungen.
+    const h=Math.max(soft*0.05, 1e-6);
+    const gx=(at({x:h,y:0})(a,b,c,d)-d0)/h, gy=(at({x:0,y:h})(a,b,c,d)-d0)/h;
+    const gl=Math.hypot(gx,gy);
+    if(gl<1e-12) return;
+    const nx=gx/gl, ny=gy/gl;           // zeigt WEG von der Gefahr
+    const vn=vx*nx+vy*ny;
+    if(vn>=0) return;                   // Bewegung entfernt sich: frei lassen
+    if(d0<soft) near.push([a,b,c,d]);
+    if(done.some(n=>n[0]*nx+n[1]*ny>0.9)) return;   // Richtung schon gebremst
+    done.push([nx,ny]);
+    // Zaeh, aber nie gesperrt: quadratisch einlaufender Faktor plus Rest.
+    const f=Math.max(PUSH_THROUGH, Math.min(1, (d0/soft)*(d0/soft)));
+    vx+=vn*nx*(f-1); vy+=vn*ny*(f-1);   // nur der Normalanteil wird gedaempft
+  });
+  return {dx:vx, dy:vy, near};
+};
+
 // ================= Entwirren =================
 // Ein geschlossener, teilgemessener Wandzug kann sich beim Skizzieren
 // verheddern (Waende kreuzen sich). Gesucht: eine kreuzungsfreie Lage, die
@@ -3461,6 +3548,7 @@ function niceFactor(raw){
 // Interaktion. Trefferradien in CSS-px und fingertauglich - der alte Wert 14
 // war in Geraetepixeln gerechnet und auf einem Retina-Handy halb so gross,
 // wie er aussah.
+const SOFT_PX = 26;      // Weichzone der Kreuzungsbremse, CSS-px
 const HIT_R = 24;        // Punkt-Trefferradius
 const WALL_R = 18;       // Wand-Trefferradius
 const TAP_SLOP = 8;      // mehr Bewegung als das: kein Tap mehr, sondern Zug
@@ -3482,7 +3570,23 @@ const $=id=>document.getElementById(id);
 // jonglieren. null = kein Zug aktiv.
 const M={ pts:[], walls:[], meas:[], mode:'draw', sel:[], chain:null,
           fit:null, an:null, sugg:[], suspects:new Set(), narrow:[],
-          drag:null, dragMode:null, highlight:null };
+          drag:null, dragMode:null, highlight:null, nearPairs:[] };
+
+// Kreuzt sich irgendein Wandpaar in dieser Lage? Bewusst ueber die
+// WANDLISTE statt ueber den Ring: waehrend des Zeichnens ist der Zug noch
+// offen, und ringSelfIntersects haette dort nichts geprueft - der
+// Mess-Korrektor durfte dann ungebremst kreuzen (browser-gesehen).
+function crossingPairs(pts){
+  const I=C.idx(pts), W=M.walls, out=[];
+  for(let i=0;i<W.length;i++) for(let j=i+1;j<W.length;j++){
+    const [a,b]=W[i], [c,d]=W[j];
+    if(a===c||a===d||b===c||b===d) continue;       // teilen einen Endpunkt
+    if(I[a]==null||I[b]==null||I[c]==null||I[d]==null) continue;
+    if(C.segCross(pts[I[a]],pts[I[b]],pts[I[c]],pts[I[d]])) out.push([a,b,c,d]);
+  }
+  return out;
+}
+const wallsCross=pts=>crossingPairs(pts).length>0;
 
 // Nutzer hat gezoomt oder verschoben - autofit() haelt sich dann zurueck,
 // bis "Einpassen" gedrueckt wird oder eine neue Szene entsteht.
@@ -3823,10 +3927,19 @@ function drawCanvas(){
   // Raster und Massstab erst, wenn die Koordinaten Millimeter sind - vorher
   // waere beides eine Aussage ueber Bildschirmpixel.
   if(M.fit){ drawGrid(dpr); drawScalebar(dpr); }
-  // Waende
-  ctx.strokeStyle=INK.wall; ctx.lineWidth=2.5*dpr; ctx.lineCap='round';
+  // Waende. Waehrend eines Zugs toenen sich die Paare, die sich fast
+  // beruehren (M.nearPairs) - erklaert wortlos, warum der Punkt hinter
+  // dem Finger zurueckbleibt; Zaehigkeit ohne Grund wirkt wie ein Ruckler.
+  const nearIds=new Set();
+  if(M.drag) M.nearPairs.forEach(([a,b,c,d])=>{
+    nearIds.add([a,b].sort().join('|')); nearIds.add([c,d].sort().join('|'));
+  });
+  ctx.lineCap='round';
   M.walls.forEach(([a,b])=>{
     if(I[a]==null||I[b]==null) return;
+    const hot=nearIds.has([a,b].sort().join('|'));
+    ctx.strokeStyle=hot?INK.mode:INK.wall;
+    ctx.lineWidth=(hot?4:2.5)*dpr;
     const p=toScr(P[I[a]]), q=toScr(P[I[b]]);
     ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
   });
@@ -4356,19 +4469,41 @@ cv.addEventListener('pointermove',e=>{
     const d=evDev(e), w=toWorld(d.x,d.y);
     const i=M.pts.findIndex(x=>x.id===gesture.id);
     if(i<0) return;
-    const dx=w.x-M.pts[i].x, dy=w.y-M.pts[i].y;
+    const rawDx=w.x-M.pts[i].x, rawDy=w.y-M.pts[i].y;
+    // Sanfte Kreuzungsbremse: nur der aktuelle Schritt wird gedaempft,
+    // nie die Gesamtlage neu gerechnet. Weichzone in BILDSCHIRMpixeln,
+    // damit sich der Widerstand bei jedem Zoom gleich anfuehlt.
+    const soft=SOFT_PX*DPR()/VIEW.s;
+    const damp=dampenDrag(M.pts, M.walls, gesture.id, rawDx, rawDy, soft);
+    const dx=damp.dx, dy=damp.dy;
+    M.nearPairs=damp.near;
     // Ziehen kennt drei Lagen: noch keine Messung (Skizze frei), dof > 0
     // (der Punkt folgt der Maus so weit, wie die Messungen es zulassen),
     // dof = 0 (die Form ist bestimmt, es bleibt das Verschieben des Ganzen).
     if(!M.an){
       M.dragMode='frei';
-      M.pts[i].x=w.x; M.pts[i].y=w.y;
+      M.pts[i].x+=dx; M.pts[i].y+=dy;
     } else if(M.an.dof>0){
       M.dragMode='moden';
-      const mv=C.dragAlongModes(M.pts, M.an.modes, i, dx, dy);
-      if(mv){
+      // Der Korrektor bewegt auch Nachbarpunkte und kann dadurch selbst
+      // eine Kreuzung erzeugen, die der Finger nicht direkt verursacht.
+      // Dann den Schritt halbieren statt zu verwerfen: kleine Schritte
+      // sehen wie zusaetzliche Zaehigkeit aus, ein Verwerfen wie ein Ruck.
+      const vorher=M.pts.map(p=>({...p}));
+      const crossedBefore=wallsCross(vorher);
+      let f=1, ok=false;
+      for(let tryN=0; tryN<4 && !ok; tryN++, f/=2){
+        const mv=C.dragAlongModes(vorher, M.an.modes, i, dx*f, dy*f);
+        if(!mv) break;
         const fit=C.solve(mv, M.meas);       // Korrektor: zurueck auf die Messungen
+        if(!crossedBefore){
+          const bad=crossingPairs(fit.pts);
+          // Was die Bisektion verhindert, wird auch getoent - sonst waere
+          // der Widerstand im Mess-Fall unerklaert.
+          if(bad.length){ M.nearPairs=bad; continue; }
+        }
         fit.pts.forEach((p,q)=>{ M.pts[q].x=p.x; M.pts[q].y=p.y; });
+        ok=true;
       }
     } else {
       M.dragMode='starr';
@@ -4402,7 +4537,7 @@ function endPointer(e){
     return;
   }
   if(g.t==='point'){
-    M.drag=null; M.dragMode=null; setHint(null);
+    M.drag=null; M.dragMode=null; M.nearPairs=[]; setHint(null);
     if(g.moved){ recompute(); return; }
     if(!g.popOpen) tapPointDraw(g.id);
     return;
@@ -5866,6 +6001,64 @@ globalThis.selfChecks=function(){
              return !!u&&!!u2 && u.every((p,i)=>Math.abs(p.x-u2[i].x)<1e-9 && Math.abs(p.y-u2[i].y)<1e-9); })());
     chk('entwirren: offener Zug -> null',
       globalThis.untangle(bow.map(p=>({...p})), [['A','B'],['B','C']], meas1, 8, 1)===null);
+  }
+  // --- Sanfte Kreuzungsbremse ---
+  {
+    const dd=globalThis.segSegDist;
+    chk('bremse: kreuzende Strecken -> Abstand 0',
+      dd({x:0,y:0},{x:10,y:10},{x:0,y:10},{x:10,y:0})===0);
+    chk('bremse: parallele Strecken -> echter Abstand',
+      near(dd({x:0,y:0},{x:10,y:0},{x:0,y:5},{x:10,y:5}), 5, 1e-9));
+    chk('bremse: Abstand ueber Endpunkte',
+      near(dd({x:0,y:0},{x:10,y:0},{x:13,y:4},{x:20,y:4}), 5, 1e-9));
+
+    // U-Form: A-B-C-D offen gezeichnet, plus eine ferne Wand E-F, die der
+    // gezogene Punkt B beim Wandern nach unten kreuzen wuerde.
+    //   B(0,0)-A(0,4000) ist die Kante an B; E-F liegt waagerecht bei y=-1000.
+    const pts=[{id:'A',x:0,y:4000},{id:'B',x:0,y:0},
+               {id:'E',x:-2000,y:-1000},{id:'F',x:2000,y:-1000}];
+    const walls=[['A','B'],['E','F']];
+    const soft=500;
+    const dmp=globalThis.dampenDrag;
+    chk('bremse: Bewegung WEG von der Gefahr bleibt ungebremst',
+      (()=>{ const r=dmp(pts,walls,'B',0,300,soft);
+             return near(r.dy,300,1e-9) && r.near.length===0; })());
+    chk('bremse: Bewegung quer zur Gefahr bleibt ungebremst (Gleiten)',
+      (()=>{ const nah=pts.map(p=>p.id==='B'?{...p,y:-800}:p);   // 200 vor der Wand
+             const r=dmp(nah,walls,'B',400,0,soft);
+             return near(r.dx,400,1e-6) && near(r.dy,0,1e-6); })());
+    chk('bremse: Bewegung AUF die Gefahr zu wird stark gedaempft',
+      (()=>{ const nah=pts.map(p=>p.id==='B'?{...p,y:-800}:p);
+             const r=dmp(nah,walls,'B',0,-400,soft);
+             return Math.abs(r.dy) < 400*0.25 && r.near.length===1; })());
+    chk('bremse: nie ganz gesperrt - Rest kommt durch',
+      (()=>{ const kante=pts.map(p=>p.id==='B'?{...p,y:-999.9}:p);
+             const r=dmp(kante,walls,'B',0,-400,soft);
+             return Math.abs(r.dy) > 0 && Math.abs(r.dy) < 400*0.1; })());
+    chk('bremse: bereits gekreuztes Paar wird nicht bewacht',
+      (()=>{ const durch=pts.map(p=>p.id==='B'?{...p,y:-2000}:p);   // A-B kreuzt E-F
+             const r=dmp(durch,walls,'B',0,-400,soft);
+             return near(r.dy,-400,1e-9) && r.near.length===0; })());
+    chk('bremse: weit entfernt -> unveraendert, kein Aufwand',
+      (()=>{ const r=dmp(pts,walls,'B',0,-100,soft);
+             return near(r.dy,-100,1e-9); })());
+    // Zwei Kanten EINER Ecke naehern sich derselben Wand. Ohne
+    // Richtungs-Sperre daempft dasselbe Hindernis zweimal und der
+    // Restdurchlass faellt unter die Zusage (browser-gemessen 1,7 % statt
+    // 12 %). Ecke B liegt hier zwischen zwei Kanten A-B und B-C.
+    {
+      const ecke=[{id:'A',x:-3000,y:4000},{id:'B',x:0,y:0},{id:'C',x:3000,y:4000},
+                  {id:'E',x:-4000,y:-300},{id:'F',x:4000,y:-300}];
+      const w2=[['A','B'],['B','C'],['E','F']];
+      const r=dmp(ecke,w2,'B',0,-400,soft);
+      const einKanten=dmp(ecke,[['A','B'],['E','F']],'B',0,-400,soft);
+      chk('bremse: zwei Kanten einer Ecke daempfen nicht doppelt',
+        near(r.dy, einKanten.dy, 1e-6) && r.near.length===2);
+      chk('bremse: Restdurchlass haelt die Zusage auch an der Ecke',
+        (()=>{ const kante=ecke.map(p=>p.id==='B'?{...p,y:-299.9}:p);
+               const rr=dmp(kante,w2,'B',0,-400,soft);
+               return Math.abs(rr.dy) >= 400*0.05; })());
+    }
   }
   return {ok, out};
 };
