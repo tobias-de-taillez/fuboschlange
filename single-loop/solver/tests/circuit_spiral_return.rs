@@ -31,7 +31,7 @@ use single_loop_solver::plate::{
     EmbeddedPoseGraph, Heading8, PlateGraphLimits, PlateInstance, PlateProfile, PlateTransform,
     PoseEdge, TemplateId, build_embedded_graph,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 // --- Real 3000x2400 / VA150 / wall_clearance-75 fixture, duplicated from
 // tests/circuit_spiral_arm.rs per that file's own precedent. ---
@@ -240,6 +240,41 @@ fn completed_spiral_returns_through_every_reserved_lane_to_the_zone() {
 
     let return_lanes = lanes_of(&path.return_edge_ids, &lanes, &graph);
     assert_eq!(return_lanes, vec![5, 3, 1]);
+
+    // Coverage pin (reviewer follow-up): every reserved ring's own edges,
+    // plus every lane-change chain's hops, no more, no less, no duplicates.
+    // Ring edge counts (20, 36, 52 for rings 5, 3, 1) are this fixture's own
+    // real counts -- re-derived directly from `lanes`, not hardcoded from
+    // memory, so a future fixture/lattice change that shifts them fails
+    // this assertion for the right reason rather than going stale silently.
+    // Chain hop count (4) *is* hardcoded: 2 hops each for the two reversed
+    // chains (ring 5->3, ring 3->1) -- `find_smallest_chain` never finds a
+    // single-edge chain on this fixture (Task 6's own probe), so each
+    // reversed chain contributes exactly 2.
+    let ring_edge_count = |id: u32| {
+        lanes
+            .iter()
+            .find(|lane| lane.id == id)
+            .unwrap()
+            .edge_ids
+            .len()
+    };
+    let ring_edge_total = ring_edge_count(5) + ring_edge_count(3) + ring_edge_count(1);
+    let chain_hop_total = 2 + 2;
+    let expected_return_edges = ring_edge_total + chain_hop_total;
+    assert_eq!(
+        expected_return_edges, 112,
+        "sanity: fixture's own known total"
+    );
+    assert_eq!(path.return_edge_ids.len(), expected_return_edges);
+
+    let unique_return_edges: BTreeSet<u32> = path.return_edge_ids.iter().copied().collect();
+    assert_eq!(
+        unique_return_edges.len(),
+        path.return_edge_ids.len(),
+        "return_edge_ids must not contain duplicate edge ids: {:?}",
+        path.return_edge_ids
+    );
 
     assert_continuous(&path, &graph);
 }

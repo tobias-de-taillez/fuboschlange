@@ -1066,8 +1066,19 @@ fn ring_entry_index(
 /// `len` edges, each replaced by [`find_reversed_counterpart`], in the
 /// order that begins departing `entry_pose` and -- since this is a closed
 /// cycle walked in full -- ends arriving back at `entry_pose` again.
-/// `Err` (a [`dead_end`]) if `entry_pose` matches no node of `ring`'s own
-/// walk, or if any required reversed edge does not exist in `graph`.
+/// `Err` (a [`dead_end`]) if `ring` is not itself a closed cycle, if
+/// `entry_pose` matches no node of `ring`'s own walk, or if any required
+/// reversed edge does not exist in `graph`.
+///
+/// The closed-cycle check is load-bearing, not defensive, and runs *before*
+/// any wraparound is attempted: `ring.edge_ids[len-1].end ==
+/// ring.edge_ids[0].start` only holds when `ring` truly closes
+/// (`node_ids.first() == node_ids.last()` -- the same test `search.rs`'s
+/// `same_lane_adjacent` uses for its own wrap-around case). A ring
+/// truncated by e.g. a clipping connection zone (`fields.rs`'s own
+/// "truncated to its longest connected arc" doc) has no real edge at that
+/// seam; walking it anyway would silently splice two genuinely disconnected
+/// arcs into one fake lap instead of failing on the missing connection.
 fn walk_ring_backward(
     graph: &EmbeddedPoseGraph,
     edge_by_id: &BTreeMap<u32, &PoseEdge>,
@@ -1075,6 +1086,17 @@ fn walk_ring_backward(
     entry_pose: LocalPose,
     resolved_so_far: usize,
 ) -> Result<Vec<u32>, SearchFailure> {
+    let is_closed = ring
+        .node_ids
+        .first()
+        .is_some_and(|first| ring.node_ids.last() == Some(first));
+    if !is_closed {
+        return Err(dead_end(
+            format!("return lane {}: ring is not a closed cycle", ring.id),
+            resolved_so_far,
+        ));
+    }
+
     let len = ring.edge_ids.len();
     let entry_index = ring_entry_index(ring, edge_by_id, entry_pose).ok_or_else(|| {
         dead_end(
@@ -1229,15 +1251,25 @@ pub fn complete_spiral(
         return_edge_ids.extend(lap);
 
         if let Some(&next_ring_id) = descending_reserved.get(index + 1) {
-            let chain = descend_chains.get(&next_ring_id).ok_or_else(|| {
-                dead_end(
-                    format!(
-                        "return lane {ring_id}: no certified lane-change chain to \
-                         return lane {next_ring_id}"
-                    ),
-                    return_edge_ids.len(),
-                )
-            })?;
+            // Two-token guard, matching `corridor_reaches_zone`'s own
+            // `descend_chains.get(&pair[0]).is_some_and(|chain|
+            // chain.to_lane == pair[1])`: the map key alone isn't enough --
+            // `compute_descend_chains` is keyed by `from`, so a wrong-lane
+            // chain could only be fetched by a caller bug, but this
+            // function's own correctness should not rest on trusting that
+            // by construction.
+            let chain = descend_chains
+                .get(&next_ring_id)
+                .filter(|chain| chain.to_lane == ring_id)
+                .ok_or_else(|| {
+                    dead_end(
+                        format!(
+                            "return lane {ring_id}: no certified lane-change chain to \
+                             return lane {next_ring_id}"
+                        ),
+                        return_edge_ids.len(),
+                    )
+                })?;
             for &forward_id in chain.hop_edge_ids.iter().rev() {
                 let reversed = find_reversed_counterpart(graph, edge_by_id[&forward_id])
                     .ok_or_else(|| {
@@ -1379,6 +1411,55 @@ mod return_chain_tests {
         eprintln!(
             "all descend_chains keys: {:?}",
             chains.keys().collect::<Vec<_>>()
+        );
+    }
+}
+
+#[cfg(test)]
+mod open_ring_return_walk_tests {
+    //! Reviewer follow-up on Task 7: `walk_ring_backward` must refuse to
+    //! wrap an open (truncated) ring rather than silently splicing two
+    //! disconnected arcs into one fake lap (see `walk_ring_backward`'s own
+    //! doc). A hand-truncated `Lane` is enough to exercise this -- the
+    //! closed-cycle check runs before any graph lookup, so the graph and
+    //! `edge_by_id` map below are deliberately empty stand-ins, never
+    //! actually queried.
+    use super::*;
+
+    #[test]
+    fn open_ring_is_a_dead_end_not_a_silent_wraparound() {
+        let lane = Lane {
+            id: 5,
+            field_id: 0,
+            rect_local: RectMm {
+                min: Point::new(0.0, 0.0),
+                max: Point::new(100.0, 100.0),
+            },
+            // Open: three nodes, first (10) != last (12) -- a ring
+            // truncated by e.g. a clipping connection zone, per
+            // `fields.rs`'s own "longest connected arc" doc.
+            node_ids: vec![10, 11, 12],
+            edge_ids: vec![100, 101],
+        };
+        let graph = EmbeddedPoseGraph {
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            rejected_edges: Vec::new(),
+            candidate_count: 0,
+        };
+        let edge_by_id: BTreeMap<u32, &PoseEdge> = BTreeMap::new();
+        let entry_pose = LocalPose::new(Point::new(0.0, 0.0), Heading8::Deg0);
+
+        let failure = walk_ring_backward(&graph, &edge_by_id, &lane, entry_pose, 0).unwrap_err();
+        assert_eq!(failure.kind, SearchFailureKind::Geometry);
+        assert!(
+            failure
+                .journal_tail
+                .iter()
+                .any(|entry| entry.decision.contains("return lane 5")
+                    && entry.decision.contains("ring is not a closed cycle")),
+            "journal_tail did not name the open ring: {:?}",
+            failure.journal_tail
         );
     }
 }
