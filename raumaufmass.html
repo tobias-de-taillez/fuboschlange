@@ -51,6 +51,18 @@
     stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
   #ribbon .sep{flex:none;width:1px;background:var(--line);margin:6px 5px}
   #ribbon #clr{color:var(--bad)}
+  #modes button[disabled]{opacity:.4;cursor:not-allowed}
+  /* Wandleiste: nur im Wände-Tab, waehlt die Wand und setzt Oeffnungen */
+  #wallbar{display:flex;gap:6px;align-items:center;padding:6px 8px;background:var(--surface);
+    border-bottom:1px solid var(--line);flex-wrap:wrap}
+  #wallbar[hidden]{display:none}
+  #wallbar button{min-height:36px;padding:0 10px}
+  #wPrev,#wNext{min-width:36px;padding:0}
+  #wPick{font:inherit;font-size:14px;padding:7px;border:1px solid var(--line);
+    border-radius:6px;background:var(--surface);color:var(--ink);max-width:150px}
+  #wInfo{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+  #wAdd{display:flex;gap:6px;margin-left:auto}
+  #wAdd button{border-style:dashed}
   #modes{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
   #modes button{border:0;border-radius:0;min-width:72px}
   #modes button+button{border-left:1px solid var(--line)}
@@ -226,6 +238,7 @@
       <div id="modes">
         <button data-mode="draw" aria-pressed="true">Zeichnen</button>
         <button data-mode="measure" aria-pressed="false">Messen</button>
+        <button data-mode="wall" aria-pressed="false" title="Erst verfügbar, wenn die Form des Grundrisses eindeutig ist">Wände</button>
       </div>
       <div id="ribbon">
         <button id="lib" title="Meine Räume"><svg viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg><span>Räume</span></button>
@@ -240,6 +253,17 @@
         <button id="exp" title="JSON in die Zwischenablage"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="1"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg><span>Kopieren</span></button>
         <button id="imp" title="JSON aus der Zwischenablage einfügen"><svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="16" rx="1"/><path d="M9 5V3h6v2"/></svg><span>Einfügen</span></button>
         <button id="clr" title="Aktuellen Raum leeren"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13"/></svg><span>Verwerfen</span></button>
+      </div>
+    </div>
+    <div id="wallbar" hidden>
+      <button id="wPrev" aria-label="Vorherige Wand">‹</button>
+      <select id="wPick"></select>
+      <button id="wNext" aria-label="Nächste Wand">›</button>
+      <span id="wInfo"></span>
+      <div id="wAdd">
+        <button data-add="door">+ Tür</button>
+        <button data-add="window">+ Fenster</button>
+        <button data-add="hole">+ Loch</button>
       </div>
     </div>
     <div id="canvaswrap">
@@ -3665,7 +3689,12 @@ const $=id=>document.getElementById(id);
 // jonglieren. null = kein Zug aktiv.
 const M={ pts:[], walls:[], meas:[], mode:'draw', sel:[], chain:null,
           fit:null, an:null, sugg:[], suspects:new Set(), narrow:[],
-          drag:null, dragMode:null, highlight:null, nearPairs:[] };
+          drag:null, dragMode:null, highlight:null, nearPairs:[],
+          openings:[], wallSel:null, openSel:null };
+// Eigene Ansicht der Wandansicht; wallUserView merkt, ob der Nutzer
+// gezoomt hat (dann kein automatisches Einpassen mehr).
+let wallUserView=false;
+let openSeq=1;
 
 // Kreuzt sich irgendein Wandpaar in dieser Lage? Bewusst ueber die
 // WANDLISTE statt ueber den Ring: waehrend des Zeichnens ist der Zug noch
@@ -3694,14 +3723,21 @@ const serialize=()=>JSON.stringify({
   pts:M.pts.map(p=>({id:p.id,x:p.x,y:p.y})),
   walls:M.walls.map(w=>[...w]),
   meas:M.meas.map(m=>({...m})),
-  idSeq,
+  openings:M.openings.map(o=>({...o})),
+  idSeq, openSeq,
 });
 function deserialize(o){
   M.pts=o.pts.map(p=>({...p}));
   M.walls=o.walls.map(w=>[...w]);
   M.meas=o.meas.map(m=>({...m}));
+  // Oeffnungen sind optional: aeltere Raeume und Fremdimporte haben sie
+  // nicht, und ein fehlendes Feld darf kein Fehler sein.
+  M.openings=Array.isArray(o.openings) ? o.openings.map(x=>({...x})) : [];
   if(typeof o.idSeq==='number') idSeq=o.idSeq;
+  if(typeof o.openSeq==='number') openSeq=o.openSeq;
+  else openSeq=M.openings.length+1;
   M.sel=[]; M.chain=null; M.drag=null; M.fit=null; M.an=null;
+  M.wallSel=null; M.openSel=null;
 }
 
 // Formvalidierung fuer alles, was deserialize() bekommt - VOLLSTAENDIG und
@@ -3948,7 +3984,7 @@ function importAsNewRoom(name, dataObj){
 }
 
 function render(){
-  drawCanvas();
+  if(M.mode==='wall') drawWallView(); else drawCanvas();
   renderPanel();
 }
 
@@ -4003,6 +4039,133 @@ function drawScalebar(dpr){
 // Vorschlag soll nur die Hervorhebung im Plan aktualisieren, nicht das Panel
 // neu aufbauen - sonst zerstoert render() genau die Zeile, auf der der
 // Cursor gerade steht.
+// ================= Wandansicht =================
+// Eigene Ansicht mit eigenem Massstab: die Wand wird eingepasst, x laeuft
+// von Ecke a nach b, y vom Boden nach oben. Auf dem Schirm zeigt y nach
+// unten - deshalb spiegelt wToScr die Hoehe.
+let WV={s:1, ox:0, oy:0};
+const wToScr=p=>({x:p.x*WV.s+WV.ox, y:WV.oy-p.y*WV.s});
+const wToWall=(sx,sy)=>({x:(sx-WV.ox)/WV.s, y:(WV.oy-sy)/WV.s});
+
+function currentShape(){
+  if(!M.wallSel) return null;
+  const P=M.fit?M.fit.pts:M.pts;
+  return wallShape(P, M.meas, M.wallSel.a, M.wallSel.b);
+}
+function wallFit(shape){
+  if(!shape) return;
+  const hMax=Math.max(shape.ha, shape.hb)||1;
+  // Rand knapp halten - die Wand soll die Flaeche fuellen, nicht darin schweben.
+  const pad=34*DPR();
+  const s=Math.min((cv.width-2*pad)/(shape.L||1), (cv.height-2*pad)/hMax);
+  WV={ s, ox:(cv.width-shape.L*s)/2, oy:(cv.height+hMax*s)/2 };
+}
+
+// Oeffnungen dieser Wand, in Anlegereihenfolge.
+function wallOpenings(){
+  if(!M.wallSel) return [];
+  const k=[M.wallSel.a,M.wallSel.b].sort().join('|');
+  return M.openings.filter(o=>[o.a,o.b].sort().join('|')===k);
+}
+
+const OPEN_LABEL={door:'Tür', window:'Fenster', hole:'Loch'};
+
+function drawWallView(){
+  const dpr=DPR();
+  cv.width=cv.clientWidth*dpr; cv.height=cv.clientHeight*dpr;
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.clearRect(0,0,cv.width,cv.height);
+  if(!cv.width||!cv.height) return;
+  const shape=currentShape();
+  if(!shape) return;
+  if(!wallUserView) wallFit(shape);
+  // Wandflaeche als Trapez - die Decke laeuft schraeg, wenn die beiden
+  // Ecken verschieden hoch sind.
+  const poly=shape.poly.map(wToScr);
+  ctx.beginPath();
+  poly.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
+  ctx.closePath();
+  ctx.fillStyle=INK.canvas; ctx.fill();
+  ctx.strokeStyle=INK.wall; ctx.lineWidth=2.5*dpr; ctx.stroke();
+  // Boden kraeftiger: er ist die Bezugskante fuer jede Hoehenangabe.
+  const b0=wToScr({x:0,y:0}), b1=wToScr({x:shape.L,y:0});
+  ctx.lineWidth=4*dpr; ctx.beginPath();
+  ctx.moveTo(b0.x,b0.y); ctx.lineTo(b1.x,b1.y); ctx.stroke();
+  // Oeffnungen
+  wallOpenings().forEach(o=>{
+    const p=wToScr({x:o.x, y:o.y+o.h}), q=wToScr({x:o.x+o.w, y:o.y});
+    const w=q.x-p.x, h=q.y-p.y;
+    const sel=M.openSel===o.id;
+    ctx.fillStyle = o.kind==='hole' ? '#e6e2d5' : '#fff';
+    ctx.fillRect(p.x,p.y,w,h);
+    ctx.strokeStyle = sel?INK.accent:INK.wall;
+    ctx.lineWidth=(sel?3:2)*dpr;
+    ctx.strokeRect(p.x,p.y,w,h);
+    drawOpeningSymbol(o,p.x,p.y,w,h,dpr);
+    // Beschriftung nur, wenn sie hineinpasst - sonst ueberlagern sich die
+    // Texte mehrerer Oeffnungen zu Unlesbarkeit (browser-gesehen).
+    ctx.font=`${11*dpr}px system-ui`; ctx.textAlign='center';
+    const txt=`${OPEN_LABEL[o.kind]} ${Math.round(o.w)}×${Math.round(o.h)}`;
+    const kurz=OPEN_LABEL[o.kind];
+    const passt=ctx.measureText(txt).width < w-8*dpr;
+    const passtKurz=ctx.measureText(kurz).width < w-8*dpr;
+    if(passt||passtKurz){
+      ctx.fillStyle=INK.canvas;
+      const tw=ctx.measureText(passt?txt:kurz).width;
+      ctx.fillRect(p.x+w/2-tw/2-3*dpr, p.y+h/2-8*dpr, tw+6*dpr, 14*dpr);
+      ctx.fillStyle=sel?INK.accent:INK.scale;
+      ctx.fillText(passt?txt:kurz, p.x+w/2, p.y+h/2+4*dpr);
+    }
+    ctx.textAlign='start';
+  });
+  // Masse der Wand selbst
+  ctx.fillStyle=INK.scale; ctx.font=`${12*dpr}px system-ui`; ctx.textAlign='center';
+  ctx.fillText(`${fmtM(shape.L)} m`, (b0.x+b1.x)/2, b0.y+20*dpr);
+  // Hoehen INNEN beschriften: aussen wurden sie am Canvasrand
+  // abgeschnitten, sobald die Wand die Flaeche gut ausnutzt.
+  ctx.textAlign='left';
+  const hl=wToScr({x:0,y:shape.ha});
+  ctx.fillText(`${fmtM(shape.ha)} m`, hl.x+8*dpr, hl.y+16*dpr);
+  if(Math.abs(shape.ha-shape.hb)>1){
+    ctx.textAlign='right';
+    const hr=wToScr({x:shape.L,y:shape.hb});
+    ctx.fillText(`${fmtM(shape.hb)} m`, hr.x-8*dpr, hr.y+16*dpr);
+  }
+  ctx.textAlign='start';
+  if(!shape.gemessen){
+    ctx.fillStyle=INK.mode; ctx.font=`${11.5*dpr}px system-ui`;
+    ctx.fillText('Höhe angenommen — Raumhöhe messen', 14*dpr, 22*dpr);
+  }
+}
+
+// Aufrisssymbolik nach DIN-Praxis: Dreiecke, deren Spitze auf die
+// Bandseite zeigt. Durchgezogen = nach innen oeffnend, gestrichelt =
+// nach aussen. Fest verglast und Loch bekommen kein Symbol.
+function drawOpeningSymbol(o,x,y,w,h,dpr){
+  const t=o.swing&&o.swing.type;
+  if(!t||t==='fix'||o.kind==='hole') return;
+  ctx.save();
+  ctx.strokeStyle=INK.scale; ctx.lineWidth=1.2*dpr;
+  if(o.swing.out) ctx.setLineDash([4*dpr,3*dpr]);
+  const tri=(ax,ay,bx,by,cx,cy)=>{
+    ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(bx,by); ctx.lineTo(cx,cy);
+    ctx.closePath(); ctx.stroke();
+  };
+  const links=o.swing.hinge==='left';
+  if(t==='turn'||t==='turntilt'){
+    // Dreh: Spitze auf der Bandseite
+    if(links) tri(x,y+h/2, x+w,y, x+w,y+h);
+    else      tri(x+w,y+h/2, x,y, x,y+h);
+  }
+  if(t==='tilt'||t==='turntilt') tri(x+w/2,y+h, x,y, x+w,y);   // Kipp: Achse unten
+  if(t==='top')  tri(x+w/2,y, x,y+h, x+w,y+h);                 // Klapp: Achse oben
+  if(t==='pivot'){                                             // Schwing: Achse mittig
+    tri(x,y+h/2, x+w,y, x+w,y+h);
+    tri(x+w,y+h/2, x,y, x,y+h);
+  }
+  ctx.restore();
+}
+
 function drawCanvas(){
   const dpr=DPR();
   cv.width=cv.clientWidth*dpr; cv.height=cv.clientHeight*dpr;
@@ -4755,9 +4918,104 @@ function finishIfClosed(){
 
 // ================= Modi, Werkzeuge =================
 
+// ================= Wände-Tab =================
+// Erst sinnvoll, wenn die Form des Grundrisses eindeutig ist - vorher
+// waeren Wandlaengen Skizzenpixel und jede Wandansicht eine Erfindung.
+const wallTabReady=()=>!!(M.an && M.an.dof===0 && M.walls.length);
+
+function serializeOpenings(){ return M.openings.map(o=>({...o})); }
+
+function pickWall(a,b){
+  M.wallSel={a,b}; M.openSel=null; wallUserView=false;
+  render();
+}
+function wallList(){ return M.walls.map(([a,b])=>({a,b})); }
+
+function renderWallBar(){
+  const bar=$('wallbar');
+  bar.hidden = M.mode!=='wall';
+  if(bar.hidden) return;
+  const list=wallList();
+  const sel=$('wPick');
+  sel.innerHTML=list.map(w=>`<option value="${w.a}|${w.b}"${
+    M.wallSel&&M.wallSel.a===w.a&&M.wallSel.b===w.b?' selected':''}>Wand ${w.a}–${w.b}</option>`).join('');
+  const shape=currentShape();
+  const n=wallOpenings().length;
+  $('wInfo').textContent = shape
+    ? `${fmtM(shape.L)} m breit · ${n} ${n===1?'Öffnung':'Öffnungen'}`
+    : '';
+}
+$('wPick').onchange=()=>{
+  const [a,b]=$('wPick').value.split('|');
+  pickWall(a,b);
+};
+const stepWall=d=>{
+  const list=wallList();
+  if(!list.length) return;
+  const i=list.findIndex(w=>M.wallSel&&w.a===M.wallSel.a&&w.b===M.wallSel.b);
+  const n=list[( (i<0?0:i) + d + list.length)%list.length];
+  pickWall(n.a,n.b);
+};
+$('wPrev').onclick=()=>stepWall(-1);
+$('wNext').onclick=()=>stepWall(1);
+
+document.querySelectorAll('#wAdd button').forEach(b=>{
+  b.onclick=()=>{
+    const shape=currentShape();
+    if(!shape) return;
+    const kind=b.dataset.add;
+    snapshot();
+    const o=defaultOpening(shape, kind);
+    o.id='o'+(openSeq++);
+    o.a=M.wallSel.a; o.b=M.wallSel.b;
+    // Vorbelegte Oeffnungsart: die in Deutschland uebliche.
+    if(kind==='door') o.swing={type:'turn', hinge:'left', out:false};
+    if(kind==='window') o.swing={type:'turntilt', hinge:'left', out:false};
+    M.openings.push(o);
+    M.openSel=o.id;
+    recompute();
+    setHint(`${OPEN_LABEL[kind]} eingesetzt — ziehen zum Positionieren.`);
+  };
+});
+// Ziehen in der Wandansicht: die Oeffnung bleibt HART in der Wand
+// (anders als die Kreuzungsbremse im Grundriss - eine Tuer halb
+// ausserhalb der Wand ist keine sinnvolle Zwischenlage).
+let wallDrag=null;
+function openingAt(wx,wy){
+  const list=wallOpenings();
+  for(let i=list.length-1;i>=0;i--){
+    const o=list[i];
+    if(wx>=o.x && wx<=o.x+o.w && wy>=o.y && wy<=o.y+o.h) return o;
+  }
+  return null;
+}
+cv.addEventListener('pointerdown',e=>{
+  if(M.mode!=='wall') return;
+  const d=evDev(e), w=wToWall(d.x,d.y);
+  const o=openingAt(w.x,w.y);
+  M.openSel=o?o.id:null;
+  if(o) wallDrag={id:o.id, gx:w.x-o.x, gy:w.y-o.y, snap:serialize()};
+  render();
+},true);
+addEventListener('pointermove',e=>{
+  if(M.mode!=='wall'||!wallDrag) return;
+  const shape=currentShape();
+  const o=M.openings.find(x=>x.id===wallDrag.id);
+  if(!shape||!o) return;
+  if(wallDrag.snap){ pushSnapshot(wallDrag.snap); wallDrag.snap=null; }
+  const d=evDev(e), w=wToWall(d.x,d.y);
+  const moved=clampOpening(shape, {...o, x:w.x-wallDrag.gx, y:w.y-wallDrag.gy});
+  o.x=moved.x; o.y=moved.y; o.w=moved.w; o.h=moved.h;
+  render();
+});
+addEventListener('pointerup',()=>{
+  if(wallDrag){ wallDrag=null; recompute(); }
+});
+
 const MODE_HINTS={
   draw:'Antippen setzt Ecken und verbindet sie · Ziehen verschiebt · gedrückt halten löscht.',
   measure:'Wand oder zwei Ecken antippen, Maß in Metern eintippen.',
+  wall:'Öffnung einsetzen und ziehen — sie bleibt immer innerhalb der Wand.',
 };
 let hintTimer=null;
 // setHint(text): fluechtige Meldung, faellt nach ein paar Sekunden auf den
@@ -4772,11 +5030,23 @@ function setHint(txt){
 function setHintLive(txt){ clearTimeout(hintTimer); hintTimer=null; $('hint').textContent=txt; }
 
 function setMode(mode){
+  if(mode==='wall' && !wallTabReady()){
+    setHint('Wandansichten erst, wenn die Form des Grundrisses eindeutig ist.');
+    return;
+  }
   M.mode=mode; M.sel=[];
   if(mode!=='draw') M.chain=null;
   if(entryPair && mode!=='measure') closeEntry();
+  if(wpopPair) closeWallPopup();
   hidePop();
+  // Beim Betreten des Wände-Tabs die erste Wand waehlen, damit sofort
+  // etwas zu sehen ist.
+  if(mode==='wall' && !M.wallSel && M.walls.length){
+    M.wallSel={a:M.walls[0][0], b:M.walls[0][1]};
+    wallUserView=false;
+  }
   $('ring').style.display = mode==='draw' ? '' : 'none';
+  $('untangle').style.display='none';
   document.querySelectorAll('#modes button[data-mode]').forEach(x=>
     x.setAttribute('aria-pressed', String(x.dataset.mode===mode)));
   setHint(null);
@@ -5093,6 +5363,11 @@ function renderPanel(){
   $('statustxt').textContent=txt;
   $('status').className=cls;
   $('roomname').textContent=currentRoomName;
+  // Der Wände-Tab bleibt gesperrt, solange der Grundriss nicht eindeutig
+  // ist - vorher waeren Wandlaengen Skizzenpixel.
+  const wt=document.querySelector('#modes button[data-mode="wall"]');
+  if(wt) wt.disabled=!wallTabReady();
+  renderWallBar();
   $('empty').style.display = M.pts.length ? 'none' : 'flex';
   $('undo').disabled = !undoStack.length;
 
