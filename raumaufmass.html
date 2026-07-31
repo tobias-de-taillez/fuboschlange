@@ -168,6 +168,14 @@
   button.badge{cursor:pointer}
   #tbl .x{display:none}
   #tbl.details .x{display:table-cell}
+  #tbl th[data-key]{cursor:pointer;user-select:none;-webkit-user-select:none}
+  /* Info-Kaestchen zu Tabellenwerten: fixed am Viewport, weil die Tabelle
+     selbst im Panel und ggf. seitlich scrollt. */
+  #tip{position:fixed;z-index:11;max-width:270px;background:var(--surface);
+    border:1px solid var(--line);border-radius:8px;padding:8px 10px;
+    font-size:12.5px;line-height:1.45;color:var(--ink);
+    box-shadow:0 4px 14px rgba(38,36,31,.18);pointer-events:none}
+  #tip[hidden]{display:none}
   .rowbtn{min-height:28px;padding:0 8px;font-size:12px}
   #dtl{min-height:26px;padding:0 10px;font-size:12px;text-transform:none;letter-spacing:0;font-weight:500}
   #dtl[aria-pressed=true]{background:var(--ink);color:var(--surface);border-color:var(--ink)}
@@ -247,6 +255,7 @@
       <div id="pop" hidden><span id="popLabel"></span><button id="popDel">Löschen</button></div>
     </div>
   </div>
+  <div id="tip" hidden></div>
   <div id="panel">
     <div id="status" class="warn"><div id="roomname" title="Antippen: Raum umbenennen">—</div><div id="statustxt">—</div><div id="geo"></div></div>
     <div id="wallwarn"></div>
@@ -257,8 +266,8 @@
     <section>
       <h3>Messungen <button id="dtl" aria-pressed="false">Details</button></h3>
       <div id="tblwrap"><table id="tbl"><thead><tr>
-        <th>Strecke</th><th>Maß [m]</th><th>Status</th>
-        <th class="x">v [mm]</th><th class="x">Red.</th><th class="x">w</th><th class="x">σ [mm]</th><th class="x"></th>
+        <th data-key="pair">Strecke</th><th data-key="d">Maß [m]</th><th data-key="status">Status</th>
+        <th class="x" data-key="v">v [mm]</th><th class="x" data-key="red">Red.</th><th class="x" data-key="w">w</th><th class="x" data-key="sig">σ [mm]</th><th class="x"></th>
       </tr></thead><tbody></tbody></table></div>
       <div id="why"></div>
     </section>
@@ -3212,6 +3221,18 @@ globalThis.parseShareFragment=function(hash){
   const m=hash.match(/^#raum=(.+)$/);
   return m ? globalThis.decodeShare(m[1]) : null;
 };
+// Verdaechtigen-Menge aus den normierten Residuen: statistisch auffaellig
+// (w > w0, Baarda) UND innerhalb der Gleichstand-Toleranz des Maximums.
+// DOM-frei HIER statt im ui-Block, damit test/run.mjs sie prueft - dieselbe
+// Menge steuert Tabelle (rote Zeile, Badge) und Plan (rote Messstrecke),
+// und zwei getrennte Implementierungen wuerden irgendwann verschieden luegen.
+globalThis.computeSuspects=function(w, w0, tieTol){
+  if(!Array.isArray(w)) return new Set();
+  const wMax=w.reduce((mx,x)=>(x!=null&&x>mx)?x:mx, -Infinity);
+  const s=new Set();
+  w.forEach((x,i)=>{ if(x!=null && x>w0 && x>=wMax*(1-tieTol)) s.add(i); });
+  return s;
+};
 // Im Browser sofort eine an localStorage gebundene Instanz; in Node bleibt
 // nur die Factory (die Checks injizieren sich ihren eigenen Speicher).
 // localStorage kann beim blossen ZUGRIFF werfen (Chrome "alle Cookies
@@ -3294,6 +3315,7 @@ const LONGPRESS_MS = 550;
 // Zeichenfarben, abgestimmt auf die CSS-Tokens im Kopf der Datei.
 const INK = {
   wall:'#2a2823', meas:'#2e7d4f', measHl:'#14532d', todo:'#c73e2e', todoHl:'#8f1f14',
+  measBad:'#b3261e', measBadHl:'#7f1a14', labelBadBg:'rgba(247,228,224,.95)',
   point:'#26241f', accent:'#c2410c', grid:'#e6e2d5', scale:'#57534a',
   ellMeasured:'#0b72a3', ellAssumed:'#8a867c', mode:'#b45309',
   canvas:'#f6f4ee', labelBg:'rgba(246,244,238,.92)',
@@ -3305,7 +3327,8 @@ const $=id=>document.getElementById(id);
 // verbindet sie sofort - den Raum "ablaufen" statt Punkte- und Wandmodus zu
 // jonglieren. null = kein Zug aktiv.
 const M={ pts:[], walls:[], meas:[], mode:'draw', sel:[], chain:null,
-          fit:null, an:null, sugg:[], drag:null, dragMode:null, highlight:null };
+          fit:null, an:null, sugg:[], suspects:new Set(),
+          drag:null, dragMode:null, highlight:null };
 
 // Nutzer hat gezoomt oder verschoben - autofit() haelt sich dann zurueck,
 // bis "Einpassen" gedrueckt wird oder eine neue Szene entsteht.
@@ -3458,6 +3481,9 @@ function recompute(){
   // Kandidat auf, im Zug waere das ein Ruckeln.
   M.sugg = (M.an && M.pts.length>=3)
     ? C.suggest(M.fit?M.fit.pts:M.pts, M.walls, M.meas) : [];
+  // Einmal je Aenderung berechnet, von Tabelle UND Plan konsumiert - die
+  // Indizes zaehlen ueber activeMeas, wie an.w selbst.
+  M.suspects = M.an ? computeSuspects(M.an.w, BAARDA_W0, TIE_TOL) : new Set();
   render();
   // Ein Aufmass dauert leicht eine halbe Stunde. Ein Reload darf es nicht
   // kosten. Bewusst ohne Debounce: serialize() ist bei den hier realistischen
@@ -3613,13 +3639,17 @@ function drawCanvas(){
     ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
     ctx.restore();
   }
-  // Messungen
+  // Messungen. Verdaechtige (M.suspects, gleiche Indizes wie an.w) in Rot
+  // und dicker: die Frage "wo muss ich nachmessen?" beantwortet der Plan
+  // selbst, nicht erst die Tabelle.
+  const actM=C.activeMeas(M.meas);
   ctx.setLineDash([6*dpr,4*dpr]);
-  C.activeMeas(M.meas).forEach(m=>{
+  actM.forEach((m,mi)=>{
     if(I[m.a]==null||I[m.b]==null) return;
     const hl = M.highlight && ((M.highlight.a===m.a&&M.highlight.b===m.b)||(M.highlight.a===m.b&&M.highlight.b===m.a));
-    ctx.strokeStyle = hl ? INK.measHl : INK.meas;
-    ctx.lineWidth   = (hl?3:1.5)*dpr;
+    const sus=M.suspects.has(mi);
+    ctx.strokeStyle = sus ? (hl?INK.measBadHl:INK.measBad) : (hl?INK.measHl:INK.meas);
+    ctx.lineWidth   = (hl?3 : sus?2.5 : 1.5)*dpr;
     const p=toScr(P[I[m.a]]), q=toScr(P[I[m.b]]);
     ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
   });
@@ -3645,18 +3675,23 @@ function drawCanvas(){
   // sonst heraus.
   ctx.font=`${12*dpr}px system-ui`; ctx.textAlign='center';
   const gezeigt=new Set();
-  C.activeMeas(M.meas).forEach(m=>{
+  actM.forEach(m=>{
     if(I[m.a]==null||I[m.b]==null) return;
     const k=[m.a,m.b].sort().join('|');
     if(gezeigt.has(k)) return;
     gezeigt.add(k);
-    const alle=C.activeMeas(M.meas).filter(x=>[x.a,x.b].sort().join('|')===k);
+    const alle=actM.filter(x=>[x.a,x.b].sort().join('|')===k);
+    // Ist EINE Messung des Paars verdaechtig, traegt das Label die Warnung -
+    // das Paar teilt sich einen Beschriftungsplatz.
+    const susPair=alle.some(x=>M.suspects.has(actM.indexOf(x)));
     const p=toScr(P[I[m.a]]), q=toScr(P[I[m.b]]);
     const txt=alle.length>1 ? `${fmtM(m.d)} (${alle.length}×)` : fmtM(m.d);
     const mx=(p.x+q.x)/2, my=(p.y+q.y)/2;
     const tw=ctx.measureText(txt).width;
-    ctx.fillStyle=INK.labelBg; ctx.fillRect(mx-tw/2-4*dpr, my-8*dpr, tw+8*dpr, 15*dpr);
-    ctx.fillStyle=INK.meas; ctx.fillText(txt, mx, my+3.5*dpr);
+    ctx.fillStyle=susPair?INK.labelBadBg:INK.labelBg;
+    ctx.fillRect(mx-tw/2-4*dpr, my-8*dpr, tw+8*dpr, 15*dpr);
+    ctx.fillStyle=susPair?INK.measBad:INK.meas;
+    ctx.fillText(txt, mx, my+3.5*dpr);
   });
   ctx.textAlign='start';
   // Punkte: weisser Rand haelt den Marker auf Linien lesbar. Auswahl und
@@ -3753,6 +3788,20 @@ function nearestWall(wx,wy){
     const r=distToSeg({x:wx,y:wy}, P[I[a]], P[I[b]]);
     if(r.t<0.15||r.t>0.85) return;
     if(r.d<bd){ bd=r.d; best={a,b}; }
+  });
+  return (best && bd*VIEW.s < WALL_R*DPR()) ? best : null;
+}
+// Naechste GEMESSENE Strecke (auch Diagonalen) - damit eine im Plan rot
+// markierte Messung direkt antippbar ist, um nachzumessen. Waende deckt
+// nearestWall schon ab; das hier faengt den Rest.
+function nearestMeas(wx,wy){
+  const P=M.drag?M.pts:(M.fit?M.fit.pts:M.pts), I=C.idx(P);
+  let best=null, bd=Infinity;
+  C.activeMeas(M.meas).forEach(m=>{
+    if(I[m.a]==null||I[m.b]==null) return;
+    const r=distToSeg({x:wx,y:wy}, P[I[m.a]], P[I[m.b]]);
+    if(r.t<0.15||r.t>0.85) return;
+    if(r.d<bd){ bd=r.d; best={a:m.a,b:m.b}; }
   });
   return (best && bd*VIEW.s < WALL_R*DPR()) ? best : null;
 }
@@ -4044,8 +4093,10 @@ function endPointer(e){
   if(e.type==='pointercancel' || g.popOpen) return;
   const d=evDev(e), w=toWorld(d.x,d.y);
   if(M.mode==='measure'){
-    const wall=g.wall||nearestWall(w.x,w.y);
-    if(wall){ M.sel=[]; render(); enterMeasurement(wall.a,wall.b); }
+    // Wand zuerst, dann jede gemessene Strecke (Diagonalen): eine rot
+    // markierte Messung im Plan ist damit direkt der Nachmess-Knopf.
+    const seg=g.wall||nearestWall(w.x,w.y)||nearestMeas(w.x,w.y);
+    if(seg){ M.sel=[]; render(); enterMeasurement(seg.a,seg.b); }
     else if(entryPair) closeEntry();
     return;
   }
@@ -4425,6 +4476,49 @@ function statusText(){
   return [`Geprüft — Messgenauigkeit ± ${txtS} mm.`,'good'];
 }
 
+// ================= Tabellen-Extras: Sortierung + Info-Kaestchen =================
+// Sortier-Zustand der Messliste. dir 1 = aufsteigend, -1 = absteigend,
+// 0 = keine Wahl -> Standard (w absteigend). Nicht persistiert: eine
+// Sitzungs-Laune, kein Dokumentzustand.
+let tblSort={col:null, dir:0};
+document.querySelectorAll('#tbl th[data-key]').forEach(th=>{
+  th.dataset.base=th.textContent;
+  th.onclick=()=>{
+    if(tblSort.col===th.dataset.key){
+      tblSort.dir = tblSort.dir===1 ? -1 : tblSort.dir===-1 ? 0 : 1;
+      if(tblSort.dir===0) tblSort.col=null;
+    } else tblSort={col:th.dataset.key, dir:1};
+    renderPanel();
+  };
+});
+
+// Ein gemeinsames Info-Kaestchen fuer Tabellenwerte. Hover zeigt, Verlassen
+// versteckt; auf Touch zeigt der Tipp auf die Zelle dasselbe Kaestchen und
+// der naechste Tipp irgendwo anders schliesst es (title-Attribute koennen
+// Handys nicht anzeigen - deshalb ein eigenes Element).
+function showTip(el, text){
+  const tip=$('tip');
+  tip.textContent=text;
+  tip.hidden=false;
+  const r=el.getBoundingClientRect(), tw=tip.offsetWidth, th2=tip.offsetHeight;
+  let x=Math.max(8, Math.min(innerWidth-tw-8, r.left+r.width/2-tw/2));
+  let y=r.top-th2-8;
+  if(y<8) y=r.bottom+8;
+  tip.style.left=x+'px'; tip.style.top=y+'px';
+}
+function hideTip(){ $('tip').hidden=true; }
+addEventListener('pointerdown',e=>{
+  // Tap ausserhalb einer Tip-Zelle schliesst das Kaestchen (Touch-Pfad).
+  if(!(e.target.closest && e.target.closest('[data-tip]'))) hideTip();
+});
+function attachTip(el, text){
+  if(!text) return;
+  el.dataset.tip='1';
+  el.onmouseenter=()=>showTip(el, text);
+  el.onmouseleave=hideTip;
+  el.addEventListener('pointerdown',()=>showTip(el, text));
+}
+
 function renderPanel(){
   const [txt,cls]=statusText();
   $('statustxt').textContent=txt;
@@ -4473,19 +4567,33 @@ function renderPanel(){
   const tb=document.querySelector('#tbl tbody');
   tb.innerHTML='';
   const act=C.activeMeas(M.meas);
-  // Nicht die eine "schlimmste" Messung suchen, sondern alle, die gleich
-  // verdaechtig sind: ueber Baardas Grenzwert UND innerhalb TIE_TOL des
-  // groessten w im Feld. Ein klarer Spitzenreiter liefert genau eine
-  // markierte Zeile, ein Unentschieden markiert alle gleich weit vorne.
-  const wMax=M.an ? M.an.w.reduce((mx,x)=>(x!=null&&x>mx)?x:mx, -Infinity) : -Infinity;
-  const suspects=new Set();
-  if(M.an) M.an.w.forEach((x,i)=>{
-    if(x!=null && x>BAARDA_W0 && x>=wMax*(1-TIE_TOL)) suspects.add(i);
-  });
+  // Wer verdaechtig ist, entscheidet computeSuspects (store-Block, getestet) -
+  // dieselbe Menge faerbt hier die Zeile und im Plan die Messstrecke rot.
+  const suspects=M.suspects;
 
-  // absteigend nach w sortiert anzeigen, aber die Originalindizes behalten
-  const rows=act.map((m,i)=>({m,i,w:M.an?M.an.w[i]:null}));
-  rows.sort((p,q)=>(q.w??-1)-(p.w??-1));
+  // Anzeige-Reihenfolge: eine per Header-Klick gewaehlte Spalte, sonst der
+  // Standard "w absteigend" (Verdaechtiges zuoberst). Originalindizes bleiben
+  // erhalten, die braucht jede Statistik-Spalte.
+  const rows=act.map((m,i)=>({m,i,w:M.an?M.an.w[i]:null,
+                              v:M.an?M.an.v[i]:null, red:M.an?M.an.red[i]:null}));
+  const SORT_VAL={
+    pair:r=>r.m.a+'–'+r.m.b, d:r=>r.m.d, status:r=>r.w??-Infinity,
+    v:r=>r.v??-Infinity, red:r=>r.red??-Infinity, w:r=>r.w??-Infinity,
+    sig:r=>r.m.sigma??C.SIGMA_DEF,
+  };
+  if(tblSort.dir && SORT_VAL[tblSort.col]){
+    const f=SORT_VAL[tblSort.col];
+    rows.sort((p,q)=>{
+      const a=f(p), b=f(q);
+      const c=(typeof a==='string') ? a.localeCompare(b) : a-b;
+      return tblSort.dir*c || p.i-q.i;
+    });
+  } else rows.sort((p,q)=>(q.w??-1)-(p.w??-1));
+  // Sortier-Indikator in den Headern nachfuehren.
+  document.querySelectorAll('#tbl th[data-key]').forEach(th=>{
+    th.textContent=th.dataset.base
+      +(tblSort.col===th.dataset.key && tblSort.dir ? (tblSort.dir>0?' ▲':' ▼') : '');
+  });
 
   // Das Verdachts-Badge ist selbst der Stilllegen-Knopf: der wichtigste
   // Handgriff beim Ausreisser darf nicht hinter Details + Seitwaertsscrollen
@@ -4496,7 +4604,7 @@ function renderPanel(){
     return '<span class="badge unchecked" title="Diese Messung geht ungeprüft ins Ergebnis ein.">ungeprüft</span>';
   };
 
-  rows.forEach(({m,i,w})=>{
+  rows.forEach(({m,i,w,v,red})=>{
     const tr=document.createElement('tr');
     if(suspects.has(i)) tr.className='worst';
     // Verknuepfung zur Zeichnung: Zeile beruehrt oder erste Zelle angetippt
@@ -4504,8 +4612,6 @@ function renderPanel(){
     // es kein Hover, deshalb zusaetzlich der Tipp aufs Kuerzel.
     tr.onmouseenter=()=>{ M.highlight={a:m.a,b:m.b}; drawCanvas(); };
     tr.onmouseleave=()=>{ if(!entryPair){ M.highlight=null; drawCanvas(); } };
-    const red=M.an?M.an.red[i]:null;
-    const v=M.an?M.an.v[i]:null;
     tr.innerHTML=
       `<td>${m.a}–${m.b}</td>`+
       `<td><input class="d" inputmode="decimal" value="${fmtM(m.d)}"></td>`+
@@ -4516,6 +4622,21 @@ function renderPanel(){
       `<td class="x"><input class="sig" inputmode="decimal" value="${m.sigma??C.SIGMA_DEF}"></td>`+
       `<td class="x"><button class="rowbtn tog" title="Messung stilllegen">aus</button>`+
       `<button class="rowbtn del" title="Messung löschen">×</button></td>`;
+    // Info-Kaestchen je Wertzelle: erklaert DIESEN Wert, nicht das Konzept
+    // im Allgemeinen - auf der Baustelle zaehlt "was heisst das hier".
+    attachTip(tr.children[2], suspects.has(i)
+      ? `w = ${w.toFixed(1)}: diese Messung weicht am stärksten vom Rest ab — wahrscheinlich falsch gemessen oder vertippt. Antippen legt sie still; besser: Strecke nachmessen.`
+      : w!=null
+        ? `Geprüft: andere Messungen kontrollieren diese, normiertes Residuum w = ${w.toFixed(1)} (unauffällig unter ${BAARDA_W0}).`
+        : 'Ungeprüft: keine andere Messung kontrolliert dieses Maß — ein Tippfehler hier bliebe unbemerkt.');
+    attachTip(tr.children[3], v==null ? 'Verbesserung v: erst berechenbar, wenn Messungen einander kontrollieren.'
+      : `Verbesserung v = ${v.toFixed(1)} mm: der Ausgleich ${v>=0?'streckt':'staucht'} dieses Maß um ${Math.abs(v).toFixed(1)} mm, damit alle Messungen zusammenpassen. Groß gegenüber σ heißt: hier klemmt es.`);
+    attachTip(tr.children[4], red==null ? 'Redundanzanteil: erst berechenbar, wenn Messungen einander kontrollieren.'
+      : `Redundanzanteil ${red.toFixed(2)}: wie stark andere Messungen dieses Maß kontrollieren — 0 = gar nicht (unprüfbar), nahe 1 = fast vollständig.`);
+    attachTip(tr.children[5], w==null ? 'w: nicht prüfbar — es fehlt eine Kontrollmessung für dieses Maß.'
+      : `Normiertes Residuum w = ${w.toFixed(1)}: Abweichung in Vielfachen der Messgenauigkeit. Über ${BAARDA_W0} gilt als Ausreißer (Baarda-Test).`);
+    attachTip(tr.children[6],
+      `Angenommene Messgenauigkeit σ = ±${m.sigma??C.SIGMA_DEF} mm. Anpassen, wenn anders gemessen wurde — Zollstock z. B. 20 statt 5.`);
     tr.children[0].onclick=()=>{
       const on=M.highlight && M.highlight.a===m.a && M.highlight.b===m.b;
       M.highlight=on?null:{a:m.a,b:m.b};
@@ -5358,6 +5479,31 @@ globalThis.selfChecks=function(){
     const st2=globalThis.STORE_FACTORY && STORE_FACTORY(raw);
     chk('store: korrupter Alt-Schluessel -> migrate false, Schluessel weg, kein Raum',
       !!st2 && st2.migrate()===false && raw.getItem('raumaufmass')===null && st2.list().length===0);
+  }
+  // --- computeSuspects: eine Quelle fuer Tabelle UND Plan-Markierung ---
+  {
+    const cs=globalThis.computeSuspects;
+    chk('suspects: Funktion vorhanden', typeof cs==='function');
+    if(cs){
+      chk('suspects: leer/kein w -> leere Menge',
+        cs([],3.29,0.02).size===0 && cs(null,3.29,0.02).size===0);
+      chk('suspects: alle unpruefbar (null) -> leere Menge',
+        cs([null,null],3.29,0.02).size===0);
+      chk('suspects: unter Schwelle -> leere Menge',
+        cs([1.2,3.28,0.4],3.29,0.02).size===0);
+      chk('suspects: klarer Spitzenreiter -> genau er',
+        (()=>{ const s=cs([1.0,14.05,2.2,null],3.29,0.02);
+               return s.size===1 && s.has(1); })());
+      chk('suspects: Gleichstand innerhalb Toleranz -> beide',
+        (()=>{ const s=cs([7.20,7.15,1.0],3.29,0.02);
+               return s.size===2 && s.has(0) && s.has(1); })());
+      chk('suspects: knapp ausserhalb Toleranz -> nur Maximum',
+        (()=>{ const s=cs([7.20,6.90,1.0],3.29,0.02);
+               return s.size===1 && s.has(0); })());
+      chk('suspects: ueber Schwelle noetig, Naehe zum Maximum reicht nicht',
+        (()=>{ const s=cs([3.30,3.25],3.29,0.02);
+               return s.size===1 && s.has(0); })());
+    }
   }
   return {ok, out};
 };
