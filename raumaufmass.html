@@ -281,6 +281,7 @@
       <select id="wPick"></select>
       <button id="wNext" aria-label="Nächste Wand">›</button>
       <span id="wInfo"></span>
+      <button id="wHeight">Höhe messen</button>
       <div id="wAdd">
         <button data-add="door">+ Tür</button>
         <button data-add="window">+ Fenster</button>
@@ -3736,7 +3737,7 @@ const $=id=>document.getElementById(id);
 const M={ pts:[], walls:[], meas:[], mode:'draw', sel:[], chain:null,
           fit:null, an:null, sugg:[], suspects:new Set(), narrow:[],
           drag:null, dragMode:null, highlight:null, nearPairs:[],
-          openings:[], wallSel:null, openSel:null };
+          openings:[], hmeas:[], wallSel:null, openSel:null };
 // Eigene Ansicht der Wandansicht; wallUserView merkt, ob der Nutzer
 // gezoomt hat (dann kein automatisches Einpassen mehr).
 let wallUserView=false;
@@ -3770,6 +3771,7 @@ const serialize=()=>JSON.stringify({
   walls:M.walls.map(w=>[...w]),
   meas:M.meas.map(m=>({...m})),
   openings:M.openings.map(o=>({...o})),
+  hmeas:M.hmeas.map(m=>({...m})),
   idSeq, openSeq,
 });
 function deserialize(o){
@@ -3779,6 +3781,9 @@ function deserialize(o){
   // Oeffnungen sind optional: aeltere Raeume und Fremdimporte haben sie
   // nicht, und ein fehlendes Feld darf kein Fehler sein.
   M.openings=Array.isArray(o.openings) ? o.openings.map(x=>({...x})) : [];
+  // Hoehen liegen BEWUSST getrennt von den Grundriss-Messungen: der
+  // Solver darf sie nie als Strecke lesen (jacobian erwartet a/b).
+  M.hmeas=Array.isArray(o.hmeas) ? o.hmeas.map(x=>({...x})) : [];
   if(typeof o.idSeq==='number') idSeq=o.idSeq;
   if(typeof o.openSeq==='number') openSeq=o.openSeq;
   else openSeq=M.openings.length+1;
@@ -4096,7 +4101,7 @@ const wToWall=(sx,sy)=>({x:(sx-WV.ox)/WV.s, y:(WV.oy-sy)/WV.s});
 function currentShape(){
   if(!M.wallSel) return null;
   const P=M.fit?M.fit.pts:M.pts;
-  return wallShape(P, M.meas, M.wallSel.a, M.wallSel.b);
+  return wallShape(P, M.hmeas, M.wallSel.a, M.wallSel.b);
 }
 function wallFit(shape){
   if(!shape) return;
@@ -4178,9 +4183,16 @@ function drawWallView(){
     ctx.fillText(`${fmtM(shape.hb)} m`, hr.x-8*dpr, hr.y+16*dpr);
   }
   ctx.textAlign='start';
-  if(!shape.gemessen){
+  // Hinweis nur, wenn er stimmt: EINE gemessene Hoehe fuer den ganzen Raum
+  // ist der Normalfall, kein Mangel. Erst wenn verschiedene Hoehen im Spiel
+  // sind und ausgerechnet diese Wand erbt, ist "geschaetzt" die Wahrheit.
+  const gem=M.hmeas.filter(m=>m.on!==false).length;
+  const hinweis = !gem ? 'Höhe angenommen — Kante antippen zum Messen'
+    : (!shape.gemessen && new Set(M.hmeas.filter(m=>m.on!==false).map(m=>Math.round(m.d))).size>1)
+      ? 'Höhe dieser Wand geschätzt — Kante antippen zum Messen' : '';
+  if(hinweis){
     ctx.fillStyle=INK.mode; ctx.font=`${11.5*dpr}px system-ui`;
-    ctx.fillText('Höhe angenommen — Raumhöhe messen', 14*dpr, 22*dpr);
+    ctx.fillText(hinweis, 14*dpr, 22*dpr);
   }
 }
 
@@ -4432,6 +4444,10 @@ function nearestMeas(wx,wy){
 // ================= Masseingabe =================
 
 let entryPair=null;
+// Ecke, deren Hoehe gerade eingetippt wird (siehe enterHeight weiter
+// unten). Hier oben deklariert, weil closeEntry und der OK-Knopf sie
+// lesen und in der Datei frueher stehen.
+let heightAt=null;
 // Gefuehrter Fluss: Eingabe kam von einem Vorschlags-Chip. Nach dem
 // Bestaetigen springt sie automatisch zum naechsten Vorschlag - auf der
 // Baustelle heisst das: Chip antippen, dann nur noch messen, tippen, OK,
@@ -4486,7 +4502,7 @@ function placeEntry(){
   box.style.left=x+'px'; box.style.top=y+'px';
 }
 function closeEntry(){
-  entryPair=null; entryGuided=false;
+  entryPair=null; entryGuided=false; heightAt=null;
   $('entry').hidden=true;
   M.highlight=null;
   drawCanvas();
@@ -4511,11 +4527,11 @@ function commitEntry(){
     setHint('Nichts mehr zu messen — Form bestimmt und geprüft.');
   }
 }
-$('entryOk').onclick=commitEntry;
+$('entryOk').onclick=()=>{ if(heightAt) commitHeight(); else commitEntry(); };
 $('entryX').onclick=closeEntry;
 $('entryVal').addEventListener('keydown',e=>{
   e.stopPropagation();                       // Modus-Kuerzel duerfen hier nicht feuern
-  if(e.key==='Enter') commitEntry();
+  if(e.key==='Enter'){ if(heightAt) commitHeight(); else commitEntry(); }
   if(e.key==='Escape') closeEntry();
 });
 // Eine rote Fehlermarkierung darf nicht stehen bleiben, sobald der Nutzer
@@ -5023,6 +5039,45 @@ document.querySelectorAll('#wAdd button').forEach(b=>{
     setHint(`${OPEN_LABEL[kind]} eingesetzt — ziehen zum Positionieren.`);
   };
 });
+// ================= Höhenmessung =================
+// Nutzt dasselbe Eingabefeld wie die Grundriss-Masse; heightAt haelt fest,
+// zu WELCHER Ecke der eingetippte Wert gehoert. Die erste Hoehe gilt fuer
+// alle Ecken (ein Raum, eine Decke); ab der zweiten abweichenden zaehlt
+// jede Ecke fuer sich - siehe cornerHeights.
+function enterHeight(pointId){
+  if(wpopPair) closeWallPopup();
+  entryPair=null; entryGuided=false;
+  heightAt=pointId;
+  const vorhanden=M.hmeas.filter(m=>m.at===pointId && m.on!==false);
+  $('entryLabel').textContent = vorhanden.length
+    ? `Höhe an Ecke ${pointId} — bisher ${vorhanden.map(m=>fmtM(m.d)).join(' · ')} m, weiterer Wert:`
+    : `Raumhöhe an Ecke ${pointId}`;
+  const box=$('entry');
+  box.hidden=false;
+  box.style.left=box.style.top='';
+  box.style.transform='';
+  if(isDesktop()){
+    const wrap=$('canvaswrap');
+    box.style.left=Math.max(8,(wrap.clientWidth-260)/2)+'px';
+    box.style.top='12px';
+  }
+  const inp=$('entryVal');
+  inp.value=''; inp.classList.remove('bad'); inp.focus();
+}
+function commitHeight(){
+  const inp=$('entryVal');
+  const d=parseFloat(inp.value.replace(',','.'))*1000;
+  if(!isFinite(d)||d<=0){ inp.classList.add('bad'); return; }
+  if(d<1000 && !confirm(`${fmtM(d)} m ist sehr niedrig — als Meter gemeint?\n\nOK = so übernehmen`)) return;
+  snapshot();
+  M.hmeas.push({kind:'h', at:heightAt, d, sigma:C.SIGMA_DEF, on:true});
+  heightAt=null;
+  $('entry').hidden=true;
+  recompute();
+  setHint('Höhe übernommen.');
+}
+$('wHeight').onclick=()=>{ if(M.wallSel) enterHeight(M.wallSel.a); };
+
 // ================= Öffnungs-Einstellungen =================
 // Kataloge. Tueren folgen den Baurichtmassen (Rohbau = Tuerblatt zzgl.
 // Zarge), Fenster haben keine vergleichbar feste Normreihe - dort sind es
@@ -5146,6 +5201,16 @@ cv.addEventListener('pointerdown',e=>{
   if(M.mode!=='wall') return;
   const d=evDev(e), w=wToWall(d.x,d.y);
   const o=openingAt(w.x,w.y);
+  if(!o){
+    // Senkrechte Wandkante angetippt: das ist die Hoehe an genau dieser
+    // Ecke - der kuerzeste Weg von "sehe die Kante" zu "messe sie".
+    const shape=currentShape();
+    const nah=28*DPR()/WV.s;
+    if(shape && w.y>-nah && w.y<Math.max(shape.ha,shape.hb)+nah){
+      if(Math.abs(w.x)<nah){ enterHeight(M.wallSel.a); render(); return; }
+      if(Math.abs(w.x-shape.L)<nah){ enterHeight(M.wallSel.b); render(); return; }
+    }
+  }
   M.openSel=o?o.id:null;
   if(o) wallDrag={id:o.id, gx:w.x-o.x, gy:w.y-o.y, snap:serialize()};
   render();
