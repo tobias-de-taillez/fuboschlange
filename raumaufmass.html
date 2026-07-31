@@ -3388,6 +3388,7 @@ function recompute(){
 
 // ================= Raumbibliothek (Anbindung) =================
 let currentRoom=null;
+let currentRoomName='—';   // gecacht: renderPanel laeuft je Frame und darf nicht je Bild die ganze Bibliothek aus dem Storage parsen
 
 // Flaeche des aktuellen Fits in m2 - fuer die Bibliotheksliste beim
 // Speichern mitgerechnet, damit die Liste ohne Solver-Laeufe rendert.
@@ -3406,7 +3407,11 @@ function openRoom(id){
   const r=STORE.load(id);
   if(!r) return;
   currentRoom=id;
+  currentRoomName=r.name;
   STORE.setCurrent(id);
+  // Der Undo-Stapel gehoert zum Raum: ein Undo nach dem Wechsel wuerde
+  // sonst die Geometrie des vorigen Raums in DIESEN Raum speichern.
+  undoStack.length=0;
   deserialize(r.data);
   userView=false;
   recompute();
@@ -4089,7 +4094,7 @@ $('roomname').onclick=()=>{
   if(!currentRoom) return;
   const r=STORE.load(currentRoom);
   const name=prompt('Raum umbenennen:', r?r.name:'');
-  if(name && name.trim()){ STORE.rename(currentRoom, name.trim()); renderPanel(); }
+  if(name && name.trim()){ STORE.rename(currentRoom, name.trim()); currentRoomName=name.trim(); renderPanel(); }
 };
 
 // Die Hotkeys sind auf window gebunden, damit sie ueberall wirken - aber
@@ -4169,8 +4174,7 @@ function renderPanel(){
   const [txt,cls]=statusText();
   $('statustxt').textContent=txt;
   $('status').className=cls;
-  const room=currentRoom?STORE.load(currentRoom):null;
-  $('roomname').textContent=room?room.name:'—';
+  $('roomname').textContent=currentRoomName;
   $('empty').style.display = M.pts.length ? 'none' : 'flex';
   $('undo').disabled = !undoStack.length;
 
@@ -4410,12 +4414,20 @@ STORE.migrate();
   }
 }
 if(!currentRoom){
-  const cur=STORE.currentId();
-  if(cur && STORE.load(cur)) { openRoom(cur); }
-  else {
-    const l=STORE.list();
-    if(l.length) openRoom(l[0].id);
-    else { currentRoom=STORE.create('Mein erster Raum'); STORE.setCurrent(currentRoom); }
+  // deserialize() wirft auf manuell verbogenen Storage-Daten - das darf
+  // den Boot nicht toeten, sonst bleibt die Seite leer statt leerzustarten.
+  try{
+    const cur=STORE.currentId();
+    if(cur && STORE.load(cur)) openRoom(cur);
+    else {
+      const l=STORE.list();
+      if(l.length) openRoom(l[0].id);
+    }
+  }catch(e){ currentRoom=null; }
+  if(!currentRoom){
+    currentRoom=STORE.create('Mein erster Raum');
+    STORE.setCurrent(currentRoom);
+    currentRoomName='Mein erster Raum';
   }
 }
 if(!STORE.storageOk)
