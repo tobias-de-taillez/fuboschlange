@@ -3905,6 +3905,40 @@ globalThis.applyRoomTransform=function(T, p){
   return {...p, x:p.x*c-p.y*s+T.x, y:p.x*s+p.y*c+T.y};
 };
 
+// Uebliche Wanddicken in mm - Vorschlaege, keine Auswahlpflicht.
+globalThis.WALL_THICKNESS=[100,115,125,175,240,300,365];
+
+// Verankerung eines Nachbarraums, der hinter der Wand a-b entsteht.
+// Die Innenkontur des Nachbarn liegt um die Dicke t nach AUSSEN versetzt;
+// in SEINEM System soll die geerbte Wand von (0,0) nach (L,0) laufen und
+// der Quellraum unter ihr liegen (negatives y) - dann zeichnet der Nutzer
+// den neuen Raum wie gewohnt nach oben weg.
+// Rueckgabe: origin des neuen Raums, Wandlaenge und welche Quellecke zu
+// seinem Punkt A wurde.
+globalThis.neighborOrigin=function(pts, walls, a, b, t, originR){
+  const C=globalThis.CORE, I=C.idx(pts);
+  if(I[a]==null||I[b]==null) return null;
+  const A=pts[I[a]], B=pts[I[b]], L=C.dist(A,B);
+  if(!(L>0) || !(t>0)) return null;
+  const n=globalThis.outerNormal(pts, walls, a, b);
+  const u={x:(B.x-A.x)/L, y:(B.y-A.y)/L};
+  const Ao={x:A.x+n.x*t, y:A.y+n.y*t}, Bo={x:B.x+n.x*t, y:B.y+n.y*t};
+  // Die lokale y-Achse des neuen Raums ist die Linksnormale seiner
+  // Laufrichtung. Zeigt sie zum Quellraum zurueck, laeuft die Wand
+  // andersherum - dann faengt sie an der anderen Ecke an.
+  const flip=(-u.y*n.x + u.x*n.y) < 0;
+  const P0=flip?Bo:Ao;
+  const dir=flip?{x:-u.x,y:-u.y}:u;
+  const rotR=(originR&&originR.rot)||0;
+  const c=Math.cos(rotR), s=Math.sin(rotR);
+  return {
+    origin:{ x:((originR&&originR.x)||0) + P0.x*c - P0.y*s,
+             y:((originR&&originR.y)||0) + P0.x*s + P0.y*c,
+             rot:rotR + Math.atan2(dir.y, dir.x) },
+    L, vonEcke: flip?b:a, bisEcke: flip?a:b,
+  };
+};
+
 // Im Browser sofort eine an localStorage gebundene Instanz; in Node bleibt
 // nur die Factory (die Checks injizieren sich ihren eigenen Speicher).
 // localStorage kann beim blossen ZUGRIFF werfen (Chrome "alle Cookies
@@ -4006,7 +4040,13 @@ const $=id=>document.getElementById(id);
 const M={ pts:[], walls:[], meas:[], mode:'draw', sel:[], chain:null,
           fit:null, an:null, sugg:[], suspects:new Set(), narrow:[],
           drag:null, dragMode:null, highlight:null, nearPairs:[],
-          openings:[], hmeas:[], opmeas:[], wallSel:null, openSel:null };
+          openings:[], hmeas:[], opmeas:[], wallSel:null, openSel:null,
+          // Wanddicke und geteilte Wand haengen an der Wand, aber Waende
+          // sind ueberall im Programm Paare [a,b] - eine Karte ueber
+          // pairKey ist dasselbe, ohne jede Zeile umzuschreiben, die
+          // [a,b] auseinandernimmt. pairKey sortiert, die Dicke ist also
+          // unabhaengig von der Zeichenrichtung.
+          thick:{}, shared:{} };
 // Eigene Ansicht der Wandansicht; wallUserView merkt, ob der Nutzer
 // gezoomt hat (dann kein automatisches Einpassen mehr).
 let wallUserView=false;
@@ -4029,6 +4069,8 @@ function crossingPairs(pts){
   return out;
 }
 const wallsCross=pts=>crossingPairs(pts).length>0;
+// Schluessel einer Wand, richtungsunabhaengig - fuer M.thick und M.shared.
+const wallKey=(a,b)=>[a,b].sort().join('|');
 
 // Nutzer hat gezoomt oder verschoben - autofit() haelt sich dann zurueck,
 // bis "Einpassen" gedrueckt wird oder eine neue Szene entsteht.
@@ -4044,6 +4086,7 @@ const serialize=()=>JSON.stringify({
   openings:M.openings.map(o=>({...o})),
   hmeas:M.hmeas.map(m=>({...m})),
   opmeas:M.opmeas.map(m=>({...m})),
+  thick:{...M.thick}, shared:{...M.shared},
   idSeq, openSeq,
 });
 function deserialize(o){
@@ -4057,6 +4100,10 @@ function deserialize(o){
   // Solver darf sie nie als Strecke lesen (jacobian erwartet a/b).
   M.hmeas=Array.isArray(o.hmeas) ? o.hmeas.map(x=>({...x})) : [];
   M.opmeas=Array.isArray(o.opmeas) ? o.opmeas.map(x=>({...x})) : [];
+  // Wie die Oeffnungen optional: aeltere Raeume und Fremdimporte kennen
+  // weder Dicke noch geteilte Wand.
+  M.thick=(o.thick && typeof o.thick==='object') ? {...o.thick} : {};
+  M.shared=(o.shared && typeof o.shared==='object') ? {...o.shared} : {};
   if(typeof o.idSeq==='number') idSeq=o.idSeq;
   if(typeof o.openSeq==='number') openSeq=o.openSeq;
   else openSeq=M.openings.length+1;
@@ -4378,11 +4425,36 @@ function loadNeighbors(){
                     poly:C.wallPolygon(pts, d.walls)});
   });
 }
-// Treffer nur ueber ein geschlossenes Raumpolygon: ein offener Wandzug ist
-// noch kein Raum, in den man hineinfahren koennte.
+// Geschlossener Raum: Treffer ueber die Flaeche. Ein frisch durch eine Tuer
+// angelegter Nachbar hat aber erst ZWEI Punkte und damit kein Polygon - waere
+// nur die Flaeche der Griff, kaeme man nie wieder zu ihm zurueck. Fuer den
+// Fall zaehlt die Naehe zu seinen Waenden.
 function neighborAt(wx,wy){
-  for(const n of neighbors) if(n.poly && C.pointInPoly({x:wx,y:wy}, n.poly)) return n.id;
-  return null;
+  const p={x:wx,y:wy};
+  for(const n of neighbors) if(n.poly && C.pointInPoly(p, n.poly)) return n.id;
+  const tol=16*DPR()/VIEW.s;
+  // Eine geerbte Wand liegt nur die Wanddicke neben der eigenen - bei
+  // 115 mm sind das wenige Bildschirmpixel. Der Strich des Nachbarn darf
+  // der eigenen Wand die Tipps nicht wegnehmen: er gewinnt nur, wenn er
+  // wirklich naeher liegt.
+  const P=M.fit?M.fit.pts:M.pts, IO=C.idx(P);
+  let eigen=Infinity;
+  for(const [a,b] of M.walls){
+    if(IO[a]==null||IO[b]==null) continue;
+    eigen=Math.min(eigen, distToSeg(p, P[IO[a]], P[IO[b]]).d);
+  }
+  let best=null, bestD=tol;
+  for(const n of neighbors){
+    if(n.poly) continue;
+    const I=C.idx(n.pts);
+    for(const [a,b] of n.walls){
+      if(I[a]==null||I[b]==null) continue;
+      // distToSeg liefert {d,t}, nicht die blosse Zahl.
+      const d=distToSeg(p, n.pts[I[a]], n.pts[I[b]]).d;
+      if(d<bestD && d<eigen){ bestD=d; best=n.id; }
+    }
+  }
+  return best;
 }
 function roomCentre(P){
   return {x:P.reduce((s,p)=>s+p.x,0)/P.length, y:P.reduce((s,p)=>s+p.y,0)/P.length};
@@ -4432,6 +4504,68 @@ function drawNeighbors(dpr){
     ctx.stroke();
     drawRoomLabel(n.name, n.pts, dpr, hot?'#2f8c5a':'#a8a396', 13);
   });
+}
+
+// Nachbarraum hinter einer Tuer anlegen. Der neue Raum bekommt KEIN
+// Vorgabe-Rechteck, sondern genau die geerbte Wand: zwei Punkte, um die
+// Wanddicke nach aussen versetzt, und ihre Laenge als fertige Messung.
+// Alles Weitere zeichnet der Nutzer wie gewohnt.
+function fragWanddicke(vorschlag){
+  const s=prompt('Wie dick ist diese Wand? Angabe in mm.\n'
+    +'Üblich: '+WALL_THICKNESS.join(', '), String(vorschlag));
+  if(s===null) return null;                    // Abbruch heisst Abbruch
+  const t=parseFloat(String(s).replace(',','.'));
+  if(!isFinite(t) || t<20 || t>1000){
+    setHint('Wanddicke muss zwischen 20 und 1000 mm liegen — nichts angelegt.');
+    return null;
+  }
+  return t;
+}
+function createNeighborRoom(opId){
+  const o=M.openings.find(x=>x.id===opId);
+  if(!o || !currentRoom) return;
+  const P=M.fit?M.fit.pts:M.pts;
+  const k=wallKey(o.a, o.b);
+  const t=fragWanddicke(M.thick[k] || 240);
+  if(t==null) return;
+  // Der Quellraum wird mit dem ersten Nachbarn zum Gebaeude. {0,0,0} ist
+  // die einzige sinnvolle Verankerung: sein eigenes System wird das des
+  // Gebaeudes.
+  const self=STORE.load(currentRoom);
+  const originR=self.origin || {x:0,y:0,rot:0};
+  if(!self.origin) STORE.save(currentRoom, {origin:originR});
+  const nb=neighborOrigin(P, M.walls, o.a, o.b, t, originR);
+  if(!nb){ setHint('Diese Wand taugt nicht als gemeinsame Wand.'); return; }
+
+  // Kein snapshot(): der Undo-Stapel gehoert zum Raum und wird beim Wechsel
+  // geleert - er koennte hier nichts zurueckholen. Wer den Nachbarn wieder
+  // los will, loescht ihn in der Bibliothek; dann kommt auch das Plus zurueck.
+  M.thick[k]=t;
+  const id=STORE.create('Neuer Raum');
+  M.shared[k]={room:id, wall:['A','B']};
+  recompute();                                  // Quellraum sichern
+
+  const L=Math.round(nb.L);
+  STORE.save(id, {
+    origin:nb.origin,
+    data:{ pts:[{id:'A',x:0,y:0},{id:'B',x:L,y:0}],
+           walls:[['A','B']],
+           meas:[{a:'A',b:'B',d:L}],
+           openings:[], hmeas:[], opmeas:[],
+           thick:{'A|B':t},
+           shared:{'A|B':{room:currentRoom, wall:[o.a,o.b]}},
+           idSeq:2, openSeq:1 },
+  });
+  openRoom(id);
+  setMode('draw');
+  M.chain='B';                                  // Zug liegt am Wandende an
+  render();
+  // setHintLive statt setHint: das hier ist keine Quittung, die nach vier
+  // Sekunden verschwinden darf - es erklaert, warum der neue Raum schon
+  // eine Wand hat und wo die Tuer geblieben ist.
+  setHintLive(`Wand A–B mit ${fmtM(L)} m aus „${self.name}“ übernommen `
+    +`(${t} mm dick). Die Tür gehört beiden Räumen und bleibt dort `
+    +`eingetragen. Nächste Ecke antippen.`);
 }
 
 const SWIM_MS=300;
@@ -4787,6 +4921,51 @@ function drawOpeningsOnPlan(P, I, dpr){
   });
 }
 
+// Hinter jeder Tuer, hinter der noch kein Raum liegt, ein Plus: dort geht
+// es weiter. Nur im geschlossenen Raum - ohne Polygon waere gar nicht
+// entschieden, welche Seite der Wand "hinter" ist.
+const PLUS_R=13;         // Radius auf dem Schirm, CSS-px
+const PLUS_ABSTAND=26;   // Abstand von der Wand, CSS-px
+const RAUM_PROBE=600;    // mm nach aussen: sicher jenseits jeder Wanddicke
+let doorPluses=[];
+function drawDoorPluses(P, I, dpr){
+  doorPluses=[];
+  if(!M.fit || !M.openings.length) return;
+  const poly=C.wallPolygon(P, M.walls);
+  if(!poly) return;
+  M.openings.forEach(o=>{
+    if(o.kind!=='door') return;
+    // Hinter EINER Wand liegt EIN Raum: ist die Wand schon geteilt, gibt es
+    // fuer keine ihrer Tueren noch etwas anzulegen. Der Eintrag entscheidet
+    // das zuverlaessig - die Geometrie allein nicht, denn ein frisch
+    // angelegter Nachbar ist nur ein Strich (browser-gesehen: das Plus kam
+    // zurueck, sobald die Trefferzone knapper wurde).
+    // ...solange es diesen Raum noch gibt. Wird der Nachbar geloescht, muss
+    // das Plus zurueckkommen, sonst ist die Tuer fuer immer verbaut.
+    const sh=M.shared[wallKey(o.a,o.b)];
+    if(sh && neighbors.some(n=>n.id===sh.room)) return;
+    const r=openingWorld(P, o.a, o.b, o);
+    if(!r) return;
+    const n=outerNormal(P, M.walls, o.a, o.b);
+    const mid={x:(r.P.x+r.Q.x)/2, y:(r.P.y+r.Q.y)/2};
+    // Und ein unabhaengig gezeichneter Raum dahinter zaehlt auch, ganz ohne
+    // Eintrag - dafuer die Probe nach aussen.
+    if(neighborAt(mid.x+n.x*RAUM_PROBE, mid.y+n.y*RAUM_PROBE)) return;
+    const d=PLUS_ABSTAND*dpr/VIEW.s;
+    const s=toScr({x:mid.x+n.x*d, y:mid.y+n.y*d});
+    doorPluses.push({x:s.x, y:s.y, r:PLUS_R*dpr, op:o.id});
+    ctx.save();
+    ctx.beginPath(); ctx.arc(s.x, s.y, PLUS_R*dpr, 0, 2*Math.PI);
+    ctx.fillStyle=INK.canvas; ctx.fill();
+    ctx.strokeStyle=INK.accent; ctx.lineWidth=1.5*dpr; ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(s.x-6*dpr, s.y); ctx.lineTo(s.x+6*dpr, s.y);
+    ctx.moveTo(s.x, s.y-6*dpr); ctx.lineTo(s.x, s.y+6*dpr);
+    ctx.lineWidth=2*dpr; ctx.stroke();
+    ctx.restore();
+  });
+}
+
 function drawCanvas(){
   const dpr=DPR();
   cv.width=cv.clientWidth*dpr; cv.height=cv.clientHeight*dpr;
@@ -4845,6 +5024,7 @@ function drawCanvas(){
   drawUnfolded(P, I, dpr);
   drawWallMarks(P, I, dpr);
   drawOpeningsOnPlan(P, I, dpr);
+  drawDoorPluses(P, I, dpr);
   // Hervorgehobenes Paar breit unterlegen - VOR Messungen und Vorschlaegen,
   // damit deren Strichmuster darauf liegen bleibt. Deckt auch den Fall ab,
   // dass eine blosse Wand angetippt wurde (Eingabe offen): die ist weder
@@ -5369,10 +5549,11 @@ cv.addEventListener('pointerdown',e=>{
 // Hand. Auf Touch gibt es keinen Hover - dort genuegt das Antippen.
 function updateHover(e){
   const d=evDev(e), w=toWorld(d.x,d.y);
-  const id=neighbors.length ? neighborAt(w.x,w.y) : null;
+  const ueberPlus=doorPluses.some(p=>Math.hypot(d.x-p.x, d.y-p.y)<=p.r+6*DPR());
+  const id=(!ueberPlus && neighbors.length) ? neighborAt(w.x,w.y) : null;
+  cv.style.cursor=(id||ueberPlus)?'pointer':'';
   if(id===hoverRoom) return;
   hoverRoom=id;
-  cv.style.cursor=id?'pointer':'';
   drawCanvas();
 }
 cv.addEventListener('pointerleave',()=>{
@@ -5482,6 +5663,10 @@ function endPointer(e){
   // Tipp dort sonst eine Ecke setzen. Also nur ohne laufenden Zug, gleiche
   // Regel wie beim Wand-Tap weiter unten.
   if(M.mode==='measure' || M.chain==null){
+    // Plus zuerst: es liegt bewusst dicht an der Wand, und ein Wand-Tap
+    // wuerde es sonst schlucken.
+    const plus=doorPluses.find(p=>Math.hypot(d.x-p.x, d.y-p.y)<=p.r+6*DPR());
+    if(plus){ createNeighborRoom(plus.op); return; }
     if(ownLabelRect && d.x>=ownLabelRect.x && d.x<=ownLabelRect.x+ownLabelRect.w
        && d.y>=ownLabelRect.y && d.y<=ownLabelRect.y+ownLabelRect.h){
       renameCurrentRoom(); return;
@@ -7266,6 +7451,79 @@ globalThis.selfChecks=function(){
       chk('store: spaeteres save ohne origin loescht die Verankerung nicht', !!st.load(a).origin);
       chk('store: freistehender Raum bleibt freistehend', !st.load(b).origin);
     }
+  }
+  // --- Nachbarraum hinter einer Tuer: Verankerung der geerbten Wand ---
+  {
+    const no=globalThis.neighborOrigin, rt=globalThis.roomTransform,
+          ap=globalThis.applyRoomTransform;
+    chk('nachbar: neighborOrigin vorhanden', typeof no==='function');
+    if(no && rt && ap){
+      // Quadrat gegen den Uhrzeigersinn; Wand A-B ist die untere Kante.
+      const pts=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},
+                 {id:'C',x:4000,y:3000},{id:'D',x:0,y:3000}];
+      const walls=[['A','B'],['B','C'],['C','D'],['D','A']];
+      const oR={x:0,y:0,rot:0};
+      const r=no(pts, walls, 'A', 'B', 240, oR);
+      chk('nachbar: Wandlaenge uebernommen', !!r && near(r.L,4000,1e-9));
+      if(r){
+        const T=rt(r.origin, oR);
+        const p0=ap(T,{x:0,y:0}), p1=ap(T,{x:r.L,y:0});
+        // Beide Punkte muessen auf der um 240 nach AUSSEN versetzten
+        // Parallelen liegen - also bei y=-240, weil der Raum oberhalb liegt.
+        chk('nachbar: (0,0) landet auf der versetzten Wand',
+          near(p0.y,-240,1e-6) && (near(p0.x,0,1e-6)||near(p0.x,4000,1e-6)));
+        chk('nachbar: (L,0) landet am anderen Ende derselben Wand',
+          near(p1.y,-240,1e-6) && near(Math.abs(p1.x-p0.x),4000,1e-6));
+        // Der Quellraum liegt in SEINEM System unter der geerbten Wand.
+        const mitteQuelle=ap(rt(oR, r.origin), {x:2000,y:1500});
+        chk('nachbar: Quellraum liegt unter der geerbten Wand', mitteQuelle.y<0);
+        chk('nachbar: geerbte Ecken benannt',
+          (r.vonEcke==='A'||r.vonEcke==='B') && r.vonEcke!==r.bisEcke);
+      }
+      // Gegenprobe mit der gegenueberliegenden Wand: dort zeigt die
+      // Aussennormale in die andere Richtung, die Laufrichtung dreht sich.
+      const r2=no(pts, walls, 'C', 'D', 300, oR);
+      if(r2){
+        const T2=rt(r2.origin, oR);
+        const q0=ap(T2,{x:0,y:0});
+        chk('nachbar: Gegenwand versetzt nach der anderen Seite',
+          near(q0.y,3300,1e-6));
+        chk('nachbar: Quellraum auch dort unter der Wand',
+          ap(rt(oR,r2.origin),{x:2000,y:1500}).y<0);
+      }
+      chk('nachbar: unbrauchbare Eingaben -> null',
+        no(pts,walls,'A','B',0,oR)===null && no(pts,walls,'A','X',240,oR)===null);
+      // Gedrehter Quellraum: die Verankerung muss die Drehung mittragen.
+      const oR2={x:1000,y:-500,rot:0.9};
+      const r3=no(pts, walls, 'A', 'B', 240, oR2);
+      if(r3){
+        // Im GEBAEUDE muss der Ursprung des Nachbarn genau auf der um 240
+        // versetzten Ecke des Quellraums liegen - unabhaengig davon, wie
+        // der Quellraum selbst im Gebaeude steht.
+        const welt=o=>ap({rot:o.rot, x:o.x, y:o.y}, {x:0,y:0});
+        const g=welt(r3.origin);
+        // Die Wand laeuft im neuen Raum von B nach A (sonst laege der
+        // Quellraum ueber ihr), sein Ursprung ist also die versetzte
+        // Ecke B: (4000, -240) im System des Quellraums.
+        const versetzt=ap({rot:oR2.rot, x:oR2.x, y:oR2.y}, {x:4000,y:-240});
+        chk('nachbar: gedrehter Quellraum -> versetzte Ecke im Gebaeude',
+          near(g.x,versetzt.x,1e-6) && near(g.y,versetzt.y,1e-6));
+        chk('nachbar: Drehung des Quellraums schlaegt durch',
+          near(r3.origin.rot-r.origin.rot, oR2.rot, 1e-9));
+      }
+    }
+  }
+  // --- der frisch angelegte Nachbarraum rechnet sich ohne Absturz ---
+  {
+    const pts=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0}];
+    const meas=[{a:'A',b:'B',d:4000}];
+    const fit=C.solve(pts, meas);
+    const an=C.analyze(fit.pts, meas);
+    chk('nachbar: zwei Punkte, eine Messung -> loesbar',
+      !!fit && fit.pts.every(p=>isFinite(p.x)&&isFinite(p.y)));
+    chk('nachbar: Laenge bleibt erhalten', near(C.dist(fit.pts[0],fit.pts[1]),4000,1e-6));
+    chk('nachbar: Analyse ohne Redundanz, aber ohne Absturz',
+      !!an && an.redundancy===0);
   }
   // --- computeSuspects: eine Quelle fuer Tabelle UND Plan-Markierung ---
   {
