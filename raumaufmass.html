@@ -3604,6 +3604,51 @@ globalThis.defaultOpening=function(shape, kind){
   return globalThis.clampOpening(shape, {kind, w, h, x:(shape.L-w)/2, y:hMit*0.4});
 };
 
+// ================= Öffnungen im Grundriss =================
+// Die Oeffnung liegt in Wandkoordinaten (x entlang der Wand). Fuer den
+// Grundriss werden daraus zwei Weltpunkte: Anfang und Ende der Luecke in
+// der Wandlinie.
+globalThis.openingWorld=function(pts, a, b, op){
+  const C=globalThis.CORE, I=C.idx(pts);
+  if(I[a]==null||I[b]==null) return null;
+  const A=pts[I[a]], B=pts[I[b]];
+  const L=C.dist(A,B);
+  if(!(L>0)) return null;
+  const ux=(B.x-A.x)/L, uy=(B.y-A.y)/L;          // entlang der Wand
+  const t0=Math.max(0,Math.min(L,op.x)), t1=Math.max(0,Math.min(L,op.x+op.w));
+  return {
+    P:{x:A.x+ux*t0, y:A.y+uy*t0},
+    Q:{x:A.x+ux*t1, y:A.y+uy*t1},
+    u:{x:ux, y:uy}, n:{x:-uy, y:ux},             // Normale (Linksdrehung)
+    L,
+  };
+};
+
+// Wie weit kann das Blatt schwingen, bevor es irgendwo anstoesst? Der
+// Strahl wird schrittweise gedreht und gegen alle Waende geprueft. Die
+// EIGENE Wand ist ausgenommen - auf ihr steht das geschlossene Blatt.
+// Gedeckelt bei 180 Grad, und kurz VOR dem Hindernis gestoppt: zeichnete
+// man bis zur Beruehrung, waere der Bogen nicht mehr vom Winkel zwischen
+// zwei Waenden zu unterscheiden.
+const SWING_CLEAR = 4*Math.PI/180;    // Sicherheitsabstand, damit der Radius als Radius lesbar bleibt
+globalThis.swingLimit=function(pts, walls, ownWall, hinge, radius, dir0, sense){
+  const C=globalThis.CORE, I=C.idx(pts);
+  const k=[ownWall[0],ownWall[1]].sort().join('|');
+  const segs=walls.filter(([c,d])=>[c,d].sort().join('|')!==k
+      && I[c]!=null && I[d]!=null).map(([c,d])=>[pts[I[c]],pts[I[d]]]);
+  const step=2*Math.PI/180;
+  let frei=0;
+  for(let ang=step; ang<=Math.PI+1e-9; ang+=step){
+    const th=dir0+sense*ang;
+    const tip={x:hinge.x+Math.cos(th)*radius, y:hinge.y+Math.sin(th)*radius};
+    // Beruehrt das Blatt in dieser Stellung eine Wand?
+    const blockiert=segs.some(([p,q])=>C.segCross(hinge,tip,p,q));
+    if(blockiert) break;
+    frei=ang;
+  }
+  return Math.max(0, frei>0 ? frei-SWING_CLEAR : 0);
+};
+
 // ================= Öffnungen einmessen =================
 // Eine Messung bindet EINE Kante der Oeffnung an EINE Bezugskante der
 // Wand: {op, edge:'left'|'right'|'bottom'|'top', d, sigma}. Daraus wird
@@ -4385,6 +4430,55 @@ function drawOpeningSymbol(o,x,y,w,h,dpr){
   ctx.restore();
 }
 
+// Oeffnungen im Grundriss: Blatt und Schwenkbogen. Der Bogen laeuft bis
+// kurz vor das naechste Hindernis (siehe swingLimit) statt pauschal 90
+// Grad - so ist ablesbar, wieviel Platz die Tuer wirklich braucht.
+function drawOpeningsOnPlan(P, I, dpr){
+  if(!M.openings.length) return;
+  M.openings.forEach(o=>{
+    const r=openingWorld(P, o.a, o.b, o);
+    if(!r) return;
+    // Fenster und Loecher: nur die Bruestungslinie in der Luecke.
+    if(o.kind!=='door' || !o.swing || o.swing.type==='slide' || o.swing.type==='none'){
+      const p=toScr(r.P), q=toScr(r.Q);
+      ctx.strokeStyle = o.kind==='window' ? INK.meas : INK.scale;
+      ctx.lineWidth=1.6*dpr;
+      ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
+      return;
+    }
+    // Drehtuer: Angel auf der Bandseite, Blatt so lang wie die Oeffnung.
+    const links=o.swing.hinge==='left';
+    const angel=links?r.P:r.Q;
+    const dir0=Math.atan2(links?r.u.y:-r.u.y, links?r.u.x:-r.u.x);
+    // Nach innen heisst: auf die Seite, auf der die Raumflaeche liegt.
+    const poly=C.wallPolygon(P, M.walls);
+    let sense=+1;
+    if(poly){
+      const probe={x:angel.x+r.n.x*10, y:angel.y+r.n.y*10};
+      const innen=C.pointInPoly(probe, poly);
+      // Kreuzprodukt u x n ist +1; das Blatt dreht zur Normalen hin,
+      // wenn sie nach innen zeigt (bzw. umgekehrt bei "nach aussen").
+      const zurNormalen = links ? +1 : -1;
+      sense = (innen !== !!o.swing.out) ? zurNormalen : -zurNormalen;
+    }
+    const max=swingLimit(P, M.walls, [o.a,o.b], angel, o.w, dir0, sense);
+    const a0=toScr(angel);
+    const tipW={x:angel.x+Math.cos(dir0+sense*max)*o.w,
+                y:angel.y+Math.sin(dir0+sense*max)*o.w};
+    const t=toScr(tipW);
+    ctx.strokeStyle=INK.scale;
+    ctx.lineWidth=2*dpr;
+    ctx.beginPath(); ctx.moveTo(a0.x,a0.y); ctx.lineTo(t.x,t.y); ctx.stroke();
+    // Bogen. Der Grundriss spiegelt y NICHT (anders als die Wandansicht),
+    // also gelten die Weltwinkel direkt - nur die Ansichtsdrehung kommt
+    // dazu. Das counterclockwise-Flag folgt dem Drehsinn.
+    ctx.lineWidth=1*dpr; ctx.setLineDash([3*dpr,3*dpr]);
+    ctx.beginPath();
+    ctx.arc(a0.x, a0.y, o.w*VIEW.s, dir0+VIEW.rot, dir0+sense*max+VIEW.rot, sense<0);
+    ctx.stroke(); ctx.setLineDash([]);
+  });
+}
+
 function drawCanvas(){
   const dpr=DPR();
   cv.width=cv.clientWidth*dpr; cv.height=cv.clientHeight*dpr;
@@ -4417,9 +4511,25 @@ function drawCanvas(){
     const hot=nearIds.has([a,b].sort().join('|'));
     ctx.strokeStyle=hot?INK.mode:INK.wall;
     ctx.lineWidth=(hot?4:2.5)*dpr;
-    const p=toScr(P[I[a]]), q=toScr(P[I[b]]);
-    ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
+    // Oeffnungen unterbrechen die Wandlinie - so sieht man im Grundriss,
+    // wo eine Tuer oder ein Fenster sitzt, nicht nur in der Wandansicht.
+    const k=[a,b].sort().join('|');
+    const ops=M.openings.filter(o=>[o.a,o.b].sort().join('|')===k)
+      .map(o=>openingWorld(P,a,b,o)).filter(Boolean)
+      .map(r=>({P:r.P,Q:r.Q}))
+      .sort((x,y)=>C.dist(P[I[a]],x.P)-C.dist(P[I[a]],y.P));
+    let von=P[I[a]];
+    ctx.beginPath();
+    ops.forEach(o=>{
+      const p1=toScr(von), p2=toScr(o.P);
+      ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y);
+      von=o.Q;
+    });
+    const pv=toScr(von), pb=toScr(P[I[b]]);
+    ctx.moveTo(pv.x,pv.y); ctx.lineTo(pb.x,pb.y);
+    ctx.stroke();
   });
+  drawOpeningsOnPlan(P, I, dpr);
   // Hervorgehobenes Paar breit unterlegen - VOR Messungen und Vorschlaegen,
   // damit deren Strichmuster darauf liegen bleibt. Deckt auch den Fall ab,
   // dass eine blosse Wand angetippt wurde (Eingabe offen): die ist weder
@@ -6961,6 +7071,49 @@ globalThis.selfChecks=function(){
         (()=>{ const voll={id:'x',x:0,y:0,w:shape.L,h:2400};
                const neu={id:'y',x:0,y:0,w:800,h:1000};
                return globalThis.findFreeSpot(shape,neu,[voll])===null; })());
+    }
+    // --- Oeffnungen im Grundriss: Luecke und Schwenkwinkel ---
+    {
+      // 4 x 3 Rechteck, Tuer mittig in der unteren Wand A-B.
+      const R=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:3000},{id:'D',x:0,y:3000}];
+      const W=[['A','B'],['B','C'],['C','D'],['D','A']];
+      const ow=globalThis.openingWorld, sl=globalThis.swingLimit;
+      chk('grundriss: Luecke sitzt an der richtigen Stelle der Wandlinie',
+        (()=>{ const r=ow(R,'A','B',{x:1500,w:1000});
+               return near(r.P.x,1500,1e-9) && near(r.P.y,0,1e-9)
+                   && near(r.Q.x,2500,1e-9) && near(r.L,4000,1e-9); })());
+      chk('grundriss: Normale steht senkrecht auf der Wand',
+        (()=>{ const r=ow(R,'A','B',{x:0,w:1000});
+               return near(r.u.x*r.n.x+r.u.y*r.n.y,0,1e-12) && near(Math.hypot(r.n.x,r.n.y),1,1e-12); })());
+      chk('grundriss: freies Blatt in der Raummitte schwingt fast 180 Grad',
+        (()=>{ // Angel bei (1500,0), Blatt 1000 lang, dreht in den Raum (+y)
+               const a=sl(R,W,['A','B'],{x:1500,y:0},1000,0,+1);
+               return a > Math.PI-0.12 && a <= Math.PI; })());
+      chk('grundriss: schmaler Raum -> Blatt stoppt an der Gegenwand',
+        (()=>{ // Raum nur 600 tief, Blatt 900 lang: es kann nicht weit
+               // aufgehen, ohne gegen die gegenueberliegende Wand zu stossen.
+               const flach=[{id:'A',x:0,y:0},{id:'B',x:3000,y:0},
+                            {id:'C',x:3000,y:600},{id:'D',x:0,y:600}];
+               const a=sl(flach,W,['A','B'],{x:1000,y:0},900,0,+1);
+               // sin(a) muss unter 600/900 bleiben -> hoechstens ~42 Grad
+               return a>0.2 && a < Math.asin(600/900); })());
+      chk('grundriss: Sicherheitsabstand - der Bogen beruehrt die Wand nie ganz',
+        (()=>{ const flach=[{id:'A',x:0,y:0},{id:'B',x:3000,y:0},
+                            {id:'C',x:3000,y:600},{id:'D',x:0,y:600}];
+               const a=sl(flach,W,['A','B'],{x:1000,y:0},900,0,+1);
+               const tip={x:1000+Math.cos(a)*900, y:Math.sin(a)*900};
+               // Spitze bleibt sichtbar unter der Gegenwand, nicht darauf
+               return tip.y < 600-20; })());
+      chk('grundriss: Blatt laenger als der Raum -> deutlich unter 90 Grad',
+        (()=>{ const eng=[{id:'A',x:0,y:0},{id:'B',x:3000,y:0},
+                          {id:'C',x:3000,y:400},{id:'D',x:0,y:400}];
+               const a=sl(eng,W,['A','B'],{x:1000,y:0},900,0,+1);
+               return a>0 && a<Math.PI/4; })());
+      chk('grundriss: Drehsinn kehrt die Richtung um (nach aussen)',
+        (()=>{ const rein=sl(R,W,['A','B'],{x:1500,y:0},1000,0,+1);
+               const raus=sl(R,W,['A','B'],{x:1500,y:0},1000,0,-1);
+               // nach aussen ist nichts im Weg -> voller Bogen
+               return raus>=rein-1e-9 && raus>Math.PI-0.12; })());
     }
     // --- Oeffnungen einmessen ---
     {
