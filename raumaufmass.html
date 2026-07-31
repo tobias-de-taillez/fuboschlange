@@ -3483,6 +3483,10 @@ function drawScalebar(dpr){
 function drawCanvas(){
   const dpr=DPR();
   cv.width=cv.clientWidth*dpr; cv.height=cv.clientHeight*dpr;
+  // 0x0-Canvas (verstecktes oder noch nicht angeschlossenes Layout):
+  // nichts zu zeichnen - und autofit() ergaebe eine negative Skalierung,
+  // an der ctx.ellipse() mit IndexSizeError wirft und den Boot abbricht.
+  if(!cv.width || !cv.height) return;
   ctx.setTransform(1,0,0,1,0,0);
   ctx.clearRect(0,0,cv.width,cv.height);
   // Waehrend eines Drags aus M.pts zeichnen und die View festhalten: liefe
