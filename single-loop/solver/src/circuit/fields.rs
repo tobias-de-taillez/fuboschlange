@@ -1007,17 +1007,19 @@ fn channel_coord(point: Point, is_row: bool) -> f64 {
     if is_row { point.y } else { point.x }
 }
 
-/// The unique certified `BroadTurn90` edge (forward or path-reversed —
-/// `PoseEdge` doesn't distinguish them beyond `template_transform.reversed`,
-/// which this doesn't need to inspect) satisfying `query`, restricted to
-/// `usable` edges. At most one edge can match: the entry/exit channel
-/// values pin the transform's two free integer periods uniquely.
-fn find_corner_edge<'a>(
+/// All certified `BroadTurn90` edges (forward or path-reversed — `PoseEdge`
+/// doesn't distinguish them beyond `template_transform.reversed`, which this
+/// doesn't need to inspect) satisfying `query`, restricted to `usable`
+/// edges. `find_corner_edge` below takes this iterator's first match;
+/// `tests::every_ring_corner_query_matches_exactly_one_certified_edge`
+/// checks the "first" is also the "only" against the real fixture, since
+/// that uniqueness is assumed rather than enforced by the type system.
+fn matching_corner_edges<'a, 'b>(
     graph: &'a EmbeddedPoseGraph,
-    usable: &HashSet<u32>,
-    query: &CornerQuery,
-) -> Option<&'a PoseEdge> {
-    graph.edges.iter().find(|edge| {
+    usable: &'b HashSet<u32>,
+    query: &'b CornerQuery,
+) -> impl Iterator<Item = &'a PoseEdge> {
+    graph.edges.iter().filter(move |edge| {
         usable.contains(&edge.id)
             && edge.template_id == TemplateId::BroadTurn90
             && edge.start.local_pose.heading == query.entry_heading
@@ -1029,6 +1031,18 @@ fn find_corner_edge<'a>(
                 .abs()
                 < CHANNEL_MATCH_TOLERANCE_MM
     })
+}
+
+/// The certified `BroadTurn90` edge satisfying `query`, restricted to
+/// `usable` edges. At most one edge is expected to match: the entry/exit
+/// channel values pin the transform's two free integer periods uniquely
+/// (empirically checked, see `matching_corner_edges`'s doc comment).
+fn find_corner_edge<'a>(
+    graph: &'a EmbeddedPoseGraph,
+    usable: &HashSet<u32>,
+    query: &CornerQuery,
+) -> Option<&'a PoseEdge> {
+    matching_corner_edges(graph, usable, query).next()
 }
 
 /// Walks `Straight0` hops (by shared node id, restricted to `usable`) from
@@ -1134,5 +1148,140 @@ fn build_ring(
         rect_local,
         node_ids,
         edge_ids,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Unit tests for invariants `find_corner_edge` relies on but the
+    //! `tests/circuit_lanes.rs` integration tests can't reach (they're
+    //! private helpers) -- namely that "first match" and "only match" are
+    //! the same thing on the real fixture. This module duplicates
+    //! `tests/circuit_lanes.rs`'s fixture builders (real graph, tiny
+    //! non-clipping zone) rather than sharing them: the two live in
+    //! different crates (this is `src/`, that is a separate integration
+    //! test binary), so there is nothing to share without adding a
+    //! public-API-only test-support crate for one helper's sake.
+    use super::*;
+    use crate::circuit::types::ConnectionInput;
+    use crate::circuit::zone::{build_connection_zone, build_graph_view};
+    use crate::plate::{PlateGraphLimits, PlateInstance, PlateProfile, build_embedded_graph};
+
+    fn point(x: f64, y: f64) -> Point {
+        Point::new(x, y)
+    }
+
+    fn rect_polygon() -> Polygon {
+        Polygon::try_from_original(vec![
+            point(0.0, 0.0),
+            point(3000.0, 0.0),
+            point(3000.0, 2400.0),
+            point(0.0, 2400.0),
+        ])
+        .unwrap()
+    }
+
+    fn transform() -> PlateTransform {
+        PlateTransform::from_edge(
+            point(0.0, 0.0),
+            point(3000.0, 0.0),
+            point(1500.0, 1200.0),
+            0.0,
+            0.0,
+        )
+        .unwrap()
+    }
+
+    fn graph() -> EmbeddedPoseGraph {
+        let instance = PlateInstance::new(
+            rect_polygon(),
+            transform(),
+            PlateProfile::bekotec_en_23_fi_30_16(),
+            50_000,
+        )
+        .unwrap();
+        build_embedded_graph(&instance, 75.0, PlateGraphLimits::default()).unwrap()
+    }
+
+    fn usable_edges() -> HashSet<u32> {
+        let zone = build_connection_zone(
+            &rect_polygon(),
+            &transform(),
+            &ConnectionInput {
+                edge_index: 0,
+                center_offset_mm: 1500.0,
+                zone_width_mm: 300.0,
+                zone_depth_mm: 50.0,
+            },
+        )
+        .unwrap();
+        build_graph_view(&graph(), &zone, &transform())
+            .usable_edges
+            .into_iter()
+            .collect()
+    }
+
+    /// `find_corner_edge` takes the first `matching_corner_edges` result and
+    /// documents that at most one should exist. With the catalogue closed
+    /// under path reversal, each (entry heading, exit heading) pair is now
+    /// realized by two transform classes at complementary channel parities
+    /// (task-4-diagnosis.md §4.1) -- this checks that a ring's *own* fixed
+    /// parities still leave exactly one candidate per corner, across every
+    /// corner of every ring the fixture actually builds, rather than trusting
+    /// that "at most one" by argument alone.
+    #[test]
+    fn every_ring_corner_query_matches_exactly_one_certified_edge() {
+        let graph = graph();
+        let usable = usable_edges();
+        let rect = RectMm {
+            min: point(0.0, 0.0),
+            max: point(3000.0, 2400.0),
+        };
+        let wall_clearance_mm = 75.0;
+        let spacing_mm = 150.0;
+        let (Some(row_legal), Some(col_legal)) = (
+            legal_channel_index_range(
+                rect.min.y + wall_clearance_mm,
+                rect.max.y - wall_clearance_mm,
+            ),
+            legal_channel_index_range(
+                rect.min.x + wall_clearance_mm,
+                rect.max.x - wall_clearance_mm,
+            ),
+        ) else {
+            panic!("fixture must have at least one legal channel per axis");
+        };
+        let phase_even =
+            choose_ring_phase(&rect, wall_clearance_mm, spacing_mm, row_legal, col_legal)
+                .expect("fixture must have a constructible ring 0");
+
+        let mut checked = 0usize;
+        let mut k = 0u32;
+        while let Some(channels) = ring_channels(
+            &rect,
+            wall_clearance_mm,
+            spacing_mm,
+            k,
+            phase_even,
+            row_legal,
+            col_legal,
+        ) {
+            for query in corner_queries(&channels) {
+                let count = matching_corner_edges(&graph, &usable, &query).count();
+                assert_eq!(
+                    count, 1,
+                    "ring {k} corner (entry heading {:?} at {}, exit heading {:?} at {}) \
+                     matched {count} certified edges, expected exactly 1",
+                    query.entry_heading, query.entry_target, query.exit_heading, query.exit_target
+                );
+                checked += 1;
+            }
+            k += 1;
+        }
+        // Sanity: this loop must actually have visited the 7 rings x 4
+        // corners this fixture is known to have (ring_edge_counts_match_the_
+        // diagnosed_nested_family in tests/circuit_lanes.rs pins the 7), so
+        // an empty or short loop can't silently pass this test.
+        assert_eq!(checked, 7 * 4);
     }
 }

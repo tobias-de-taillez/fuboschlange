@@ -184,8 +184,17 @@ fn lane_edges_form_a_connected_ordered_ring() {
 #[test]
 fn all_seven_fixture_lanes_are_complete_untruncated_cycles() {
     // Amendment 4: with the reversal-closed graph, the brief's truncation
-    // rule stands but should not fire on this fixture. A closed cycle's
-    // signature: one more node than edges, first node == last node.
+    // rule stands but should not fire on this fixture.
+    //
+    // `node_ids.len() == edge_ids.len() + 1` is structural in `build_ring`
+    // (every edge push is paired with exactly one node push) -- it holds for
+    // a truncated arc too, so it cannot by itself catch truncation. The
+    // assertion with teeth is `first == last`: that's only true if
+    // `walk_straight_hops`'s closing leg actually reached back to the ring's
+    // start node, which is exactly what a missing edge would break.
+    // `ring_edge_counts_match_the_diagnosed_nested_family` above is the
+    // other truncation catcher here -- a truncated lane would fall well
+    // short of its pinned edge count.
     let graph = graph();
     let view = view(&graph);
     let lanes = build_lanes(&field(), 150.0, &graph, &view, &transform(), 75.0).unwrap();
@@ -193,13 +202,13 @@ fn all_seven_fixture_lanes_are_complete_untruncated_cycles() {
         assert_eq!(
             lane.node_ids.len(),
             lane.edge_ids.len() + 1,
-            "lane {} is not a closed cycle (truncated?)",
+            "lane {} has a node/edge count mismatch (build_ring invariant broken)",
             lane.id
         );
         assert_eq!(
             lane.node_ids.first(),
             lane.node_ids.last(),
-            "lane {} does not close",
+            "lane {} does not close (truncated?)",
             lane.id
         );
     }
@@ -212,4 +221,37 @@ fn lanes_are_deterministic() {
     let a = build_lanes(&field(), 150.0, &graph, &view, &transform(), 75.0).unwrap();
     let b = build_lanes(&field(), 150.0, &graph, &view, &transform(), 75.0).unwrap();
     assert_eq!(a, b);
+}
+
+#[test]
+fn odd_channel_step_spacing_still_produces_closed_rings() {
+    // ALLOWED_SPACINGS_MM (circuit/types.rs) is [75, 150, 225, 300]; every
+    // other test here uses 150mm, which steps consecutive rings by exactly
+    // one translation period (2 channels) and so trivially preserves each
+    // side's channel parity. 225mm steps by 3 channels -- an odd number --
+    // which is the case `ring_channels`' doc comment claims still works
+    // because corner constructibility is a parity relationship *within* one
+    // ring (diagnosis §1.7), not a function of the raw step between rings.
+    // That claim was previously asserted but never exercised; this pins it.
+    let graph = graph();
+    let view = view(&graph);
+    let lanes = build_lanes(&field(), 225.0, &graph, &view, &transform(), 75.0).unwrap();
+    assert!(
+        !lanes.is_empty(),
+        "expected at least one ring at spacing 225 on this fixture"
+    );
+    for lane in &lanes {
+        assert_eq!(
+            lane.node_ids.len(),
+            lane.edge_ids.len() + 1,
+            "lane {} did not close at spacing 225",
+            lane.id
+        );
+        assert_eq!(
+            lane.node_ids.first(),
+            lane.node_ids.last(),
+            "lane {} did not close at spacing 225",
+            lane.id
+        );
+    }
 }
