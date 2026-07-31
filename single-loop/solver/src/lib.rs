@@ -1,3 +1,4 @@
+pub mod circuit;
 pub mod constants;
 pub mod geometry;
 pub mod input;
