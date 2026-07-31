@@ -3031,6 +3031,101 @@ globalThis.CORE={ TOL_RANK, TOL_RED, TOL_MODE, SIGMA_DEF, SUGGEST_CHECK_MAX,
                   pairMeasurable, suggest, dragAlongModes };
 </script>
 
+<script id="store">
+"use strict";
+// Raumbibliothek. DOM-frei und mit injiziertem Storage: genau dadurch in
+// Node testbar (test/run.mjs), wo es kein localStorage gibt. Alle Eintraege
+// leben unter zwei Schluesseln - raumaufmass.rooms (Array) und
+// raumaufmass.current (id). Der Alt-Schluessel "raumaufmass" (Einzelraum
+// aus der Vor-Bibliothek-Version) wird einmalig migriert.
+globalThis.STORE_FACTORY=function makeStore(storage){
+  const K_ROOMS='raumaufmass.rooms', K_CUR='raumaufmass.current', K_OLD='raumaufmass';
+  // Selbsttest statt Feature-Detection: Private-Mode-Safari hat setItem,
+  // wirft aber. Einmal pruefen, Ergebnis als Flag fuer die UI.
+  let storageOk=true;
+  try{ storage.setItem(K_ROOMS+'.probe','1'); storage.removeItem(K_ROOMS+'.probe'); }
+  catch(e){ storageOk=false; }
+
+  const readRooms=()=>{
+    try{
+      const raw=storage.getItem(K_ROOMS);
+      const arr=raw?JSON.parse(raw):[];
+      return Array.isArray(arr)?arr:[];
+    }catch(e){ return []; }   // kaputtes JSON: leere Bibliothek statt Absturz
+  };
+  const writeRooms=rooms=>{
+    try{ storage.setItem(K_ROOMS, JSON.stringify(rooms)); return true; }
+    catch(e){ return false; }
+  };
+  const newId=()=> (globalThis.crypto && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : 'r'+Date.now().toString(36)+Math.random().toString(36).slice(2,10);
+
+  return {
+    storageOk,
+    list(){
+      return readRooms()
+        .map(r=>({id:r.id,name:r.name,updated:r.updated,area:r.area??null}))
+        .sort((a,b)=>String(b.updated).localeCompare(String(a.updated)));
+    },
+    load(id){
+      const r=readRooms().find(r=>r.id===id);
+      return r?{...r}:null;
+    },
+    create(name){
+      const rooms=readRooms();
+      const id=newId();
+      rooms.push({id, name:name||'Unbenannt', updated:new Date().toISOString(),
+                  area:null, data:{pts:[],walls:[],meas:[],idSeq:0}});
+      writeRooms(rooms);
+      return id;
+    },
+    save(id,patch){
+      const rooms=readRooms();
+      const r=rooms.find(r=>r.id===id);
+      if(!r) return false;
+      if(patch.name!==undefined) r.name=patch.name;
+      if(patch.data!==undefined) r.data=patch.data;
+      if(patch.area!==undefined) r.area=patch.area;
+      r.updated=new Date().toISOString();
+      return writeRooms(rooms);
+    },
+    rename(id,name){ return this.save(id,{name}); },
+    remove(id){
+      writeRooms(readRooms().filter(r=>r.id!==id));
+      if(this.currentId()===id){
+        try{ storage.removeItem(K_CUR); }catch(e){}
+      }
+    },
+    currentId(){
+      try{ return storage.getItem(K_CUR); }catch(e){ return null; }
+    },
+    setCurrent(id){
+      try{ storage.setItem(K_CUR,id); }catch(e){}
+    },
+    migrate(){
+      let old=null;
+      try{ old=storage.getItem(K_OLD); }catch(e){ return false; }
+      if(!old) return false;
+      let data=null;
+      try{ data=JSON.parse(old); }catch(e){}
+      try{ storage.removeItem(K_OLD); }catch(e){}
+      if(!data || !Array.isArray(data.pts)) return false;
+      const rooms=readRooms();
+      rooms.push({id:newId(), name:'Unbenannt', updated:new Date().toISOString(),
+                  area:null, data});
+      writeRooms(rooms);
+      return true;
+    },
+  };
+};
+// Im Browser sofort eine an localStorage gebundene Instanz; in Node bleibt
+// nur die Factory (die Checks injizieren sich ihren eigenen Speicher).
+if(typeof localStorage!=='undefined'){
+  globalThis.STORE=globalThis.STORE_FACTORY(localStorage);
+}
+</script>
+
 <script id="ui">
 "use strict";
 const C=globalThis.CORE;
@@ -4802,6 +4897,65 @@ globalThis.selfChecks=function(){
            return q.getModuleCount()>0 && typeof q.isDark(0,0)==='boolean'; }
       catch(e){ return false; }
     })());
+  }
+  // --- store: Raumbibliothek (DOM-frei, Storage injiziert) ---
+  {
+    const fakeStorage=()=>{ const m=new Map(); return {
+      getItem:k=>m.has(k)?m.get(k):null,
+      setItem:(k,v)=>m.set(k,String(v)),
+      removeItem:k=>m.delete(k),
+    };};
+    const mkData=()=>({pts:[{id:'A',x:0,y:0}],walls:[],meas:[],idSeq:1});
+
+    const st=globalThis.STORE_FACTORY && STORE_FACTORY(fakeStorage());
+    chk('store: Factory vorhanden', !!st);
+    if(st){
+      chk('store: leere Bibliothek', st.list().length===0 && st.currentId()===null);
+      const id=st.create('Wohnzimmer');
+      chk('store: create liefert id und listet', typeof id==='string' && st.list().length===1);
+      chk('store: create legt leeres data an', st.load(id).data.pts.length===0 && st.load(id).data.idSeq===0);
+      chk('store: save merged data und area', st.save(id,{data:mkData(),area:15.12})===true
+        && st.load(id).data.pts.length===1 && st.load(id).area===15.12);
+      chk('store: save auf unbekannte id -> false', st.save('gibtsnicht',{area:1})===false);
+      chk('store: rename', st.rename(id,'Küche')===true && st.load(id).name==='Küche');
+      chk('store: list ohne data, neueste zuerst', (()=>{
+        const id2=st.create('Bad');
+        const l=st.list();
+        return l.length===2 && l[0].id===id2 && !('data' in l[0]);
+      })());
+      st.setCurrent(id);
+      chk('store: current', st.currentId()===id);
+      st.remove(id);
+      chk('store: remove entfernt und raeumt current', st.list().length===1 && st.currentId()===null);
+    }
+    // Migration: Alt-Schluessel wird zu "Unbenannt"
+    {
+      const raw=fakeStorage();
+      raw.setItem('raumaufmass', JSON.stringify(mkData()));
+      const st2=globalThis.STORE_FACTORY && STORE_FACTORY(raw);
+      const did=st2 && st2.migrate();
+      chk('store: migrate uebernimmt Alt-Schluessel', did===true && st2.list().length===1
+        && st2.list()[0].name==='Unbenannt' && st2.load(st2.list()[0].id).data.pts.length===1);
+      chk('store: migrate loescht Alt-Schluessel', raw.getItem('raumaufmass')===null);
+      chk('store: migrate nur einmal', st2.migrate()===false);
+    }
+    // Kaputter rooms-Eintrag darf nicht crashen
+    {
+      const raw=fakeStorage();
+      raw.setItem('raumaufmass.rooms','{{kaputt');
+      const st3=globalThis.STORE_FACTORY && STORE_FACTORY(raw);
+      chk('store: kaputtes JSON -> leere Bibliothek statt Absturz', !!st3 && st3.list().length===0);
+    }
+    // Quota-Fehler: setItem wirft -> save false, storageOk false
+    {
+      const boom={getItem:()=>null,setItem:()=>{throw new Error('QuotaExceeded');},removeItem:()=>{}};
+      const st4=globalThis.STORE_FACTORY && STORE_FACTORY(boom);
+      chk('store: werfender Storage -> storageOk false', !!st4 && st4.storageOk===false);
+      chk('store: save bei vollem Storage -> false statt Exception', (()=>{
+        try{ const id=st4.create('X'); return st4.save(id,{area:1})===false || st4.list().length===0; }
+        catch(e){ return false; }
+      })());
+    }
   }
   return {ok, out};
 };

@@ -6,7 +6,7 @@ const pick=id=>{
   if(!m) throw new Error(`Script-Block "${id}" nicht gefunden`);
   return m[1];
 };
-new Function('"use strict";\n'+pick('vendor')+'\n'+pick('core')+'\n'+pick('checks'))();
+new Function('"use strict";\n'+pick('vendor')+'\n'+pick('core')+'\n'+pick('store')+'\n'+pick('checks'))();
 const r=globalThis.selfChecks();
 console.log(r.out.join('\n'));
 console.log(r.ok?'\nALLE CHECKS GRÜN':'\nCHECKS ROT');
