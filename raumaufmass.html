@@ -162,6 +162,16 @@
   .seg button+button{border-left:1px solid var(--line)}
   .seg button[aria-pressed=true]{background:var(--ink);color:var(--surface)}
   #opDel{color:var(--bad);border-color:#e2c4be}
+  #opMeasBox{border-top:1px solid var(--line);margin-top:8px;padding-top:8px}
+  .mbtn{border-style:dashed;font-size:12.5px;padding:0 8px;min-height:34px}
+  #opState{font-size:12.5px;font-weight:600}
+  #opState.good{color:var(--good)} #opState.warn{color:var(--warn)} #opState.bad{color:var(--bad)}
+  #opMeasList{display:grid;gap:3px;margin-top:6px;font-size:12.5px;
+    font-variant-numeric:tabular-nums}
+  #opMeasList .mrow{display:flex;gap:8px;align-items:center}
+  #opMeasList .mrow.bad{color:var(--bad);font-weight:600}
+  #opMeasList .mrow span:nth-child(2){margin-left:auto}
+  #opMeasList button{min-height:26px;padding:0 7px;font-size:12px}
   /* Lösch-Popover */
   #pop{position:absolute;z-index:7;background:var(--surface);border:1px solid var(--line);
     border-radius:8px;padding:8px;box-shadow:0 4px 14px rgba(38,36,31,.18);
@@ -353,6 +363,16 @@
           <div class="seg" id="opDir">
             <button data-o="0">nach innen</button><button data-o="1">nach außen</button>
           </div>
+        </div>
+        <div id="opMeasBox">
+          <div class="oprow"><label style="min-width:0">Position messen</label><span id="opState"></span></div>
+          <div class="oprow">
+            <button class="mbtn" data-edge="left">von links</button>
+            <button class="mbtn" data-edge="right">von rechts</button>
+            <button class="mbtn" data-edge="bottom">vom Boden</button>
+            <button class="mbtn" data-edge="top">von der Decke</button>
+          </div>
+          <div id="opMeasList"></div>
         </div>
         <div class="oprow"><button id="opDel">Öffnung löschen</button></div>
       </div>
@@ -3584,6 +3604,74 @@ globalThis.defaultOpening=function(shape, kind){
   return globalThis.clampOpening(shape, {kind, w, h, x:(shape.L-w)/2, y:hMit*0.4});
 };
 
+// ================= Öffnungen einmessen =================
+// Eine Messung bindet EINE Kante der Oeffnung an EINE Bezugskante der
+// Wand: {op, edge:'left'|'right'|'bottom'|'top', d, sigma}. Daraus wird
+// jeweils die linke untere Ecke zurueckgerechnet:
+//   left   -> x = d                 right -> x = L - w - d
+//   bottom -> y = d                 top   -> y = Decke - h - d
+// Jede Messung betrifft damit NUR x oder NUR y. Das Problem zerfaellt in
+// zwei unabhaengige gewichtete Mittelwerte - kein Gauss-Newton noetig,
+// und die Aussagen (Redundanz, normiertes Residuum) bleiben dieselben
+// wie im Grundriss, weil der Mittelwert genau die Ausgleichung EINER
+// Unbekannten ist.
+function opObs(shape, op, m){
+  const s=m.sigma||5;
+  if(m.edge==='left')   return {achse:'x', wert:m.d, s};
+  if(m.edge==='right')  return {achse:'x', wert:shape.L-op.w-m.d, s};
+  if(m.edge==='bottom') return {achse:'y', wert:m.d, s};
+  if(m.edge==='top'){
+    // Gegen die Decke ueber der Oeffnungsmitte - in einer Trapezwand
+    // laeuft sie schraeg, und genau daran misst man auf der Baustelle.
+    const decke=globalThis.ceilingAt(shape, op.x+op.w/2);
+    return {achse:'y', wert:decke-op.h-m.d, s};
+  }
+  return null;
+}
+// Gewichteter Mittelwert je Achse samt Kontrollgroessen. Bei n Messungen
+// einer Unbekannten ist der Redundanzanteil jeder Messung 1 - 1/n (bei
+// gleichen Gewichten) - dieselbe Groesse, die im Grundriss aus der
+// Hutmatrix kommt, hier in geschlossener Form.
+function axisFit(obs){
+  if(!obs.length) return {n:0, wert:null, v:[], red:[], w:[], sigmaHat:null};
+  let sw=0, swx=0;
+  obs.forEach(o=>{ const g=1/(o.s*o.s); sw+=g; swx+=g*o.wert; });
+  const wert=swx/sw;
+  const v=obs.map(o=>wert-o.wert);
+  const n=obs.length;
+  const red=obs.map(o=>{ const g=1/(o.s*o.s); return Math.max(0, 1-g/sw); });
+  const w=obs.map((o,i)=> red[i]<0.01 ? null : Math.abs(v[i])/(o.s*Math.sqrt(red[i])));
+  const sigmaHat = n>1
+    ? Math.sqrt(obs.reduce((s,o,i)=>s+v[i]*v[i]/(o.s*o.s),0)/(n-1))
+    : null;
+  return {n, wert, v, red, w, sigmaHat};
+}
+// Liefert die eingemessene Lage plus Diagnose. Ohne Messung bleibt die
+// Achse, wie sie ist (gezogen oder vorbelegt) - ehrlich als "geschaetzt".
+globalThis.solveOpening=function(shape, op, meas){
+  const eigene=(meas||[]).filter(m=>m.op===op.id && m.on!==false);
+  const obs=eigene.map(m=>({m, o:opObs(shape, op, m)})).filter(e=>e.o);
+  const xs=obs.filter(e=>e.o.achse==='x'), ys=obs.filter(e=>e.o.achse==='y');
+  const fx=axisFit(xs.map(e=>e.o)), fy=axisFit(ys.map(e=>e.o));
+  const ziel={...op};
+  if(fx.wert!=null) ziel.x=fx.wert;
+  if(fy.wert!=null) ziel.y=fy.wert;
+  // Verdaechtig ist, was Baardas Schwelle reisst - dieselbe Regel wie im
+  // Grundriss, damit "verdaechtig" ueberall dasselbe heisst.
+  // Verdaechtig ist, was Baardas Schwelle reisst UND nahe am groessten w
+  // liegt - exakt computeSuspects wie im Grundriss. Die blosse Schwelle
+  // reicht nicht: ein grober Ausreisser zieht den Mittelwert mit, dann
+  // reissen ALLE Residuen die Schwelle und die Aussage waere wertlos
+  // (gemessen an 1200/1205/1400: w = 16,7 / 15,5 / 32,3).
+  const verdacht=new Set();
+  [[xs,fx],[ys,fy]].forEach(([liste,fit])=>{
+    const s2=globalThis.computeSuspects(fit.w, 3.29, 0.02);
+    s2.forEach(i=>verdacht.add(liste[i].m.id));
+  });
+  return {ziel, x:fx, y:fy, verdacht,
+          rows:obs.map((e,i)=>({m:e.m, achse:e.o.achse}))};
+};
+
 // ================= Entwirren =================
 // Ein geschlossener, teilgemessener Wandzug kann sich beim Skizzieren
 // verheddern (Waende kreuzen sich). Gesucht: eine kreuzungsfreie Lage, die
@@ -3786,7 +3874,7 @@ const $=id=>document.getElementById(id);
 const M={ pts:[], walls:[], meas:[], mode:'draw', sel:[], chain:null,
           fit:null, an:null, sugg:[], suspects:new Set(), narrow:[],
           drag:null, dragMode:null, highlight:null, nearPairs:[],
-          openings:[], hmeas:[], wallSel:null, openSel:null };
+          openings:[], hmeas:[], opmeas:[], wallSel:null, openSel:null };
 // Eigene Ansicht der Wandansicht; wallUserView merkt, ob der Nutzer
 // gezoomt hat (dann kein automatisches Einpassen mehr).
 let wallUserView=false;
@@ -3821,6 +3909,7 @@ const serialize=()=>JSON.stringify({
   meas:M.meas.map(m=>({...m})),
   openings:M.openings.map(o=>({...o})),
   hmeas:M.hmeas.map(m=>({...m})),
+  opmeas:M.opmeas.map(m=>({...m})),
   idSeq, openSeq,
 });
 function deserialize(o){
@@ -3833,6 +3922,7 @@ function deserialize(o){
   // Hoehen liegen BEWUSST getrennt von den Grundriss-Messungen: der
   // Solver darf sie nie als Strecke lesen (jacobian erwartet a/b).
   M.hmeas=Array.isArray(o.hmeas) ? o.hmeas.map(x=>({...x})) : [];
+  M.opmeas=Array.isArray(o.opmeas) ? o.opmeas.map(x=>({...x})) : [];
   if(typeof o.idSeq==='number') idSeq=o.idSeq;
   if(typeof o.openSeq==='number') openSeq=o.openSeq;
   else openSeq=M.openings.length+1;
@@ -3893,7 +3983,13 @@ function pushSnapshot(s){
 function snapshot(){ pushSnapshot(serialize()); }
 function undo(){
   if(!undoStack.length) return false;
+  // deserialize() raeumt die Auswahl - beim Undo einer Messung soll das
+  // Popup aber offen bleiben, sonst verliert man nach jedem Schritt den
+  // Kontext. Auswahl zurueckholen, falls es sie noch gibt.
+  const wandVor=M.wallSel, offenVor=M.openSel;
   deserialize(JSON.parse(undoStack.pop()));
+  if(wandVor && M.walls.some(([a,b])=>a===wandVor.a&&b===wandVor.b)) M.wallSel=wandVor;
+  if(offenVor && M.openings.some(o=>o.id===offenVor)) M.openSel=offenVor;
   recompute();
   return true;
 }
@@ -4004,6 +4100,22 @@ function recompute(){
   // Einmal je Aenderung berechnet, von Tabelle UND Plan konsumiert - die
   // Indizes zaehlen ueber activeMeas, wie an.w selbst.
   M.suspects = M.an ? computeSuspects(M.an.w, BAARDA_W0, TIE_TOL) : new Set();
+  // Eingemessene Oeffnungen an ihre Messungen ziehen - auch beim LADEN,
+  // sonst zeigt die App eine Lage, die den eigenen Messwerten
+  // widerspricht (browser-gesehen: 1220 gespeichert, 1200 gemessen).
+  // Messungen schlagen Ziehen; ohne Messung bleibt die Lage unberuehrt.
+  if(M.openings.length && M.opmeas.length && M.fit){
+    const P=M.fit.pts;
+    M.openings.forEach(o=>{
+      if(!M.opmeas.some(m=>m.op===o.id && m.on!==false)) return;
+      const sh=wallShape(P, M.hmeas, o.a, o.b);
+      if(!sh) return;
+      const r=solveOpening(sh, o, M.opmeas);
+      const andere=M.openings.filter(x=>x!==o && [x.a,x.b].sort().join('|')===[o.a,o.b].sort().join('|'));
+      const platz=clampOpening(sh, r.ziel);
+      if(openingPlaceable(sh, platz, andere)){ o.x=platz.x; o.y=platz.y; }
+    });
+  }
   // Streuung auffaellig, aber kein EINZELNER Schuldiger isolierbar (leer =
   // alle unter der Schwelle, >1 = Gleichstand): dann helfen nur
   // Wiederholungen. Genau ein Verdaechtiger braucht keine Eingrenzung.
@@ -4497,6 +4609,10 @@ let entryPair=null;
 // unten). Hier oben deklariert, weil closeEntry und der OK-Knopf sie
 // lesen und in der Datei frueher stehen.
 let heightAt=null;
+// Kante, deren Abstand gerade eingetippt wird, und Zaehler fuer die
+// Messungs-IDs. Oben deklariert, weil closeEntry und der OK-Knopf sie
+// lesen und weiter vorn stehen (let ist bis zur Deklaration in der TDZ).
+let opMeasEdge=null, opMeasSeq=1;
 // Gefuehrter Fluss: Eingabe kam von einem Vorschlags-Chip. Nach dem
 // Bestaetigen springt sie automatisch zum naechsten Vorschlag - auf der
 // Baustelle heisst das: Chip antippen, dann nur noch messen, tippen, OK,
@@ -4551,7 +4667,7 @@ function placeEntry(){
   box.style.left=x+'px'; box.style.top=y+'px';
 }
 function closeEntry(){
-  entryPair=null; entryGuided=false; heightAt=null;
+  entryPair=null; entryGuided=false; heightAt=null; opMeasEdge=null;
   $('entry').hidden=true;
   M.highlight=null;
   drawCanvas();
@@ -4576,11 +4692,11 @@ function commitEntry(){
     setHint('Nichts mehr zu messen — Form bestimmt und geprüft.');
   }
 }
-$('entryOk').onclick=()=>{ if(heightAt) commitHeight(); else commitEntry(); };
+$('entryOk').onclick=()=>{ if(opMeasEdge) commitOpMeasure(); else if(heightAt) commitHeight(); else commitEntry(); };
 $('entryX').onclick=closeEntry;
 $('entryVal').addEventListener('keydown',e=>{
   e.stopPropagation();                       // Modus-Kuerzel duerfen hier nicht feuern
-  if(e.key==='Enter'){ if(heightAt) commitHeight(); else commitEntry(); }
+  if(e.key==='Enter'){ if(opMeasEdge) commitOpMeasure(); else if(heightAt) commitHeight(); else commitEntry(); }
   if(e.key==='Escape') closeEntry();
 });
 // Eine rote Fehlermarkierung darf nicht stehen bleiben, sobald der Nutzer
@@ -5208,6 +5324,7 @@ function applySize(o, w, h){
     if(!platz){
       setHint('Diese Größe überdeckt eine andere Öffnung — kein freier Platz in der Wand.');
       renderOpeningPopup();
+  renderOpeningMeasures();
       return;
     }
     snapshot(); Object.assign(o, platz); recompute();
@@ -5259,6 +5376,87 @@ $('opDel').onclick=()=>{
 };
 $('opopX').onclick=()=>{ M.openSel=null; render(); };
 
+// Positionsmessungen der gewaehlten Oeffnung. Vier Knoepfe statt
+// Klick-Klick-Messen: auf der Baustelle misst man vom Rand, vom Boden
+// oder von der Decke - genau diese vier Angaben tippt man ein.
+const EDGE_LABEL={left:'von links', right:'von rechts', bottom:'vom Boden', top:'von der Decke'};
+
+function applyOpeningFit(o){
+  const shape=currentShape();
+  if(!shape) return null;
+  const r=solveOpening(shape, o, M.opmeas);
+  // Die eingemessene Lage muss trotzdem in die Wand passen und darf keine
+  // Nachbarin ueberdecken - Messungen heben die Exklusivitaet nicht auf.
+  const andere=wallOpenings().filter(x=>x.id!==o.id);
+  const platz=clampOpening(shape, r.ziel);
+  if(openingPlaceable(shape, platz, andere)){ o.x=platz.x; o.y=platz.y; }
+  return r;
+}
+
+function renderOpeningMeasures(){
+  const o=selectedOpening();
+  const box=$('opMeasBox');
+  if(!o){ box.hidden=true; return; }
+  box.hidden=false;
+  const shape=currentShape();
+  const r=shape ? solveOpening(shape, o, M.opmeas) : null;
+  const st=$('opState');
+  if(!r || (!r.x.n && !r.y.n)){
+    st.textContent='geschätzt — noch nicht gemessen'; st.className='warn';
+  } else if(!r.x.n || !r.y.n){
+    st.textContent=`${r.x.n?'':'Breite'}${(!r.x.n&&!r.y.n)?' und ':''}${r.y.n?'':'Höhe'} fehlt noch`;
+    st.className='warn';
+  } else if(r.verdacht.size){
+    st.textContent='eine Messung passt nicht'; st.className='bad';
+  } else if(r.x.n>1 || r.y.n>1){
+    const sh=[r.x.sigmaHat, r.y.sigmaHat].filter(v=>v!=null);
+    st.textContent=sh.length ? `geprüft — ± ${Math.max(...sh).toFixed(1).replace('.',',')} mm` : 'geprüft';
+    st.className='good';
+  } else { st.textContent='bestimmt, ungeprüft'; st.className='warn'; }
+  const liste=M.opmeas.filter(m=>m.op===o.id);
+  $('opMeasList').innerHTML = liste.map(m=>{
+    const schlecht=r&&r.verdacht.has(m.id);
+    return `<div class="mrow${schlecht?' bad':''}" data-id="${m.id}">`
+      +`<span>${EDGE_LABEL[m.edge]}</span><span>${fmtM(m.d)} m</span>`
+      +`${schlecht?'<span>verdächtig</span>':''}`
+      +`<button data-del="${m.id}">×</button></div>`;
+  }).join('');
+  $('opMeasList').querySelectorAll('button[data-del]').forEach(b=>{
+    b.onclick=()=>{
+      snapshot();
+      M.opmeas=M.opmeas.filter(m=>m.id!==b.dataset.del);
+      const sel=selectedOpening(); if(sel) applyOpeningFit(sel);
+      recompute();
+    };
+  });
+}
+document.querySelectorAll('.mbtn').forEach(b=>{
+  b.onclick=()=>{
+    const o=selectedOpening(); if(!o) return;
+    opMeasEdge=b.dataset.edge;
+    heightAt=null; entryPair=null;
+    $('entryLabel').textContent=`${OPEN_LABEL[o.kind]}: Abstand ${EDGE_LABEL[opMeasEdge]}`;
+    const box=$('entry');
+    box.hidden=false; box.style.transform='';
+    if(isDesktop()){
+      const wrap=$('canvaswrap');
+      box.style.left=Math.max(8,(wrap.clientWidth-260)/2)+'px'; box.style.top='12px';
+    } else { box.style.left=box.style.top=''; }
+    const inp=$('entryVal'); inp.value=''; inp.classList.remove('bad'); inp.focus();
+  };
+});
+function commitOpMeasure(){
+  const o=selectedOpening();
+  const inp=$('entryVal');
+  const d=parseFloat(inp.value.replace(',','.'))*1000;
+  if(!o || !isFinite(d) || d<0){ inp.classList.add('bad'); return; }
+  snapshot();
+  M.opmeas.push({id:'om'+(opMeasSeq++), op:o.id, edge:opMeasEdge, d, sigma:C.SIGMA_DEF, on:true});
+  opMeasEdge=null;
+  $('entry').hidden=true;
+  applyOpeningFit(o);
+  recompute();
+}
 // Ziehen in der Wandansicht: die Oeffnung bleibt HART in der Wand
 // (anders als die Kreuzungsbremse im Grundriss - eine Tuer halb
 // ausserhalb der Wand ist keine sinnvolle Zwischenlage).
@@ -5663,6 +5861,7 @@ function renderPanel(){
   if(wt) wt.disabled=!wallTabReady();
   renderWallBar();
   renderOpeningPopup();
+  renderOpeningMeasures();
   $('empty').style.display = M.pts.length ? 'none' : 'flex';
   $('undo').disabled = !undoStack.length;
 
@@ -6762,6 +6961,59 @@ globalThis.selfChecks=function(){
         (()=>{ const voll={id:'x',x:0,y:0,w:shape.L,h:2400};
                const neu={id:'y',x:0,y:0,w:800,h:1000};
                return globalThis.findFreeSpot(shape,neu,[voll])===null; })());
+    }
+    // --- Oeffnungen einmessen ---
+    {
+      const so=globalThis.solveOpening;
+      const op={id:'o1', x:0, y:0, w:1000, h:2000};
+      chk('einmessen: links gemessen -> x uebernommen',
+        (()=>{ const r=so(shape, op, [{id:'m1',op:'o1',edge:'left',d:1200,sigma:5}]);
+               return near(r.ziel.x,1200,1e-9) && r.x.n===1; })());
+      chk('einmessen: rechts gemessen -> x von der anderen Seite gerechnet',
+        (()=>{ const r=so(shape, op, [{id:'m1',op:'o1',edge:'right',d:800,sigma:5}]);
+               // L 4000, Breite 1000, 800 vom rechten Rand -> x = 2200
+               return near(r.ziel.x,2200,1e-9); })());
+      chk('einmessen: Boden und Decke bestimmen y',
+        (()=>{ const r=so(shape, op, [{id:'m1',op:'o1',edge:'bottom',d:900,sigma:5}]);
+               return near(r.ziel.y,900,1e-9); })());
+      chk('einmessen: Decke wird ueber der Oeffnungsmitte gerechnet (Trapez)',
+        (()=>{ // Oeffnung x=1500 w=1000 -> Mitte 2000; Decke dort:
+               // 2400 + (2800-2400)*2000/4000 = 2600
+               const mitte={...op, x:1500};
+               const r=so(shape, mitte, [{id:'m1',op:'o1',edge:'top',d:100,sigma:5}]);
+               return near(r.ziel.y, 2600-2000-100, 1e-9); })());
+      chk('einmessen: eine Messung je Achse -> bestimmt, aber nichts pruefbar',
+        (()=>{ const r=so(shape, op, [{id:'m1',op:'o1',edge:'left',d:1200,sigma:5},
+                                      {id:'m2',op:'o1',edge:'bottom',d:0,sigma:5}]);
+               return r.x.n===1 && r.y.n===1 && r.x.w[0]===null && r.x.sigmaHat===null; })());
+      chk('einmessen: zwei passende Messungen -> Mittel, kleine Residuen, pruefbar',
+        (()=>{ const r=so(shape, op, [{id:'m1',op:'o1',edge:'left',d:1200,sigma:5},
+                                      {id:'m2',op:'o1',edge:'right',d:1800,sigma:5}]);
+               // rechts 1800 -> x = 4000-1000-1800 = 1200, deckungsgleich
+               return near(r.ziel.x,1200,1e-9) && r.x.n===2
+                   && r.x.v.every(v=>Math.abs(v)<1e-9) && r.x.red.every(x=>near(x,0.5,1e-9)); })());
+      chk('einmessen: widersprechende Messungen -> Mittel und sichtbare Residuen',
+        (()=>{ const r=so(shape, op, [{id:'m1',op:'o1',edge:'left',d:1200,sigma:5},
+                                      {id:'m2',op:'o1',edge:'right',d:1700,sigma:5}]);
+               // rechts 1700 -> x = 1300; Mittel 1250, Residuen +-50
+               return near(r.ziel.x,1250,1e-9)
+                   && r.x.v.map(Math.abs).every(a=>near(a,50,1e-9))
+                   && r.x.sigmaHat>0; })());
+      chk('einmessen: grober Ausreisser wird als verdaechtig benannt',
+        (()=>{ const r=so(shape, op, [{id:'m1',op:'o1',edge:'left',d:1200,sigma:5},
+                                      {id:'m2',op:'o1',edge:'left',d:1205,sigma:5},
+                                      {id:'m3',op:'o1',edge:'left',d:1400,sigma:5}]);
+               return r.verdacht.has('m3') && !r.verdacht.has('m1'); })());
+      chk('einmessen: genaueres sigma zieht das Ergebnis staerker',
+        (()=>{ const r=so(shape, op, [{id:'m1',op:'o1',edge:'left',d:1000,sigma:1},
+                                      {id:'m2',op:'o1',edge:'left',d:2000,sigma:10}]);
+               return r.ziel.x<1100; })());
+      chk('einmessen: stillgelegte Messung zaehlt nicht',
+        (()=>{ const r=so(shape, op, [{id:'m1',op:'o1',edge:'left',d:9999,sigma:5,on:false}]);
+               return r.x.n===0 && r.ziel.x===op.x; })());
+      chk('einmessen: ohne Messung bleibt die Lage unveraendert',
+        (()=>{ const r=so(shape, {...op, x:777, y:333}, []);
+               return r.ziel.x===777 && r.ziel.y===333 && r.x.n===0; })());
     }
     chk('oeffnung: Vorbelegung passt auch in eine winzige Wand',
       (()=>{ const eng={L:700, ha:1800, hb:1800,
