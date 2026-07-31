@@ -4,7 +4,7 @@ import type { PlateModel } from "../../src/plate/types";
 
 const model: PlateModel = {
   profile: "BEKOTEC_EN_23_FI_30_16",
-  profileVersion: "2026.07.28-1",
+  profileVersion: "2026.07.31-1",
   polygon: [{ x: 0, y: 0 }, { x: 300, y: 0 }, { x: 300, y: 300 }, { x: 0, y: 300 }],
   wallClearanceMm: 8,
   transform: {

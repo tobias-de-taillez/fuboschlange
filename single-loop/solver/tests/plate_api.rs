@@ -30,7 +30,7 @@ fn public_api_returns_only_an_independently_validated_plate_model() {
         panic!("reference rectangle should have a plate graph: {result:?}");
     };
     assert_eq!(model.profile, PlateProfileId::BekotecEn23Fi30_16);
-    assert_eq!(model.profile_version, "2026.07.28-1");
+    assert_eq!(model.profile_version, "2026.07.31-1");
     assert!(model.validation.independently_validated);
     assert!(!model.graph.edges.is_empty());
 

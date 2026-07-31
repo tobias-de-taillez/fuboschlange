@@ -5,7 +5,7 @@ import type { PlateModel, PlateModelResult } from "../../src/plate/types";
 
 const model: PlateModel = {
   profile: "BEKOTEC_EN_23_FI_30_16",
-  profileVersion: "2026.07.28-1",
+  profileVersion: "2026.07.31-1",
   polygon: [{ x: 0, y: 0 }, { x: 300, y: 0 }, { x: 300, y: 300 }, { x: 0, y: 300 }],
   wallClearanceMm: 12,
   transform: { origin: { x: 0, y: 0 }, u: { x: 1, y: 0 }, v: { x: 0, y: 1 }, phaseUMm: 30, phaseVMm: 45 },
@@ -120,7 +120,7 @@ describe("plate debug page", () => {
     const svg = document.querySelector("#plate")!;
     expect(svg.querySelectorAll("g[data-layer]").length).toBe(10);
     expect(document.querySelector("#plate-profile")!.textContent).toContain("BEKOTEC_EN_23_FI_30_16");
-    expect(document.querySelector("#plate-profile")!.textContent).toContain("2026.07.28-1");
+    expect(document.querySelector("#plate-profile")!.textContent).toContain("2026.07.31-1");
     const counts = document.querySelector("#plate-counts")!.textContent!;
     expect(counts).toContain("1 Noppen");
     expect(counts).toContain("1 Posen");

@@ -103,18 +103,27 @@ fn tight_handbook_turns_are_rejected_by_the_profile_certificate() {
 
 #[test]
 fn every_quarter_turn_reflection_and_period_translation_recertifies() {
+    // Every template, not just one: `TemplateTransform::apply` negates
+    // `sweep_rad` per primitive under reflection, and the catalogue now holds a
+    // negative (reflex) sweep and a mixed-sign two-arc composite, neither of
+    // which `BroadTurn90` alone would exercise. This holds because the nopp
+    // checkerboard is invariant under the whole transform group: a period shift
+    // moves the index by (2i, 2j), a quarter turn maps (i, j) -> (-j, i) and a
+    // mirror maps it to (-i, j), all of which preserve `i + j` parity.
     let profile = PlateProfile::bekotec_en_23_fi_30_16();
-    let broad_90 = profile
-        .templates()
-        .into_iter()
-        .find(|template| template.id == TemplateId::BroadTurn90)
-        .unwrap();
-
-    for reflected in [false, true] {
-        for quarter_turns in 0..4 {
-            let transform = TemplateTransform::new(quarter_turns, reflected, -2, 3).unwrap();
-            let transformed = transform.apply(&broad_90, profile.period_mm);
-            certify_template(&transformed, &profile).unwrap();
+    for template in profile.templates() {
+        for reflected in [false, true] {
+            for quarter_turns in 0..4 {
+                let transform = TemplateTransform::new(quarter_turns, reflected, -2, 3).unwrap();
+                let transformed = transform.apply(&template, profile.period_mm);
+                certify_template(&transformed, &profile).unwrap_or_else(|failure| {
+                    panic!(
+                        "{:?} does not recertify at quarter_turns={quarter_turns} \
+                         reflected={reflected}: {failure:?}",
+                        template.id
+                    )
+                });
+            }
         }
     }
 }

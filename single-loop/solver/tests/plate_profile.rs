@@ -8,7 +8,7 @@ fn bekotec_16_profile_has_fixed_physical_dimensions() {
     let profile = PlateProfile::bekotec_en_23_fi_30_16();
 
     assert_eq!(profile.id, PlateProfileId::BekotecEn23Fi30_16);
-    assert_eq!(profile.version, "2026.07.28-1");
+    assert_eq!(profile.version, "2026.07.31-1");
     assert_eq!(profile.pitch_mm, 75.0);
     assert_eq!(profile.period_mm, 150.0);
     assert_eq!(profile.pipe_radius_mm, 8.0);

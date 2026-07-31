@@ -1,34 +1,19 @@
-//! Task 4 (lane model) is BLOCKED. In short: `build_lanes` cannot be
-//! implemented as specified by the brief, because the certified
-//! `EmbeddedPoseGraph` for this profile (`BEKOTEC_EN_23_FI_30_16`) contains
-//! no edge that transitions between a straight run and a 90-degree turn --
-//! "corners with the `BroadTurn90` edge" is not constructible; no
-//! `BroadTurn90` instance anywhere in the graph shares an endpoint with
-//! anything else. The full investigation (raw node/edge counts, per-template
-//! connectivity table, all-pairs template co-occurrence scan, options for
-//! resolving it) is written up in the (gitignored, not in version control)
-//! `.superpowers/sdd/task-4-report.md` -- the root-cause explanation below
-//! is self-contained and does not depend on that file surviving.
+//! Task 4 (lane model) was BLOCKED on a plate-layer defect: the certified
+//! `EmbeddedPoseGraph` for this profile (`BEKOTEC_EN_23_FI_30_16`) contained no
+//! edge at all that transitioned between a straight run and a turn, so "corners
+//! with the `BroadTurn90` edge" was not constructible and the graph was a heap
+//! of disjoint islands. Root cause: nodes are interned by exact
+//! `(x, y, heading)` (`plate::graph::pose_key`), and the turn templates were
+//! bare tangent arcs whose endpoints landed 80 mm off every channel crossing --
+//! never commensurate with the 150 mm period of the straight chains.
 //!
-//! The tests below are a characterization of that fact, pinned so it is
-//! caught if the plate layer changes (fixed) or regresses further. They
-//! replace an exploratory `println!`-driven investigation run during Task 4.
-//!
-//! Root cause: graph nodes are interned by exact `(x, y, heading)`
-//! (`plate::graph::pose_key`), so two edges only chain when one's end pose
-//! equals the other's start pose bit-for-bit (mod the 1e-6mm intern tick).
-//! `Straight0`'s template-local endpoints are `(-150, 37.5)` and
-//! `(300, 37.5)` -- both x-coordinates are exact multiples of
-//! `profile.period_mm` (150), so every instance (any period offset,
-//! quarter-turn, reflection) has one coordinate exactly `≡ 0 mod 150`.
-//! `BroadTurn90`'s endpoints, relative to its own arc center `(37.5, 37.5)`
-//! radius 80, are `(37.5, -42.5)` and `(117.5, 37.5)`; `37.5`, `-42.5`
-//! (`≡ 107.5`), and `117.5` are all non-zero mod 150, and rotation/reflection
-//! only permute or negate coordinates (never producing an exact 0), so no
-//! combination of period, quarter-turn or reflection can ever land a
-//! `BroadTurn90` endpoint on a `Straight0` endpoint. This is a structural
-//! property of the profile's template geometry (`plate/template.rs`), not a
-//! property of any specific room, wall clearance, or spacing.
+//! Task 3b fixed that at the plate layer: the turns are now
+//! `Line + Arc(>= 80 mm) + Line` composites whose lead-in and lead-out
+//! straights absorb exactly that offset, so both endpoint poses land on the
+//! shared anchor lattice. The tests below were originally written to pin the
+//! broken state; they are kept, inverted, as the positive certification they
+//! were probing for. If they fail again, the families have come apart and the
+//! lane model is blocked once more.
 
 use single_loop_solver::geometry::Polygon;
 use single_loop_solver::model::Point;
@@ -116,12 +101,11 @@ fn straight0_chains_form_long_connected_runs() {
 }
 
 #[test]
-fn broad_turn_90_never_shares_an_endpoint_with_any_other_edge() {
-    // This is the fact that blocks Task 4's brief as written: "corners with
-    // the BroadTurn90 edge" requires some BroadTurn90 instance whose start
-    // (or end) pose exactly equals a Straight0 chain node. None exists,
-    // anywhere in this graph, at either end -- confirmed exhaustively, not
-    // just near one corner or one channel row.
+fn broad_turn_90_hands_over_to_straight_runs_at_both_ends() {
+    // The maneuver Task 4's brief needs: a BroadTurn90 instance whose start
+    // pose exactly equals the end pose of a straight edge, and whose end pose
+    // exactly equals the start pose of another one. Before task 3b, zero of
+    // 2144 BroadTurn90 edges touched anything at all.
     let graph = graph();
     let touches = touch_map(&graph);
     let turns: Vec<_> = graph
@@ -133,46 +117,63 @@ fn broad_turn_90_never_shares_an_endpoint_with_any_other_edge() {
         !turns.is_empty(),
         "fixture must contain BroadTurn90 candidates for this test to mean anything"
     );
-    let isolated = turns
+    let routable = turns
         .iter()
-        .filter(|e| touches[&e.start.id].len() == 1 && touches[&e.end.id].len() == 1)
+        .filter(|turn| {
+            let straight_at = |node: u32, turn_id: u32| {
+                touches[&node]
+                    .iter()
+                    .any(|&id| id != turn_id && is_straight_family(graph.edges[id as usize].template_id))
+            };
+            straight_at(turn.start.id, turn.id) && straight_at(turn.end.id, turn.id)
+        })
         .count();
-    assert_eq!(
-        isolated,
-        turns.len(),
-        "expected every BroadTurn90 edge ({} total) to be isolated at both ends; if this \
-         fails, the plate layer has gained a straight<->arc transition and Task 4's lane \
-         model is unblocked -- see task-4-report.md",
+    assert!(
+        routable * 2 > turns.len(),
+        "only {routable} of {} BroadTurn90 edges have a straight run at BOTH ends; the corner \
+         maneuver is not generally routable",
         turns.len()
     );
 }
 
 #[test]
-fn straight_and_arc_template_families_never_share_a_node() {
-    // Generalizes the BroadTurn90 finding across all 7 templates: at every
-    // node touched by 2+ edges, either all of them are in the straight
-    // family ({Straight0, Straight45}) or none of them are. The graph's
-    // only connected sub-families are Straight0<->Straight0,
-    // Straight45<->Straight45, and a closed {BroadTurn135, BroadReverse180,
-    // TeardropReverse} cluster (presumably the "Kehre" u-turn assembly) --
-    // confirmed by an all-pairs template co-occurrence scan during the Task
-    // 4 investigation (see the report). BroadTurn45 and BroadTurn90 connect
-    // to nothing, not even each other.
+fn every_arc_template_family_shares_nodes_with_the_straight_family() {
+    // Generalizes the BroadTurn90 check across all five direction-changing
+    // templates. Before task 3b the graph's only connected sub-families were
+    // Straight0<->Straight0, Straight45<->Straight45 and a closed
+    // {BroadTurn135, BroadReverse180, TeardropReverse} cluster; BroadTurn45 and
+    // BroadTurn90 connected to nothing at all, not even each other. Every one
+    // of them must now meet a straight run at a shared pose node.
     let graph = graph();
     let touches = touch_map(&graph);
-    for (node_id, edge_ids) in &touches {
-        if edge_ids.len() < 2 {
-            continue;
-        }
-        let mut families = edge_ids
+    for family in [
+        TemplateId::BroadTurn45,
+        TemplateId::BroadTurn90,
+        TemplateId::BroadTurn135,
+        TemplateId::BroadReverse180,
+        TemplateId::TeardropReverse,
+    ] {
+        let edges: Vec<_> = graph
+            .edges
             .iter()
-            .map(|&id| is_straight_family(graph.edges[id as usize].template_id));
-        let first = families.next().unwrap();
+            .filter(|e| e.template_id == family)
+            .collect();
+        assert!(!edges.is_empty(), "fixture must contain {family:?} edges");
+        let attached = edges
+            .iter()
+            .filter(|arc| {
+                [arc.start.id, arc.end.id].iter().any(|node| {
+                    touches[node].iter().any(|&id| {
+                        id != arc.id && is_straight_family(graph.edges[id as usize].template_id)
+                    })
+                })
+            })
+            .count();
         assert!(
-            families.all(|is_straight| is_straight == first),
-            "node {node_id} is touched by both a straight-family and an arc-family edge \
-             (edges: {edge_ids:?}) -- if this fails, families now interconnect and Task 4's \
-             lane model should be revisited"
+            attached > 0,
+            "{family:?} shares no pose node with any straight edge ({} instances checked) -- \
+             the families have come apart again",
+            edges.len()
         );
     }
 }

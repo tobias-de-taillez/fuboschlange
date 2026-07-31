@@ -18,7 +18,7 @@ impl PlateProfile {
     pub const fn bekotec_en_23_fi_30_16() -> Self {
         Self {
             id: PlateProfileId::BekotecEn23Fi30_16,
-            version: "2026.07.28-1",
+            version: "2026.07.31-1",
             pitch_mm: 75.0,
             period_mm: 150.0,
             pipe_radius_mm: 8.0,
