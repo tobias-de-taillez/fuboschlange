@@ -144,11 +144,19 @@
     text-transform:uppercase;color:var(--muted)}
   /* Öffnungs-Einstellungen: erscheint nur für die gewählte Öffnung, und
      zeigt nur, was für ihre Art überhaupt gilt. */
-  #opop{position:absolute;left:8px;right:8px;bottom:8px;z-index:6;background:var(--surface);
-    border:1px solid var(--ink);border-radius:8px;padding:10px;
-    box-shadow:0 4px 14px rgba(38,36,31,.18)}
+  /* Schmale Screens: als Blatt von unten ueber dem PANEL, nicht ueber der
+     Zeichnung - sonst verdeckt es die Wand, die man gerade bearbeitet
+     (gemessen: 402px Popup auf 313px Canvas). */
+  #opop{position:fixed;left:0;right:0;bottom:0;z-index:8;background:var(--surface);
+    border:1px solid var(--ink);border-bottom:0;border-radius:12px 12px 0 0;
+    padding:10px 12px calc(10px + env(safe-area-inset-bottom));
+    max-height:52dvh;overflow-y:auto;box-shadow:0 -4px 14px rgba(38,36,31,.18)}
   #opop[hidden]{display:none}
-  @media(min-width:880px){ #opop{left:auto;width:330px} }
+  @media(min-width:880px){
+    #opop{position:absolute;left:auto;right:8px;bottom:8px;width:330px;
+      border:1px solid var(--ink);border-radius:8px;max-height:none;
+      box-shadow:0 4px 14px rgba(38,36,31,.18)}
+  }
   #opopHead{display:flex;align-items:center;gap:8px;margin-bottom:8px}
   #opopHead b{flex:1;font-size:14.5px}
   #opopX{min-height:32px;min-width:36px;padding:0}
