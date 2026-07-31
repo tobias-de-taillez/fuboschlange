@@ -3657,10 +3657,23 @@ globalThis.swingLimit=function(pts, walls, ownWall, hinge, radius, dir0, sense){
 // direkt unter dem Fokus bleiben flach (nur eine Linie), ferne stellen
 // sich auf und zeigen ihren Inhalt. Ueber der Raummitte schwebend sind
 // alle gleich weit weg - das ist die symmetrische Uebersicht.
-globalThis.unfoldFactor=function(mitte, fokus, refDist){
+const VIEW_FADE = 0.3;   // ab diesem cos ist die Wand voll aufgeklappt
+globalThis.unfoldFactor=function(mitte, fokus, refDist, nOut){
   if(!(refDist>0)) return 0;
-  const d=Math.hypot(mitte.x-fokus.x, mitte.y-fokus.y);
-  return Math.max(0, Math.min(1, d/refDist));
+  const vx=mitte.x-fokus.x, vy=mitte.y-fokus.y;
+  const d=Math.hypot(vx,vy);
+  let f=Math.max(0, Math.min(1, d/refDist));
+  // Nur Waende aufklappen, auf die man VON INNEN schaut. Zeigt die
+  // Aussennormale zum Fokus hin (cos < 0), steht der Betrachter
+  // ausserhalb - dann klappte die Wand ihm entgegen, quer ueber den Raum
+  // oder ueber andere Waende. Gemessen an einem U-Raum mit Fokus
+  // ausserhalb: vier von acht Waenden hatten cos <= 0 und klappten
+  // trotzdem voll auf. Betrifft auch die Kerbe eines konkaven Raums.
+  if(nOut && d>1e-9){
+    const cos=(vx*nOut.x+vy*nOut.y)/d;
+    f*=Math.max(0, Math.min(1, cos/VIEW_FADE));
+  }
+  return f;
 };
 // Halbe Diagonale der Bounding-Box - der natuerliche Bezug fuer "weit weg".
 globalThis.planRefDist=function(pts){
@@ -4480,6 +4493,32 @@ function drawOpeningSymbol(o,x,y,w,h,dpr){
   ctx.restore();
 }
 
+// Marker fuer Waende, die schon eine Wandansicht haben - unabhaengig
+// davon, ob die Abwicklung eingeschaltet ist. So sieht man auf einen
+// Blick, welche Waende nur in ihrer LAENGE bekannt sind und welche schon
+// mit Oeffnungen vermessen wurden.
+function drawWallMarks(P, I, dpr){
+  const bemasst=new Set(M.openings.map(o=>[o.a,o.b].sort().join('|')));
+  if(!bemasst.size) return;
+  M.walls.forEach(([a,b])=>{
+    if(!bemasst.has([a,b].sort().join('|'))) return;
+    if(I[a]==null||I[b]==null) return;
+    const A=P[I[a]], B=P[I[b]];
+    const n=outerNormal(P, M.walls, a, b);
+    const m={x:(A.x+B.x)/2, y:(A.y+B.y)/2};
+    // Zwei kurze Striche aussen an der Wandmitte - ruhig genug, um im
+    // Plan nicht mit Messstrecken verwechselt zu werden.
+    const L=C.dist(A,B)||1;
+    const u={x:(B.x-A.x)/L, y:(B.y-A.y)/L};
+    ctx.strokeStyle=INK.meas; ctx.lineWidth=2*dpr;
+    [-1,1].forEach(k=>{
+      const b0=toScr({x:m.x+u.x*k*90, y:m.y+u.y*k*90});
+      const b1=toScr({x:m.x+u.x*k*90+n.x*180, y:m.y+u.y*k*90+n.y*180});
+      ctx.beginPath(); ctx.moveTo(b0.x,b0.y); ctx.lineTo(b1.x,b1.y); ctx.stroke();
+    });
+  });
+}
+
 // Abwicklung: die Waende mit Inhalt nach aussen weggeklappt. Der
 // Klappgrad kommt aus dem Abstand zum Fokus (Bildschirmmitte), so dass
 // die Uebersicht am besten ist, wenn man ueber der Raummitte schwebt.
@@ -4498,7 +4537,7 @@ function drawUnfolded(P, I, dpr){
     const L=shape.L||1;
     const u={x:(B.x-A.x)/L, y:(B.y-A.y)/L};
     const n=outerNormal(P, M.walls, a, b);
-    const f=unfoldFactor({x:(A.x+B.x)/2, y:(A.y+B.y)/2}, fokus, ref);
+    const f=unfoldFactor({x:(A.x+B.x)/2, y:(A.y+B.y)/2}, fokus, ref, n);
     if(f<0.02) return;                       // flach unterm Fokus: nichts zu zeigen
     // Wandkoordinate -> Welt: entlang der Wand, dann nach aussen geklappt.
     const w2w=(x,y)=>({x:A.x+u.x*x+n.x*y*f, y:A.y+u.y*x+n.y*y*f});
@@ -4624,6 +4663,7 @@ function drawCanvas(){
     ctx.stroke();
   });
   drawUnfolded(P, I, dpr);
+  drawWallMarks(P, I, dpr);
   drawOpeningsOnPlan(P, I, dpr);
   // Hervorgehobenes Paar breit unterlegen - VOR Messungen und Vorschlaegen,
   // damit deren Strichmuster darauf liegen bleibt. Deckt auch den Fall ab,
@@ -7185,6 +7225,18 @@ globalThis.selfChecks=function(){
                return near(ab,cd,1e-12) && ab>0 && ab<1; })());
       chk('abwicklung: weiter weg heisst weiter aufgeklappt',
         uf({x:2000,y:0},{x:2000,y:1500},2500) < uf({x:2000,y:0},{x:2000,y:2500},2500));
+      chk('abwicklung: Blick von aussen -> Wand bleibt flach',
+        (()=>{ const n={x:0,y:-1};            // Aussennormale zeigt nach -y
+               // Fokus liegt AUSSERHALB (bei y<0), schaut also von aussen
+               return near(uf({x:2000,y:0},{x:2000,y:-3000},2500,n), 0, 1e-12); })());
+      chk('abwicklung: Blick von innen -> Wand klappt auf',
+        (()=>{ const n={x:0,y:-1};
+               return uf({x:2000,y:0},{x:2000,y:1500},2500,n) > 0.5; })());
+      chk('abwicklung: streifender Blick faellt sanft auf null',
+        (()=>{ const n={x:0,y:-1};
+               const steil=uf({x:2000,y:0},{x:2000,y:2000},2500,n);
+               const streif=uf({x:2000,y:0},{x:3800,y:200},2500,n);
+               return streif<steil && streif>=0; })());
       chk('abwicklung: gedeckelt bei 1',
         near(uf({x:0,y:0},{x:99999,y:0},2500), 1, 1e-12));
       chk('abwicklung: Aussennormale zeigt aus dem Raum',
