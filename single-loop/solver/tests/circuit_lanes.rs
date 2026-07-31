@@ -1,27 +1,31 @@
-//! Task 4 (lane model) was BLOCKED on a plate-layer defect: the certified
-//! `EmbeddedPoseGraph` for this profile (`BEKOTEC_EN_23_FI_30_16`) contained no
-//! edge at all that transitioned between a straight run and a turn, so "corners
-//! with the `BroadTurn90` edge" was not constructible and the graph was a heap
-//! of disjoint islands. Root cause: nodes are interned by exact
-//! `(x, y, heading)` (`plate::graph::pose_key`), and the turn templates were
-//! bare tangent arcs whose endpoints landed 80 mm off every channel crossing --
-//! never commensurate with the 150 mm period of the straight chains.
+//! Lane model tests for the brief's 3000x2400 / VA150 / wall_clearance-75
+//! fixture, amended per the controller's Task 4 handoff after the plate
+//! layer became reversal-closed (commits 5ea8997, 182ebf4):
 //!
-//! Task 3b fixed that at the plate layer: the turns are now
-//! `Line + Arc(>= 80 mm) + Line` composites whose lead-in and lead-out
-//! straights absorb exactly that offset, so both endpoint poses land on the
-//! shared anchor lattice. The tests below were originally written to pin the
-//! broken state; they are kept, inverted, as the positive certification they
-//! were probing for. If they fail again, the families have come apart and the
-//! lane model is blocked once more.
+//! - The brief's naive ring count (`floor(2250/(2*150))+1 = 8`) assumed a
+//!   ring can sit at one uniform inset on all four sides. It cannot:
+//!   `BroadTurn90`'s corner geometry forces the horizontal-side and
+//!   vertical-side insets to differ by an odd multiple of 75mm
+//!   (`.superpowers/sdd/task-4-diagnosis.md` §1.7), so the real count for
+//!   this fixture is **7**, not 8.
+//! - `Lane` carries per-side channel coordinates (`rect_local: RectMm`) --
+//!   there is no single uniform inset to report.
+//! - The outermost ring is cross-checked against `plate_graph.rs`'s
+//!   independently hand-verified `e_the_outermost_closable_ring_is_a_real_
+//!   directed_cycle` test (same fixture, same phase: rows y=187.5/2212.5,
+//!   columns x=112.5/2887.5, 60 edges, 2 of the 4 corners are path
+//!   reversals) rather than re-deriving the expectation here.
 
+use single_loop_solver::circuit::{
+    ConnectionZone, Field, LoopGraphView, RectMm, build_connection_zone, build_graph_view,
+    build_lanes,
+};
 use single_loop_solver::geometry::Polygon;
 use single_loop_solver::model::Point;
 use single_loop_solver::plate::{
-    EmbeddedPoseGraph, PlateGraphLimits, PlateInstance, PlateProfile, PlateTransform, TemplateId,
+    EmbeddedPoseGraph, PlateGraphLimits, PlateInstance, PlateProfile, PlateTransform, PoseEdge,
     build_embedded_graph,
 };
-use std::collections::HashMap;
 
 fn point(x: f64, y: f64) -> Point {
     Point::new(x, y)
@@ -39,7 +43,8 @@ fn rect_polygon() -> Polygon {
 
 // Edge 0 runs from (0,0) to (3000,0) with inward point (1500,1200) on the
 // +y side, so plate-local coordinates equal world coordinates here (same
-// convention as circuit_fields.rs / circuit_zone.rs).
+// convention as circuit_fields.rs / circuit_zone.rs / plate_graph.rs's
+// `rectangle_3000x2400_graph`).
 fn transform() -> PlateTransform {
     PlateTransform::from_edge(
         point(0.0, 0.0),
@@ -51,10 +56,22 @@ fn transform() -> PlateTransform {
     .unwrap()
 }
 
-/// The real, certified pose graph for the brief's 3000x2400 rectangle
-/// fixture at wall_clearance 75mm (the `rectangle_field_produces_expected_
-/// ring_count` test's own numbers) -- built once per test call, a few
-/// hundred ms.
+fn field() -> Field {
+    // The whole room is one field for a plain rectangle (circuit_fields.rs
+    // proves this via `decompose_fields`); constructed directly here to
+    // avoid pulling in the guillotine machinery for a fixture that doesn't
+    // exercise it.
+    Field {
+        id: 0,
+        rect_local: RectMm {
+            min: point(0.0, 0.0),
+            max: point(3000.0, 2400.0),
+        },
+    }
+}
+
+/// The real, certified pose graph for the fixture -- built once per call,
+/// on the order of a second including the reversal pass.
 fn graph() -> EmbeddedPoseGraph {
     let instance = PlateInstance::new(
         rect_polygon(),
@@ -66,116 +83,133 @@ fn graph() -> EmbeddedPoseGraph {
     build_embedded_graph(&instance, 75.0, PlateGraphLimits::default()).unwrap()
 }
 
-fn is_straight_family(id: TemplateId) -> bool {
-    matches!(id, TemplateId::Straight0 | TemplateId::Straight45)
+/// A tiny connection zone tucked against the connection edge (width 300mm,
+/// depth 50mm, centered at x=1500) -- shallow enough to stay entirely below
+/// every ring's bottom row (the outermost ring's is already at y=187.5) and
+/// every ring's leftmost column-node y (150), so it cannot clip any lane
+/// edge in this fixture. `build_lanes` doesn't otherwise care about the
+/// zone's placement, but the fixture must not accidentally truncate a lane
+/// the amendments say should be a complete cycle.
+fn zone() -> ConnectionZone {
+    use single_loop_solver::circuit::ConnectionInput;
+    build_connection_zone(
+        &rect_polygon(),
+        &transform(),
+        &ConnectionInput {
+            edge_index: 0,
+            center_offset_mm: 1500.0,
+            zone_width_mm: 300.0,
+            zone_depth_mm: 50.0,
+        },
+    )
+    .unwrap()
 }
 
-/// node id -> ids of every edge touching it, as either start or end.
-fn touch_map(graph: &EmbeddedPoseGraph) -> HashMap<u32, Vec<u32>> {
-    let mut touches: HashMap<u32, Vec<u32>> = HashMap::new();
-    for edge in &graph.edges {
-        touches.entry(edge.start.id).or_default().push(edge.id);
-        touches.entry(edge.end.id).or_default().push(edge.id);
-    }
-    touches
+fn view(graph: &EmbeddedPoseGraph) -> LoopGraphView {
+    build_graph_view(graph, &zone(), &transform())
+}
+
+fn edge_by_id(graph: &EmbeddedPoseGraph, id: u32) -> &PoseEdge {
+    graph.edges.iter().find(|edge| edge.id == id).unwrap()
 }
 
 #[test]
-fn straight0_chains_form_long_connected_runs() {
-    // Sanity baseline for the tests below: Straight0 chains to itself
-    // extensively, so a ring's straight sides are buildable on their own. This
-    // was already true while the graph was disconnected -- it isolates "the
-    // straight runs are fine" from "the turns now attach to them", which is
-    // what the next two tests establish.
+fn rectangle_field_produces_expected_ring_count() {
+    // 3000 x 2400 room, wall clearance 75, VA 150: the naive uniform-inset
+    // formula gives 8, but no uniform-inset ring is constructible (see
+    // module docs). The graph-verified count is 7.
     let graph = graph();
-    let touches = touch_map(&graph);
-    let straight0_both_ends_shared = graph
-        .edges
-        .iter()
-        .filter(|e| e.template_id == TemplateId::Straight0)
-        .filter(|e| touches[&e.start.id].len() > 1 && touches[&e.end.id].len() > 1)
-        .count();
+    let view = view(&graph);
+    let lanes = build_lanes(&field(), 150.0, &graph, &view, &transform(), 75.0).unwrap();
+    assert_eq!(lanes.len(), 7);
+    assert_eq!(lanes[0].id, 0);
     assert!(
-        straight0_both_ends_shared > 500,
-        "expected long Straight0 chains in a 3000x2400 room, found only \
-         {straight0_both_ends_shared} edges with both endpoints shared"
+        lanes[0].node_ids.len() > lanes[6].node_ids.len(),
+        "outer ring is longer"
     );
 }
 
 #[test]
-fn broad_turn_90_hands_over_to_straight_runs_at_both_ends() {
-    // The maneuver Task 4's brief needs: a BroadTurn90 instance whose start
-    // pose exactly equals the end pose of a straight edge, and whose end pose
-    // exactly equals the start pose of another one. Before task 3b, zero of
-    // 2144 BroadTurn90 edges touched anything at all.
+fn outermost_ring_matches_the_hand_verified_sixty_edge_cycle() {
+    // Cross-check against plate_graph.rs's independently hand-computed
+    // ring: rows y=187.5 (m=2) / y=2212.5 (m=29), columns x=112.5 (n=1) /
+    // x=2887.5 (n=38); 4 corners + 56 straights = 60 edges.
     let graph = graph();
-    let touches = touch_map(&graph);
-    let turns: Vec<_> = graph
-        .edges
-        .iter()
-        .filter(|e| e.template_id == TemplateId::BroadTurn90)
-        .collect();
-    assert!(
-        !turns.is_empty(),
-        "fixture must contain BroadTurn90 candidates for this test to mean anything"
+    let view = view(&graph);
+    let lanes = build_lanes(&field(), 150.0, &graph, &view, &transform(), 75.0).unwrap();
+    let outer = &lanes[0];
+    assert_eq!(
+        outer.rect_local,
+        RectMm {
+            min: point(112.5, 187.5),
+            max: point(2887.5, 2212.5),
+        }
     );
-    let routable = turns
-        .iter()
-        .filter(|turn| {
-            let straight_at = |node: u32, turn_id: u32| {
-                touches[&node]
-                    .iter()
-                    .any(|&id| id != turn_id && is_straight_family(graph.edges[id as usize].template_id))
-            };
-            straight_at(turn.start.id, turn.id) && straight_at(turn.end.id, turn.id)
-        })
-        .count();
-    assert!(
-        routable * 2 > turns.len(),
-        "only {routable} of {} BroadTurn90 edges have a straight run at BOTH ends; the corner \
-         maneuver is not generally routable",
-        turns.len()
-    );
+    assert_eq!(outer.edge_ids.len(), 60);
+    assert_eq!(outer.node_ids.len(), 61);
 }
 
 #[test]
-fn every_arc_template_family_shares_nodes_with_the_straight_family() {
-    // Generalizes the BroadTurn90 check across all five direction-changing
-    // templates. Before task 3b the graph's only connected sub-families were
-    // Straight0<->Straight0, Straight45<->Straight45 and a closed
-    // {BroadTurn135, BroadReverse180, TeardropReverse} cluster; BroadTurn45 and
-    // BroadTurn90 connected to nothing at all, not even each other. Every one
-    // of them must now meet a straight run at a shared pose node.
+fn ring_edge_counts_match_the_diagnosed_nested_family() {
+    // task-4-diagnosis.md §2.3's nested-ring table (edges column), derived
+    // independently from the same parity algebra: 4 corners plus
+    // 2*(width-375)/150 row hops plus 2*(height-225)/150 column hops for
+    // each successively-nested ring.
     let graph = graph();
-    let touches = touch_map(&graph);
-    for family in [
-        TemplateId::BroadTurn45,
-        TemplateId::BroadTurn90,
-        TemplateId::BroadTurn135,
-        TemplateId::BroadReverse180,
-        TemplateId::TeardropReverse,
-    ] {
-        let edges: Vec<_> = graph
-            .edges
-            .iter()
-            .filter(|e| e.template_id == family)
-            .collect();
-        assert!(!edges.is_empty(), "fixture must contain {family:?} edges");
-        let attached = edges
-            .iter()
-            .filter(|arc| {
-                [arc.start.id, arc.end.id].iter().any(|node| {
-                    touches[node].iter().any(|&id| {
-                        id != arc.id && is_straight_family(graph.edges[id as usize].template_id)
-                    })
-                })
-            })
-            .count();
+    let view = view(&graph);
+    let lanes = build_lanes(&field(), 150.0, &graph, &view, &transform(), 75.0).unwrap();
+    let edge_counts: Vec<usize> = lanes.iter().map(|lane| lane.edge_ids.len()).collect();
+    assert_eq!(edge_counts, vec![60, 52, 44, 36, 28, 20, 12]);
+}
+
+#[test]
+fn lane_edges_form_a_connected_ordered_ring() {
+    let graph = graph();
+    let view = view(&graph);
+    let lanes = build_lanes(&field(), 150.0, &graph, &view, &transform(), 75.0).unwrap();
+    for lane in &lanes {
+        for pair in lane.edge_ids.windows(2) {
+            let a = edge_by_id(&graph, pair[0]);
+            let b = edge_by_id(&graph, pair[1]);
+            assert_eq!(a.end.id, b.start.id, "edges are chained");
+        }
         assert!(
-            attached > 0,
-            "{family:?} shares no pose node with any straight edge ({} instances checked) -- \
-             the families have come apart again",
-            edges.len()
+            lane.edge_ids
+                .iter()
+                .all(|id| view.usable_edges.contains(id))
         );
     }
+}
+
+#[test]
+fn all_seven_fixture_lanes_are_complete_untruncated_cycles() {
+    // Amendment 4: with the reversal-closed graph, the brief's truncation
+    // rule stands but should not fire on this fixture. A closed cycle's
+    // signature: one more node than edges, first node == last node.
+    let graph = graph();
+    let view = view(&graph);
+    let lanes = build_lanes(&field(), 150.0, &graph, &view, &transform(), 75.0).unwrap();
+    for lane in &lanes {
+        assert_eq!(
+            lane.node_ids.len(),
+            lane.edge_ids.len() + 1,
+            "lane {} is not a closed cycle (truncated?)",
+            lane.id
+        );
+        assert_eq!(
+            lane.node_ids.first(),
+            lane.node_ids.last(),
+            "lane {} does not close",
+            lane.id
+        );
+    }
+}
+
+#[test]
+fn lanes_are_deterministic() {
+    let graph = graph();
+    let view = view(&graph);
+    let a = build_lanes(&field(), 150.0, &graph, &view, &transform(), 75.0).unwrap();
+    let b = build_lanes(&field(), 150.0, &graph, &view, &transform(), 75.0).unwrap();
+    assert_eq!(a, b);
 }

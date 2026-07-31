@@ -2,7 +2,7 @@ mod fields;
 mod types;
 mod zone;
 
-pub use fields::{Field, decompose_fields};
+pub use fields::{Field, Lane, build_lanes, decompose_fields};
 pub use types::{
     ConnectionInput, ConnectionOutput, CoverageOutput, FieldDiagnostics, JournalEntry,
     LocatedSpacing, LoopConstraintCertificate, LoopError, LoopErrorCode, LoopPattern, LoopPlan,

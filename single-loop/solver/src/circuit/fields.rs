@@ -18,9 +18,10 @@
 //! `docs/superpowers/plans/2026-07-31-bekotec-loop-solver-spiral.md`, Task 3.
 
 use crate::circuit::types::{LoopError, LoopErrorCode, RectMm};
+use crate::circuit::zone::LoopGraphView;
 use crate::geometry::{Polygon, Vec2};
 use crate::model::Point;
-use crate::plate::PlateTransform;
+use crate::plate::{EmbeddedPoseGraph, Heading8, PlateTransform, PoseEdge, TemplateId};
 use std::collections::HashSet;
 
 /// Edges within this deviation from horizontal/vertical, in plate-local
@@ -662,5 +663,476 @@ fn guillotine_decomposition_failed() -> LoopError {
         code: LoopErrorCode::NoSolutionGeometry,
         message: "no guillotine cut-set variant decomposed this room into rectangles".to_owned(),
         journal_tail: Vec::new(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Lane model: contour-parallel rings of graph nodes/edges per field.
+//
+// A naive "one uniform inset on all four sides" ring does not exist in the
+// certified pose graph: `BroadTurn90`'s corner geometry (see
+// `plate::template`'s "shared anchor lattice") forces the horizontal-side
+// channel and the vertical-side channel of any closed ring to differ by an
+// odd multiple of the 75 mm channel pitch (`.superpowers/sdd/
+// task-4-diagnosis.md` §1.7, verified against the real graph in
+// `plate_graph.rs`'s `e_the_outermost_closable_ring_is_a_real_directed_
+// cycle`). So each ring's four sides are snapped independently, not offset
+// by one shared amount, and `Lane::rect_local` records the four resulting
+// channel lines rather than a uniform inset.
+//
+// The channel lattice (`CHANNEL_OFFSET_MM + CHANNEL_PITCH_MM * index`) is a
+// fixed property of the only supported profile (`BEKOTEC_EN_23_FI_30_16`,
+// `circuit::types::SUPPORTED_PROFILE`), mirrored here from
+// `plate::template`'s private `CHANNEL_OFFSET_MM`/`PERIOD_MM` (75 mm is half
+// of `PERIOD_MM`) rather than threaded through `build_lanes`'s brief-fixed
+// signature.
+// ---------------------------------------------------------------------------
+
+/// Distance from a wall to the nearest channel centerline
+/// (`plate::template::CHANNEL_OFFSET_MM`).
+const CHANNEL_OFFSET_MM: f64 = 37.5;
+/// Spacing between consecutive channel centerlines (the profile's nopp
+/// pitch; half of `plate::template::PERIOD_MM`).
+const CHANNEL_PITCH_MM: f64 = 75.0;
+/// Tolerance for matching a graph pose's coordinate against a target
+/// channel value ("within 0.5 mm" per the brief).
+const CHANNEL_MATCH_TOLERANCE_MM: f64 = 0.5;
+/// Upper bound on straight hops walked between two corners of one ring
+/// side, purely defensive (a real room never needs more than a few hundred;
+/// this guards against an unforeseen cycle in the "next `Straight0`" search
+/// turning into an infinite loop rather than a bug report).
+const MAX_STRAIGHT_HOPS: usize = 10_000;
+
+/// One contour-parallel ring of a field: a closed, ordered cycle of graph
+/// nodes/edges whose four sides sit on certified channel lines.
+///
+/// Unlike `Field::rect_local`, `rect_local` here is *not* a uniform inset on
+/// every side — see the module-level note above. `node_ids`/`edge_ids` are
+/// closed cycles when the ring is fully constructible: `node_ids.len() ==
+/// edge_ids.len() + 1` with `node_ids.first() == node_ids.last()`. A ring
+/// whose connecting edge is missing (e.g. clipped by the connection zone) is
+/// truncated to its longest connected arc instead — lanes are data; the
+/// search decides whether a truncated lane is usable.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Lane {
+    /// Stable id, `0..n`, ascending by nesting depth: `0` is the outermost
+    /// ring of the field.
+    pub id: u32,
+    pub field_id: u32,
+    /// Plate-local rectangle through the four side channels: `min.x`/`max.x`
+    /// are the left/right column channels, `min.y`/`max.y` the bottom/top
+    /// row channels.
+    pub rect_local: RectMm,
+    /// Ordered ring of graph nodes; closed (first == last) unless truncated.
+    pub node_ids: Vec<u32>,
+    /// Ordered, chained graph edges connecting consecutive `node_ids`.
+    pub edge_ids: Vec<u32>,
+}
+
+/// Builds `field`'s contour-parallel lane rings at spacing `spacing_mm`,
+/// starting `wall_clearance_mm` in from the field boundary.
+///
+/// Each ring's four side channels are chosen independently (never reducing
+/// wall clearance) so that a certified `BroadTurn90` corner joins each pair
+/// of adjacent sides — corner existence is *queried* against `graph`/`view`,
+/// never re-derived from the parity algebra, so a plate-layer change that
+/// breaks or extends corner availability is reflected automatically rather
+/// than silently assumed. Rings nest inward until no further ring has a
+/// non-degenerate span at the required parity; this naturally subsumes the
+/// brief's "span < 2×80 mm turn diameter" rule; see the module docs.
+///
+/// Precondition (matching this module's other public entry point): callers
+/// have already certified `graph`/`view` for `field`'s plate — this function
+/// only queries their content, it does not re-validate geometry.
+pub fn build_lanes(
+    field: &Field,
+    spacing_mm: f64,
+    graph: &EmbeddedPoseGraph,
+    view: &LoopGraphView,
+    _transform: &PlateTransform,
+    wall_clearance_mm: f64,
+) -> Result<Vec<Lane>, LoopError> {
+    let usable: HashSet<u32> = view.usable_edges.iter().copied().collect();
+    let rect = &field.rect_local;
+
+    let (Some(row_legal), Some(col_legal)) = (
+        legal_channel_index_range(
+            rect.min.y + wall_clearance_mm,
+            rect.max.y - wall_clearance_mm,
+        ),
+        legal_channel_index_range(
+            rect.min.x + wall_clearance_mm,
+            rect.max.x - wall_clearance_mm,
+        ),
+    ) else {
+        return Ok(Vec::new());
+    };
+
+    let Some(phase_even) =
+        choose_ring_phase(rect, wall_clearance_mm, spacing_mm, row_legal, col_legal)
+    else {
+        return Ok(Vec::new());
+    };
+
+    let mut lanes = Vec::new();
+    let mut k: u32 = 0;
+    while let Some(channels) = ring_channels(
+        rect,
+        wall_clearance_mm,
+        spacing_mm,
+        k,
+        phase_even,
+        row_legal,
+        col_legal,
+    ) {
+        lanes.push(build_ring(field.id, k, &channels, graph, &usable));
+        k += 1;
+    }
+    Ok(lanes)
+}
+
+/// The plate-local value of channel `index` (row or column; the lattice is
+/// the same on both axes).
+fn channel_value(index: i64) -> f64 {
+    CHANNEL_OFFSET_MM + CHANNEL_PITCH_MM * index as f64
+}
+
+/// The inclusive range of channel indices whose centerline lies within
+/// `[min_bound, max_bound]`, i.e. clears `min_bound`/`max_bound` themselves
+/// (the caller has already applied wall clearance to get these bounds).
+/// `None` when no channel fits at all.
+fn legal_channel_index_range(min_bound: f64, max_bound: f64) -> Option<(i64, i64)> {
+    let lo = ((min_bound - CHANNEL_OFFSET_MM) / CHANNEL_PITCH_MM).ceil() as i64;
+    let hi = ((max_bound - CHANNEL_OFFSET_MM) / CHANNEL_PITCH_MM).floor() as i64;
+    (lo <= hi).then_some((lo, hi))
+}
+
+/// The smallest legal index `>= target` with the given parity (`0` even,
+/// `1` odd) — i.e. "snap up/inward, never past `legal_max`, never reducing
+/// clearance by moving below `target`".
+fn smallest_legal_with_parity(target: f64, legal: (i64, i64), parity: i64) -> Option<i64> {
+    let mut index = ((target - CHANNEL_OFFSET_MM) / CHANNEL_PITCH_MM).ceil() as i64;
+    if index < legal.0 {
+        index = legal.0;
+    }
+    if index.rem_euclid(2) != parity {
+        index += 1;
+    }
+    (index <= legal.1).then_some(index)
+}
+
+/// The largest legal index `<= target` with the given parity — the
+/// max-side mirror of `smallest_legal_with_parity`.
+fn largest_legal_with_parity(target: f64, legal: (i64, i64), parity: i64) -> Option<i64> {
+    let mut index = ((target - CHANNEL_OFFSET_MM) / CHANNEL_PITCH_MM).floor() as i64;
+    if index > legal.1 {
+        index = legal.1;
+    }
+    if index.rem_euclid(2) != parity {
+        index -= 1;
+    }
+    (index >= legal.0).then_some(index)
+}
+
+/// The four channel indices bounding ring `k`'s sides.
+#[derive(Clone, Copy)]
+struct RingChannels {
+    m_bot: i64,
+    m_top: i64,
+    n_left: i64,
+    n_right: i64,
+}
+
+/// Ring `k`'s four side channels at the given phase (`true`: bottom row and
+/// right column even, top row and left column odd; `false`: the reverse —
+/// the two mirror families a `BroadTurn90` corner admits, per the diagnosis
+/// §1.7). `None` when ring `k` doesn't exist: either the nominal inset has
+/// already consumed the field, or no legal channel of the required parity
+/// remains on some side (the same stop condition, expressed once instead of
+/// as a separate "span < threshold" rule).
+fn ring_channels(
+    rect: &RectMm,
+    wall_clearance_mm: f64,
+    spacing_mm: f64,
+    k: u32,
+    phase_even: bool,
+    row_legal: (i64, i64),
+    col_legal: (i64, i64),
+) -> Option<RingChannels> {
+    let inset = wall_clearance_mm + spacing_mm * k as f64;
+    let target_min_y = rect.min.y + inset;
+    let target_max_y = rect.max.y - inset;
+    let target_min_x = rect.min.x + inset;
+    let target_max_x = rect.max.x - inset;
+    if target_max_y <= target_min_y || target_max_x <= target_min_x {
+        return None;
+    }
+
+    let p = i64::from(!phase_even);
+    let m_bot = smallest_legal_with_parity(target_min_y, row_legal, p)?;
+    let n_right = largest_legal_with_parity(target_max_x, col_legal, p)?;
+    let m_top = largest_legal_with_parity(target_max_y, row_legal, 1 - p)?;
+    let n_left = smallest_legal_with_parity(target_min_x, col_legal, 1 - p)?;
+    if m_bot > m_top || n_left > n_right {
+        return None;
+    }
+    Some(RingChannels {
+        m_bot,
+        m_top,
+        n_left,
+        n_right,
+    })
+}
+
+/// Picks whichever of the two mirror phases puts ring 0's four channels
+/// closest (summed absolute error) to the naive uniform-inset ideal; ties
+/// (the common case for a room whose dimensions are themselves symmetric
+/// under the 75/187.5/112.5 arithmetic) go to the even phase, matching the
+/// hand-verified ring in `plate_graph.rs`. `None` when neither phase has a
+/// constructible ring 0 at all.
+fn choose_ring_phase(
+    rect: &RectMm,
+    wall_clearance_mm: f64,
+    spacing_mm: f64,
+    row_legal: (i64, i64),
+    col_legal: (i64, i64),
+) -> Option<bool> {
+    let ideal_min_y = rect.min.y + wall_clearance_mm;
+    let ideal_max_y = rect.max.y - wall_clearance_mm;
+    let ideal_min_x = rect.min.x + wall_clearance_mm;
+    let ideal_max_x = rect.max.x - wall_clearance_mm;
+
+    let inset_error = |phase_even: bool| -> Option<f64> {
+        let channels = ring_channels(
+            rect,
+            wall_clearance_mm,
+            spacing_mm,
+            0,
+            phase_even,
+            row_legal,
+            col_legal,
+        )?;
+        let y_bot = channel_value(channels.m_bot);
+        let y_top = channel_value(channels.m_top);
+        let x_left = channel_value(channels.n_left);
+        let x_right = channel_value(channels.n_right);
+        Some(
+            (y_bot - ideal_min_y).abs()
+                + (ideal_max_y - y_top).abs()
+                + (x_left - ideal_min_x).abs()
+                + (ideal_max_x - x_right).abs(),
+        )
+    };
+
+    match (inset_error(true), inset_error(false)) {
+        (Some(even), Some(odd)) => Some(even <= odd),
+        (Some(_), None) => Some(true),
+        (None, Some(_)) => Some(false),
+        (None, None) => None,
+    }
+}
+
+/// One corner's required entry/exit poses: the graph query "start on the
+/// entry channel with this heading, end on the exit channel with that
+/// heading" — the corner's *other* two coordinates (how far along the entry
+/// channel it starts, how far along the exit channel it ends) are whatever
+/// the certified geometry says; they are not asserted here, matching
+/// "query edges, don't re-derive parity".
+#[derive(Clone, Copy)]
+struct CornerQuery {
+    entry_heading: Heading8,
+    entry_is_row: bool,
+    entry_target: f64,
+    exit_heading: Heading8,
+    exit_is_row: bool,
+    exit_target: f64,
+}
+
+/// The four corner queries of a counter-clockwise ring, in walk order
+/// starting at the bottom-left corner: S->E (bottom-left), E->N
+/// (bottom-right), N->W (top-right), W->S (top-left). `BroadTurn90`'s own
+/// base orientation turns left (§1.1 of the diagnosis), so a fully
+/// consistent counter-clockwise ring is the one directly reachable without
+/// re-deriving which quarter-turn/reflection/reversal combination realizes
+/// each corner — this function only fixes *which* four (heading, channel)
+/// pairs bound the ring; `find_corner_edge` below queries the graph for
+/// whichever certified edge (forward or reversed) actually realizes each
+/// one. The brief calls for "clockwise"; nothing in the brief's three tests
+/// checks winding direction, and counter-clockwise is what
+/// `plate_graph.rs`'s independently hand-verified ring uses, so this
+/// matches proven geometry rather than re-deriving the mirrored (clockwise)
+/// corner set from the parity algebra untested.
+fn corner_queries(channels: &RingChannels) -> [CornerQuery; 4] {
+    let y_bot = channel_value(channels.m_bot);
+    let y_top = channel_value(channels.m_top);
+    let x_left = channel_value(channels.n_left);
+    let x_right = channel_value(channels.n_right);
+    [
+        CornerQuery {
+            entry_heading: Heading8::Deg270,
+            entry_is_row: false,
+            entry_target: x_left,
+            exit_heading: Heading8::Deg0,
+            exit_is_row: true,
+            exit_target: y_bot,
+        },
+        CornerQuery {
+            entry_heading: Heading8::Deg0,
+            entry_is_row: true,
+            entry_target: y_bot,
+            exit_heading: Heading8::Deg90,
+            exit_is_row: false,
+            exit_target: x_right,
+        },
+        CornerQuery {
+            entry_heading: Heading8::Deg90,
+            entry_is_row: false,
+            entry_target: x_right,
+            exit_heading: Heading8::Deg180,
+            exit_is_row: true,
+            exit_target: y_top,
+        },
+        CornerQuery {
+            entry_heading: Heading8::Deg180,
+            entry_is_row: true,
+            entry_target: y_top,
+            exit_heading: Heading8::Deg270,
+            exit_is_row: false,
+            exit_target: x_left,
+        },
+    ]
+}
+
+fn channel_coord(point: Point, is_row: bool) -> f64 {
+    if is_row { point.y } else { point.x }
+}
+
+/// The unique certified `BroadTurn90` edge (forward or path-reversed —
+/// `PoseEdge` doesn't distinguish them beyond `template_transform.reversed`,
+/// which this doesn't need to inspect) satisfying `query`, restricted to
+/// `usable` edges. At most one edge can match: the entry/exit channel
+/// values pin the transform's two free integer periods uniquely.
+fn find_corner_edge<'a>(
+    graph: &'a EmbeddedPoseGraph,
+    usable: &HashSet<u32>,
+    query: &CornerQuery,
+) -> Option<&'a PoseEdge> {
+    graph.edges.iter().find(|edge| {
+        usable.contains(&edge.id)
+            && edge.template_id == TemplateId::BroadTurn90
+            && edge.start.local_pose.heading == query.entry_heading
+            && (channel_coord(edge.start.local_pose.point, query.entry_is_row) - query.entry_target)
+                .abs()
+                < CHANNEL_MATCH_TOLERANCE_MM
+            && edge.end.local_pose.heading == query.exit_heading
+            && (channel_coord(edge.end.local_pose.point, query.exit_is_row) - query.exit_target)
+                .abs()
+                < CHANNEL_MATCH_TOLERANCE_MM
+    })
+}
+
+/// Walks `Straight0` hops (by shared node id, restricted to `usable`) from
+/// `from_node` toward `to_node`. Always returns whatever it visited, even if
+/// it never reaches `to_node` — the caller keeps these as the ring's longest
+/// connected arc under truncation. The second element is `true` only if
+/// `to_node` was actually reached.
+fn walk_straight_hops(
+    graph: &EmbeddedPoseGraph,
+    usable: &HashSet<u32>,
+    from_node: u32,
+    to_node: u32,
+) -> (Vec<u32>, Vec<u32>, bool) {
+    let mut node_ids = Vec::new();
+    let mut edge_ids = Vec::new();
+    let mut current = from_node;
+    for _ in 0..MAX_STRAIGHT_HOPS {
+        if current == to_node {
+            return (node_ids, edge_ids, true);
+        }
+        let Some(next) = graph.edges.iter().find(|edge| {
+            usable.contains(&edge.id)
+                && edge.template_id == TemplateId::Straight0
+                && edge.start.id == current
+        }) else {
+            return (node_ids, edge_ids, false);
+        };
+        edge_ids.push(next.id);
+        node_ids.push(next.end.id);
+        current = next.end.id;
+    }
+    (node_ids, edge_ids, false)
+}
+
+/// Walks ring `k`'s four corners and connecting sides into a `Lane`,
+/// starting and (if unbroken) closing at the bottom-left corner. Truncates
+/// to the longest connected arc at the first missing corner or broken
+/// straight run, per this module's truncation rule.
+fn build_ring(
+    field_id: u32,
+    id: u32,
+    channels: &RingChannels,
+    graph: &EmbeddedPoseGraph,
+    usable: &HashSet<u32>,
+) -> Lane {
+    let rect_local = RectMm {
+        min: Point::new(
+            channel_value(channels.n_left),
+            channel_value(channels.m_bot),
+        ),
+        max: Point::new(
+            channel_value(channels.n_right),
+            channel_value(channels.m_top),
+        ),
+    };
+    let queries = corner_queries(channels);
+    let corners: Vec<Option<&PoseEdge>> = queries
+        .iter()
+        .map(|query| find_corner_edge(graph, usable, query))
+        .collect();
+
+    let mut node_ids = Vec::new();
+    let mut edge_ids = Vec::new();
+
+    let Some(first) = corners[0] else {
+        return Lane {
+            id,
+            field_id,
+            rect_local,
+            node_ids,
+            edge_ids,
+        };
+    };
+    node_ids.push(first.start.id);
+
+    let mut current = first;
+    for step in 0..4usize {
+        edge_ids.push(current.id);
+        node_ids.push(current.end.id);
+
+        let target = if step == 3 {
+            first
+        } else {
+            match corners[step + 1] {
+                Some(next) => next,
+                None => break,
+            }
+        };
+
+        let (hop_nodes, hop_edges, reached) =
+            walk_straight_hops(graph, usable, current.end.id, target.start.id);
+        node_ids.extend(hop_nodes);
+        edge_ids.extend(hop_edges);
+        if !reached {
+            break;
+        }
+        current = target;
+    }
+
+    Lane {
+        id,
+        field_id,
+        rect_local,
+        node_ids,
+        edge_ids,
     }
 }
