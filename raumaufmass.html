@@ -38,10 +38,10 @@
     border-radius:6px;padding:0 12px;min-height:40px;cursor:pointer;color:var(--ink)}
   button:active{background:#eae7dc}
   /* Werkzeugleiste */
-  #topbar{display:flex;gap:8px;align-items:center;padding:8px;background:var(--surface);
+  #topbar{display:flex;gap:6px;align-items:center;padding:8px;background:var(--surface);
     border-bottom:1px solid var(--line)}
   #modes{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
-  #modes button{border:0;border-radius:0;min-width:82px}
+  #modes button{border:0;border-radius:0;min-width:72px}
   #modes button+button{border-left:1px solid var(--line)}
   #modes button[aria-pressed=true]{background:var(--ink);color:var(--surface)}
   #tools{margin-left:auto;display:flex;gap:6px}
@@ -85,6 +85,27 @@
     display:flex;gap:10px;align-items:center;font-size:13.5px;white-space:nowrap}
   #pop[hidden]{display:none}
   #popDel{color:#fff;background:var(--bad);border-color:var(--bad)}
+  /* Bibliothek */
+  #libwrap{position:fixed;inset:0;z-index:9;background:rgba(38,36,31,.35);
+    display:flex;align-items:flex-end;justify-content:center}
+  #libwrap[hidden]{display:none}
+  #libbox{background:var(--surface);width:100%;max-width:560px;max-height:80dvh;
+    overflow-y:auto;border-radius:12px 12px 0 0;padding:14px;
+    border:1px solid var(--line);border-bottom:0}
+  @media(min-width:880px){
+    #libwrap{align-items:center}
+    #libbox{border-radius:10px;border-bottom:1px solid var(--line);max-height:70dvh}
+  }
+  #libhead{display:flex;align-items:center;gap:8px}
+  #libhead h2{font-size:15px;margin:0;flex:1}
+  #libnote{font-size:12px;color:var(--muted);margin:8px 0 10px}
+  .librow{display:flex;align-items:center;gap:10px;padding:10px 4px;
+    border-top:1px solid var(--line);cursor:pointer}
+  .librow .nm{flex:1;min-width:0}
+  .librow .nm b{display:block;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .librow .nm small{color:var(--muted);font-size:12px}
+  .librow.cur .nm b{color:var(--accent)}
+  .librow button{min-height:32px;padding:0 10px;font-size:12.5px;flex:none}
   /* Panel */
   #status{position:sticky;top:0;z-index:3;padding:12px 14px;background:var(--surface);
     border-bottom:1px solid var(--line)}
@@ -162,6 +183,7 @@
       </div>
       <button id="ring" title="Alle Ecken in Anlegereihenfolge zu einem geschlossenen Wandzug verbinden">Schließen</button>
       <div id="tools">
+        <button id="lib" title="Meine Räume" aria-label="Meine Räume">▤</button>
         <button id="undo" title="Rückgängig (Strg+Z)" aria-label="Rückgängig">↶</button>
         <button id="fitview" title="Ansicht einpassen" aria-label="Ansicht einpassen">⛶</button>
       </div>
@@ -186,6 +208,17 @@
           <span class="unit">m</span>
           <button id="entryOk">OK</button>
           <button id="entryX" aria-label="Abbrechen">✕</button>
+        </div>
+      </div>
+      <div id="libwrap" hidden>
+        <div id="libbox">
+          <div id="libhead">
+            <h2>Meine Räume</h2>
+            <button id="libnew">+ Neuer Raum</button>
+            <button id="libclose" aria-label="Schließen">✕</button>
+          </div>
+          <div id="libnote">Räume liegen nur auf diesem Gerät — wichtige Aufmaße als Datei oder Link sichern.</div>
+          <div id="liblist"></div>
         </div>
       </div>
       <div id="pop" hidden><span id="popLabel"></span><button id="popDel">Löschen</button></div>
@@ -4101,6 +4134,57 @@ $('roomname').onclick=()=>{
   if(name && name.trim()){ STORE.rename(currentRoom, name.trim()); currentRoomName=name.trim(); renderPanel(); }
 };
 
+// ================= Bibliothek (Overlay) =================
+const fmtDate=iso=>{
+  const d=new Date(iso);
+  return isFinite(d) ? d.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'}) : '';
+};
+function renderLib(){
+  const list=STORE.list();
+  const el=$('liblist');
+  if(!list.length){ el.innerHTML='<div style="padding:14px 4px;color:var(--muted)">Noch keine Räume.</div>'; return; }
+  el.innerHTML=list.map(r=>
+    `<div class="librow${r.id===currentRoom?' cur':''}" data-id="${r.id}">
+       <div class="nm"><b>${r.name.replace(/</g,'&lt;')}</b>
+         <small>zuletzt ${fmtDate(r.updated)}${r.area!=null?` · ${fmt2(r.area)} m²`:''}</small></div>
+       <button class="ren" title="Umbenennen">Name</button>
+       <button class="exp2" title="Als Datei sichern">Datei</button>
+       <button class="del2" title="Löschen">×</button>
+     </div>`).join('');
+  el.querySelectorAll('.librow').forEach(row=>{
+    const id=row.dataset.id;
+    row.onclick=e=>{
+      if(e.target.tagName==='BUTTON') return;   // Aktionen nicht als "oeffnen" werten
+      openRoom(id); closeLib();
+    };
+    row.querySelector('.ren').onclick=()=>{
+      const r=STORE.load(id);
+      const name=prompt('Raum umbenennen:', r?r.name:'');
+      if(name && name.trim()){ STORE.rename(id,name.trim()); if(id===currentRoom) currentRoomName=name.trim(); renderLib(); renderPanel(); }
+    };
+    row.querySelector('.exp2').onclick=()=>{
+      if(typeof exportRoomAsFile==='function') exportRoomAsFile(id);
+      else setHint('Datei-Export kommt im nächsten Schritt.');
+    };
+    row.querySelector('.del2').onclick=()=>{
+      const r=STORE.load(id);
+      if(!confirm(`Raum „${r?r.name:''}" löschen?`)) return;
+      STORE.remove(id);
+      if(id===currentRoom){
+        const l=STORE.list();
+        if(l.length) openRoom(l[0].id); else newRoom('Neuer Raum');
+      }
+      renderLib();
+    };
+  });
+}
+function openLib(){ renderLib(); $('libwrap').hidden=false; }
+function closeLib(){ $('libwrap').hidden=true; }
+$('lib').onclick=openLib;
+$('libclose').onclick=closeLib;
+$('libnew').onclick=()=>{ newRoom(prompt('Name des neuen Raums:','Neuer Raum')||'Neuer Raum'); closeLib(); };
+$('libwrap').addEventListener('pointerdown',e=>{ if(e.target===$('libwrap')) closeLib(); });
+
 // Die Hotkeys sind auf window gebunden, damit sie ueberall wirken - aber
 // genau deshalb bubbelt auch ein Tastendruck in einem Eingabefeld bis
 // hierher. Ohne die Sperre wuerde eine getippte "1" im Mass den Modus
@@ -4110,6 +4194,7 @@ addEventListener('keydown',e=>{
   if(t && (t.tagName==='INPUT' || t.tagName==='TEXTAREA' || t.isContentEditable)) return;
   if(e.key==='Escape'){
     hidePop();
+    if(!$('libwrap').hidden){ closeLib(); return; }
     if(entryPair){ closeEntry(); return; }
     if(M.sel.length){ M.sel=[]; render(); return; }
     if(M.chain){ M.chain=null; render(); return; }
