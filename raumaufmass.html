@@ -126,6 +126,10 @@
   #wpopVal{font:inherit;font-size:16px;font-variant-numeric:tabular-nums;width:90px;text-align:right;
     padding:7px;border:1px solid var(--line);border-radius:6px;min-width:0}
   #wpopOk{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  #wpopThick{display:flex;gap:8px;align-items:center;margin-top:8px;padding-top:8px;
+    border-top:1px solid var(--line);font-size:13px}
+  #wpopThick:empty{display:none}
+  #wpopThick .muted{color:var(--muted)}
   @media(max-width:879px){
     #wpop{position:fixed;left:0;right:0;bottom:0;min-width:0;border-radius:12px 12px 0 0;
       border-left:0;border-right:0;border-bottom:0;
@@ -395,6 +399,7 @@
           <button id="wpopOk">+ Wert</button>
           <button id="wpopNorth" title="Diese Wand parallel zur oberen Bildschirmkante drehen">Einnorden</button>
         </div>
+        <div id="wpopThick"></div>
       </div>
     </div>
   </div>
@@ -3907,6 +3912,66 @@ globalThis.applyRoomTransform=function(T, p){
 
 // Uebliche Wanddicken in mm - Vorschlaege, keine Auswahlpflicht.
 globalThis.WALL_THICKNESS=[100,115,125,175,240,300,365];
+globalThis.THICK_DEFAULT=240;   // angenommen, solange nichts bekannt ist
+
+// Wandkoerper: das gemessene Polygon ist die INNENkontur, die Dicke wird
+// nach AUSSEN aufgetragen. Je Wand ein Viereck aus den beiden Innenecken
+// und den beiden AUSSENecken; die Aussenecke ist der Schnitt der beiden
+// versetzten Parallelen, also eine Gehrung. Weil beide Waende einer Ecke
+// denselben Schnittpunkt bekommen, stossen ihre Vierecke luecken- und
+// ueberlappungsfrei aneinander - und wo drei Raeume zusammenlaufen, deckt
+// die Gehrung die dreieckige Spitze mit ab, ohne dass sie je beschrieben
+// werden muesste.
+globalThis.wallBands=function(pts, walls, thick, defT){
+  const C=globalThis.CORE, I=C.idx(pts);
+  const ring=C.wallPolygon(pts, walls);
+  if(!ring || ring.length<3) return [];
+  const n=ring.length;
+  // Umlaufsinn einmal: daraus folgt die Aussennormale jeder Kante direkt.
+  // outerNormal je Wand zu fragen baute den Ring je Wand neu - im Zug waere
+  // das ein Dutzend Polygonaufbauten pro Bild.
+  let A2=0;
+  for(let i=0,j=n-1;i<n;j=i++) A2+=ring[j].x*ring[i].y-ring[i].x*ring[j].y;
+  const ccw=A2>0;
+  const key=(a,b)=>[a,b].sort().join('|');
+  const t0=(defT>0)?defT:globalThis.THICK_DEFAULT;
+  const seg=[];
+  for(let i=0;i<n;i++){
+    const p=ring[i], q=ring[(i+1)%n];
+    const L=C.dist(p,q);
+    if(!(L>0)) return [];
+    const u={x:(q.x-p.x)/L, y:(q.y-p.y)/L};
+    const k=key(p.id, q.id);
+    const gemessen=!!(thick && thick[k]>0);
+    seg.push({a:p.id, b:q.id, p, q, u, L, t:gemessen?thick[k]:t0,
+              assumed:!gemessen,
+              // Im Gegenuhrzeigersinn liegt aussen RECHTS der Laufrichtung.
+              n: ccw ? {x:u.y, y:-u.x} : {x:-u.y, y:u.x}});
+  }
+  // Gehrung an der gemeinsamen Ecke v der Waende s1 und s2. Symmetrisch in
+  // s1/s2 - beide Waende bekommen denselben Punkt, auch im Ersatzfall.
+  const ecke=(s1, s2, v)=>{
+    const A={x:v.x+s1.n.x*s1.t, y:v.y+s1.n.y*s1.t};
+    const B={x:v.x+s2.n.x*s2.t, y:v.y+s2.n.y*s2.t};
+    const mitte={x:(A.x+B.x)/2, y:(A.y+B.y)/2};
+    const cr=s1.u.x*s2.u.y - s1.u.y*s2.u.x;
+    if(Math.abs(cr)<1e-9) return mitte;                    // parallel
+    const s=((B.x-A.x)*s2.u.y - (B.y-A.y)*s2.u.x)/cr;
+    const X={x:A.x+s1.u.x*s, y:A.y+s1.u.y*s};
+    // Sehr spitze Ecken treiben die Gehrung ins Weite. Dann fuer BEIDE
+    // Waende derselbe Ersatzpunkt - je Wand ein eigener risse die Ecke auf.
+    const grenze=6*Math.max(s1.t, s2.t);
+    return C.dist(X,v)>grenze ? mitte : X;
+  };
+  const out=[];
+  for(let i=0;i<n;i++){
+    const s=seg[i], vor=seg[(i-1+n)%n], nach=seg[(i+1)%n];
+    out.push({a:s.a, b:s.b, t:s.t, L:s.L, assumed:s.assumed, u:s.u, n:s.n,
+              iA:{x:s.p.x,y:s.p.y}, iB:{x:s.q.x,y:s.q.y},
+              oA:ecke(s, vor, s.p), oB:ecke(s, nach, s.q)});
+  }
+  return out;
+};
 
 // Verankerung eines Nachbarraums, der hinter der Wand a-b entsteht.
 // Die Innenkontur des Nachbarn liegt um die Dicke t nach AUSSEN versetzt;
@@ -4256,6 +4321,9 @@ function autofit(){
     const H=cornerHeights(P, M.hmeas);
     auf=Math.max(...Object.values(H).map(x=>x.h), 0);
   }
+  // Der Wandkoerper steht IMMER nach aussen, nicht nur beim Aufklappen -
+  // sonst schneidet der Bildrand die Aussenkante ab.
+  auf=Math.max(auf, Math.max(THICK_DEFAULT, ...Object.values(M.thick||{})));
   VIEW=fitView(P, VIEW.rot, auf);
 }
 // Zoom um einen festen Bildpunkt (Geraetepixel): der Weltpunkt darunter
@@ -4422,7 +4490,10 @@ function loadNeighbors(){
     const T=roomTransform(r.origin, self.origin);
     const pts=d.pts.map(p=>applyRoomTransform(T,p));
     neighbors.push({id:r.id, name:r.name, walls:d.walls, pts, T,
-                    poly:C.wallPolygon(pts, d.walls)});
+                    thick:d.thick||{},
+                    openings:Array.isArray(d.openings)?d.openings:[],
+                    poly:C.wallPolygon(pts, d.walls),
+                    bands:wallBands(pts, d.walls, d.thick||{}, THICK_DEFAULT)});
   });
 }
 // Geschlossener Raum: Treffer ueber die Flaeche. Ein frisch durch eine Tuer
@@ -4492,6 +4563,15 @@ function drawNeighbors(dpr){
       ctx.fillStyle = hot ? 'rgba(47,140,90,.15)' : 'rgba(42,40,35,.035)';
       ctx.fill();
     }
+    // Wandkoerper des Nachbarn, blass: erst damit liest sich der Plan als
+    // Gebaeude und nicht als Sammlung von Umrissen.
+    n.bands.forEach(b=>{
+      const gaps=n.openings
+        .filter(o=>wallKey(o.a,o.b)===wallKey(b.a,b.b))
+        .map(o=>o.a===b.a ? [o.x,o.x+o.w] : [b.L-(o.x+o.w), b.L-o.x])
+        .sort((p,q)=>p[0]-q[0]);
+      drawBand(b, gaps, dpr, b.assumed?BAND.nachbarAnn:BAND.nachbarMess, false);
+    });
     const I=C.idx(n.pts);
     ctx.strokeStyle = hot ? '#2f8c5a' : '#bdb8a9';
     ctx.lineWidth = (hot?2.5:1.5)*dpr;
@@ -4921,6 +5001,77 @@ function drawOpeningsOnPlan(P, I, dpr){
   });
 }
 
+// ================= Wandkoerper im Grundriss =================
+// Farben der Wandflaeche: gemessene Dicke satt, angenommene blass und mit
+// gestrichelter Aussenkante - eine angenommene Dicke ist eine Aussage, die
+// der Nutzer nie gemacht hat, und darf nicht wie eine Messung aussehen.
+const BAND={ mess:'#d9d4c5', ann:'#eceae1', kante:'#b9b3a3',
+             nachbarMess:'#e6e2d7', nachbarAnn:'#f0eee7' };
+
+// Alle Luecken in dieser Wand, in Wandkoordinaten (0..L ab Ecke a) - die
+// eigenen Oeffnungen und die des Raums auf der anderen Seite. Die geteilte
+// Wand steht in M.shared, sie muss nicht aus der Geometrie erraten werden.
+function wallGaps(a, b, L, iA, iB){
+  const k=wallKey(a,b), out=[];
+  M.openings.forEach(o=>{
+    if(wallKey(o.a,o.b)!==k) return;
+    out.push(o.a===a ? [o.x, o.x+o.w] : [L-(o.x+o.w), L-o.x]);
+  });
+  const sh=M.shared[k];
+  if(sh){
+    const n=neighbors.find(x=>x.id===sh.room);
+    if(n){
+      const I=C.idx(n.pts);
+      n.openings.forEach(o=>{
+        if(wallKey(o.a,o.b)!==wallKey(sh.wall[0],sh.wall[1])) return;
+        if(I[o.a]==null) return;
+        // Laeuft die Wand drueben andersherum? Entscheidet der Vergleich
+        // zweier Abstaende, keine Toleranz: der Anfangspunkt der fremden
+        // Wand liegt naeher an genau einer unserer beiden Ecken.
+        const p=n.pts[I[o.a]];
+        const gleich=C.dist(p,iA)<=C.dist(p,iB);
+        out.push(gleich ? [o.x, o.x+o.w] : [L-(o.x+o.w), L-o.x]);
+      });
+    }
+  }
+  return out.map(([x0,x1])=>[Math.max(0,Math.min(L,x0)), Math.max(0,Math.min(L,x1))])
+            .filter(([x0,x1])=>x1-x0>1)
+            .sort((p,q)=>p[0]-q[0]);
+}
+// Die Wand als Flaeche, an ihren Oeffnungen unterbrochen. Jedes Stueck
+// reicht bis zur Gehrung, damit die Ecken geschlossen bleiben.
+function drawBand(band, gaps, dpr, fuell, kante){
+  const {iA,iB,oA,oB,L,u}=band;
+  const stuecke=[]; let von=0;
+  gaps.forEach(([x0,x1])=>{ if(x0>von) stuecke.push([von,x0]); von=Math.max(von,x1); });
+  if(von<L) stuecke.push([von,L]);
+  // Innen- und Aussenkante laufen parallel, also derselbe Anteil auf beiden.
+  const misch=(p,q,f)=>({x:p.x+(q.x-p.x)*f, y:p.y+(q.y-p.y)*f});
+  stuecke.forEach(([x0,x1])=>{
+    const f0=x0/L, f1=x1/L;
+    const P=[misch(iA,iB,f0), misch(iA,iB,f1), misch(oA,oB,f1), misch(oA,oB,f0)]
+      .map(toScr);
+    ctx.beginPath();
+    P.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
+    ctx.closePath();
+    ctx.fillStyle=fuell; ctx.fill();
+    if(!kante) return;
+    // Nur die AUSSENkante zeichnen - die Innenkante ist die Wandlinie
+    // selbst und wird gleich ohnehin gezogen.
+    ctx.beginPath(); ctx.moveTo(P[3].x,P[3].y); ctx.lineTo(P[2].x,P[2].y);
+    ctx.strokeStyle=BAND.kante; ctx.lineWidth=1*dpr;
+    ctx.setLineDash(band.assumed?[4*dpr,3*dpr]:[]);
+    ctx.stroke(); ctx.setLineDash([]);
+  });
+}
+function drawOwnBands(dpr){
+  if(!M.fit) return;
+  const P=M.drag?M.pts:M.fit.pts;
+  const bands=wallBands(P, M.walls, M.thick, THICK_DEFAULT);
+  bands.forEach(b=>drawBand(b, wallGaps(b.a,b.b,b.L,b.iA,b.iB), dpr,
+                            b.assumed?BAND.ann:BAND.mess, true));
+}
+
 // Hinter jeder Tuer, hinter der noch kein Raum liegt, ein Plus: dort geht
 // es weiter. Nur im geschlossenen Raum - ohne Polygon waere gar nicht
 // entschieden, welche Seite der Wand "hinter" ist.
@@ -4988,6 +5139,7 @@ function drawCanvas(){
   // Nachbarraeume und beide Raumnamen liegen UNTER dem aktiven Aufmass:
   // Kontext, kein Vordergrund.
   drawNeighbors(dpr);
+  drawOwnBands(dpr);
   ownLabelRect = (currentRoom && P.length && currentRoomName && currentRoomName!=='—')
     ? drawRoomLabel(currentRoomName, P, dpr, 'rgba(42,40,35,.30)', 15) : null;
   // Waende. Waehrend eines Zugs toenen sich die Paare, die sich fast
@@ -5005,20 +5157,20 @@ function drawCanvas(){
     ctx.lineWidth=(hot?4:2.5)*dpr;
     // Oeffnungen unterbrechen die Wandlinie - so sieht man im Grundriss,
     // wo eine Tuer oder ein Fenster sitzt, nicht nur in der Wandansicht.
-    const k=[a,b].sort().join('|');
-    const ops=M.openings.filter(o=>[o.a,o.b].sort().join('|')===k)
-      .map(o=>openingWorld(P,a,b,o)).filter(Boolean)
-      .map(r=>({P:r.P,Q:r.Q}))
-      .sort((x,y)=>C.dist(P[I[a]],x.P)-C.dist(P[I[a]],y.P));
-    let von=P[I[a]];
+    // Oeffnungen unterbrechen die Wandlinie - auch die des Raums auf der
+    // anderen Seite, sonst laeuft die Linie quer durch die Luecke, die der
+    // Wandkoerper dort schon zeigt.
+    const A=P[I[a]], B=P[I[b]], L=C.dist(A,B);
+    const gaps=L>0 ? wallGaps(a,b,L,A,B) : [];
     ctx.beginPath();
-    ops.forEach(o=>{
-      const p1=toScr(von), p2=toScr(o.P);
-      ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y);
-      von=o.Q;
+    let von=0;
+    const auf=f=>toScr({x:A.x+(B.x-A.x)*f, y:A.y+(B.y-A.y)*f});
+    gaps.forEach(([x0,x1])=>{
+      if(x0>von){ const p=auf(von/L), q=auf(x0/L); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); }
+      von=Math.max(von,x1);
     });
-    const pv=toScr(von), pb=toScr(P[I[b]]);
-    ctx.moveTo(pv.x,pv.y); ctx.lineTo(pb.x,pb.y);
+    const p=auf(L>0?von/L:0), q=toScr(B);
+    ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y);
     ctx.stroke();
   });
   drawUnfolded(P, I, dpr);
@@ -5436,6 +5588,48 @@ function renderWallPopup(){
   if(!tb.children.length){
     tb.innerHTML='<tr><td style="text-align:left;color:var(--muted)">Noch kein Messwert.</td></tr>';
   }
+  // Wanddicke. Nur fuer echte Waende - eine Diagonale hat keine.
+  const tw=$('wpopThick');
+  tw.innerHTML='';
+  if(!isWall) return;
+  const t=M.thick[k];
+  const span=document.createElement('span');
+  span.textContent = t>0 ? `Wanddicke ${t} mm`
+                         : `Wanddicke ${THICK_DEFAULT} mm (angenommen)`;
+  if(!(t>0)) span.className='muted';
+  const btn=document.createElement('button');
+  btn.textContent = t>0 ? 'ändern' : 'eintragen';
+  btn.onclick=()=>{
+    const neu=fragWanddicke(t>0?t:THICK_DEFAULT);
+    if(neu==null) return;
+    const alt=t>0?t:THICK_DEFAULT;
+    snapshot();
+    M.thick[k]=neu;
+    // Die Wand gehoert zwei Raeumen. Die Dicke drueben mitfuehren - und den
+    // Nachbarn um die Differenz verschieben: seine Innenkontur liegt per
+    // Definition genau diese Dicke von unserer entfernt. Ohne das Nachruecken
+    // zeigte der Plan eine Fuge, die keiner der beiden Raeume behauptet.
+    const sh=M.shared[k];
+    if(sh && Math.abs(neu-alt)>1e-9){
+      const r=STORE.load(sh.room), self=STORE.load(currentRoom);
+      if(r && r.data && r.origin && self && self.origin){
+        const Pn=M.fit?M.fit.pts:M.pts;
+        const nrm=outerNormal(Pn, M.walls, a, b);
+        const c=Math.cos(self.origin.rot), s2=Math.sin(self.origin.rot);
+        const d={...r.data, thick:{...(r.data.thick||{})}};
+        d.thick[wallKey(sh.wall[0], sh.wall[1])]=neu;
+        STORE.save(sh.room, {data:d, origin:{
+          x:r.origin.x+(nrm.x*c-nrm.y*s2)*(neu-alt),
+          y:r.origin.y+(nrm.x*s2+nrm.y*c)*(neu-alt),
+          rot:r.origin.rot}});
+      }
+    }
+    recompute();
+    loadNeighbors();
+    renderWallPopup();
+    render();
+  };
+  tw.append(span, btn);
 }
 $('wpopX').onclick=closeWallPopup;
 $('wpopOk').onclick=()=>{
@@ -7524,6 +7718,56 @@ globalThis.selfChecks=function(){
     chk('nachbar: Laenge bleibt erhalten', near(C.dist(fit.pts[0],fit.pts[1]),4000,1e-6));
     chk('nachbar: Analyse ohne Redundanz, aber ohne Absturz',
       !!an && an.redundancy===0);
+  }
+  // --- Wandkoerper: Innenkontur + Dicke nach aussen, Ecken per Gehrung ---
+  {
+    const wb=globalThis.wallBands;
+    chk('band: wallBands vorhanden', typeof wb==='function');
+    if(wb){
+      const rechteck=(w,h)=>({
+        pts:[{id:'A',x:0,y:0},{id:'B',x:w,y:0},{id:'C',x:w,y:h},{id:'D',x:0,y:h}],
+        walls:[['A','B'],['B','C'],['C','D'],['D','A']]});
+      const r=rechteck(4000,3000);
+      const b=wb(r.pts, r.walls, {}, 240);
+      chk('band: je Wand ein Koerper', b.length===4);
+      chk('band: ohne Eintrag gilt der angenommene Wert',
+        b.every(x=>x.t===240 && x.assumed===true));
+      // Aussenecken eines Rechtecks: genau die um 240 nach aussen
+      // versetzten Ecken - also (-240,-240) bis (4240,3240).
+      const alle=b.flatMap(x=>[x.oA,x.oB]);
+      chk('band: Aussenkontur ist das um 240 vergroesserte Rechteck',
+        alle.every(p=>near(Math.min(Math.abs(p.x+240),Math.abs(p.x-4240)),0,1e-6)
+                   && near(Math.min(Math.abs(p.y+240),Math.abs(p.y-3240)),0,1e-6)));
+      // Die entscheidende Eigenschaft: benachbarte Vierecke teilen die Ecke.
+      const teiltEcken=bs=>bs.every(x=>{
+        const nach=bs.find(y=>y.a===x.b);
+        return nach && near(x.oB.x,nach.oA.x,1e-9) && near(x.oB.y,nach.oA.y,1e-9);
+      });
+      chk('band: Nachbarwaende teilen ihre Aussenecke', teiltEcken(b));
+      // Flaeche der vier Vierecke = Umfang*t + 4*t^2 (jede Ecke einmal)
+      const flaeche=q=>{
+        const P=[q.iA,q.iB,q.oB,q.oA]; let a=0;
+        for(let i=0,j=3;i<4;j=i++) a+=P[j].x*P[i].y-P[i].x*P[j].y;
+        return Math.abs(a)/2;
+      };
+      chk('band: Gesamtflaeche = Umfang*t + 4*t²',
+        near(b.reduce((s,q)=>s+flaeche(q),0), 14000*240+4*240*240, 1e-6));
+      // Unterschiedliche Dicken je Wand: die Gehrung muss beide tragen.
+      const b2=wb(r.pts, r.walls, {'A|B':300}, 240);
+      chk('band: eingetragene Dicke schlaegt den angenommenen Wert',
+        b2.some(x=>x.t===300 && x.assumed===false) && b2.some(x=>x.assumed===true));
+      chk('band: gemischte Dicken teilen die Ecke trotzdem', teiltEcken(b2));
+      // Sehr spitze Ecke: der Ersatzpunkt muss fuer BEIDE Waende gelten,
+      // sonst klafft genau dort die Wand auf.
+      const spitz={pts:[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:3800,y:200}],
+                   walls:[['A','B'],['B','C'],['C','A']]};
+      const b3=wb(spitz.pts, spitz.walls, {}, 240);
+      chk('band: spitze Ecke reisst nicht auf', b3.length===3 && teiltEcken(b3));
+      chk('band: spitze Ecke bleibt in der Naehe der Ecke',
+        b3.every(x=>C.dist(x.oA,x.iA)<6*240+1 && C.dist(x.oB,x.iB)<6*240+1));
+      chk('band: offener Wandzug -> nichts zu zeichnen',
+        wb(r.pts, [['A','B'],['B','C']], {}, 240).length===0);
+    }
   }
   // --- computeSuspects: eine Quelle fuer Tabelle UND Plan-Markierung ---
   {
