@@ -3522,6 +3522,55 @@ globalThis.clampOpening=function(shape, op){
   return o;
 };
 
+// Oeffnungen sind exklusiv: eine Tuer im Fenster ergibt kein Bauteil.
+// Beruehrung (gemeinsame Kante) ist erlaubt, echte Ueberdeckung nicht -
+// zwei Fenster direkt nebeneinander mit gemeinsamem Pfosten sind ein
+// realer Fall, ein Millimeter Ueberlappung dagegen ein Fehler.
+const OVERLAP_EPS = 1;   // mm; darunter gilt es als Beruehrung, nicht als Ueberdeckung
+globalThis.openingsOverlap=function(a, b){
+  return a.x + a.w > b.x + OVERLAP_EPS
+      && b.x + b.w > a.x + OVERLAP_EPS
+      && a.y + a.h > b.y + OVERLAP_EPS
+      && b.y + b.h > a.y + OVERLAP_EPS;
+};
+// Passt die Oeffnung an dieser Stelle - in der Wand UND ohne die anderen
+// zu ueberdecken?
+globalThis.openingPlaceable=function(shape, op, others){
+  if(!globalThis.openingFits(shape, op)) return false;
+  return !(others||[]).some(o=>o.id!==op.id && globalThis.openingsOverlap(op, o));
+};
+// Zug aufloesen: erst die volle Bewegung, sonst nur waagerecht, sonst nur
+// senkrecht, sonst gar nicht. Das laesst die Oeffnung an einer fremden
+// Kante ENTLANGGLEITEN, statt sie stumpf festzuhalten.
+globalThis.slideOpening=function(shape, op, ziel, others){
+  const clamp=globalThis.clampOpening, ok=globalThis.openingPlaceable;
+  const voll=clamp(shape, {...op, x:ziel.x, y:ziel.y});
+  if(ok(shape, voll, others)) return voll;
+  const nurX=clamp(shape, {...op, x:ziel.x, y:op.y});
+  if(ok(shape, nurX, others)) return nurX;
+  const nurY=clamp(shape, {...op, x:op.x, y:ziel.y});
+  if(ok(shape, nurY, others)) return nurY;
+  return {...op};
+};
+// Freien Platz suchen, wenn die Vorbelegung schon besetzt ist. Erst auf
+// der Vorzugshoehe nach rechts wandern, dann in Hoehenstufen - so landet
+// eine zweite Tuer neben der ersten und nicht darueber.
+globalThis.findFreeSpot=function(shape, op, others){
+  if(globalThis.openingPlaceable(shape, op, others)) return op;
+  const schritt=Math.max(50, op.w/4);
+  const hMax=Math.max(shape.ha, shape.hb);
+  for(let dy=0; dy<=hMax; dy+=Math.max(100, op.h/2)){
+    for(const y of (dy===0?[op.y]:[op.y+dy, op.y-dy])){
+      if(y<0) continue;
+      for(let x=0; x<=shape.L-op.w+1e-6; x+=schritt){
+        const k=globalThis.clampOpening(shape, {...op, x, y});
+        if(globalThis.openingPlaceable(shape, k, others)) return k;
+      }
+    }
+  }
+  return null;
+};
+
 // Vorbelegung beim Einsetzen: nichts erscheint an absurder Stelle, auch
 // ohne eine einzige Messung. Tuer steht auf dem Boden, Fenster und
 // Wandloch sitzen mittig im oberen Bereich.
@@ -5026,9 +5075,19 @@ document.querySelectorAll('#wAdd button').forEach(b=>{
     const shape=currentShape();
     if(!shape) return;
     const kind=b.dataset.add;
+    const vorschlag=defaultOpening(shape, kind);
+    vorschlag.id='o'+openSeq;
+    // Vorbelegung kann besetzt sein - dann daneben einsetzen statt
+    // uebereinander. Ist die Wand voll, ehrlich absagen.
+    const platz=findFreeSpot(shape, vorschlag, wallOpenings());
+    if(!platz){
+      setHint('Kein freier Platz mehr in dieser Wand — erst Platz schaffen oder kleiner wählen.');
+      return;
+    }
     snapshot();
-    const o=defaultOpening(shape, kind);
+    const o={...platz};
     o.id='o'+(openSeq++);
+    o.kind=kind;
     o.a=M.wallSel.a; o.b=M.wallSel.b;
     // Vorbelegte Oeffnungsart: die in Deutschland uebliche.
     if(kind==='door') o.swing={type:'turn', hinge:'left', out:false};
@@ -5140,8 +5199,23 @@ function renderOpeningPopup(){
 function applySize(o, w, h){
   const shape=currentShape();
   if(!shape) return;
+  const andere=wallOpenings().filter(x=>x.id!==o.id);
+  const gross=clampOpening(shape, {...o, w, h});
+  if(!openingPlaceable(shape, gross, andere)){
+    // Erst am Platz versuchen, dann daneben - und nur absagen, wenn es
+    // wirklich nirgends passt. Stilles Abschneiden waere eine Luege.
+    const platz=findFreeSpot(shape, gross, andere);
+    if(!platz){
+      setHint('Diese Größe überdeckt eine andere Öffnung — kein freier Platz in der Wand.');
+      renderOpeningPopup();
+      return;
+    }
+    snapshot(); Object.assign(o, platz); recompute();
+    setHint('Größe geändert — Öffnung ist ausgewichen.');
+    return;
+  }
   snapshot();
-  Object.assign(o, clampOpening(shape, {...o, w, h}));
+  Object.assign(o, gross);
   recompute();
 }
 $('opW').onchange=()=>{
@@ -5222,7 +5296,9 @@ addEventListener('pointermove',e=>{
   if(!shape||!o) return;
   if(wallDrag.snap){ pushSnapshot(wallDrag.snap); wallDrag.snap=null; }
   const d=evDev(e), w=wToWall(d.x,d.y);
-  const moved=clampOpening(shape, {...o, x:w.x-wallDrag.gx, y:w.y-wallDrag.gy});
+  // Oeffnungen sind exklusiv: slideOpening laesst sie an einer fremden
+  // Kante entlanggleiten statt sie stumpf festzuhalten.
+  const moved=slideOpening(shape, o, {x:w.x-wallDrag.gx, y:w.y-wallDrag.gy}, wallOpenings());
   o.x=moved.x; o.y=moved.y; o.w=moved.w; o.h=moved.h;
   render();
 });
@@ -6651,6 +6727,42 @@ globalThis.selfChecks=function(){
       (()=>{ const o=globalThis.defaultOpening(shape,'window');
              return near(o.x+o.w/2, shape.L/2, 1e-9) && o.y>0
                  && globalThis.openingFits(shape,o); })());
+    // --- Oeffnungen sind exklusiv ---
+    {
+      const A={id:'a',x:1000,y:0,w:1000,h:2000};
+      const ov=globalThis.openingsOverlap;
+      chk('exklusiv: echte Ueberdeckung erkannt',
+        ov(A,{id:'b',x:1500,y:500,w:1000,h:1000})===true);
+      chk('exklusiv: Beruehrung an der Kante ist erlaubt',
+        ov(A,{id:'b',x:2000,y:0,w:800,h:2000})===false);
+      chk('exklusiv: uebereinander ohne Hoehenueberschneidung ist erlaubt',
+        ov(A,{id:'b',x:1000,y:2000,w:1000,h:400})===false);
+      chk('exklusiv: daneben ist erlaubt',
+        ov(A,{id:'b',x:2500,y:0,w:500,h:2000})===false);
+      chk('exklusiv: placeable prueft Wand UND Nachbarn',
+        globalThis.openingPlaceable(shape,{id:'b',x:1500,y:0,w:900,h:1500},[A])===false
+        && globalThis.openingPlaceable(shape,{id:'b',x:2100,y:0,w:900,h:1500},[A])===true);
+      chk('exklusiv: eine Oeffnung kollidiert nicht mit sich selbst',
+        globalThis.openingPlaceable(shape,A,[A])===true);
+      chk('exklusiv: Zug gleitet waagerecht an der Nachbarin entlang',
+        (()=>{ // B links von A, Ziel liegt rechts UND tiefer -> x wird
+               // blockiert, die Hoehenaenderung muss trotzdem durchgehen
+               const B={id:'b',x:0,y:0,w:900,h:1000};
+               const r=globalThis.slideOpening(shape,B,{x:1200,y:1400},[A]);
+               return r.y===1400 && r.x===0; })());
+      chk('exklusiv: voll blockierter Zug laesst die Oeffnung stehen',
+        (()=>{ const B={id:'b',x:0,y:0,w:900,h:2000};
+               const r=globalThis.slideOpening(shape,B,{x:1100,y:0},[A]);
+               return r.x===0 && r.y===0; })());
+      chk('exklusiv: freier Platz wird gefunden, wenn die Vorbelegung besetzt ist',
+        (()=>{ const neu={id:'c',x:1000,y:0,w:800,h:1900};
+               const f=globalThis.findFreeSpot(shape,neu,[A]);
+               return !!f && globalThis.openingPlaceable(shape,f,[A]); })());
+      chk('exklusiv: volle Wand -> kein Platz, ehrliches null',
+        (()=>{ const voll={id:'x',x:0,y:0,w:shape.L,h:2400};
+               const neu={id:'y',x:0,y:0,w:800,h:1000};
+               return globalThis.findFreeSpot(shape,neu,[voll])===null; })());
+    }
     chk('oeffnung: Vorbelegung passt auch in eine winzige Wand',
       (()=>{ const eng={L:700, ha:1800, hb:1800,
                         poly:[{x:0,y:0},{x:700,y:0},{x:700,y:1800},{x:0,y:1800}]};
