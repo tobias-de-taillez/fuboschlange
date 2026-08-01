@@ -130,7 +130,7 @@
       <div class="row"><label>Bahnabstand (mm)</label><input type="number" id="randSpacing" step="5" min="10" max="500"></div>
       <div class="row"><label>Bahnen</label><input type="number" id="randPasses" min="0" max="30" step="1"></div>
       <p class="hint" id="randWHint"></p>
-      <p class="hint">Fensterwände im Plan anklicken.</p>
+      <div class="chips" id="winChips"></div>
     </div>
 
     <div class="grp">
@@ -735,10 +735,15 @@ function randzoneRuns(F,poly,sel,level,eps){
 function randzonePath(F,poly,sel,eps){
   if(!sel.length||S.randPasses<1) return [];
   const lanes=[];
+  randzonePath.dropped=0;
   for(let j=0;j<S.randPasses;j++){
     const runs=randzoneRuns(F,poly,sel,S.edgeGap+j*S.randSpacing,eps);
     if(!runs.length) break;
     runs.sort((a,b)=>b.length-a.length);
+    // Nur das laengste Stueck wird verlegt. Liegen die Fensterwaende nicht
+    // beieinander, faellt der Rest weg - das darf nicht stillschweigend
+    // passieren, deshalb wird es gezaehlt und in validate() gemeldet.
+    randzonePath.dropped+=runs.length-1;
     lanes.push(j%2 ? runs[0].slice().reverse() : runs[0]);
   }
   if(!lanes.length) return [];
@@ -916,7 +921,7 @@ function snappedManifold(){ return nearestOnRing(S.manifold,S.poly).pt; }
 // fuer den Uebergang von der Randzone ins Feld. Bei einem Kreis ohne Randzone
 // bleibt es bei null - Ein- und Austritt der Schnecke liegen dann schon am
 // Verteiler.
-const leadCount=(n,hasRand)=>(n>1?2*n:0)+(hasRand?1:0);
+const leadCount=(n,hasRand)=>(n===1&&!hasRand)?0:2*n+(hasRand?n:0);
 const leadLevel=k=>S.edgeGap+randDepth()+(k+0.5)*LANE();
 const fieldStart=(n,hasRand)=>S.edgeGap+randDepth()+leadCount(n,hasRand)*LANE();
 // Weg von A nach B ueber Spur k: senkrecht auf die Spur, auf ihr entlang,
@@ -950,9 +955,10 @@ function buildLoops(parts){
     const seed=nearestOnRing(M,poly).pt;
     const sp=spiralRoom(F,fieldStart(parts.length,hasRand),S.s,ISO_EPS,seed);
     const rand=randzonePath(Fraw,poly,sel,ISO_EPS);
+    const randDropped=randzonePath.dropped>0;
     const field=sp.path;
     if(!field.length&&!rand.length) return;
-    raw.push({gi,field,rand,split:sp.split,levels:sp.levels,
+    raw.push({gi,field,rand,split:sp.split,levels:sp.levels,randDropped,
               head:rand.length?rand[0]:field[0],
               tail:field.length?field[field.length-1]:rand[rand.length-1]});
   });
@@ -964,7 +970,9 @@ function buildLoops(parts){
   conns.sort((a,b)=>dist(b.t,M)-dist(a.t,M));
   const lane={};
   conns.forEach((c,i)=>{ lane[c.r.gi+'/'+c.kind]=Math.min(i,Math.max(0,nL-1)); });
-  const midLane=Math.max(0,nL-1);            // innerste Spur, direkt am Feld
+  // Jeder Kreis bekommt eine eigene Spur fuer den Uebergang Randzone -> Feld.
+  // Teilten sie sich eine, laegen zwei Rohre aufeinander.
+  const midLane=r=>Math.max(0,nL-1-raw.findIndex(x=>x===r));
   return raw.map(r=>{
     const L=k=>lane[r.gi+'/'+k]??0;
     const leadIn  = nL?corridorPath(Fall,M,r.head,L('in')) :[M,r.head];
@@ -973,11 +981,12 @@ function buildLoops(parts){
     // endet dort, wo die Fensterwaende enden, das Feld beginnt am Verteiler.
     // Gerade durchgezogen waere das eine Diagonale quer durchs Verlegefeld.
     const mid = (r.rand.length&&r.field.length)
-      ? corridorPath(Fall,r.rand[r.rand.length-1],r.field[0],midLane) : [];
+      ? corridorPath(Fall,r.rand[r.rand.length-1],r.field[0],midLane(r)) : [];
     const pts=[...leadIn.slice(0,-1),...r.rand,...mid.slice(1,-1),...r.field,...leadOut.slice(1)];
     const f=fillet(pts,S.bendRadius);
     return {gi:r.gi,pts,field:r.field,rand:r.rand,leadIn,leadOut,mid,
-            rings:r.levels,length:f.length,minR:f.minR,split:r.split};
+            rings:r.levels,length:f.length,minR:f.minR,split:r.split,
+            randDropped:r.randDropped};
   }).filter(l=>l.pts.length>1);
 }
 function autofit(){
@@ -1363,11 +1372,14 @@ function draw(plan){
     const a=room[i], b=room[(i+1)%room.length];
     return a&&b?line(a,b,'var(--window)',34):'';
   }).join('');
-  // Alle Kanten als unsichtbare Klickflächen, damit man Fensterwände am Plan
-  // wählen kann statt über Namens-Chips — Namen gibt es nicht mehr.
-  const edgeHit=room.map((a,i)=>{
+  // Wandnummern, damit die Auswahl im Panel eindeutig zuzuordnen ist.
+  const edgeNums=room.map((a,i)=>{
     const b=room[(i+1)%room.length];
-    return `<line class="edgehit" data-edge="${i}" x1="${X(a.x)}" y1="${Y(a.y)}" x2="${X(b.x)}" y2="${Y(b.y)}" stroke="transparent" stroke-width="90" style="cursor:pointer"/>`;
+    const mid={x:(a.x+b.x)/2,y:(a.y+b.y)/2}, c={x:(RW())/2,y:(RH())/2};
+    const off=scl(unit(sub(mid,c)),260);      // Beschriftung nach außen rücken
+    return `<text x="${X(mid.x+off.x)}" y="${Y(mid.y+off.y)+30}" font-size="90" `
+      +`fill="${S.windowEdges.includes(i)?'#b45309':'#94a3b8'}" text-anchor="middle" `
+      +`font-family="system-ui">${i+1}</text>`;
   }).join('');
 
   // Jeder Kreis als EIN durchgehender Pfad (Verteiler -> ... -> Verteiler),
@@ -1412,7 +1424,7 @@ function draw(plan){
     `<rect x="0" y="0" width="${W+2*m}" height="${H+2*m}" fill="#fff"/>`+
     `<polygon points="${roomClosed.map(p=>PP(p)).join(' ')}" fill="#f8fafc" stroke="#334155" stroke-width="22" stroke-linejoin="round"/>`+
     hmLayer+
-    winSeg+loopPaths+marks+edgeHit+
+    winSeg+loopPaths+marks+edgeNums+
     `<circle cx="${X(M.x)}" cy="${Y(M.y)}" r="55" fill="#0f172a"/>`+
     `<circle cx="${X(M.x)}" cy="${Y(M.y)}" r="26" fill="#fff"/>`+
     `<text x="${X(M.x)}" y="${Y(M.y)-90}" font-size="82" fill="#0f172a" text-anchor="middle" font-family="system-ui">Verteiler</text>`+
@@ -1424,11 +1436,21 @@ function draw(plan){
   sv.addEventListener('click',onPlanClick);
   sv.addEventListener('mousemove',onPlanHover);
   sv.addEventListener('mouseleave',hideInspector);
-  sv.querySelectorAll('.edgehit').forEach(el=>el.addEventListener('click',ev=>{
-    ev.stopPropagation();                        // sonst wandert auch der Verteiler
-    const i=+el.dataset.edge, at=S.windowEdges.indexOf(i);
-    if(at<0) S.windowEdges.push(i); else S.windowEdges.splice(at,1);
-    S.windowEdges.sort((a,b)=>a-b);
+}
+
+// Fensterwände als Liste im Panel. Am Plan anklicken ginge auch, kollidiert
+// dort aber mit dem Setzen des Verteilers — beides sind Klicks auf eine Wand.
+// Die Nummern stehen im Plan an den Wänden.
+function renderWinChips(){
+  const box=document.getElementById('winChips'); if(!box) return;
+  box.innerHTML=S.poly.map((a,i)=>{
+    const b=S.poly[(i+1)%S.poly.length], on=S.windowEdges.includes(i);
+    return `<label class="chip${on?' on':''}"><input type="checkbox" value="${i}"${on?' checked':''}>`
+      +`Wand ${i+1} · ${(dist(a,b)/1000).toFixed(2)} m</label>`;
+  }).join('');
+  box.querySelectorAll('input').forEach(cb=>cb.addEventListener('change',()=>{
+    S.windowEdges=[...box.querySelectorAll('input:checked')].map(x=>+x.value);
+    cb.closest('.chip').classList.toggle('on',cb.checked);
     recompute();
   }));
 }
@@ -1734,9 +1756,10 @@ function initRoomUI(){
     setPoly(rectPoly(w,h));
     S.windowEdges=S.windowEdges.filter(i=>i<4);
     S.roomName=''; if(window.__snapBack) window.__snapBack();
-    recompute();
+    roomHint(); renderWinChips(); recompute();
   };
   rw.oninput=setRect; rh.oninput=setRect;
+  roomHint(); renderWinChips();
   const file=document.getElementById('impFile');
   document.getElementById('impBtn').onclick=()=>file.click();
   file.onchange=async ()=>{
@@ -1749,7 +1772,7 @@ function initRoomUI(){
     if(err){ alert('Import nicht möglich: '+err); return; }
     const nb=polyBBox(S.poly); rw.value=Math.round(nb.w); rh.value=Math.round(nb.h);
     if(window.__snapBack) window.__snapBack();
-    recompute();
+    roomHint(); renderWinChips(); recompute();
   };
 }
 
@@ -2078,7 +2101,9 @@ function crossingBench(n,seed){
     const w=1500+Math.round(rnd()*9000/50)*50, h=1500+Math.round(rnd()*5000/50)*50;
     const kind=Math.floor(rnd()*4);
     const a=300+Math.round(rnd()*w*0.45/50)*50, b=300+Math.round(rnd()*h*0.45/50)*50;
-    if(a>=w-300||b>=h-300) continue;
+    // kind 2 (T-Form) setzt a links UND rechts ab: bei 2a >= w schlaegt das
+    // Polygon in sich um und der Fall misst Unsinn statt den Planer.
+    if(a>=w-300||b>=h-300||(kind===2&&2*a>=w-300)) continue;
     setPoly(shape(w,h,a,b,kind));
     S.s=75+Math.round(rnd()*225/5)*5;
     S.bendRadius=20+Math.round(rnd()*100/5)*5;
@@ -2096,10 +2121,12 @@ function crossingBench(n,seed){
       edgeGap:S.edgeGap,randSpacing:S.randSpacing,randPasses:S.randPasses,
       win:S.windowEdges.join('+')||'-',mode:S.loopMode,
       mf:`${Math.round(S.manifold.x)},${Math.round(S.manifold.y)}`});
-    let plan,x=0;
-    try{ plan=autofit(); x=loopCrossings(plan)+loopsOutside(plan); }
+    // Getrennt zaehlen: eine Kreuzung ist ein anderer Mangel als ein Rohr, das
+    // den Raum verlaesst. Zusammengezaehlt sagt die Zahl nicht, welcher.
+    let plan,x=0,outs=0;
+    try{ plan=autofit(); x=loopCrossings(plan); outs=loopsOutside(plan); }
     catch(e){ fails.push({err:String(e),cfg:cfg()}); continue; }
-    if(x>0) fails.push({cross:x,cfg:cfg()});
+    if(x>0||outs>0) fails.push({cross:x,outside:outs,cfg:cfg()});
   }
   Object.assign(S,save);
   return fails;
@@ -2118,6 +2145,8 @@ function validate(plan){
     errs.push('Kein Verlegefeld — Raum zu klein für die aktuellen Abstände.');
   // ponytail: bei aufspaltenden Konturen ist die Übergabe zwischen den Ästen
   // noch nicht als kreuzungsfrei nachgewiesen (Phase 0 des Plans).
+  if(plan.loops.some(l=>l.randDropped))
+    errs.push('Die gewählten Fensterwände hängen nicht zusammen. Verlegt wird nur die längste Randzone; die übrigen Wände bleiben ohne. Zusammenhängende Wände wählen.');
   if(plan.loops.some(l=>l.split))
     errs.push('Dieser Grundriss zerfällt beim Verlegen in mehrere Bereiche (U-, T- oder H-Form). Der Übergang zwischen ihnen ist noch nicht als kreuzungsfrei nachgewiesen — den Plan vor dem Verlegen prüfen.');
   return errs;

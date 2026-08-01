@@ -52,7 +52,8 @@ schrägen Wänden, je bei 100, 150 und 200 mm Bahnabstand. Zerfallende Grundriss
 (U, T, H) werden vollständig verlegt, aber die Übergabe zwischen den Ästen ist
 noch nicht als kreuzungsfrei nachgewiesen; das Werkzeug weist das im Plan aus.
 
-**Die Anbindeleitungen sind noch nicht kreuzungsfrei** — der Bench schlägt fehl.
+**Die Anbindeleitungen sind noch nicht kreuzungsfrei** — der Bench schlägt fehl:
+von 40 Zufallssets 35 mit einer Kreuzung, 3 mit einem Rohr außerhalb des Raums.
 Sie laufen inzwischen im Randkorridor statt quer durchs Feld, aber die
 Spurzuteilung ist noch nicht verschachtelt (siehe `docs/superpowers/specs/`).
 Der Bahnabstand ist weiterhin eine Eingabe und wird nicht aus dem Längenbudget

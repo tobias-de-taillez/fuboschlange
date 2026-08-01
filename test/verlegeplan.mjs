@@ -25,7 +25,11 @@ const ok=api.selfChecks();
 // Der Bench ist kein Tor: Anbindeleitungen sind bewusst noch nicht
 // kreuzungsfrei (siehe Plan). Er wird gemessen und gemeldet, nicht bewertet.
 const bench=api.crossingBench(40);
-console.log(`\nKreuzungs-Bench: ${bench.length} von 40 Sets mit Befund`);
+const cross=bench.filter(f=>f.cross>0).length;
+const outside=bench.filter(f=>f.outside>0).length;
+const threw=bench.filter(f=>f.err).length;
+console.log(`\nKreuzungs-Bench: ${bench.length} von 40 Sets mit Befund`
+  +`  (Kreuzung ${cross}, Rohr außerhalb ${outside}, Ausnahme ${threw})`);
 if(bench.length) console.log('  erster Befund:',JSON.stringify(bench[0]));
 console.log(ok?'\nALLE CHECKS GRÜN':'\nCHECKS ROT');
 process.exit(ok?0:1);
