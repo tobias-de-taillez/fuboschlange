@@ -19,7 +19,23 @@ const CONNECTION_PORT_ENDPOINT_MARGIN_MM: f64 = 33.0;
 
 /// Width of the ring around the zone rectangle, in plate-local millimeters,
 /// that is searched for graph-node entry/exit candidates.
-const ENTRY_RING_MM: f64 = 150.0;
+///
+/// `pub(crate)` for one cross-module read: `circuit::validate` bounds the
+/// free-form zone geometry by this same ring (design spec §4's "Übergänge
+/// Zone ↔ Graph nur an Pose-Ankern"), and must not keep a second copy that
+/// could drift from the value the candidate set was actually built with.
+/// `validate.rs` is a sibling under the same `circuit` parent, matching
+/// `types::ALLOWED_SPACINGS_MM`'s own crate-visible-for-a-sibling precedent.
+///
+/// This constant, not any manufacturing rule, is what decides whether a
+/// spiral's two attachment rings can both be reachable from one zone: the
+/// system "reach ring 1" (`zone_depth + ENTRY_RING_MM ≥ ring0_offset +
+/// spacing`) and "do not swallow ring 0" (`zone_depth < ring0_offset`) is
+/// satisfiable exactly when `ENTRY_RING_MM > spacing_mm`. At the 150 mm
+/// spacing the spiral's turn templates require, 150 == 150 makes it
+/// unsatisfiable by a single millimetre of slack. See
+/// `tests/circuit_validate.rs`'s module doc.
+pub(crate) const ENTRY_RING_MM: f64 = 150.0;
 
 /// The noppen-free connection zone: an axis-parallel rectangle in the plate
 /// frame where the loop enters/exits the certified graph, plus the two

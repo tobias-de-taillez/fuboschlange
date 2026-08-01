@@ -53,16 +53,19 @@
 //!
 //! ## Locality, touching and the 50 mm rule
 //!
-//! `localArcLength = 80π mm` (`constants::LOCAL_ARC_LENGTH_MM`). Two points
-//! of the path closer together than that *along the path* are local: a
-//! minimum-radius turn brings them within millimetres of each other by
-//! construction, so neither the 16 mm hard floor nor the 50 mm soft rule can
-//! be applied to them without rejecting every legal path. What protects
-//! local geometry instead is the crossing rule (design spec §5: "keine
-//! Selbstkreuzung, keine Berührung nichtbenachbarter Teile"), checked here
-//! as: no two primitives more than one step apart in the path may intersect
-//! at all. Adjacent primitives are exempt because they share an endpoint by
-//! construction.
+//! `localArcLength = 80π mm` (`constants::LOCAL_ARC_LENGTH_MM`) separates the
+//! two rules, and only the soft one. The 50 mm nominal laying distance is a
+//! *pattern* target that design spec §7 explicitly permits a Kehre to
+//! undershoot, so it is measured on nonlocal pairs only. The 16 mm
+//! centre-centre floor is *physics* -- two 16 mm pipes closer than that are
+//! overlapping tubes -- and §7's own wording ("bis zur physischen
+//! Nichtberührung") keeps it in force inside the turn, so it is applied
+//! unconditionally to every pair of primitives at least two steps apart,
+//! local or not. Adjacent primitives are the only exemption, and not on
+//! locality grounds: they share an endpoint by construction, so their
+//! distance is identically zero. The same pair set carries design spec §5's
+//! crossing rule ("keine Selbstkreuzung, keine Berührung nichtbenachbarter
+//! Teile"): no two primitives more than one step apart may intersect at all.
 //!
 //! Pair classification is exact at both extremes; only pairs that straddle
 //! the locality boundary are covered approximately, and [`pair_ranges`]
@@ -84,7 +87,7 @@
 
 use crate::circuit::fields::Lane;
 use crate::circuit::types::{JournalEntry, LocatedSpacing, LoopError, LoopErrorCode, RectMm};
-use crate::circuit::zone::{ConnectionZone, LoopGraphView, zone_contains_local};
+use crate::circuit::zone::{ConnectionZone, ENTRY_RING_MM, LoopGraphView, zone_contains_local};
 use crate::constants::{
     LOCAL_ARC_LENGTH_MM, MAX_COVERAGE_CELLS, MAX_LENGTH_MM, MIN_NONLOCAL_SPACING_MM, MIN_RADIUS_MM,
     PIPE_DIAMETER_MM,
@@ -94,7 +97,10 @@ use crate::geometry::{
     primitive_distance, primitive_intersections,
 };
 use crate::model::{PathPrimitive, Point};
-use crate::plate::{EmbeddedPoseGraph, PlateInstance, PlateTransform, PoseEdge};
+use crate::plate::{
+    EmbeddedPoseGraph, PlateInstance, PlateTransform, PoseEdge, TemplateId,
+    primitive_circle_clearance,
+};
 use crate::validation::{CoverageBounds, coverage_bounds};
 use std::collections::BTreeSet;
 
@@ -203,9 +209,11 @@ impl LoopContext<'_> {
 /// one, so holding a `LoopCertificate` is proof the checks ran.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LoopCertificate {
-    /// The smallest measured centre-centre distance between two nonlocal
-    /// parts of the path, and where it was found. Always greater than
-    /// `PIPE_DIAMETER_MM + TOUCHING_RESERVE_MM`.
+    /// The smallest measured centre-centre distance between two parts of the
+    /// path at least two primitives apart, and where it was found. Always
+    /// greater than `PIPE_DIAMETER_MM + TOUCHING_RESERVE_MM`. Unconditional:
+    /// unlike the 50 mm penalty, this is not restricted to nonlocal pairs
+    /// (see [`measure_spacing`]).
     pub min_center_distance_mm: LocatedSpacing,
     /// `Σ max(0, 50 − d)` over the measured per-pair minima (design spec
     /// §5's soft rule; feeds `escalate::Candidate::penalty_sum_mm`).
@@ -231,6 +239,9 @@ enum Reason {
     EdgeProvenance,
     PatternProvenance,
     ZoneAutomaton,
+    ZoneBounds,
+    ZoneAnchor,
+    NoppClearance,
     PathContinuity,
     PortEndpoints,
     BendRadius,
@@ -248,6 +259,9 @@ impl Reason {
             Self::EdgeProvenance => "EDGE_PROVENANCE",
             Self::PatternProvenance => "PATTERN_PROVENANCE",
             Self::ZoneAutomaton => "ZONE_AUTOMATON",
+            Self::ZoneBounds => "ZONE_BOUNDS",
+            Self::ZoneAnchor => "ZONE_ANCHOR",
+            Self::NoppClearance => "NOPP_CLEARANCE",
             Self::PathContinuity => "PATH_CONTINUITY",
             Self::PortEndpoints => "PORT_ENDPOINTS",
             Self::BendRadius => "BEND_RADIUS",
@@ -287,9 +301,10 @@ fn reject_at(reason: Reason, detail: impl AsRef<str>, witness: Point) -> LoopErr
 ///
 /// The checks run in a fixed order, chosen so each rejection names its own
 /// cause rather than an earlier check's collateral damage: section structure,
-/// edge provenance, pattern provenance, the zone automaton, path continuity
-/// and ports, bend radius, polygon containment, self-intersection, nonlocal
-/// spacing, total length, coverage.
+/// edge provenance, pattern provenance, zone discipline (bounds and anchors),
+/// the zone automaton, path continuity, ports, bend radius, polygon
+/// containment, nopp clearance, self-intersection, spacing, total length,
+/// coverage.
 pub fn certify_loop(
     candidate: &LoopCandidate,
     context: &LoopContext,
@@ -297,6 +312,8 @@ pub fn certify_loop(
     check_section_structure(candidate)?;
     check_edge_provenance(candidate, context)?;
     check_pattern_provenance(candidate, context)?;
+
+    check_zone_discipline(candidate, context)?;
 
     let primitives = candidate.primitives();
     check_zone_automaton(&primitives, context)?;
@@ -307,6 +324,7 @@ pub fn certify_loop(
     check_ports(&path, context)?;
     let min_bend_radius_mm = check_bend_radius(&path)?;
     check_inside_polygon(&path, context)?;
+    check_nopp_clearance(&path, context)?;
     check_self_intersections(&path)?;
     let spacing = measure_spacing(&path)?;
 
@@ -595,6 +613,27 @@ fn check_pattern_provenance(
                         format!("turn section {index} claims a lane; a turn crosses two rings"),
                     ));
                 }
+                // The template family is read off the real graph edge, not
+                // taken from the candidate's own label: "spiral" means the
+                // Kehre is a certified reverse-family placement (design spec
+                // §11's pattern provenance), and a generator that labelled a
+                // straight `Turn` would otherwise pass.
+                let edge_id = section.edge_id.expect("graph sections carry an edge id");
+                let edge =
+                    find_edge(context.graph, edge_id).expect("existence checked by provenance");
+                if !matches!(
+                    edge.template_id,
+                    TemplateId::TeardropReverse | TemplateId::BroadReverse180
+                ) {
+                    return Err(reject(
+                        Reason::PatternProvenance,
+                        format!(
+                            "turn section {index} renders graph edge {edge_id}, whose template \
+                             {:?} is not one of the certified reverse-family turns",
+                            edge.template_id
+                        ),
+                    ));
+                }
             }
             _ => {
                 let Some(lane_id) = section.lane_id else {
@@ -748,6 +787,92 @@ fn point_on_rect_boundary(point: Point, rect: &RectMm) -> bool {
     let within_y = point.y >= rect.min.y - eps && point.y <= rect.max.y + eps;
     let within_x = point.x >= rect.min.x - eps && point.x <= rect.max.x + eps;
     (on_vertical_side && within_y) || (on_horizontal_side && within_x)
+}
+
+// ---------------------------------------------------------------------------
+// Zone discipline: how far free-form geometry may reach, and where it may
+// meet the certified graph
+// ---------------------------------------------------------------------------
+
+/// Design spec §4's two structural rules for the connection zone, neither of
+/// which the automaton can express:
+///
+/// 1. **Bounds.** Free-form geometry is bounded by the zone rectangle grown
+///    by [`ENTRY_RING_MM`] -- the very ring `build_graph_view` searched for
+///    anchors. Not the bare rectangle: a connector necessarily leaves it to
+///    reach an anchor (`zone::attach_port`'s own doc). Without this rule a
+///    "zone" section is spatially unbounded and could route uncertified
+///    geometry across the whole room, which is exactly what edge provenance
+///    exists to prevent everywhere else.
+/// 2. **Anchors.** Each zone-graph junction must land on a real graph node
+///    that `build_graph_view` listed as an entry candidate -- design spec
+///    §4's "Übergänge Zone ↔ Graph nur an Pose-Ankern auf dem Zonenrand".
+fn check_zone_discipline(
+    candidate: &LoopCandidate,
+    context: &LoopContext,
+) -> Result<(), LoopError> {
+    let transform = context.transform();
+    let allowed = expand_rect(&context.zone.rect_local, ENTRY_RING_MM);
+    for (index, section) in candidate.sections.iter().enumerate() {
+        if section.kind != SectionKind::Zone {
+            continue;
+        }
+        for primitive in &section.primitives {
+            let bounds = transform.primitive_to_local(primitive).bounds();
+            if !rect_contains_rect(&allowed, &bounds) {
+                return Err(reject_at(
+                    Reason::ZoneBounds,
+                    format!(
+                        "zone section {index} routes free-form geometry outside the connection \
+                         zone's own {ENTRY_RING_MM:.0} mm anchor ring"
+                    ),
+                    primitive.point_at(0.5),
+                ));
+            }
+        }
+    }
+
+    let anchors: BTreeSet<u32> = context.view.entry_candidates.iter().copied().collect();
+    let sections = &candidate.sections;
+    let junctions = [
+        end_of(
+            sections[0]
+                .primitives
+                .last()
+                .expect("structure check rejects empty sections"),
+        ),
+        start_of(&sections[sections.len() - 1].primitives[0]),
+    ];
+    for junction in junctions {
+        let anchored = context
+            .graph
+            .nodes
+            .iter()
+            .any(|node| anchors.contains(&node.id) && same_point(node.world_point, junction));
+        if !anchored {
+            return Err(reject_at(
+                Reason::ZoneAnchor,
+                "a zone-graph transition does not sit on a certified entry anchor",
+                junction,
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn rect_contains_rect(outer: &RectMm, inner: &crate::geometry::Aabb) -> bool {
+    let eps = PROVENANCE_POSITION_TOLERANCE_MM;
+    inner.min.x >= outer.min.x - eps
+        && inner.max.x <= outer.max.x + eps
+        && inner.min.y >= outer.min.y - eps
+        && inner.max.y <= outer.max.y + eps
+}
+
+fn expand_rect(rect: &RectMm, margin_mm: f64) -> RectMm {
+    RectMm {
+        min: Point::new(rect.min.x - margin_mm, rect.min.y - margin_mm),
+        max: Point::new(rect.max.x + margin_mm, rect.max.y + margin_mm),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -964,6 +1089,52 @@ fn check_inside_polygon(path: &CanonicalPath, context: &LoopContext) -> Result<(
     Ok(())
 }
 
+/// Design spec §5's nopp rule: the path must clear every expanded nopp body
+/// that survived `zone::filter_zone_nopps`, by the profile's laying
+/// tolerance.
+///
+/// The graph sections inherit this from their edges' own plate certification,
+/// which edge provenance already pins -- but the free-form zone connectors do
+/// not, and `filter_zone_nopps` only clears the zone *rectangle*, while a
+/// connector reaches into the anchor ring outside it. `zone::attach_port`
+/// certifies the connectors it builds; nothing certifies connectors built any
+/// other way, so the validator does it here rather than trusting the
+/// generator's choice of constructor. Same predicate and same sign convention
+/// as `attach_port`'s own check.
+fn check_nopp_clearance(path: &CanonicalPath, context: &LoopContext) -> Result<(), LoopError> {
+    let tolerance_mm = context.instance.profile.laying_tolerance_mm;
+    for primitive in path.primitives() {
+        // The nopp list is thousands of entries on a real room and the path
+        // is hundreds of primitives, so reject the overwhelming majority by
+        // bounding box before running the analytic clearance.
+        let bounds = primitive.bounds();
+        for nopp in &context.instance.nopps {
+            let reach = nopp.forbidden_radius_mm + tolerance_mm;
+            if nopp.center.x < bounds.min.x - reach
+                || nopp.center.x > bounds.max.x + reach
+                || nopp.center.y < bounds.min.y - reach
+                || nopp.center.y > bounds.max.y + reach
+            {
+                continue;
+            }
+            let clearance_mm =
+                primitive_circle_clearance(primitive, nopp.center, nopp.forbidden_radius_mm);
+            if clearance_mm < -tolerance_mm {
+                return Err(reject_at(
+                    Reason::NoppClearance,
+                    format!(
+                        "the path overlaps an expanded nopp body by {:.3} mm, more than the \
+                         {tolerance_mm} mm laying tolerance",
+                        -clearance_mm
+                    ),
+                    nopp.center,
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Design spec §5's crossing rule: no self-intersection and no contact
 /// between non-adjacent parts. Adjacent primitives are skipped because they
 /// share an endpoint by construction; everything two or more steps apart must
@@ -1003,17 +1174,33 @@ fn check_self_intersections(path: &CanonicalPath) -> Result<(), LoopError> {
 // Nonlocal spacing
 // ---------------------------------------------------------------------------
 
+#[derive(Debug)]
 struct SpacingReport {
     minimum: LocatedSpacing,
     penalty_sum_mm: f64,
     worst_penalty: Option<LocatedSpacing>,
 }
 
-/// Design spec §11's fourth bullet: analytic pair distances with the path
-/// arc-length locality notion. Every nonlocal primitive pair contributes its
-/// own measured minimum once; the global minimum must clear the 16 mm
-/// physical floor, and each pair below 50 mm contributes `50 − d` to the soft
-/// penalty.
+/// Design spec §5's hard minimum distance and §11's fourth bullet's soft
+/// 50 mm rule. Two separate sweeps over the same primitive pairs, because
+/// they are two different rules over two different pair sets:
+///
+/// - **The 16 mm centre-centre floor is unconditional.** It applies to every
+///   pair of primitives at least two steps apart in the path, measured over
+///   their whole extent, whether or not they are local. Locality is a
+///   *pattern* notion -- design spec §7 permits the nominal spacing to be
+///   undershot inside a Kehre -- but "bis zur physischen Nichtberührung"
+///   states the physical floor still holds there, and two passes of a 16 mm
+///   pipe 5 mm apart are overlapping tubes no matter how close together they
+///   are along the path. Only *adjacent* primitives are exempt, and for a
+///   structural reason that has nothing to do with locality: they share an
+///   endpoint by construction, so their distance is identically zero. That is
+///   the same pair set `check_self_intersections` scans.
+/// - **The 50 mm soft rule is nonlocal-only.** It is the nominal laying
+///   distance, which a minimum-radius turn legitimately undershoots, so it is
+///   measured only where the two points are at least `LOCAL_ARC_LENGTH_MM`
+///   apart along the path (see [`pair_ranges`]), and each qualifying pair
+///   contributes its own measured minimum once.
 fn measure_spacing(path: &CanonicalPath) -> Result<SpacingReport, LoopError> {
     let primitives = path.primitives();
     let prefix = path.prefix_lengths();
@@ -1022,6 +1209,29 @@ fn measure_spacing(path: &CanonicalPath) -> Result<SpacingReport, LoopError> {
     let mut worst_penalty: Option<LocatedSpacing> = None;
 
     for first in 0..primitives.len() {
+        // The hard floor: every pair at least two steps apart, whole extent.
+        for second in (first + 2)..primitives.len() {
+            let closest = primitive_distance(
+                &primitives[first],
+                ParameterRange::FULL,
+                &primitives[second],
+                ParameterRange::FULL,
+            );
+            let located = LocatedSpacing {
+                distance_mm: closest.distance_mm,
+                first_point: closest.point_on_a,
+                second_point: closest.point_on_b,
+            };
+            if minimum
+                .as_ref()
+                .is_none_or(|best| located.distance_mm < best.distance_mm)
+            {
+                minimum = Some(located);
+            }
+        }
+        // The soft rule: nonlocal pairs only, including the adjacent pair
+        // (which `pair_ranges` will class as local and skip, but is included
+        // for completeness rather than assumed away).
         for second in (first + 1)..primitives.len() {
             let ranges = pair_ranges(
                 prefix[first],
@@ -1052,12 +1262,6 @@ fn measure_spacing(path: &CanonicalPath) -> Result<SpacingReport, LoopError> {
             let Some(pair_minimum) = pair_minimum else {
                 continue;
             };
-            if minimum
-                .as_ref()
-                .is_none_or(|best| pair_minimum.distance_mm < best.distance_mm)
-            {
-                minimum = Some(pair_minimum.clone());
-            }
             let penalty = (MIN_NONLOCAL_SPACING_MM - pair_minimum.distance_mm).max(0.0);
             if penalty > 0.0 {
                 penalty_sum_mm += penalty;
@@ -1074,8 +1278,8 @@ fn measure_spacing(path: &CanonicalPath) -> Result<SpacingReport, LoopError> {
     let Some(minimum) = minimum else {
         return Err(reject(
             Reason::CenterDistance,
-            "no two parts of the path are far enough apart along it to be measured; \
-             the loop is too short to certify",
+            "a loop needs at least three primitives before any two of them are far enough \
+             apart in the path to be measured against each other",
         ));
     };
     let floor_mm = PIPE_DIAMETER_MM + TOUCHING_RESERVE_MM;
@@ -1083,8 +1287,8 @@ fn measure_spacing(path: &CanonicalPath) -> Result<SpacingReport, LoopError> {
         return Err(reject_at(
             Reason::CenterDistance,
             format!(
-                "two nonlocal parts of the path are {:.3} mm apart centre to centre, \
-                 at or below the {floor_mm:.2} mm floor",
+                "two parts of the path are {:.3} mm apart centre to centre, at or below the \
+                 {floor_mm:.2} mm physical floor",
                 minimum.distance_mm
             ),
             minimum.first_point,
@@ -1182,6 +1386,102 @@ fn start_of(primitive: &PathPrimitive) -> Point {
 fn end_of(primitive: &PathPrimitive) -> Point {
     match primitive {
         PathPrimitive::Line { end, .. } | PathPrimitive::Arc { end, .. } => *end,
+    }
+}
+
+#[cfg(test)]
+mod spacing_rule_tests {
+    //! The two spacing rules differ in *which pairs they apply to*, and that
+    //! difference is only observable from inside the module: `certify_loop`
+    //! gates on G1 continuity and the 80 mm bend radius before it ever
+    //! measures, and on such a path two points closer than 16 mm in space are
+    //! necessarily within ~16 mm of each other along the path too (the chord
+    //! bound in `pair_ranges`' doc, read backwards). So a *local* pair below
+    //! the floor cannot be reached through the public entry point at all --
+    //! which is exactly why the rule must not quietly depend on locality.
+    //! These build the `CanonicalPath` directly.
+    use super::*;
+    use crate::geometry::CanonicalPath;
+
+    /// Two parallel legs `gap_mm` apart, joined by a short cross leg. The
+    /// legs are 100 mm so that even the pair's farthest-apart points are
+    /// `2 * 100 + gap < 80*pi` apart along the path: the pair is *entirely*
+    /// local, which `pair_ranges` skips outright. Anything these tests
+    /// observe therefore comes from the unconditional floor, not from the
+    /// nonlocal sweep.
+    fn hairpin(gap_mm: f64) -> CanonicalPath {
+        CanonicalPath::from_connected(vec![
+            PathPrimitive::Line {
+                start: Point::new(100.0, 0.0),
+                end: Point::new(0.0, 0.0),
+            },
+            PathPrimitive::Line {
+                start: Point::new(0.0, 0.0),
+                end: Point::new(0.0, gap_mm),
+            },
+            PathPrimitive::Line {
+                start: Point::new(0.0, gap_mm),
+                end: Point::new(100.0, gap_mm),
+            },
+        ])
+    }
+
+    #[test]
+    fn the_hairpin_pair_really_is_local() {
+        // Guards the two tests below: if this ever became a straddling pair,
+        // they would silently start proving the nonlocal sweep instead.
+        assert!(pair_ranges(0.0, 100.0, 130.0, 100.0).is_empty());
+    }
+
+    #[test]
+    fn the_touching_floor_applies_to_local_pairs_too() {
+        let error = measure_spacing(&hairpin(10.0))
+            .expect_err("10 mm centre-centre is overlapping pipe, local or not");
+        assert!(
+            error.message.starts_with("CENTER_DISTANCE"),
+            "got: {}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn a_local_pair_above_the_floor_is_accepted_without_penalty() {
+        // The same shape at 30 mm: above the physical floor, below the 50 mm
+        // nominal spacing -- but local, so the soft rule does not apply and
+        // no penalty accrues. This is design spec §7's "lokale
+        // Abstandsunterschreitung ... ist zulaessig".
+        let report = measure_spacing(&hairpin(30.0)).expect("30 mm clears the physical floor");
+        assert!((report.minimum.distance_mm - 30.0).abs() < 1e-6);
+        assert_eq!(report.penalty_sum_mm, 0.0);
+        assert!(report.worst_penalty.is_none());
+    }
+}
+
+#[cfg(test)]
+mod alternation_tests {
+    //! `check_alternation` is only reachable through a candidate whose arm
+    //! spans three or more rings; the integration fixture spans two, where
+    //! `windows(2)` is empty and the check is vacuous. Pinned directly.
+    use super::*;
+
+    #[test]
+    fn rings_two_apart_alternate() {
+        assert!(check_alternation(&[0, 2, 4, 6], "inward").is_ok());
+        assert!(check_alternation(&[0], "inward").is_ok());
+        assert!(check_alternation(&[], "inward").is_ok());
+    }
+
+    #[test]
+    fn consecutive_or_skipped_rings_do_not() {
+        for broken in [vec![0, 1, 2], vec![0, 2, 5], vec![2, 0], vec![0, 2, 2]] {
+            let error =
+                check_alternation(&broken, "inward").expect_err("rings must step by exactly two");
+            assert!(
+                error.message.starts_with("PATTERN_PROVENANCE"),
+                "got: {}",
+                error.message
+            );
+        }
     }
 }
 
