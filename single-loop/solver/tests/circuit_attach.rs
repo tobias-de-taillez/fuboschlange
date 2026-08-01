@@ -99,8 +99,9 @@ fn too_close_anchor(graph: &EmbeddedPoseGraph) -> PoseNode {
         .expect("fixture anchor (450, 262.5) Deg0 exists")
 }
 
-/// An anchor whose heading is parallel to the port tangent: reaching it needs
-/// an S-shaped biarc, which this milestone does not construct.
+/// An anchor whose heading is parallel to the port tangent: no fixed-radius
+/// corner exists, and on this fixture no biarc candidate to it certifies
+/// either, so it exercises the exhausted-both-shapes rejection.
 fn parallel_anchor(graph: &EmbeddedPoseGraph) -> PoseNode {
     graph
         .nodes

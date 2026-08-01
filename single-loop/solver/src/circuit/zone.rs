@@ -1,5 +1,4 @@
-use crate::circuit::types::JournalEntry;
-use crate::circuit::types::{ConnectionInput, LoopError, LoopErrorCode, RectMm};
+use crate::circuit::types::{ConnectionInput, JournalEntry, LoopError, LoopErrorCode, RectMm};
 use crate::geometry::{
     Aabb, Intersection, PointClassification, Polygon, Vec2, primitive_intersections,
 };
@@ -378,12 +377,15 @@ pub struct Attachment {
 
 /// Builds the connector from a port pose to a certified graph anchor.
 ///
-/// The construction is a fixed-radius corner: a straight along the port's
-/// inward normal, one tangent arc of the profile's minimum bend radius, and a
-/// straight arriving along the anchor's heading. Either straight collapses
-/// when the corner consumes its whole leg. No other shape is produced —
-/// parallel poses would need an S-shaped biarc, which this milestone does not
-/// construct and rejects as `INVALID_CONNECTION`.
+/// Two shapes are tried, in this order. First a fixed-radius corner: a
+/// straight along the port's inward normal, one tangent arc of the profile's
+/// minimum bend radius, and a straight arriving along the anchor's heading;
+/// either straight collapses when the corner consumes its whole leg. When
+/// that corner cannot be built or does not certify — an anchor whose channel
+/// runs parallel to the port tangent has no such corner at all — the crate's
+/// robust biarc construction supplies the S-shape, and the first candidate
+/// that certifies wins. Only when neither shape survives is the corner's own
+/// rejection returned as `INVALID_CONNECTION`.
 ///
 /// Containment: the anchors the loop can attach to lie in the ring *outside*
 /// the connection zone (`LoopGraphView::entry_candidates`), so a connector
@@ -464,7 +466,7 @@ fn fixed_radius_corner(
             return Ok(vec![PathPrimitive::Line { start, end }]);
         }
         return Err(invalid_connection(
-            "attachment: port and anchor tangents are parallel, which needs a biarc",
+            "attachment: port and anchor tangents are parallel, so no corner exists and no biarc candidate certified",
         ));
     }
 
