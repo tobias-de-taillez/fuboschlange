@@ -124,3 +124,40 @@ belegte oder reservierte Bahn überquert.
 Der Zwei-Windungen-Kreis (`the_generator_produces_a_loop_the_validator_certifies`)
 ist zertifiziert und verlegbar, deckt aber nur den Randbereich. Für einen
 vollflächigen Heizkreis ist dieser Umbau die verbleibende Arbeit.
+
+## 6. Nutzerwunsch 75 mm Rohrabstand — Folgen
+
+Der Nutzer plant 75 mm zwischen hin- und rücklaufender Schlange. Das ist der
+Kanalabstand selbst, also die dichteste auf dieser Platte mögliche Verlegung:
+jeder Kanal belegt.
+
+Was dadurch **passt**:
+
+- Windungsabstand des Vorlaufs allein = 2 × 75 = **150 mm**, und 150 mm ist
+  exakt der kleinste darstellbare richtungserhaltende Querversatz (§2, zwei
+  `BroadTurn45`). Die Einrückung pro Umrundung ist damit genau ein S-Schlag —
+  einfacher als die 300-mm-Variante aus §2a.
+- Die Zwei-Spuren-Konstruktion aus §2a bleibt unverändert gültig, nur mit
+  Versatz 75 statt 150.
+
+Was dadurch **bricht**:
+
+- Die Mittelkehre muss zwei Bahnen im Abstand 75 mm verbinden, also mit
+  Radius 37,5 mm. Der Mindestbiegeradius ist 80 mm (5 × 16 mm Rohr). Das ist
+  **physikalisch unmöglich**, kein Katalogmangel — genau diese Wende ist im
+  Handbuch als unzulässig abgebildet und liegt als Golden Fixture
+  `handbook-rejected-tight-u.json` vor.
+- Der Katalog hat folgerichtig keine Reverse-Familie unter 150 mm Span
+  (`TeardropReverse` 150, `BroadReverse180` 225); Task 10 hat das gemessen.
+
+Zu klären, bevor bei 75 mm gebaut wird: Die Kehre muss den inneren Freiraum
+nutzen, statt die beiden innersten Bahnen direkt zu verbinden — die Spirale
+endet vor der Mitte und wendet dort großzügig. Ob der Katalog eine solche
+Wende auf dem 75-mm-Raster hergibt, ist zu prüfen (Sweep über
+`TeardropReverse`-Platzierungen im inneren Freiraum), bevor 75 mm als
+unterstützter Wert gilt.
+
+Thermisch ist 75 mm zudem sehr dicht; übliche Wohnraumwerte liegen bei
+100–150 mm, 75 mm ist ein Randzonen- oder Niedertemperaturmaß. Das ist eine
+Auslegungsfrage des Nutzers, keine Solverfrage — der Solver meldet Geometrie,
+keine thermische Eignung (Spec §23.3).
