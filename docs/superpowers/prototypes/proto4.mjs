@@ -207,36 +207,76 @@ function cutGap(ring,g,t0){
 // wird die Luecken-Mitte von k+1 eingehaengt, damit die Querung auch dort in
 // der Luecke liegt, wo die Naht einen Knick macht.
 function spiralLinear(rings,seed,g){
-  if(!rings.length) return [];
+  const r=spiralParts(rings,seed,g);
+  return r ? [...r.head,...r.inward,...r.turnVia,...r.outward] : [];
+}
+// Wie spiralLinear, aber Vorlauf und Ruecklauf getrennt: dazwischen haengen
+// spaeter die Unterbaeume eines Verzweigungsknotens.
+function spiralParts(rings,seed,g){
+  if(!rings.length) return null;
   const n=rings.length, arc=rings.map(ringArc);
   const gapT=new Array(n), gapP=new Array(n);
+  // Die Luecke braucht ein GERADES Wandstueck der Laenge g. Sitzt sie auf einer
+  // Ecke, ist der Eckbogen so lang wie die Luecke selbst, und jeder Sprung
+  // darin schneidet die Ecke ab statt in der Luecke zu bleiben. Deshalb wird
+  // der Nahtpunkt im Fenster +-0,75g auf die geradeste Stelle geschoben:
+  // gerade heisst, die Sehne ueber die Luecke ist so lang wie die Luecke.
+  const straighten=(k,t0)=>{
+    const {cum,L}=arc[k], r=rings[k];
+    if(g>=L*0.5) return t0;
+    let best=t0, bq=-1;
+    for(let i=-6;i<=6;i++){
+      const t=t0+i*g/8;
+      const a=ptAtArc(r,cum,L,t-g/2), b=ptAtArc(r,cum,L,t+g/2);
+      const q=dist(a,b)/g;
+      if(q>bq){ bq=q; best=t; }
+    }
+    return best;
+  };
   const setGap=(k,ref)=>{
     const {t}=arcOfNearest(rings[k],arc[k].cum,ref);
-    gapT[k]=t; gapP[k]=ptAtArc(rings[k],arc[k].cum,arc[k].L,t);
+    gapT[k]=straighten(k,t); gapP[k]=ptAtArc(rings[k],arc[k].cum,arc[k].L,gapT[k]);
   };
   setGap(n-1,seed);                             // innerster Ring am Verteiler ausrichten
   for(let k=n-2;k>=0;k--) setGap(k,gapP[k+1]);  // dann nach aussen
+  // Die Paritaet wird so gewaehlt, dass der VORLAUF auf der innersten Kontur
+  // endet. Endete dort der Ruecklauf, muessten Hin- und Rueckweg zu den
+  // Unterbaeumen dieselbe Luecke in derselben Reihenfolge queren - das ist
+  // geometrisch nicht kreuzungsfrei aufloesbar (nachgemessen in U und Hantel).
+  const par=(n-1)%2;
   const chains=rings.map((r,k)=>{
     const c=cutGap(r,g,gapT[k]);
     if(!c) return null;
-    return k%2===0 ? c.slice().reverse() : c;   // gerade Ringe gegenlaeufig
+    return k%2===par ? c : c.slice().reverse();   // Ruecklaufringe gegenlaeufig
   });
   const usable=k=>chains[k]&&chains[k].length>1;
   const odd=[], even=[];
-  for(let k=0;k<n;k++) if(usable(k)) (k%2?odd:even).push(k);
-  if(!odd.length&&!even.length) return [];
-  const out=[];
+  for(let k=0;k<n;k++) if(usable(k)) (k%2===par?odd:even).push(k);
+  if(!odd.length&&!even.length) return null;
   // Stuetzpunkte der uebersprungenen Niveaus zwischen zwei Ringen derselben
   // Paritaet einhaengen (bei lueckenlosem Stapel genau einer).
-  const via=(a,b)=>{ for(let k=Math.min(a,b)+1;k<Math.max(a,b);k++)
+  const via=(out,a,b)=>{ for(let k=Math.min(a,b)+1;k<Math.max(a,b);k++)
     if(gapP[k]) out.push(gapP[k]); };
-  const run=seq=>seq.forEach((k,i)=>{ if(i) via(seq[i-1],k); out.push(...chains[k]); });
-  if(usable(0)) out.push(gapP[0]);              // Eintritt in der Luecken-Mitte
-  run(odd);
+  const run=seq=>{ const out=[];
+    seq.forEach((k,i)=>{ if(i) via(out,seq[i-1],k); out.push(...chains[k]); });
+    return out; };
   const back=even.slice().reverse();
-  if(odd.length&&back.length) via(odd[odd.length-1],back[0]);
-  run(back);
-  return out;
+  const tag=(a,n)=>a.map(p=>({x:p.x,y:p.y,_t:n}));
+  return {
+    head: usable(0)?tag([gapP[0]],'head'):[],   // Eintritt in der Luecken-Mitte
+    inward: tag(run(odd),'vor'),
+    outward: tag(run(back),'rueck'),
+    // Kehre: von der innersten ungeraden auf die innerste gerade Kontur.
+    turnVia: (odd.length&&back.length) ? (()=>{const o=[];via(o,odd[odd.length-1],back[0]);return o;})() : [],
+    gapP,
+    // Punkt in der Luecke von Ring k, seitlich um off versetzt. Hin- und
+    // Rueckweg durch dieselbe Luecke brauchen verschiedene Seiten, sonst
+    // kreuzen sie sich dort.
+    gapAt:(k,off)=>gapT[k]==null?null:ptAtArc(rings[k],arc[k].cum,arc[k].L,gapT[k]+off),
+    aIdx: odd.length?odd[odd.length-1]:0,      // Ring, auf dem der Vorlauf endet
+    bIdx: back.length?back[0]:0,               // Ring, auf dem der Ruecklauf beginnt
+    nIdx: n-1,
+  };
 }
 
 // ---------- Konturbaum ----------
@@ -267,41 +307,170 @@ function contourTree(F,e0,s,eps){
   }
   return {roots,levels};
 }
-// Maximale Ketten: eine Kette laeuft, solange ein Knoten genau ein Kind hat.
-// Bei mehreren Kindern endet sie, und jedes Kind beginnt eine neue.
-function branches(roots){
-  const out=[];
-  const walk=(nd,parentIdx)=>{
-    const rings=[]; let cur=nd;
-    while(cur){ rings.push(cur.ring);
-      if(cur.children.length===1){ cur=cur.children[0]; continue; }
-      break;
-    }
-    const idx=out.length;
-    out.push({rings,parent:parentIdx});
-    if(cur) cur.children.forEach(c=>walk(c,idx));
+// Maximale Kette ab einem Knoten: laeuft, solange ein Knoten genau ein Kind
+// hat. Gibt die Ringe der Kette und den Verzweigungsknoten am Ende zurueck.
+function chainFrom(nd){
+  const rings=[]; let cur=nd;
+  while(cur){ rings.push(cur.ring);
+    if(cur.children.length===1){ cur=cur.children[0]; continue; }
+    break; }
+  return {rings,end:cur,kInner:nd.k+rings.length-1};
+}
+
+// ---------- Verbinderring ----------
+// Die Unterbaeume eines Verzweigungsknotens haengen nicht mehr aneinander,
+// sobald man tiefer als die Engstelle geht - dort ist der Raum ja gerade
+// zerfallen. Knapp OBERHALB der Engstelle haengen sie noch zusammen. Auf
+// dieser Iso-Linie laeuft der Verbinder: sie liegt zwischen der innersten
+// Kontur der Elternkette und den Kindkonturen, also in freiem Raum.
+// Die Tiefe wird gesucht, nicht geraten - wo genau die Kontur zerfaellt, liegt
+// irgendwo zwischen zwei abgetasteten Niveaus.
+// Es sind ZWEI Ringe: Hinweg und Rueckweg. Auf einem einzigen Ring geht es
+// nicht - der Rundgang laeuft nur in eine Richtung, also treffen sich Ein- und
+// Ausstieg zwangslaeufig an derselben Naht und kreuzen sich dort. Der
+// Rueckwegring liegt flacher; flacher heisst naeher an der Elternkontur, und
+// da die Menge {d >= L} mit L nur schrumpft, haengt er sicher zusammen, sobald
+// der Hinwegring es tut.
+function linkRingsFor(F,lvlInner,s,eps,kids){
+  const seeds=kids.map(c=>c.ring[0]);
+  const at=f=>{
+    const hit=isoContours(F,lvlInner+f*s,eps).filter(r=>seeds.every(p=>inRing(p,r)));
+    return hit.length===1?hit[0]:null;
   };
-  roots.forEach(r=>walk(r,-1));
+  for(const f of [0.6,0.45,0.3,0.16,0.08]){
+    const a=at(f), b=a&&at(f/2);
+    if(a&&b) return {a,b};
+  }
+  return null;
+}
+// Bogen auf dem Verbinderring, immer VORWAERTS in Ringrichtung. Damit laufen
+// aufeinanderfolgende Verbinder rundherum in einer Richtung und koennen sich
+// nicht kreuzen.
+function ringArcBetween(ring,arc,tFrom,tTo){
+  const {cum,L}=arc, n=ring.length;
+  const span=((tTo-tFrom)%L+L)%L;
+  const out=[ptAtArc(ring,cum,L,tFrom)];
+  for(let k=0;k<2*n;k++){
+    const t=cum[k%n]+(k>=n?L:0);
+    if(t>tFrom+1e-9 && t<tFrom+span-1e-9) out.push(ring[k%n]);
+  }
+  out.push(ptAtArc(ring,cum,L,tTo));
   return out;
 }
 
-// ---------- Ganzer Raum: Ketten in Serie ----------
-// Jede Kette wird fuer sich bifilar spiraliert; die Ketten haengen in
-// Tiefensuche-Reihenfolge hintereinander. Die Naht der naechsten Kette wird auf
-// den Austritt der vorigen ausgerichtet, damit der Verbinder kurz bleibt.
-// (Die Verbinder selbst kreuzungsfrei zu fuehren ist Phase 3 und hier bewusst
-// nicht geloest - deshalb wird ihr Beitrag getrennt ausgewiesen.)
+// ---------- Ganzer Raum: Konturbaum als EIN Pfad ----------
+// Die Unterbaeume eines Verzweigungsknotens werden zwischen Vorlauf und
+// Ruecklauf der Elternkette eingehaengt. Jeder Unterbaum betritt und verlaesst
+// sein Gebiet an derselben Stelle (der Luecke seiner aeussersten Kontur), also
+// bleibt die bifilare Ordnung der Elternkette unberuehrt.
+//
+// Vorlaufende -> Kind 1 -> Kind 2 -> ... -> Ruecklaufanfang laeuft als EIN
+// Rundgang auf dem Verbinderring, immer in derselben Richtung. Kinder werden
+// dafuer nach ihrer Bogenlaenge auf diesem Ring sortiert. Ein Rundgang in
+// einer Richtung ist eine einfache geschlossene Kurve - er kann sich nicht
+// selbst kreuzen, und den Elternbahnen weicht er aus, weil er innerhalb der
+// innersten Elternkontur bleibt.
+function spiralNode(F,e0,s,eps,node,seed,g,stat){
+  const {rings,end,kInner}=chainFrom(node);
+  const P=spiralParts(rings,seed,g);
+  if(!P) return [];
+  const kids=end?end.children:[];
+  let middle=P.turnVia;
+  if(kids.length){
+    const LR=linkRingsFor(F,e0+kInner*s,s,eps,kids);
+    const A=P.inward[P.inward.length-1], B=P.outward[0];
+    if(LR&&A&&B){
+      const ring=LR.a, arc=ringArc(ring), L=arc.L;
+      const rb=LR.b, arcB=ringArc(rb);
+      const tOf=p=>arcOfNearest(ring,arc.cum,p).t;
+      const tOfB=p=>arcOfNearest(rb,arcB.cum,p).t;
+      // Einstieg wie Ausstieg vom ZIEL her: der Bogen beginnt am Ringpunkt, der
+      // dem letzten Lueckenpunkt am naechsten liegt, sonst laeuft das
+      // Anfahrstueck schraeg statt radial.
+      const down0=[];
+      for(let k=P.aIdx+1;k<=P.nIdx;k++){ const p=P.gapAt(k,-g/4); if(p) down0.push(p); }
+      const tA=tOf(down0.length?down0[down0.length-1]:A);
+      const fwd=t=>((t-tA)%L+L)%L;
+      // Erst die Unterbaeume bauen, dann einsortieren. Ihre Naht liegt nicht
+      // fest, wo man sie erwartet - sie waechst von innen nach aussen, also
+      // steht der tatsaechliche Ein- und Austrittspunkt erst danach fest.
+      // Nach einem geratenen Ringpunkt zu sortieren ergab Anfahrten quer durch
+      // den halben Raum, und genau das waren die Kreuzungen.
+      const subs=kids.map(c=>{
+        const mid=c.ring.reduce((a,p)=>({x:a.x+p.x/c.ring.length,y:a.y+p.y/c.ring.length}),{x:0,y:0});
+        const near=ptAtArc(ring,arc.cum,L,tOf(mid));
+        const sp=spiralNode(F,e0,s,eps,c,near,g,stat);
+        return sp.length>1 ? {sp,tIn:tOf(sp[0]),tOut:tOf(sp[sp.length-1])} : null;
+      }).filter(Boolean).sort((a,b)=>fwd(a.tIn)-fwd(b.tIn));
+      // Der Verbinderring liegt TIEFER als jede Elternkontur. Vorlaufende und
+      // Ruecklaufanfang liegen aber nicht zwingend auf der innersten - der Weg
+      // dorthin quert die dazwischenliegenden Konturen und muss das in deren
+      // Luecken tun, sonst schneidet er sie (im Hantelraum genau eine solche
+      // Kreuzung).
+      // Hin- und Rueckweg queren dieselben Luecken. Der Hinweg laeuft auf der
+      // Seite, auf der der Vorlauf endet (-g/2), der Rueckweg um g/4 versetzt
+      // auf der anderen. Der Rundgang schliesst ebenfalls um g/4 vor seinem
+      // Startpunkt, damit die beiden Radialstuecke am Verbinderring nicht
+      // zusammenfallen.
+      const down=[], up=[];
+      for(let k=P.aIdx+1;k<=P.nIdx;k++){ const p=P.gapAt(k,-g/4); if(p) down.push({...p,_t:'ab'}); }
+      for(let k=P.nIdx;k>P.bIdx;k--)   { const p=P.gapAt(k, g/4); if(p) up.push({...p,_t:'auf'}); }
+      // Der Rundgang laeuft nur VORWAERTS. Ein Unterbaum wird an seinem
+      // Eintritt betreten und um g/4 dahinter wieder verlassen - nicht an
+      // seinem Austrittspunkt. Dessen Lage auf dem Ring ist nicht garantiert
+      // hinter dem Eintritt, und liegt sie davor, laeuft der Bogen rueckwaerts
+      // in sein eigenes vorheriges Stueck hinein.
+      middle=[...down]; let fPrev=0;
+      for(const sub of subs){
+        const fIn=fwd(sub.tIn);
+        middle.push(...ringArcBetween(ring,arc,tA+fPrev,tA+fIn).map(p=>({...p,_t:'hinweg'})));
+        middle.push(...sub.sp);
+        fPrev=fIn+g/4;
+      }
+      // Rueckweg: auf den flacheren Ring wechseln und ihn RUECKWAERTS bis kurz
+      // vor die Naht laufen. Rueckwaerts, damit er den Hinweg nicht einholt.
+      //
+      // Wo er endet, wird vom ZIEL her bestimmt: der Punkt des Rings, der dem
+      // Ausstiegspunkt am naechsten liegt. Nur dann ist das Schlussstueck eine
+      // echte Radiale und laeuft monoton nach aussen. Vom Einstieg her
+      // gerechnet endete es seitlich versetzt, schnitt die Ecke ab und kreuzte
+      // dabei den eigenen Bogen - jede verbliebene Kreuzung war genau das.
+      // Der Rueckweg muss KURZ VOR dem Einstieg enden. Der naechste Ringpunkt
+      // zum Ausstieg liegt aber nicht zwangslaeufig davor - projiziert man zwei
+      // Punkte, die auf der Elternkontur g/2 auseinanderliegen, ueber eine Ecke
+      // hinweg auf den Verbinderring, kippt ihre Reihenfolge. Dann wickelt der
+      // Bogen ueber den Einstieg hinweg und kreuzt ihn. Kippt sie, wird die
+      // Lage direkt gesetzt statt projiziert.
+      const E=up[0]??B, LB=arcB.L;
+      const tB0=tOfB(down0.length?down0[down0.length-1]:A);
+      const fwdB=t=>((t-tB0)%LB+LB)%LB;
+      let eB=tOfB(E);
+      if(!(fwdB(eB)>1 && fwdB(eB)<g)) eB=tB0+g/2;
+      // Umstieg auf den Rueckwegring an derselben Stelle, an der der Hinweg
+      // aufgehoert hat - massstaeblich uebertragen, weil beide Ringe
+      // verschieden lang sind.
+      const fEnd=tB0+fPrev*LB/L;
+      middle.push(...ringArcBetween(rb,arcB,eB,fEnd).reverse()
+                    .map(p=>({...p,_t:'rueckweg'})),...up);
+    }else{
+      stat.unlinked++;                       // kein Verbinderring gefunden
+      kids.forEach(c=>{ middle=middle.concat(spiralNode(F,e0,s,eps,c,P.outward[0]||seed,g,stat)); });
+    }
+  }
+  return [...P.head,...P.inward,...middle,...P.outward];
+}
 function spiralRoom(F,e0,s,eps,seed){
   const {roots,levels}=contourTree(F,e0,s,eps);
-  const brs=branches(roots);
-  const parts=[]; let ref=seed;
-  for(const b of brs){
-    const p=spiralLinear(b.rings,ref,2*s);
+  const stat={unlinked:0};
+  let path=[], ref=seed, nodes=0;
+  const count=nd=>{ nodes++; nd.children.forEach(count); };
+  roots.forEach(count);
+  for(const r of roots){
+    const p=spiralNode(F,e0,s,eps,r,ref,2*s,stat);
     if(p.length<2) continue;
-    parts.push(p); ref=p[p.length-1];
+    path=path.concat(p); ref=p[p.length-1];
   }
-  const path=parts.flat();
-  return {path,parts,levels,nBranches:brs.length};
+  return {path,levels,nodes,unlinked:stat.unlinked};
 }
 
 // ---------- Testraeume ----------
@@ -366,12 +535,13 @@ function counterflowShare(path,s){
 // ---------- Lauf ----------
 const H=20, EPS=2, E0=75;
 console.log(`Raster ${H} mm, Vereinfachung ${EPS} mm, erste Bahn ${E0} mm von der Wand\n`);
-console.log('Raum                s   Ketten  Punkte   Pfad     Kreuz.  max.Lücke  Gegenstrom');
+console.log('Raum                s  Knoten  Punkte   Pfad     Kreuz.  max.Lücke  Gegenstrom');
 let bad=0, uncov=0;
 for(const [name,poly] of Object.entries(ROOMS)){
   const F=signedDistanceField(poly,H);
   for(const s of [100,150,200]){
-    const {path,levels,nBranches}=spiralRoom(F,E0,s,EPS,poly[0]);
+    const {path,levels,nodes,unlinked}=spiralRoom(F,E0,s,EPS,poly[0]);
+    const nBranches=nodes;
     const len=path.reduce((a,p,i)=>i?a+dist(p,path[i-1]):0,0);
     const x=selfCross(path);
     const gap=maxUncovered(poly,path,50);
