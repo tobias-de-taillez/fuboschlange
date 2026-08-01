@@ -101,23 +101,20 @@
 <body>
 <header>
   <h1>Verlegeplan Fußbodenheizung</h1>
-  <span class="sub">Bifilare Schnecke · L-Raum · Randzone · Autofit bis 3 Heizkreise</span>
+  <span class="sub">Konturparallele Doppelschnecke · beliebiges Polygon · Randzone · Autofit bis 3 Heizkreise</span>
   <button id="printBtn" class="pbtn" onclick="window.print()">Drucken / PDF</button>
 </header>
 
 <div class="app">
   <aside id="panel">
     <div class="grp">
-      <h2>Raum (mm)</h2>
-      <div class="row"><label>Breite</label><input type="number" id="W" step="50" min="500" max="30000"></div>
-      <div class="row"><label>Höhe</label><input type="number" id="H" step="50" min="500" max="30000"></div>
-      <div class="row"><label>Notch Breite</label><input type="number" id="notchA" step="50" min="0" max="30000"></div>
-      <div class="row"><label>Notch Höhe</label><input type="number" id="notchB" step="50" min="0" max="30000"></div>
-      <div class="seg" id="notchSeg">
-        <button data-side="left" class="on">Notch links</button>
-        <button data-side="right">Notch rechts</button>
-      </div>
-      <p class="hint">L = Rechteck minus Ausschnitt oben. Notch 0 = volles Rechteck.</p>
+      <h2>Raum</h2>
+      <button id="impBtn" class="pbtn" style="width:100%">Raum importieren …</button>
+      <input id="impFile" type="file" accept=".json,application/json" hidden>
+      <p class="hint" id="polyHint"></p>
+      <p class="subhead">oder Rechteck (mm)</p>
+      <div class="row"><label>Breite</label><input type="number" id="rectW" step="50" min="500" max="30000"></div>
+      <div class="row"><label>Tiefe</label><input type="number" id="rectH" step="50" min="500" max="30000"></div>
     </div>
 
     <div class="grp">
@@ -133,12 +130,7 @@
       <div class="row"><label>Bahnabstand (mm)</label><input type="number" id="randSpacing" step="5" min="10" max="500"></div>
       <div class="row"><label>Bahnen</label><input type="number" id="randPasses" min="0" max="30" step="1"></div>
       <p class="hint" id="randWHint"></p>
-      <div class="chips" id="winChips">
-        <label class="chip"><input type="checkbox" value="bottom">Unten</label>
-        <label class="chip"><input type="checkbox" value="top">Oben</label>
-        <label class="chip"><input type="checkbox" value="left">Links</label>
-        <label class="chip"><input type="checkbox" value="right">Rechts</label>
-      </div>
+      <p class="hint">Fensterwände im Plan anklicken.</p>
     </div>
 
     <div class="grp">
@@ -221,13 +213,14 @@
 <script>
 "use strict";
 // ================= State / Defaults (mm) =================
+// Der Raum ist eine Eckenliste, gegen den Uhrzeigersinn. Er darf konkav sein
+// und beliebig viele Ecken haben, auch schraege; Loecher gibt es nicht.
 const S = {
-  W:8000, H:3200, notchA:3000, notchB:1000,
-  notchLeft:true,           // Notch im BILD links (intern immer rechts gerechnet, nur gespiegelt)
+  poly: rectPoly(8000,3200),
   s:150, bendRadius:60, pipeDia:16, edgeGap:75,
-  randSpacing:50, randPasses:2, windowEdges:['bottom','left','right'],
+  randSpacing:50, randPasses:2, windowEdges:[0,1,3],   // Kantenindizes ins Polygon
   maxLoop:100000, loopMode:'auto',
-  manifold:{x:1000,y:0},    // interne Koordinaten (Notch-rechts-Welt)
+  manifold:{x:1000,y:0},
   // ---- Thermik (Heatmap) ----
   // targetPowerW/activeAreaM2 = AUSLEGUNGSWERT (aktive Heizfläche des Planers).
   // Davon strikt getrennt: das Kartenmittel bezieht sich auf die GEOMETRISCHE
@@ -251,61 +244,9 @@ const TH_RANGE={
 };
 const clampTh=(k,v)=>{const r=TH_RANGE[k]; if(!r||!isFinite(v)) return v;
   return Math.max(r[0],Math.min(r[1],v));};
-// Bild-x <-> intern-x (Involution). windowEdges sind BILD-Angaben ->
-// intern links/rechts tauschen, wenn gespiegelt.
-const mirX=x=>S.notchLeft ? S.W-x : x;
-// ---- Wand-Frame: die Verteilerwand wird zur "Unterkante" ----
-// Der Korridor liegt immer an der Verteilerwand; damit laufen Anbindeleitungen
-// nie quer durchs Feld. Statt jede Funktion vier Wandfälle behandeln zu lassen,
-// wird die ganze Geometrie in einen Frame gedreht (rot=Anzahl 90°-Schritte),
-// dort wie gewohnt "Korridor unten" gerechnet und am Ende zurückgedreht.
-let ROT=0;                                     // 0=unten,1=links,2=oben,3=rechts
-// Die Verteilerwand muss zur Frame-UNTERkante werden (Frame-y = Wandabstand).
-const rotFwd=(p,W,H)=>{                        // Welt -> Frame
-  switch(ROT){
-    case 1: return {x:H-p.y, y:p.x};           // linke Wand  -> unten
-    case 2: return {x:W-p.x, y:H-p.y};         // obere Wand  -> unten
-    case 3: return {x:p.y,   y:W-p.x};         // rechte Wand -> unten
-    default:return {x:p.x,   y:p.y};
-  }
-};
-const rotBack=(p,W,H)=>{                       // Frame -> Welt (W,H = Welt-Maße)
-  switch(ROT){
-    case 1: return {x:p.y,   y:H-p.x};
-    case 2: return {x:W-p.x, y:H-p.y};
-    case 3: return {x:W-p.y, y:p.x};
-    default:return {x:p.x,   y:p.y};
-  }
-};
-const rotOdd=()=>ROT===1||ROT===3;             // Frame-Maße vertauscht?
-const frameW=()=>rotOdd()?S.H:S.W;
-const frameH=()=>rotOdd()?S.W:S.H;
-// Fensterkanten mitdrehen: Frame-'bottom' ist die Verteilerwand.
-const EDGE_CYCLE=['bottom','left','top','right'];
-const edgeFwd=e=>{ const i=EDGE_CYCLE.indexOf(e); return i<0?e:EDGE_CYCLE[(i-ROT+8)%4]; };
-// Notch im Frame (Welt: obere rechte Ecke). Nach Rotation liegt er in einer
-// beliebigen Ecke — Ecken drehen und Hülle bilden.
-function notchFrame(){
-  if(!hasNotch()) return null;
-  const W=S.W,H=S.H;
-  const cs=[{x:S.W-S.notchA,y:S.H-S.notchB},{x:W,y:H}].map(p=>rotFwd(p,W,H));
-  return {x0:Math.min(cs[0].x,cs[1].x), y0:Math.min(cs[0].y,cs[1].y),
-          x1:Math.max(cs[0].x,cs[1].x), y1:Math.max(cs[0].y,cs[1].y)};
-}
-// L im Frame in zwei Rechtecke zerlegen — der Notch klebt an zwei Boxrändern.
-function rectsFrame(){
-  const W=frameW(), H=frameH(), n=notchFrame();
-  if(!n) return [{x0:0,y0:0,w:W,h:H}];
-  const atRight=n.x1>=W-1, atBottom=n.y0<=1;
-  const big  = atRight ? {x0:0,y0:0,w:n.x0,h:H} : {x0:n.x1,y0:0,w:W-n.x1,h:H};
-  const smallX= atRight ? n.x0 : 0, smallW= atRight ? W-n.x0 : n.x1;
-  const small= atBottom ? {x0:smallX,y0:n.y1,w:smallW,h:H-n.y1}
-                        : {x0:smallX,y0:0,   w:smallW,h:n.y0};
-  return [big,small].filter(r=>r.w>1&&r.h>1);
-}
-const wEdges=()=>S.notchLeft
-  ? S.windowEdges.map(e=>e==='left'?'right':e==='right'?'left':e)
-  : S.windowEdges;
+// Huellmasse des Raums. Das Polygon liegt im Ursprung (siehe setPoly), also
+// sind das zugleich seine Ausdehnungen ab 0.
+const RW=()=>polyBBox(S.poly).w, RH=()=>polyBBox(S.poly).h;
 
 // ================= Vektor-Helfer =================
 const sub=(p,q)=>({x:p.x-q.x,y:p.y-q.y});
@@ -314,12 +255,13 @@ const scl=(p,k)=>({x:p.x*k,y:p.y*k});
 const dot=(p,q)=>p.x*q.x+p.y*q.y;
 const len=p=>Math.hypot(p.x,p.y);
 const unit=p=>{const l=len(p)||1;return {x:p.x/l,y:p.y/l};};
+const dist=(p,q)=>Math.hypot(p.x-q.x,p.y-q.y);
 
 function nearestOnSeg(p,a,b){
   const ab=sub(b,a), l2=dot(ab,ab)||1;
   const t=Math.max(0,Math.min(1,dot(sub(p,a),ab)/l2));
   const pt=add(a,scl(ab,t));
-  return {pt,d:len(sub(p,pt)),dir:unit(ab)};
+  return {pt,d:len(sub(p,pt)),dir:unit(ab),t};
 }
 function nearestOnRing(p,ring){
   let best=null;
@@ -330,265 +272,486 @@ function nearestOnRing(p,ring){
   return best;
 }
 
-// ================= Geometrie: Konturen =================
-// Rechteck-Ring CCW (Boden zuerst: [0]->[1])
-const rectRing=(x0,y0,w,h)=>[{x:x0,y:y0},{x:x0+w,y:y0},{x:x0+w,y:y0+h},{x:x0,y:y0+h}];
-// L-Ring CCW, Notch oben rechts; a<=0||b<=0 -> Rechteck
-function lRing(x0,y0,w,h,a,b){
-  if(a<=0||b<=0) return rectRing(x0,y0,w,h);
-  return [
-    {x:x0,y:y0},{x:x0+w,y:y0},
-    {x:x0+w,y:y0+h-b},{x:x0+w-a,y:y0+h-b},
-    {x:x0+w-a,y:y0+h},{x:x0,y:y0+h},
-  ];
+// ================= Polygon =================
+function rectPoly(w,h){ return [{x:0,y:0},{x:w,y:0},{x:w,y:h},{x:0,y:h}]; }
+// Das Polygon wird beim Setzen gegen den Uhrzeigersinn gedreht und in den
+// Ursprung geschoben. Dadurch bleiben Heatmap-Raster, Zeichnung und Bemassung
+// bei ihrer bisherigen Annahme "Raum liegt bei 0,0" - ein importierter Raum
+// bringt sonst beliebige Weltkoordinaten mit.
+function setPoly(poly){
+  const r=orientCCW(poly.map(p=>({x:+p.x,y:+p.y})));
+  const b=polyBBox(r);
+  S.poly=r.map(p=>({x:p.x-b.minx, y:p.y-b.miny}));
+  return S.poly;
 }
-// Zonenbreiten von der Wand nach innen: Randzone -> Leitungskorridor -> Feld.
-const hasNotch=()=>S.notchA>0&&S.notchB>0;
-const notchX=()=>S.W-S.notchA;                      // x der Notch-Innenwand
-// Omega-Kehren: ist die halbe Randzonen-Teilung kleiner als der Biegeradius,
-// werden die Bahn-Enden als ausgeschwungene Schlaufen mit vollem Radius
-// verlegt. Braucht edgeGap >= R (Ausschwung zur Wand). Der Randzonen-Streifen
-// bleibt dabei schmal — die Schlaufen ragen bewusst asymmetrisch in den Raum.
-const omegaOn=()=>S.randPasses>1 && S.randSpacing/2<S.bendRadius
-              && S.edgeGap>=S.bendRadius+S.pipeDia/2;
-// e ist eine FRAME-Kante; die Auswahl steht in Weltkanten -> mitdrehen.
-const frameEdges=()=>wEdges().map(edgeFwd);
-const randW=e=>frameEdges().includes(e) ? S.randPasses*S.randSpacing : 0;
-const randWidth=()=>randW('bottom');                // Korridor liegt über der BODEN-Randzone
-// Spurabstand im Korridor: mind. 50 mm (Verlegeabstand). Die Höhenwechsel
-// laufen als 45°-Schrägen (siehe routeVia) — eine 45°-Ablenkung braucht nur
-// R/tan(67,5°) ~ 0,41R Platz statt R wie eine rechtwinklige Ecke, deshalb
-// bleibt der Korridor schmal und der Biegeradius trotzdem eingehalten.
-const LANE=()=>Math.max(50,S.pipeDia*1.6,0.9*S.bendRadius);
-const laneCount=()=>2*Math.max(1,curLoopCount)+1;   // Vor-/Rücklauf je Kreis + Reserve
-// + LANE/2 Puffer: sonst liegt die äußerste Spur nur LANE/2 unter der ersten
-// Feldbahn — bei 16er Rohr wäre das physische Überlappung.
-const corridorW=()=>laneCount()*LANE()+LANE()/2;
-// lane -1 = Übergangskanal für Rechteck->Rechteck-Verbinder. Liegt ZWISCHEN
-// Randzone und Korridor: unterhalb der Randzone würde jeder Verbinder die
-// Fensterbahnen durchstoßen.
-// Die Omega-Schlaufen ragen 2R über die letzte Randzonenbahn in den Raum.
-// Sie sitzen NUR an den Enden einer Randzonen-Kette: bei links->unten->rechts
-// also oben an den Seitenwänden, nicht an der Unterkante. Nur dort muss das
-// Feld ausweichen — sonst verschenkt man den Streifen über die ganze Breite.
-const omegaEndEdges=()=>{
-  if(!omegaOn()) return [];
-  const s=new Set();
-  edgeChains(frameEdges()).forEach(ch=>{ s.add(ch[0]); s.add(ch[ch.length-1]); });
-  return [...s];
-};
-const omegaClear=e=>omegaEndEdges().includes(e||'bottom') ? 2*S.bendRadius+LANE()/2 : 0;
-const laneY=i=>i<0 ? S.edgeGap+randWidth()+omegaClear()-LANE()/2
-                   : S.edgeGap+randWidth()+omegaClear()+(i+0.5)*LANE();
-let curLoopCount=1;                                 // von autofit gesetzt (Korridorbreite)
-const fieldInset=()=>S.edgeGap+randWidth()+omegaClear()+corridorW();   // = Boden-Inset
+const signedArea=r=>{let a=0;for(let i=0,j=r.length-1;i<r.length;j=i++)a+=(r[j].x*r[i].y-r[i].x*r[j].y);return a/2;};
+const orientCCW=r=>signedArea(r)<0?r.slice().reverse():r;
+function pointInPoly(p,r){
+  let inside=false;
+  for(let i=0,j=r.length-1;i<r.length;j=i++){
+    if((r[j].y>p.y)!==(r[i].y>p.y) &&
+       p.x < r[j].x+(p.y-r[j].y)*(r[i].x-r[j].x)/(r[i].y-r[j].y)) inside=!inside;
+  }
+  return inside;
+}
+function polyBBox(r){
+  let minx=Infinity,miny=Infinity,maxx=-Infinity,maxy=-Infinity;
+  for(const p of r){ minx=Math.min(minx,p.x); maxx=Math.max(maxx,p.x);
+                     miny=Math.min(miny,p.y); maxy=Math.max(maxy,p.y); }
+  return {minx,miny,maxx,maxy,w:maxx-minx,h:maxy-miny};
+}
+// Halbebenen-Schnitt (Sutherland-Hodgman). sign>0 behaelt coord>=c.
+function clipHalf(poly,horiz,c,sign){
+  const co=p=>horiz?p.x:p.y;
+  const keep=p=>sign*(co(p)-c)>=0;
+  const cut=(a,b)=>{ const t=(c-co(a))/((co(b)-co(a))||1);
+    return {x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t}; };
+  const out=[];
+  for(let i=0;i<poly.length;i++){
+    const a=poly[i], b=poly[(i+1)%poly.length], ka=keep(a), kb=keep(b);
+    if(ka) out.push(a);
+    if(ka!==kb) out.push(cut(a,b));
+  }
+  return out;
+}
+// Schnittlage, die den Anteil frac der Flaeche abtrennt. Die Flaeche links des
+// Schnitts waechst monoton mit c, also reicht Bisektion.
+function areaSplit(poly,horiz,frac){
+  const b=polyBBox(poly), total=Math.abs(signedArea(poly));
+  let lo=horiz?b.minx:b.miny, hi=horiz?b.maxx:b.maxy;
+  for(let k=0;k<40;k++){
+    const mid=(lo+hi)/2;
+    const a=Math.abs(signedArea(clipHalf(poly,horiz,mid,-1)));
+    if(a<frac*total) lo=mid; else hi=mid;
+  }
+  return (lo+hi)/2;
+}
 
-// Per-Seite-Insets eines Feld-Rechtecks: Randzone nur an echten Fensterwänden,
-// Korridor nur unten, innere Nähte zwischen Rechtecken nur s/2 — sonst
-// entstehen breite unbeheizte Streifen an Wänden ohne Fenster/Korridor.
-function insetsFor(rect){
-  const atL=rect.x0<=1, atR=rect.x0+rect.w>=frameW()-1;
-  const topIsOuter=rect.y0+rect.h>=frameH()-1;      // Außen-Oberkante im Frame
-  // Korridor NUR an der Verteilerwand. Ihn rundum zu reservieren kostete an
-  // jeder Seite die volle Korridorbreite und drückte das Verlegefeld auf die
-  // Hälfte des Raums — Heizfläche ist wertvoller als bequemes Routing.
+// ================= Abstandsfeld =================
+// d > 0 im Raum, d = Abstand zur naechsten Wandkante. Exakt je Rasterpunkt;
+// nur die Iso-Linie wird zwischen den Rasterpunkten interpoliert.
+//
+// bonus[i] zieht an Kante i einen festen Betrag ab. Damit rueckt das Feld an
+// den Fensterwaenden genau um die Randzone nach innen, ohne dass der Planer
+// eine Fallunterscheidung braucht - die Randzone ist dann einfach der Streifen,
+// den das Feld dort frei laesst.
+function buildField(poly,h,bonus){
+  const b=polyBBox(poly);
+  // 2 Zellen Rand: die Iso-Linien duerfen den Feldrand nie beruehren, sonst
+  // sind sie offene Ketten statt geschlossener Ringe.
+  const x0=b.minx-2*h, y0=b.miny-2*h;
+  const nx=Math.ceil(b.w/h)+5, ny=Math.ceil(b.h/h)+5;
+  const d=new Float64Array(nx*ny);
+  const n=poly.length;
+  for(let j=0;j<ny;j++){
+    const py=y0+j*h;
+    for(let i=0;i<nx;i++){
+      const px=x0+i*h, p={x:px,y:py};
+      let raw=Infinity, biased=Infinity, inside=false;
+      for(let k=0,m=n-1;k<n;m=k++){
+        const a=poly[m], q=poly[k];
+        const dd=nearestOnSeg(p,a,q).d;
+        if(dd<raw) raw=dd;
+        const bb=dd-(bonus?bonus[m]:0);
+        if(bb<biased) biased=bb;
+        if((a.y>py)!==(q.y>py) && px < a.x+(py-a.y)*(q.x-a.x)/(q.y-a.y)) inside=!inside;
+      }
+      d[j*nx+i]=inside?biased:-raw;
+    }
+  }
+  return {x0,y0,h,nx,ny,d,poly};
+}
+
+// ================= Iso-Linien (Marching Squares) =================
+// Kantenpunkte werden pro Gitterkante EINMAL bestimmt und ueber ihren
+// Kantenschluessel identifiziert - dadurch passen benachbarte Zellen exakt
+// zusammen und das Zusammenfaedeln braucht keine Toleranz.
+function isoContours(F,level,eps){
+  const {x0,y0,h,nx,ny,d}=F;
+  const V=(i,j)=>d[j*nx+i]-level;
+  const pts=new Map(), nbr=new Map();
+  const link=(a,b)=>{ (nbr.get(a)??nbr.set(a,[]).get(a)).push(b);
+                      (nbr.get(b)??nbr.set(b,[]).get(b)).push(a); };
+  const put=(key,p)=>{ if(!pts.has(key)) pts.set(key,p); return key; };
+  const hPt=(i,j)=>{ const a=V(i,j),b=V(i+1,j),t=a/(a-b); return {x:x0+(i+t)*h,y:y0+j*h}; };
+  const vPt=(i,j)=>{ const a=V(i,j),b=V(i,j+1),t=a/(a-b); return {x:x0+i*h,y:y0+(j+t)*h}; };
+  for(let j=0;j<ny-1;j++) for(let i=0;i<nx-1;i++){
+    const a=V(i,j), b=V(i+1,j), c=V(i+1,j+1), e=V(i,j+1);
+    const cs=(a>0?1:0)|(b>0?2:0)|(c>0?4:0)|(e>0?8:0);
+    if(cs===0||cs===15) continue;
+    const E0=()=>put(`H${i},${j}`,hPt(i,j)), E1=()=>put(`V${i+1},${j}`,vPt(i+1,j));
+    const E2=()=>put(`H${i},${j+1}`,hPt(i,j+1)), E3=()=>put(`V${i},${j}`,vPt(i,j));
+    switch(cs){
+      case 1: case 14: link(E3(),E0()); break;
+      case 2: case 13: link(E0(),E1()); break;
+      case 3: case 12: link(E3(),E1()); break;
+      case 4: case 11: link(E1(),E2()); break;
+      case 6: case  9: link(E0(),E2()); break;
+      case 7: case  8: link(E3(),E2()); break;
+      case 5: case 10: {                       // Sattel: ueber das Zellmittel
+        const mid=(a+b+c+e)/4, join=(cs===5)===(mid>0);
+        if(join){ link(E3(),E2()); link(E0(),E1()); }
+        else    { link(E3(),E0()); link(E1(),E2()); }
+        break;
+      }
+    }
+  }
+  const seen=new Set(), rings=[];
+  for(const start of pts.keys()){
+    if(seen.has(start)) continue;
+    const ring=[]; let cur=start, prev=null;
+    while(cur && !seen.has(cur)){
+      seen.add(cur); ring.push(pts.get(cur));
+      const ns=nbr.get(cur)||[];
+      const nx2=ns.find(k=>k!==prev&&!seen.has(k));
+      prev=cur; cur=nx2;
+    }
+    if(ring.length>=3) rings.push(ring);
+  }
+  return rings.map(r=>orientCCW(simplifyRing(r,eps))).filter(r=>r.length>=3);
+}
+// Douglas-Peucker auf einem GESCHLOSSENEN Ring: an den zwei weitest
+// entfernten Punkten aufteilen, sonst haengt das Ergebnis am Startindex.
+function simplifyRing(ring,eps){
+  if(ring.length<4) return ring;
+  let i1=0,best=-1;
+  for(let i=1;i<ring.length;i++){ const dd=dist(ring[0],ring[i]); if(dd>best){best=dd;i1=i;} }
+  const A=dp(ring.slice(0,i1+1),eps), B=dp(ring.slice(i1).concat([ring[0]]),eps);
+  return A.slice(0,-1).concat(B.slice(0,-1));
+}
+function dp(pl,eps){
+  if(pl.length<3) return pl;
+  let idx=0,max=0;
+  for(let i=1;i<pl.length-1;i++){
+    const dd=nearestOnSeg(pl[i],pl[0],pl[pl.length-1]).d;
+    if(dd>max){max=dd;idx=i;}
+  }
+  if(max<=eps) return [pl[0],pl[pl.length-1]];
+  return dp(pl.slice(0,idx+1),eps).slice(0,-1).concat(dp(pl.slice(idx),eps));
+}
+
+// ================= Bogenlaenge auf einem Ring =================
+function ringArc(ring){
+  const n=ring.length, cum=[0]; let L=0;
+  for(let i=0;i<n;i++){ L+=dist(ring[i],ring[(i+1)%n]); cum.push(L); }
+  return {cum,L};
+}
+function ptAtArc(ring,cum,L,t){
+  const n=ring.length; t=((t%L)+L)%L;
+  let i=0; while(i<n-1 && cum[i+1]<t) i++;
+  const seg=cum[i+1]-cum[i], f=seg>0?(t-cum[i])/seg:0;
+  const a=ring[i], b=ring[(i+1)%n];
+  return {x:a.x+(b.x-a.x)*f, y:a.y+(b.y-a.y)*f};
+}
+function arcOfNearest(ring,cum,P){
+  let best=Infinity, bt=0;
+  for(let i=0;i<ring.length;i++){
+    const a=ring[i], b=ring[(i+1)%ring.length];
+    const r=nearestOnSeg(P,a,b);
+    if(r.d<best){ best=r.d; bt=cum[i]+dist(a,r.pt); }
+  }
+  return {t:bt,d:best};
+}
+// Bogen VORWAERTS in Ringrichtung von tFrom nach tTo.
+function ringArcBetween(ring,arc,tFrom,tTo){
+  const {cum,L}=arc, n=ring.length;
+  const span=((tTo-tFrom)%L+L)%L;
+  const out=[ptAtArc(ring,cum,L,tFrom)];
+  for(let k=0;k<2*n;k++){
+    const t=cum[k%n]+(k>=n?L:0);
+    if(t>tFrom+1e-9 && t<tFrom+span-1e-9) out.push(ring[k%n]);
+  }
+  out.push(ptAtArc(ring,cum,L,tTo));
+  return out;
+}
+// Offene Kette: Ring ohne die Luecke der Bogenlaenge g um t0.
+function cutGap(ring,g,t0){
+  const {cum,L}=ringArc(ring);
+  if(g>=L*0.9) return null;
+  const n=ring.length, s=t0+g/2, e=t0+L-g/2;
+  const out=[ptAtArc(ring,cum,L,s)];
+  for(let k=0;k<2*n;k++){
+    const t=cum[k%n]+(k>=n?L:0);
+    if(t>s+1e-9 && t<e-1e-9) out.push(ring[k%n]);
+  }
+  out.push(ptAtArc(ring,cum,L,e));
+  return out;
+}
+
+// ================= Konturbaum =================
+// {d >= L} schrumpft monoton mit L, also liegt jeder Ring auf Niveau k+1 in
+// genau einem Ring auf Niveau k. Der Baum faellt daraus ohne Sonderfaelle an:
+// an einer Engstelle bekommt ein Knoten mehrere Kinder.
+function contourTree(F,e0,s,eps){
+  let prev=[], roots=[], levels=0, split=false;
+  for(let k=0;k<400;k++){
+    const cs=isoContours(F,e0+k*s,eps);
+    if(!cs.length) break;
+    levels++;
+    if(cs.length>prev.length && k) split=true;
+    const nodes=cs.map(ring=>({k,ring,children:[]}));
+    if(!k) roots=nodes;
+    else nodes.forEach(nd=>{
+      const p=prev.find(q=>pointInPoly(nd.ring[0],q.ring));
+      (p?p.children:roots).push(nd);        // ohne Elter (Rundungsfall): eigene Wurzel
+    });
+    prev=nodes;
+  }
+  return {roots,levels,split:split||roots.length>1};
+}
+// Maximale Kette ab einem Knoten: laeuft, solange ein Knoten genau ein Kind hat.
+function chainFrom(nd){
+  const rings=[]; let cur=nd;
+  while(cur){ rings.push(cur.ring);
+    if(cur.children.length===1){ cur=cur.children[0]; continue; }
+    break; }
+  return {rings,end:cur,kInner:nd.k+rings.length-1};
+}
+// Verbinderringe eines Verzweigungsknotens: EINER fuer den Hinweg, ein
+// flacherer fuer den Rueckweg. Auf einem einzigen Ring geht es nicht - er wird
+// nur in eine Richtung umlaufen, also treffen sich Ein- und Ausstieg an
+// derselben Naht und kreuzen sich dort. Der flachere haengt sicher zusammen,
+// sobald der tiefere es tut.
+function linkRingsFor(F,lvlInner,s,eps,kids){
+  const seeds=kids.map(c=>c.ring[0]);
+  const at=f=>{
+    const hit=isoContours(F,lvlInner+f*s,eps).filter(r=>seeds.every(p=>pointInPoly(p,r)));
+    return hit.length===1?hit[0]:null;
+  };
+  for(const f of [0.6,0.45,0.3,0.16,0.08]){
+    const a=at(f), b=a&&at(f/2);
+    if(a&&b) return {a,b};
+  }
+  return null;
+}
+
+// ================= Bifilare Spirale =================
+// Jede Kontur bekommt eine LUECKE der Bogenlaenge g an einer gemeinsamen Naht;
+// alle Ring-zu-Ring-Spruenge laufen durch diese Luecken. Der Sprung von k nach
+// k+2 quert damit das Niveau k+1 genau dort, wo auf k+1 kein Rohr liegt.
+// Ohne diese Luecke durchstoesst jeder Sprung die Zwischenkonturen - das war
+// der Fehler der beiden verworfenen Prototypen.
+function spiralParts(rings,seed,g,pinOuter){
+  if(!rings.length) return null;
+  const n=rings.length, arc=rings.map(ringArc);
+  const gapT=new Array(n), gapP=new Array(n);
+  // Die Luecke braucht ein GERADES Wandstueck der Laenge g. Sitzt sie auf einer
+  // Ecke, ist der Eckbogen so lang wie die Luecke, und jeder Sprung darin
+  // schneidet die Ecke ab statt in der Luecke zu bleiben.
+  const straighten=(k,t0)=>{
+    const {cum,L}=arc[k], r=rings[k];
+    if(g>=L*0.5) return t0;
+    let best=t0, bq=-1;
+    for(let i=-6;i<=6;i++){
+      const t=t0+i*g/8;
+      const q=dist(ptAtArc(r,cum,L,t-g/2),ptAtArc(r,cum,L,t+g/2))/g;
+      if(q>bq){ bq=q; best=t; }
+    }
+    return best;
+  };
+  const setGap=(k,ref)=>{
+    const {t}=arcOfNearest(rings[k],arc[k].cum,ref);
+    gapT[k]=straighten(k,t); gapP[k]=ptAtArc(rings[k],arc[k].cum,arc[k].L,gapT[k]);
+  };
+  // Naht VON INNEN NACH AUSSEN. Andersherum laeuft sie in Sackgassen: sobald
+  // eine innere Kontur woanders sitzt als der Ruecken, dem die Naht gefolgt
+  // ist, liegt ihr naechster Punkt beliebig weit weg. Die aeussere Kontur
+  // UMSCHLIESST die innere dagegen immer.
+  // Ausnahme: ist ein Punkt fuer die AEUSSERSTE Luecke vorgegeben (der
+  // Verteiler), wird sie dort verankert und nach innen weitergereicht. Sonst
+  // faellt der Eintritt der Schnecke irgendwohin, und die Zuleitung muss quer
+  // durchs Feld. Springt die Naht dabei irgendwo weiter als 0,8 Lueckenbreiten,
+  // ist sie in eine Sackgasse gelaufen und die Fassung von innen gilt wieder.
+  const build=outsideIn=>{
+    if(outsideIn){ setGap(0,pinOuter); for(let k=1;k<n;k++) setGap(k,gapP[k-1]); }
+    else { setGap(n-1,seed); for(let k=n-2;k>=0;k--) setGap(k,gapP[k+1]); }
+    let worst=0;
+    for(let k=0;k+1<n;k++) worst=Math.max(worst,dist(gapP[k],gapP[k+1]));
+    return worst;
+  };
+  if(!(pinOuter && build(true)<=0.8*g)) build(false);
+  // Die Paritaet wird so gewaehlt, dass der VORLAUF auf der innersten Kontur
+  // endet. Endete dort der Ruecklauf, muessten Hin- und Rueckweg zu den
+  // Unterbaeumen dieselbe Luecke in derselben Reihenfolge queren - dafuer gibt
+  // es keine kreuzungsfreie Loesung.
+  const par=(n-1)%2;
+  const chains=rings.map((r,k)=>{
+    const c=cutGap(r,g,gapT[k]);
+    if(!c) return null;
+    return k%2===par ? c : c.slice().reverse();
+  });
+  const usable=k=>chains[k]&&chains[k].length>1;
+  const fwdSeq=[], backSeq=[];
+  for(let k=0;k<n;k++) if(usable(k)) (k%2===par?fwdSeq:backSeq).push(k);
+  if(!fwdSeq.length&&!backSeq.length) return null;
+  const via=(out,a,b)=>{ for(let k=Math.min(a,b)+1;k<Math.max(a,b);k++)
+    if(gapP[k]) out.push(gapP[k]); };
+  const run=seq=>{ const out=[];
+    seq.forEach((k,i)=>{ if(i) via(out,seq[i-1],k); out.push(...chains[k]); });
+    return out; };
+  const back=backSeq.slice().reverse();
   return {
-    b: fieldInset(),
-    t: S.edgeGap+(topIsOuter?randW('top')+omegaClear('top'):0),
-    l: atL? S.edgeGap+randW('left')+omegaClear('left') : S.s/2,
-    r: atR? S.edgeGap+randW('right')+omegaClear('right') : S.s/2,
+    head: usable(0)?[gapP[0]]:[],
+    inward: run(fwdSeq),
+    outward: run(back),
+    turnVia: (fwdSeq.length&&back.length)
+      ? (()=>{const o=[];via(o,fwdSeq[fwdSeq.length-1],back[0]);return o;})() : [],
+    gapP,
+    // Punkt in der Luecke von Ring k, seitlich um off versetzt. Hin- und
+    // Rueckweg brauchen verschiedene Seiten derselben Luecke.
+    gapAt:(k,off)=>gapT[k]==null?null:ptAtArc(rings[k],arc[k].cum,arc[k].L,gapT[k]+off),
+    aIdx: fwdSeq.length?fwdSeq[fwdSeq.length-1]:0,
+    bIdx: back.length?back[0]:0,
+    nIdx: n-1,
   };
 }
-
-// Echte Bahnenzahl: Probe-Linie quer durchs Rechteck, gezählt wird jedes
-// Rohr, das sie schneidet (nur Feldbahnen, Korridor/Kanal unterhalb ignoriert).
-function passCount(field,rect,gate){
-  const ins=insetsFor(rect);
-  const x0=rect.x0+ins.l, x1=rect.x0+rect.w-ins.r, cx=(x0+x1)/2;
-  // Probe im torfernen Viertel: die Ecken-Treppe (Lücken) liegt auf der Torseite
-  const px=(gate??cx)<=cx ? x1-(x1-x0)/4 : x0+(x1-x0)/4;
-  const yMin=rect.y0+ins.b-1;
-  let n=0;
-  for(let i=0;i<field.length-1;i++){
-    const a=field[i],b=field[i+1];
-    if((a.x-px)*(b.x-px)<0 && Math.min(a.y,b.y)>yMin) n++;
+// Ein Knoten des Konturbaums als EIN Pfad: die Unterbaeume haengen zwischen
+// Vorlauf und Ruecklauf der eigenen Kette. Jeder Unterbaum betritt und
+// verlaesst sein Gebiet an derselben Luecke, also bleibt die bifilare Ordnung
+// der Elternkette unberuehrt.
+function spiralNode(F,e0,s,eps,node,seed,g,pinOuter){
+  const {rings,end,kInner}=chainFrom(node);
+  const P=spiralParts(rings,seed,g,pinOuter);
+  if(!P) return [];
+  const kids=end?end.children:[];
+  let middle=P.turnVia;
+  if(kids.length){
+    const LR=linkRingsFor(F,e0+kInner*s,s,eps,kids);
+    const A=P.inward[P.inward.length-1], B=P.outward[0];
+    if(LR&&A&&B){
+      const ring=LR.a, arc=ringArc(ring), L=arc.L;
+      const rb=LR.b, arcB=ringArc(rb), LB=arcB.L;
+      const tOf=p=>arcOfNearest(ring,arc.cum,p).t;
+      const tOfB=p=>arcOfNearest(rb,arcB.cum,p).t;
+      // Hin- und Rueckweg queren dieselben Luecken, der Hinweg auf der Seite,
+      // auf der der Vorlauf endet, der Rueckweg um g/4 versetzt.
+      const down=[], up=[];
+      for(let k=P.aIdx+1;k<=P.nIdx;k++){ const p=P.gapAt(k,-g/4); if(p) down.push(p); }
+      for(let k=P.nIdx;k>P.bIdx;k--)   { const p=P.gapAt(k, g/4); if(p) up.push(p); }
+      // Ein- wie Ausstieg vom ZIEL her: der Bogen beginnt und endet am
+      // Ringpunkt, der dem Lueckenpunkt am naechsten liegt. Sonst laeuft das
+      // Anschlussstueck schraeg, schneidet eine Ecke ab und kreuzt dabei den
+      // eigenen Bogen.
+      const tA=tOf(down.length?down[down.length-1]:A);
+      const fwd=t=>((t-tA)%L+L)%L;
+      // Erst die Unterbaeume bauen, dann einsortieren: ihre Naht waechst von
+      // innen nach aussen, ihr Ein- und Austritt steht also erst danach fest.
+      const subs=kids.map(c=>{
+        const mid=c.ring.reduce((a,p)=>({x:a.x+p.x/c.ring.length,y:a.y+p.y/c.ring.length}),{x:0,y:0});
+        const sp=spiralNode(F,e0,s,eps,c,ptAtArc(ring,arc.cum,L,tOf(mid)),g);
+        return sp.length>1 ? {sp,tIn:tOf(sp[0])} : null;
+      }).filter(Boolean).sort((a,b)=>fwd(a.tIn)-fwd(b.tIn));
+      // Der Rundgang laeuft nur VORWAERTS. Ein Unterbaum wird um g/4 hinter
+      // seinem Eintritt wieder verlassen, nicht an seinem Austrittspunkt -
+      // dessen Lage ist nicht garantiert dahinter.
+      middle=[...down]; let fPrev=0;
+      for(const sub of subs){
+        const fIn=fwd(sub.tIn);
+        middle.push(...ringArcBetween(ring,arc,tA+fPrev,tA+fIn));
+        middle.push(...sub.sp);
+        fPrev=fIn+g/4;
+      }
+      // Rueckweg auf dem flacheren Ring, rueckwaerts bis kurz vor die Naht.
+      const E=up[0]??B, tB0=tOfB(down.length?down[down.length-1]:A);
+      const fwdB=t=>((t-tB0)%LB+LB)%LB;
+      let eB=tOfB(E);
+      // Projiziert man zwei Punkte, die auf der Elternkontur g/2 auseinander
+      // liegen, ueber eine Ecke hinweg auf den Verbinderring, kippt ihre
+      // Reihenfolge. Dann wickelt der Bogen ueber den Einstieg hinweg.
+      if(!(fwdB(eB)>1 && fwdB(eB)<g)) eB=tB0+g/2;
+      middle.push(...ringArcBetween(rb,arcB,eB,tB0+fPrev*LB/L).reverse(),...up);
+    }else{
+      kids.forEach(c=>{ middle=middle.concat(spiralNode(F,e0,s,eps,c,B||seed,g)); });
+    }
   }
-  return n;
+  return [...P.head,...P.inward,...middle,...P.outward];
 }
-
-// Bifilar-Reihenfolge (nur noch für Selbstchecks / Doku der Verlegelogik)
-function bifilarOrder(n){const ev=[],od=[];for(let i=0;i<n;i++)(i%2===0?ev:od).push(i);od.reverse();return ev.concat(od);}
-
-// Ein Spiralarm: rechteckige archimedische Spirale. Der Wandabstand wächst pro
-// Vierteldrehung um step/4, also um step pro voller Umdrehung. Kein Aufschneiden
-// und kein radialer Sprung -> der Arm kann sich per Konstruktion nicht kreuzen.
-// Bifilare Doppelspirale aus WANDPARALLELEN konzentrischen Ringen mit
-// ECKEN-TREPPE: alle Ring-zu-Ring-Sprünge laufen als parallele Diagonalen in
-// der unteren Ecke, die dem Verteiler zugewandt ist. Jeder Ring hat dort in
-// der Unterkante eine Lücke der Breite g; der Sprung über den fremden
-// Zwischenring quert dessen Kanten-Niveau exakt in der Lücken-Mitte.
-// Rücklauf = gerade Tiefen (0,2s,...) CW, Vorlauf = ungerade (s,3s,...) CCW
-// -> Gegenstrom, Abstand s überall. Eintritt in der Lücken-Mitte des
-// äußersten Rings (x0+g/2), Austritt an dessen Lückenrand (x0+g).
-function doubleSpiral(rect,ins,s,gate){
-  const at=d=>({x0:rect.x0+ins.l+d, y0:rect.y0+ins.b+d,
-                x1:rect.x0+rect.w-ins.r-d, y1:rect.y0+rect.h-ins.t-d});
-  const g=2*s;
-  const depths=[];
-  for(let k=0;k<200;k++){ const e=at(k*s);
-    if(e.x1-e.x0<=g+s||e.y1-e.y0<=s) break; depths.push(k*s); }
-  if(!depths.length) return [];
-  const e0=at(0), cx=(e0.x0+e0.x1)/2;
-  const leftGate=(gate??cx)<=cx;                 // Verteiler-zugewandte Ecke
-  const FX=leftGate ? (x=>x) : (x=>e0.x0+e0.x1-x);   // rechts: x-Rollen spiegeln
-  const P=(x,y)=>({x:FX(x),y});
-  const outD=depths.filter((_,i)=>i%2===0), inD=depths.filter((_,i)=>i%2===1);
-  const pts=[P(e0.x0+g/2,e0.y0)];                // Eintritt in der Lücke außen
-  if(!inD.length){                               // nur ein Ring: einfache Schleife
-    const e=at(outD[0]);
-    pts.push(P(e.x0+g,e.y0),P(e.x1,e.y0),P(e.x1,e.y1),P(e.x0,e.y1),P(e.x0,e.y0));
-    return pts;
+function spiralRoom(F,e0,s,eps,seed){
+  const {roots,levels,split}=contourTree(F,e0,s,eps);
+  let path=[], ref=seed;
+  for(const r of roots){
+    const p=spiralNode(F,e0,s,eps,r,ref,2*s,seed);
+    if(p.length<2) continue;
+    path=path.concat(p); ref=p[p.length-1];
   }
-  // Vorlauf rein: CCW, Start am Lückenrand (x0+g), Ende an der Ecke (x0,y0)
-  inD.forEach(d=>{ const e=at(d);
-    pts.push(P(e.x0+g,e.y0),P(e.x1,e.y0),P(e.x1,e.y1),P(e.x0,e.y1),P(e.x0,e.y0));
-  });
-  // U-Turn implizit Ecke->Ecke, dann Rücklauf raus: CW, Start Ecke, Ende Lückenrand
-  outD.slice().reverse().forEach(d=>{ const e=at(d);
-    pts.push(P(e.x0,e.y0),P(e.x0,e.y1),P(e.x1,e.y1),P(e.x1,e.y0),P(e.x0+g,e.y0));
-  });
-  return pts;
+  return {path,levels,split};
 }
-function bifilarPath(rect,gate){ return doubleSpiral(rect,insetsFor(rect),S.s,gate); }
 
 // ================= Randzone =================
+// Spurabstand im Anbindekorridor: mind. 50 mm (Verlegeabstand).
+const LANE=()=>Math.max(50,S.pipeDia*1.6,0.9*S.bendRadius);
+// Omega-Kehren: ist die halbe Randzonen-Teilung kleiner als der Biegeradius,
+// werden die Bahn-Enden als ausgeschwungene Schlaufen mit vollem Radius
+// verlegt. Braucht edgeGap >= R (Ausschwung zur Wand).
+const omegaOn=()=>S.randPasses>1 && S.randSpacing/2<S.bendRadius
+              && S.edgeGap>=S.bendRadius+S.pipeDia/2;
+const randDepth=()=>S.windowEdges.length?S.randPasses*S.randSpacing:0;
 // Omega-Kehre: Bahn-Ende Pe -> ausgeschwungene Schlaufe -> Nachbarbahn Ps,
-// alle Bögen mit vollem Radius R. u = Bahnrichtung am Ende (Einheitsvektor).
-// Form: 90° raus (u-Seite), Steigstück, 180° zurück, 90°-Gegenbogen auf die
-// Nachbarbahn, die dadurch um 2R später beginnt. Kreuzungsfrei: der Ausschwung
-// liegt jenseits des Nachbarbahn-Endes, der Scheitel im erweiterten Streifen.
+// alle Bögen mit vollem Radius R. u = Bahnrichtung am Ende.
 function omegaTurn(Pe,Ps,u,R){
   const n=unit(sub(Ps,Pe)), d=len(sub(Ps,Pe));
   const cw=(u.x*n.y-u.y*n.x)<0;
-  const A =add(add(Pe,scl(u,R)),  scl(n,R));      // nach 90°-Bogen
-  const B =add(add(Pe,scl(u,R)),  scl(n,R+d));    // Steigstück-Ende
-  const C2=add(add(Pe,scl(u,-R)), scl(n,R+d));    // nach 180°-Bogen
-  const D =add(Ps,scl(u,-2*R));                   // nach Gegenbogen, auf Nachbarbahn
+  const A =add(add(Pe,scl(u,R)),  scl(n,R));
+  const B =add(add(Pe,scl(u,R)),  scl(n,R+d));
+  const C2=add(add(Pe,scl(u,-R)), scl(n,R+d));
+  const D =add(Ps,scl(u,-2*R));
   return [
     {x:A.x, y:A.y, arc:{r:R,cw,large:false}},
     {x:B.x, y:B.y},
-    {x:C2.x,y:C2.y,arc:{r:R,cw,large:false}},     // 180°: Sehne=2R, sweep zählt
-    {x:D.x, y:D.y, arc:{r:R,cw:!cw,large:false}}, // Gegenbogen
+    {x:C2.x,y:C2.y,arc:{r:R,cw,large:false}},
+    {x:D.x, y:D.y, arc:{r:R,cw:!cw,large:false}},
   ];
 }
-// Wandspanne einer FRAME-Kante ('bottom' = Verteilerwand), notch-bewusst.
-// Gibt Anfang/Ende auf der Wandlinie (ohne Einrückung) + Innen-Normale.
-function edgeSpan(edgeName){
-  const W=frameW(), H=frameH(), n=notchFrame();
-  const yStart=fieldInset();       // seitliche Zonen starten über dem Korridor
-  if(edgeName==='bottom'){
-    const x1 = n&&n.y0<=1 ? (n.x1>=W-1?n.x0:W) : W;
-    const x0 = n&&n.y0<=1&&n.x0<=1 ? n.x1 : 0;
-    return {a:{x:x0,y:0}, b:{x:x1,y:0}, inw:{x:0,y:1}};
-  }
-  // Umlaufsinn der Kette: left runter -> bottom rechts -> right hoch -> top links.
-  // Nur so schließen benachbarte Kanten ohne Sprung aneinander an.
-  if(edgeName==='top'){
-    const x1 = n&&n.y1>=H-1 ? (n.x1>=W-1?n.x0:W) : W;
-    const x0 = n&&n.y1>=H-1&&n.x0<=1 ? n.x1 : 0;
-    return {a:{x:x1,y:H}, b:{x:x0,y:H}, inw:{x:0,y:-1}};
-  }
-  if(edgeName==='left'){
-    const y1 = n&&n.x0<=1 ? (n.y1>=H-1?n.y0:H) : H;
-    const y0 = n&&n.x0<=1&&n.y0<=1 ? Math.max(n.y1,yStart) : yStart;
-    return {a:{x:0,y:y1}, b:{x:0,y:y0}, inw:{x:1,y:0}};
-  }
-  const y1 = n&&n.x1>=W-1 ? (n.y1>=H-1?n.y0:H) : H;
-  const y0 = n&&n.x1>=W-1&&n.y0<=1 ? Math.max(n.y1,yStart) : yStart;
-  return {a:{x:W,y:y0}, b:{x:W,y:y1}, inw:{x:-1,y:0}};
-}
-// Zusammenhängende Fensterwände (z.B. links+unten+rechts) werden als EINE
-// U-förmige Randzone um die Ecken geführt. Verbinder quer durch den Raum
-// entfallen damit ganz — sie waren die Ursache der Notch-Durchläufe.
-function edgeChains(frameSel){
-  const order=['left','bottom','right','top'];        // im Uhrzeigersinn benachbart
-  const sel=order.filter(e=>frameSel.includes(e));
-  if(!sel.length) return [];
-  // Benachbart heißt: die gemeinsame Raumecke existiert wirklich. Liegt sie im
-  // Notch, gibt es dort keine Ecke — dann bleiben es zwei Ketten, sonst liefe
-  // die Verbindung durch die Aussparung.
-  const W=frameW(), H=frameH(), n=notchFrame();
-  const CORNER={'left|bottom':{x:0,y:0}, 'bottom|right':{x:W,y:0},
-                'right|top':{x:W,y:H},   'top|left':{x:0,y:H}};
-  const adj=(p,q)=>{
-    const i=order.indexOf(p), j=order.indexOf(q);
-    if((i+1)%4!==j) return false;
-    const c=CORNER[p+'|'+q];
-    return !(n && c.x>=n.x0-1 && c.x<=n.x1+1 && c.y>=n.y0-1 && c.y<=n.y1+1);
-  };
-  const chains=[[sel[0]]];
-  for(let i=1;i<sel.length;i++){
-    const last=chains[chains.length-1];
-    if(adj(last[last.length-1],sel[i])) last.push(sel[i]); else chains.push([sel[i]]);
-  }
-  // Ring schließen (top grenzt wieder an left), aber nie alle vier zu einem Ring
-  if(chains.length>1){
-    const f=chains[0], l=chains[chains.length-1];
-    if(adj(l[l.length-1],f[0])){ chains[0]=l.concat(f); chains.pop(); }
-  }
-  return chains;
-}
-// Eine Randzonenbahn im Abstand off entlang einer Kettenfolge: Ecken sind die
-// Schnittpunkte der eingerückten Wandlinien, Enden um endGap eingerückt.
-// Kettenglied: 'bottom' (volle Kante) oder {e, a, b} mit eigenen Endpunkten
-function chainPass(chain,off,endGap){
-  const ls=chain.map(item=>{
-    const e=typeof item==='string'?item:item.e, s=edgeSpan(e);
-    const a=item.a??s.a, b=item.b??s.b;
-    return {p:add(a,scl(s.inw,off)), d:unit(sub(b,a)), L:len(sub(b,a))};
-  });
-  // Ecke = Schnittpunkt der beiden eingerückten Wandlinien (Projektion, da
-  // rechtwinklig): so entsteht EIN durchgehender Zug ohne Sprung.
-  const corner=(A,B)=>add(A.p,scl(A.d,(B.p.x-A.p.x)*A.d.x+(B.p.y-A.p.y)*A.d.y));
-  const pts=[add(ls[0].p,scl(ls[0].d,endGap))];
-  for(let i=1;i<ls.length;i++) pts.push(corner(ls[i-1],ls[i]));
-  const last=ls[ls.length-1];
-  pts.push(add(last.p,scl(last.d,last.L-endGap)));
-  return pts;
-}
-function randzoneChain(chain){
-  const {edgeGap,randSpacing,randPasses}=S;
-  const endGap = edgeGap + (omegaOn()?S.bendRadius:0);   // Platz für den Ausschwung
-  const pts=[];
-  for(let j=0;j<randPasses;j++){
-    let pass=chainPass(chain, edgeGap+j*randSpacing, endGap);
-    if(j%2===1) pass=pass.reverse();
-    if(j>0 && omegaOn()){
-      const Pe=pts[pts.length-1], u=unit(sub(Pe,pts[pts.length-2]));
-      pts.push(...omegaTurn(Pe,pass[0],u,S.bendRadius));
-      pts.push(...pass.slice(1));
-    }else{
-      pts.push(...pass);
+// Randzonenbahn j: das Stueck der Iso-Linie auf Niveau edgeGap + j*randSpacing,
+// dessen naechstliegende Wandkante ausgewaehlt ist. Zusammenhaengende Stuecke
+// ergeben von selbst eine Kette um die Ecken - der Sonderfall "benachbarte
+// Fensterwaende verbinden" entfaellt damit.
+function randzoneRuns(F,poly,sel,level,eps){
+  const runs=[];
+  for(const ring of isoContours(F,level,eps)){
+    const owned=ring.map(p=>{
+      let best=Infinity, bi=-1;
+      for(let i=0;i<poly.length;i++){
+        const d=nearestOnSeg(p,poly[i],poly[(i+1)%poly.length]).d;
+        if(d<best){ best=d; bi=i; }
+      }
+      return sel.includes(bi);
+    });
+    const n=ring.length;
+    let start=owned.findIndex((v,i)=>v&&!owned[(i-1+n)%n]);
+    if(start<0){ if(owned[0]) runs.push(ring.slice()); continue; }
+    let cur=[];
+    for(let k=0;k<n;k++){
+      const i=(start+k)%n;
+      if(owned[i]) cur.push(ring[i]);
+      else if(cur.length){ if(cur.length>1) runs.push(cur); cur=[]; }
     }
+    if(cur.length>1) runs.push(cur);
+  }
+  return runs;
+}
+// Die Bahnen einer Randzone: aussen nach innen, jede zweite umgekehrt, damit
+// ein durchgehender Zug entsteht. Kein Bahnwechsel ohne Kehre.
+function randzonePath(F,poly,sel,eps){
+  if(!sel.length||S.randPasses<1) return [];
+  const lanes=[];
+  for(let j=0;j<S.randPasses;j++){
+    const runs=randzoneRuns(F,poly,sel,S.edgeGap+j*S.randSpacing,eps);
+    if(!runs.length) break;
+    runs.sort((a,b)=>b.length-a.length);
+    lanes.push(j%2 ? runs[0].slice().reverse() : runs[0]);
+  }
+  if(!lanes.length) return [];
+  const pts=[...lanes[0]];
+  for(let j=1;j<lanes.length;j++){
+    const Pe=pts[pts.length-1], Ps=lanes[j][0];
+    if(omegaOn()&&pts.length>1){
+      const u=unit(sub(Pe,pts[pts.length-2]));
+      pts.push(...omegaTurn(Pe,Ps,u,S.bendRadius));
+      pts.push(...lanes[j].slice(1));
+    }else pts.push(...lanes[j]);
   }
   return pts;
-}
-// Einzelkante (für Selbstchecks / Kompatibilität)
-function randzonePath(edgeName){ return randzoneChain([edgeName]); }
-// Enthält die Kette die Verteilerwand, wird sie dort in zwei Arme geteilt:
-// jeder Arm beginnt beim Verteiler. Sonst müsste die Zuleitung bis ans ferne
-// Kettenende laufen — direkt auf der ersten Randzonenbahn (Rohr auf Rohr).
-function splitChainAtManifold(chain,mx){
-  const i=chain.indexOf('bottom');
-  if(i<0) return [chain];
-  const s=edgeSpan('bottom');
-  if(mx<=s.a.x+1||mx>=s.b.x-1) return [chain];        // Verteiler am Kettenende
-  const Mp={x:mx,y:s.a.y};
-  // Beide Arme starten am Verteiler. Kanten vor 'bottom' laufen dabei rückwärts.
-  const rev=e=>{ const t=edgeSpan(e); return {e,a:t.b,b:t.a}; };
-  const leftArm  = [{e:'bottom',a:Mp,b:s.a}, ...chain.slice(0,i).reverse().map(rev)];
-  const rightArm = [{e:'bottom',a:Mp,b:s.b}, ...chain.slice(i+1)];
-  return [leftArm,rightArm];
 }
 
 // ================= Fillet: Ecken runden + korrekte Bogenlänge =================
@@ -601,7 +764,6 @@ function fillet(pts,r){
   if(!pts.length) return {ops,length,minR};
   ops.push({kind:'move',to:pts[0]});
   if(pts.length===1) return {ops,length,minR};
-  // Vorgegebener Bogen (Omega-Schlaufen): Länge analytisch aus Sehne+Radius.
   const pushArc=(v)=>{
     const c=len(sub(v,prev));
     let th=2*Math.asin(Math.min(1,c/(2*v.arc.r)));
@@ -613,14 +775,12 @@ function fillet(pts,r){
   for(let i=1;i<pts.length-1;i++){
     const a=pts[i-1],v=pts[i],b=pts[i+1];
     if(v.arc){ pushArc(v); continue; }
-    // Nachbarn eines vorgegebenen Bogens sind tangential konstruiert:
-    // Ecke nicht runden, sonst verfälscht die Sehnen-Richtung den Knick.
     if((b&&b.arc)||a.arc){ ops.push({kind:'line',to:v}); length+=len(sub(v,prev)); prev=v; continue; }
     const din=unit(sub(v,a)),dout=unit(sub(b,v));
     const dotv=Math.max(-1,Math.min(1,dot(din,dout)));
-    const defl=Math.acos(dotv);                 // 0..pi
+    const defl=Math.acos(dotv);
     const cross=din.x*dout.y-din.y*dout.x;
-    if(defl<1e-3||Math.abs(cross)<1e-9){ continue; } // gerade -> Punkt weg
+    if(defl<1e-3||Math.abs(cross)<1e-9){ continue; }
     let rr=r, t=rr/Math.tan((Math.PI-defl)/2);
     const maxT=Math.min(len(sub(v,a)),len(sub(v,b)))*0.5;
     // ponytail: ~180°-Kehren als scharfer Punkt (t->0); echte U-Bogen erst wenn nötig.
@@ -669,233 +829,165 @@ function crossBetween(a,b,near){
   return hits;
 }
 // Parallele Rohre mit Mittenabstand < Rohr-Ø = physische Überlappung.
-// segCrossPt sieht nur transversale Schnitte — kollineare/parallele Doppel-
-// belegung braucht diesen eigenen Check.
+// segCrossPt sieht nur transversale Schnitte. Frueher waren hier nur waag- und
+// senkrechte Segmente behandelt; auf einem beliebigen Polygon liegt kaum ein
+// Segment achsparallel, deshalb jetzt der allgemeine Abstand Segment/Segment.
+function segDist(a,b,c,d){
+  if(segCrossPt(a,b,c,d)) return 0;
+  return Math.min(nearestOnSeg(a,c,d).d, nearestOnSeg(b,c,d).d,
+                  nearestOnSeg(c,a,b).d, nearestOnSeg(d,a,b).d);
+}
 function parallelOverlaps(paths,near){
   const segs=[], R=near?400:0;
-  paths.forEach(p=>{ for(let i=0;i<p.length-1;i++){
-    const a=p[i],b=p[i+1];
-    if(Math.abs(a.y-b.y)<1e-6&&Math.abs(a.x-b.x)>1e-6)
-      segs.push({o:'h',c:a.y,lo:Math.min(a.x,b.x),hi:Math.max(a.x,b.x),p,i});
-    else if(Math.abs(a.x-b.x)<1e-6&&Math.abs(a.y-b.y)>1e-6)
-      segs.push({o:'v',c:a.x,lo:Math.min(a.y,b.y),hi:Math.max(a.y,b.y),p,i});
-  }});
+  paths.forEach(p=>{ for(let i=0;i<p.length-1;i++)
+    if(dist(p[i],p[i+1])>1) segs.push({a:p[i],b:p[i+1],p,i}); });
   const hits=[];
   for(let i=0;i<segs.length;i++)for(let j=i+1;j<segs.length;j++){
     const A=segs[i],B=segs[j];
-    if(A.o!==B.o) continue;
-    if(A.p===B.p&&Math.abs(A.i-B.i)<=1) continue;   // direkte Nachbarn (teilen nur einen Punkt)
-    if(Math.abs(A.c-B.c)>=S.pipeDia) continue;
-    const lo=Math.max(A.lo,B.lo), hi=Math.min(A.hi,B.hi);
-    if(hi-lo>1){
-      const mid = A.o==='h' ? {x:(lo+hi)/2,y:(A.c+B.c)/2} : {x:(A.c+B.c)/2,y:(lo+hi)/2};
-      if(!near||len(sub(mid,near))>R) hits.push(mid);
-    }
+    if(A.p===B.p&&Math.abs(A.i-B.i)<=1) continue;   // Nachbarn teilen einen Punkt
+    if(segDist(A.a,A.b,B.a,B.b)>=S.pipeDia) continue;
+    // Nur ECHTE Doppelbelegung: die Segmente muessen ueber eine Strecke
+    // nebeneinander laufen, nicht nur an einem Punkt nah beieinander liegen.
+    const par=Math.abs(dot(unit(sub(A.b,A.a)),unit(sub(B.b,B.a))));
+    if(par<0.94) continue;
+    const ov=Math.min(dist(A.a,A.b),dist(B.a,B.b));
+    if(ov<=S.pipeDia) continue;
+    const mid={x:(A.a.x+A.b.x+B.a.x+B.b.x)/4, y:(A.a.y+A.b.y+B.a.y+B.b.y)/4};
+    if(!near||len(sub(mid,near))>R) hits.push(mid);
   }
   return hits;
 }
 
-// ================= Zonen / Loops / Autofit =================
-// Aufteilung in N Heizkreise; jeder Kreis = Liste von Rechtecken (in Serie verlegt).
-// Alles im FRAME (Verteilerwand = Unterkante).
+// ================= Planung =================
+const GRID_H=()=>Math.max(10,Math.min(25,S.s/8));
+const ISO_EPS=2;
+// Das Feld haengt nur an Polygon, Raster und Randzonen-Zuschlag - beim Ziehen
+// eines Reglers aendert sich meist keines davon.
+let fieldCache={key:null,val:null};
+function fieldFor(poly,sel){
+  const h=GRID_H(), bonus=poly.map((_,i)=>sel&&sel.includes(i)?randDepth():0);
+  const key=JSON.stringify([poly,h,bonus]);
+  if(fieldCache.key!==key) fieldCache={key,val:buildField(poly,h,bonus)};
+  return fieldCache.val;
+}
+// Aufteilung in N Heizkreise: das Polygon wird entlang seiner laengeren Achse
+// in flaechengleiche Teile geschnitten. Die Schnittkante wird je Teil um
+// edgeGap - s/2 in den Nachbarn verlaengert, sonst bliebe an der Naht der
+// doppelte Wandabstand als kalter Streifen stehen.
 function partition(N){
-  const base=rectsFrame();
-  if(N<=1) return [base];                                   // 1 Kreis, alle Rechtecke
-  if(base.length===1){                                      // reines Rechteck -> N Streifen
-    const r=base[0], loops=[];
-    for(let i=0;i<N;i++) loops.push([{x0:r.x0+i*r.w/N,y0:r.y0,w:r.w/N,h:r.h}]);
-    return loops;
+  if(N<=1) return [S.poly];
+  const b=polyBBox(S.poly), horiz=b.w>=b.h;
+  const ov=Math.max(0,S.edgeGap-S.s/2);
+  const cuts=[]; for(let i=1;i<N;i++) cuts.push(areaSplit(S.poly,horiz,i/N));
+  const parts=[];
+  for(let i=0;i<N;i++){
+    let p=S.poly;
+    if(i>0)   p=clipHalf(p,horiz,cuts[i-1]-ov,+1);
+    if(i<N-1) p=clipHalf(p,horiz,cuts[i]+ov,-1);
+    if(p.length>=3 && Math.abs(signedArea(p))>1e5) parts.push(orientCCW(p));
   }
-  if(N===2) return [[base[0]],[base[1]]];
-  const [Lz,Rz]=base;                                       // N===3: größeres Rechteck halbieren
-  if(Lz.w*Lz.h>=Rz.w*Rz.h)
-    return [[{...Lz,w:Lz.w/2}],[{x0:Lz.x0+Lz.w/2,y0:Lz.y0,w:Lz.w/2,h:Lz.h}],[Rz]];
-  return [[Lz],[{...Rz,w:Rz.w/2}],[{x0:Rz.x0+Rz.w/2,y0:Rz.y0,w:Rz.w/2,h:Rz.h}]];
+  return parts.length?parts:[S.poly];
 }
-// Manhattan-Weg über eine reservierte Korridor-Spur. Im Frame liegt der
-// Verteiler IMMER an der Unterkante, also nie ein Umweg über eine Seitenwand:
-// hoch/runter auf die Spur, entlang, wieder hoch/runter.
-function routeVia(a,b,lane,gap){
-  const yC=laneY(lane), n=notchFrame(), pts=[];
-  const put=p=>{ const q=pts[pts.length-1];
-    if(!q||Math.abs(q.x-p.x)>1e-6||Math.abs(q.y-p.y)>1e-6) pts.push(p); };
-  // Ziel UNTERHALB des Korridors (Randzone): erst in der rohrfreien
-  // Verteiler-Lücke auf Zielhöhe absteigen, dann waagerecht heranfahren.
-  // Andersherum (erst waagerecht, dann fallen) durchsticht die Absenkung
-  // zwangsläufig alle Randzonenbahnen zwischen Korridor und Ziel.
-  if(gap && b.y<yC-1 && a.y<=1){
-    const gx=Math.min(Math.max(a.x,gap.lo),gap.hi);   // x innerhalb der Lücke
-    put(a); put({x:gx,y:a.y}); put({x:gx,y:b.y}); put(b);
-    return pts;
-  }
-  // Ziel an einer ANDEREN Wand als der Verteilerwand (z.B. Randzone gegenüber):
-  // im Verteiler-Korridor bis zur Seite, dort im Seitenkorridor hoch, dann quer.
-  // Direkt hochzuziehen würde das ganze Feld zerschneiden.
-  if(b.y > frameH()-fieldInset()+1){
-    const xS = b.x<frameW()/2 ? laneY(lane) : frameW()-laneY(lane);
-    put(a); put({x:a.x,y:yC}); put({x:xS,y:yC}); put({x:xS,y:b.y}); put(b);
-    return pts;
-  }
-  // Klebt der Notch an der Verteilerwand, liegt der Korridor dort im Nichts:
-  // die Spur steigt in diesem x-Bereich über die Notch-Oberkante.
-  const overNotch = n && n.y0<=1 && yC<n.y1;
-  const yHi = overNotch ? n.y1+(yC-(S.edgeGap+randWidth()+omegaClear()))+LANE()/2 : yC;
-  const yFor = x => (overNotch && x>n.x0-1 && x<n.x1+1) ? yHi : yC;
-  // Höhenwechsel als 45°-Schräge in Laufrichtung: zwei 45°-Ecken statt zweier
-  // rechtwinkliger. Reicht der Platz nicht, bleibt es rechtwinklig.
-  const dir = b.x>=a.x ? 1 : -1;
-  const room = Math.abs(b.x-a.x);
-  const ramp=(x,y0,y1,sign)=>{                // Schräge von y0 auf y1 ab x
-    const d=Math.abs(y1-y0);
-    if(d<1e-6) return x;
-    if(d*2>room) { put({x,y:y1}); return x; }  // zu eng -> rechtwinklig
-    put({x,y:y0}); put({x:x+sign*d,y:y1});
-    return x+sign*d;
-  };
-  put(a);
-  let cx = ramp(a.x, a.y, yFor(a.x), dir);
-  if(yFor(a.x)!==yFor(b.x)){                  // Höhenwechsel an der Notch-Kante
-    const edgeX = (a.x<b.x) ? (a.x<n.x0 ? n.x0 : n.x1) : (a.x>n.x1 ? n.x1 : n.x0);
-    cx = ramp(edgeX, yFor(a.x), yFor(b.x), dir);
-  }
-  // Zielseite: Schräge rückwärts, damit b senkrecht angefahren wird
-  const dEnd=Math.abs(yFor(b.x)-b.y);
-  if(dEnd>1e-6 && dEnd*2<=room){
-    put({x:b.x-dir*dEnd, y:yFor(b.x)});
-    put({x:b.x, y:b.y});
-  }else{
-    put({x:b.x,y:yFor(b.x)});
-    put(b);
-  }
-  return pts;
-}
-// Welche Weltwand trägt den Verteiler -> Frame-Rotation.
-function rotForManifold(M){
-  const nearNotchSide = hasNotch()&&Math.abs(M.x-notchX())<=1&&M.y>=S.H-S.notchB-1;
-  const nearNotchBot  = hasNotch()&&Math.abs(M.y-(S.H-S.notchB))<=1&&M.x>=notchX()-1;
-  if(M.y<=1) return 0;                 // Unterwand
-  if(M.x<=1) return 1;                 // linke Wand
-  if(M.y>=S.H-1||nearNotchBot) return 2;   // Oberwand (auch Notch-Unterkante)
-  if(M.x>=S.W-1||nearNotchSide) return 3;  // rechte Wand (auch Notch-Seitenwand)
-  return 0;
-}
-function buildLoops(groups){
-  const M=rotFwd(snappedManifold(),S.W,S.H);  // Verteiler im Frame (auf der Unterkante)
-  // Rohrfreie Lücke in der Randzone: splitChainAtManifold teilt die Kette hier,
-  // beide Arme rücken um endGap ein. Durch diese Lücke steigen die Zuleitungen
-  // ab, ohne die Randzonenbahnen zu durchstechen.
-  const endGap=S.edgeGap+(omegaOn()?S.bendRadius:0);
-  const gap={lo:M.x-endGap+S.pipeDia, hi:M.x+endGap-S.pipeDia};
-
-  // Stufe 1: Felder (noch ohne Randzone/Anbindung)
-  const raw=groups.map((rects,gi)=>{
-    let field=[], joins=[];
-    rects.forEach(r=>{                                    // Rechtecke in Serie
-      const sp=bifilarPath(r,M.x);          // Tor zum Verteiler hin — Schlaufe beginnt/endet dort
-      if(!sp.length) return;
-      if(field.length) joins.push({at:field.length,from:field[field.length-1],to:sp[0]});
-      field=field.concat(sp);
-    });
-    return {gi,rects,field,joins,rand:[]};
-  });
-
-  // Randzone dem Kreis mit dem anker-fernsten Feld-Eintritt zuordnen: dessen
-  // Steigleitung aus dem Korridor liegt außerhalb aller fremden Korridor-Spans
-  // und kreuzt daher nichts. (Vorlauf geht weiterhin zuerst an die Scheibe.)
-  const anchor = M.x;
-  if(S.windowEdges.length){
-    let owner=-1,best=-1;
-    raw.forEach((r,i)=>{ if(r.field.length){
-      const d=Math.abs(r.field[0].x-anchor); if(d>best){best=d;owner=i;} }});
-    if(owner<0&&raw.length) owner=0;
-    if(owner>=0){
-      // Zusammenhängende Fensterwände laufen als EINE U-förmige Randzone um die
-      // Ecken. Getrennte Ketten (z.B. nur oben + nur unten) werden im wandnahen
-      // Kanal verbunden — eine Direktverbindung wäre eine Diagonale quer durch
-      // den Raum und ggf. durch den Notch.
-      // Ketten am Verteiler in zwei Arme teilen (jeder beginnt dort) und die
-      // Stränge über den Übergangskanal verbinden — mit denselben 45°-Rampen
-      // wie die Anbindeleitungen, statt über scharfe wandnahe Ecken.
-      const parts=edgeChains(frameEdges())
-        .flatMap(ch=>splitChainAtManifold(ch,M.x))
-        .map(ch=>randzoneChain(ch)).filter(p=>p.length);
-      let rz=[];
-      parts.forEach(p=>{
-        if(rz.length) rz.push(...routeVia(rz[rz.length-1],p[0],-1).slice(1,-1));
-        rz=rz.concat(p);
-      });
-      raw[owner].rand=rz;
+// Welche Polygonkanten des Teils sind Fensterwaende? Die Auswahl steht am
+// GANZEN Raum; ein Teilstueck erbt sie ueber die Lage seiner Kantenmitte.
+function selForPart(part){
+  const sel=[];
+  part.forEach((p,i)=>{
+    const q=part[(i+1)%part.length], mid={x:(p.x+q.x)/2,y:(p.y+q.y)/2};
+    if(dist(p,q)<50) return;
+    let best=Infinity, bi=-1;
+    for(let k=0;k<S.poly.length;k++){
+      const d=nearestOnSeg(mid,S.poly[k],S.poly[(k+1)%S.poly.length]).d;
+      if(d<best){ best=d; bi=k; }
     }
-  }
-  raw.forEach(r=>{
-    r.head = r.rand.length?r.rand[0]:r.field[0];
-    r.tail = r.field.length?r.field[r.field.length-1]:(r.rand.length?r.rand[r.rand.length-1]:null);
+    if(best<=1 && S.windowEdges.includes(bi)) sel.push(i);
   });
+  return sel;
+}
+// Verteiler darf an jeder Stelle der Wand stehen.
+function snappedManifold(){ return nearestOnRing(S.manifold,S.poly).pt; }
 
-  // Stufe 2: Spur-Vergabe so, dass keine Stichleitung über eine fremde Spur muss.
-  // Verteiler unten: fernstes Ziel -> innerste Spur (Spans um M.x schachteln sich).
-  // Detour (Seiten-/Oberwand): die Wand-Vertikale läuft bei x=laneY(lane); das
-  // WANDNÄCHSTE Ziel braucht die WANDNÄCHSTE Spur, sonst schneidet die Vertikale
-  // eines inneren Anschlusses die Korridor-Horizontalen der äußeren.
+// Anbindekorridor: Spuren sind Iso-Linien des GANZEN Raums, direkt innerhalb
+// der Randzone. Verschachtelte Versaetze desselben Randes schneiden sich nicht,
+// also koennen sich die Spuren untereinander nicht kreuzen. Reserviert wird
+// nur, was gebraucht wird - bei einem Kreis liegen Ein- und Austritt der
+// Schnecke am Verteiler und es wird gar keine Spur belegt.
+// Spuren: je Kreis eine fuer den Vor- und eine fuer den Ruecklauf, plus eine
+// fuer den Uebergang von der Randzone ins Feld. Bei einem Kreis ohne Randzone
+// bleibt es bei null - Ein- und Austritt der Schnecke liegen dann schon am
+// Verteiler.
+const leadCount=(n,hasRand)=>(n>1?2*n:0)+(hasRand?1:0);
+const leadLevel=k=>S.edgeGap+randDepth()+(k+0.5)*LANE();
+const fieldStart=(n,hasRand)=>S.edgeGap+randDepth()+leadCount(n,hasRand)*LANE();
+// Weg von A nach B ueber Spur k: senkrecht auf die Spur, auf ihr entlang,
+// senkrecht wieder herunter. Der kuerzere Umlaufsinn gewinnt, sonst faehrt die
+// Leitung einmal um den ganzen Raum.
+function corridorPath(Fall,A,B,k){
+  const rings=Fall?isoContours(Fall,leadLevel(k),ISO_EPS):[];
+  if(!rings.length) return [A,B];
+  let ring=rings[0], best=Infinity;
+  for(const r of rings){ const d=nearestOnRing(B,r).d; if(d<best){best=d;ring=r;} }
+  const arc=ringArc(ring);
+  const tA=arcOfNearest(ring,arc.cum,A).t, tB=arcOfNearest(ring,arc.cum,B).t;
+  const fwd=((tB-tA)%arc.L+arc.L)%arc.L;
+  const along = fwd<=arc.L-fwd ? ringArcBetween(ring,arc,tA,tB)
+                               : ringArcBetween(ring,arc,tB,tA).reverse();
+  return [A,...along,B];
+}
+function buildLoops(parts){
+  const M=snappedManifold();
+  const hasRand=S.windowEdges.length>0&&S.randPasses>0;
+  const nL=leadCount(parts.length,hasRand);
+  const Fall=nL?fieldFor(S.poly,S.windowEdges):null;
+  const raw=[];
+  parts.forEach((poly,gi)=>{
+    const sel=selForPart(poly);
+    const F=(parts.length===1) ? fieldFor(poly,sel)
+          : buildField(poly,GRID_H(),poly.map((_,i)=>sel.includes(i)?randDepth():0));
+    const Fraw=(parts.length===1&&!sel.length) ? F : buildField(poly,GRID_H(),null);
+    // Die Naht wird am Verteiler verankert: dann liegen Ein- und Austritt der
+    // Schnecke dort, wo die Anbindung hin muss.
+    const seed=nearestOnRing(M,poly).pt;
+    const sp=spiralRoom(F,fieldStart(parts.length,hasRand),S.s,ISO_EPS,seed);
+    const rand=randzonePath(Fraw,poly,sel,ISO_EPS);
+    const field=sp.path;
+    if(!field.length&&!rand.length) return;
+    raw.push({gi,field,rand,split:sp.split,levels:sp.levels,
+              head:rand.length?rand[0]:field[0],
+              tail:field.length?field[field.length-1]:rand[rand.length-1]});
+  });
+  // Spurvergabe nach Entfernung zum Verteiler: der fernste Anschluss bekommt
+  // die innerste Spur. Dadurch schachteln sich die Spannen ineinander und keine
+  // Stichleitung muss ueber eine fremde Spur steigen.
   const conns=[];
-  raw.forEach(r=>{
-    if(!r.head) return;
-    conns.push({r,kind:'in',t:r.head});
-    if(r.rand.length&&r.field.length)
-      conns.push({r,kind:'mid',t:r.field[0],src:r.rand[r.rand.length-1]});
-    conns.push({r,kind:'out',t:r.tail});
-  });
-  // Fern -> innerste Spur: die Korridor-Spans schachteln sich um M.x, dadurch
-  // muss keine Stichleitung über eine fremde Spur steigen.
-  conns.sort((a,b)=>Math.abs(b.t.x-M.x)-Math.abs(a.t.x-M.x));
-  const laneOf={}, portOf={};
-  // Jede Leitung bekommt einen eigenen Abgang am Verteilerbalken. Liefen alle
-  // auf denselben Punkt, träfen sich dort zwangsläufig alle Rohre.
-  const nP=conns.length, pitch=Math.max(S.pipeDia*2,LANE()/2);
-  conns.forEach((c,i)=>{
-    c.lane=Math.min(i,laneCount()-1);
-    laneOf[c.r.gi+'/'+c.kind]=c.lane;
-    // Abgänge in Spur-Reihenfolge auffächern: innere Spur -> äußerer Abgang,
-    // dann laufen Stich und Abgang in derselben Ordnung und kreuzen sich nicht
-    const off=(i-(nP-1)/2)*pitch;
-    portOf[c.r.gi+'/'+c.kind]={x:Math.min(Math.max(M.x+off,pitch),frameW()-pitch),y:M.y};
-  });
-
-  // Stufe 3: routen, zusammensetzen und aus dem Frame zurückdrehen
-  const back=p=>{ const q=rotBack(p,S.W,S.H); return p.arc?{...q,arc:p.arc}:q; };
-  const bk=a=>a.map(back);
+  raw.forEach(r=>{ conns.push({r,kind:'in',t:r.head}); conns.push({r,kind:'out',t:r.tail}); });
+  conns.sort((a,b)=>dist(b.t,M)-dist(a.t,M));
+  const lane={};
+  conns.forEach((c,i)=>{ lane[c.r.gi+'/'+c.kind]=Math.min(i,Math.max(0,nL-1)); });
+  const midLane=Math.max(0,nL-1);            // innerste Spur, direkt am Feld
   return raw.map(r=>{
-    if(!r.head) return {pts:[]};
-    const L=kind=>laneOf[r.gi+'/'+kind]??0;
-    let field=r.field.slice();
-    // Rechteck->Rechteck-Übergänge im wandnahen Kanal (unter allem) -> kreuzt nichts.
-    // Rückwärts einsetzen, damit die gespeicherten Indizes gültig bleiben.
-    r.joins.slice().reverse().forEach(j=>{
-      field.splice(j.at,0,...routeVia(j.from,j.to,-1).slice(1,-1));
-    });
-    const P=kind=>portOf[r.gi+'/'+kind]??M;
-    const leadIn  = routeVia(P('in'),r.head,L('in'),gap);
-    const leadOut = routeVia(P('out'),r.tail,L('out'),gap).reverse();
+    const L=k=>lane[r.gi+'/'+k]??0;
+    const leadIn  = nL?corridorPath(Fall,M,r.head,L('in')) :[M,r.head];
+    const leadOut = nL?corridorPath(Fall,M,r.tail,L('out')).reverse():[r.tail,M];
+    // Der Uebergang Randzone -> Feld ist keine Direktverbindung: die Randzone
+    // endet dort, wo die Fensterwaende enden, das Feld beginnt am Verteiler.
+    // Gerade durchgezogen waere das eine Diagonale quer durchs Verlegefeld.
     const mid = (r.rand.length&&r.field.length)
-      ? routeVia(r.rand[r.rand.length-1],r.field[0],L('mid')).slice(1,-1) : [];
-    const pts=[...leadIn.slice(0,-1),...r.rand,...mid,...field,...leadOut.slice(1)];
-    const rings=r.rects.reduce((a,x)=>a+passCount(field,x,M.x),0);   // echte Bahnenzahl
-    const f=fillet(pts,S.bendRadius);      // Länge im Frame = Länge in der Welt
-    return {pts:bk(pts), field:bk(field), rand:bk(r.rand), leadIn:bk(leadIn),
-            leadOut:bk(leadOut), mid:bk(mid), rings, length:f.length, minR:f.minR};
+      ? corridorPath(Fall,r.rand[r.rand.length-1],r.field[0],midLane) : [];
+    const pts=[...leadIn.slice(0,-1),...r.rand,...mid.slice(1,-1),...r.field,...leadOut.slice(1)];
+    const f=fillet(pts,S.bendRadius);
+    return {gi:r.gi,pts,field:r.field,rand:r.rand,leadIn,leadOut,mid,
+            rings:r.levels,length:f.length,minR:f.minR,split:r.split};
   }).filter(l=>l.pts.length>1);
 }
 function autofit(){
-  ROT=rotForManifold(snappedManifold());      // Korridor an die Verteilerwand legen
   if(S.loopMode!=='auto'){
-    curLoopCount=+S.loopMode;                 // Korridorbreite vor Konturen festlegen
     const loops=buildLoops(partition(+S.loopMode));
     const maxLen=Math.max(0,...loops.map(l=>l.length));
     return {N:loops.length,loops,ok:maxLen<=S.maxLoop,forced:true};
   }
   let last=null;
   for(let N=1;N<=3;N++){
-    curLoopCount=N;
     const loops=buildLoops(partition(N));
     const maxLen=Math.max(0,...loops.map(l=>l.length));
     last={N:loops.length,loops,ok:maxLen<=S.maxLoop,forced:false};
@@ -903,20 +995,13 @@ function autofit(){
   }
   return last; // best effort (über Limit)
 }
-// Verteiler darf an JEDER Wand stehen, auch an den Notch-Innenkanten.
-function snappedManifold(){
-  return nearestOnRing(S.manifold,lRing(0,0,S.W,S.H,S.notchA,S.notchB)).pt;
-}
 
 // ================= Thermik: Geometrie-Grundlagen =================
 // Punkt-im-Raum-Test kommt vom Planer (pointInRoom, weiter unten) — hier wird
 // er nur mitbenutzt, damit Heatmap und Kreuzungs-Checks dieselbe Raumkontur
 // sehen. GEOMETRISCHE Bodenoberfläche des Grundrisses; strikt getrennt von der
 // vom Nutzer eingegebenen "aktiven Heizfläche" (Auslegungswert).
-function roomAreaM2(){
-  const n=(S.notchA>0&&S.notchB>0)?S.notchA*S.notchB:0;
-  return Math.max(0,(S.W*S.H-n)/1e6);
-}
+function roomAreaM2(){ return Math.abs(signedArea(S.poly))/1e6; }
 // Linearer Abfall entlang EINES Kreises: s=0 Vorlauf am Verteiler, s=L Rücklauf.
 function thermalPipeTemp(s,L,flow,ret){
   if(!isFinite(s)||!isFinite(L)||L<=0) return flow;
@@ -997,7 +1082,7 @@ function thermalSegmentsCached(loops,maxSeg,key){
 // ================= Thermik: Raster =================
 function thermalBuildGrid(g){
   const gs=(g>0)?g:40;
-  const nx=Math.max(1,Math.ceil(S.W/gs)), ny=Math.max(1,Math.ceil(S.H/gs));
+  const nx=Math.max(1,Math.ceil(RW()/gs)), ny=Math.max(1,Math.ceil(RH()/gs));
   const cells=new Array(nx*ny), SS=3, cellA=gs*gs/1e6;
   for(let j=0;j<ny;j++)for(let i=0;i<nx;i++){
     // Randzellen per 3x3-Supersampling -> Teildeckung 0..1
@@ -1014,19 +1099,18 @@ function thermalBuildGrid(g){
   return {nx:nx, ny:ny, g:gs, cells:cells};
 }
 // Randzone = Streifen randPasses*randSpacing an den GEWÄHLTEN Fensterkanten.
-// wEdges() rechnet die Bild-Auswahl in interne Kanten um (S.notchLeft).
+// Auf einem beliebigen Polygon ist das kein Achsenvergleich mehr, sondern der
+// Abstand zur jeweiligen Kante.
 function thermalMarkEdgeZone(grid){
   const wMM=Math.max(0,S.randPasses*S.randSpacing);
-  const es=wEdges();
-  if(!(wMM>0)||!es.length) return 0;
-  const xTE=hasNotch()?notchX():S.W;          // Oberkante endet an der Notch-Innenwand
-  const yRE=hasNotch()?S.H-S.notchB:S.H;      // rechte Kante endet an der Notch-Unterkante
+  const sel=S.windowEdges;
+  if(!(wMM>0)||!sel.length) return 0;
   grid.cells.forEach(c=>{
     if(!c) return;
-    c.edge = (es.indexOf('bottom')>=0 && c.y<=wMM)
-          || (es.indexOf('top')>=0    && S.H-c.y<=wMM && c.x<=xTE)
-          || (es.indexOf('left')>=0   && c.x<=wMM)
-          || (es.indexOf('right')>=0  && S.W-c.x<=wMM && c.y<=yRE);
+    c.edge=sel.some(i=>{
+      const a=S.poly[i], b=S.poly[(i+1)%S.poly.length];
+      return a&&b&&nearestOnSeg({x:c.x,y:c.y},a,b).d<=wMM;
+    });
   });
   return wMM;
 }
@@ -1218,7 +1302,7 @@ function thermalCellValue(c,view){
 }
 // Offscreen-Canvas -> ImageData -> Data-URL. Eine Rasterzelle = ein Pixel;
 // die SVG-Einbettung skaliert (und interpoliert) auf die Raumgröße.
-// Spiegelung: Modell y-up, Bild y-down; mirX spiegelt zusätzlich in x.
+// Spiegelung: Modell y-up, Bild y-down.
 function thermalImageURL(res){
   if(!res||!res.ok||!res.nx||!res.ny) return '';
   const nx=res.nx, ny=res.ny, cells=res.cells, sc=thermalScale(res);
@@ -1229,7 +1313,7 @@ function thermalImageURL(res){
   const ctx=cv.getContext('2d'); if(!ctx) return '';
   const img=ctx.createImageData(nx,ny), d=img.data;
   for(let r=0;r<ny;r++)for(let k=0;k<nx;k++){
-    const j=ny-1-r, i=S.notchLeft?(nx-1-k):k;
+    const j=ny-1-r, i=k;
     const c=cells[j*nx+i], o=(r*nx+k)*4;
     if(!c||c.coverage<=0){ d[o+3]=0; continue; }      // außerhalb Raum/Notch: transparent
     const v=thermalCellValue(c,res.view);
@@ -1260,64 +1344,65 @@ function nf(v,d){
 const LOOPCOL=['var(--loop0)','var(--loop1)','var(--loop2)'];
 const LOOPHEX=['#2563eb','#7c3aed','#0891b2'];
 function draw(plan){
-  const {W,H}=S, m=Math.max(400,S.s*3);
-  // mirX: Notch-links-Ansicht ist die gespiegelte Notch-rechts-Geometrie
-  const X=x=>mirX(x)+m, Y=y=>(H-y)+m, XR=x=>x+m;
+  const W=RW(), H=RH(), m=Math.max(400,S.s*3);
+  // Modell y-up, Bild y-down. Eine Spiegelung in x gibt es nicht mehr - die
+  // gab es nur, weil der Notch intern immer rechts gerechnet wurde.
+  const X=x=>x+m, Y=y=>(H-y)+m;
   const PP=p=>`${X(p.x).toFixed(1)} ${Y(p.y).toFixed(1)}`;
-  // sweep: Y-Flip spiegelt die Drehrichtung (ccw->cw); mirX spiegelt sie erneut.
-  const sweep=cw=>{ let f=cw?1:0; if(S.notchLeft) f=1-f; return f; };
+  const sweep=cw=>cw?1:0;                       // Y-Flip dreht den Umlaufsinn
   const opsToD=ops=>ops.map(o=>o.kind==='move'?`M ${PP(o.to)}`:o.kind==='line'?`L ${PP(o.to)}`
       :`A ${o.r.toFixed(1)} ${o.r.toFixed(1)} 0 ${o.large?1:0} ${sweep(o.cw)} ${PP(o.to)}`).join(' ');
   const path=(pts,stroke,sw)=>pts.length<2?'':`<path d="${opsToD(fillet(pts,S.bendRadius).ops)}" fill="none" stroke="${stroke}" stroke-width="${sw}" stroke-linejoin="round" stroke-linecap="round"/>`;
   const line=(a,b,stroke,sw,dash='')=>`<line x1="${X(a.x)}" y1="${Y(a.y)}" x2="${X(b.x)}" y2="${Y(b.y)}" stroke="${stroke}" stroke-width="${sw}" ${dash}/>`;
 
-  const room=lRing(0,0,W,H,S.notchA,S.notchB);
-  const roomClosed=[...room,room[0]];
+  const room=S.poly, roomClosed=[...room,room[0]];
   const sw=Math.max(6,S.pipeDia*0.55);
 
-  // Fensterwände (Notch-bewusst: Oberwand endet am Notch, rechte Wand darunter)
-  const xTE=hasNotch()?notchX():W, yRE=hasNotch()?H-S.notchB:H;
-  const edgePts={bottom:[{x:0,y:0},{x:W,y:0}],top:[{x:0,y:H},{x:xTE,y:H}],left:[{x:0,y:0},{x:0,y:H}],right:[{x:W,y:0},{x:W,y:yRE}]};
-  let winSeg=wEdges().map(e=>line(edgePts[e][0],edgePts[e][1],'var(--window)',34)).join('');
+  // Fensterwände sind jetzt Polygonkanten; angeklickt wird die Kante selbst.
+  const winSeg=S.windowEdges.map(i=>{
+    const a=room[i], b=room[(i+1)%room.length];
+    return a&&b?line(a,b,'var(--window)',34):'';
+  }).join('');
+  // Alle Kanten als unsichtbare Klickflächen, damit man Fensterwände am Plan
+  // wählen kann statt über Namens-Chips — Namen gibt es nicht mehr.
+  const edgeHit=room.map((a,i)=>{
+    const b=room[(i+1)%room.length];
+    return `<line class="edgehit" data-edge="${i}" x1="${X(a.x)}" y1="${Y(a.y)}" x2="${X(b.x)}" y2="${Y(b.y)}" stroke="transparent" stroke-width="90" style="cursor:pointer"/>`;
+  }).join('');
 
-  // Jeder Kreis als EIN durchgehender Pfad (Verteiler -> ... -> Verteiler):
-  // Stückel-Zeichnung ließ die Übergänge (rand->mid->Feld) optisch offen.
+  // Jeder Kreis als EIN durchgehender Pfad (Verteiler -> ... -> Verteiler),
   // Randzone danach orange darübergelegt.
   const M=snappedManifold();
-  let loopPaths='', leaders='';
+  let loopPaths='';
   plan.loops.forEach((lp,i)=>{
     loopPaths+=path(lp.pts,LOOPHEX[i%3],sw);
     if(lp.rand.length) loopPaths+=path(lp.rand,'var(--rand)',sw);
   });
 
-  // Maßstabsbalken (1 m) — ungespiegelte Koordinaten (reine Beschriftung)
-  const bx=XR(0), by=Y(-m*0.55), sb=1000;
+  // Maßstabsbalken (1 m)
+  const bx=X(0), by=Y(-m*0.55), sb=1000;
   const scaleBar=`<g font-family="system-ui"><line x1="${bx}" y1="${by}" x2="${bx+sb}" y2="${by}" stroke="#0f172a" stroke-width="10"/>`+
     `<line x1="${bx}" y1="${by-18}" x2="${bx}" y2="${by+18}" stroke="#0f172a" stroke-width="8"/>`+
     `<line x1="${bx+sb}" y1="${by-18}" x2="${bx+sb}" y2="${by+18}" stroke="#0f172a" stroke-width="8"/>`+
     `<text x="${bx+sb/2}" y="${by-34}" font-size="90" fill="#0f172a" text-anchor="middle">1 m</text></g>`;
 
-  // Bemaßung — ungespiegelte Koordinaten (reine Beschriftung)
+  // Bemaßung: Hüllmaße des Grundrisses, nicht die einzelnen Wandlängen.
   const dims=`<g font-family="system-ui" fill="#475569">`+
-    `<text x="${XR(W/2)}" y="${Y(-m*0.2)}" font-size="105" text-anchor="middle">${(W/1000).toFixed(2)} m</text>`+
-    `<text x="${XR(-m*0.35)}" y="${Y(H/2)}" font-size="105" text-anchor="middle" transform="rotate(-90 ${XR(-m*0.35)} ${Y(H/2)})">${(H/1000).toFixed(2)} m</text></g>`;
+    `<text x="${X(W/2)}" y="${Y(-m*0.2)}" font-size="105" text-anchor="middle">${(W/1000).toFixed(2)} m</text>`+
+    `<text x="${X(-m*0.35)}" y="${Y(H/2)}" font-size="105" text-anchor="middle" transform="rotate(-90 ${X(-m*0.35)} ${Y(H/2)})">${(H/1000).toFixed(2)} m</text></g>`;
 
   // Overlap-Marker (rot) — sollten nie erscheinen (E2E-Check)
   const marks=[...(plan.overlaps||[]),...(plan.parOv||[])].map(p=>
     `<circle cx="${X(p.x)}" cy="${Y(p.y)}" r="75" fill="none" stroke="#dc2626" stroke-width="16"/>`).join('');
 
-  // ---- Heatmap-Layer: liegt über der Raumfläche, unter allem Gezeichneten ----
-  // Ausrichtung: eine Rasterzelle = ein Bildpixel. Das Bild wird exakt auf den
-  // Raster-Bereich gelegt; y-Flip und mirX stecken bereits in der Pixelablage
-  // (thermalImageURL), deshalb wird hier NICHT nochmal gespiegelt.
+  // ---- Heatmap-Layer: über der Raumfläche, unter allem Gezeichneten ----
+  // Eine Rasterzelle = ein Bildpixel; der y-Flip steckt in thermalImageURL.
   let hmDefs='', hmLayer='';
   const hres=plan.thermal;
   if(S.thermal.enabled&&hres&&hres.ok&&hres.imageURL){
     const iw=hres.nx*hres.g, ih=hres.ny*hres.g;
-    const ix=S.notchLeft ? (m+W-iw) : m;
-    const iy=m+H-ih;
     hmDefs=`<defs><clipPath id="hmClip"><polygon points="${roomClosed.map(p=>PP(p)).join(' ')}"/></clipPath></defs>`;
-    hmLayer=`<image id="hmImg" x="${ix.toFixed(2)}" y="${iy.toFixed(2)}" width="${iw}" height="${ih}"`+
+    hmLayer=`<image id="hmImg" x="${m.toFixed(2)}" y="${(m+H-ih).toFixed(2)}" width="${iw}" height="${ih}"`+
       ` preserveAspectRatio="none" clip-path="url(#hmClip)" opacity="${(+S.thermal.opacity).toFixed(3)}"`+
       ` pointer-events="none" href="${hres.imageURL}"/>`;
   }
@@ -1327,7 +1412,7 @@ function draw(plan){
     `<rect x="0" y="0" width="${W+2*m}" height="${H+2*m}" fill="#fff"/>`+
     `<polygon points="${roomClosed.map(p=>PP(p)).join(' ')}" fill="#f8fafc" stroke="#334155" stroke-width="22" stroke-linejoin="round"/>`+
     hmLayer+
-    winSeg+leaders+loopPaths+marks+
+    winSeg+loopPaths+marks+edgeHit+
     `<circle cx="${X(M.x)}" cy="${Y(M.y)}" r="55" fill="#0f172a"/>`+
     `<circle cx="${X(M.x)}" cy="${Y(M.y)}" r="26" fill="#fff"/>`+
     `<text x="${X(M.x)}" y="${Y(M.y)-90}" font-size="82" fill="#0f172a" text-anchor="middle" font-family="system-ui">Verteiler</text>`+
@@ -1339,6 +1424,13 @@ function draw(plan){
   sv.addEventListener('click',onPlanClick);
   sv.addEventListener('mousemove',onPlanHover);
   sv.addEventListener('mouseleave',hideInspector);
+  sv.querySelectorAll('.edgehit').forEach(el=>el.addEventListener('click',ev=>{
+    ev.stopPropagation();                        // sonst wandert auch der Verteiler
+    const i=+el.dataset.edge, at=S.windowEdges.indexOf(i);
+    if(at<0) S.windowEdges.push(i); else S.windowEdges.splice(at,1);
+    S.windowEdges.sort((a,b)=>a-b);
+    recompute();
+  }));
 }
 
 // Bild-/Mauskoordinaten -> interne Weltkoordinaten (gleiche Umkehr wie beim Klick).
@@ -1348,7 +1440,7 @@ function planPointFromEvent(e){
   const p=svg.createSVGPoint(); p.x=e.clientX; p.y=e.clientY;
   const loc=p.matrixTransform(ctm.inverse());
   const m=Math.max(400,S.s*3);
-  return {x:mirX(loc.x-m), y:S.H-(loc.y-m)};
+  return {x:loc.x-m, y:RH()-(loc.y-m)};
 }
 function hideInspector(){
   const el=document.getElementById('hmInspect'); if(el) el.style.display='none';
@@ -1364,7 +1456,7 @@ function onPlanHover(e){
   if(!c||c.coverage<=0){ el.style.display='none'; return; }
   // x/y als Bild-Koordinaten der Mausposition (nicht des Rasterzellen-Mittelpunkts).
   el.innerHTML=
-    `<b>x</b> ${nf(mirX(w.x),0)} mm &nbsp; <b>y</b> ${nf(w.y,0)} mm<br>`+
+    `<b>x</b> ${nf(w.x,0)} mm &nbsp; <b>y</b> ${nf(w.y,0)} mm<br>`+
     `<b>${nf(c.powerWm2,0)}</b> W/m² &nbsp; Oberfläche <b>${nf(c.surfaceTempC,1)}</b> °C<br>`+
     `wirks. Rohrtemp. <b>${c.effectivePipeTempC===null?'–':nf(c.effectivePipeTempC,1)+' °C'}</b>`+
     ` &nbsp; Randzone: <b>${c.edge?'ja':'nein'}</b>`;
@@ -1377,11 +1469,11 @@ function onPlanClick(e){
   const p=svg.createSVGPoint(); p.x=e.clientX; p.y=e.clientY;
   const loc=p.matrixTransform(svg.getScreenCTM().inverse());
   const m=Math.max(400,S.s*3);
-  S.manifold={x:mirX(loc.x-m), y:S.H-(loc.y-m)};   // Bild -> intern (Involution)
+  S.manifold={x:loc.x-m, y:RH()-(loc.y-m)};
   // State = gesnappter Punkt, damit Felder, State und Zeichnung übereinstimmen.
   const snap=snappedManifold();
   S.manifold={x:snap.x,y:snap.y};
-  document.getElementById('mfx').value=Math.round(mirX(snap.x));  // Anzeige in Bild-Koordinaten
+  document.getElementById('mfx').value=Math.round(snap.x);
   document.getElementById('mfy').value=Math.round(snap.y);
   recompute();
 }
@@ -1483,7 +1575,7 @@ function renderResults(plan){
         `Normierte Ziel-Leistungsdarstellung — kein Nachweis, dass die gewählten Heizwassertemperaturen die Ziel-Leistung tatsächlich erreichen.</div>`);
       if(tst.overNormalAreaM2>0.01)
         notes.push(`<div class="note warn">⚠ ${nf(tst.overNormalAreaM2,2)} m² Aufenthaltszone über ${nf(T.normalSurfaceLimitC,0)} °C Oberflächentemperatur `+
-          `(Maximum ${nf(tst.maxSurfaceTempC,1)} °C${tst.maxSurfaceAt?` bei x ${nf(mirX(tst.maxSurfaceAt.x),0)} / y ${nf(tst.maxSurfaceAt.y,0)} mm`:''}). Planungshinweis.</div>`);
+          `(Maximum ${nf(tst.maxSurfaceTempC,1)} °C${tst.maxSurfaceAt?` bei x ${nf(tst.maxSurfaceAt.x,0)} / y ${nf(tst.maxSurfaceAt.y,0)} mm`:''}). Planungshinweis.</div>`);
       if(tst.overEdgeAreaM2>0.01)
         notes.push(`<div class="note warn">⚠ ${nf(tst.overEdgeAreaM2,2)} m² Randzone über ${nf(T.edgeSurfaceLimitC,0)} °C Oberflächentemperatur. Planungshinweis.</div>`);
     }
@@ -1556,38 +1648,29 @@ function bindRange(id,key,valId){
   el.addEventListener('input',()=>{S[key]=+el.value; out.textContent=el.value+' mm'; recompute();});
 }
 function initUI(){
-  bindNumber('W','W');bindNumber('H','H');bindNumber('notchA','notchA');bindNumber('notchB','notchB');
+  initRoomUI();
   bindNumber('pipeDia','pipeDia');bindNumber('edgeGap','edgeGap');
   bindNumber('randSpacing','randSpacing');bindNumber('randPasses','randPasses');
   bindNumber('maxLoopM','maxLoop',1000);
   bindRange('s','s','sVal');bindRange('bendRadius','bendRadius','brVal');
   // manifold x/y felder
   const mfx=document.getElementById('mfx'),mfy=document.getElementById('mfy');
-  const sm=snappedManifold(); mfx.value=Math.round(mirX(sm.x)); mfy.value=Math.round(sm.y);
+  const sm=snappedManifold(); mfx.value=Math.round(sm.x); mfy.value=Math.round(sm.y);
   const setMf=()=>{
     const x=parseFloat(mfx.value), y=parseFloat(mfy.value);
     if(isNaN(x)||isNaN(y)) return;              // leeres Feld beim Umtippen: kein 0-Teleport
-    S.manifold={x:mirX(x),y};                   // Felder zeigen Bild-Koordinaten
+    S.manifold={x,y};
     recompute();
   };
   // Auf blur/Enter den gesnappten Punkt zurückschreiben — Felder, State und
   // Zeichnung zeigen danach denselben Verteiler.
   const snapBack=()=>{
     const sp=snappedManifold(); S.manifold={x:sp.x,y:sp.y};
-    mfx.value=Math.round(mirX(sp.x)); mfy.value=Math.round(sp.y);
+    mfx.value=Math.round(sp.x); mfy.value=Math.round(sp.y);
   };
   mfx.oninput=setMf; mfy.oninput=setMf;
   mfx.onchange=snapBack; mfy.onchange=snapBack;
-  // fenster chips
-  document.querySelectorAll('#winChips input').forEach(cb=>{
-    cb.checked=S.windowEdges.includes(cb.value);
-    cb.closest('.chip').classList.toggle('on',cb.checked);
-    cb.addEventListener('change',()=>{
-      cb.closest('.chip').classList.toggle('on',cb.checked);
-      S.windowEdges=[...document.querySelectorAll('#winChips input:checked')].map(x=>x.value);
-      recompute();
-    });
-  });
+  window.__snapBack=snapBack;
   // loop segment
   document.querySelectorAll('#loopSeg button').forEach(b=>{
     b.addEventListener('click',()=>{
@@ -1595,15 +1678,79 @@ function initUI(){
       b.classList.add('on'); S.loopMode=b.dataset.n; recompute();
     });
   });
-  // notch side
-  document.querySelectorAll('#notchSeg button').forEach(b=>{
-    b.classList.toggle('on',(b.dataset.side==='left')===S.notchLeft);
-    b.addEventListener('click',()=>{
-      document.querySelectorAll('#notchSeg button').forEach(x=>x.classList.remove('on'));
-      b.classList.add('on'); S.notchLeft=b.dataset.side==='left'; snapBack(); recompute();
-    });
-  });
   initThermalUI();
+}
+
+// ---- Raum: Import und Rechteck-Schnellstart ----
+// Der Import liest pts und walls aus einem Export von raumaufmass.html und
+// setzt daraus den geschlossenen Wandring zusammen. Das Polygon wird NICHT
+// begradigt - eine 89,4-Grad-Ecke bleibt eine 89,4-Grad-Ecke.
+function ringFromWalls(pts,walls){
+  const by={}; pts.forEach(p=>{by[p.id]={x:+p.x,y:+p.y};});
+  const nb={};
+  for(const w of walls){
+    if(!by[w[0]]||!by[w[1]]) return null;
+    (nb[w[0]]??=[]).push(w[1]); (nb[w[1]]??=[]).push(w[0]);
+  }
+  const ids=Object.keys(nb);
+  if(!ids.length) return null;
+  // Ein geschlossener Ring heisst: jeder Punkt hat genau zwei Wände.
+  if(ids.some(i=>nb[i].length!==2)) return null;
+  const ring=[ids[0]]; let prev=null, cur=ids[0];
+  for(let k=0;k<ids.length;k++){
+    const nx=nb[cur].find(x=>x!==prev);
+    if(nx===undefined) return null;
+    if(nx===ids[0]) break;
+    ring.push(nx); prev=cur; cur=nx;
+  }
+  if(ring.length!==ids.length) return null;     // mehrere getrennte Ringe
+  return ring.map(i=>by[i]);
+}
+function applyImport(o,name){
+  if(!o||!Array.isArray(o.pts)||!Array.isArray(o.walls))
+    return 'Die Datei enthält keine Punkte und Wände.';
+  const ring=ringFromWalls(o.pts,o.walls);
+  if(!ring) return 'Die Wände bilden keinen einzelnen geschlossenen Ring.';
+  if(ring.length<3) return 'Weniger als drei Ecken.';
+  if(Math.abs(signedArea(ring))<1e5) return 'Der Raum hat praktisch keine Fläche.';
+  setPoly(ring);
+  S.windowEdges=[];                    // Kantennummern des alten Raums gelten nicht mehr
+  S.manifold={x:polyBBox(S.poly).w/2, y:0};
+  S.roomName=o.name||name||'importiert';
+  return null;
+}
+function roomHint(){
+  const el=document.getElementById('polyHint'); if(!el) return;
+  const b=polyBBox(S.poly);
+  el.textContent=`${S.roomName?S.roomName+' — ':''}${S.poly.length} Ecken, `
+    +`${(b.w/1000).toFixed(2)} × ${(b.h/1000).toFixed(2)} m, ${roomAreaM2().toFixed(2)} m²`;
+}
+function initRoomUI(){
+  const rw=document.getElementById('rectW'), rh=document.getElementById('rectH');
+  const b=polyBBox(S.poly); rw.value=Math.round(b.w); rh.value=Math.round(b.h);
+  const setRect=()=>{
+    const w=parseFloat(rw.value), h=parseFloat(rh.value);
+    if(isNaN(w)||isNaN(h)||w<500||h<500) return;
+    setPoly(rectPoly(w,h));
+    S.windowEdges=S.windowEdges.filter(i=>i<4);
+    S.roomName=''; if(window.__snapBack) window.__snapBack();
+    recompute();
+  };
+  rw.oninput=setRect; rh.oninput=setRect;
+  const file=document.getElementById('impFile');
+  document.getElementById('impBtn').onclick=()=>file.click();
+  file.onchange=async ()=>{
+    const f=file.files&&file.files[0]; if(!f) return;
+    let o=null;
+    try{ o=JSON.parse(await f.text()); }
+    catch(e){ alert('Das ist keine gültige JSON-Datei.'); file.value=''; return; }
+    const err=applyImport(o,f.name.replace(/\.json$/i,''));
+    file.value='';
+    if(err){ alert('Import nicht möglich: '+err); return; }
+    const nb=polyBBox(S.poly); rw.value=Math.round(nb.w); rh.value=Math.round(nb.h);
+    if(window.__snapBack) window.__snapBack();
+    recompute();
+  };
 }
 
 // ---- Bindings der Heatmap-Gruppe ----
@@ -1671,63 +1818,94 @@ function initThermalUI(){
 function selfChecks(){
   const out=[]; let ok=true; const eq=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
   const A=(n,c)=>{ok=ok&&c;out.push((c?'PASS ':'FAIL ')+n);};
-  A('bifilarOrder(4)=[0,2,3,1]',eq(bifilarOrder(4),[0,2,3,1]));
-  A('bifilarOrder(5)=[0,2,4,3,1]',eq(bifilarOrder(5),[0,2,4,3,1]));
   // fillet: 90°-Ecke, r=100 -> 900 + 100*pi/2 + 900
   const f=fillet([{x:0,y:0},{x:1000,y:0},{x:1000,y:1000}],100);
   A('fillet 90°-Länge korrekt',Math.abs(f.length-(1800+100*Math.PI/2))<1e-6);
-  // fillet gerade -> reine Länge
   const g=fillet([{x:0,y:0},{x:500,y:0},{x:1000,y:0}],60);
   A('fillet gerade=1000',Math.abs(g.length-1000)<1e-6);
-  // E2E: Spiralen kreuzungsfrei — über viele Raumgrößen und Bahnabstände
-  const bs=S.loopMode,bss=S.s,bc=curLoopCount;
+  // Parallel-Detektor: zwei Rohre mit 10 mm Mittenabstand bei Ø16 = Überlappung
+  A('Parallel-Detektor erkennt Rohr-auf-Rohr',
+    parallelOverlaps([[{x:0,y:0},{x:1000,y:0}],[{x:0,y:10},{x:1000,y:10}]]).length===1);
+  A('Parallel-Detektor meldet 200 mm Abstand nicht',
+    parallelOverlaps([[{x:0,y:0},{x:1000,y:0}],[{x:0,y:200},{x:1000,y:200}]]).length===0);
+  // Polygon-Helfer
+  A('Fläche eines Rechtecks',Math.abs(Math.abs(signedArea(rectPoly(2000,1000)))-2e6)<1);
+  A('Punkt im Polygon',pointInPoly({x:100,y:100},rectPoly(2000,1000))
+                    && !pointInPoly({x:-100,y:100},rectPoly(2000,1000)));
+  A('Halbebenen-Schnitt halbiert die Fläche',
+    Math.abs(Math.abs(signedArea(clipHalf(rectPoly(2000,1000),true,1000,-1)))-1e6)<1);
+  A('areaSplit trifft die Hälfte',Math.abs(areaSplit(rectPoly(2000,1000),true,0.5)-1000)<1);
+  A('setPoly dreht CCW und schiebt in den Ursprung',(()=>{
+    const keep=S.poly;
+    const r=setPoly([{x:500,y:500},{x:500,y:1500},{x:2500,y:1500},{x:2500,y:500}]);
+    const okc=signedArea(r)>0, b=polyBBox(r);
+    S.poly=keep;
+    return okc && Math.abs(b.minx)<1e-9 && Math.abs(b.miny)<1e-9;
+  })());
+  // Abstandsfeld und Iso-Linien
+  const F0=buildField(rectPoly(4000,3000),20,null);
+  const iso=isoContours(F0,500,2);
+  A('Iso-Linie ist ein Ring',iso.length===1);
+  A('Iso-Linie hat den richtigen Abstand',iso.length===1&&(()=>{
+    const bb=polyBBox(iso[0]);
+    return Math.abs(bb.minx-500)<15&&Math.abs(bb.maxx-3500)<15;
+  })());
+  // Der Befund aus Phase 0: konturparallele Doppelschnecke ohne
+  // Selbstkreuzung, auf geraden wie auf schrägen Wänden.
+  const TROOMS=[
+    rectPoly(6000,4000),
+    [{x:0,y:0},{x:6000,y:0},{x:4500,y:3000},{x:0,y:3000}],
+    [{x:0,y:0},{x:8000,y:0},{x:8000,y:2000},{x:3000,y:2000},{x:3000,y:5000},{x:0,y:5000}],
+    [{x:0,y:0},{x:6000,y:0},{x:7000,y:2500},{x:3000,y:4500},{x:0,y:3000}],
+  ];
   let xc=0, cases=0;
-  curLoopCount=1;
-  [[2500,1600],[5000,3200],[1200,800],[8000,2400],[3000,3000]].forEach(([w,h])=>{
-    [80,150,220].forEach(s=>{
-      S.s=s; const sp=bifilarPath({x0:0,y0:0,w,h});
-      if(sp.length>1){cases++; xc+=fieldCrossings(sp).length;}
-    });
-  });
-  S.loopMode=bs;S.s=bss;curLoopCount=bc;
-  A(`Spiralen kreuzungsfrei (${cases} Größen, 0 Overlaps)`,xc===0&&cases>0);
-  // HARTE REGEL: keine Schlaufe kreuzt sich oder eine andere. Zufalls-Bench,
-  // deterministisch geseedet. Für tiefere Läufe in der Konsole:
-  //   crossingBench(500)  -> Liste der fehlschlagenden Parametersets
-  const N=40, bench=crossingBench(N);
-  A(`Bench: ${N} Zufallssets kreuzungsfrei (${bench.length} Fehler)`,bench.length===0);
-  if(bench.length) console.warn('Kreuzungs-Bench, erste Fehlschläge:',bench.slice(0,5));
-  // Doppelspirale: Vor- und Rücklauf um s versetzt (Gegenstrom)
-  const ins0={l:200,r:200,t:200,b:200};
-  const ds=doubleSpiral({x0:0,y0:0,w:4000,h:3000},ins0,150);
-  A('Doppelspirale liefert beide Arme',ds.length>8);
-  // Parallel-Detektor: zwei Rohre mit 10mm Mittenabstand bei Ø16 = Überlappung
-  const pv=parallelOverlaps([[{x:0,y:0},{x:1000,y:0}],[{x:0,y:10},{x:1000,y:10}]]);
-  A('Parallel-Detektor erkennt Rohr-auf-Rohr',pv.length===1);
-  // Randzone endet am Notch (Defaults: Notch vorhanden)
-  if(hasNotch()){
-    const rot0=ROT; ROT=0;                     // Frame = Welt
-    const n=notchFrame();
-    const topZ=randzonePath('top');
-    A('Randzone Oben endet am Notch',Math.max(...topZ.map(p=>p.x))<=n.x0-S.edgeGap+1);
-    const rZ=randzonePath('right');
-    A('Randzone Rechts endet am Notch',Math.max(...rZ.map(p=>p.y))<=n.y0-S.edgeGap+1);
-    // Zusammenhängende Fensterwände -> EINE Kette (U-Form), Notch-Ecke trennt.
-    // notchLeft aus, damit die Bild-Spiegelung den Test nicht verdreht.
-    const savedW=S.windowEdges, savedNL=S.notchLeft; S.notchLeft=false;
-    S.windowEdges=['bottom','left','right'];
-    A('unten+links+rechts = eine Randzonen-Kette',edgeChains(frameEdges()).length===1);
-    S.windowEdges=['right','top'];        // Notch sitzt oben rechts -> Ecke fehlt
-    A('Kette bricht an der Notch-Ecke',edgeChains(frameEdges()).length===2);
-    S.windowEdges=savedW; S.notchLeft=savedNL;
-    // Frame-Rotation: Verteiler an jeder Wand -> Korridor immer an dieser Wand
-    ROT=1; const fw=frameW(), fh=frameH();
-    A('Frame-Rotation dreht Raummaße',fw===S.H&&fh===S.W);
-    const p={x:1234,y:567};
-    const rt=rotBack(rotFwd(p,S.W,S.H),S.W,S.H);
-    A('rotFwd/rotBack sind invers',Math.abs(rt.x-p.x)<1e-6&&Math.abs(rt.y-p.y)<1e-6);
-    ROT=rot0;
+  for(const poly of TROOMS){
+    const F=buildField(poly,20,null);
+    for(const sp of [100,150,200]){
+      const r=spiralRoom(F,75,sp,2,poly[0]);
+      if(r.path.length>1){ cases++; xc+=fieldCrossings(r.path).length; }
+    }
   }
+  A(`Doppelschnecke kreuzungsfrei (${cases} Fälle)`,xc===0&&cases===12);
+  // Gegenstrom: benachbarte Bahnen laufen entgegengesetzt.
+  A('Gegenstrom auf benachbarten Bahnen',(()=>{
+    const poly=rectPoly(6000,4000), F=buildField(poly,20,null);
+    const P=spiralRoom(F,75,150,2,poly[0]).path;
+    const dir=i=>{const a=P[i],b=P[i+1],l=dist(a,b)||1;return {x:(b.x-a.x)/l,y:(b.y-a.y)/l};};
+    let good=0,tot=0;
+    for(let i=0;i<P.length-1;i+=3){
+      let best=Infinity,bj=-1;
+      for(let j=0;j<P.length-1;j++){
+        if(Math.abs(i-j)<4) continue;
+        const d=nearestOnSeg(P[i],P[j],P[j+1]).d;
+        if(d>60&&d<240&&d<best){best=d;bj=j;}
+      }
+      if(bj<0) continue;
+      tot++; if(dot(dir(i),dir(bj))<0) good++;
+    }
+    return tot>20 && good/tot>0.8;
+  })());
+  // Aufspaltende Konturen werden erkannt und im Plan ausgewiesen.
+  A('U-Raum wird als aufspaltend erkannt',(()=>{
+    const u=[{x:0,y:0},{x:6000,y:0},{x:6000,y:4000},{x:4000,y:4000},
+             {x:4000,y:1500},{x:2000,y:1500},{x:2000,y:4000},{x:0,y:4000}];
+    return spiralRoom(buildField(u,20,null),75,150,2,u[0]).split===true
+        && spiralRoom(buildField(rectPoly(6000,4000),20,null),75,150,2,{x:0,y:0}).split===false;
+  })());
+  // Import: der Wandring aus raumaufmass wird zum Polygon
+  A('Import baut den Wandring',(()=>{
+    // applyImport setzt Raum, Fensterwände und Verteiler — der Check muss ALLES
+    // davon zurückgeben, sonst startet das Werkzeug ohne Randzone.
+    const keep={poly:S.poly,win:S.windowEdges,mf:S.manifold,name:S.roomName};
+    const err=applyImport({pts:[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},
+                                {id:'C',x:4000,y:3000},{id:'D',x:0,y:3000}],
+                           walls:[['A','B'],['B','C'],['C','D'],['D','A']]},'t');
+    const n=S.poly.length, ar=roomAreaM2();
+    S.poly=keep.poly; S.windowEdges=keep.win; S.manifold=keep.mf; S.roomName=keep.name;
+    return err===null && n===4 && Math.abs(ar-12)<0.01;
+  })());
+  A('Import weist offene Wandzüge ab',
+    typeof applyImport({pts:[{id:'A',x:0,y:0},{id:'B',x:1000,y:0}],walls:[['A','B']]},'t')==='string');
   thermalSelfChecks(A);
   console[ok?'log':'error']('Selbstchecks',out);
   return ok;
@@ -1750,16 +1928,16 @@ function thermalSelfChecks(A){
   A('Thermik: Oberflächentemp bei q=0 = Raumtemp',Math.abs(thermalSurfaceTemp(0,22,10.8)-22)<1e-12);
   A('Thermik: Oberflächentemp steigt mit q',thermalSurfaceTemp(60,22,10.8)>22);
   // 4) pointInRoom — der Planer-Test wird von der Heatmap mitbenutzt; er liest
-  //    die Raummaße aus S, deshalb hier setzen und danach zurückgeben.
-  const sv={W:S.W,H:S.H,notchA:S.notchA,notchB:S.notchB};
-  S.W=8000; S.H=3200; S.notchA=3000; S.notchB=1000;
+  //    den Grundriss aus S, deshalb hier setzen und danach zurückgeben.
+  const svPoly=S.poly;
+  setPoly([{x:0,y:0},{x:8000,y:0},{x:8000,y:2200},{x:5000,y:2200},{x:5000,y:3200},{x:0,y:3200}]);
   A('Thermik: pointInRoom innen',pointInRoom({x:100,y:100})===true);
-  A('Thermik: pointInRoom im Notch',pointInRoom({x:7000,y:3000})===false);
+  A('Thermik: pointInRoom in der Aussparung',pointInRoom({x:7000,y:3000})===false);
   A('Thermik: pointInRoom außerhalb',
     pointInRoom({x:-10,y:100})===false&&pointInRoom({x:100,y:4000})===false);
-  S.notchA=0; S.notchB=0;
-  A('Thermik: pointInRoom Rechteck ohne Notch',pointInRoom({x:7000,y:3000})===true);
-  Object.assign(S,sv);
+  setPoly(rectPoly(8000,3200));
+  A('Thermik: pointInRoom im vollen Rechteck',pointInRoom({x:7000,y:3000})===true);
+  S.poly=svPoly;
 
   const mkLine=(x0,y0,x1,y1)=>{
     const pts=[{x:x0,y:y0},{x:x1,y:y1}];
@@ -1780,10 +1958,10 @@ function thermalSelfChecks(A){
   A('Thermik: keine Temperaturaddition (2x 35 °C -> 35 °C)',rT.ok&&nT>0&&devT<1e-9);
 
   // 7) Realer Plan: Normierung, Kreissummen, Raster, Skalierung
-  const rot0=ROT, lc0=curLoopCount, lm0=S.loopMode;
+  const lm0=S.loopMode;
   let plan=null;
   try{ plan=autofit(); }catch(e){ plan=null; }
-  ROT=rot0; curLoopCount=lc0; S.loopMode=lm0;
+  S.loopMode=lm0;
   const loops=(plan&&plan.loops)||[];
   const r1=thermalCompute(loops,{targetPowerW:2000});
   const devN=(r1.ok)?Math.abs(r1.stats.integratedW-2000)/2000:1;
@@ -1795,9 +1973,12 @@ function thermalSelfChecks(A){
     if(!isFinite(c.powerWm2)||!isFinite(c.surfaceTempC)||!isFinite(c.areaM2)||c.areaM2<0) bad++;
     if(c.effectivePipeTempC!==null&&!isFinite(c.effectivePipeTempC)) bad++; });
   A('Thermik: Raster ohne NaN / negative Flächen',r1.ok&&cov>0&&bad===0);
-  const inNotch = !hasNotch() || (r1.ok &&
-    !r1.cells[Math.floor((S.H-1)/r1.g)*r1.nx+Math.floor((S.W-1)/r1.g)]);
-  A('Thermik: Zellen außerhalb des Raums sind transparent',inNotch);
+  // Eine Zelle, deren Mitte ausserhalb des Polygons liegt, muss leer bleiben.
+  const outside = !r1.ok || r1.cells.every((c,i)=>{
+    if(!c) return true;
+    return pointInPoly({x:c.x,y:c.y},S.poly) || nearestOnRing({x:c.x,y:c.y},S.poly).d<=r1.g;
+  });
+  A('Thermik: Zellen außerhalb des Raums sind transparent',outside);
   // 8) Halbe Zielleistung -> halbe W/m², wirksame Rohrtemperaturen unverändert
   const r2=thermalCompute(loops,{targetPowerW:1000});
   let halfOk=r1.ok&&r2.ok, tempOk=halfOk, n2=0;
@@ -1831,10 +2012,10 @@ function heatCoverage(loops,reach){
                  miny:Math.min(a.y,b.y)-reach,maxy:Math.max(a.y,b.y)+reach});
     }});
   const r2=reach*reach, step=reach;
-  const inRoom=(x,y)=>!(hasNotch()&&x>notchX()&&y>S.H-S.notchB);
   let total=0, hit=0;
-  for(let y=step/2;y<S.H;y+=step)for(let x=step/2;x<S.W;x+=step){
-    if(!inRoom(x,y)) continue;
+  const W=RW(), H=RH();
+  for(let y=step/2;y<H;y+=step)for(let x=step/2;x<W;x+=step){
+    if(!pointInPoly({x,y},S.poly)) continue;
     total++;
     for(const s of segs){
       if(x<s.minx||x>s.maxx||y<s.miny||y>s.maxy) continue;
@@ -1858,11 +2039,12 @@ function loopCrossings(plan){
     n+=crossBetween(plan.loops[i].pts,plan.loops[j].pts).length;
   return n;
 }
-// Ebenso hart: kein Rohr darf den Raum verlassen (Notch-Aussparung eingeschlossen).
+// Ebenso hart: kein Rohr darf den Raum verlassen.
+// 1 mm Toleranz nach aussen: die Konturen kommen aus einem Raster, ihre Punkte
+// liegen deshalb nicht bitgenau auf der Wand.
 function pointInRoom(p){
-  if(p.x<-1||p.x>S.W+1||p.y<-1||p.y>S.H+1) return false;
-  if(hasNotch()&&p.x>S.W-S.notchA+1&&p.y>S.H-S.notchB+1) return false;
-  return true;
+  if(pointInPoly(p,S.poly)) return true;
+  return nearestOnRing(p,S.poly).d<=1;
 }
 function loopsOutside(plan){
   let n=0;
@@ -1876,43 +2058,48 @@ function loopsOutside(plan){
   return n;
 }
 function crossingBench(n,seed){
-  let s=(seed||20260725)>>>0;
-  const rnd=()=>{s=(s*1664525+1013904223)>>>0; return s/4294967296;};
+  let st=(seed||20260725)>>>0;
+  const rnd=()=>{st=(st*1664525+1013904223)>>>0; return st/4294967296;};
   const pick=a=>a[Math.floor(rnd()*a.length)];
-  const save=JSON.parse(JSON.stringify({W:S.W,H:S.H,notchA:S.notchA,notchB:S.notchB,
-    notchLeft:S.notchLeft,s:S.s,bendRadius:S.bendRadius,pipeDia:S.pipeDia,edgeGap:S.edgeGap,
-    randSpacing:S.randSpacing,randPasses:S.randPasses,windowEdges:S.windowEdges,
-    loopMode:S.loopMode,manifold:S.manifold}));
+  const save=JSON.parse(JSON.stringify({poly:S.poly,s:S.s,bendRadius:S.bendRadius,
+    pipeDia:S.pipeDia,edgeGap:S.edgeGap,randSpacing:S.randSpacing,randPasses:S.randPasses,
+    windowEdges:S.windowEdges,loopMode:S.loopMode,manifold:S.manifold}));
+  // Zufällige Grundrisse: Rechteck, L, T und ein Fünfeck mit schräger Wand.
+  // Die Formfamilie steht fest, die Maße sind zufällig — so bleiben die Fälle
+  // vergleichbar und trotzdem breit gestreut.
+  const shape=(w,h,a,b,kind)=>{
+    if(kind===0) return rectPoly(w,h);
+    if(kind===1) return [{x:0,y:0},{x:w,y:0},{x:w,y:h-b},{x:w-a,y:h-b},{x:w-a,y:h},{x:0,y:h}];
+    if(kind===2) return [{x:0,y:0},{x:w,y:0},{x:w,y:b},{x:w-a,y:b},{x:w-a,y:h},{x:a,y:h},{x:a,y:b},{x:0,y:b}];
+    return [{x:0,y:0},{x:w,y:0},{x:w,y:h-b},{x:w-a,y:h},{x:0,y:h}];
+  };
   const fails=[];
   for(let i=0;i<n;i++){
-    S.W=1500+Math.round(rnd()*9000/50)*50;
-    S.H=1500+Math.round(rnd()*5000/50)*50;
-    const withNotch=rnd()<0.7;
-    S.notchA=withNotch?Math.round(rnd()*(S.W*0.7)/50)*50:0;
-    S.notchB=withNotch?Math.round(rnd()*(S.H*0.6)/50)*50:0;
-    S.notchLeft=rnd()<0.5;
+    const w=1500+Math.round(rnd()*9000/50)*50, h=1500+Math.round(rnd()*5000/50)*50;
+    const kind=Math.floor(rnd()*4);
+    const a=300+Math.round(rnd()*w*0.45/50)*50, b=300+Math.round(rnd()*h*0.45/50)*50;
+    if(a>=w-300||b>=h-300) continue;
+    setPoly(shape(w,h,a,b,kind));
     S.s=75+Math.round(rnd()*225/5)*5;
     S.bendRadius=20+Math.round(rnd()*100/5)*5;
     S.pipeDia=[12,14,16,17,20][Math.floor(rnd()*5)];
     S.edgeGap=30+Math.round(rnd()*170/5)*5;
     S.randSpacing=20+Math.round(rnd()*180/5)*5;
     S.randPasses=Math.floor(rnd()*5);
-    S.windowEdges=['bottom','top','left','right'].filter(()=>rnd()<0.45);
+    S.windowEdges=S.poly.map((_,k)=>k).filter(()=>rnd()<0.4);
     S.loopMode=pick(['auto','1','2','3']);
-    // Verteiler zufällig auf der Raumkontur: zufällige Wand, zufällige Stelle
-    // darauf — damit sind alle vier Wände und die Notch-Kanten abgedeckt.
-    const room=lRing(0,0,S.W,S.H,S.notchA,S.notchB);
-    const k=Math.floor(rnd()*room.length), a=room[k], b=room[(k+1)%room.length], t=rnd();
-    S.manifold={x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t};
+    // Verteiler zufällig auf der Raumkontur.
+    const k=Math.floor(rnd()*S.poly.length);
+    const p1=S.poly[k], p2=S.poly[(k+1)%S.poly.length], t=rnd();
+    S.manifold={x:p1.x+(p2.x-p1.x)*t, y:p1.y+(p2.y-p1.y)*t};
+    const cfg=()=>({kind,w,h,a,b,s:S.s,bendRadius:S.bendRadius,pipeDia:S.pipeDia,
+      edgeGap:S.edgeGap,randSpacing:S.randSpacing,randPasses:S.randPasses,
+      win:S.windowEdges.join('+')||'-',mode:S.loopMode,
+      mf:`${Math.round(S.manifold.x)},${Math.round(S.manifold.y)}`});
     let plan,x=0;
     try{ plan=autofit(); x=loopCrossings(plan)+loopsOutside(plan); }
-    catch(e){ fails.push({err:String(e),cfg:{W:S.W,H:S.H,notchA:S.notchA,notchB:S.notchB,
-      s:S.s,bendRadius:S.bendRadius,randPasses:S.randPasses,win:S.windowEdges.join('+'),
-      mode:S.loopMode,mf:`${Math.round(S.manifold.x)},${Math.round(S.manifold.y)}`}}); continue; }
-    if(x>0) fails.push({cross:x,cfg:{W:S.W,H:S.H,notchA:S.notchA,notchB:S.notchB,
-      notchLeft:S.notchLeft,s:S.s,bendRadius:S.bendRadius,pipeDia:S.pipeDia,edgeGap:S.edgeGap,
-      randSpacing:S.randSpacing,randPasses:S.randPasses,win:S.windowEdges.join('+')||'-',
-      mode:S.loopMode,mf:`${Math.round(S.manifold.x)},${Math.round(S.manifold.y)}`}});
+    catch(e){ fails.push({err:String(e),cfg:cfg()}); continue; }
+    if(x>0) fails.push({cross:x,cfg:cfg()});
   }
   Object.assign(S,save);
   return fails;
@@ -1921,18 +2108,18 @@ function crossingBench(n,seed){
 // Eingabe-Plausibilität: harte Fehler, die einen unbrauchbaren Plan erzeugen.
 function validate(plan){
   const errs=[];
-  if(S.notchA>0&&S.notchB>0&&(S.notchA>=S.W-100||S.notchB>=S.H-100))
-    errs.push(`Notch (${S.notchA}×${S.notchB}) ist so groß wie der Raum — Grundriss ungültig.`);
+  if(!Array.isArray(S.poly)||S.poly.length<3||roomAreaM2()<0.5)
+    errs.push('Der Grundriss hat weniger als 0,5 m² — als Raum unbrauchbar.');
   if(S.s<S.pipeDia*1.5)
     errs.push(`Bahnabstand ${S.s} mm zu klein für Rohr-Ø ${S.pipeDia} mm (min. ${Math.ceil(S.pipeDia*1.5)} mm).`);
   if(S.windowEdges.length&&S.randSpacing<S.pipeDia*1.25)
     errs.push(`Randzonen-Abstand ${S.randSpacing} mm zu klein für Rohr-Ø ${S.pipeDia} mm.`);
   if(!plan.loops.some(l=>l.field&&l.field.length))
     errs.push('Kein Verlegefeld — Raum zu klein für die aktuellen Abstände.');
-  // ponytail: nicht zusammenhängende Fensterwände am L-Raum werden über einen
-  // Umfangskanal verbunden, der die Aussparung noch nicht umgeht.
-  if(hasNotch() && edgeChains(frameEdges()).length>1)
-    errs.push('Diese Fensterwände hängen nicht zusammen: der Verbinder zwischen den Randzonen umgeht die Notch-Aussparung noch nicht. Zusammenhängende Wände wählen (z. B. unten+links+rechts).');
+  // ponytail: bei aufspaltenden Konturen ist die Übergabe zwischen den Ästen
+  // noch nicht als kreuzungsfrei nachgewiesen (Phase 0 des Plans).
+  if(plan.loops.some(l=>l.split))
+    errs.push('Dieser Grundriss zerfällt beim Verlegen in mehrere Bereiche (U-, T- oder H-Form). Der Übergang zwischen ihnen ist noch nicht als kreuzungsfrei nachgewiesen — den Plan vor dem Verlegen prüfen.');
   return errs;
 }
 
