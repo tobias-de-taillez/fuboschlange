@@ -1288,6 +1288,52 @@ pub fn spiral_side_sequence(
     sides
 }
 
+/// The channel line a spiral side runs on: a plate-local coordinate, `x` for
+/// the left/right sides and `y` for the bottom/top ones.
+///
+/// Pipe channels sit midway between nopp rows, at `37.5 + 75n`. A side's
+/// nominal inset rarely lands on one, so it is snapped to the nearest channel
+/// that is no closer to the wall than the inset asks — snapping never eats
+/// into wall clearance. Returns `None` when the snapped channel would fall
+/// past the field's far wall.
+pub fn spiral_side_channel(field: &Field, side: &SpiralSide) -> Option<f64> {
+    let rect = &field.rect_local;
+    let (near_mm, far_mm, inward_positive) = match side.side {
+        0 => (rect.min.y, rect.max.y, true),
+        1 => (rect.max.x, rect.min.x, false),
+        2 => (rect.max.y, rect.min.y, false),
+        _ => (rect.min.x, rect.max.x, true),
+    };
+    let nominal_mm = if inward_positive {
+        near_mm + side.inset_mm
+    } else {
+        near_mm - side.inset_mm
+    };
+    let channel_mm = if inward_positive {
+        smallest_channel_at_least(nominal_mm)
+    } else {
+        largest_channel_at_most(nominal_mm)
+    };
+    let clears_far_wall = if inward_positive {
+        channel_mm < far_mm
+    } else {
+        channel_mm > far_mm
+    };
+    clears_far_wall.then_some(channel_mm)
+}
+
+/// Smallest `37.5 + 75n` that is at least `value_mm`.
+fn smallest_channel_at_least(value_mm: f64) -> f64 {
+    let steps = ((value_mm - CHANNEL_OFFSET_MM) / CHANNEL_PITCH_MM).ceil();
+    CHANNEL_OFFSET_MM + steps * CHANNEL_PITCH_MM
+}
+
+/// Largest `37.5 + 75n` that is at most `value_mm`.
+fn largest_channel_at_most(value_mm: f64) -> f64 {
+    let steps = ((value_mm - CHANNEL_OFFSET_MM) / CHANNEL_PITCH_MM).floor();
+    CHANNEL_OFFSET_MM + steps * CHANNEL_PITCH_MM
+}
+
 #[cfg(test)]
 mod tests {
     //! Unit tests for invariants `find_corner_edge` relies on but the
@@ -1473,5 +1519,43 @@ mod tests {
                 "the return must hold 75 mm inside the outbound run"
             );
         }
+    }
+
+    /// Every side of every revolution must land on a real pipe channel, and
+    /// never closer to its wall than the inset asked for.
+    #[test]
+    fn every_spiral_side_snaps_onto_a_channel_without_losing_wall_clearance() {
+        let field = Field {
+            id: 0,
+            rect_local: RectMm {
+                min: Point::new(0.0, 0.0),
+                max: Point::new(3000.0, 2400.0),
+            },
+        };
+        let mut checked = 0usize;
+        for side in spiral_side_sequence(&field, 75.0, 75.0) {
+            let channel_mm =
+                spiral_side_channel(&field, &side).expect("a listed side has a channel");
+            // On a channel: 37.5 + 75n.
+            let steps = (channel_mm - 37.5) / 75.0;
+            assert!(
+                (steps - steps.round()).abs() < 1e-9,
+                "side {side:?} landed off-grid at {channel_mm}"
+            );
+            // No closer to its own wall than the inset asked.
+            let rect = &field.rect_local;
+            let distance_mm = match side.side {
+                0 => channel_mm - rect.min.y,
+                1 => rect.max.x - channel_mm,
+                2 => rect.max.y - channel_mm,
+                _ => channel_mm - rect.min.x,
+            };
+            assert!(
+                distance_mm >= side.inset_mm - 1e-9,
+                "side {side:?} snapped inside its own clearance"
+            );
+            checked += 1;
+        }
+        assert_eq!(checked, 8 * 4);
     }
 }
