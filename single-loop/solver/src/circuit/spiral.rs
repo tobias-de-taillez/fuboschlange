@@ -57,21 +57,25 @@
 //! reservation invariant must hold by construction, not by the coincidence
 //! that the smallest chain never happens to reuse one.
 //!
-//! ## `InwardArm::edge_ids` is provenance, not a chained path
+//! ## `InwardArm::edge_ids` is provenance; [`complete_spiral`] is the path
 //!
 //! A lane ring is a closed cycle with one fixed (if arbitrary) start/end
 //! node (`fields.rs`'s own module doc already disclaims meaning in *which*
 //! corner that is). The smallest certified lane-change chain out of ring `k`
 //! does not depart from that specific node (checked empirically for 0->2,
 //! 2->4 and 4->6 on the real fixture: it never does, on any of the three).
-//! So the edge id sequence this module returns -- each occupied ring's own
-//! `edge_ids` in order, with the chosen lane-change chain's edge ids spliced
-//! between consecutive rings -- is the real, certified set of edges the arm
-//! uses, but is not asserted (and on this fixture, is not actually true) to
-//! be one continuous G1 path end-to-end. No test in this module's brief
-//! requires that stronger property; stitching a truly continuous path is
-//! left to whichever later task turns this provenance into rendered
-//! geometry.
+//! So [`InwardArm::edge_ids`] -- each occupied ring's own `edge_ids` in
+//! order, with the chosen lane-change chain's edge ids spliced between
+//! consecutive rings -- is the real, certified *set* of edges available to
+//! the arm, and it stays that: a provenance list, deliberately not a path.
+//! [`plan_inward_arm`]'s job is which *rings* the arm occupies and which it
+//! reserves, which is what every [`Invariant`] in `search.rs` is stated over.
+//!
+//! Turning that into one continuous pipe is [`complete_spiral`]'s job, and
+//! since Task 11a it does exactly that: it re-walks the rings itself as
+//! *arcs* rather than copying `edge_ids`, so its output is a single chained
+//! path (see "Chaining" below). The two are not redundant -- the arm names
+//! the rings, the completion names the edges.
 //!
 //! ## Why `TerminalCut` is a per-ring chain check, not `terminal_corridor_connected`
 //!
@@ -144,36 +148,64 @@
 //!   edges of rings 5, 3, and 1, and all 4 chain hop edges of 1->3 and 3->5,
 //!   have exactly one pose-flipped counterpart each -- zero missing, zero
 //!   ambiguous.
-//! - **Where a ring's reversed walk *starts*.** The turn (or a reversed
-//!   chain) does not generally land on a reserved ring's own `node_ids[0]`
-//!   -- that point is an arbitrary artifact of wherever `build_ring`
-//!   happened to start describing the cycle (`fields.rs`'s own module doc
-//!   already disclaims meaning in it), unrelated to where a differently-
-//!   positioned turn or chain edge lands. Confirmed empirically (not
-//!   assumed): on the real fixture, the ring-5 turn lands one 150mm lattice
-//!   hop short of ring 5's own `node_ids[0]`. So [`walk_ring_backward`]
-//!   first finds *which* node of the ring's own walk the arriving pose
-//!   corresponds to ([`ring_entry_index`]), then rotates the reversed walk
-//!   to start exactly there -- covering the ring's full cycle exactly once,
-//!   ending back at the same entry pose it started from (a closed loop,
-//!   walked in full, necessarily returns to its own start).
+//! - **Where a ring's walk *starts*.** The turn (or a lane-change chain) does
+//!   not generally land on a ring's own `node_ids[0]` -- that point is an
+//!   arbitrary artifact of wherever `build_ring` happened to start describing
+//!   the cycle (`fields.rs`'s own module doc already disclaims meaning in
+//!   it), unrelated to where a differently-positioned turn or chain edge
+//!   lands. Confirmed empirically (not assumed): on the real fixture, the
+//!   ring-5 turn lands one 150mm lattice hop short of ring 5's own
+//!   `node_ids[0]`. So [`RingWalk::locate`] finds *which* node of the ring's
+//!   own walk the arriving pose corresponds to, and the walk starts exactly
+//!   there.
 //!
-//! **Continuity is a two-seam contract, not an end-to-end one.** Matching
-//! `InwardArm::edge_ids`'s own "provenance, not a chained path" property
-//! (see above), [`SpiralPath`]'s three edge-id lists are not asserted G1-
-//! continuous with each other throughout -- only at the two seams the
-//! brief's own test checks: the arm's last pose equals the turn's first
-//! pose (true by construction: the turn's start pose *is* the arm's final
-//! pose, the query key), and the turn's last pose equals the return
-//! sequence's first pose (true by construction: [`walk_ring_backward`]'s
-//! rotation starts exactly at the turn's own end pose). Nothing beyond that
-//! is continuous by construction, and generally isn't: a ring's reversed lap
-//! ends back where the turn or chain dropped it off, not wherever the *next*
-//! chain to the next reserved ring happens to depart from -- exactly the
-//! same "ring end and lane-change start need not coincide" property Task 6
-//! already found and documented for the inward arm. A later task turning
-//! this provenance into rendered, chained geometry inherits that same
-//! obligation the inward arm always had.
+//! ## Chaining: arcs, not laps (Task 11a)
+//!
+//! [`SpiralPath`]'s edge sequence is **one chained path end to end**: every
+//! edge's end pose is the next edge's start pose exactly, so rendering the
+//! sequence in order produces geometry `geometry::canonicalize_path` accepts
+//! (position 1e-6 mm, G1 1e-7 rad). Three things make that true, and each
+//! replaced a real, measured break in the pre-Task-11a output (7 breaks of up
+//! to 322.6 mm on the 3000x2400 fixture):
+//!
+//! - **A ring is entered wherever the previous piece drops the path off**, not
+//!   at `node_ids[0]`. [`RingWalk::locate`] finds the node index the arriving
+//!   pose corresponds to and, at the same time, *which direction* the ring is
+//!   being walked in: forward along its own `edge_ids`, or backward through
+//!   the certified pose-flipped counterparts. Both senses are real -- the
+//!   catalogue is reversal-closed -- and which one applies is decided by the
+//!   arriving pose, never by convention.
+//! - **A ring is left wherever the next piece departs from.** The walk is an
+//!   *arc*, its length chosen (longest first) so that the pose it ends at is
+//!   one a certified lane-change chain, a certified turn, or an attachable
+//!   zone anchor actually departs from. The chain is searched *from that
+//!   pose* ([`find_chain_from_pose`]) rather than taken from
+//!   `SpiralRules::descend_chains`, whose entries are keyed by ring and
+//!   depart from wherever the smallest edge ids happen to sit.
+//! - **A full lap is never emitted.** [`RingWalk::max_steps`] caps a closed
+//!   ring at `edge_count - 1`. A full lap would return to the node it
+//!   started at, and design spec §5's crossing rule (as `validate.rs`
+//!   implements it: no two primitives two or more apart may meet *at all*)
+//!   rejects a path that touches itself there. This cap is what makes the
+//!   spiral a spiral rather than a stack of closed rings.
+//!
+//! ## Attachable ends (Task 11a)
+//!
+//! A loop is only a loop once both ends reach the connection zone's ports, so
+//! [`complete_spiral`] chooses the arm's start and the return's end from the
+//! anchors that can actually be reached: a node in
+//! [`LoopGraphView::entry_candidates`] for which [`zone::attach_port`] builds
+//! a certified connector that stays inside the zone's own anchor ring
+//! (`zone::ENTRY_RING_MM`, read from `zone.rs` rather than copied). The two
+//! ends use the two different ports; both assignments are tried, in a fixed
+//! order, because which one keeps the connectors from crossing is a geometric
+//! fact about the anchors, not a naming choice.
+//!
+//! The exit anchor is the **pose-flip** of where the return arm arrives:
+//! `attach_port` builds port -> anchor, and the loop traverses that connector
+//! backwards, so it must leave the anchor along the direction the return arm
+//! comes in with. Getting this backwards produces a tangent reversal at the
+//! seam that `canonicalize_path` rejects.
 //!
 //! **A missing certified edge is a dead end, not something to repair.**
 //! [`complete_spiral`] never invents geometry: if any required turn or
@@ -211,9 +243,11 @@ use crate::circuit::search::{
     backtracking_search,
 };
 use crate::circuit::types::{JournalEntry, RectMm};
+use crate::circuit::zone::{ConnectionZone, ENTRY_RING_MM, LoopGraphView, attach_port};
 use crate::model::{PathPrimitive, Point};
 use crate::plate::{
-    EmbeddedPoseGraph, Heading8, LocalPose, MotionTemplate, PlateProfile, PoseEdge, TemplateId,
+    EmbeddedPoseGraph, Heading8, LocalPose, MotionTemplate, PlateInstance, PlateProfile, PoseEdge,
+    PoseNode, TemplateId,
 };
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
@@ -910,21 +944,49 @@ fn reconstruct_arm(rules: &SpiralRules, state: &SearchState) -> InwardArm {
 }
 
 // ---------------------------------------------------------------------------
-// Task 7: turn insertion and return construction. See the module doc's
-// "Turn and return construction" section for the design; everything below
-// is its implementation.
+// Task 7 + Task 11a: the turn, the return, and the chained, attachable path.
+// See the module doc's "Turn and return construction", "Chaining: arcs, not
+// laps" and "Attachable ends" sections for the design; everything below is
+// its implementation.
 // ---------------------------------------------------------------------------
 
-/// The full certified path realizing one completed spiral: the inward arm's
-/// own provenance (`inward_edge_ids`, verbatim `arm.edge_ids`), the single
-/// certified reverse-family edge connecting the arm's final pose to the
-/// innermost reserved ring (`turn_edge_ids`), and the reserved rings walked
-/// back out to the connection zone (`return_edge_ids`). See the module doc.
+/// Where a completed spiral meets the connection zone: which port each end
+/// leaves from, and the certified graph node [`zone::attach_port`] must build
+/// that end's connector to.
+///
+/// `exit_anchor_node_id` is the **pose-flip** of the node the return arm
+/// arrives at: the connector is built port -> anchor and then traversed
+/// backwards by the loop, so it has to leave the anchor along the direction
+/// the return arm comes in with (see the module doc's "Attachable ends").
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SpiralEnds {
+    pub entry_port: Point,
+    pub exit_port: Point,
+    pub entry_anchor_node_id: u32,
+    pub exit_anchor_node_id: u32,
+}
+
+/// The full certified path realizing one completed spiral, as **one chained
+/// edge sequence**: `inward_edge_ids ++ turn_edge_ids ++ return_edge_ids`
+/// rendered in order is position- and tangent-continuous end to end (see the
+/// module doc's "Chaining: arcs, not laps").
+///
+/// The two `*_lane_ids` lists run parallel to their edge lists and say which
+/// ring each edge walks, `None` for a lane-change hop (which belongs to no
+/// ring: it passes through a free lattice node between two rings). A caller
+/// cannot re-derive this by looking the edge id up in `Lane::edge_ids`,
+/// because a ring walked backwards is realized by its edges' certified
+/// pose-flipped counterparts, and those are not any lane's own members.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SpiralPath {
     pub inward_edge_ids: Vec<u32>,
     pub turn_edge_ids: Vec<u32>,
     pub return_edge_ids: Vec<u32>,
+    pub inward_lane_ids: Vec<Option<u32>>,
+    pub return_lane_ids: Vec<Option<u32>>,
+    /// `None` only for a degenerate spiral with nothing to return through
+    /// (see [`complete_spiral`]), which has no zone attachment to describe.
+    pub ends: Option<SpiralEnds>,
 }
 
 /// The 180-degree-opposite heading (see `plate::template`'s own private
@@ -936,50 +998,413 @@ fn opposite_heading(heading: Heading8) -> Heading8 {
     Heading8::from_octant(heading.octant() + 4)
 }
 
-/// The deterministically smallest-id certified edge in `graph` whose start
-/// pose is exactly `from` and whose end pose is exactly `to`, within
-/// `GEOMETRY_EPSILON_MM`. `None` if no certified edge realizes that exact
-/// pose pair.
-fn find_edge_by_pose(
-    graph: &EmbeddedPoseGraph,
-    from: LocalPose,
-    to: LocalPose,
-) -> Option<&PoseEdge> {
-    graph
-        .edges
-        .iter()
-        .filter(|edge| {
-            edge.start.local_pose.heading == from.heading
-                && edge.end.local_pose.heading == to.heading
-                && (edge.start.local_pose.point - from.point).norm() < GEOMETRY_EPSILON_MM
-                && (edge.end.local_pose.point - to.point).norm() < GEOMETRY_EPSILON_MM
-        })
-        .min_by_key(|edge| edge.id)
+/// The same pose, traversed the other way round.
+fn flip(pose: LocalPose) -> LocalPose {
+    LocalPose::new(pose.point, opposite_heading(pose.heading))
 }
 
-/// The certified edge realizing `edge`'s exact path reversal in `graph`:
-/// same two poses, endpoints swapped, each heading flipped 180 degrees (see
-/// the module doc's "Turn and return construction", controller amendment 2,
-/// "KEHRE MATCHING"). Matched purely by pose, never by template identity or
-/// `Lane::node_ids`/`edge_ids` membership -- with the catalogue reversal-
-/// closed (`plate::template`'s own module doc), this is typically a
-/// *different* template placement than `edge` itself, not "`edge` with
-/// `template_transform.reversed` flipped" (that placement is certified
-/// independently and may not even be the one this finds, if a smaller-id
-/// edge happens to realize the same two poses another way).
-fn find_reversed_counterpart<'a>(
-    graph: &'a EmbeddedPoseGraph,
-    edge: &PoseEdge,
+fn same_pose(left: LocalPose, right: LocalPose) -> bool {
+    left.heading == right.heading && (left.point - right.point).norm() < GEOMETRY_EPSILON_MM
+}
+
+/// A pose reduced to an exactly-comparable key, for the hash indices below.
+///
+/// Every coordinate in this lattice is a literal template endpoint or an exact
+/// multiple of 37.5 mm (see `GEOMETRY_EPSILON_MM`'s own doc), so rounding to a
+/// micrometre is lossless here and two poses share a key exactly when
+/// [`same_pose`] holds for them. The indices are a lookup optimisation only --
+/// every result they return is re-read from the real edge, never trusted from
+/// the key.
+type PoseKey = (i64, i64, u8);
+
+fn pose_key(pose: LocalPose) -> PoseKey {
+    (
+        (pose.point.x * 1000.0).round() as i64,
+        (pose.point.y * 1000.0).round() as i64,
+        pose.heading.octant(),
+    )
+}
+
+/// The certified graph, plus the two pose indices the path construction reads
+/// it through. Built once per [`complete_spiral`] call: the construction
+/// searches from a great many poses (one per candidate arc length per ring),
+/// and a linear scan of `graph.edges` per query would make that quadratic in
+/// a graph with ~20 000 edges.
+struct GraphIndex<'a> {
+    edge_by_id: BTreeMap<u32, &'a PoseEdge>,
+    /// Edge ids by their start pose, each list ascending, so "the
+    /// deterministically smallest edge from this pose" is the first hit.
+    edges_by_start: BTreeMap<PoseKey, Vec<u32>>,
+    /// The smallest-id certified node at each pose.
+    node_by_pose: BTreeMap<PoseKey, &'a PoseNode>,
+}
+
+impl<'a> GraphIndex<'a> {
+    fn new(graph: &'a EmbeddedPoseGraph) -> Self {
+        let edge_by_id: BTreeMap<u32, &PoseEdge> =
+            graph.edges.iter().map(|edge| (edge.id, edge)).collect();
+        let mut edges_by_start: BTreeMap<PoseKey, Vec<u32>> = BTreeMap::new();
+        for edge in &graph.edges {
+            edges_by_start
+                .entry(pose_key(edge.start.local_pose))
+                .or_default()
+                .push(edge.id);
+        }
+        for ids in edges_by_start.values_mut() {
+            ids.sort_unstable();
+        }
+        let mut node_by_pose: BTreeMap<PoseKey, &PoseNode> = BTreeMap::new();
+        for node in &graph.nodes {
+            node_by_pose
+                .entry(pose_key(node.local_pose))
+                .and_modify(|best| {
+                    if node.id < best.id {
+                        *best = node;
+                    }
+                })
+                .or_insert(node);
+        }
+        Self {
+            edge_by_id,
+            edges_by_start,
+            node_by_pose,
+        }
+    }
+
+    fn edge(&self, id: u32) -> Option<&'a PoseEdge> {
+        self.edge_by_id.get(&id).copied()
+    }
+
+    fn departing(&self, pose: LocalPose) -> &[u32] {
+        self.edges_by_start
+            .get(&pose_key(pose))
+            .map_or(&[][..], Vec::as_slice)
+    }
+
+    fn node_at(&self, pose: LocalPose) -> Option<&'a PoseNode> {
+        self.node_by_pose.get(&pose_key(pose)).copied()
+    }
+
+    /// The deterministically smallest-id certified edge from `from` to `to`.
+    fn edge_between(&self, from: LocalPose, to: LocalPose) -> Option<&'a PoseEdge> {
+        self.departing(from)
+            .iter()
+            .filter_map(|id| self.edge(*id))
+            .find(|edge| same_pose(edge.end.local_pose, to))
+    }
+
+    /// The certified edge realizing `edge`'s exact path reversal: same two
+    /// poses, endpoints swapped, each heading flipped 180 degrees (see the
+    /// module doc's "Turn and return construction", controller amendment 2,
+    /// "KEHRE MATCHING"). Matched purely by pose, never by template identity
+    /// or `Lane::node_ids`/`edge_ids` membership -- with the catalogue
+    /// reversal-closed (`plate::template`'s own module doc), this is typically
+    /// a *different* template placement than `edge` itself.
+    fn reversed_counterpart(&self, edge: &PoseEdge) -> Option<&'a PoseEdge> {
+        self.edge_between(flip(edge.end.local_pose), flip(edge.start.local_pose))
+    }
+}
+
+/// Which way a ring's own (counter-clockwise) walk is being traversed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Direction {
+    /// Along `Lane::edge_ids`, using those certified edges verbatim.
+    Forward,
+    /// Against `Lane::edge_ids`, using each edge's certified pose-flipped
+    /// counterpart. Both senses are real: the catalogue is reversal-closed,
+    /// and which one a ring is walked in is decided by the pose the path
+    /// arrives with, not by convention.
+    Backward,
+}
+
+/// One lane ring, indexed so it can be walked from any of its own nodes in
+/// either direction.
+struct RingWalk {
+    lane_id: u32,
+    rect_local: RectMm,
+    edge_ids: Vec<u32>,
+    /// `node_poses[i]` is the ring's own forward pose at node `i`; edge `i`
+    /// runs from node `i` to node `i + 1`. Length is `edge_ids.len() + 1`, and
+    /// for a closed ring the last entry equals the first.
+    node_poses: Vec<LocalPose>,
+    /// `node_ids.first() == node_ids.last()`, i.e. the ring really closes.
+    /// A ring the connection zone clipped is truncated to its longest
+    /// connected arc instead (`fields.rs`), and then has no edge at that seam.
+    closed: bool,
+}
+
+impl RingWalk {
+    fn new(lane: &Lane, index: &GraphIndex) -> Option<Self> {
+        let last_id = *lane.edge_ids.last()?;
+        let mut node_poses = Vec::with_capacity(lane.edge_ids.len() + 1);
+        for id in &lane.edge_ids {
+            node_poses.push(index.edge(*id)?.start.local_pose);
+        }
+        node_poses.push(index.edge(last_id)?.end.local_pose);
+        Some(Self {
+            lane_id: lane.id,
+            rect_local: lane.rect_local.clone(),
+            edge_ids: lane.edge_ids.clone(),
+            node_poses,
+            closed: !lane.node_ids.is_empty() && lane.node_ids.first() == lane.node_ids.last(),
+        })
+    }
+
+    fn edge_count(&self) -> usize {
+        self.edge_ids.len()
+    }
+
+    /// The node indices a walk may stand at. A closed ring's last index is the
+    /// same node as its first, so it is not offered twice.
+    fn index_range(&self) -> std::ops::Range<usize> {
+        if self.closed {
+            0..self.edge_count()
+        } else {
+            0..(self.edge_count() + 1)
+        }
+    }
+
+    /// The pose a path standing at node `index` and travelling in `direction`
+    /// currently has.
+    fn cursor_pose(&self, index: usize, direction: Direction) -> LocalPose {
+        match direction {
+            Direction::Forward => self.node_poses[index],
+            Direction::Backward => flip(self.node_poses[index]),
+        }
+    }
+
+    /// The node index and walk direction an arriving `pose` corresponds to, or
+    /// `None` when the pose is not on this ring's own walk at all. A pose can
+    /// never match both senses (nothing equals its own 180-degree flip), so
+    /// this is unambiguous.
+    fn locate(&self, pose: LocalPose) -> Option<(usize, Direction)> {
+        self.index_range().find_map(|index| {
+            if same_pose(self.node_poses[index], pose) {
+                Some((index, Direction::Forward))
+            } else if same_pose(flip(self.node_poses[index]), pose) {
+                Some((index, Direction::Backward))
+            } else {
+                None
+            }
+        })
+    }
+
+    /// The most steps a walk from `index` may take.
+    ///
+    /// A **closed** ring is capped at `edge_count - 1`, one short of a full
+    /// lap, and that cap is load-bearing rather than defensive: a full lap
+    /// ends at the very node it started from, so its first and last primitives
+    /// meet, and design spec §5's crossing rule -- which `validate.rs` applies
+    /// as "no two primitives two or more apart may meet at all" -- rejects
+    /// exactly that. Emitting arcs instead of laps is what makes this a
+    /// spiral rather than a stack of closed rings.
+    fn max_steps(&self, index: usize, direction: Direction) -> usize {
+        match (self.closed, direction) {
+            (true, _) => self.edge_count().saturating_sub(1),
+            (false, Direction::Forward) => self.edge_count() - index,
+            (false, Direction::Backward) => index,
+        }
+    }
+
+    /// The node index `steps` steps from `index` in `direction`. Never called
+    /// with more than [`RingWalk::max_steps`], so an open ring cannot run off
+    /// either end.
+    fn step(&self, index: usize, direction: Direction, steps: usize) -> usize {
+        let count = self.edge_count();
+        match direction {
+            Direction::Forward if self.closed => (index + steps) % count,
+            Direction::Forward => index + steps,
+            Direction::Backward if self.closed => (index + count - steps % count) % count,
+            Direction::Backward => index - steps,
+        }
+    }
+
+    /// Which of this ring's own `edge_ids` the `offset`-th step from `index`
+    /// traverses.
+    fn edge_index_at(&self, index: usize, direction: Direction, offset: usize) -> usize {
+        let count = self.edge_count();
+        match direction {
+            Direction::Forward => (index + offset) % count,
+            Direction::Backward => (index + count - 1 - offset) % count,
+        }
+    }
+}
+
+/// The longest arc actually walkable from `index` in `direction`, together
+/// with the reason it stopped short of [`RingWalk::max_steps`] if it did.
+///
+/// A backward step needs its edge's certified pose-flipped counterpart to
+/// exist; when one does not, the walk simply cannot go further. That is
+/// reported rather than swallowed, because "a required certified edge is
+/// missing" is the one failure this module must never paper over (see the
+/// module doc, "a missing certified edge is a dead end") -- the caller turns
+/// it into the dead end when no shorter arc works either.
+fn longest_arc(
+    index: &GraphIndex,
+    walk: &RingWalk,
+    start: usize,
+    direction: Direction,
+) -> (Vec<u32>, Option<String>) {
+    let mut walked = Vec::new();
+    for offset in 0..walk.max_steps(start, direction) {
+        let forward_id = walk.edge_ids[walk.edge_index_at(start, direction, offset)];
+        let Some(forward) = index.edge(forward_id) else {
+            return (
+                walked,
+                Some(format!(
+                    "graph edge {forward_id} is not in the certified graph"
+                )),
+            );
+        };
+        match direction {
+            Direction::Forward => walked.push(forward.id),
+            Direction::Backward => match index.reversed_counterpart(forward) {
+                Some(reversed) => walked.push(reversed.id),
+                None => {
+                    return (
+                        walked,
+                        Some(format!(
+                            "no certified reversed counterpart for graph edge {forward_id}"
+                        )),
+                    );
+                }
+            },
+        }
+    }
+    (walked, None)
+}
+
+/// The deterministically smallest certified chain of one or two edges from
+/// `from` to any node of `target`'s own walk (in either sense -- the target
+/// ring may be walked forwards or backwards from wherever the chain lands),
+/// using no edge in `excluded`.
+///
+/// This is [`find_smallest_chain`]'s per-pose counterpart. `find_smallest_
+/// chain` answers "is ring `k` linked to ring `k+2` at all", which is what
+/// `SpiralRules`' invariants are stated over, and it is free to depart from
+/// whichever of the ring's nodes carries the smallest edge ids. The path
+/// construction cannot use that answer: it is standing at one specific pose
+/// and needs a chain *from there*, or the path breaks. Measured on the
+/// 3000x2400 fixture before this existed: the chain out of ring `k` departed
+/// a node the ring's own walk had left 218.7 mm earlier, at every one of the
+/// three lane changes.
+fn find_chain_from_pose(
+    index: &GraphIndex,
+    from: LocalPose,
+    target: &RingWalk,
+    excluded: &HashSet<u32>,
+) -> Option<Vec<u32>> {
+    let reaches_target = |pose: LocalPose| target.locate(pose).is_some();
+
+    for &hop_id in index.departing(from) {
+        if excluded.contains(&hop_id) {
+            continue;
+        }
+        let Some(hop) = index.edge(hop_id) else {
+            continue;
+        };
+        if reaches_target(hop.end.local_pose) {
+            return Some(vec![hop_id]);
+        }
+    }
+    let mut best: Option<(u32, u32)> = None;
+    for &first_id in index.departing(from) {
+        if excluded.contains(&first_id) {
+            continue;
+        }
+        let Some(first) = index.edge(first_id) else {
+            continue;
+        };
+        for &second_id in index.departing(first.end.local_pose) {
+            if excluded.contains(&second_id) {
+                continue;
+            }
+            let Some(second) = index.edge(second_id) else {
+                continue;
+            };
+            if reaches_target(second.end.local_pose)
+                && best.is_none_or(|current| (first_id, second_id) < current)
+            {
+                best = Some((first_id, second_id));
+            }
+        }
+    }
+    best.map(|(first, second)| vec![first, second])
+}
+
+/// The edges a lane-change chain between `from` and `to` may not use: those
+/// two rings' own catalogued segments, the ring strictly between them (the one
+/// the pattern reserves or occupies -- see [`excluded_edge_ids`]), *and* every
+/// one of those edges' certified pose-flipped counterparts.
+///
+/// The counterparts matter here and not in [`compute_descend_chains`]: a
+/// backward walk occupies a ring through its counterparts, so a chain allowed
+/// to use one would run down a channel the pattern has reserved, which is
+/// exactly the hard invariant controller amendment 5 put the exclusion there
+/// to protect. `compute_descend_chains` keeps its own narrower exclusion set
+/// so `SpiralRules`' invariants (and the Task 6 suite that pins them) are not
+/// silently re-tuned by a path-construction concern.
+fn excluded_with_counterparts(
+    index: &GraphIndex,
+    lanes: &[Lane],
+    from: u32,
+    to: u32,
+) -> HashSet<u32> {
+    let between = from.min(to) + 1;
+    let mut excluded = excluded_edge_ids(lanes, from, between, to);
+    let mut counterparts = HashSet::new();
+    for id in &excluded {
+        if let Some(edge) = index.edge(*id)
+            && let Some(reversed) = index.reversed_counterpart(edge)
+        {
+            counterparts.insert(reversed.id);
+        }
+    }
+    excluded.extend(counterparts);
+    excluded
+}
+
+/// The deterministically smallest certified reverse-family edge whose start
+/// pose is `from` (the pose the arm's innermost ring ends at) and whose end
+/// point lies on `target_ring`'s own channel rectangle boundary (controller
+/// amendment 4). Reverse-family is checked by `TemplateId` allowlist, matching
+/// `turn_uses_only_certified_reverse_templates_with_80_mm_arcs` -- every
+/// template `reverse_span_mm` accepts on this catalogue *is* one of these two
+/// (`turn_budget_ok`'s own catalogue scan), so the two never disagree here,
+/// but this function's contract is specifically "produce only
+/// `TeardropReverse`/`BroadReverse180` edges", which the allowlist states
+/// directly rather than incidentally.
+///
+/// The end-point-on-target-ring filter is load-bearing, not defensive: on the
+/// real fixture, three reverse-family edges depart the same start pose (the
+/// lattice is periodic -- two land on interior points that belong to neither
+/// ring), and only the one landing on `target_ring`'s own boundary is the real
+/// Kehre. Picking the smallest id *before* this filter would silently choose a
+/// spurious edge that shares a start pose but goes nowhere relevant.
+///
+/// Landing on that boundary is necessary but not sufficient, and Task 11a
+/// added the rest: the turn has to hand the path over to the ring's own walk,
+/// so its end pose must be a node of that walk ([`RingWalk::locate`]), not
+/// merely a point on the rectangle. Measured on the 3000x900 fixture: from one
+/// pose of ring 0's arc a certified `TeardropReverse` lands exactly on ring 1's
+/// rectangle *between* two of its nodes, and taking it left the return arm with
+/// nowhere to start.
+fn select_turn_edge<'a>(
+    index: &GraphIndex<'a>,
+    from: LocalPose,
+    target_ring: &RingWalk,
 ) -> Option<&'a PoseEdge> {
-    let from = LocalPose::new(
-        edge.end.local_pose.point,
-        opposite_heading(edge.end.local_pose.heading),
-    );
-    let to = LocalPose::new(
-        edge.start.local_pose.point,
-        opposite_heading(edge.start.local_pose.heading),
-    );
-    find_edge_by_pose(graph, from, to)
+    index
+        .departing(from)
+        .iter()
+        .filter_map(|id| index.edge(*id))
+        .find(|edge| {
+            matches!(
+                edge.template_id,
+                TemplateId::TeardropReverse | TemplateId::BroadReverse180
+            ) && point_on_rect_boundary(edge.end.local_pose.point, &target_ring.rect_local)
+                && target_ring.locate(edge.end.local_pose).is_some()
+        })
 }
 
 /// Whether `point` sits on `rect`'s boundary -- one of its four channel
@@ -995,135 +1420,6 @@ fn point_on_rect_boundary(point: Point, rect: &RectMm) -> bool {
     let within_x =
         point.x >= rect.min.x - GEOMETRY_EPSILON_MM && point.x <= rect.max.x + GEOMETRY_EPSILON_MM;
     (on_vertical_side && within_y) || (on_horizontal_side && within_x)
-}
-
-/// The deterministically smallest certified reverse-family edge whose start
-/// pose is `from` (the arm's final pose) and whose end point lies on
-/// `target_ring`'s own channel rectangle boundary (controller amendment 4).
-/// Reverse-family is checked by `TemplateId` allowlist, matching this task's
-/// own `turn_uses_only_certified_reverse_templates_with_80_mm_arcs` test --
-/// every template `reverse_span_mm` accepts on this catalogue *is* one of
-/// these two (`turn_budget_ok`'s own catalogue scan), so the two never
-/// disagree here, but this function's contract is specifically "produce only
-/// `TeardropReverse`/`BroadReverse180` edges", which the allowlist states
-/// directly rather than incidentally.
-///
-/// The end-point-on-target-ring filter is load-bearing, not defensive: on
-/// the real fixture, three reverse-family edges depart the same start pose
-/// (the lattice is periodic -- two land on interior points that belong to
-/// neither ring), and only the one landing on `target_ring`'s own boundary
-/// is the real Kehre. Picking the smallest id *before* this filter would
-/// silently choose a spurious edge that shares a start pose but goes
-/// nowhere relevant.
-fn select_turn_edge<'a>(
-    graph: &'a EmbeddedPoseGraph,
-    from: LocalPose,
-    target_ring: &Lane,
-) -> Option<&'a PoseEdge> {
-    graph
-        .edges
-        .iter()
-        .filter(|edge| {
-            matches!(
-                edge.template_id,
-                TemplateId::TeardropReverse | TemplateId::BroadReverse180
-            ) && edge.start.local_pose.heading == from.heading
-                && (edge.start.local_pose.point - from.point).norm() < GEOMETRY_EPSILON_MM
-                && point_on_rect_boundary(edge.end.local_pose.point, &target_ring.rect_local)
-        })
-        .min_by_key(|edge| edge.id)
-}
-
-/// The index `k` into `ring.edge_ids` such that `ring.edge_ids[k]`'s own
-/// (forward) start pose is the pose-flip of `entry_pose` -- i.e. the point
-/// in `ring`'s forward walk that the return path is re-entering at, from
-/// outside the ring (the turn, for the innermost reserved ring, or a
-/// reversed lane-change chain, for every ring after it). `None` if
-/// `entry_pose` does not correspond to any node of `ring`'s own forward
-/// walk.
-///
-/// This is *not* always `0`: a ring's own `node_ids[0]`/`node_ids.last()`
-/// (its arbitrary, meaning-free start/end corner -- `fields.rs`'s own
-/// module doc) generally sits at a *different* point than wherever a turn
-/// or chain edge happens to land (confirmed empirically on the real
-/// fixture: the ring-5 turn lands one lattice hop short of `node_ids[0]`).
-/// `complete_spiral` rotates the ring's reversed walk to start exactly here
-/// rather than assuming it starts at `node_ids[0]`.
-fn ring_entry_index(
-    ring: &Lane,
-    edge_by_id: &BTreeMap<u32, &PoseEdge>,
-    entry_pose: LocalPose,
-) -> Option<usize> {
-    let target = LocalPose::new(entry_pose.point, opposite_heading(entry_pose.heading));
-    ring.edge_ids.iter().position(|&id| {
-        let start = edge_by_id[&id].start.local_pose;
-        start.heading == target.heading && (start.point - target.point).norm() < GEOMETRY_EPSILON_MM
-    })
-}
-
-/// The reversed, rotated walk of `ring`'s full cycle, starting exactly at
-/// `entry_pose` (see [`ring_entry_index`]): every one of `ring.edge_ids`'
-/// `len` edges, each replaced by [`find_reversed_counterpart`], in the
-/// order that begins departing `entry_pose` and -- since this is a closed
-/// cycle walked in full -- ends arriving back at `entry_pose` again.
-/// `Err` (a [`dead_end`]) if `ring` is not itself a closed cycle, if
-/// `entry_pose` matches no node of `ring`'s own walk, or if any required
-/// reversed edge does not exist in `graph`.
-///
-/// The closed-cycle check is load-bearing, not defensive, and runs *before*
-/// any wraparound is attempted: `ring.edge_ids[len-1].end ==
-/// ring.edge_ids[0].start` only holds when `ring` truly closes
-/// (`node_ids.first() == node_ids.last()` -- the same test `search.rs`'s
-/// `same_lane_adjacent` uses for its own wrap-around case). A ring
-/// truncated by e.g. a clipping connection zone (`fields.rs`'s own
-/// "truncated to its longest connected arc" doc) has no real edge at that
-/// seam; walking it anyway would silently splice two genuinely disconnected
-/// arcs into one fake lap instead of failing on the missing connection.
-fn walk_ring_backward(
-    graph: &EmbeddedPoseGraph,
-    edge_by_id: &BTreeMap<u32, &PoseEdge>,
-    ring: &Lane,
-    entry_pose: LocalPose,
-    resolved_so_far: usize,
-) -> Result<Vec<u32>, SearchFailure> {
-    let is_closed = ring
-        .node_ids
-        .first()
-        .is_some_and(|first| ring.node_ids.last() == Some(first));
-    if !is_closed {
-        return Err(dead_end(
-            format!("return lane {}: ring is not a closed cycle", ring.id),
-            resolved_so_far,
-        ));
-    }
-
-    let len = ring.edge_ids.len();
-    let entry_index = ring_entry_index(ring, edge_by_id, entry_pose).ok_or_else(|| {
-        dead_end(
-            format!(
-                "return lane {}: arrival pose does not match any node of this ring's own walk",
-                ring.id
-            ),
-            resolved_so_far,
-        )
-    })?;
-
-    let mut walked = Vec::with_capacity(len);
-    for offset in 1..=len {
-        let idx = (entry_index + len - offset) % len;
-        let forward_id = ring.edge_ids[idx];
-        let reversed = find_reversed_counterpart(graph, edge_by_id[&forward_id]).ok_or_else(|| {
-            dead_end(
-                format!(
-                    "return lane {}: no certified reversed counterpart for graph edge {forward_id}",
-                    ring.id
-                ),
-                resolved_so_far + walked.len(),
-            )
-        })?;
-        walked.push(reversed.id);
-    }
-    Ok(walked)
 }
 
 /// Free-standing counterpart to `SpiralRules::lane_by_id`: `complete_spiral`
@@ -1150,15 +1446,15 @@ fn reserved_ring_ids(arm: &InwardArm, lanes: &[Lane]) -> BTreeSet<u32> {
         .collect()
 }
 
-/// A hard-stop failure from `complete_spiral`: a certified edge the return
-/// construction needs does not exist in `graph` at all. This is not a
-/// `PatternRules::check` rejection -- no `Invariant` variant describes "this
-/// edge is simply missing" -- so the lone journal entry's `rejected_by` is
-/// `None`; `decision` alone names what is missing and where (see the module
-/// doc, "a missing certified edge is a dead end, not something to repair").
-/// `actions_used` is how many turn/return edges were successfully resolved
-/// before this one, for a caller that wants a sense of how far construction
-/// got (no test in this task's brief inspects it).
+/// A hard-stop failure from `complete_spiral`: a certified edge the path
+/// construction needs does not exist in `graph` at all, or no arc of any
+/// length reaches the next piece. This is not a `PatternRules::check`
+/// rejection -- no `Invariant` variant describes "this edge is simply
+/// missing" -- so the lone journal entry's `rejected_by` is `None`;
+/// `decision` alone names what is missing and where (see the module doc, "a
+/// missing certified edge is a dead end, not something to repair").
+/// `actions_used` is how many edges were successfully resolved before this
+/// one, for a caller that wants a sense of how far construction got.
 fn dead_end(decision: String, actions_used: usize) -> SearchFailure {
     SearchFailure {
         kind: SearchFailureKind::Geometry,
@@ -1171,129 +1467,469 @@ fn dead_end(decision: String, actions_used: usize) -> SearchFailure {
     }
 }
 
-/// Completes `arm` into a full [`SpiralPath`]: the turn from the arm's final
-/// pose to the innermost reserved ring, and the reserved rings walked back
-/// out to the connection zone. See the module doc's "Turn and return
-/// construction" for the design. `lanes`/`graph` are the same values
-/// `plan_inward_arm` was called with (this function does not re-derive or
-/// re-validate the arm itself).
+/// Everything outside the certified graph that the path construction needs:
+/// the zone it must start and end at, the anchors it may use, and the plate
+/// instance `attach_port` certifies connectors against.
+struct ZoneReach<'a> {
+    view: &'a LoopGraphView,
+    zone: &'a ConnectionZone,
+    instance: &'a PlateInstance,
+}
+
+impl ZoneReach<'_> {
+    /// Whether a zone connector from `port` to `anchor` really exists.
+    ///
+    /// Three conditions, all of them the validator's (design spec §4 and
+    /// §11), checked here so the generator aims at the contract instead of
+    /// discovering it at certification time: the anchor is one of the zone's
+    /// own certified entry candidates, `attach_port` builds a connector to it
+    /// that clears the room and the noppen, and that connector stays inside
+    /// the zone rectangle grown by `zone::ENTRY_RING_MM` -- the same ring the
+    /// candidate set was built with, read from `zone.rs` rather than copied.
+    fn connector_exists(&self, port: Point, anchor: &PoseNode) -> bool {
+        if !self.view.entry_candidates.contains(&anchor.id) {
+            return false;
+        }
+        let Ok(attachment) = attach_port(port, self.zone.inward, anchor, self.instance) else {
+            return false;
+        };
+        let bounds = expand_rect(&self.zone.rect_local, ENTRY_RING_MM);
+        attachment.primitives.iter().all(|primitive| {
+            let local = self
+                .instance
+                .transform
+                .primitive_to_local(primitive)
+                .bounds();
+            local.min.x >= bounds.min.x
+                && local.max.x <= bounds.max.x
+                && local.min.y >= bounds.min.y
+                && local.max.y <= bounds.max.y
+        })
+    }
+}
+
+/// `rect` grown by `margin_mm` on every side. Same arithmetic as `zone.rs`'s
+/// own private `expand_rect`; `circuit`'s modules keep such small geometric
+/// helpers local rather than widening a sibling's API (see
+/// `point_on_rect_boundary`, which `validate.rs` also keeps its own copy of).
+fn expand_rect(rect: &RectMm, margin_mm: f64) -> RectMm {
+    RectMm {
+        min: Point::new(rect.min.x - margin_mm, rect.min.y - margin_mm),
+        max: Point::new(rect.max.x + margin_mm, rect.max.y + margin_mm),
+    }
+}
+
+/// One candidate place for the arm to start: a node of the outermost occupied
+/// ring that a port can actually be connected to, with the direction the ring
+/// would then be walked in.
+struct EntryStart {
+    index: usize,
+    direction: Direction,
+    anchor_node_id: u32,
+    steps: usize,
+}
+
+/// Every attachable start on `walk`, longest available arc first (then
+/// smallest node index, then `Forward` before `Backward`) -- a total order, so
+/// the choice is deterministic. Longest first because the arm should cover as
+/// much of its ring as the ring allows; the alternatives after it exist
+/// because the longest one may not reach a lane change or a turn.
+fn entry_starts(
+    index: &GraphIndex,
+    walk: &RingWalk,
+    reach: &ZoneReach,
+    port: Point,
+) -> Vec<EntryStart> {
+    let mut starts = Vec::new();
+    for node_index in walk.index_range() {
+        for direction in [Direction::Forward, Direction::Backward] {
+            let steps = walk.max_steps(node_index, direction);
+            if steps == 0 {
+                continue;
+            }
+            let anchor_pose = walk.cursor_pose(node_index, direction);
+            let Some(anchor) = index.node_at(anchor_pose) else {
+                continue;
+            };
+            if !reach.connector_exists(port, anchor) {
+                continue;
+            }
+            starts.push(EntryStart {
+                index: node_index,
+                direction,
+                anchor_node_id: anchor.id,
+                steps,
+            });
+        }
+    }
+    starts.sort_by_key(|start| {
+        (
+            std::cmp::Reverse(start.steps),
+            start.index,
+            u8::from(start.direction == Direction::Backward),
+        )
+    });
+    starts
+}
+
+/// Completes `arm` into a full [`SpiralPath`]: the rings walked as arcs, the
+/// lane changes between them, the turn onto the innermost reserved ring, the
+/// reserved rings walked back out, and the two zone anchors the ports attach
+/// to. See the module doc's "Turn and return construction", "Chaining: arcs,
+/// not laps" and "Attachable ends" for the design. `lanes`/`graph` are the
+/// same values `plan_inward_arm` was called with (this function does not
+/// re-derive or re-validate the arm itself); `view`/`zone`/`instance` are the
+/// connection zone the loop has to reach, which the arm search has no opinion
+/// about.
 ///
-/// A degenerate `arm` with no edges at all (only possible if `lanes` itself
-/// is empty -- see `SpiralRules::expand`'s `None` branch) or with nothing
-/// reserved (a single-ring arm, `lanes` has no ring 1) has nothing to turn
-/// or return through; both return an otherwise-empty `SpiralPath` rather
-/// than an error, matching `plan_inward_arm`'s own treatment of an empty
-/// state as a trivial success rather than a failure.
+/// A degenerate `arm` with no edges at all (only possible if `lanes` itself is
+/// empty -- see `SpiralRules::expand`'s `None` branch) or with nothing
+/// reserved (a single-ring arm in a room whose field has no ring 1) has
+/// nothing to turn or return through. Both return rather than erroring,
+/// matching `plan_inward_arm`'s own treatment of an empty state as a trivial
+/// success -- but what comes back is [`degenerate_path`]: no turn, no return,
+/// no [`SpiralEnds`], and `inward_edge_ids` carrying `arm.edge_ids`
+/// **verbatim**. That is the one `SpiralPath` whose edge sequence is *not* a
+/// chained path -- it is the arm's provenance list, unwalked -- and `ends`
+/// being `None` is the signal for it: there is no loop here to attach.
 pub fn complete_spiral(
     arm: &InwardArm,
     lanes: &[Lane],
     graph: &EmbeddedPoseGraph,
+    view: &LoopGraphView,
+    zone: &ConnectionZone,
+    instance: &PlateInstance,
 ) -> Result<SpiralPath, SearchFailure> {
-    let Some(&last_edge_id) = arm.edge_ids.last() else {
-        return Ok(SpiralPath {
-            inward_edge_ids: arm.edge_ids.clone(),
-            turn_edge_ids: Vec::new(),
-            return_edge_ids: Vec::new(),
-        });
-    };
-    let edge_by_id: BTreeMap<u32, &PoseEdge> =
-        graph.edges.iter().map(|edge| (edge.id, edge)).collect();
-    let arm_final_pose = edge_by_id[&last_edge_id].end.local_pose;
+    let index = GraphIndex::new(graph);
+    let occupied = arm.lane_sequence.clone();
+    let reserved: Vec<u32> = reserved_ring_ids(arm, lanes).into_iter().rev().collect();
+    if occupied.is_empty() || reserved.is_empty() || arm.edge_ids.is_empty() {
+        return Ok(degenerate_path(arm, lanes));
+    }
 
-    let descending_reserved: Vec<u32> = reserved_ring_ids(arm, lanes).into_iter().rev().collect();
-    let Some(&innermost_reserved) = descending_reserved.first() else {
-        return Ok(SpiralPath {
-            inward_edge_ids: arm.edge_ids.clone(),
-            turn_edge_ids: Vec::new(),
-            return_edge_ids: Vec::new(),
-        });
-    };
-
-    let target_ring = lane_by_id(lanes, innermost_reserved).ok_or_else(|| {
-        dead_end(
-            format!("return lane {innermost_reserved} does not exist"),
-            0,
-        )
-    })?;
-    let turn_edge = select_turn_edge(graph, arm_final_pose, target_ring).ok_or_else(|| {
-        dead_end(
-            format!(
-                "no certified reverse-template edge connects the arm's final pose to \
-                 return lane {innermost_reserved}"
-            ),
-            0,
-        )
-    })?;
-
-    let descend_chains = compute_descend_chains(lanes, graph);
-    let mut return_edge_ids = Vec::new();
-    // The pose the return path is currently arriving at: the turn's own end
-    // pose for the innermost reserved ring, and (after each ring's lap) the
-    // last reversed lane-change edge's end pose for every ring after it --
-    // *not* whatever pose a ring's own lap happens to end at (that is
-    // always back at this same entry pose; see `walk_ring_backward`'s doc
-    // and the module doc's "continuity is a two-seam contract").
-    let mut current_pose = turn_edge.end.local_pose;
-    for (index, &ring_id) in descending_reserved.iter().enumerate() {
-        let ring = lane_by_id(lanes, ring_id).ok_or_else(|| {
+    let mut walks: BTreeMap<u32, RingWalk> = BTreeMap::new();
+    for ring_id in occupied.iter().chain(reserved.iter()) {
+        let lane = lane_by_id(lanes, *ring_id)
+            .ok_or_else(|| dead_end(format!("lane {ring_id} does not exist"), 0))?;
+        let walk = RingWalk::new(lane, &index).ok_or_else(|| {
             dead_end(
-                format!("return lane {ring_id} does not exist"),
-                return_edge_ids.len(),
+                format!("lane {ring_id}: an edge of this ring is not in the certified graph"),
+                0,
             )
         })?;
-        let lap = walk_ring_backward(
-            graph,
-            &edge_by_id,
-            ring,
-            current_pose,
-            return_edge_ids.len(),
-        )?;
-        return_edge_ids.extend(lap);
+        walks.insert(*ring_id, walk);
+    }
 
-        if let Some(&next_ring_id) = descending_reserved.get(index + 1) {
-            // Two-token guard, matching `corridor_reaches_zone`'s own
-            // `descend_chains.get(&pair[0]).is_some_and(|chain|
-            // chain.to_lane == pair[1])`: the map key alone isn't enough --
-            // `compute_descend_chains` is keyed by `from`, so a wrong-lane
-            // chain could only be fetched by a caller bug, but this
-            // function's own correctness should not rest on trusting that
-            // by construction.
-            let chain = descend_chains
-                .get(&next_ring_id)
-                .filter(|chain| chain.to_lane == ring_id)
-                .ok_or_else(|| {
-                    dead_end(
-                        format!(
-                            "return lane {ring_id}: no certified lane-change chain to \
-                             return lane {next_ring_id}"
-                        ),
-                        return_edge_ids.len(),
-                    )
-                })?;
-            for &forward_id in chain.hop_edge_ids.iter().rev() {
-                let reversed = find_reversed_counterpart(graph, edge_by_id[&forward_id])
-                    .ok_or_else(|| {
-                        dead_end(
-                            format!(
-                                "return lane {ring_id}: no certified reversed counterpart \
-                                 for lane-change edge {forward_id}"
-                            ),
-                            return_edge_ids.len(),
-                        )
-                    })?;
-                current_pose = reversed.end.local_pose;
-                return_edge_ids.push(reversed.id);
+    let outermost = &walks[&occupied[0]];
+    let mut first_failure: Option<SearchFailure> = None;
+    let reach = ZoneReach {
+        view,
+        zone,
+        instance,
+    };
+    for (entry_port, exit_port) in [
+        (zone.start_port, zone.end_port),
+        (zone.end_port, zone.start_port),
+    ] {
+        for start in entry_starts(&index, outermost, &reach, entry_port) {
+            let attempt = build_chained_path(
+                &index, lanes, &occupied, &reserved, &walks, &reach, &start, entry_port, exit_port,
+            );
+            match attempt {
+                Ok(path) => return Ok(path),
+                Err(failure) => {
+                    if first_failure.is_none() {
+                        first_failure = Some(failure);
+                    }
+                }
             }
         }
     }
+    Err(first_failure.unwrap_or_else(|| {
+        dead_end(
+            format!(
+                "lane {}: no node of the outermost occupied ring is both a zone entry \
+                 candidate and reachable from a port",
+                occupied[0]
+            ),
+            0,
+        )
+    }))
+}
+
+/// The path for one fixed choice of ports and arm start, or the dead end that
+/// choice runs into.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "every argument is a distinct input the construction needs, and \
+              bundling them would only move the list behind a struct that has \
+              no other use"
+)]
+fn build_chained_path(
+    index: &GraphIndex,
+    lanes: &[Lane],
+    occupied: &[u32],
+    reserved: &[u32],
+    walks: &BTreeMap<u32, RingWalk>,
+    reach: &ZoneReach,
+    start: &EntryStart,
+    entry_port: Point,
+    exit_port: Point,
+) -> Result<SpiralPath, SearchFailure> {
+    let innermost_reserved = &walks[&reserved[0]];
+
+    // --- Inward: each occupied ring as an arc, lane-change chains between. ---
+    let mut inward_edge_ids: Vec<u32> = Vec::new();
+    let mut inward_lane_ids: Vec<Option<u32>> = Vec::new();
+    let mut cursor = (start.index, start.direction);
+    let mut turn_from: Option<LocalPose> = None;
+
+    for (position, ring_id) in occupied.iter().enumerate() {
+        let walk = &walks[ring_id];
+        let (arc, blocked) = longest_arc(index, walk, cursor.0, cursor.1);
+        let next_ring = occupied.get(position + 1);
+        let excluded = next_ring
+            .map(|next| excluded_with_counterparts(index, lanes, *ring_id, *next))
+            .unwrap_or_default();
+
+        let mut chosen: Option<(usize, Option<Vec<u32>>)> = None;
+        for steps in (1..=arc.len()).rev() {
+            let end = walk.step(cursor.0, cursor.1, steps);
+            let pose = walk.cursor_pose(end, cursor.1);
+            match next_ring {
+                Some(next) => {
+                    if let Some(hops) = find_chain_from_pose(index, pose, &walks[next], &excluded) {
+                        chosen = Some((steps, Some(hops)));
+                        break;
+                    }
+                }
+                None => {
+                    if select_turn_edge(index, pose, innermost_reserved).is_some() {
+                        chosen = Some((steps, None));
+                        break;
+                    }
+                }
+            }
+        }
+        let Some((steps, hops)) = chosen else {
+            let detail = blocked.unwrap_or_else(|| match next_ring {
+                Some(next) => format!(
+                    "no certified lane-change chain reaches lane {next} from any pose of this \
+                     ring's walk"
+                ),
+                None => format!(
+                    "no certified reverse-template edge connects any pose of this ring's walk \
+                     to return lane {}",
+                    innermost_reserved.lane_id
+                ),
+            });
+            return Err(dead_end(
+                format!("lane {ring_id}: {detail}"),
+                inward_edge_ids.len(),
+            ));
+        };
+
+        inward_edge_ids.extend(arc[..steps].iter().copied());
+        inward_lane_ids.extend(std::iter::repeat_n(Some(*ring_id), steps));
+        let end = walk.step(cursor.0, cursor.1, steps);
+
+        match (hops, next_ring) {
+            (Some(hops), Some(next)) => {
+                let landing = hops
+                    .last()
+                    .and_then(|id| index.edge(*id))
+                    .ok_or_else(|| {
+                        dead_end(
+                            format!("lane {ring_id}: chain hop is not in the certified graph"),
+                            inward_edge_ids.len(),
+                        )
+                    })?
+                    .end
+                    .local_pose;
+                inward_lane_ids.extend(std::iter::repeat_n(None, hops.len()));
+                inward_edge_ids.extend(hops);
+                cursor = walks[next].locate(landing).ok_or_else(|| {
+                    dead_end(
+                        format!(
+                            "lane {next}: the lane-change chain from lane {ring_id} lands off \
+                             this ring's own walk"
+                        ),
+                        inward_edge_ids.len(),
+                    )
+                })?;
+            }
+            _ => turn_from = Some(walk.cursor_pose(end, cursor.1)),
+        }
+    }
+
+    // --- The turn onto the innermost reserved ring. ---
+    // Set by the innermost occupied ring, which is the one iteration of the
+    // loop above with no next ring to descend to -- and `occupied` is
+    // non-empty, so that iteration always runs. Handled rather than asserted:
+    // this module never panics on input a future caller could shape (see
+    // `SpiralRules::expand`'s own "fail closed, don't panic" stance).
+    let turn_pose = turn_from.ok_or_else(|| {
+        dead_end(
+            "the inward arm ended without a pose to turn from".to_owned(),
+            inward_edge_ids.len(),
+        )
+    })?;
+    let turn = select_turn_edge(index, turn_pose, innermost_reserved).ok_or_else(|| {
+        dead_end(
+            format!(
+                "no certified reverse-template edge connects the arm's final pose to return \
+                 lane {}",
+                innermost_reserved.lane_id
+            ),
+            inward_edge_ids.len(),
+        )
+    })?;
+
+    // --- Return: the reserved rings walked back out to the zone. ---
+    let mut return_edge_ids: Vec<u32> = Vec::new();
+    let mut return_lane_ids: Vec<Option<u32>> = Vec::new();
+    let mut cursor = innermost_reserved
+        .locate(turn.end.local_pose)
+        .ok_or_else(|| {
+            dead_end(
+                format!(
+                    "return lane {}: the turn lands off this ring's own walk",
+                    innermost_reserved.lane_id
+                ),
+                inward_edge_ids.len(),
+            )
+        })?;
+    let mut exit_anchor_node_id: Option<u32> = None;
+
+    for (position, ring_id) in reserved.iter().enumerate() {
+        let walk = &walks[ring_id];
+        let (arc, blocked) = longest_arc(index, walk, cursor.0, cursor.1);
+        let next_ring = reserved.get(position + 1);
+        let excluded = next_ring
+            .map(|next| excluded_with_counterparts(index, lanes, *ring_id, *next))
+            .unwrap_or_default();
+
+        let mut chosen: Option<(usize, Option<Vec<u32>>, Option<u32>)> = None;
+        for steps in (1..=arc.len()).rev() {
+            let end = walk.step(cursor.0, cursor.1, steps);
+            let pose = walk.cursor_pose(end, cursor.1);
+            match next_ring {
+                Some(next) => {
+                    if let Some(hops) = find_chain_from_pose(index, pose, &walks[next], &excluded) {
+                        chosen = Some((steps, Some(hops), None));
+                        break;
+                    }
+                }
+                None => {
+                    // The exit connector is built port -> anchor and then
+                    // traversed backwards, so the anchor is the pose-flip of
+                    // where the return arm arrives.
+                    if let Some(anchor) = index.node_at(flip(pose))
+                        && reach.connector_exists(exit_port, anchor)
+                    {
+                        chosen = Some((steps, None, Some(anchor.id)));
+                        break;
+                    }
+                }
+            }
+        }
+        let Some((steps, hops, anchor)) = chosen else {
+            let detail = blocked.unwrap_or_else(|| match next_ring {
+                Some(next) => format!(
+                    "no certified lane-change chain reaches return lane {next} from any pose \
+                     of this ring's walk"
+                ),
+                None => "no pose of this ring's walk is both a zone entry candidate and \
+                     reachable from a port"
+                    .to_owned(),
+            });
+            return Err(dead_end(
+                format!("return lane {ring_id}: {detail}"),
+                inward_edge_ids.len() + return_edge_ids.len(),
+            ));
+        };
+
+        return_edge_ids.extend(arc[..steps].iter().copied());
+        return_lane_ids.extend(std::iter::repeat_n(Some(*ring_id), steps));
+        exit_anchor_node_id = anchor;
+
+        if let (Some(hops), Some(next)) = (hops, next_ring) {
+            let landing = hops
+                .last()
+                .and_then(|id| index.edge(*id))
+                .ok_or_else(|| {
+                    dead_end(
+                        format!("return lane {ring_id}: chain hop is not in the certified graph"),
+                        return_edge_ids.len(),
+                    )
+                })?
+                .end
+                .local_pose;
+            return_lane_ids.extend(std::iter::repeat_n(None, hops.len()));
+            return_edge_ids.extend(hops);
+            cursor = walks[next].locate(landing).ok_or_else(|| {
+                dead_end(
+                    format!(
+                        "return lane {next}: the lane-change chain from return lane {ring_id} \
+                         lands off this ring's own walk"
+                    ),
+                    return_edge_ids.len(),
+                )
+            })?;
+        }
+    }
+
+    let exit_anchor_node_id = exit_anchor_node_id.ok_or_else(|| {
+        dead_end(
+            format!(
+                "return lane {}: the return arm never reached an attachable zone anchor",
+                reserved.last().copied().unwrap_or_default()
+            ),
+            return_edge_ids.len(),
+        )
+    })?;
 
     Ok(SpiralPath {
-        inward_edge_ids: arm.edge_ids.clone(),
-        turn_edge_ids: vec![turn_edge.id],
+        inward_edge_ids,
+        turn_edge_ids: vec![turn.id],
         return_edge_ids,
+        inward_lane_ids,
+        return_lane_ids,
+        ends: Some(SpiralEnds {
+            entry_port,
+            exit_port,
+            entry_anchor_node_id: start.anchor_node_id,
+            exit_anchor_node_id,
+        }),
     })
 }
 
+/// The completion of an arm with nothing to turn or return through: the arm's
+/// own provenance list verbatim, no turn, no return, and no zone attachment.
+///
+/// Deliberately *not* re-walked into a chained arc: with no reserved ring
+/// there is no return arm, no turn and no second port to reach, so there is no
+/// loop to be continuous. `ends: None` is what tells a caller that.
+fn degenerate_path(arm: &InwardArm, lanes: &[Lane]) -> SpiralPath {
+    let inward_lane_ids = arm
+        .edge_ids
+        .iter()
+        .map(|id| {
+            lanes
+                .iter()
+                .find(|lane| lane.edge_ids.contains(id))
+                .map(|lane| lane.id)
+        })
+        .collect();
+    SpiralPath {
+        inward_edge_ids: arm.edge_ids.clone(),
+        turn_edge_ids: Vec::new(),
+        return_edge_ids: Vec::new(),
+        inward_lane_ids,
+        return_lane_ids: Vec::new(),
+        ends: None,
+    }
+}
 #[cfg(test)]
 mod return_chain_tests {
     //! Started as a throwaway reviewer-review probe ("does `compute_descend_
@@ -1416,50 +2052,126 @@ mod return_chain_tests {
 }
 
 #[cfg(test)]
-mod open_ring_return_walk_tests {
-    //! Reviewer follow-up on Task 7: `walk_ring_backward` must refuse to
-    //! wrap an open (truncated) ring rather than silently splicing two
-    //! disconnected arcs into one fake lap (see `walk_ring_backward`'s own
-    //! doc). A hand-truncated `Lane` is enough to exercise this -- the
-    //! closed-cycle check runs before any graph lookup, so the graph and
-    //! `edge_by_id` map below are deliberately empty stand-ins, never
-    //! actually queried.
+mod ring_walk_tests {
+    //! The two walk rules the whole chaining argument rests on, exercised
+    //! directly rather than through `complete_spiral` (which can only fail
+    //! *somewhere*, not tell you which rule broke):
+    //!
+    //! - **A closed ring is never walked all the way round.** The cap is one
+    //!   step short of a full lap, because a lap ends at the node it started
+    //!   from and `validate.rs`'s crossing rule rejects a path whose first and
+    //!   last primitives meet. This replaces Task 7's
+    //!   `open_ring_is_a_dead_end_not_a_silent_wraparound`, whose concern (an
+    //!   open ring must not be wrapped into a fake lap by modular arithmetic)
+    //!   is now structural: an open ring's own `max_steps` cannot reach the
+    //!   wrap, so `step` never applies one.
+    //! - **A ring is entered at the pose it is entered at**, in whichever
+    //!   direction that pose implies.
+    //!
+    //! `RingWalk`'s fields are built directly here: it is this module's own
+    //! private type, and the alternative (a synthetic `EmbeddedPoseGraph`
+    //! carrying hand-built `TemplateTransform`s) would test the fixture rather
+    //! than the rules.
     use super::*;
 
-    #[test]
-    fn open_ring_is_a_dead_end_not_a_silent_wraparound() {
-        let lane = Lane {
-            id: 5,
-            field_id: 0,
+    fn pose(x: f64, y: f64, heading: Heading8) -> LocalPose {
+        LocalPose::new(Point::new(x, y), heading)
+    }
+
+    /// A four-edge square ring: nodes at the corners, walked counter-clockwise.
+    /// `closed` decides whether the fifth node is the first one again.
+    fn square(closed: bool) -> RingWalk {
+        RingWalk {
+            lane_id: 5,
             rect_local: RectMm {
                 min: Point::new(0.0, 0.0),
                 max: Point::new(100.0, 100.0),
             },
-            // Open: three nodes, first (10) != last (12) -- a ring
-            // truncated by e.g. a clipping connection zone, per
-            // `fields.rs`'s own "longest connected arc" doc.
-            node_ids: vec![10, 11, 12],
-            edge_ids: vec![100, 101],
-        };
-        let graph = EmbeddedPoseGraph {
-            nodes: Vec::new(),
-            edges: Vec::new(),
-            rejected_edges: Vec::new(),
-            candidate_count: 0,
-        };
-        let edge_by_id: BTreeMap<u32, &PoseEdge> = BTreeMap::new();
-        let entry_pose = LocalPose::new(Point::new(0.0, 0.0), Heading8::Deg0);
+            edge_ids: vec![100, 101, 102, 103],
+            node_poses: vec![
+                pose(0.0, 0.0, Heading8::Deg0),
+                pose(100.0, 0.0, Heading8::Deg90),
+                pose(100.0, 100.0, Heading8::Deg180),
+                pose(0.0, 100.0, Heading8::Deg270),
+                pose(0.0, 0.0, Heading8::Deg0),
+            ],
+            closed,
+        }
+    }
 
-        let failure = walk_ring_backward(&graph, &edge_by_id, &lane, entry_pose, 0).unwrap_err();
-        assert_eq!(failure.kind, SearchFailureKind::Geometry);
-        assert!(
-            failure
-                .journal_tail
-                .iter()
-                .any(|entry| entry.decision.contains("return lane 5")
-                    && entry.decision.contains("ring is not a closed cycle")),
-            "journal_tail did not name the open ring: {:?}",
-            failure.journal_tail
+    #[test]
+    fn a_closed_ring_is_never_walked_a_full_lap() {
+        let ring = square(true);
+        for index in ring.index_range() {
+            for direction in [Direction::Forward, Direction::Backward] {
+                let steps = ring.max_steps(index, direction);
+                assert_eq!(
+                    steps,
+                    ring.edge_count() - 1,
+                    "a closed ring must stop one edge short of its own start node"
+                );
+                assert_ne!(
+                    ring.step(index, direction, steps),
+                    index,
+                    "walking {steps} steps from {index} must not land back on {index}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn an_open_ring_never_wraps_past_either_end() {
+        let ring = square(false);
+        let count = ring.edge_count();
+        // The extra index an open ring offers: its last node is a real,
+        // different node, not the first one again.
+        assert_eq!(ring.index_range(), 0..(count + 1));
+        for index in ring.index_range() {
+            assert_eq!(ring.max_steps(index, Direction::Forward), count - index);
+            assert_eq!(ring.max_steps(index, Direction::Backward), index);
+            for direction in [Direction::Forward, Direction::Backward] {
+                let steps = ring.max_steps(index, direction);
+                let end = ring.step(index, direction, steps);
+                assert!(
+                    end <= count,
+                    "an open ring's walk left its own index range: {index} -> {end}"
+                );
+                for offset in 0..steps {
+                    assert!(
+                        ring.edge_index_at(index, direction, offset) < count,
+                        "an open ring's walk reached for an edge it does not have"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_ring_is_located_by_the_pose_it_is_entered_at() {
+        let ring = square(true);
+        assert_eq!(
+            ring.locate(pose(100.0, 100.0, Heading8::Deg180)),
+            Some((2, Direction::Forward))
+        );
+        // The same node, entered against the ring's own walk.
+        assert_eq!(
+            ring.locate(pose(100.0, 100.0, Heading8::Deg0)),
+            Some((2, Direction::Backward))
+        );
+        // A pose that is not on this ring at all.
+        assert_eq!(ring.locate(pose(50.0, 50.0, Heading8::Deg0)), None);
+    }
+
+    #[test]
+    fn the_cursor_pose_follows_the_walk_direction() {
+        let ring = square(true);
+        assert_eq!(
+            ring.cursor_pose(1, Direction::Forward),
+            pose(100.0, 0.0, Heading8::Deg90)
+        );
+        assert_eq!(
+            ring.cursor_pose(1, Direction::Backward),
+            pose(100.0, 0.0, Heading8::Deg270)
         );
     }
 }

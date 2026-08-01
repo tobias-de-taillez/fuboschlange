@@ -2,44 +2,41 @@
 //!
 //! ## Where the "valid" candidate comes from — and what it is not
 //!
-//! The brief asks for a valid candidate built by the real pipeline
-//! (`build_connection_zone` → `build_graph_view` → `build_lanes` →
-//! `plan_inward_arm` → `complete_spiral` → `attach_port`). That is not
-//! currently possible, for reasons established empirically before this file
-//! was written (see `.superpowers/sdd/task-10-report.md` for the full probe
-//! results). The blockers are in the *generator*, not the geometry:
-//!
-//! 1. `plan_inward_arm`/`complete_spiral` output is *provenance, not a
-//!    chained path* — its own module doc says so, and on the 3000×2400
-//!    fixture the assembled edge sequence has 7 geometric breaks of up to
-//!    322.6 mm at the lane-change seams.
-//! 2. `attach_port` cannot connect either port to that arm's first or last
-//!    node: the arm begins at ring 0's arbitrary closing corner, whose
-//!    heading is antiparallel to the port tangent.
-//!
-//! Neither blocker is about the geometry being unreachable: a candidate that
-//! certifies at the production constants does exist, and this file uses one.
-//! Finding it needs a *deep* zone (300 mm against a 187.5 mm ring-0 offset),
-//! which truncates ring 0 to a short arc — enough for a short arm — while
-//! putting ring 1 inside the zone's 150 mm anchor ring, so both zone-graph
-//! junctions land on real `entry_candidates`. A sweep over that space found
-//! 38 such candidates.
-//!
-//! So [`valid_candidate`] below is assembled by this test file, from real
+//! [`valid_candidate`] below is assembled by this test file, from real
 //! pipeline pieces: a real polygon, plate instance, certified pose graph,
 //! `build_connection_zone` zone, `build_graph_view` view and `build_lanes`
 //! rings. Every graph section is a **verbatim copy of a real certified graph
-//! edge's own primitives** — that is what makes the tamper tests bite. The
-//! Both free-form zone connectors are `zone::attach_port` output too, so the
-//! only thing this file supplies that the pipeline does not is the *choice*
-//! of which certified edges to chain and in which order -- which is exactly
-//! what `plan_inward_arm`/`complete_spiral` would supply if their output
-//! chained.
+//! edge's own primitives** — that is what makes the tamper tests bite. Both
+//! free-form zone connectors are `zone::attach_port` output too, so the only
+//! thing this file supplies that the pipeline does not is the *choice* of
+//! which certified edges to chain and in which order.
 //!
-//! What this proves: every geometric check in `certify_loop` runs against
+//! Getting a candidate to certify at all needs a *deep* zone (300 mm against a
+//! 187.5 mm ring-0 offset), which truncates ring 0 to a short arc — enough for
+//! a short arm — while putting ring 1 inside the zone's 150 mm anchor ring, so
+//! both zone-graph junctions land on real `entry_candidates`. A sweep over that
+//! space found 38 such candidates.
+//!
+//! What this file proves: every geometric check in `certify_loop` runs against
 //! real certified geometry, and each tamper is rejected by its own check.
-//! What it does not prove: that the current generator can produce a
-//! certifiable loop. It cannot, and that is the point of the report.
+//!
+//! ## Superseded, deliberately kept as a hand-built fixture
+//!
+//! When this file was written the generator could not produce a certifiable
+//! loop at all: `complete_spiral`'s output had 7 geometric breaks of up to
+//! 322.6 mm at the lane-change seams, and `attach_port` could reach neither of
+//! the arm's ends. Task 11a fixed both, and
+//! `tests/circuit_loop_end_to_end.rs` now runs the whole pipeline —
+//! `plan_inward_arm` → `complete_spiral` → `attach_port` ×2 — into
+//! `certify_loop` and gets `Ok`.
+//!
+//! This fixture is *not* replaced by that one. Its value is precisely that it
+//! is assembled by hand: the tamper tests below need to place a 0.5 mm shift,
+//! a wrong edge id, a zone re-entry or a mislabelled ring into an otherwise
+//! valid candidate, and a candidate the generator built cannot be edited that
+//! way without the edit being about the generator instead. The generator is
+//! the subject of the end-to-end test; the validator is the subject of this
+//! one.
 
 use single_loop_solver::circuit::{
     ConnectionInput, ConnectionZone, Field, Lane, LoopCandidate, LoopContext, LoopErrorCode,

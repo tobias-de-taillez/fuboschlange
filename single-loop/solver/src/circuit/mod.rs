@@ -16,7 +16,8 @@ pub use search::{
     SearchState, backtracking_search, terminal_corridor_connected,
 };
 pub use spiral::{
-    InwardArm, SpiralPath, SpiralRules, complete_spiral, plan_inward_arm, turn_budget_ok,
+    InwardArm, SpiralEnds, SpiralPath, SpiralRules, complete_spiral, plan_inward_arm,
+    turn_budget_ok,
 };
 pub use types::{
     ConnectionInput, ConnectionOutput, CoverageOutput, FieldDiagnostics, JournalEntry,
