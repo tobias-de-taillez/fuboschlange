@@ -1,6 +1,7 @@
 mod escalate;
 mod fields;
 mod plan;
+mod room;
 mod schnecke;
 mod search;
 mod spiral;
@@ -17,6 +18,7 @@ pub use fields::{
     spiral_side_sequence,
 };
 pub use plan::{SchneckeInput, SchneckePlan, plan_schnecke, zone_depth_mm};
+pub use room::{RectifiedRoom, rectify, slab_fields};
 pub use schnecke::{Schnecke, build_schnecke};
 pub use search::{
     Action, Decision, Invariant, Journal, PatternRules, SearchFailure, SearchFailureKind,
