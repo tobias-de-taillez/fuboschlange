@@ -16,27 +16,25 @@
 //! 2. `attach_port` cannot connect either port to that arm's first or last
 //!    node: the arm begins at ring 0's arbitrary closing corner, whose
 //!    heading is antiparallel to the port tangent.
-//! 3. The two rings a spiral attaches to are reachable, but only just. The
-//!    validator requires both zone-graph junctions to sit on real
-//!    `entry_candidates` and bounds free-form geometry by the zone rectangle
-//!    grown by `ENTRY_RING_MM` (150 mm). Ring 0 sits `wallClearance + 112.5`
-//!    mm from the wall and ring 1 a further `spacing` in, so both are inside
-//!    that window only when `zoneDepth + 150 >= ring0Offset + spacing` while
-//!    `zoneDepth` stays small enough not to truncate ring 0 -- satisfiable
-//!    exactly when `ENTRY_RING_MM > spacing`. At `ENTRY_RING_MM == 150` and
-//!    the 150 mm spacing the catalogue's only usable Kehre span forces, that
-//!    is one millimetre from unsatisfiable, and a *deep* zone (300 mm) is the
-//!    way through: it truncates ring 0 to a short arc, which is enough for a
-//!    short arm. This fixture uses that route.
+//!
+//! Neither blocker is about the geometry being unreachable: a candidate that
+//! certifies at the production constants does exist, and this file uses one.
+//! Finding it needs a *deep* zone (300 mm against a 187.5 mm ring-0 offset),
+//! which truncates ring 0 to a short arc — enough for a short arm — while
+//! putting ring 1 inside the zone's 150 mm anchor ring, so both zone-graph
+//! junctions land on real `entry_candidates`. A sweep over that space found
+//! 38 such candidates.
 //!
 //! So [`valid_candidate`] below is assembled by this test file, from real
 //! pipeline pieces: a real polygon, plate instance, certified pose graph,
 //! `build_connection_zone` zone, `build_graph_view` view and `build_lanes`
 //! rings. Every graph section is a **verbatim copy of a real certified graph
 //! edge's own primitives** — that is what makes the tamper tests bite. The
-//! two free-form zone connectors are built here rather than by `attach_port`
-//! (which refuses these anchors), which is legitimate for the zone: design
-//! spec §4 makes the zone the one free-form part of the loop.
+//! Both free-form zone connectors are `zone::attach_port` output too, so the
+//! only thing this file supplies that the pipeline does not is the *choice*
+//! of which certified edges to chain and in which order -- which is exactly
+//! what `plan_inward_arm`/`complete_spiral` would supply if their output
+//! chained.
 //!
 //! What this proves: every geometric check in `certify_loop` runs against
 //! real certified geometry, and each tamper is rejected by its own check.
@@ -45,10 +43,10 @@
 
 use single_loop_solver::circuit::{
     ConnectionInput, ConnectionZone, Field, Lane, LoopCandidate, LoopContext, LoopErrorCode,
-    LoopGraphView, LoopSection, RectMm, SectionKind, build_connection_zone, build_graph_view,
-    build_lanes, certify_loop, filter_zone_nopps,
+    LoopGraphView, LoopSection, RectMm, SectionKind, attach_port, build_connection_zone,
+    build_graph_view, build_lanes, certify_loop, filter_zone_nopps,
 };
-use single_loop_solver::geometry::Polygon;
+use single_loop_solver::geometry::{ParameterRange, Polygon, primitive_distance};
 use single_loop_solver::model::{PathPrimitive, Point};
 use single_loop_solver::plate::{
     EmbeddedPoseGraph, Heading8, LocalPose, Nopp, NoppIndex, NoppType, PlateGraphLimits,
@@ -274,93 +272,6 @@ fn reverse_primitive(primitive: &PathPrimitive) -> PathPrimitive {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Free-form zone connectors
-// ---------------------------------------------------------------------------
-
-/// A `straight — minimum-radius arc — straight` connector from `start` (with
-/// tangent `start_direction`) to `end` (with tangent `end_direction`).
-///
-/// This is `zone::fixed_radius_corner`'s construction, restated here because
-/// that function is private and `attach_port`, its only public entry point,
-/// additionally insists on nopp clearance against anchors it can actually
-/// reach — which, on this fixture, excludes every anchor a two-ring spiral
-/// needs (see the module doc). The geometry produced is the same shape the
-/// real connector would have.
-fn corner_connector(
-    start: Point,
-    start_direction: Point,
-    end: Point,
-    end_direction: Point,
-    radius_mm: f64,
-) -> Option<Vec<PathPrimitive>> {
-    let cross = start_direction.x * end_direction.y - start_direction.y * end_direction.x;
-    let dot = start_direction.x * end_direction.x + start_direction.y * end_direction.y;
-    if cross.abs() <= 1e-9 {
-        return None;
-    }
-    let offset = point(end.x - start.x, end.y - start.y);
-    let run_in_mm = (offset.x * end_direction.y - offset.y * end_direction.x) / cross;
-    let run_out_mm = (start_direction.x * offset.y - start_direction.y * offset.x) / cross;
-    let turn_rad = cross.atan2(dot);
-    let leg_mm = radius_mm * (turn_rad.abs() / 2.0).tan();
-    if run_in_mm < leg_mm - 1e-9 || run_out_mm < leg_mm - 1e-9 {
-        return None;
-    }
-
-    let vertex = point(
-        start.x + start_direction.x * run_in_mm,
-        start.y + start_direction.y * run_in_mm,
-    );
-    let arc_start = point(
-        vertex.x - start_direction.x * leg_mm,
-        vertex.y - start_direction.y * leg_mm,
-    );
-    let arc_end = point(
-        vertex.x + end_direction.x * leg_mm,
-        vertex.y + end_direction.y * leg_mm,
-    );
-    let normal = if cross > 0.0 {
-        point(-start_direction.y, start_direction.x)
-    } else {
-        point(start_direction.y, -start_direction.x)
-    };
-    let center = point(
-        arc_start.x + normal.x * radius_mm,
-        arc_start.y + normal.y * radius_mm,
-    );
-
-    let mut primitives = Vec::with_capacity(3);
-    if (arc_start - start).norm() > 1e-9 {
-        primitives.push(PathPrimitive::Line {
-            start,
-            end: arc_start,
-        });
-    }
-    primitives.push(PathPrimitive::Arc {
-        start: arc_start,
-        end: arc_end,
-        center,
-        radius_mm,
-        sweep_rad: turn_rad,
-    });
-    if (end - arc_end).norm() > 1e-9 {
-        primitives.push(PathPrimitive::Line {
-            start: arc_end,
-            end,
-        });
-    }
-    Some(primitives)
-}
-
-fn vector(v: single_loop_solver::geometry::Vec2) -> Point {
-    point(v.x, v.y)
-}
-
-fn world_heading(transform: &PlateTransform, heading: Heading8) -> Point {
-    vector(transform.vector_to_world(heading.direction()))
-}
-
 /// The certified graph node at exactly `pose`, if the lattice has one.
 fn node_at(graph: &EmbeddedPoseGraph, pose: LocalPose) -> Option<&PoseNode> {
     graph.nodes.iter().find(|node| {
@@ -488,21 +399,21 @@ fn assemble(
     // accepts either assignment) but not a geometric one: the connectors must
     // not cross, and which port is on the inside of the arm's first turn
     // decides that.
-    let radius_mm = fixture.instance.profile.min_bend_radius_mm;
-    let transform = transform();
     let (entry_port, exit_port) = if swap_ports {
         (fixture.zone.end_port, fixture.zone.start_port)
     } else {
         (fixture.zone.start_port, fixture.zone.end_port)
     };
     let inward_start = inward[0];
-    let start_connector = corner_connector(
+    let start_anchor = node_at(&fixture.graph, inward_start.start.local_pose)?;
+    let start_connector = attach_port(
         entry_port,
-        vector(fixture.zone.inward),
-        inward_start.start.world_point,
-        world_heading(&transform, inward_start.start.local_pose.heading),
-        radius_mm,
-    )?;
+        fixture.zone.inward,
+        start_anchor,
+        &fixture.instance,
+    )
+    .ok()?
+    .primitives;
     // The exit anchor is the pose-flip of where the return arm arrives: the
     // connector is built port -> anchor and then reversed, so it must leave
     // the anchor along the direction the return arm comes in with.
@@ -514,13 +425,14 @@ fn assemble(
             opposite(return_end.end.local_pose.heading),
         ),
     )?;
-    let end_connector: Vec<PathPrimitive> = corner_connector(
+    let end_connector: Vec<PathPrimitive> = attach_port(
         exit_port,
-        vector(fixture.zone.inward),
-        exit_anchor.world_point,
-        world_heading(&transform, exit_anchor.local_pose.heading),
-        radius_mm,
-    )?
+        fixture.zone.inward,
+        exit_anchor,
+        &fixture.instance,
+    )
+    .ok()?
+    .primitives
     .iter()
     .rev()
     .map(reverse_primitive)
@@ -627,14 +539,14 @@ fn the_real_graph_candidate_certifies() {
     assert!(certificate.edge_provenance_ok);
     assert!(certificate.zone_automaton_ok);
     assert!(certificate.pattern_provenance_ok);
-    // 28.28 mm (= 20*sqrt(2)), inside the certified `TeardropReverse` turn
-    // where its own loop passes ring 1's channel. This is the tightest
-    // non-adjacent approach the certified catalogue produces here, and the
-    // answer to "does a real template ever breach the 16 mm physical floor?"
-    // on this fixture: no, with 12 mm to spare. Pinned rather than merely
-    // bounded, so a catalogue change that tightens it shows up here.
+    // The tightest non-adjacent approach on this fixture, inside the
+    // certified `TeardropReverse` turn where its own loop passes ring 1's
+    // channel. It coincides with the catalogue-wide minimum that
+    // `no_certified_template_breaches_the_touching_floor` measures, which is
+    // why the two constants are the same. Pinned rather than merely bounded,
+    // so a catalogue change that tightens it shows up here.
     assert!(
-        (certificate.min_center_distance_mm.distance_mm - 28.284_271).abs() < 1e-4,
+        (certificate.min_center_distance_mm.distance_mm - CATALOGUE_FLOOR_MM).abs() < 1e-6,
         "min centre distance {}",
         certificate.min_center_distance_mm.distance_mm
     );
@@ -868,21 +780,24 @@ fn candidate_with_center_distance(
 
     let mut candidate = valid_candidate(fixture);
     let last = candidate.sections.len() - 1;
-    let section = &mut candidate.sections[last];
-    let anchor = start_of(&section.primitives[0]);
-    let arrival = section.primitives[0].start_tangent();
-    section.primitives = corner_connector(
-        moved,
-        vector(fixture.zone.inward),
-        anchor,
-        point(-arrival.x, -arrival.y),
-        fixture.instance.profile.min_bend_radius_mm,
-    )
-    .expect("the moved exit port must still admit a minimum-radius corner")
-    .iter()
-    .rev()
-    .map(reverse_primitive)
-    .collect();
+    let anchor_point = start_of(&candidate.sections[last].primitives[0]);
+    let anchor = fixture
+        .graph
+        .nodes
+        .iter()
+        .find(|node| {
+            (node.world_point - anchor_point).norm() < 1e-6
+                && attach_port(moved, fixture.zone.inward, node, &fixture.instance).is_ok()
+        })
+        .expect("the exit anchor must still be reachable from the moved port");
+    candidate.sections[last].primitives =
+        attach_port(moved, fixture.zone.inward, anchor, &fixture.instance)
+            .expect("checked just above")
+            .primitives
+            .iter()
+            .rev()
+            .map(reverse_primitive)
+            .collect();
     (zone, candidate)
 }
 
@@ -914,7 +829,12 @@ fn candidate_with_two_turns(fixture: &Fixture) -> LoopCandidate {
 }
 
 #[test]
-fn a_return_ring_that_is_not_the_reserved_neighbour_fails_pattern_provenance() {
+fn a_return_section_claiming_a_ring_it_does_not_walk_fails_pattern_provenance() {
+    // Relabelling the return arm as ring 3 is rejected by the *lane
+    // membership* check, not by the ring algebra: ring 1's edges do not have
+    // both endpoints on ring 3's rectangle. The ring algebra's own branches
+    // are unreachable this way, and are covered directly by
+    // `validate.rs`'s `ring_algebra_tests` instead.
     let fixture = Fixture::build();
     let mut candidate = valid_candidate(&fixture);
     for section in &mut candidate.sections {
@@ -924,8 +844,8 @@ fn a_return_ring_that_is_not_the_reserved_neighbour_fails_pattern_provenance() {
     }
     let message = failure_message(&candidate, &fixture);
     assert!(
-        message.starts_with("PATTERN_PROVENANCE"),
-        "expected PATTERN_PROVENANCE, got: {message}"
+        message.contains("claims ring 3, but edge"),
+        "expected the lane-membership branch, got: {message}"
     );
 }
 
@@ -1121,22 +1041,101 @@ fn a_turn_section_rendering_a_straight_edge_fails_pattern_provenance() {
 
 #[test]
 fn a_candidate_with_no_turn_at_all_fails_pattern_provenance() {
-    // The zero side of "exactly one turn": relabelling the Kehre as another
-    // return section leaves a legal-looking `Inward+ Return+` sequence that
-    // phase monotonicity is happy with, so only the turn counter can catch
-    // it.
+    // The zero side of "exactly one turn". The Kehre section is *removed*,
+    // not relabelled: relabelling it `Return` on ring 1 is caught earlier by
+    // `check_section_on_lane`, because a turn edge spans two rings and so
+    // cannot have both endpoints on ring 1's rectangle. Removing it leaves
+    // `Inward+ Return+`, which every earlier check accepts, so the turn
+    // counter is the only thing that can reject this.
     let fixture = Fixture::build();
     let mut candidate = valid_candidate(&fixture);
-    let turn = candidate
+    let position = candidate
         .sections
-        .iter_mut()
-        .find(|section| section.kind == SectionKind::Turn)
+        .iter()
+        .position(|section| section.kind == SectionKind::Turn)
         .expect("the fixture has a turn");
-    turn.kind = SectionKind::Return;
-    turn.lane_id = Some(1);
+    candidate.sections.remove(position);
     let message = failure_message(&candidate, &fixture);
     assert!(
-        message.starts_with("PATTERN_PROVENANCE"),
-        "expected PATTERN_PROVENANCE, got: {message}"
+        message.contains("exactly one turn section; found 0"),
+        "expected the turn counter's zero case, got: {message}"
     );
+}
+
+/// The smallest centre-centre distance any certified template places between
+/// two of its own primitives that are at least two steps apart, measured
+/// across every placement in the fixture graph by
+/// [`no_certified_template_breaches_the_touching_floor`].
+///
+/// Exactly `sqrt(800)`: the witness pair sits 27.838_821_814_150_15 mm apart
+/// in x and exactly 5 mm apart in y, and 27.838_821_814_150_15^2 + 5^2 = 800
+/// to the last representable bit, so the value is `20 * sqrt(2)` rather than
+/// a rounded decimal.
+const CATALOGUE_FLOOR_MM: f64 = 28.284_271_247_461_902;
+
+#[test]
+fn no_certified_template_breaches_the_touching_floor() {
+    // The 16 mm floor is unconditional and hard, so a certified template that
+    // breached it would make `certify_loop` reject legitimate generator
+    // output -- a failure mode the floor introduces and which one fixture
+    // cannot rule out. Sweep every placement in the graph instead, and pin
+    // both the per-template minima and the global one.
+    let fixture = Fixture::build();
+    let mut per_template: BTreeMap<String, f64> = BTreeMap::new();
+    let mut global = f64::INFINITY;
+    let mut widest_edge = 0usize;
+
+    for edge in &fixture.graph.edges {
+        widest_edge = widest_edge.max(edge.primitives.len());
+        for first in 0..edge.primitives.len() {
+            for second in (first + 2)..edge.primitives.len() {
+                let distance_mm = primitive_distance(
+                    &edge.primitives[first],
+                    ParameterRange::FULL,
+                    &edge.primitives[second],
+                    ParameterRange::FULL,
+                )
+                .distance_mm;
+                let slot = per_template
+                    .entry(format!("{:?}", edge.template_id))
+                    .or_insert(f64::INFINITY);
+                *slot = slot.min(distance_mm);
+                global = global.min(distance_mm);
+            }
+        }
+    }
+
+    // Every template family that can have such a pair at all must appear:
+    // a sweep that silently measured nothing would otherwise "pass".
+    assert_eq!(widest_edge, 5, "widest certified edge, in primitives");
+    let mut families: Vec<&String> = per_template.keys().collect();
+    families.sort();
+    assert_eq!(
+        families,
+        vec![
+            "BroadReverse180",
+            "BroadTurn135",
+            "BroadTurn45",
+            "BroadTurn90",
+            "TeardropReverse",
+        ],
+        "the straight templates have fewer than three primitives, so they \
+         contribute no pair at index distance two; every turning family must"
+    );
+
+    for (template, minimum_mm) in &per_template {
+        assert!(
+            *minimum_mm > 16.01,
+            "certified template {template} places two of its own primitives \
+             {minimum_mm:.6} mm apart, at or below the physical floor -- the \
+             floor would reject legitimate generator output"
+        );
+    }
+    assert!(
+        (global - CATALOGUE_FLOOR_MM).abs() < 1e-6,
+        "catalogue-wide minimum is {global:.6} mm"
+    );
+    // The margin, stated so a future catalogue addition that eats into it is
+    // visible in the diff rather than only in a threshold comparison.
+    assert!(global - 16.01 > 12.0);
 }

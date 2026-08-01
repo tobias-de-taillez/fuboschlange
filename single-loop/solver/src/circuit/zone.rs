@@ -27,14 +27,25 @@ const CONNECTION_PORT_ENDPOINT_MARGIN_MM: f64 = 33.0;
 /// `validate.rs` is a sibling under the same `circuit` parent, matching
 /// `types::ALLOWED_SPACINGS_MM`'s own crate-visible-for-a-sibling precedent.
 ///
-/// This constant, not any manufacturing rule, is what decides whether a
-/// spiral's two attachment rings can both be reachable from one zone: the
-/// system "reach ring 1" (`zone_depth + ENTRY_RING_MM ≥ ring0_offset +
-/// spacing`) and "do not swallow ring 0" (`zone_depth < ring0_offset`) is
-/// satisfiable exactly when `ENTRY_RING_MM > spacing_mm`. At the 150 mm
-/// spacing the spiral's turn templates require, 150 == 150 makes it
-/// unsatisfiable by a single millimetre of slack. See
-/// `tests/circuit_validate.rs`'s module doc.
+/// This constant, not any manufacturing rule, sets how far outside the zone
+/// rectangle the loop may attach. It therefore has a say in whether a
+/// spiral's two attachment rings are both reachable from one zone: ring 1 is
+/// only inside the ring when `zone_depth + ENTRY_RING_MM ≥ ring0_offset +
+/// spacing`. Keeping ring 0 *untruncated* additionally wants
+/// `zone_depth < ring0_offset`, and those two together are satisfiable only
+/// when `ENTRY_RING_MM > spacing_mm` — which the 150 mm spacing the
+/// catalogue's Kehre spans force makes a near-miss at this value.
+///
+/// That is a sufficient condition, not a necessary one, and an untruncated
+/// ring 0 is not required: `build_lanes` truncates a ring the zone cuts to
+/// its longest connected arc (see `fields.rs`) and returns it as ordinary
+/// data — lanes describe what exists, the search decides what to walk, and a
+/// short arc is enough for a short arm. A deep zone is therefore a perfectly
+/// good route, and the one `tests/circuit_validate.rs`'s fixture takes: at
+/// `zone_depth_mm = 300` against a 187.5 mm ring-0 offset, ring 0 *is*
+/// truncated, ring 1 sits inside the anchor ring, and 38 candidates certify
+/// at this value of the constant. Nothing here is impossible; the value only
+/// decides which zone geometries work.
 pub(crate) const ENTRY_RING_MM: f64 = 150.0;
 
 /// The noppen-free connection zone: an axis-parallel rectangle in the plate

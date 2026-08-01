@@ -75,15 +75,18 @@
 //!
 //! ## Out of scope, deliberately
 //!
-//! Nopp clearance is not re-checked. Design spec §5 makes nopp safety a
-//! property of the certified graph edges ("keine Kollision mit expandierten
-//! Noppenkörpern (via Graphkanten)"), which edge provenance already pins,
-//! and the zone is nopp-free by construction (`zone::filter_zone_nopps`).
-//! The free-form connectors' own nopp clearance is certified by
-//! `zone::attach_port` at construction time; a caller that builds connectors
-//! some other way owes that check itself. Wall clearance is likewise not
-//! checked: design spec §5's table scopes it to "Wandabstand außerhalb der
-//! Zone", and both ports sit on the wall by construction.
+//! Wall clearance is not checked: design spec §5's table scopes it to
+//! "Wandabstand außerhalb der Zone", and both ports sit on the wall by
+//! construction.
+//!
+//! Nopp clearance *is* checked, on every primitive -- see
+//! [`check_nopp_clearance`]. Design spec §5 makes nopp safety a property of
+//! the certified graph edges, which edge provenance pins, and the zone
+//! rectangle is nopp-free by construction (`zone::filter_zone_nopps`); but
+//! neither covers the free-form connectors, which reach past the rectangle
+//! into unfiltered terrain. `zone::attach_port` certifies the connectors it
+//! builds, and nothing certifies connectors built any other way, so the
+//! validator does not take the generator's choice of constructor on trust.
 
 use crate::circuit::fields::Lane;
 use crate::circuit::types::{JournalEntry, LocatedSpacing, LoopError, LoopErrorCode, RectMm};
@@ -665,38 +668,64 @@ fn check_pattern_provenance(
     // folded into "is there a turn at all", because "exactly one turn" is the
     // property design spec §11 states and the two mechanisms enforcing it sit
     // in different places.
+    // The counter's zero case is the reachable one: a candidate that simply
+    // omits its Kehre reads `Inward+ Return+`, which phase monotonicity is
+    // perfectly happy with. `turn_blocks > 1` cannot occur -- a second block
+    // would have to follow a `Return` section, and monotonicity rejects that
+    // first -- but the property design spec §11 states is "exactly one turn",
+    // so the count is checked as such rather than as "is there one at all".
     if turn_blocks != 1 {
         return Err(reject(
             Reason::PatternProvenance,
             format!("a spiral has exactly one turn section; found {turn_blocks}"),
         ));
     }
+    let lane_ids: BTreeSet<u32> = context.lanes.iter().map(|lane| lane.id).collect();
+    check_ring_algebra(&inward_lanes, &return_lanes, &lane_ids)
+}
+
+/// The spiral's ring bookkeeping, as a pure function of the three things it
+/// depends on: the rings the arm walked (in order), the rings the return
+/// walked (in order), and which rings exist at all.
+///
+/// Separated from [`check_pattern_provenance`] so each branch can be reached
+/// directly from a test. Through the public entry point most of them are
+/// masked: a candidate whose sections carry deliberately wrong `lane_id`s is
+/// caught earlier by [`check_section_on_lane`], which verifies the claimed
+/// ring against the edge's real endpoints, so the ring *algebra* below would
+/// never be reached with the interesting inputs.
+fn check_ring_algebra(
+    inward_lanes: &[u32],
+    return_lanes: &[u32],
+    lane_ids: &BTreeSet<u32>,
+) -> Result<(), LoopError> {
     if inward_lanes.is_empty() || return_lanes.is_empty() {
         return Err(reject(
             Reason::PatternProvenance,
             "a spiral needs at least one inward ring and one return ring",
         ));
     }
-    check_alternation(&inward_lanes, "inward")?;
-    let mut descending = return_lanes.clone();
+    check_alternation(inward_lanes, "inward")?;
+    let mut descending = return_lanes.to_vec();
     descending.reverse();
     check_alternation(&descending, "return")?;
 
     let occupied: BTreeSet<u32> = inward_lanes.iter().copied().collect();
-    for lane_id in &return_lanes {
+    for lane_id in return_lanes {
         if occupied.contains(lane_id) {
             return Err(reject(
                 Reason::PatternProvenance,
                 format!("return ring {lane_id} is also walked by the inward arm"),
             ));
         }
-        if !occupied.contains(&lane_id.saturating_sub(1)) || *lane_id == 0 {
+        if *lane_id == 0 || !occupied.contains(&(lane_id - 1)) {
             return Err(reject(
                 Reason::PatternProvenance,
                 format!("return ring {lane_id} is not the ring reserved beside an occupied ring"),
             ));
         }
     }
+
     // Where the turn must land: on the innermost ring the arm actually
     // reserved. Entering ring `k` reserves ring `k + 1`
     // (`spiral::reserved_ring_ids`), so that is `innermost + 1` whenever that
@@ -704,11 +733,7 @@ fn check_pattern_provenance(
     // the full-depth arm's case (arm `[0,2,4,6]` on seven rings reserves
     // `{1,3,5}`; there is no ring 7, so the turn goes to 5).
     let innermost_occupied = *inward_lanes.last().expect("checked non-empty");
-    let inner_ring_exists = context
-        .lanes
-        .iter()
-        .any(|lane| lane.id == innermost_occupied + 1);
-    let expected_first_return = if inner_ring_exists {
+    let expected_first_return = if lane_ids.contains(&(innermost_occupied + 1)) {
         innermost_occupied + 1
     } else {
         innermost_occupied.saturating_sub(1)
@@ -1138,8 +1163,12 @@ fn check_nopp_clearance(path: &CanonicalPath, context: &LoopContext) -> Result<(
 /// Design spec §5's crossing rule: no self-intersection and no contact
 /// between non-adjacent parts. Adjacent primitives are skipped because they
 /// share an endpoint by construction; everything two or more steps apart must
-/// not meet at all. This is what protects *local* geometry, which the 16 mm
-/// and 50 mm rules cannot apply to (see the module doc).
+/// not meet at all.
+///
+/// This runs over the same pair set as the 16 mm floor in [`measure_spacing`]
+/// and complements it: the floor rejects two parts of the path that come too
+/// close, this rejects two that actually meet. Only the 50 mm *soft* rule is
+/// restricted to nonlocal pairs.
 fn check_self_intersections(path: &CanonicalPath) -> Result<(), LoopError> {
     let primitives = path.primitives();
     for first in 0..primitives.len() {
@@ -1454,6 +1483,92 @@ mod spacing_rule_tests {
         assert!((report.minimum.distance_mm - 30.0).abs() < 1e-6);
         assert_eq!(report.penalty_sum_mm, 0.0);
         assert!(report.worst_penalty.is_none());
+    }
+}
+
+#[cfg(test)]
+mod ring_algebra_tests {
+    //! Every branch of `check_ring_algebra`, reached directly. Through
+    //! `certify_loop` these are masked by `check_section_on_lane`, which
+    //! rejects a wrong `lane_id` against the edge's real endpoints before the
+    //! algebra ever sees it -- so an integration test that merely relabels a
+    //! section proves nothing about the branches below.
+    use super::*;
+
+    fn seven_rings() -> BTreeSet<u32> {
+        (0..7).collect()
+    }
+
+    fn two_rings() -> BTreeSet<u32> {
+        (0..2).collect()
+    }
+
+    fn message(inward: &[u32], returns: &[u32], lanes: &BTreeSet<u32>) -> String {
+        check_ring_algebra(inward, returns, lanes)
+            .expect_err("this ring layout is not a spiral")
+            .message
+    }
+
+    #[test]
+    fn the_full_depth_arm_and_its_return_are_a_spiral() {
+        // Arm [0,2,4,6] reserves {1,3,5}; there is no ring 7, so the turn
+        // lands on 5 and the return walks back out 5 -> 3 -> 1.
+        assert!(check_ring_algebra(&[0, 2, 4, 6], &[5, 3, 1], &seven_rings()).is_ok());
+    }
+
+    #[test]
+    fn a_two_ring_arm_turns_inward_onto_the_ring_it_reserved() {
+        // Arm [0] on two rings reserves {1}, which exists -- so the turn goes
+        // outward-in onto ring 1, not to ring -1.
+        assert!(check_ring_algebra(&[0], &[1], &two_rings()).is_ok());
+    }
+
+    #[test]
+    fn a_return_ring_the_arm_itself_walked_is_rejected() {
+        assert!(message(&[0, 2], &[2], &seven_rings()).contains("also walked by the inward arm"));
+    }
+
+    #[test]
+    fn a_return_ring_that_is_not_a_reserved_neighbour_is_rejected() {
+        // Ring 4 is neither occupied nor reserved beside an occupied ring
+        // (3 is, 5 is; 4 would need ring 3 in the arm).
+        assert!(
+            message(&[0, 2], &[4], &seven_rings())
+                .contains("not the ring reserved beside an occupied ring")
+        );
+        // Ring 0 can never be a return ring: there is no ring -1 to reserve
+        // it from.
+        assert!(
+            message(&[1, 3], &[0], &seven_rings())
+                .contains("not the ring reserved beside an occupied ring")
+        );
+    }
+
+    #[test]
+    fn the_turn_must_land_on_the_innermost_reserved_ring() {
+        // Arm [0,2,4,6] on seven rings must turn onto 5, not 1.
+        assert!(message(&[0, 2, 4, 6], &[1], &seven_rings()).contains("must land on ring 5"));
+        // Arm [0,2] with ring 3 present must turn onto 3, not 1.
+        assert!(message(&[0, 2], &[1], &seven_rings()).contains("must land on ring 3"));
+    }
+
+    #[test]
+    fn an_arm_or_return_with_no_rings_at_all_is_rejected() {
+        for empty in [
+            message(&[], &[1], &seven_rings()),
+            message(&[0], &[], &seven_rings()),
+        ] {
+            assert!(
+                empty.contains("at least one inward ring and one return ring"),
+                "{empty}"
+            );
+        }
+    }
+
+    #[test]
+    fn non_alternating_rings_are_rejected_through_the_algebra_too() {
+        assert!(message(&[0, 1, 2], &[3], &seven_rings()).contains("rings must step by two"));
+        assert!(message(&[0, 2, 4, 6], &[5, 4], &seven_rings()).contains("rings must step by two"));
     }
 }
 
