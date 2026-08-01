@@ -1,7 +1,12 @@
 use crate::circuit::types::{ConnectionInput, LoopError, LoopErrorCode, RectMm};
-use crate::geometry::{Aabb, PointClassification, Polygon, Vec2};
+use crate::geometry::{
+    Aabb, Intersection, PointClassification, Polygon, Vec2, primitive_intersections,
+};
 use crate::model::{PathPrimitive, Point};
-use crate::plate::{EmbeddedPoseGraph, PlateInstance, PlateTransform, PoseEdge};
+use crate::plate::{
+    EmbeddedPoseGraph, PlateInstance, PlateTransform, PoseEdge, PoseNode,
+    primitive_circle_clearance,
+};
 
 /// Half of the fixed 50 mm port-to-port distance: each port sits this many
 /// millimeters from the normalized center, along the connection edge.
@@ -340,4 +345,210 @@ fn invalid_connection(message: &str) -> LoopError {
         message: message.to_owned(),
         journal_tail: Vec::new(),
     }
+}
+
+/// Tolerance below which two unit directions count as parallel, and below
+/// which a straight leg of a connector is dropped as degenerate.
+const ATTACHMENT_EPS: f64 = 1e-9;
+
+/// The free-form connector between a port and one certified graph anchor.
+///
+/// Its primitives are world-space and tangent-continuous: they start at the
+/// port with the wall-orthogonal inward tangent and end at the anchor with
+/// the anchor's own heading, so the loop can be assembled by concatenation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Attachment {
+    pub primitives: Vec<PathPrimitive>,
+}
+
+/// Builds the connector from a port pose to a certified graph anchor.
+///
+/// The construction is a fixed-radius corner: a straight along the port's
+/// inward normal, one tangent arc of the profile's minimum bend radius, and a
+/// straight arriving along the anchor's heading. Either straight collapses
+/// when the corner consumes its whole leg. No other shape is produced —
+/// parallel poses would need an S-shaped biarc, which this milestone does not
+/// construct and rejects as `INVALID_CONNECTION`.
+///
+/// Containment: the anchors the loop can attach to lie in the ring *outside*
+/// the connection zone (`LoopGraphView::entry_candidates`), so a connector
+/// necessarily leaves the nopp-free rectangle. The conservative reading of
+/// the zone rule that this function implements is therefore the physical one:
+/// the connector must stay inside the room polygon, and must clear every nopp
+/// that survived `filter_zone_nopps` by the profile's laying tolerance —
+/// inside the zone there are none left, outside the zone the same rule the
+/// certified graph edges obey applies. Wall clearance deliberately does not
+/// apply: a port sits on the wall by construction.
+///
+/// `instance` supplies the polygon, the plate frame, the surviving noppen and
+/// the profile in one consistent piece; callers must pass the instance whose
+/// zone noppen were already removed.
+pub fn attach_port(
+    port: Point,
+    inward: Vec2,
+    anchor: &PoseNode,
+    instance: &PlateInstance,
+) -> Result<Attachment, LoopError> {
+    let start_direction = inward
+        .normalized()
+        .ok_or_else(|| invalid_connection("attachment: the port tangent is degenerate"))?;
+    let end_direction = instance
+        .transform
+        .vector_to_world(anchor.local_pose.heading.direction())
+        .normalized()
+        .ok_or_else(|| invalid_connection("attachment: the anchor heading is degenerate"))?;
+
+    let primitives = fixed_radius_corner(
+        port,
+        start_direction,
+        anchor.world_point,
+        end_direction,
+        instance.profile.min_bend_radius_mm,
+    )?;
+    certify_attachment(&primitives, port, instance)?;
+    Ok(Attachment { primitives })
+}
+
+/// Joins two poses with `straight — arc(radius_mm) — straight`.
+fn fixed_radius_corner(
+    start: Point,
+    start_direction: Vec2,
+    end: Point,
+    end_direction: Vec2,
+    radius_mm: f64,
+) -> Result<Vec<PathPrimitive>, LoopError> {
+    let cross = start_direction.x * end_direction.y - start_direction.y * end_direction.x;
+    let dot = start_direction.dot(end_direction);
+    if cross.abs() <= ATTACHMENT_EPS {
+        let offset = end - start;
+        let along = offset.dot(start_direction);
+        let lateral = (offset - start_direction * along).norm();
+        if dot > 0.0 && along > 0.0 && lateral <= ATTACHMENT_EPS {
+            return Ok(vec![PathPrimitive::Line { start, end }]);
+        }
+        return Err(invalid_connection(
+            "attachment: port and anchor tangents are parallel, which needs a biarc",
+        ));
+    }
+
+    // Vertex where the two tangent lines meet: start + run_in * start_direction
+    // = end - run_out * end_direction.
+    let offset = end - start;
+    let run_in_mm = (offset.x * end_direction.y - offset.y * end_direction.x) / cross;
+    let run_out_mm = (start_direction.x * offset.y - start_direction.y * offset.x) / cross;
+    if run_in_mm <= 0.0 || run_out_mm <= 0.0 {
+        return Err(invalid_connection(
+            "attachment: the anchor lies behind the port tangent or faces away from it",
+        ));
+    }
+
+    // A corner of `radius_mm` consumes this much of each leg.
+    let turn_rad = cross.atan2(dot);
+    let leg_mm = radius_mm * (turn_rad.abs() / 2.0).tan();
+    if leg_mm > run_in_mm + ATTACHMENT_EPS || leg_mm > run_out_mm + ATTACHMENT_EPS {
+        return Err(invalid_connection(
+            "attachment: the minimum-radius corner does not fit between port and anchor",
+        ));
+    }
+
+    let vertex = start + start_direction * run_in_mm;
+    let arc_start = vertex - start_direction * leg_mm;
+    let arc_end = vertex + end_direction * leg_mm;
+    let normal = if cross > 0.0 {
+        start_direction.perp_ccw()
+    } else {
+        -start_direction.perp_ccw()
+    };
+    let center = arc_start + normal * radius_mm;
+
+    let mut primitives = Vec::with_capacity(3);
+    if (arc_start - start).norm() > ATTACHMENT_EPS {
+        primitives.push(PathPrimitive::Line {
+            start,
+            end: arc_start,
+        });
+    }
+    primitives.push(PathPrimitive::Arc {
+        start: arc_start,
+        end: arc_end,
+        center,
+        radius_mm,
+        sweep_rad: turn_rad,
+    });
+    if (end - arc_end).norm() > ATTACHMENT_EPS {
+        primitives.push(PathPrimitive::Line {
+            start: arc_end,
+            end,
+        });
+    }
+    Ok(primitives)
+}
+
+/// Rejects a constructed connector that leaves the room or touches a nopp.
+fn certify_attachment(
+    primitives: &[PathPrimitive],
+    port: Point,
+    instance: &PlateInstance,
+) -> Result<(), LoopError> {
+    let tolerance_mm = instance.profile.laying_tolerance_mm;
+    // Leaving the room is the more fundamental failure, so it is reported
+    // even when a nopp collision happens to occur earlier along the path.
+    for primitive in primitives {
+        if let PathPrimitive::Arc { radius_mm, .. } = primitive
+            && *radius_mm < instance.profile.min_bend_radius_mm
+        {
+            return Err(invalid_connection(
+                "attachment: the constructed arc is below the minimum bend radius",
+            ));
+        }
+        if primitive_leaves_polygon(primitive, port, &instance.polygon) {
+            return Err(invalid_connection(
+                "attachment: the connector leaves the room polygon",
+            ));
+        }
+    }
+    for primitive in primitives {
+        for nopp in &instance.nopps {
+            if primitive_circle_clearance(primitive, nopp.center, nopp.forbidden_radius_mm)
+                < -tolerance_mm
+            {
+                return Err(invalid_connection(
+                    "attachment: the connector collides with a nopp",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// True when the primitive crosses the polygon boundary anywhere but at the
+/// port, or lies outside it entirely.
+///
+/// The port sits exactly on the connection edge, so the connector's first
+/// primitive necessarily touches the boundary there; every other contact is a
+/// real escape.
+fn primitive_leaves_polygon(primitive: &PathPrimitive, port: Point, polygon: &Polygon) -> bool {
+    if polygon.classify_point(primitive.point_at(0.5)) == PointClassification::Outside {
+        return true;
+    }
+    for edge_index in 0..polygon.original_edge_count() {
+        let (edge_start, edge_end) = polygon.original_edge(edge_index);
+        let edge = PathPrimitive::Line {
+            start: edge_start,
+            end: edge_end,
+        };
+        match primitive_intersections(primitive, &edge) {
+            Intersection::None => {}
+            Intersection::Points(points) => {
+                if points
+                    .iter()
+                    .any(|hit| (hit.point - port).norm() > ATTACHMENT_EPS)
+                {
+                    return true;
+                }
+            }
+            _ => return true,
+        }
+    }
+    false
 }

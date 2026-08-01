@@ -19,6 +19,6 @@ pub use types::{
     validate_input,
 };
 pub use zone::{
-    ConnectionZone, LoopGraphView, build_connection_zone, build_graph_view, edge_intersects_zone,
-    filter_zone_nopps, zone_contains_local,
+    Attachment, ConnectionZone, LoopGraphView, attach_port, build_connection_zone,
+    build_graph_view, edge_intersects_zone, filter_zone_nopps, zone_contains_local,
 };
