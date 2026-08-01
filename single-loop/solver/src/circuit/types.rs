@@ -3,7 +3,17 @@ use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 
 const MIN_WALL_CLEARANCE_MM: f64 = 8.0;
-const ALLOWED_SPACINGS_MM: [u32; 4] = [75, 150, 225, 300];
+/// The only spacings a request may name (`validate_input`, below) and the
+/// only rungs `circuit::escalate::escalation_ladder` may step through --
+/// that function reads this array directly rather than keeping its own
+/// copy, so the two can never drift apart. `pub(crate)` (not private) only
+/// for that cross-module read; `escalate.rs` is a sibling module under the
+/// same `circuit` parent, so crate-visibility is enough without exposing
+/// this outside the crate. `search.rs`'s `MAX_RING_SPACING_MM` constant
+/// separately mirrors this array's max (300) as a plausibility ceiling for
+/// cross-lane adjacency -- a tracked, deliberate duplication (see that
+/// constant's own doc comment), not a second source of truth for this list.
+pub(crate) const ALLOWED_SPACINGS_MM: [u32; 4] = [75, 150, 225, 300];
 const SUPPORTED_PROFILE: &str = "BEKOTEC_EN_23_FI_30_16";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

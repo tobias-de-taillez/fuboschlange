@@ -1,9 +1,14 @@
+mod escalate;
 mod fields;
 mod search;
 mod spiral;
 mod types;
 mod zone;
 
+pub use escalate::{
+    Candidate, LadderVerdict, SpacingOutcome, escalation_ladder, length_estimate_mm, rank,
+    walk_ladder,
+};
 pub use fields::{Field, Lane, build_lanes, decompose_fields};
 pub use search::{
     Action, Decision, Invariant, Journal, PatternRules, SearchFailure, SearchFailureKind,

@@ -423,10 +423,18 @@ fn describe_action(action: &Action, alternatives_left: usize) -> String {
 /// of a spacing derived from the actual geometry below.
 const CHANNEL_PITCH_SLACK_MM: f64 = 37.5;
 
-/// The largest value `circuit::types::ALLOWED_SPACINGS_MM` allows (not
-/// imported here: that constant is private to the `types` module, and this
-/// module does not otherwise depend on it). Used only as the plausibility
-/// ceiling in `segments_adjacent`'s cross-lane branch -- see there.
+/// The largest value `circuit::types::ALLOWED_SPACINGS_MM` allows. That
+/// constant is `pub(crate)` (readable from this module), but is
+/// deliberately not imported here: this module's `MAX_RING_SPACING_MM` is a
+/// plausibility ceiling for cross-lane adjacency, a different concern from
+/// `ALLOWED_SPACINGS_MM`'s role as the set of legal request/escalation
+/// spacings, and tying the two together with an import would couple this
+/// module's geometry check to that list's exact shape (`[u32; 4]`, not a
+/// max) for no behavioral gain. `circuit::escalate::escalation_ladder`
+/// reads `ALLOWED_SPACINGS_MM` directly instead, so this duplication is
+/// tracked (see that constant's own doc comment) rather than silently
+/// drifting. Used only as the plausibility ceiling in `segments_adjacent`'s
+/// cross-lane branch -- see there.
 const MAX_RING_SPACING_MM: f64 = 300.0;
 
 fn lane_by_id(lanes: &[Lane], id: u32) -> Option<&Lane> {
