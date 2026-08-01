@@ -20,7 +20,7 @@ use single_loop_solver::circuit::{
 use single_loop_solver::geometry::Polygon;
 use single_loop_solver::model::{PathPrimitive, Point};
 use single_loop_solver::plate::{
-    PlateGraphLimits, PlateInstance, PlateProfile, PlateTransform, build_embedded_graph,
+    NoppType, PlateGraphLimits, PlateInstance, PlateProfile, PlateTransform, build_embedded_graph,
 };
 
 const WALL_CLEARANCE_MM: f64 = 75.0;
@@ -130,6 +130,7 @@ fn main() -> Result<(), String> {
             width_mm,
             height_mm,
             spacing_mm,
+            &instance,
             &candidate,
             certificate.total_length_mm
         )
@@ -256,6 +257,7 @@ fn svg(
     width_mm: f64,
     height_mm: f64,
     spacing_mm: f64,
+    instance: &PlateInstance,
     candidate: &LoopCandidate,
     length_mm: f64,
 ) -> String {
@@ -270,20 +272,38 @@ fn svg(
         height_mm,
     );
 
-    out.push_str("<g stroke=\"#e6e2da\" stroke-width=\"1\">\n");
-    let mut line = CHANNEL_PITCH_MM / 2.0;
-    while line < width_mm {
+    // The real nub field the pipe is threaded through, not a helper grid:
+    // every nub the solver placed, drawn at the body the pipe has to clear.
+    // The checkerboard of large and small nubs on a 75 mm pitch is what makes
+    // 75 mm pipe spacing possible at all — the pipe runs midway between two
+    // nub rows, on the 37.5 + 75n channel lattice.
+    out.push_str("<g>\n");
+    for nopp in &instance.nopps {
+        let local = instance.transform.to_local(nopp.center);
+        if local.x < -CHANNEL_PITCH_MM
+            || local.y < -CHANNEL_PITCH_MM
+            || local.x > width_mm + CHANNEL_PITCH_MM
+            || local.y > height_mm + CHANNEL_PITCH_MM
+        {
+            continue;
+        }
+        let (fill, opacity) = match nopp.nopp_type {
+            NoppType::Large => ("#e8a33d", 0.55),
+            NoppType::Small => ("#e8a33d", 0.30),
+        };
         out.push_str(&format!(
-            "<line x1=\"{line:.1}\" y1=\"0\" x2=\"{line:.1}\" y2=\"{height_mm:.1}\"/>\n"
+            "<circle cx=\"{:.1}\" cy=\"{:.1}\" r=\"{:.1}\" fill=\"{fill}\" \
+             opacity=\"{opacity}\"/>\n",
+            local.x, local.y, nopp.rendered_radius_mm
         ));
-        line += CHANNEL_PITCH_MM;
-    }
-    let mut line = CHANNEL_PITCH_MM / 2.0;
-    while line < height_mm {
+        // The body the pipe must stay off: the nub grown by half the pipe and
+        // the calibration allowance. Where two of these nearly touch is where
+        // the channel is.
         out.push_str(&format!(
-            "<line x1=\"0\" y1=\"{line:.1}\" x2=\"{width_mm:.1}\" y2=\"{line:.1}\"/>\n"
+            "<circle cx=\"{:.1}\" cy=\"{:.1}\" r=\"{:.1}\" fill=\"none\" \
+             stroke=\"#c98a2a\" stroke-width=\"1.5\" opacity=\"0.45\"/>\n",
+            local.x, local.y, nopp.forbidden_radius_mm
         ));
-        line += CHANNEL_PITCH_MM;
     }
     out.push_str("</g>\n");
 
