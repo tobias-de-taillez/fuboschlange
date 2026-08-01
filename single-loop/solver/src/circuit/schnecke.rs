@@ -94,6 +94,12 @@ const TURN_SPAN_ODD: i64 = 3;
 /// 150 mm.
 const TURN_SPAN_EVEN: i64 = 2;
 
+/// How far the turn-around's body must stay off the rows of the lane it turns
+/// out of. The design spec's nominal minimum centre-to-centre distance (§5);
+/// anything below it would be a spacing penalty even where it is not an
+/// outright crossing.
+const TURN_BODY_CLEARANCE_MM: f64 = 50.0;
+
 /// A bound on how many straight segments one side of one revolution may take,
 /// so a graph defect cannot spin the walk forever. A side is at most a room
 /// wide and a `Straight0` is 150 mm, so this clears any real room by orders
@@ -904,6 +910,18 @@ fn walk_turn(
     let mut run = Stretch::new(start);
     for _ in 0..MAX_STRAIGHTS_PER_SIDE {
         if let Some(turn) = turn_from(index, run.pose, landing) {
+            if !turn_clears_its_own_lane(index, turn, claim) {
+                // The turn's body reaches past its two endpoints — a
+                // `TeardropReverse` loops 192 mm beyond them — and here it
+                // would land on the innermost lane's own far side. There is no
+                // room lower down either, so this nesting is one revolution
+                // too deep; the caller retries a shallower one.
+                return Err(no_geometry(format!(
+                    "the turn-around from column {column} onto column {landing} would run into \
+                     lane {}'s own far side",
+                    claim.id
+                )));
+            }
             return Ok((vec![turn.id], run, turn.end.local_pose));
         }
         let Some(straight) = index.straight(run.pose) else {
@@ -918,6 +936,32 @@ fn walk_turn(
     Err(no_geometry(
         "the innermost column ran past its straight-segment bound without a turn-around",
     ))
+}
+
+/// Whether `turn`'s body keeps clear of the two rows bounding the lane it
+/// turns out of.
+///
+/// A reverse-family placement is not contained between its own endpoints: a
+/// `TeardropReverse` loops up to 192 mm past them, a `BroadReverse180` 112 mm.
+/// Both ends sit on a column, so what that overhang can run into is the lane's
+/// own bottom or top row — and it does, on a lane squat enough that the turn
+/// is forced to sit right against one of them. Rejecting it here is what makes
+/// the nesting back off by one revolution instead of producing a loop that
+/// crosses itself.
+fn turn_clears_its_own_lane(index: &GraphIndex, turn: &PoseEdge, claim: &Claim) -> bool {
+    let mut lowest = f64::MAX;
+    let mut highest = f64::MIN;
+    for primitive in &turn.primitives {
+        let bounds = index
+            .instance
+            .transform
+            .primitive_to_local(primitive)
+            .bounds();
+        lowest = lowest.min(bounds.min.y);
+        highest = highest.max(bounds.max.y);
+    }
+    lowest >= claim.rect.min.y + TURN_BODY_CLEARANCE_MM
+        && highest <= claim.rect.max.y - TURN_BODY_CLEARANCE_MM
 }
 
 /// The reverse-family edge leaving `pose` that lands on column `landing`

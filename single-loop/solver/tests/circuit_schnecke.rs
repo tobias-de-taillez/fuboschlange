@@ -63,12 +63,17 @@ fn field() -> Field {
     }
 }
 
-fn connection() -> ConnectionInput {
+/// The connection zone has to sever the two outermost lanes — that is where
+/// the two arms start and end — but must leave the third alone, or the inward
+/// arm cannot get past it on its way round. With the outermost row
+/// `wall_clearance` in and the lanes one spacing apart, that puts the depth
+/// strictly between the second and third row.
+fn connection(pipe_spacing_mm: f64) -> ConnectionInput {
     ConnectionInput {
         edge_index: 0,
         center_offset_mm: 1500.0,
         zone_width_mm: 600.0,
-        zone_depth_mm: 225.0,
+        zone_depth_mm: WALL_CLEARANCE_MM + 1.5 * pipe_spacing_mm,
     }
 }
 
@@ -83,6 +88,10 @@ struct Pipeline {
 
 impl Pipeline {
     fn run() -> Self {
+        Self::run_at(PIPE_SPACING_MM)
+    }
+
+    fn run_at(pipe_spacing_mm: f64) -> Self {
         let base = PlateInstance::new(
             rect_polygon(),
             transform(),
@@ -92,14 +101,15 @@ impl Pipeline {
         .unwrap();
         let graph = build_embedded_graph(&base, WALL_CLEARANCE_MM, PlateGraphLimits::default())
             .expect("the fixture room must have a certified pose graph");
-        let zone = build_connection_zone(&rect_polygon(), &transform(), &connection())
-            .expect("the fixture connection must be valid");
+        let zone =
+            build_connection_zone(&rect_polygon(), &transform(), &connection(pipe_spacing_mm))
+                .expect("the fixture connection must be valid");
         let view = build_graph_view(&graph, &zone, &transform());
         let mut instance = base;
         filter_zone_nopps(&mut instance, &zone);
         let schnecke = match build_schnecke(
             &field(),
-            PIPE_SPACING_MM,
+            pipe_spacing_mm,
             WALL_CLEARANCE_MM,
             &graph,
             &view,
@@ -372,4 +382,54 @@ fn the_turn_is_a_single_certified_reverse() {
         single_loop_solver::plate::TemplateId::BroadReverse180,
         "at an odd-channel pipe spacing only the 225 mm reverse has the right parity"
     );
+}
+
+#[test]
+fn the_other_spacings_on_the_ladder_certify_too() {
+    // The user plans 75 mm but reserved the right to deviate, and the spec's
+    // escalation ladder walks {75, 150, 225, 300}. Each spacing takes a
+    // different turn-around — two channels when the spacing is an even number
+    // of channels, three when it is odd — so each is its own path through the
+    // construction and each needs its own end-to-end run.
+    for spacing_mm in [150.0, 225.0, 300.0] {
+        let pipeline = Pipeline::run_at(spacing_mm);
+        let candidate = assemble(&pipeline);
+        let certificate = match certify_loop(&candidate, &pipeline.context()) {
+            Ok(certificate) => certificate,
+            Err(error) => panic!("spacing {spacing_mm} mm: {error:#?}"),
+        };
+        assert!(
+            certificate.min_bend_radius_mm >= 80.0,
+            "spacing {spacing_mm} mm: min bend radius {}",
+            certificate.min_bend_radius_mm
+        );
+        assert!(
+            certificate.total_length_mm > 0.0 && certificate.total_length_mm <= 100_000.0,
+            "spacing {spacing_mm} mm: total length {}",
+            certificate.total_length_mm
+        );
+
+        let gaps = lane_gaps(&pipeline);
+        let (innermost, outer) = gaps.split_last().expect("at least two lanes");
+        let spacing_channels = (spacing_mm / 75.0).round() as i64;
+        assert!(
+            outer.iter().all(|gap| *gap == spacing_channels),
+            "spacing {spacing_mm} mm: gaps {gaps:?}"
+        );
+        assert_eq!(
+            *innermost,
+            if spacing_channels.rem_euclid(2) == 1 {
+                3
+            } else {
+                2
+            },
+            "spacing {spacing_mm} mm: the innermost gap is the turn's own span; gaps {gaps:?}"
+        );
+        println!(
+            "spacing {spacing_mm:.0} mm: {} lanes, {:.0} mm, worst uncovered point {:.0} mm",
+            pipeline.lanes.len(),
+            certificate.total_length_mm,
+            certificate.coverage.upper_bound_mm,
+        );
+    }
 }

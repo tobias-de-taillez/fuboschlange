@@ -123,6 +123,20 @@ wall_clearance_mm, graph, view, zone, instance) -> Result<Schnecke, LoopError>`.
   Summe Port→Anker. Die andere lässt die beiden Anschlussstücke einander
   kreuzen.
 
+### 3a. Die Kehre darf ihre eigene Bahn nicht treffen
+
+Eine Reverse-Platzierung liegt nicht zwischen ihren Endpunkten: die
+`TeardropReverse` schlingt bis zu 192 mm darüber hinaus, die
+`BroadReverse180` 112 mm. Beide Enden sitzen auf einer Spalte — was der
+Überstand also treffen kann, ist die untere oder obere **Zeile derselben
+Bahn**. Bei 150 mm Verlegeabstand tut er das auch: die innerste Bahn ist
+dort nur 225 mm hoch, die Kehre sitzt zwangsläufig direkt an ihrer
+Unterkante, und der Schwanz der Tropfenschleife landet exakt darauf.
+
+`turn_clears_its_own_lane` verwirft solche Platzierungen (Abstand < 50 mm,
+Spec §5). Die Verschachtelung fällt dann um eine Windung zurück, statt eine
+sich kreuzende Schleife zu liefern.
+
 ## 5. Abnahme — erreicht
 
 `tests/circuit_schnecke.rs`, Raum 3000 × 2400, Verlegeabstand 75 mm,
@@ -135,23 +149,42 @@ Wandabstand 75 mm, Anschluss mittig an der Unterkante (Zone 600 × 225):
 - Vorlauf 0, 2, 4, 6, 8, 10; Rücklauf 9, 7, 5, 3, 1.
 - Kehre: genau eine `BroadReverse180`.
 
+Die ganze Leiter, im selben Testlauf zertifiziert:
+
+| Verlegeabstand | Bahnen | Länge | schlechtester Deckungspunkt |
+|---|---|---|---|
+| 75 mm | 11 | 67 421 mm | 354,6 mm |
+| 150 mm | 5 | 32 116 mm | 519 mm |
+| 225 mm | 5 | 27 145 mm | 616 mm |
+| 300 mm | 3 | 18 890 mm | 663 mm |
+
 `tests/plate_spiral_facts.rs` pinnt die drei Messungen, auf denen das ruht.
 
 ## 6. Was offen bleibt
 
-- **Deckung.** Schlechtester Punkt 354,6 mm von der nächsten Rohrachse
-  (Raumecke). Ursache: die äußerste Windung ist zweifach unterbrochen — von
-  der Anschlusszone *und* von der Naht in der Ecke unten links —, sodass die
-  unterste Zeile nur östlich der Zone liegt. Ein mittiger Anschluss erzwingt
-  das bei diesem Nahtschema.
+- **Seite der Kehre.** Die Kehre sitzt immer auf der linken Spalte. Bei
+  75 mm kostet das nichts — dort begrenzt die *Eckenreichweite* die Tiefe,
+  nicht die Kehre (Bahn 12 und 14 scheitern beide an einer fehlenden Ecke).
+  Bei 150 mm dagegen ist die Kehre der Engpass: die innerste Bahn ist breit
+  und flach, auf der langen Seite wäre Platz, auf der kurzen nicht — das
+  kostet dort zwei Bahnen (5 statt 7). Die Kehre auf der Seite mit Platz zu
+  legen ist der lohnendste nächste Schritt, kostet aber Deckung auf der
+  innersten Rücklaufbahn: der Rücklauf beginnt dann mitten in seiner Windung
+  und legt die vorangehenden Seiten nicht mehr.
+- **Deckung bei 75 mm.** Schlechtester Punkt 354,6 mm (Raumecke). Ursache:
+  die äußerste Windung ist zweifach unterbrochen — von der Anschlusszone
+  *und* von der Naht in der Ecke unten links —, sodass die unterste Zeile
+  nur östlich der Zone liegt. Ein mittiger Anschluss erzwingt das bei diesem
+  Nahtschema. Untere Schranke bei vollständigem Außenring wären ~219 mm.
 - **Wickelrichtung.** Nur gegen den Uhrzeigersinn gebaut. Bei einem
   Anschluss nahe der linken oder rechten Wand wäre die Gegenrichtung deutlich
   besser; die Spiegelung der Legs steht noch aus.
 - **Zonentiefe.** Sie muss die zwei äußersten Bahnen durchtrennen, aber die
-  dritte nicht — sonst kann der Arm nicht daran vorbei. Bei 75 mm heißt das
-  187,5 mm < Tiefe < 262,5 mm. Diese Kopplung gehört in die Eingabeprüfung,
-  statt dem Aufrufer überlassen zu bleiben.
-- **Andere Verlegeabstände.** Nur 75 mm ist end-to-end gefahren. Die Tabelle
-  in §3 ist implementiert, aber 150/225/300 mm sind ungetestet.
+  dritte nicht — sonst kann der Arm nicht daran vorbei. Das ist
+  `wall_clearance + 1,5 × Verlegeabstand`, im Test so gesetzt. Diese Kopplung
+  gehört in die Eingabeprüfung, statt dem Aufrufer überlassen zu bleiben.
+- **Nur Rechtecke.** `build_schnecke` nimmt ein `Field`, also ein Rechteck.
+  Für verwinkelte Räume zerlegt `decompose_fields` schon in Rechtecke, aber
+  die Verkettung mehrerer Felder zu *einem* Kreis fehlt.
 - **`spiral.rs` bleibt unangetastet.** Der suchbasierte Pfad und seine Tests
   laufen weiter; die Schnecke steht daneben. Zusammenführen später.
