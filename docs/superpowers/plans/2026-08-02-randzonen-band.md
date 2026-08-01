@@ -71,6 +71,35 @@ Kehre 0→1 liegen ([A−192,5, A+112,5]). Bei 150-mm-Raster heißt das ein
 Versatz von 300 mm. Das ist zu **suchen**, nicht abzuleiten — wie
 `walk_core` alle vier Seiten probiert und `build_from` jede Tiefe.
 
+## 3a. Was gebaut ist, und woran es hängt
+
+`src/circuit/band.rs` läuft alle vier Bahnen, findet die 75-mm-Kehren im
+Graphen und erreicht den Verteiler an beiden Enden. Offen ist die
+**Landung**.
+
+Die kompakte Kette erreicht ihre Zielspalte über die Spalten `c−2`, `c+1`,
+`c−1` — ihr eigener Körper überquert die Zielspalte also noch einmal, bevor
+er dort endet. Die Bahn läuft ab der Landung nach Norden und trifft ihn:
+
+```
+lane 1 runs into edge N, laid by an earlier lane change
+```
+
+Zwei Wege, beide messbar statt zu raten:
+
+1. **Kette mit Nord-Ausdehnung 0 bevorzugen.** Es gibt eine —
+   `BroadTurn90 → BroadTurn90 → BroadReverse180`, gemessen 0,0 mm nach
+   Norden — aber sie kostet 412,5 mm nach Süden und 225 mm Ausschlag. Ob ein
+   größerer Wandabstand das kauft, ist zu messen.
+2. **Bahnwechsel länger als drei Kanten zulassen.** `uturn_chains` nimmt die
+   Länge schon als Parameter, der Walker setzt sie fest auf
+   `UTURN_CHAIN_LEN`. Vier Kanten öffnen viel mehr Landungen — zu welchem
+   Verzweigungspreis, ist ebenfalls zu messen.
+
+Die drei Abnahmetests in `tests/circuit_band.rs` stehen als `#[ignore]` da,
+nicht abgeschwächt: sie sind die Abnahme und laufen unverändert, sobald die
+Landung sitzt.
+
 ## 4. Der Validator braucht das Mäander-Muster
 
 `check_ring_algebra` beschreibt die Schnecke: Hinlauf in Zweierschritten,

@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::circuit::fields::Field;
 use crate::circuit::schnecke::build_schnecke;
-use crate::circuit::types::{LoopError, LoopErrorCode, RectMm};
+use crate::circuit::types::{LoopError, LoopErrorCode, LoopPattern, RectMm};
 use crate::circuit::validate::{
     LoopCandidate, LoopContext, LoopSection, SectionKind, certify_loop,
 };
@@ -161,6 +161,7 @@ pub fn plan_schnecke(input: SchneckeInput) -> Result<SchneckePlan, LoopError> {
             view: &view,
             zone: &zone,
             lanes: &schnecke.lanes,
+            pattern: LoopPattern::Spiral,
         },
     )?;
 
@@ -612,6 +613,7 @@ fn plan_one(
             view: &view,
             zone: &zone,
             lanes: &schnecke.lanes,
+            pattern: LoopPattern::Spiral,
         },
     )?;
 

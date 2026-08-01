@@ -39,7 +39,7 @@
 //! than confusing the loop assertions.
 
 use single_loop_solver::circuit::{
-    ConnectionInput, ConnectionZone, Field, Lane, LoopCandidate, LoopContext, LoopGraphView,
+    ConnectionInput, ConnectionZone, Field, Lane, LoopCandidate, LoopContext, LoopGraphView, LoopPattern,
     LoopSection, RectMm, SectionKind, SpiralPath, attach_port, build_connection_zone,
     build_graph_view, build_lanes, certify_loop, complete_spiral, filter_zone_nopps,
     plan_inward_arm,
@@ -171,6 +171,7 @@ impl Pipeline {
             view: &self.view,
             zone: &self.zone,
             lanes: &self.lanes,
+            pattern: LoopPattern::Spiral,
         }
     }
 

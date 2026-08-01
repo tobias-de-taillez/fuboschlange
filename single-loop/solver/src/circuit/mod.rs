@@ -2,6 +2,7 @@ mod escalate;
 mod fields;
 mod plan;
 mod room;
+mod band;
 mod schnecke;
 mod search;
 mod spiral;
@@ -21,6 +22,7 @@ pub use plan::{
     CircuitPlan, MultiPlan, SchneckeInput, SchneckePlan, plan_multi, plan_schnecke, zone_depth_mm,
 };
 pub use room::{RectifiedRoom, rectify, slab_fields};
+pub use band::{Band, build_band};
 pub use schnecke::{Schnecke, build_schnecke};
 pub use search::{
     Action, Decision, Invariant, Journal, PatternRules, SearchFailure, SearchFailureKind,

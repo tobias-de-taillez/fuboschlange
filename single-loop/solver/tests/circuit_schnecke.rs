@@ -11,7 +11,7 @@
 //! the 75 mm pipe spacing they plan to lay.
 
 use single_loop_solver::circuit::{
-    ConnectionInput, ConnectionZone, Field, Lane, LoopCandidate, LoopContext, LoopGraphView,
+    ConnectionInput, ConnectionZone, Field, Lane, LoopCandidate, LoopContext, LoopGraphView, LoopPattern,
     LoopSection, RectMm, SectionKind, SpiralPath, attach_port, build_connection_zone,
     build_graph_view, build_schnecke, certify_loop, filter_zone_nopps,
 };
@@ -136,6 +136,7 @@ impl Pipeline {
             view: &self.view,
             zone: &self.zone,
             lanes: &self.lanes,
+            pattern: LoopPattern::Spiral,
         }
     }
 

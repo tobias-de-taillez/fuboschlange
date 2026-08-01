@@ -39,7 +39,7 @@
 //! one.
 
 use single_loop_solver::circuit::{
-    ConnectionInput, ConnectionZone, Field, Lane, LoopCandidate, LoopContext, LoopErrorCode,
+    ConnectionInput, ConnectionZone, Field, Lane, LoopCandidate, LoopContext, LoopErrorCode, LoopPattern,
     LoopGraphView, LoopSection, RectMm, SectionKind, attach_port, build_connection_zone,
     build_graph_view, build_lanes, certify_loop, filter_zone_nopps,
 };
@@ -154,6 +154,7 @@ impl Fixture {
             view: &self.view,
             zone: &self.zone,
             lanes: &self.lanes,
+            pattern: LoopPattern::Spiral,
         }
     }
 

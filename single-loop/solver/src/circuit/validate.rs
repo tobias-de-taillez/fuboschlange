@@ -89,7 +89,9 @@
 //! validator does not take the generator's choice of constructor on trust.
 
 use crate::circuit::fields::Lane;
-use crate::circuit::types::{JournalEntry, LocatedSpacing, LoopError, LoopErrorCode, RectMm};
+use crate::circuit::types::{
+    JournalEntry, LocatedSpacing, LoopError, LoopErrorCode, LoopPattern, RectMm,
+};
 use crate::circuit::zone::{ConnectionZone, ENTRY_RING_MM, LoopGraphView, zone_contains_local};
 use crate::constants::{
     LOCAL_ARC_LENGTH_MM, MAX_COVERAGE_CELLS, MAX_LENGTH_MM, MIN_NONLOCAL_SPACING_MM, MIN_RADIUS_MM,
@@ -206,6 +208,11 @@ pub struct LoopContext<'a> {
     pub view: &'a LoopGraphView,
     pub zone: &'a ConnectionZone,
     pub lanes: &'a [Lane],
+    /// Which lane bookkeeping [`check_pattern_provenance`] holds the candidate
+    /// to. Stated by the caller, never inferred from the path: reading the
+    /// pattern off the lane sequence would let a spiral whose rings came out
+    /// wrong pass as a perfectly good meander.
+    pub pattern: LoopPattern,
 }
 
 impl LoopContext<'_> {
@@ -592,7 +599,87 @@ fn check_pattern_provenance(
         .iter()
         .filter(|section| section.kind.is_graph())
         .collect();
+    match context.pattern {
+        LoopPattern::Spiral => check_spiral_provenance(&graph_sections, context),
+        LoopPattern::Meander => check_meander_provenance(&graph_sections, context),
+        LoopPattern::Free => Err(reject(
+            Reason::PatternProvenance,
+            "no lane bookkeeping is defined for the free pattern, so nothing can be certified \
+             against it",
+        )),
+    }
+}
 
+/// The meander's lane bookkeeping: the lanes are walked in nesting order,
+/// outermost first, each exactly once, and every lane change is a hop.
+///
+/// A band is not a spiral with a different lane order. It has no turn-around
+/// and no return arm — it never comes back out — so the spiral's phase ladder
+/// and its "return ring beside an occupied one" rule say nothing about it.
+/// What is left to check is what a band actually claims: it walked every lane
+/// it was given, in order, and the stretches it claims for each really lie on
+/// that lane (`check_section_on_lane`, the same geometric test the spiral uses).
+///
+/// The lane changes themselves carry no lane and are not template-restricted:
+/// on this plate the certified 75 mm U-turn is a chain of three reverse-family
+/// edges (`tests/plate_spiral_facts.rs`), and a chain is exactly what a run of
+/// hops is.
+fn check_meander_provenance(
+    graph_sections: &[&LoopSection],
+    context: &LoopContext,
+) -> Result<(), LoopError> {
+    let mut walked: Vec<u32> = Vec::new();
+    for (index, section) in graph_sections.iter().enumerate() {
+        match section.kind {
+            SectionKind::Hop => {
+                if section.lane_id.is_some() {
+                    return Err(reject(
+                        Reason::PatternProvenance,
+                        format!("hop section {index} claims a lane; a hop crosses two lanes"),
+                    ));
+                }
+            }
+            SectionKind::Inward => {
+                let Some(lane_id) = section.lane_id else {
+                    return Err(reject(
+                        Reason::PatternProvenance,
+                        format!("graph section {index} walks a lane but names none"),
+                    ));
+                };
+                check_section_on_lane(index, section, lane_id, context)?;
+                if walked.last() != Some(&lane_id) {
+                    walked.push(lane_id);
+                }
+            }
+            other => {
+                return Err(reject(
+                    Reason::PatternProvenance,
+                    format!(
+                        "graph section {index} is {other:?}; a meander has no turn-around and no \
+                         return arm, so its lane stretches are all Inward"
+                    ),
+                ));
+            }
+        }
+    }
+
+    let expected: Vec<u32> = (0..context.lanes.len() as u32).collect();
+    if walked != expected {
+        return Err(reject(
+            Reason::PatternProvenance,
+            format!(
+                "a meander walks every lane once, outermost first: expected {expected:?}, \
+                 walked {walked:?}"
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn check_spiral_provenance(
+    graph_sections: &[&LoopSection],
+    context: &LoopContext,
+) -> Result<(), LoopError> {
     let mut inward_lanes: Vec<u32> = Vec::new();
     let mut return_lanes: Vec<u32> = Vec::new();
     let mut turn_blocks = 0usize;

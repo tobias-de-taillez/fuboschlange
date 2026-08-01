@@ -14,7 +14,7 @@
 
 use single_loop_solver::circuit::Field;
 use single_loop_solver::circuit::{
-    ConnectionInput, LoopCandidate, LoopContext, LoopSection, RectMm, SectionKind, attach_port,
+    ConnectionInput, LoopCandidate, LoopContext, LoopPattern, LoopSection, RectMm, SectionKind, attach_port,
     build_connection_zone, build_graph_view, build_schnecke, certify_loop, filter_zone_nopps,
 };
 use single_loop_solver::geometry::Polygon;
@@ -111,6 +111,7 @@ fn main() -> Result<(), String> {
             view: &view,
             zone: &zone,
             lanes: &schnecke.lanes,
+            pattern: LoopPattern::Spiral,
         },
     )
     .map_err(|error| format!("{:?}: {}", error.code, error.message))?;

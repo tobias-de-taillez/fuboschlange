@@ -75,13 +75,13 @@ use crate::plate::{
 /// Pipe channels sit midway between nopp rows: `CHANNEL_OFFSET_MM +
 /// CHANNEL_PITCH_MM * index`. Same lattice as `fields.rs`'s, kept local for
 /// the same reason that module keeps its own copy of the constants.
-const CHANNEL_OFFSET_MM: f64 = 37.5;
-const CHANNEL_PITCH_MM: f64 = 75.0;
+pub(crate) const CHANNEL_OFFSET_MM: f64 = 37.5;
+pub(crate) const CHANNEL_PITCH_MM: f64 = 75.0;
 
 /// How close a pose's coordinate must be to a channel line to count as on it.
 /// Every coordinate in this lattice is an exact multiple of 37.5 mm, so this
 /// only absorbs floating-point noise.
-const CHANNEL_MATCH_TOLERANCE_MM: f64 = 1e-6;
+pub(crate) const CHANNEL_MATCH_TOLERANCE_MM: f64 = 1e-6;
 
 /// The turn-around's span, in channels, when the pipe spacing is an odd
 /// number of channels (75 mm, 225 mm, …). The inward arm's own step is even,
@@ -105,7 +105,7 @@ const TURN_BODY_CLEARANCE_MM: f64 = 50.0;
 /// so a graph defect cannot spin the walk forever. A side is at most a room
 /// wide and a `Straight0` is 150 mm, so this clears any real room by orders
 /// of magnitude.
-const MAX_STRAIGHTS_PER_SIDE: usize = 512;
+pub(crate) const MAX_STRAIGHTS_PER_SIDE: usize = 512;
 
 /// One revolution's four channel indices. `bottom`/`top` are row indices,
 /// `left`/`right` column indices, all on the shared 37.5 + 75n lattice.
@@ -202,7 +202,7 @@ pub fn build_schnecke(
 }
 
 /// The plate-local value of channel `index`.
-fn channel_value(index: i64) -> f64 {
+pub(crate) fn channel_value(index: i64) -> f64 {
     CHANNEL_OFFSET_MM + CHANNEL_PITCH_MM * index as f64
 }
 
@@ -219,7 +219,7 @@ fn spacing_in_channels(pipe_spacing_mm: f64) -> Result<i64, LoopError> {
     Ok(steps.round() as i64)
 }
 
-fn no_geometry(message: impl Into<String>) -> LoopError {
+pub(crate) fn no_geometry(message: impl Into<String>) -> LoopError {
     LoopError {
         code: LoopErrorCode::NoSolutionGeometry,
         message: message.into(),
@@ -256,7 +256,7 @@ fn outermost_candidates(field: &Field, wall_clearance_mm: f64) -> Vec<Revolution
 
 /// The smallest channel index of the given parity whose line is at least
 /// `bound_mm` — "snap inward, never below the clearance the caller asked for".
-fn smallest_index_at_least(bound_mm: f64, parity: i64) -> Option<i64> {
+pub(crate) fn smallest_index_at_least(bound_mm: f64, parity: i64) -> Option<i64> {
     let mut index = ((bound_mm - CHANNEL_OFFSET_MM) / CHANNEL_PITCH_MM).ceil() as i64;
     if index.rem_euclid(2) != parity {
         index += 1;
@@ -266,7 +266,7 @@ fn smallest_index_at_least(bound_mm: f64, parity: i64) -> Option<i64> {
 
 /// The largest channel index of the given parity whose line is at most
 /// `bound_mm` — the far-wall mirror of [`smallest_index_at_least`].
-fn largest_index_at_most(bound_mm: f64, parity: i64) -> Option<i64> {
+pub(crate) fn largest_index_at_most(bound_mm: f64, parity: i64) -> Option<i64> {
     let mut index = ((bound_mm - CHANNEL_OFFSET_MM) / CHANNEL_PITCH_MM).floor() as i64;
     if index.rem_euclid(2) != parity {
         index -= 1;
@@ -356,12 +356,13 @@ fn laid_edges(path: &SpiralPath) -> usize {
 /// The certified graph, indexed the two ways the walk reads it, plus
 /// everything outside the graph the walk needs: the zone it must start and end
 /// at, and the plate instance `attach_port` certifies connectors against.
-struct GraphIndex<'a> {
+pub(crate) struct GraphIndex<'a> {
     edges_by_start: BTreeMap<PoseKey, Vec<&'a PoseEdge>>,
+    edges_by_id: BTreeMap<u32, &'a PoseEdge>,
     node_by_pose: BTreeMap<PoseKey, &'a PoseNode>,
     entry_candidates: HashSet<u32>,
-    zone: &'a ConnectionZone,
-    instance: &'a PlateInstance,
+    pub(crate) zone: &'a ConnectionZone,
+    pub(crate) instance: &'a PlateInstance,
 }
 
 type PoseKey = (i64, i64, u8);
@@ -375,7 +376,7 @@ fn pose_key(pose: LocalPose) -> PoseKey {
 }
 
 impl<'a> GraphIndex<'a> {
-    fn new(
+    pub(crate) fn new(
         graph: &'a EmbeddedPoseGraph,
         view: &LoopGraphView,
         zone: &'a ConnectionZone,
@@ -403,8 +404,14 @@ impl<'a> GraphIndex<'a> {
                 })
                 .or_insert(node);
         }
+        let edges_by_id = edges_by_start
+            .values()
+            .flatten()
+            .map(|edge| (edge.id, *edge))
+            .collect();
         Self {
             edges_by_start,
+            edges_by_id,
             node_by_pose,
             entry_candidates: view.entry_candidates.iter().copied().collect(),
             zone,
@@ -420,7 +427,7 @@ impl<'a> GraphIndex<'a> {
     /// zone's own entry candidates, `attach_port` must build a connector to it
     /// that clears the room and the noppen, and that connector must stay
     /// inside the zone rectangle grown by [`ENTRY_RING_MM`].
-    fn connector_exists(&self, port: Point, anchor: &PoseNode) -> bool {
+    pub(crate) fn connector_exists(&self, port: Point, anchor: &PoseNode) -> bool {
         if !self.entry_candidates.contains(&anchor.id) {
             return false;
         }
@@ -442,7 +449,7 @@ impl<'a> GraphIndex<'a> {
     }
 
     /// Whether the node at `pose` can be connected to `port`.
-    fn reaches(&self, pose: LocalPose, port: Point) -> bool {
+    pub(crate) fn reaches(&self, pose: LocalPose, port: Point) -> bool {
         self.node(pose)
             .is_some_and(|node| self.connector_exists(port, node))
     }
@@ -454,7 +461,7 @@ impl<'a> GraphIndex<'a> {
 /// the loop, so it has to leave the anchor along the direction the return arm
 /// arrives with — which makes the anchor the *pose-flip* of the node the walk
 /// stops on. Same rule as `spiral::SpiralEnds`' own.
-fn flip(pose: LocalPose) -> LocalPose {
+pub(crate) fn flip(pose: LocalPose) -> LocalPose {
     LocalPose::new(pose.point, Heading8::from_octant(pose.heading.octant() + 4))
 }
 
@@ -469,34 +476,35 @@ fn expand_rect(rect: &RectMm, margin_mm: f64) -> RectMm {
 }
 
 impl<'a> GraphIndex<'a> {
-    fn departing(&self, pose: LocalPose) -> &[&'a PoseEdge] {
+    pub(crate) fn departing(&self, pose: LocalPose) -> &[&'a PoseEdge] {
         self.edges_by_start
             .get(&pose_key(pose))
             .map(Vec::as_slice)
             .unwrap_or(&[])
     }
 
-    fn node(&self, pose: LocalPose) -> Option<&'a PoseNode> {
+    pub(crate) fn node(&self, pose: LocalPose) -> Option<&'a PoseNode> {
         self.node_by_pose.get(&pose_key(pose)).copied()
     }
 
-    fn node_by_id(&self, id: u32) -> Option<&'a PoseNode> {
+    /// Every certified node pose, in id order.
+    pub(crate) fn node_poses(&self) -> impl Iterator<Item = LocalPose> + '_ {
+        self.node_by_pose.values().map(|node| node.local_pose)
+    }
+
+    pub(crate) fn node_by_id(&self, id: u32) -> Option<&'a PoseNode> {
         self.node_by_pose
             .values()
             .copied()
             .find(|node| node.id == id)
     }
 
-    fn edge_by_id(&self, id: u32) -> Option<&'a PoseEdge> {
-        self.edges_by_start
-            .values()
-            .flatten()
-            .copied()
-            .find(|edge| edge.id == id)
+    pub(crate) fn edge_by_id(&self, id: u32) -> Option<&'a PoseEdge> {
+        self.edges_by_id.get(&id).copied()
     }
 
     /// The single `Straight0` leaving `pose`, if the graph has one.
-    fn straight(&self, pose: LocalPose) -> Option<&'a PoseEdge> {
+    pub(crate) fn straight(&self, pose: LocalPose) -> Option<&'a PoseEdge> {
         self.departing(pose)
             .iter()
             .copied()
@@ -504,7 +512,7 @@ impl<'a> GraphIndex<'a> {
     }
 
     /// Every edge of `template` leaving `pose`, ascending by id.
-    fn leaving_with(&self, pose: LocalPose, template: TemplateId) -> Vec<&'a PoseEdge> {
+    pub(crate) fn leaving_with(&self, pose: LocalPose, template: TemplateId) -> Vec<&'a PoseEdge> {
         self.departing(pose)
             .iter()
             .copied()
@@ -523,7 +531,7 @@ fn channel_of(pose: LocalPose) -> Option<f64> {
     }
 }
 
-fn on_channel(pose: LocalPose, channel_index: i64) -> bool {
+pub(crate) fn on_channel(pose: LocalPose, channel_index: i64) -> bool {
     channel_of(pose).is_some_and(|value| {
         (value - channel_value(channel_index)).abs() < CHANNEL_MATCH_TOLERANCE_MM
     })
@@ -536,11 +544,11 @@ fn on_channel(pose: LocalPose, channel_index: i64) -> bool {
 /// One side of one revolution, as the walk sees it: run along `channel` on
 /// `heading`, then take a corner onto `exit_heading` at `exit_channel`.
 #[derive(Clone, Copy, Debug)]
-struct Leg {
-    heading: Heading8,
-    channel: i64,
-    exit_heading: Heading8,
-    exit_channel: i64,
+pub(crate) struct Leg {
+    pub(crate) heading: Heading8,
+    pub(crate) channel: i64,
+    pub(crate) exit_heading: Heading8,
+    pub(crate) exit_channel: i64,
 }
 
 /// The four legs of the inward arm's counter-clockwise revolution `here`,
@@ -608,9 +616,9 @@ fn return_legs(here: Revolution, next_left: i64) -> [Leg; 4] {
 /// The lane a stretch is nominally walking, and the rectangle that lane's four
 /// channels bound.
 #[derive(Clone)]
-struct Claim {
-    id: u32,
-    rect: RectMm,
+pub(crate) struct Claim {
+    pub(crate) id: u32,
+    pub(crate) rect: RectMm,
 }
 
 impl Claim {
@@ -626,7 +634,7 @@ impl Claim {
             && point_on_rect_boundary(edge.end.local_pose.point, &self.rect)
     }
 
-    fn label(&self, edge: &PoseEdge) -> Option<u32> {
+    pub(crate) fn label(&self, edge: &PoseEdge) -> Option<u32> {
         self.covers(edge).then_some(self.id)
     }
 }
@@ -634,7 +642,7 @@ impl Claim {
 /// Whether `point` sits on one of `rect`'s four channel sides. The same
 /// predicate `validate::check_section_on_lane` judges a claim by; kept local
 /// for the same reason that module keeps its own copy.
-fn point_on_rect_boundary(point: Point, rect: &RectMm) -> bool {
+pub(crate) fn point_on_rect_boundary(point: Point, rect: &RectMm) -> bool {
     let eps = CHANNEL_MATCH_TOLERANCE_MM;
     let on_vertical_side = (point.x - rect.min.x).abs() < eps || (point.x - rect.max.x).abs() < eps;
     let on_horizontal_side =
@@ -646,14 +654,14 @@ fn point_on_rect_boundary(point: Point, rect: &RectMm) -> bool {
 
 /// What one walked stretch contributed: its edges, each tagged with the lane
 /// it walks (`None` where it walks none, i.e. a lane change).
-struct Stretch {
-    edge_ids: Vec<u32>,
-    lane_ids: Vec<Option<u32>>,
-    pose: LocalPose,
+pub(crate) struct Stretch {
+    pub(crate) edge_ids: Vec<u32>,
+    pub(crate) lane_ids: Vec<Option<u32>>,
+    pub(crate) pose: LocalPose,
 }
 
 impl Stretch {
-    fn new(pose: LocalPose) -> Self {
+    pub(crate) fn new(pose: LocalPose) -> Self {
         Self {
             edge_ids: Vec::new(),
             lane_ids: Vec::new(),
@@ -661,13 +669,13 @@ impl Stretch {
         }
     }
 
-    fn push(&mut self, edge: &PoseEdge, claim: &Claim) {
+    pub(crate) fn push(&mut self, edge: &PoseEdge, claim: &Claim) {
         self.edge_ids.push(edge.id);
         self.lane_ids.push(claim.label(edge));
         self.pose = edge.end.local_pose;
     }
 
-    fn absorb(&mut self, other: Stretch) {
+    pub(crate) fn absorb(&mut self, other: Stretch) {
         self.edge_ids.extend(other.edge_ids);
         self.lane_ids.extend(other.lane_ids);
         self.pose = other.pose;
@@ -681,7 +689,7 @@ impl Stretch {
 /// step along the channel, whether a `BroadTurn90` leaves this pose onto the
 /// leg's exit channel. That is the same "query edges, don't re-derive parity"
 /// discipline `fields.rs` applies to its rings.
-fn walk_leg(
+pub(crate) fn walk_leg(
     index: &GraphIndex,
     start: LocalPose,
     leg: Leg,
@@ -844,7 +852,7 @@ fn connectors_clear_the_loop(index: &GraphIndex, path: &SpiralPath) -> Result<()
 
 /// The same primitive, traversed the other way round. The exit connector is
 /// built port → anchor and walked back.
-fn reverse_primitive(primitive: &PathPrimitive) -> PathPrimitive {
+pub(crate) fn reverse_primitive(primitive: &PathPrimitive) -> PathPrimitive {
     match primitive {
         PathPrimitive::Line { start, end } => PathPrimitive::Line {
             start: *end,
