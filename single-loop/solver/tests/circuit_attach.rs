@@ -2,7 +2,7 @@ use single_loop_solver::circuit::{
     ConnectionInput, ConnectionZone, LoopErrorCode, attach_port, build_connection_zone,
     build_graph_view, filter_zone_nopps,
 };
-use single_loop_solver::geometry::Polygon;
+use single_loop_solver::geometry::{PointClassification, Polygon};
 use single_loop_solver::model::{PathPrimitive, Point};
 use single_loop_solver::plate::{
     EmbeddedPoseGraph, Heading8, LocalPose, PlateGraphLimits, PlateInstance, PlateProfile,
@@ -254,4 +254,69 @@ fn every_accepted_attachment_clears_the_remaining_noppen() {
         accepted > 0,
         "no entry candidate is reachable from the start port"
     );
+}
+
+#[test]
+fn both_the_corner_and_the_biarc_fallback_are_used_on_the_fixture() {
+    let (instance, graph, zone) = fixture();
+    let view = build_graph_view(&graph, &zone, &instance.transform);
+
+    let (mut corners, mut biarcs) = (0usize, 0usize);
+    for &id in &view.entry_candidates {
+        let anchor = node_by_id(&graph, id);
+        let Ok(attachment) = attach_port(zone.start_port, zone.inward, &anchor, &instance) else {
+            continue;
+        };
+        let arcs = attachment
+            .primitives
+            .iter()
+            .filter(|primitive| matches!(primitive, PathPrimitive::Arc { .. }))
+            .count();
+        // A fixed-radius corner has exactly one arc between its straights; a
+        // biarc is two arcs and nothing else.
+        if attachment.primitives.len() == 2 && arcs == 2 {
+            biarcs += 1;
+        } else {
+            assert_eq!(arcs, 1, "a corner carries exactly one arc");
+            corners += 1;
+        }
+    }
+
+    // Measured on this fixture: 26 corners, 10 biarcs, 128 anchors reachable
+    // by neither. The biarc count is what makes the fallback load-bearing —
+    // without it those ten anchors would be lost.
+    assert_eq!(corners, 26);
+    assert_eq!(biarcs, 10);
+}
+
+#[test]
+fn every_accepted_attachment_stays_inside_the_room() {
+    let (instance, graph, zone) = fixture();
+    let view = build_graph_view(&graph, &zone, &instance.transform);
+
+    let mut checked = 0usize;
+    for &id in &view.entry_candidates {
+        let anchor = node_by_id(&graph, id);
+        let Ok(attachment) = attach_port(zone.start_port, zone.inward, &anchor, &instance) else {
+            continue;
+        };
+        checked += 1;
+        for primitive in &attachment.primitives {
+            // Dense independent sampling as a counter-check on the analytic
+            // containment test, per the design spec's testing rules: samples
+            // are a test-side control, never the production certificate.
+            for step in 0..=64 {
+                let sample = primitive.point_at(f64::from(step) / 64.0);
+                let classification = instance.polygon.classify_point(sample);
+                let on_port = (sample - zone.start_port).norm() <= 1e-9;
+                assert!(
+                    classification != PointClassification::Outside
+                        && (classification != PointClassification::Boundary || on_port),
+                    "anchor {id}: accepted attachment samples {sample:?} outside the room"
+                );
+            }
+        }
+    }
+
+    assert!(checked > 0, "no attachment was available to check");
 }

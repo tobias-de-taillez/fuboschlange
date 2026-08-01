@@ -1,3 +1,4 @@
+use crate::circuit::types::JournalEntry;
 use crate::circuit::types::{ConnectionInput, LoopError, LoopErrorCode, RectMm};
 use crate::geometry::{
     Aabb, Intersection, PointClassification, Polygon, Vec2, primitive_intersections,
@@ -7,6 +8,7 @@ use crate::plate::{
     EmbeddedPoseGraph, PlateInstance, PlateTransform, PoseEdge, PoseNode,
     primitive_circle_clearance,
 };
+use crate::spiral::{Pose, biarc_candidates};
 
 /// Half of the fixed 50 mm port-to-port distance: each port sits this many
 /// millimeters from the normalized center, along the connection edge.
@@ -347,6 +349,19 @@ fn invalid_connection(message: &str) -> LoopError {
     }
 }
 
+/// The same rejection, carrying the geometry that proves it.
+fn invalid_connection_at(message: &str, witness: Point) -> LoopError {
+    LoopError {
+        code: LoopErrorCode::InvalidConnection,
+        message: message.to_owned(),
+        journal_tail: vec![JournalEntry {
+            decision: message.to_owned(),
+            rejected_by: Some("PolygonEscape".to_owned()),
+            witness: Some(witness),
+        }],
+    }
+}
+
 /// Tolerance below which two unit directions count as parallel, and below
 /// which a straight leg of a connector is dropped as degenerate.
 const ATTACHMENT_EPS: f64 = 1e-9;
@@ -398,15 +413,37 @@ pub fn attach_port(
         .normalized()
         .ok_or_else(|| invalid_connection("attachment: the anchor heading is degenerate"))?;
 
-    let primitives = fixed_radius_corner(
+    let radius_mm = instance.profile.min_bend_radius_mm;
+    let corner = fixed_radius_corner(
         port,
         start_direction,
         anchor.world_point,
         end_direction,
-        instance.profile.min_bend_radius_mm,
-    )?;
-    certify_attachment(&primitives, port, instance)?;
-    Ok(Attachment { primitives })
+        radius_mm,
+    );
+    let corner_rejection = match corner {
+        Ok(primitives) => match certify_attachment(&primitives, port, instance) {
+            Ok(()) => return Ok(Attachment { primitives }),
+            Err(error) => error,
+        },
+        Err(error) => error,
+    };
+
+    // The single corner cannot serve every anchor: an anchor whose channel
+    // runs parallel to the port tangent needs an S-shape, and a corner that
+    // fits geometrically may still hit a nopp. Fall back to the crate's
+    // robust biarc construction, taking the first candidate that certifies.
+    let start_pose = Pose::new(port, start_direction);
+    let end_pose = Pose::new(anchor.world_point, end_direction);
+    if let (Some(start_pose), Some(end_pose)) = (start_pose, end_pose) {
+        for candidate in biarc_candidates(start_pose, end_pose, radius_mm) {
+            let primitives = candidate.to_vec();
+            if certify_attachment(&primitives, port, instance).is_ok() {
+                return Ok(Attachment { primitives });
+            }
+        }
+    }
+    Err(corner_rejection)
 }
 
 /// Joins two poses with `straight — arc(radius_mm) — straight`.
@@ -501,9 +538,10 @@ fn certify_attachment(
                 "attachment: the constructed arc is below the minimum bend radius",
             ));
         }
-        if primitive_leaves_polygon(primitive, port, &instance.polygon) {
-            return Err(invalid_connection(
+        if let Some(witness) = polygon_escape_witness(primitive, port, &instance.polygon) {
+            return Err(invalid_connection_at(
                 "attachment: the connector leaves the room polygon",
+                witness,
             ));
         }
     }
@@ -521,15 +559,20 @@ fn certify_attachment(
     Ok(())
 }
 
-/// True when the primitive crosses the polygon boundary anywhere but at the
-/// port, or lies outside it entirely.
+/// The point where the primitive leaves the room, or `None` when it stays
+/// inside.
 ///
 /// The port sits exactly on the connection edge, so the connector's first
 /// primitive necessarily touches the boundary there; every other contact is a
 /// real escape.
-fn primitive_leaves_polygon(primitive: &PathPrimitive, port: Point, polygon: &Polygon) -> bool {
-    if polygon.classify_point(primitive.point_at(0.5)) == PointClassification::Outside {
-        return true;
+fn polygon_escape_witness(
+    primitive: &PathPrimitive,
+    port: Point,
+    polygon: &Polygon,
+) -> Option<Point> {
+    let midpoint = primitive.point_at(0.5);
+    if polygon.classify_point(midpoint) == PointClassification::Outside {
+        return Some(midpoint);
     }
     for edge_index in 0..polygon.original_edge_count() {
         let (edge_start, edge_end) = polygon.original_edge(edge_index);
@@ -540,15 +583,17 @@ fn primitive_leaves_polygon(primitive: &PathPrimitive, port: Point, polygon: &Po
         match primitive_intersections(primitive, &edge) {
             Intersection::None => {}
             Intersection::Points(points) => {
-                if points
+                if let Some(hit) = points
                     .iter()
-                    .any(|hit| (hit.point - port).norm() > ATTACHMENT_EPS)
+                    .find(|hit| (hit.point - port).norm() > ATTACHMENT_EPS)
                 {
-                    return true;
+                    return Some(hit.point);
                 }
             }
-            _ => return true,
+            // An overlap with the boundary is an escape whose witness cannot
+            // be a single crossing point; report where it was found.
+            _ => return Some(midpoint),
         }
     }
-    false
+    None
 }
