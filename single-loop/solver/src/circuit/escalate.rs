@@ -20,7 +20,10 @@
 //! `SpacingOutcome::GeometryFailure` depending on why, or (b) at least one
 //! certifies -> call [`rank`] on the certified set and return
 //! `SpacingOutcome::Solved` with the winner. `walk_ladder` takes it from
-//! there.
+//! there. On `LadderVerdict::NoSolution`, its `failure` is the journal
+//! source for `LoopError::journal_tail` (design spec §8.4: "NO_SOLUTION_
+//! GEOMETRY mit Journal-Auszug") -- Task 11 should not need to separately
+//! remember which rung's `SearchFailure` mattered.
 
 use crate::circuit::search::SearchFailure;
 use crate::circuit::types::{ALLOWED_SPACINGS_MM, LoopErrorCode};
@@ -114,32 +117,48 @@ pub enum SpacingOutcome {
 
 /// The final result of walking an escalation ladder (design spec §8):
 /// either the candidate that solved it, or the `LoopErrorCode` to report
-/// once none did.
+/// once none did, together with the `SearchFailure` that ended the ladder
+/// (when there is one) so a caller building a `LoopError` never has to
+/// separately track which rung's failure mattered.
 #[derive(Clone, Debug, PartialEq)]
 pub enum LadderVerdict {
     Solved(Candidate),
-    NoSolution(LoopErrorCode),
+    NoSolution {
+        code: LoopErrorCode,
+        /// Design spec §8.4: `NO_SOLUTION_GEOMETRY` is reported "mit
+        /// Journal-Auszug" -- this is that journal's source
+        /// (`SearchFailure::journal_tail`). `Some` exactly when `code` is
+        /// `NoSolutionGeometry`; `None` for the length-exhausted case
+        /// (§8.5), since a `LengthOnly` outcome carries no `SearchFailure`
+        /// at all -- a pre-prune skip never runs a search, so there is no
+        /// journal to excerpt.
+        failure: Option<SearchFailure>,
+    },
 }
 
 /// Classifies a sequence of non-`Solved` rung outcomes into the failure
-/// code design spec §8.3/§8.4 mandates: a `GeometryFailure` *anywhere* in
+/// code design spec §8.3/§8.4 mandates, plus (for the geometry case) the
+/// `SearchFailure` responsible: a `GeometryFailure` *anywhere* in
 /// `outcomes` forbids escalating at all, forcing `NoSolutionGeometry` --
 /// even when it is the last (highest-spacing) outcome, where an
 /// exhausted-ladder reading would otherwise conclude `NoSolutionLength`
 /// (§8.5). Only when every outcome is `LengthOnly` does exhausting the
-/// ladder mean `NoSolutionLength`. Private: only [`walk_ladder`] calls
-/// this, and only with the outcomes it actually collected (never one
-/// containing a `Solved` entry -- `walk_ladder` returns as soon as one
-/// appears, before this is ever called).
-fn classify(outcomes: &[SpacingOutcome]) -> LoopErrorCode {
-    let any_geometry_failure = outcomes
-        .iter()
-        .any(|outcome| matches!(outcome, SpacingOutcome::GeometryFailure(_)));
-    if any_geometry_failure {
-        LoopErrorCode::NoSolutionGeometry
-    } else {
-        LoopErrorCode::NoSolutionLength
+/// ladder mean `NoSolutionLength`, with no failure to report. Private:
+/// only [`walk_ladder`] calls this, and only with the outcomes it actually
+/// collected (never one containing a `Solved` entry -- `walk_ladder`
+/// returns as soon as one appears, before this is ever called).
+/// `walk_ladder`'s own loop only ever pushes at most one `GeometryFailure`
+/// (it breaks immediately after), so which one this returns when several
+/// outcomes are present is not ambiguous in practice -- but this searches
+/// by value rather than assuming position, so that guarantee is not a
+/// silent precondition of correctness here.
+fn classify(outcomes: Vec<SpacingOutcome>) -> (LoopErrorCode, Option<SearchFailure>) {
+    for outcome in outcomes {
+        if let SpacingOutcome::GeometryFailure(failure) = outcome {
+            return (LoopErrorCode::NoSolutionGeometry, Some(failure));
+        }
     }
+    (LoopErrorCode::NoSolutionLength, None)
 }
 
 /// Walks `escalation_ladder(requested)` in ascending order, calling
@@ -158,6 +177,9 @@ fn classify(outcomes: &[SpacingOutcome]) -> LoopErrorCode {
 ///   rung;
 /// - exhausting every rung with nothing but `LengthOnly` outcomes ends
 ///   with `NoSolutionLength` (§8.5).
+///
+/// The `LadderVerdict::NoSolution.failure` returned is always the
+/// `SearchFailure` that actually ended the ladder (see [`classify`]).
 pub fn walk_ladder(
     requested: u32,
     mut try_spacing: impl FnMut(u32) -> SpacingOutcome,
@@ -174,7 +196,8 @@ pub fn walk_ladder(
             break;
         }
     }
-    LadderVerdict::NoSolution(classify(&outcomes))
+    let (code, failure) = classify(outcomes);
+    LadderVerdict::NoSolution { code, failure }
 }
 
 /// Orders two candidates by design spec §10's criteria, in order: coverage

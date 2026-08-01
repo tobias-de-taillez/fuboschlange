@@ -177,7 +177,13 @@ fn every_rung_failing_with_the_last_on_geometry_classifies_as_geometry() {
     assert_eq!(attempted, vec![150, 225, 300]);
     assert_eq!(
         verdict,
-        LadderVerdict::NoSolution(LoopErrorCode::NoSolutionGeometry)
+        LadderVerdict::NoSolution {
+            code: LoopErrorCode::NoSolutionGeometry,
+            // Design spec §8.4: "NO_SOLUTION_GEOMETRY mit Journal-Auszug" --
+            // the 300 mm rung's own failure must survive to here, not just
+            // its code, so `LoopError::journal_tail` has something to show.
+            failure: Some(geometry_failure()),
+        }
     );
 }
 
@@ -188,7 +194,10 @@ fn exhausting_the_ladder_on_length_alone_reports_length_not_geometry() {
     let verdict = walk_ladder(150, |_spacing_mm| SpacingOutcome::LengthOnly);
     assert_eq!(
         verdict,
-        LadderVerdict::NoSolution(LoopErrorCode::NoSolutionLength)
+        LadderVerdict::NoSolution {
+            code: LoopErrorCode::NoSolutionLength,
+            failure: None,
+        }
     );
 }
 
@@ -205,7 +214,10 @@ fn geometry_failure_at_the_requested_spacing_forbids_any_escalation() {
     assert_eq!(attempted, vec![150]);
     assert_eq!(
         verdict,
-        LadderVerdict::NoSolution(LoopErrorCode::NoSolutionGeometry)
+        LadderVerdict::NoSolution {
+            code: LoopErrorCode::NoSolutionGeometry,
+            failure: Some(geometry_failure()),
+        }
     );
 }
 
