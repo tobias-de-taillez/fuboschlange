@@ -52,6 +52,46 @@ Daraus folgt die entscheidende Einschränkung:
 nicht auf vier Seiten à 75 mm verteilen, sondern nur auf **zwei
 gegenüberliegende Seiten à 150 mm**.
 
+## 2a. Die Seitenzuweisung, durchgerechnet
+
+Zwei Schritte, beide zwingend:
+
+**Erstens: alle vier Seiten, nicht zwei.** Rückt eine Rechteckspirale nur an
+Nord und Süd ein, bleiben Ost- und West-Inset über alle Umrundungen
+konstant — die Spirale zieht sich nur vertikal zusammen, und alle Windungen
+liegen auf Ost und West übereinander. Das ist keine Spirale, sondern ein
+Streifen, und es kollidiert sofort. Also rückt **jede** Seite pro Umrundung
+ein.
+
+Damit ist der Betrag festgelegt: Auf einer Seite ist der Abstand zweier
+aufeinanderfolgender Windungen genau die Einrückung pro Umrundung. Für den
+Vorlauf muss dieser Abstand 2×VA = **300 mm** sein — als zwei 150-mm-S-Schläge
+darstellbar (§2), 75 mm ist nicht darstellbar und 150 mm wäre zu dicht.
+
+**Zweitens: beide Arme rücken gemeinsam ein.** Der S-Schlag des Vorlaufs
+überstreicht quer das Intervall `[r, r+300]`. Die Rücklaufbahn liegt bei
+`r+150` — mitten darin. Läuft der Rücklauf dort gerade durch, ist die
+Kreuzung unvermeidlich; **das ist exakt der Treffer bei (1162,5 | 487,5)**.
+
+Die einzige konfliktfreie Anordnung: Der Rücklauf rückt an derselben Ecke
+gleichzeitig ein, um VA versetzt.
+
+```text
+Vorlauf:   r      → r+300
+Rücklauf:  r+150  → r+450
+```
+
+Zwei parallele S-Schläge im festen Abstand 150 mm — sie können sich nicht
+schneiden, weil sie überall denselben Versatz halten. Genau das ist die
+bifilare Doppelspirale: zwei Arme, die *gemeinsam* nach innen laufen und
+überall im Verlegeabstand nebeneinander liegen, nicht zwei unabhängig
+belegte Ringmengen.
+
+Daraus folgt für die Konstruktion: Vor- und Rücklauf sind **eine** Bahnfolge
+mit zwei Spuren, keine getrennten Bahnlisten. Die Reservierung wird damit
+strukturell statt geprüft — die zweite Spur ist per Konstruktion frei und
+liegt immer VA neben der ersten.
+
 ## 3. Zu bauen
 
 1. **`build_spiral_lanes`** ersetzt `build_lanes` für das Spiralmuster:
@@ -59,13 +99,9 @@ gegenüberliegende Seiten à 150 mm**.
    Umrundung rückt an zwei gegenüberliegenden Seiten um je 150 mm ein
    (S-Schlag aus zwei `BroadTurn45`); die beiden anderen Seiten laufen auf
    konstantem Inset.
-2. **Seitenwahl festlegen und begründen:** an welchen zwei Seiten eingerückt
-   wird, entscheidet, ob Vor- und Rücklauf sich vertragen. Vor der
-   Implementierung an einem Fixture durchrechnen: Der Einwärtsarm überstreicht
-   beim S-Schlag das Intervall [r, r+150]; die Rücklaufbahn darf in diesem
-   Intervall an dieser Seite nicht liegen. Ergibt sich ein Konflikt, ist die
-   Rücklaufbahn um eine halbe Steigung zu versetzen (Rücklauf rückt an den
-   *anderen* beiden Seiten ein).
+2. **Seitenwahl — gelöst, siehe §2a.** Eingerückt wird an *allen vier*
+   Seiten um je 300 mm pro Umrundung, und beide Arme rücken an derselben
+   Ecke gleichzeitig ein.
 3. **`plan_inward_arm` / `complete_spiral`** folgen der Bahnfolge, statt
    Ringe zu belegen und zu hoppen. Die Reservierungs-Invariante bleibt: die
    Zwischenbahn gehört dem Rücklauf.
