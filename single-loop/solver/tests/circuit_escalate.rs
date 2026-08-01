@@ -150,6 +150,40 @@ fn rank_panics_on_an_empty_candidate_list() {
     rank(Vec::new());
 }
 
+#[test]
+fn ranking_is_order_dependent_across_a_coverage_tie_chain() {
+    // `compare_candidates` (escalate.rs doc) is explicitly not a total
+    // order: a chain of three candidates, each tied to its neighbor but
+    // not to the chain's own ends, lets `rank`'s left-fold land on a
+    // different winner depending only on input order. Pinned here as a
+    // known, accepted property (not a latent bug to "fix" into
+    // nondeterminism later) -- `rank` itself stays fully deterministic for
+    // any *one* fixed input order (design spec §12).
+    //
+    // a: 75.00 mm, worst penalty (9) -- b: 75.08 mm, middle penalty (5) --
+    // c: 75.16 mm, best penalty (1). a~b are 0.08 mm apart (tied), b~c are
+    // 0.08 mm apart (tied), but a~c are 0.16 mm apart -- not tied, so a
+    // and c, compared directly, are always decided by coverage alone
+    // (a wins) regardless of penalty.
+    let a = candidate("a", 75.00, 9.0, 0.0, 0.0);
+    let b = candidate("b", 75.08, 5.0, 0.0, 0.0);
+    let c = candidate("c", 75.16, 1.0, 0.0, 0.0);
+
+    // Ascending order: a loses its tie-break to b (better penalty), then b
+    // loses its tie-break to c (better penalty still). a and c are never
+    // compared directly, so c's real coverage disadvantage against a never
+    // surfaces.
+    let ascending = rank(vec![a.clone(), b.clone(), c.clone()]);
+    assert_eq!(ascending.key, "c");
+
+    // Descending order: c beats b's tie-break (better penalty) and stays
+    // best, so a ends up compared directly against c -- not a tie -- and
+    // wins outright on coverage alone, despite the worst penalty of the
+    // three.
+    let descending = rank(vec![c, b, a]);
+    assert_eq!(descending.key, "a");
+}
+
 // --- Controller amendment 2: VA300 geometry, never mislabeled as length ---
 
 #[test]
@@ -233,7 +267,14 @@ fn solving_a_rung_stops_the_ladder_without_trying_looser_spacings() {
     assert_eq!(attempted, vec![150]);
     assert_eq!(
         verdict,
-        LadderVerdict::Solved(candidate("winner", 10.0, 0.0, 0.0, 50_000.0))
+        LadderVerdict::Solved {
+            // Solved on the very first (requested) rung: the winning
+            // spacing equals `requested`, not some other ladder value --
+            // `LoopPlan::actual_spacing_mm` and the §8.3 warnings both key
+            // off exactly this.
+            spacing_mm: 150,
+            candidate: candidate("winner", 10.0, 0.0, 0.0, 50_000.0),
+        }
     );
 }
 
@@ -252,6 +293,15 @@ fn solving_after_escalating_past_length_only_failures_stops_there() {
     assert_eq!(attempted, vec![75, 150, 225]);
     assert_eq!(
         verdict,
-        LadderVerdict::Solved(candidate("mid", 20.0, 0.0, 0.0, 60_000.0))
+        LadderVerdict::Solved {
+            // Solved after escalating past 75 and 150: the winning
+            // spacing is 225 (where it actually solved), not 75 (the
+            // requested value) -- this is the case
+            // `solving_a_rung_stops_the_ladder_without_trying_looser_
+            // spacings` above can't distinguish, since there `requested`
+            // and the winning rung are the same value.
+            spacing_mm: 225,
+            candidate: candidate("mid", 20.0, 0.0, 0.0, 60_000.0),
+        }
     );
 }

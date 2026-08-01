@@ -23,7 +23,11 @@
 //! there. On `LadderVerdict::NoSolution`, its `failure` is the journal
 //! source for `LoopError::journal_tail` (design spec §8.4: "NO_SOLUTION_
 //! GEOMETRY mit Journal-Auszug") -- Task 11 should not need to separately
-//! remember which rung's `SearchFailure` mattered.
+//! remember which rung's `SearchFailure` mattered. Likewise, on
+//! `LadderVerdict::Solved`, `spacing_mm` is the winning rung -- the only
+//! input `LoopPlan::actual_spacing_mm` and the §8.3 `SpacingIncreased`/
+//! `SpacingExceeds250Mm` warnings need, so Task 11 should not need to
+//! separately remember which rung solved either.
 
 use crate::circuit::search::SearchFailure;
 use crate::circuit::types::{ALLOWED_SPACINGS_MM, LoopErrorCode};
@@ -116,13 +120,25 @@ pub enum SpacingOutcome {
 }
 
 /// The final result of walking an escalation ladder (design spec §8):
-/// either the candidate that solved it, or the `LoopErrorCode` to report
-/// once none did, together with the `SearchFailure` that ended the ladder
-/// (when there is one) so a caller building a `LoopError` never has to
-/// separately track which rung's failure mattered.
+/// either the candidate that solved it (together with the spacing that
+/// solved it), or the `LoopErrorCode` to report once none did, together
+/// with the `SearchFailure` that ended the ladder (when there is one) so a
+/// caller building a `LoopError` never has to separately track which
+/// rung's failure mattered.
 #[derive(Clone, Debug, PartialEq)]
 pub enum LadderVerdict {
-    Solved(Candidate),
+    Solved {
+        /// The rung (one of `ALLOWED_SPACINGS_MM`) that produced
+        /// `candidate` -- always `try_spacing`'s argument at the point it
+        /// returned `SpacingOutcome::Solved`, never re-derived from
+        /// `candidate` itself (which carries no spacing field -- amendment
+        /// 5, `Candidate`'s field set is fixed). The only input
+        /// `LoopPlan::actual_spacing_mm` and the design spec §8.3
+        /// `SpacingIncreased` (`spacing_mm > requested`) /
+        /// `SpacingExceeds250Mm` (`spacing_mm == 300`) warnings need.
+        spacing_mm: u32,
+        candidate: Candidate,
+    },
     NoSolution {
         code: LoopErrorCode,
         /// Design spec §8.4: `NO_SOLUTION_GEOMETRY` is reported "mit
@@ -179,7 +195,9 @@ fn classify(outcomes: Vec<SpacingOutcome>) -> (LoopErrorCode, Option<SearchFailu
 ///   with `NoSolutionLength` (§8.5).
 ///
 /// The `LadderVerdict::NoSolution.failure` returned is always the
-/// `SearchFailure` that actually ended the ladder (see [`classify`]).
+/// `SearchFailure` that actually ended the ladder (see [`classify`]); the
+/// `LadderVerdict::Solved.spacing_mm` returned is always the rung
+/// `try_spacing` was called with when it returned `Solved`.
 pub fn walk_ladder(
     requested: u32,
     mut try_spacing: impl FnMut(u32) -> SpacingOutcome,
@@ -188,7 +206,10 @@ pub fn walk_ladder(
     for spacing_mm in escalation_ladder(requested) {
         let outcome = try_spacing(spacing_mm);
         if let SpacingOutcome::Solved(candidate) = outcome {
-            return LadderVerdict::Solved(candidate);
+            return LadderVerdict::Solved {
+                spacing_mm,
+                candidate,
+            };
         }
         let is_geometry_failure = matches!(outcome, SpacingOutcome::GeometryFailure(_));
         outcomes.push(outcome);
@@ -243,6 +264,17 @@ fn compare_with_tie_window(left: f64, right: f64, window_mm: f64) -> Ordering {
 /// certified, which is never an empty set (a rung with zero certified
 /// candidates is a `LengthOnly`/`GeometryFailure` outcome, not a call to
 /// `rank`).
+///
+/// `rank` is deterministic for a fixed input order (design spec §12), but
+/// because `compare_candidates` is not a total order, the *result* can
+/// depend on that order: three or more candidates forming a coverage chain
+/// (each tied to its neighbor, but not to the chain's own ends) can rank
+/// differently depending on which order they arrive in -- see
+/// `ranking_is_order_dependent_across_a_coverage_tie_chain` in
+/// `tests/circuit_escalate.rs` for a worked example. Where reproducibility
+/// across call sites matters (not just within one), callers should feed
+/// `candidates` in a canonical order -- ascending `coverage_upper_mm` is
+/// the natural choice, matching criterion 1's own direction.
 pub fn rank(candidates: Vec<Candidate>) -> Candidate {
     let mut candidates = candidates.into_iter();
     let first = candidates
