@@ -137,7 +137,14 @@ Unterkante, und der Schwanz der Tropfenschleife landet exakt darauf.
 Spec §5). Die Verschachtelung fällt dann um eine Windung zurück, statt eine
 sich kreuzende Schleife zu liefern.
 
-## 5. Abnahme — erreicht
+## 5. Abnahme — erreicht, aber anders als hier ursprünglich formuliert
+
+**Klarstellung.** §4 dieses Plans forderte, den Test
+`a_four_ring_spiral_crosses_itself_and_the_validator_catches_it` umzudrehen.
+Das ist **nicht** passiert und soll auch nicht passieren: Die Schnecke steht
+*neben* `spiral.rs` statt an dessen Stelle. Jener Test beschreibt weiterhin
+korrekt, was das Ringmodell tut, und bleibt auf `SELF_INTERSECTION` stehen.
+Die Abnahme der Schnecke ist `tests/circuit_schnecke.rs`.
 
 `tests/circuit_schnecke.rs`, Raum 3000 × 2400, Verlegeabstand 75 mm,
 Wandabstand 75 mm, Anschluss mittig an der Unterkante (Zone 600 × 225):

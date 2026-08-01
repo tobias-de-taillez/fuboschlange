@@ -948,6 +948,13 @@ fn walk_turn(
 /// is forced to sit right against one of them. Rejecting it here is what makes
 /// the nesting back off by one revolution instead of producing a loop that
 /// crosses itself.
+///
+/// **Precondition: the turn sits on a column.** That is the only case
+/// [`walk_turn`] produces, and it is why the extent checked here is the `y`
+/// one. A turn placed on a *row* would overhang along `x` instead, and this
+/// check would pass vacuously — so moving the turn onto the long side of a
+/// squat lane (the open item that would buy back two lanes at 150 mm) means
+/// checking the extent along the turn's own travel axis, not `y`.
 fn turn_clears_its_own_lane(index: &GraphIndex, turn: &PoseEdge, claim: &Claim) -> bool {
     let mut lowest = f64::MAX;
     let mut highest = f64::MIN;
