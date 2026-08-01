@@ -1,0 +1,418 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>IMU-Streckenmessung</title>
+<!--
+  Misst die Strecke zwischen zwei Wandtipps durch Strapdown-Integration der
+  6 IMU-Zeitreihen des Telefons, und vergleicht sie mit einer bekannten Strecke.
+  Zweck ist die Zahl, nicht das Produkt: wie gross ist die Abweichung wirklich.
+
+  Keine Dependencies, kein Server. Datei aufs Telefon kopieren und oeffnen —
+  file:// gilt als sicherer Kontext, die Sensor-API ist damit verfuegbar.
+
+  Die Mathematik ist eine Kopie aus probe-imu.mjs, wo sie gegen synthetische
+  Daten mit bekannter Wahrheit geprueft wird. Der Selbstcheck unten (Konsole)
+  reproduziert den wichtigsten dieser Tests, damit eine kaputte Kopie auffaellt.
+-->
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; font: 16px/1.5 system-ui, sans-serif;
+         background: #14161a; color: #e6e8eb; -webkit-text-size-adjust: 100%; }
+  h1 { font-size: 19px; margin: 0 0 4px; }
+  .sub { color: #8b929c; font-size: 13px; margin-bottom: 16px; }
+  .card { background: #1c1f25; border: 1px solid #2a2e36; border-radius: 12px;
+          padding: 14px; margin-bottom: 12px; }
+  .step { font-size: 20px; font-weight: 600; margin-bottom: 6px; }
+  .hint { color: #9aa2ad; font-size: 14px; }
+  button { width: 100%; padding: 18px; font-size: 18px; font-weight: 600;
+           border: 0; border-radius: 10px; background: #3b82f6; color: #fff; }
+  button:disabled { background: #333840; color: #6b7280; }
+  button.ghost { background: #2a2e36; color: #e6e8eb; font-size: 15px; padding: 12px; }
+  label { display: block; font-size: 13px; color: #9aa2ad; margin-bottom: 4px; }
+  input { width: 100%; padding: 12px; font-size: 17px; border-radius: 8px;
+          border: 1px solid #2a2e36; background: #14161a; color: #e6e8eb; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
+  .kv .k { font-size: 12px; color: #8b929c; }
+  .kv .v { font-size: 17px; font-variant-numeric: tabular-nums; }
+  .big { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .ok { color: #4ade80; } .warn { color: #fbbf24; } .bad { color: #f87171; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px;
+          font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 5px 4px; border-bottom: 1px solid #262a31; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: #8b929c; font-weight: 500; }
+</style>
+
+<h1>IMU-Streckenmessung</h1>
+<div class="sub">Zwei Wandtipps, bekannte Strecke dazwischen, Abweichung messen.</div>
+
+<div class="card">
+  <label for="soll">Bekannte Strecke (m)</label>
+  <input id="soll" type="number" step="0.01" min="0.1" value="4.00" inputmode="decimal">
+</div>
+
+<div class="card">
+  <div class="step" id="step">Bereit</div>
+  <div class="hint" id="hint">Sollwert eintragen, Telefon flach mit Display nach oben ablegen, dann starten.</div>
+</div>
+
+<button id="go">Messung starten</button>
+<button id="manual" class="ghost" style="margin-top:8px" hidden>Tipp manuell auslösen</button>
+
+<div class="card" id="live" hidden>
+  <div class="grid kv">
+    <div><div class="k">Abtastrate</div><div class="v" id="hz">–</div></div>
+    <div><div class="k">dt-Streuung</div><div class="v" id="jit">–</div></div>
+    <div><div class="k">|Kraft|</div><div class="v" id="fmag">–</div></div>
+    <div><div class="k">|Drehrate|</div><div class="v" id="wmag">–</div></div>
+  </div>
+</div>
+
+<div class="card" id="result" hidden>
+  <div class="k" style="font-size:12px;color:#8b929c">Gemessen</div>
+  <div class="big" id="ist">–</div>
+  <div class="grid kv" style="margin-top:12px">
+    <div><div class="k">Abweichung</div><div class="v" id="delta">–</div></div>
+    <div><div class="k">Lagedrift am Ende</div><div class="v" id="drift">–</div></div>
+    <div><div class="k">Restgeschw. v(T)</div><div class="v" id="vres">–</div></div>
+    <div><div class="k">Segmentdauer</div><div class="v" id="dur">–</div></div>
+    <div><div class="k">ohne ZUPT</div><div class="v" id="noz">–</div></div>
+    <div><div class="k">Samples</div><div class="v" id="ns">–</div></div>
+  </div>
+</div>
+
+<div class="card" id="runsCard" hidden>
+  <table id="runs"></table>
+  <button class="ghost" id="clear" style="margin-top:10px">Läufe löschen</button>
+</div>
+
+<script>
+// ============================================================== Quaternionen
+// q = [w,x,y,z], dreht vom Body- ins Nav-Frame: v_nav = q * v_body * q^-1
+const qmul = (a, b) => [
+  a[0]*b[0] - a[1]*b[1] - a[2]*b[2] - a[3]*b[3],
+  a[0]*b[1] + a[1]*b[0] + a[2]*b[3] - a[3]*b[2],
+  a[0]*b[2] - a[1]*b[3] + a[2]*b[0] + a[3]*b[1],
+  a[0]*b[3] + a[1]*b[2] - a[2]*b[1] + a[3]*b[0],
+];
+const qnorm = q => { const n = Math.hypot(...q); return q.map(c => c / n); };
+// Rotationsvektor -> Quaternion. Exponentialabbildung, exakt fuer konstante
+// Drehrate im Intervall — kein Kleinwinkelfehler bei den 200-300 grad/s,
+// die beim Gehen auftreten.
+const expq = rv => {
+  const th = Math.hypot(...rv);
+  if (th < 1e-12) return [1, rv[0]/2, rv[1]/2, rv[2]/2];
+  const s = Math.sin(th/2) / th;
+  return [Math.cos(th/2), rv[0]*s, rv[1]*s, rv[2]*s];
+};
+const rot = (q, v) => {
+  const [w, x, y, z] = q;
+  const tx = 2*(y*v[2] - z*v[1]), ty = 2*(z*v[0] - x*v[2]), tz = 2*(x*v[1] - y*v[0]);
+  return [v[0] + w*tx + (y*tz - z*ty),
+          v[1] + w*ty + (z*tx - x*tz),
+          v[2] + w*tz + (x*ty - y*tx)];
+};
+const qBetween = (u, v) => {
+  const d = u[0]*v[0] + u[1]*v[1] + u[2]*v[2];
+  if (d > 1 - 1e-12) return [1, 0, 0, 0];
+  const c = [u[1]*v[2]-u[2]*v[1], u[2]*v[0]-u[0]*v[2], u[0]*v[1]-u[1]*v[0]];
+  return qnorm([1 + d, ...c]);
+};
+
+// ================================================================ Integrator
+// samples: [{ t (s), f: [m/s^2] spezifische Kraft im Body-Frame, w: [rad/s] }]
+// Kopie aus probe-imu.mjs. Aenderungen dort zuerst, dort laufen die Tests.
+function integrate(samples, opts = {}) {
+  const { staticSec = 2, zupt = true, segment = null, coning = true,
+          injectTiltDeg = 0, injectTiltAxis = [0, 1, 0] } = opts;
+
+  const t0 = samples[0].t;
+  const stat = samples.filter(s => s.t - t0 < staticSec);
+  if (stat.length < 10) throw new Error('Ruhephase zu kurz: ' + stat.length + ' Samples');
+  const mean = get => [0,1,2].map(i => stat.reduce((a, s) => a + get(s)[i], 0) / stat.length);
+
+  // Im Stillstand ist die wahre Drehrate null — der Mittelwert ist der Bias.
+  const bg = mean(s => s.w);
+  // Lokales g aus dem Stillstand, absorbiert den Skalenfehler des Sensors mit.
+  const fs = mean(s => s.f);
+  const g = Math.hypot(...fs);
+  // Die gemittelte spezifische Kraft zeigt im Stillstand nach oben. Heading
+  // bleibt frei — pro Segment zaehlt nur der relative Verschiebungsvektor.
+  let q = qBetween(fs.map(c => c / g), [0, 0, 1]);
+  if (injectTiltDeg !== 0) {
+    const a = Math.hypot(...injectTiltAxis);
+    const rv = injectTiltAxis.map(c => (c/a) * injectTiltDeg * Math.PI / 180);
+    q = qmul(q, expq(rv));
+  }
+
+  const tA = segment ? segment[0] : t0 + staticSec;
+  const tB = segment ? segment[1] : Infinity;
+  const traj = [];
+  let v = [0,0,0], p = [0,0,0], prev = null;
+
+  for (const s of samples) {
+    if (s.t - t0 < staticSec) continue;
+    if (s.t > tB) break;
+
+    if (prev) {
+      const dt = s.t - prev.t;
+      if (!(dt > 0)) continue;
+      const w1 = [0,1,2].map(i => prev.w[i] - bg[i]);
+      const w2 = [0,1,2].map(i => s.w[i] - bg[i]);
+      const rv = [0,1,2].map(i => (w1[i] + w2[i]) / 2 * dt);
+      if (coning) {
+        // Korrektur zweiter Ordnung. Bei 400 Hz egal, bei den 50-100 Hz eines
+        // Browsers nicht mehr: theta += (1/12)(w_{k-1} x w_k) dt^2
+        const c = [w1[1]*w2[2]-w1[2]*w2[1], w1[2]*w2[0]-w1[0]*w2[2], w1[0]*w2[1]-w1[1]*w2[0]];
+        for (let i = 0; i < 3; i++) rv[i] += c[i]*dt*dt/12;
+      }
+      q = qnorm(qmul(q, expq(rv)));
+    }
+
+    const fNav = rot(q, s.f);
+    const aNav = [fNav[0], fNav[1], fNav[2] - g];
+
+    // Vor dem ersten Tipp nur die Lage mitfuehren: das Aufnehmen des Telefons
+    // dreht das Geraet, darf aber nicht in die Strecke eingehen.
+    if (s.t < tA) { prev = { ...s, aNav }; continue; }
+    if (!traj.length) { prev = { ...s, aNav }; traj.push({ t: s.t, v: [...v], p: [...p] }); continue; }
+
+    const dt = s.t - prev.t;
+    // Trapez statt Euler — kostet nichts, halbiert den Diskretisierungsfehler.
+    const vNew = [0,1,2].map(i => v[i] + (aNav[i] + prev.aNav[i]) / 2 * dt);
+    p = [0,1,2].map(i => p[i] + (vNew[i] + v[i]) / 2 * dt);
+    v = vNew;
+    prev = { ...s, aNav };
+    traj.push({ t: s.t, v: [...v], p: [...p] });
+  }
+  if (traj.length < 2) throw new Error('Messsegment zu kurz: ' + traj.length + ' Samples');
+
+  const raw = { p: [...p], v: [...v], q, g, bg, traj };
+  if (!zupt) return raw;
+
+  // Zwei-Punkt-ZUPT: beide Tipps sind v=0-Ereignisse, der Rest bei tB ist
+  // reiner Fehler. Linear ueber die Segmentdauer abziehen, neu integrieren.
+  const T = traj[traj.length-1].t - traj[0].t;
+  const vT = traj[traj.length-1].v;
+  const vc = k => { const f = (traj[k].t - traj[0].t) / T;
+                    return [0,1,2].map(i => traj[k].v[i] - f*vT[i]); };
+  let pc = [0,0,0];
+  for (let k = 1; k < traj.length; k++) {
+    const dt = traj[k].t - traj[k-1].t, v1 = vc(k-1), v2 = vc(k);
+    pc = [0,1,2].map(i => pc[i] + (v1[i] + v2[i]) / 2 * dt);
+  }
+  return { ...raw, p: pc, pRaw: raw.p };
+}
+
+// ================================================================= Aufnahme
+const RUHE_S = 10;       // Kalibrier- und Ausrichtphase
+const ENDRUHE_S = 3;     // Stillstand nach Tipp B, liefert die Lagedrift
+const TIPP_G = 30;       // |f| ueber diesem Wert gilt als Wandtipp (m/s^2)
+const TIPP_SPERRE = 1.0; // Sekunden Sperre nach einem Tipp
+const STILL_W = 0.35;    // rad/s, Schwelle fuer "liegt ruhig"
+
+const $ = id => document.getElementById(id);
+let samples = [], state = 'idle', tA = 0, tB = 0, lastTip = -9, t0 = 0;
+let flipAccel = false, stillSeit = null;
+
+// iOS meldet accelerationIncludingGravity mit umgekehrtem Vorzeichen (flach
+// liegend -9.81 statt +9.81). Der Integrator erwartet die spezifische Kraft,
+// also +g. Aus der Ruhephase erkennbar, solange das Display nach oben zeigt.
+function onMotion(e) {
+  const a = e.accelerationIncludingGravity, r = e.rotationRate;
+  if (!a || a.x === null || !r) return;
+  const t = performance.now() / 1000;
+  const s = flipAccel ? -1 : 1;
+  samples.push({
+    t,
+    f: [s * a.x, s * a.y, s * a.z],
+    w: [(r.beta || 0) * Math.PI / 180, (r.gamma || 0) * Math.PI / 180, (r.alpha || 0) * Math.PI / 180],
+  });
+  tick(t);
+}
+
+function stats() {
+  const n = samples.length;
+  if (n < 20) return null;
+  const win = samples.slice(-60);
+  const dts = win.slice(1).map((s, i) => s.t - win[i].t);
+  const m = dts.reduce((a, b) => a + b, 0) / dts.length;
+  const sd = Math.sqrt(dts.reduce((a, d) => a + (d - m) ** 2, 0) / dts.length);
+  const last = samples[n - 1];
+  return { hz: 1 / m, jit: sd * 1000, f: Math.hypot(...last.f), w: Math.hypot(...last.w) };
+}
+
+function tick(t) {
+  const st = stats();
+  if (st) {
+    $('hz').textContent = st.hz.toFixed(0) + ' Hz';
+    $('jit').textContent = '±' + st.jit.toFixed(1) + ' ms';
+    $('fmag').textContent = st.f.toFixed(2) + ' m/s²';
+    $('wmag').textContent = st.w.toFixed(2) + ' rad/s';
+    $('fmag').className = 'v ' + (Math.abs(st.f - 9.81) < 2 ? 'ok' : 'warn');
+  }
+
+  if (state === 'ruhe') {
+    const rest = RUHE_S - (t - t0);
+    $('step').textContent = 'Ruhephase … ' + Math.ceil(rest) + ' s';
+    if (rest <= 0) {
+      // Vorzeichen-Check: flach liegend muss die z-Komponente positiv sein.
+      const z = samples.slice(-40).reduce((a, s) => a + s.f[2], 0) / 40;
+      if (z < 0) { flipAccel = true; samples.forEach(s => (s.f = s.f.map(c => -c))); }
+      state = 'bereit';
+      $('step').textContent = 'Jetzt an Wand A tippen';
+      $('hint').textContent = 'Telefon aufnehmen, mit der oberen linken Ecke gegen Wand A tippen.'
+        + (flipAccel ? ' (Beschleunigungs-Vorzeichen gedreht — iOS-Konvention erkannt.)' : '');
+      $('manual').hidden = false;
+    }
+    return;
+  }
+
+  if (state === 'bereit' || state === 'messung') {
+    const f = Math.hypot(...samples[samples.length - 1].f);
+    if (f > TIPP_G && t - lastTip > TIPP_SPERRE) tipp(t);
+    return;
+  }
+
+  if (state === 'endruhe') {
+    const w = Math.hypot(...samples[samples.length - 1].w);
+    if (w > STILL_W) { stillSeit = null; $('step').textContent = 'Telefon flach ablegen'; return; }
+    if (stillSeit === null) stillSeit = t;
+    const rest = ENDRUHE_S - (t - stillSeit);
+    $('step').textContent = 'Ruhig halten … ' + Math.max(0, Math.ceil(rest)) + ' s';
+    if (rest <= 0) { state = 'fertig'; auswerten(); }
+  }
+}
+
+function tipp(t) {
+  lastTip = t;
+  if (state === 'bereit') {
+    tA = t; state = 'messung';
+    $('step').textContent = 'Messung läuft';
+    $('hint').textContent = 'Zu Wand B gehen und antippen.';
+  } else if (state === 'messung') {
+    tB = t; state = 'endruhe'; stillSeit = null;
+    $('manual').hidden = true;
+    $('hint').textContent = 'Telefon flach ablegen und still halten.';
+  }
+}
+
+// ================================================================ Auswertung
+function auswerten() {
+  window.removeEventListener('devicemotion', onMotion);
+  const soll = parseFloat($('soll').value);
+
+  let r, rNo, qEnd;
+  try {
+    r   = integrate(samples, { staticSec: RUHE_S, segment: [tA, tB], zupt: true });
+    rNo = integrate(samples, { staticSec: RUHE_S, segment: [tA, tB], zupt: false });
+    // Zweiter Lauf bis zum Ende der Schlussruhe: liefert die Lage nach der
+    // gesamten Strecke. Das Telefon liegt dann wieder still, die gemessene
+    // Kraft zeigt also nachweislich nach oben — die Abweichung der gerechneten
+    // Lage davon IST der aufgelaufene Lagefehler.
+    qEnd = integrate(samples, { staticSec: RUHE_S, segment: [tA, samples[samples.length-1].t] }).q;
+  } catch (err) {
+    $('step').textContent = 'Messung unbrauchbar';
+    $('hint').textContent = err.message;
+    reset(); return;
+  }
+
+  const fEnd = [0,1,2].map(i => samples.slice(-40).reduce((a, s) => a + s.f[i], 0) / 40);
+  const up = rot(qEnd, fEnd.map(c => c / Math.hypot(...fEnd)));
+  const drift = Math.acos(Math.min(1, Math.max(-1, up[2]))) * 180 / Math.PI;
+
+  const ist = Math.hypot(...r.p);
+  const d = ist - soll;
+  const T = tB - tA;
+  const seg = samples.filter(s => s.t >= tA && s.t <= tB).length;
+
+  $('result').hidden = false;
+  $('ist').textContent = ist.toFixed(3) + ' m';
+  $('delta').textContent = (d >= 0 ? '+' : '') + (d * 100).toFixed(1) + ' cm';
+  $('delta').className = 'v ' + (Math.abs(d) < 0.05 ? 'ok' : Math.abs(d) < 0.2 ? 'warn' : 'bad');
+  $('drift').textContent = drift.toFixed(2) + '°';
+  $('drift').className = 'v ' + (drift < 1 ? 'ok' : drift < 5 ? 'warn' : 'bad');
+  $('vres').textContent = Math.hypot(...r.v).toFixed(2) + ' m/s';
+  $('dur').textContent = T.toFixed(1) + ' s';
+  $('noz').textContent = Math.hypot(...rNo.p).toFixed(3) + ' m';
+  $('ns').textContent = seg + ' (' + (seg / T).toFixed(0) + ' Hz)';
+
+  speichern({ soll, ist, d, drift, T, hz: seg / T });
+  $('step').textContent = 'Fertig';
+  $('hint').textContent = 'Telefon wieder ablegen und erneut starten für den nächsten Lauf.';
+  reset();
+}
+
+function reset() {
+  state = 'idle'; samples = []; flipAccel = false;
+  $('go').disabled = false; $('go').textContent = 'Nächster Lauf';
+  $('manual').hidden = true;
+}
+
+// ===================================================================== Läufe
+// Die Frage ist Mittelwert gegen Streuung: liegt der Mittelwert daneben und die
+// Streuung ist klein, ist der Fehler systematisch und Mitteln hilft nicht.
+const KEY = 'imu-messung-laeufe';
+const laden = () => JSON.parse(localStorage.getItem(KEY) || '[]');
+function speichern(run) { const a = laden(); a.push(run); localStorage.setItem(KEY, JSON.stringify(a)); zeigen(); }
+
+function zeigen() {
+  const a = laden();
+  $('runsCard').hidden = !a.length;
+  if (!a.length) return;
+  const ds = a.map(r => r.d);
+  const m = ds.reduce((x, y) => x + y, 0) / ds.length;
+  const sd = ds.length > 1
+    ? Math.sqrt(ds.reduce((x, d) => x + (d - m) ** 2, 0) / (ds.length - 1)) : 0;
+  $('runs').innerHTML =
+    '<tr><th>#</th><th>Soll</th><th>Ist</th><th>Δ cm</th><th>Drift°</th><th>Hz</th></tr>'
+    + a.map((r, i) => '<tr><td>' + (i+1) + '</td><td>' + r.soll.toFixed(2) + '</td><td>'
+        + r.ist.toFixed(2) + '</td><td>' + (r.d*100).toFixed(1) + '</td><td>'
+        + r.drift.toFixed(1) + '</td><td>' + r.hz.toFixed(0) + '</td></tr>').join('')
+    + '<tr><th>n=' + a.length + '</th><th></th><th>Mittel Δ</th><th>' + (m*100).toFixed(1)
+    + '</th><th colspan="2">σ ' + (sd*100).toFixed(1) + ' cm</th></tr>';
+}
+
+// ==================================================================== Start
+$('go').onclick = async () => {
+  if (typeof DeviceMotionEvent === 'undefined') {
+    $('hint').textContent = 'Dieses Gerät liefert keine Bewegungsdaten.'; return;
+  }
+  // iOS verlangt die Freigabe aus einer echten Nutzeraktion heraus.
+  if (typeof DeviceMotionEvent.requestPermission === 'function') {
+    if (await DeviceMotionEvent.requestPermission() !== 'granted') {
+      $('hint').textContent = 'Zugriff auf die Bewegungssensoren abgelehnt.'; return;
+    }
+  }
+  samples = []; flipAccel = false;
+  window.addEventListener('devicemotion', onMotion);
+  t0 = performance.now() / 1000;
+  state = 'ruhe';
+  $('go').disabled = true;
+  $('live').hidden = false; $('result').hidden = true;
+  $('hint').textContent = 'Telefon flach mit Display nach oben liegen lassen.';
+};
+$('manual').onclick = () => tipp(performance.now() / 1000);
+$('clear').onclick = () => { localStorage.removeItem(KEY); zeigen(); };
+zeigen();
+
+// ================================================================ Selbstcheck
+// Faengt eine kaputte Kopie der Mathematik ab. Reproduziert den Kerntest aus
+// probe-imu.mjs: ein konstanter Lagefehler DREHT das Ergebnis, verkuerzt es
+// aber nicht — die Laenge ueberlebt die Zwei-Punkt-Randbedingung exakt.
+(function selfcheck() {
+  const T = 5, D = 4, g = 9.81, dt = 1/200, out = [];
+  for (let t = 0; t < 2; t += dt) out.push({ t, f: [0,0,g], w: [0,0,0] });
+  for (let k = 0; k*dt <= T; k++) {
+    const t = k*dt;
+    out.push({ t: 2+t, f: [D*Math.PI**2/(2*T**2)*Math.cos(Math.PI*t/T), 0, g], w: [0,0,0] });
+  }
+  const a = integrate(out, { zupt: false });
+  const b = integrate(out, { zupt: true, injectTiltDeg: 1 });
+  const bad = Math.abs(Math.hypot(...a.p) - D) > 1e-3 || Math.abs(Math.hypot(...b.p) - D) > 1e-3;
+  console[bad ? 'error' : 'log'](
+    (bad ? 'FAIL' : 'ok') + ' Selbstcheck Integrator: perfekt ' + Math.hypot(...a.p).toFixed(4)
+    + ' m, 1° Lagefehler + ZUPT ' + Math.hypot(...b.p).toFixed(4) + ' m (Soll ' + D + ')');
+})();
+</script>
