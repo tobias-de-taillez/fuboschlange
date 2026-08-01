@@ -1,12 +1,20 @@
 # Schnecke: von Ringen auf offene Spiralbahnen — Bauplan
 
 **Datum:** 2026-08-01
-**Status:** Konstruktion vermessen, Umbau offen
+**Status:** **gebaut** — `src/circuit/schnecke.rs`, zertifiziert in
+`tests/circuit_schnecke.rs`
 **Auslöser:** `a_four_ring_spiral_crosses_itself_and_the_validator_catches_it`
 (`tests/circuit_loop_end_to_end.rs`) — der vierringige Arm kreuzt bei
 (1162,5 | 487,5) die Bahn, die der Rücklauf später belegt.
 
-## 1. Warum das aktuelle Modell kreuzen muss
+> **Korrekturhinweis.** Die §§2, 2a und 6a dieses Plans waren in ihrer
+> ursprünglichen Fassung sachlich falsch — beide auf abgeleiteten statt
+> gemessenen Annahmen. Die Messungen stehen jetzt als Test in
+> `tests/plate_spiral_facts.rs`; die Abschnitte unten sind entsprechend
+> korrigiert und die verworfenen Annahmen ausdrücklich benannt, damit sie
+> niemand rekonstruiert.
+
+## 1. Warum das Ringmodell kreuzen muss
 
 `build_lanes` liefert **geschlossene** Ringe. Ein Arm, der von Ring k auf
 Ring k+2 wechselt, braucht dafür ein Querstück (Hop), und dieses Querstück
@@ -15,183 +23,135 @@ Implementierungsfehler, sondern eine Eigenschaft des Ringmodells: Solange
 die Windungen geschlossen sind, muss der Einwärtsweg irgendwo über sie
 hinweg.
 
-Eine echte Schnecke hat dieses Problem nicht, weil sie keine Ringschar ist:
-Sie ist **eine fortlaufende Spirale**, deren Steigung über die Umrundung
-verteilt ist. Zwei Spiralen gleicher Steigung, um die halbe Steigung
-versetzt, kreuzen sich nie — wie die zwei Gänge einer zweigängigen Schraube.
-Genau so beschreibt es auch das Schlüter-Handbuch (S. 27, siehe
-`docs/superpowers/research/2026-07-31-schneckenverlegung-handwerk-praxis.md`):
-Vorlauf im doppelten Verlegeabstand bis zur Wendeschleife, Rücklauf mittig
-im verbliebenen Freiraum.
+Eine echte Schnecke hat dieses Problem nicht, weil sie keine Ringschar ist,
+sondern **eine fortlaufende Spirale**. Zwei Spiralen gleicher Steigung, um
+die halbe Steigung versetzt, kreuzen sich nie — wie die zwei Gänge einer
+zweigängigen Schraube. So beschreibt es auch das Schlüter-Handbuch (S. 27,
+siehe `docs/superpowers/research/2026-07-31-schneckenverlegung-handwerk-praxis.md`).
 
-## 2. Was der Katalog hergibt (gemessen, nicht geschätzt)
+## 2. Was der Katalog hergibt (gemessen)
 
-Aus `PlateProfile::bekotec_en_23_fi_30_16().templates()`, lokale
-Start-/Endposen:
+**Verworfen:** Die ursprüngliche Fassung behauptete, eine Rechteckspirale
+brauche entlang einer Seite einen richtungserhaltenden Querversatz
+(„S-Schlag" aus zwei `BroadTurn45`), und ein solcher Versatz sei erst ab
+150 mm darstellbar.
 
-| Template | Δ (längs, quer) | Heading |
-|---|---|---|
-| `Straight0` | (150, 0) | Deg0 → Deg0 |
-| `Straight45` | (150, 150) | Deg45 → Deg45 |
-| `BroadTurn45` | (150, **75**) | Deg0 → Deg45 |
-| `BroadTurn90` | (187,5 , 112,5) | Deg0 → Deg90 |
-| `BroadTurn135` | (150, 150) | Deg0 → Deg135 |
-| `BroadReverse180` | (0, 225) | Deg0 → Deg180 |
-| `TeardropReverse` | (0, **150**) | Deg0 → Deg180 |
+**Beides ist falsch.** Gemessen am zertifizierten Graphen des
+3000 × 2400-Fixtures:
 
-Daraus folgt die entscheidende Einschränkung:
+1. **Eine Rechteckspirale braucht überhaupt keinen Querversatz.** Die
+   Einrückung passiert in der Ecke: eine `BroadTurn90` verbindet *irgendeine*
+   Zeilengasse mit *irgendeiner* Spaltengasse zulässiger Parität. Die Ecke
+   unten links führt also von der linken Spalte der Windung j direkt auf die
+   untere Zeile der Windung j+1. Kein S-Schlag, keine Diagonale.
+2. **Der kleinste umkehrfreie richtungserhaltende Querversatz ist 300 mm**
+   (vier Gassen), realisiert als `BroadTurn90`-Paar. 150 mm gibt es nicht,
+   und über einen `BroadTurn45` läuft keine einzige erreichbare Kette.
 
-- Ein einzelner `BroadTurn45` versetzt **75 mm quer**, ändert aber das
-  Heading. Um wieder längs zu laufen, braucht es einen zweiten — Summe
-  **150 mm**.
-- Ein richtungserhaltender Querversatz von 75 mm existiert nicht, auch
-  nicht als Kette (bestätigt durch Graph-Sweep: die einzigen
-  headinggleichen Kanten mit Querversatz sind die Diagonalen 150/150).
+Die Paritätsklassen der Ecken (`tests/plate_spiral_facts.rs`):
 
-**Konsequenz:** Die Steigung von 2×VA = 300 mm pro Umrundung lässt sich
-nicht auf vier Seiten à 75 mm verteilen, sondern nur auf **zwei
-gegenüberliegende Seiten à 150 mm**.
+| Ecke (Heading-Paar) | Gassendifferenz |
+|---|---|
+| `Deg0→Deg90`, `Deg90→Deg0`, `Deg180→Deg270`, `Deg270→Deg180` | gerade |
+| die übrigen vier | ungerade |
 
-## 2a. Die Seitenzuweisung, durchgerechnet
+Rundherum komponiert ergibt das: **die nächste Windung liegt eine gerade
+Zahl von Gassen weiter innen.** Der Einwärtsschritt ist also immer ein
+Vielfaches von 150 mm — nicht weil der Katalog nichts Feineres kann,
+sondern weil die Eckparitäten sich sonst nicht schließen.
 
-Zwei Schritte, beide zwingend:
+## 2a. Die zwei Arme
 
-**Erstens: alle vier Seiten, nicht zwei.** Rückt eine Rechteckspirale nur an
-Nord und Süd ein, bleiben Ost- und West-Inset über alle Umrundungen
-konstant — die Spirale zieht sich nur vertikal zusammen, und alle Windungen
-liegen auf Ost und West übereinander. Das ist keine Spirale, sondern ein
-Streifen, und es kollidiert sofort. Also rückt **jede** Seite pro Umrundung
-ein.
+Arm B ist Arm A, auf jeder Seite um eine Gasse nach innen versetzt. Dessen
+Ecken existieren: pro Heading-Paar haben 473 von 504 Platzierungen ihren
+diagonalen `(+1, +1)`-Zwilling.
 
-Damit ist der Betrag festgelegt: Auf einer Seite ist der Abstand zweier
-aufeinanderfolgender Windungen genau die Einrückung pro Umrundung. Für den
-Vorlauf muss dieser Abstand 2×VA = **300 mm** sein — als zwei 150-mm-S-Schläge
-darstellbar (§2), 75 mm ist nicht darstellbar und 150 mm wäre zu dicht.
+Beide Arme bilden **eine** Verschachtelungsfolge, keine zwei unabhängig
+belegten Ringmengen: Bahn 2k gehört dem Vorlauf, Bahn 2k+1 dem Rücklauf,
+Bahn j+1 liegt echt in Bahn j. Die Reservierung ist damit strukturell
+statt geprüft.
 
-**Zweitens: beide Arme rücken gemeinsam ein.** Der S-Schlag des Vorlaufs
-überstreicht quer das Intervall `[r, r+300]`. Die Rücklaufbahn liegt bei
-`r+150` — mitten darin. Läuft der Rücklauf dort gerade durch, ist die
-Kreuzung unvermeidlich; **das ist exakt der Treffer bei (1162,5 | 487,5)**.
+## 3. Die Kehre — der eigentlich harte Punkt
 
-Die einzige konfliktfreie Anordnung: Der Rücklauf rückt an derselben Ecke
-gleichzeitig ein, um VA versetzt.
+**Verworfen:** §6a behauptete, bei 75 mm überspringe die Kehre eine Spur
+(`TeardropReverse`, 150 mm, Rücklauf beginnt auf Spur k−2). Das ist ein
+Paritätsfehler: k−2 hat dieselbe Parität wie k, ist also wieder eine
+*Vorlauf*spur. Die Kehre muss die Parität wechseln.
 
-```text
-Vorlauf:   r      → r+300
-Rücklauf:  r+150  → r+450
-```
+Die Sachlage, korrekt:
 
-Zwei parallele S-Schläge im festen Abstand 150 mm — sie können sich nicht
-schneiden, weil sie überall denselben Versatz halten. Genau das ist die
-bifilare Doppelspirale: zwei Arme, die *gemeinsam* nach innen laufen und
-überall im Verlegeabstand nebeneinander liegen, nicht zwei unabhängig
-belegte Ringmengen.
+- Bahnen liegen echt ineinander. Die beiden Enden der Kehre sind deshalb
+  **immer benachbart in der Verschachtelungsordnung** — man kommt an einer
+  Bahn nicht vorbei, ohne sie zu kreuzen. Die Kehre überspannt also genau
+  einen Verschachtelungsabstand.
+- Die Reverse-Familie überbrückt **zwei Gassen (150 mm, `TeardropReverse`)
+  oder drei (225 mm, `BroadReverse180`)** — nie eine. Eine 75-mm-Kehre wäre
+  ein Biegeradius von 37,5 mm gegen 80 mm Minimum; physikalisch unmöglich,
+  kein Katalogmangel.
 
-Daraus folgt für die Konstruktion: Vor- und Rücklauf sind **eine** Bahnfolge
-mit zwei Spuren, keine getrennten Bahnlisten. Die Reservierung wird damit
-strukturell statt geprüft — die zweite Spur ist per Konstruktion frei und
-liegt immer VA neben der ersten.
+Daraus folgt die Konstruktion: **der innerste Abstand allein wird
+aufgeweitet**, alle übrigen behalten den gewünschten Verlegeabstand.
 
-## 3. Zu bauen
+| Verlegeabstand | Gassen | innerster Abstand | Kehre |
+|---|---|---|---|
+| 75 mm | 1 (ungerade) | 3 Gassen = 225 mm | `BroadReverse180` |
+| 150 mm | 2 (gerade) | 2 Gassen = 150 mm | `TeardropReverse` |
+| 225 mm | 3 (ungerade) | 3 Gassen = 225 mm | `BroadReverse180` |
+| 300 mm | 4 (gerade) | 2 Gassen = 150 mm | `TeardropReverse` |
 
-1. **`build_spiral_lanes`** ersetzt `build_lanes` für das Spiralmuster:
-   statt geschlossener Ringe eine offene, fortlaufende Bahnfolge. Jede
-   Umrundung rückt an zwei gegenüberliegenden Seiten um je 150 mm ein
-   (S-Schlag aus zwei `BroadTurn45`); die beiden anderen Seiten laufen auf
-   konstantem Inset.
-2. **Seitenwahl — gelöst, siehe §2a.** Eingerückt wird an *allen vier*
-   Seiten um je 300 mm pro Umrundung, und beide Arme rücken an derselben
-   Ecke gleichzeitig ein.
-3. **`plan_inward_arm` / `complete_spiral`** folgen der Bahnfolge, statt
-   Ringe zu belegen und zu hoppen. Die Reservierungs-Invariante bleibt: die
-   Zwischenbahn gehört dem Rücklauf.
-4. **`walk_ring_backward`'s Geschlossen-Guard** entfällt für Spiralbahnen —
-   er war die richtige Regel für Ringe und ist die falsche für Spiralen.
-5. **`SectionKind::Hop`** bleibt: der Übergang zwischen zwei Windungen ist
-   weiterhin eine Sektion ohne Bahnzugehörigkeit. Was entfällt, ist das
-   *Queren* einer fremden Bahn.
+Der Einwärtsschritt des Vorlaufs bleibt dabei gerade (Verlegeabstand +
+Kehrenspanne), die Eckparitäten schließen sich also weiterhin. Der Preis
+ist ein freier Kern in der Raummitte — genau dort, wo die Wendeschleife
+läuft und wo der Boden über die Kehre ohnehin am wärmsten ist.
 
-## 4. Abnahme
+## 4. Gebaut
 
-Der Test `a_four_ring_spiral_crosses_itself_and_the_validator_catches_it`
-wird umgedreht: dieselbe Geometrie, dieselbe Pipeline, aber `certify_loop`
-liefert `Ok`. Zusätzlich pinnen: Deckung (die Spirale muss die Fläche
-belegen, nicht nur den Rand), Länge unter 100 m, und dass kein Hop eine
-belegte oder reservierte Bahn überquert.
+`src/circuit/schnecke.rs`, `build_schnecke(field, pipe_spacing_mm,
+wall_clearance_mm, graph, view, zone, instance) -> Result<Schnecke, LoopError>`.
 
-## 5. Was bis dahin gilt
+- Bahnnummerierung = Verschachtelungsindex, gerade = Vorlauf, ungerade =
+  Rücklauf. Damit hält die Ringalgebra des Validators ohne Übersetzungsschicht.
+- Ecken werden **abgefragt, nicht abgeleitet** — dieselbe Disziplin wie in
+  `fields.rs`.
+- Die Bahnzuordnung einer Kante entscheidet die **Geometrie**: eine Kante
+  beansprucht eine Bahn nur, wenn beide Endpunkte auf deren Rechteck liegen.
+  Der Rest ist `SectionKind::Hop`. Das ist ehrlich und kann nicht
+  auseinanderdriften, weil es dasselbe Prädikat benutzt wie der Validator.
+- Tiefste Verschachtelung zuerst; die erste, die durchläuft, gewinnt.
+  Beide Paritäten des äußersten Rings werden probiert.
+- Beide Port-Zuordnungen werden probiert; gewählt wird die mit der kürzeren
+  Summe Port→Anker. Die andere lässt die beiden Anschlussstücke einander
+  kreuzen.
 
-Der Zwei-Windungen-Kreis (`the_generator_produces_a_loop_the_validator_certifies`)
-ist zertifiziert und verlegbar, deckt aber nur den Randbereich. Für einen
-vollflächigen Heizkreis ist dieser Umbau die verbleibende Arbeit.
+## 5. Abnahme — erreicht
 
-## 6. Nutzerwunsch 75 mm Rohrabstand — Folgen
+`tests/circuit_schnecke.rs`, Raum 3000 × 2400, Verlegeabstand 75 mm,
+Wandabstand 75 mm, Anschluss mittig an der Unterkante (Zone 600 × 225):
 
-Der Nutzer plant 75 mm zwischen hin- und rücklaufender Schlange. Das ist der
-Kanalabstand selbst, also die dichteste auf dieser Platte mögliche Verlegung:
-jeder Kanal belegt.
+- `certify_loop` liefert `Ok`.
+- **11 Bahnen**, Gesamtlänge **67 421 mm** (< 100 m).
+- Strafsumme 0 mm, minimaler Biegeradius ≥ 80 mm.
+- Alle Abstände außer dem innersten genau eine Gasse; der innerste drei.
+- Vorlauf 0, 2, 4, 6, 8, 10; Rücklauf 9, 7, 5, 3, 1.
+- Kehre: genau eine `BroadReverse180`.
 
-Was dadurch **passt**:
+`tests/plate_spiral_facts.rs` pinnt die drei Messungen, auf denen das ruht.
 
-- Windungsabstand des Vorlaufs allein = 2 × 75 = **150 mm**, und 150 mm ist
-  exakt der kleinste darstellbare richtungserhaltende Querversatz (§2, zwei
-  `BroadTurn45`). Die Einrückung pro Umrundung ist damit genau ein S-Schlag —
-  einfacher als die 300-mm-Variante aus §2a.
-- Die Zwei-Spuren-Konstruktion aus §2a bleibt unverändert gültig, nur mit
-  Versatz 75 statt 150.
+## 6. Was offen bleibt
 
-Was dadurch **bricht**:
-
-- Die Mittelkehre muss zwei Bahnen im Abstand 75 mm verbinden, also mit
-  Radius 37,5 mm. Der Mindestbiegeradius ist 80 mm (5 × 16 mm Rohr). Das ist
-  **physikalisch unmöglich**, kein Katalogmangel — genau diese Wende ist im
-  Handbuch als unzulässig abgebildet und liegt als Golden Fixture
-  `handbook-rejected-tight-u.json` vor.
-- Der Katalog hat folgerichtig keine Reverse-Familie unter 150 mm Span
-  (`TeardropReverse` 150, `BroadReverse180` 225); Task 10 hat das gemessen.
-
-Zu klären, bevor bei 75 mm gebaut wird: Die Kehre muss den inneren Freiraum
-nutzen, statt die beiden innersten Bahnen direkt zu verbinden — die Spirale
-endet vor der Mitte und wendet dort großzügig. Ob der Katalog eine solche
-Wende auf dem 75-mm-Raster hergibt, ist zu prüfen (Sweep über
-`TeardropReverse`-Platzierungen im inneren Freiraum), bevor 75 mm als
-unterstützter Wert gilt.
-
-Thermisch ist 75 mm zudem sehr dicht; übliche Wohnraumwerte liegen bei
-100–150 mm, 75 mm ist ein Randzonen- oder Niedertemperaturmaß. Das ist eine
-Auslegungsfrage des Nutzers, keine Solverfrage — der Solver meldet Geometrie,
-keine thermische Eignung (Spec §23.3).
-
-### 6a. Kehren-Sweep bei 75 mm — Ergebnis und Konstruktion
-
-Gemessen am Graph des 3000×2400-Fixtures: Reverse-Familien-Kanten überbrücken
-quer zur Startrichtung **ausschließlich 150 mm** (4032 Platzierungen) oder
-**225 mm** (2016). Eine 75-mm-Wende gibt es nicht — bestätigt, wie §6
-vorhergesagt hat.
-
-Das schließt 75 mm aber **nicht** aus, es legt die Wende fest. Bei 75 mm
-Rohrabstand belegt der Vorlauf jede zweite Spur (0, 2, 4, …), der Rücklauf
-die dazwischen (1, 3, 5, …). Verbände die Kehre die beiden innersten
-Nachbarspuren, wäre sie 75 mm — unmöglich. Sie muss stattdessen **eine Spur
-überspringen**:
-
-```text
-Vorlauf endet auf Spur k
-Kehre über 150 mm (TeardropReverse)
-Rücklauf beginnt auf Spur k-2
-Spur k-1 bleibt frei — der Wendekern
-```
-
-Damit ist die Kehre eine reguläre 150-mm-`TeardropReverse`, und in der
-Raummitte bleibt genau eine Spur unbelegt. Das ist auch handwerklich die
-übliche Lösung: Die Wendeschleife braucht Platz, und die Mitte ist über die
-Kehre ohnehin am wärmsten. Die Deckungsprüfung muss diese eine freie
-Mittelspur folglich als zulässig behandeln, nicht als Fehlstelle.
-
-**Damit ist 75 mm baubar.** Zu implementieren nach §3, mit:
-
-- Einrückung pro Umrundung = 150 mm (ein S-Schlag aus zwei `BroadTurn45`),
-- Spurversatz beider Arme = 75 mm,
-- Kehre = `TeardropReverse` über 150 mm mit freier Mittelspur,
-- Abnahme wie §4, zusätzlich: die freie Mittelspur ist genau eine, und die
-  Deckung bleibt trotzdem unter der geforderten Schranke.
+- **Deckung.** Schlechtester Punkt 354,6 mm von der nächsten Rohrachse
+  (Raumecke). Ursache: die äußerste Windung ist zweifach unterbrochen — von
+  der Anschlusszone *und* von der Naht in der Ecke unten links —, sodass die
+  unterste Zeile nur östlich der Zone liegt. Ein mittiger Anschluss erzwingt
+  das bei diesem Nahtschema.
+- **Wickelrichtung.** Nur gegen den Uhrzeigersinn gebaut. Bei einem
+  Anschluss nahe der linken oder rechten Wand wäre die Gegenrichtung deutlich
+  besser; die Spiegelung der Legs steht noch aus.
+- **Zonentiefe.** Sie muss die zwei äußersten Bahnen durchtrennen, aber die
+  dritte nicht — sonst kann der Arm nicht daran vorbei. Bei 75 mm heißt das
+  187,5 mm < Tiefe < 262,5 mm. Diese Kopplung gehört in die Eingabeprüfung,
+  statt dem Aufrufer überlassen zu bleiben.
+- **Andere Verlegeabstände.** Nur 75 mm ist end-to-end gefahren. Die Tabelle
+  in §3 ist implementiert, aber 150/225/300 mm sind ungetestet.
+- **`spiral.rs` bleibt unangetastet.** Der suchbasierte Pfad und seine Tests
+  laufen weiter; die Schnecke steht daneben. Zusammenführen später.
