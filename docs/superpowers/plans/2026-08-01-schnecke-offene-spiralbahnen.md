@@ -161,3 +161,37 @@ Thermisch ist 75 mm zudem sehr dicht; übliche Wohnraumwerte liegen bei
 100–150 mm, 75 mm ist ein Randzonen- oder Niedertemperaturmaß. Das ist eine
 Auslegungsfrage des Nutzers, keine Solverfrage — der Solver meldet Geometrie,
 keine thermische Eignung (Spec §23.3).
+
+### 6a. Kehren-Sweep bei 75 mm — Ergebnis und Konstruktion
+
+Gemessen am Graph des 3000×2400-Fixtures: Reverse-Familien-Kanten überbrücken
+quer zur Startrichtung **ausschließlich 150 mm** (4032 Platzierungen) oder
+**225 mm** (2016). Eine 75-mm-Wende gibt es nicht — bestätigt, wie §6
+vorhergesagt hat.
+
+Das schließt 75 mm aber **nicht** aus, es legt die Wende fest. Bei 75 mm
+Rohrabstand belegt der Vorlauf jede zweite Spur (0, 2, 4, …), der Rücklauf
+die dazwischen (1, 3, 5, …). Verbände die Kehre die beiden innersten
+Nachbarspuren, wäre sie 75 mm — unmöglich. Sie muss stattdessen **eine Spur
+überspringen**:
+
+```text
+Vorlauf endet auf Spur k
+Kehre über 150 mm (TeardropReverse)
+Rücklauf beginnt auf Spur k-2
+Spur k-1 bleibt frei — der Wendekern
+```
+
+Damit ist die Kehre eine reguläre 150-mm-`TeardropReverse`, und in der
+Raummitte bleibt genau eine Spur unbelegt. Das ist auch handwerklich die
+übliche Lösung: Die Wendeschleife braucht Platz, und die Mitte ist über die
+Kehre ohnehin am wärmsten. Die Deckungsprüfung muss diese eine freie
+Mittelspur folglich als zulässig behandeln, nicht als Fehlstelle.
+
+**Damit ist 75 mm baubar.** Zu implementieren nach §3, mit:
+
+- Einrückung pro Umrundung = 150 mm (ein S-Schlag aus zwei `BroadTurn45`),
+- Spurversatz beider Arme = 75 mm,
+- Kehre = `TeardropReverse` über 150 mm mit freier Mittelspur,
+- Abnahme wie §4, zusätzlich: die freie Mittelspur ist genau eine, und die
+  Deckung bleibt trotzdem unter der geforderten Schranke.
