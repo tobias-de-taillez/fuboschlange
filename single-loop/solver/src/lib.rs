@@ -23,6 +23,17 @@ pub fn build_plate_model_wasm(input: JsValue) -> Result<JsValue, JsValue> {
         .map_err(|error| JsValue::from_str(&format!("cannot serialize PlateModelResult: {error}")))
 }
 
+#[wasm_bindgen(js_name = planSchnecke)]
+pub fn plan_schnecke_wasm(input: JsValue) -> Result<JsValue, JsValue> {
+    console_error_panic_hook::set_once();
+    let input = serde_wasm_bindgen::from_value(input)
+        .map_err(|error| JsValue::from_str(&format!("invalid SchneckeInput: {error}")))?;
+    let result = circuit::plan_schnecke(input)
+        .map_err(|error| JsValue::from_str(&format!("{:?}: {}", error.code, error.message)))?;
+    serde_wasm_bindgen::to_value(&result)
+        .map_err(|error| JsValue::from_str(&format!("cannot serialize SchneckePlan: {error}")))
+}
+
 #[wasm_bindgen(js_name = solveSingleLoop)]
 pub fn solve_single_loop_wasm(input: JsValue) -> Result<JsValue, JsValue> {
     console_error_panic_hook::set_once();

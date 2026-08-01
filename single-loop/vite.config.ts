@@ -8,6 +8,7 @@ export default defineConfig({
       input: {
         index: fileURLToPath(new URL("index.html", import.meta.url)),
         plate: fileURLToPath(new URL("plate.html", import.meta.url)),
+        schnecke: fileURLToPath(new URL("schnecke.html", import.meta.url)),
       },
     },
   },

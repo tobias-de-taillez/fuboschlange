@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Schnecke – Verlegeplan</title>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <p class="eyebrow">BEKOTEC-EN 23 FI 30 · Rohr 16 mm · Noppenraster 75 mm</p>
+          <h1>Schnecke</h1>
+          <p class="banner" id="banner">
+            Bifilare Doppelschnecke, gegen das Noppenmodell zertifiziert
+          </p>
+        </div>
+        <button id="plan">Neu planen</button>
+      </header>
+
+      <section class="controls">
+        <label>Breite <input id="width" type="number" min="600" step="75" value="3000" /> mm</label>
+        <label>Tiefe <input id="height" type="number" min="600" step="75" value="2400" /> mm</label>
+        <label>
+          Verlegeabstand
+          <select id="spacing">
+            <option value="75" selected>75 mm</option>
+            <option value="150">150 mm</option>
+            <option value="225">225 mm</option>
+            <option value="300">300 mm</option>
+          </select>
+        </label>
+        <label>Wandabstand <input id="clearance" type="number" min="75" step="25" value="75" /> mm</label>
+        <label>Anschluss ab Ecke <input id="offset" type="number" min="0" step="50" value="1500" /> mm</label>
+        <label>Zonenbreite <input id="zone" type="number" min="300" step="50" value="600" /> mm</label>
+      </section>
+
+      <section class="canvas">
+        <div id="plot" aria-label="Verlegeplan"></div>
+        <aside>
+          <h2>Prüfbericht</h2>
+          <p id="status">Noch nicht geplant</p>
+          <dl id="numbers"></dl>
+          <p>
+            Gezeichnet wird nur, was <code>certify_loop</code> zertifiziert hat:
+            Kanten-Provenienz, G1-Stetigkeit, Noppenfreiheit, Mindestbiegeradius
+            80 mm, Rohrabstand und Länge. Wird etwas davon verletzt, erscheint
+            die Ablehnung statt eines Bildes.
+          </p>
+        </aside>
+      </section>
+    </main>
+    <script type="module" src="/src/schnecke-main.ts"></script>
+  </body>
+</html>
