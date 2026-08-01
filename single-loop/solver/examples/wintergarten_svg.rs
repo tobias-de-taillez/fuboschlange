@@ -23,6 +23,13 @@ use single_loop_solver::plate::PlateTransform;
 /// Enough pipe for one circuit, per the design spec.
 const MAX_LOOP_LENGTH_MM: f64 = 100_000.0;
 const WALL_CLEARANCE_MM: f64 = 75.0;
+/// The user's layout: a four-lane band at 75 mm along the window fronts, and
+/// the rest filled at 150 mm. Three circuits cannot cover this room at 75 mm
+/// throughout — 23.96 m² remain after the band, two circuits hold 200 m, and
+/// 200 m at 75 mm covers 15 m². See
+/// `docs/superpowers/specs/2026-08-02-wintergarten-drei-heizkreise.md`.
+const EDGE_LANES: f64 = 4.0;
+const EDGE_SPACING_MM: f64 = 75.0;
 /// Circuit colours, in field order.
 const INK: [&str; 8] = [
     "#b4441f", "#1d6b4f", "#2f5d8c", "#8a4fa0", "#a8791b", "#357f86", "#96324a", "#5a6b1f",
@@ -44,15 +51,21 @@ fn main() -> Result<(), String> {
     // count comes out higher, because a Schnecke never lays the full
     // theoretical length — the wall clearance, the free core and the ring the
     // connection zone cuts all take their share.
-    let theoretical_m = rectified_m2 / (spacing_mm / 1000.0);
+    // The edge band takes its 300 mm along the window fronts first; the fill
+    // circuits are cut from what is left, not from the whole room.
+    let band_mm = EDGE_LANES * EDGE_SPACING_MM;
+    let inner = inset_room(&room, band_mm);
+    let inner_m2 = area_mm2(&inner.vertices) / 1e6;
+    let theoretical_m = inner_m2 / (spacing_mm / 1000.0);
     let wanted = (theoretical_m / (MAX_LOOP_LENGTH_MM / 1000.0))
         .ceil()
         .max(1.0) as usize;
 
-    let fields = split_by_area(&room, wanted);
+    let fields = split_by_area(&inner, wanted);
     eprintln!(
         "gemessen {measured_m2:.2} m², begradigt {rectified_m2:.2} m²; \
-         theoretisch {theoretical_m:.0} m Rohr bei {spacing_mm:.0} mm ⇒ mindestens {wanted} Kreise; \
+         Randzone {band_mm:.0} mm breit reserviert ⇒ {inner_m2:.2} m² Fuellflaeche; \
+         theoretisch {theoretical_m:.0} m bei {spacing_mm:.0} mm ⇒ {wanted} Fuellkreise; \
          zerlegt in {} Felder",
         fields.len()
     );
@@ -66,23 +79,22 @@ fn main() -> Result<(), String> {
     let (start, end) = reference_wall(&room.vertices);
     let transform = PlateTransform::from_edge(start, end, centroid(&room.vertices), 0.0, 0.0)
         .map_err(|error| format!("the room's reference wall is degenerate: {error:?}"))?;
-    let fields_local: Vec<Field> = fields
+    let fields_local: Vec<(Field, f64)> = fields
         .iter()
-        .map(|field| Field {
-            id: field.id,
-            rect_local: to_local_rect(&transform, &field.rect_local),
+        .map(|field| {
+            (
+                Field {
+                    id: field.id,
+                    rect_local: to_local_rect(&transform, &field.rect_local),
+                },
+                spacing_mm,
+            )
         })
         .collect();
     let room_world: Vec<Point> = room.vertices.clone();
 
-    let plan = plan_multi(
-        &room_world,
-        &fields_local,
-        &transform,
-        spacing_mm,
-        WALL_CLEARANCE_MM,
-    )
-    .map_err(|error| error.message)?;
+    let plan = plan_multi(&room_world, &fields_local, &transform, WALL_CLEARANCE_MM)
+        .map_err(|error| error.message)?;
 
     for circuit in &plan.circuits {
         eprintln!(
@@ -143,9 +155,21 @@ fn main() -> Result<(), String> {
         100.0 * (longest - shortest) / longest,
     );
 
+    let band_local: Vec<Point> = inner
+        .vertices
+        .iter()
+        .map(|vertex| transform.to_local(*vertex))
+        .collect();
     print!(
         "{}",
-        compose(&plan.room_local, &circuits, spacing_mm, laid, theoretical_m)
+        compose(
+            &plan.room_local,
+            &band_local,
+            &circuits,
+            spacing_mm,
+            laid,
+            theoretical_m
+        )
     );
     Ok(())
 }
@@ -212,6 +236,7 @@ fn area_mm2(vertices: &[Point]) -> f64 {
 
 fn compose(
     room_local: &[Point],
+    band_inner_local: &[Point],
     circuits: &[(Field, String, f64, usize)],
     spacing_mm: f64,
     laid_mm: f64,
@@ -249,6 +274,16 @@ fn compose(
         .join(" ");
     out.push_str(&format!(
         "<polygon points=\"{outline}\" fill=\"#f6f2e9\" stroke=\"#3a3632\" stroke-width=\"20\"/>\n"
+    ));
+    // The band the edge circuit gets, reserved but not yet laid.
+    let band: String = band_inner_local
+        .iter()
+        .map(|vertex| format!("{:.1},{:.1}", vertex.x, vertex.y))
+        .collect::<Vec<_>>()
+        .join(" ");
+    out.push_str(&format!(
+        "<polygon points=\"{band}\" fill=\"none\" stroke=\"#b4441f\" stroke-width=\"10\" \
+         stroke-dasharray=\"70 45\" opacity=\"0.7\"/>\n"
     ));
 
     for (index, (field, path_d, _, _)) in circuits.iter().enumerate() {
@@ -398,4 +433,68 @@ fn reference_wall(vertices: &[Point]) -> (Point, Point) {
     }
     let (_, from, to) = best.or(fallback).expect("a room has walls");
     (from, to)
+}
+
+/// The room shrunk by `inset_mm` on every wall — the area left once the edge
+/// band has taken its strip.
+///
+/// Each wall moves along its **own** inward normal and the corners are
+/// recomputed where the moved lines meet. Pulling every vertex toward the
+/// centroid instead is only right for a convex outline: at an L's reflex
+/// corner the two walls need opposite signs, and a naive inset puts that
+/// corner on the wrong side — which is what left the lower leg of this room
+/// without a circuit.
+fn inset_room(
+    room: &single_loop_solver::circuit::RectifiedRoom,
+    inset_mm: f64,
+) -> single_loop_solver::circuit::RectifiedRoom {
+    let ring = &room.vertices;
+    let count = ring.len();
+    // Counter-clockwise, so the interior is on the left of every wall and the
+    // inward normal is the direction's `perp_ccw`.
+    let mut ring = ring.clone();
+    if signed_area(&ring) < 0.0 {
+        ring.reverse();
+    }
+    // Each wall as (is_horizontal, its constant coordinate after the inset).
+    let lines: Vec<(bool, f64)> = (0..count)
+        .map(|index| {
+            let from = ring[index];
+            let to = ring[(index + 1) % count];
+            let (dx, dy) = (to.x - from.x, to.y - from.y);
+            if dx.abs() >= dy.abs() {
+                // Horizontal: inward normal is +y when running +x.
+                (true, from.y + inset_mm * dx.signum())
+            } else {
+                // Vertical: inward normal is -x when running +y.
+                (false, from.x - inset_mm * dy.signum())
+            }
+        })
+        .collect();
+    let vertices = (0..count)
+        .map(|index| {
+            let (horizontal, value) = lines[index];
+            let (_, next_value) = lines[(index + 1) % count];
+            if horizontal {
+                Point::new(next_value, value)
+            } else {
+                Point::new(value, next_value)
+            }
+        })
+        .collect();
+    single_loop_solver::circuit::RectifiedRoom {
+        vertices,
+        inscribed_loss_mm2: room.inscribed_loss_mm2,
+        dropped_walls: room.dropped_walls,
+    }
+}
+
+fn signed_area(ring: &[Point]) -> f64 {
+    let mut sum = 0.0;
+    for index in 0..ring.len() {
+        let from = ring[index];
+        let to = ring[(index + 1) % ring.len()];
+        sum += from.x * to.y - to.x * from.y;
+    }
+    sum / 2.0
 }

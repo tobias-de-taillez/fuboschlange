@@ -427,6 +427,7 @@ fn svg(
 pub struct CircuitPlan {
     /// The field it fills, in the shared plate-local frame.
     pub rect_local: RectMm,
+    pub pipe_spacing_mm: f64,
     /// The loop as SVG path data, in that same shared frame — so every
     /// circuit's path can be drawn into one picture without a per-circuit
     /// translation, which is what having one lattice buys.
@@ -467,9 +468,8 @@ pub struct MultiPlan {
 /// the field off it too.
 pub fn plan_multi(
     room_world: &[Point],
-    fields_local: &[Field],
+    fields_local: &[(Field, f64)],
     transform: &PlateTransform,
-    pipe_spacing_mm: f64,
     wall_clearance_mm: f64,
 ) -> Result<MultiPlan, LoopError> {
     let polygon = Polygon::try_from_original(room_world.to_vec()).map_err(|error| {
@@ -489,18 +489,21 @@ pub fn plan_multi(
         .map_err(|error| reject(format!("no certified pose graph for this room: {error:?}")))?;
     let nopp_count = base.nopps.len();
 
-    let depth_mm = zone_depth_mm(wall_clearance_mm, pipe_spacing_mm);
     let mut circuits = Vec::new();
     let mut refused = Vec::new();
-    for field in fields_local {
+    // Each circuit carries its own pipe spacing: an edge zone is laid dense
+    // where the heat is lost and the field wider, and one number for the whole
+    // room cannot express that.
+    for (field, pipe_spacing_mm) in fields_local {
         let field = snap_to_channels(field);
         let width = field.rect_local.max.x - field.rect_local.min.x;
+        let depth_mm = zone_depth_mm(wall_clearance_mm, *pipe_spacing_mm);
         match plan_one(
             &field,
             &graph,
             &base,
             transform,
-            pipe_spacing_mm,
+            *pipe_spacing_mm,
             wall_clearance_mm,
             depth_mm,
         ) {
@@ -614,6 +617,7 @@ fn plan_one(
 
     Ok(CircuitPlan {
         rect_local: rect.clone(),
+        pipe_spacing_mm,
         path_d: path_data_local(&candidate, transform),
         lanes: schnecke.lanes.len(),
         total_length_mm: certificate.total_length_mm,
