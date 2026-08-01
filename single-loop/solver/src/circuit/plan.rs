@@ -14,7 +14,9 @@ use crate::circuit::types::{LoopError, LoopErrorCode, RectMm};
 use crate::circuit::validate::{
     LoopCandidate, LoopContext, LoopSection, SectionKind, certify_loop,
 };
-use crate::circuit::zone::{attach_port, build_connection_zone, build_graph_view, filter_zone_nopps};
+use crate::circuit::zone::{
+    attach_port, build_connection_zone, build_graph_view, filter_zone_nopps,
+};
 use crate::geometry::Polygon;
 use crate::model::{PathPrimitive, Point};
 use crate::plate::{
@@ -46,6 +48,11 @@ pub struct SchneckeInput {
 #[serde(rename_all = "camelCase")]
 pub struct SchneckePlan {
     pub svg: String,
+    /// The loop alone, as SVG path data in the field's own frame (origin at
+    /// its bottom-left, y up). What a multi-field drawing composes: it can
+    /// translate this into room coordinates, which the whole-page `svg` above
+    /// cannot be.
+    pub path_d: String,
     pub lanes: usize,
     pub total_length_mm: f64,
     /// Distance from the worst-served point of the floor to the nearest pipe.
@@ -87,7 +94,11 @@ pub fn plan_schnecke(input: SchneckeInput) -> Result<SchneckePlan, LoopError> {
         Point::new(width_mm, height_mm),
         Point::new(0.0, height_mm),
     ])
-    .map_err(|error| reject(format!("the room outline is not a valid polygon: {error:?}")))?;
+    .map_err(|error| {
+        reject(format!(
+            "the room outline is not a valid polygon: {error:?}"
+        ))
+    })?;
     let transform = PlateTransform::from_edge(
         Point::new(0.0, 0.0),
         Point::new(width_mm, 0.0),
@@ -152,6 +163,7 @@ pub fn plan_schnecke(input: SchneckeInput) -> Result<SchneckePlan, LoopError> {
     )?;
 
     Ok(SchneckePlan {
+        path_d: path_data(&candidate),
         svg: svg(
             width_mm,
             height_mm,
@@ -289,6 +301,44 @@ fn reverse_primitive(primitive: &PathPrimitive) -> PathPrimitive {
     }
 }
 
+/// The loop as SVG path data, in the plate-local frame.
+fn path_data(candidate: &LoopCandidate) -> String {
+    let mut out = String::new();
+    let mut started = false;
+    for section in &candidate.sections {
+        for primitive in &section.primitives {
+            match primitive {
+                PathPrimitive::Line { start, end } => {
+                    if !started {
+                        out.push_str(&format!("M {:.2} {:.2} ", start.x, start.y));
+                        started = true;
+                    }
+                    out.push_str(&format!("L {:.2} {:.2} ", end.x, end.y));
+                }
+                PathPrimitive::Arc {
+                    start,
+                    end,
+                    radius_mm,
+                    sweep_rad,
+                    ..
+                } => {
+                    if !started {
+                        out.push_str(&format!("M {:.2} {:.2} ", start.x, start.y));
+                        started = true;
+                    }
+                    let large = u8::from(sweep_rad.abs() > std::f64::consts::PI);
+                    let sweep = u8::from(*sweep_rad > 0.0);
+                    out.push_str(&format!(
+                        "A {radius_mm:.2} {radius_mm:.2} 0 {large} {sweep} {:.2} {:.2} ",
+                        end.x, end.y
+                    ));
+                }
+            }
+        }
+    }
+    out
+}
+
 /// The loop over the nub field it is threaded through, to scale in
 /// millimetres, pipe at its true outside diameter. Y is flipped so the drawing
 /// reads the way the room does: origin bottom-left, connection wall at the
@@ -350,41 +400,9 @@ fn svg(
 
     out.push_str(&format!(
         "<path fill=\"none\" stroke=\"#b4441f\" stroke-width=\"{PIPE_DIAMETER_MM}\" \
-         stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"0.85\" d=\""
+         stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"0.85\" d=\"{}\"/>\n</g>\n",
+        path_data(candidate)
     ));
-    let mut started = false;
-    for section in &candidate.sections {
-        for primitive in &section.primitives {
-            match primitive {
-                PathPrimitive::Line { start, end } => {
-                    if !started {
-                        out.push_str(&format!("M {:.2} {:.2} ", start.x, start.y));
-                        started = true;
-                    }
-                    out.push_str(&format!("L {:.2} {:.2} ", end.x, end.y));
-                }
-                PathPrimitive::Arc {
-                    start,
-                    end,
-                    radius_mm,
-                    sweep_rad,
-                    ..
-                } => {
-                    if !started {
-                        out.push_str(&format!("M {:.2} {:.2} ", start.x, start.y));
-                        started = true;
-                    }
-                    let large = u8::from(sweep_rad.abs() > std::f64::consts::PI);
-                    let sweep = u8::from(*sweep_rad > 0.0);
-                    out.push_str(&format!(
-                        "A {radius_mm:.2} {radius_mm:.2} 0 {large} {sweep} {:.2} {:.2} ",
-                        end.x, end.y
-                    ));
-                }
-            }
-        }
-    }
-    out.push_str("\"/>\n</g>\n");
 
     out.push_str(&format!(
         "<text x=\"{:.0}\" y=\"{:.0}\" font-family=\"sans-serif\" font-size=\"64\" \
