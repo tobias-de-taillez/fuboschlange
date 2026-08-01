@@ -55,9 +55,18 @@ use crate::geometry::primitive_intersections;
 use crate::model::Point;
 use crate::plate::{EmbeddedPoseGraph, Heading8, LocalPose, PlateInstance, PoseEdge};
 
-/// How many edges a lane change may take. Three is what the plate offers; the
-/// bound is here so a graph defect cannot turn the chain search exponential.
-const UTURN_CHAIN_LEN: usize = 3;
+/// How many edges a lane change may take, shortest first.
+///
+/// Three is the shortest chain that reverses across one channel at all, but
+/// three is not enough for a band: the corners force the run's two side
+/// columns to opposite parity, and a three-edge chain lands cleanly on only
+/// one parity per direction, so with three edges the two ends of a U can never
+/// both work. A fourth edge breaks that lock — every (direction, parity) pair
+/// has clean four-edge landings (`plate_spiral_facts.rs`,
+/// `a_four_edge_lane_change_lands_cleanly_on_either_parity`). Three is still
+/// tried first because it lays less pipe in the turn and leaves more for the
+/// floor.
+const UTURN_CHAIN_LENGTHS: [usize; 2] = [3, 4];
 
 /// How many turn rows to try per lane change before giving up on a
 /// configuration. The rows are offered deepest first, so this bounds the
@@ -405,7 +414,8 @@ impl<'g> State<'_, 'g> {
                 failure = failure.or(Some(detail));
                 continue;
             }
-            match self.lane(k + 1, chain[UTURN_CHAIN_LEN - 1].end.local_pose, exit_port) {
+            let landed = chain.last().expect("a chain has edges").end.local_pose;
+            match self.lane(k + 1, landed, exit_port) {
                 Ok(end) => return Ok(end),
                 // A failure from further in says more than "this turn fouled
                 // something": it means the turn was fine and the band ran out
@@ -439,8 +449,10 @@ impl<'g> State<'_, 'g> {
         let mut approach: Vec<&'g PoseEdge> = Vec::new();
         let mut here = pose;
         for _ in 0..MAX_STRAIGHTS_PER_SIDE {
-            for chain in self.index.uturn_chains(here, landing, UTURN_CHAIN_LEN) {
-                rows.push((approach.clone(), chain));
+            for length in UTURN_CHAIN_LENGTHS {
+                for chain in self.index.uturn_chains(here, landing, length) {
+                    rows.push((approach.clone(), chain));
+                }
             }
             let Some(straight) = self.index.straight(here) else {
                 break;

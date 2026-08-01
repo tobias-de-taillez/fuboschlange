@@ -228,35 +228,41 @@ fn assemble(pipeline: &Pipeline) -> LoopCandidate {
 }
 
 // ---------------------------------------------------------------------------
-// Not yet green, and exactly why
+// Not yet green, and exactly where it stands
 // ---------------------------------------------------------------------------
 //
-// The band walks all four lanes, finds its 75 mm U-turns in the graph, and
-// reaches the manifold at both ends. What it does not yet do is get the
-// *landing* right. The compact chain the plate offers —
-// `TeardropReverse → BroadReverse180 → TeardropReverse` — reaches its landing
-// column by way of columns `c-2`, `c+1`, `c-1`, so its own body passes over
-// that column once more before it ends there. The lane then starts running
-// north from the landing and meets it:
+// The band walks lanes 0, 1 and 2, finds its 75 mm U-turns in the graph and
+// lands them cleanly. What is left is the *last* lane change, and it is the
+// one the plan called the hard point: two turns share the left-hand end, and
+// the outer one's sideways swing crosses the columns the inner two lanes run
+// down.
 //
-//     lane 1 runs into edge N, laid by an earlier lane change
+//     the lane change from lane 2 onto channel 5 at (337.5, 300.0)
+//     runs into edge N, already laid
 //
-// Two things could close this and neither is guesswork:
+// What has been ruled out, by measurement rather than by trying:
 //
-//   1. Prefer a chain whose body never reaches north of its landing row. One
-//      exists — `BroadTurn90 → BroadTurn90 → BroadReverse180`, measured north
-//      extent 0.0 mm — but it costs 412.5 mm of southward room and a 225 mm
-//      swing, which the bottom of a leg does not have at a 75 mm wall
-//      clearance. Whether a wider clearance buys it is a measurement, not a
-//      guess.
-//   2. Let a lane change be longer than three edges. `uturn_chains` already
-//      takes the length; the walk fixes it at `UTURN_CHAIN_LEN`. Four edges
-//      opens far more landings, at a branching cost that needs measuring
-//      before it is turned on.
+//   - It is not the landing. Three-edge chains land cleanly on only one column
+//     parity per direction, and a U's two side columns are forced to opposite
+//     parity by its corners, so three edges could never serve both ends. Four
+//     edges break that lock, `circuit::band` now tries them, and lane 1 — which
+//     used to foul immediately — walks.
+//   - It is not the wall clearance. At 150 mm the walk fails in the same place.
+//
+// What is left to try, in order:
+//
+//   1. `MAX_TURN_ROWS` bounds each lane change to the twelve deepest rows it
+//      could sit on. The two same-end turns need the *inner* one high up, and
+//      whether twelve rows reaches that far on this fixture is arithmetic
+//      nobody has done.
+//   2. Rank turn candidates by which way their body swings, so a turn beside
+//      the wall is offered its inward swing first. Today they come in graph
+//      order.
 //
 // The tests below are ignored rather than deleted or weakened: they are the
-// acceptance the band has to pass, and they run as written the moment the
-// landing is solved. `cargo test -- --ignored` shows where it stands.
+// acceptance the band has to pass, and they run as written the moment the last
+// lane change lands. `cargo test --test circuit_band -- --ignored` shows where
+// it stands.
 
 #[test]
 #[ignore = "the lane change's landing still meets the lane it lands on; see the note above"]

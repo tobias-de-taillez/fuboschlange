@@ -73,32 +73,42 @@ Versatz von 300 mm. Das ist zu **suchen**, nicht abzuleiten — wie
 
 ## 3a. Was gebaut ist, und woran es hängt
 
-`src/circuit/band.rs` läuft alle vier Bahnen, findet die 75-mm-Kehren im
-Graphen und erreicht den Verteiler an beiden Enden. Offen ist die
-**Landung**.
-
-Die kompakte Kette erreicht ihre Zielspalte über die Spalten `c−2`, `c+1`,
-`c−1` — ihr eigener Körper überquert die Zielspalte also noch einmal, bevor
-er dort endet. Die Bahn läuft ab der Landung nach Norden und trifft ihn:
+`src/circuit/band.rs` läuft die Bahnen 0, 1 und 2, findet die 75-mm-Kehren im
+Graphen und landet sie sauber. Offen ist der **letzte** Bahnwechsel — genau
+der harte Punkt aus §3: am linken Ende liegen zwei Kehren, und der Ausschlag
+der äußeren kreuzt die Spalten, die die inneren beiden Bahnen herunterlaufen.
 
 ```
-lane 1 runs into edge N, laid by an earlier lane change
+the lane change from lane 2 onto channel 5 at (337.5, 300.0)
+runs into edge N, already laid
 ```
 
-Zwei Wege, beide messbar statt zu raten:
+**Was gemessen ausgeschlossen ist:**
 
-1. **Kette mit Nord-Ausdehnung 0 bevorzugen.** Es gibt eine —
-   `BroadTurn90 → BroadTurn90 → BroadReverse180`, gemessen 0,0 mm nach
-   Norden — aber sie kostet 412,5 mm nach Süden und 225 mm Ausschlag. Ob ein
-   größerer Wandabstand das kauft, ist zu messen.
-2. **Bahnwechsel länger als drei Kanten zulassen.** `uturn_chains` nimmt die
-   Länge schon als Parameter, der Walker setzt sie fest auf
-   `UTURN_CHAIN_LEN`. Vier Kanten öffnen viel mehr Landungen — zu welchem
-   Verzweigungspreis, ist ebenfalls zu messen.
+- *Nicht die Landung.* Die eigentliche Bedingung ist nicht der Gesamtausschlag,
+  sondern eine pro Spalte: Bahn `k` kommt südwärts herunter, Bahn `k+1` läuft
+  nordwärts hinauf — beide Spalten sind also **nördlich** der Kehre belegt.
+  Drei-Kanten-Ketten landen sauber nur auf **einer** Spaltenparität je
+  Richtung (westwärts ungerade, ostwärts gerade), und die Ecken erzwingen
+  `links ≢ rechts`. Drei Kanten konnten beide Enden nie bedienen. Vier Kanten
+  brechen die Sperre; der Walker probiert sie jetzt, und Bahn 1 — die vorher
+  sofort auflief — läuft durch. Gepinnt als
+  `a_three_edge_lane_change_lands_cleanly_on_only_one_parity_per_direction`
+  und `a_four_edge_lane_change_lands_cleanly_on_either_parity`.
+- *Nicht der Wandabstand.* Bei 150 mm scheitert der Lauf an derselben Stelle.
+
+**Was als Nächstes zu prüfen ist, in dieser Reihenfolge:**
+
+1. `MAX_TURN_ROWS` begrenzt jeden Bahnwechsel auf die zwölf tiefsten Zeilen.
+   Die beiden Kehren am selben Ende brauchen die innere weit oben — ob zwölf
+   Zeilen dort hinreichen, ist Arithmetik, die noch niemand gemacht hat.
+2. Kehren-Kandidaten nach Ausschlagrichtung ordnen, damit eine Kehre neben der
+   Wand ihren Ausschlag zuerst nach innen angeboten bekommt. Heute kommen sie
+   in Graphreihenfolge.
 
 Die drei Abnahmetests in `tests/circuit_band.rs` stehen als `#[ignore]` da,
-nicht abgeschwächt: sie sind die Abnahme und laufen unverändert, sobald die
-Landung sitzt.
+nicht abgeschwächt: sie sind die Abnahme und laufen unverändert, sobald der
+letzte Bahnwechsel sitzt.
 
 ## 4. Der Validator braucht das Mäander-Muster
 

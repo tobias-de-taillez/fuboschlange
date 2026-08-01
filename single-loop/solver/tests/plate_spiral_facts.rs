@@ -663,3 +663,208 @@ fn a_one_channel_uturn_exists_only_as_a_three_edge_chain() {
         "the narrowest eastward U-turn swings {east_swing:.1} mm, not 225"
     );
 }
+
+/// A band's real constraint on a lane change is not its whole-body swing but a
+/// per-column one: lane `k` arrives southbound down the start column and lane
+/// `k+1` departs northbound up the landing column, so **both** columns are
+/// occupied north of the turn. A chain is usable only if its body never comes
+/// back to either column north of that column's own endpoint row.
+#[test]
+fn a_three_edge_lane_change_lands_cleanly_on_only_one_parity_per_direction() {
+    let instance = instance();
+    let graph = graph();
+    let usable: HashSet<u32> = view(&graph).usable_edges.iter().copied().collect();
+    let mut by_start: BTreeMap<u32, Vec<usize>> = BTreeMap::new();
+    for (position, edge) in graph.edges.iter().enumerate() {
+        if usable.contains(&edge.id) {
+            by_start.entry(edge.start.id).or_default().push(position);
+        }
+    }
+
+    // (shift, column parity) -> how many interior start poses admit a clean
+    // landing, and the chain that does it.
+    let mut clean: BTreeMap<(i64, i64), (usize, String)> = BTreeMap::new();
+    let mut tried: BTreeMap<(i64, i64), usize> = BTreeMap::new();
+    for node in &graph.nodes {
+        let pose = node.local_pose;
+        if pose.heading != Heading8::Deg270
+            || pose.point.x < 700.0
+            || pose.point.x > 2300.0
+            || pose.point.y < 700.0
+            || pose.point.y > 1700.0
+        {
+            continue;
+        }
+        let column = channel_index(pose.point.x).expect("a column node");
+        for a in by_start.get(&node.id).map(Vec::as_slice).unwrap_or(&[]) {
+            for b in by_start
+                .get(&graph.edges[*a].end.id)
+                .map(Vec::as_slice)
+                .unwrap_or(&[])
+            {
+                for c in by_start
+                    .get(&graph.edges[*b].end.id)
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[])
+                {
+                    let end = graph.edges[*c].end.local_pose;
+                    if end.heading != Heading8::Deg90 {
+                        continue;
+                    }
+                    let shift = ((end.point.x - pose.point.x) / 75.0).round() as i64;
+                    if shift.abs() != 1 {
+                        continue;
+                    }
+                    let key = (shift, column.rem_euclid(2));
+                    *tried.entry(key).or_default() += 1;
+                    let body: Vec<Point> = [*a, *b, *c]
+                        .iter()
+                        .flat_map(|position| edge_body(&instance, &graph.edges[*position]))
+                        .collect();
+                    let north_on = |col: f64, row: f64| -> f64 {
+                        body.iter()
+                            .filter(|p| (p.x - col).abs() < 1.0)
+                            .map(|p| p.y - row)
+                            .fold(f64::MIN, f64::max)
+                    };
+                    if north_on(pose.point.x, pose.point.y) < 1.0
+                        && north_on(end.point.x, end.point.y) < 1.0
+                    {
+                        let names = [*a, *b, *c]
+                            .iter()
+                            .map(|p| format!("{:?}", graph.edges[*p].template_id))
+                            .collect::<Vec<_>>()
+                            .join("->");
+                        let slot = clean.entry(key).or_insert((0, names));
+                        slot.0 += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    println!("shift | column parity | chains tried | land clean | example");
+    for (key, count) in &tried {
+        let (ok, example) = clean
+            .get(key)
+            .cloned()
+            .unwrap_or((0, "-- none --".to_owned()));
+        println!("{:+5} | {:13} | {count:12} | {ok:10} | {example}", key.0, key.1);
+    }
+
+    // Westward only from odd columns, eastward only from even ones. The plate's
+    // nub checkerboard showing through, and the reason three edges are not
+    // enough for a band: a U's two side columns are forced to *opposite*
+    // parity by the corners (`left ≢ right`), while the two ends need turns of
+    // opposite direction — so with three edges one end always has no clean
+    // landing.
+    let count = |shift: i64, parity: i64| clean.get(&(shift, parity)).map_or(0, |(n, _)| *n);
+    assert!(count(-1, 1) > 0 && count(-1, 0) == 0, "westward wants odd columns");
+    assert!(count(1, 0) > 0 && count(1, 1) == 0, "eastward wants even columns");
+}
+
+/// And the fourth edge breaks that parity lock, which is what makes a U-shaped
+/// band possible at all. `circuit::band` therefore tries three edges first and
+/// four when three will not land.
+#[test]
+fn a_four_edge_lane_change_lands_cleanly_on_either_parity() {
+    // A U-shaped band needs a clean landing at both ends. The corners force
+    // its two side columns to opposite parity, and three-edge chains land
+    // cleanly only on one parity per direction — so with three edges the two
+    // ends cannot both work. Does a fourth edge break the parity lock?
+    let instance = instance();
+    let graph = graph();
+    let usable: HashSet<u32> = view(&graph).usable_edges.iter().copied().collect();
+    let mut by_start: BTreeMap<u32, Vec<usize>> = BTreeMap::new();
+    for (position, edge) in graph.edges.iter().enumerate() {
+        if usable.contains(&edge.id) {
+            by_start.entry(edge.start.id).or_default().push(position);
+        }
+    }
+
+    let mut clean: BTreeMap<(i64, i64), (usize, String)> = BTreeMap::new();
+    let mut tried: BTreeMap<(i64, i64), usize> = BTreeMap::new();
+    let starts: Vec<&single_loop_solver::plate::PoseNode> = graph
+        .nodes
+        .iter()
+        .filter(|node| {
+            let pose = node.local_pose;
+            pose.heading == Heading8::Deg270
+                && (1012.5..=1312.5).contains(&pose.point.x)
+                && (1050.0..=1350.0).contains(&pose.point.y)
+        })
+        .collect();
+    println!("{} start poses", starts.len());
+
+    for node in starts {
+        let pose = node.local_pose;
+        let column = channel_index(pose.point.x).expect("a column node");
+        let mut frontier: Vec<(u32, Vec<usize>)> = vec![(node.id, Vec::new())];
+        for step in 1..=4usize {
+            let mut next: Vec<(u32, Vec<usize>)> = Vec::new();
+            for (here, taken) in &frontier {
+                for position in by_start.get(here).map(Vec::as_slice).unwrap_or(&[]) {
+                    let edge = &graph.edges[*position];
+                    let mut chain = taken.clone();
+                    chain.push(*position);
+                    if step == 4 {
+                        let end = edge.end.local_pose;
+                        if end.heading != Heading8::Deg90 {
+                            continue;
+                        }
+                        let shift = ((end.point.x - pose.point.x) / 75.0).round() as i64;
+                        if shift.abs() != 1 {
+                            continue;
+                        }
+                        let key = (shift, column.rem_euclid(2));
+                        *tried.entry(key).or_default() += 1;
+                        let body: Vec<Point> = chain
+                            .iter()
+                            .flat_map(|p| edge_body(&instance, &graph.edges[*p]))
+                            .collect();
+                        let north_on = |col: f64, row: f64| -> f64 {
+                            body.iter()
+                                .filter(|p| (p.x - col).abs() < 1.0)
+                                .map(|p| p.y - row)
+                                .fold(f64::MIN, f64::max)
+                        };
+                        if north_on(pose.point.x, pose.point.y) < 1.0
+                            && north_on(end.point.x, end.point.y) < 1.0
+                        {
+                            let names = chain
+                                .iter()
+                                .map(|p| format!("{:?}", graph.edges[*p].template_id))
+                                .collect::<Vec<_>>()
+                                .join("->");
+                            let slot = clean.entry(key).or_insert((0, names));
+                            slot.0 += 1;
+                        }
+                    } else {
+                        next.push((edge.end.id, chain));
+                    }
+                }
+            }
+            frontier = next;
+        }
+    }
+
+    println!("shift | column parity | chains tried | land clean | example");
+    for (key, count) in &tried {
+        let (ok, example) = clean
+            .get(key)
+            .cloned()
+            .unwrap_or((0, "-- none --".to_owned()));
+        println!("{:+5} | {:13} | {count:12} | {ok:10} | {example}", key.0, key.1);
+    }
+
+    for shift in [-1i64, 1] {
+        for parity in [0i64, 1] {
+            let landed = clean.get(&(shift, parity)).map_or(0, |(n, _)| *n);
+            assert!(
+                landed > 0,
+                "no four-edge lane change of {shift:+} lands cleanly from a column of parity \
+                 {parity}; with three edges neither did, and a U-shaped band needs both"
+            );
+        }
+    }
+}
