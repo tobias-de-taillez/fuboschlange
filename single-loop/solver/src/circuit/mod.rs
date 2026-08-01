@@ -17,7 +17,9 @@ pub use fields::{
     Field, Lane, SpiralSide, build_lanes, decompose_fields, spiral_side_channel,
     spiral_side_sequence,
 };
-pub use plan::{SchneckeInput, SchneckePlan, plan_schnecke, zone_depth_mm};
+pub use plan::{
+    CircuitPlan, MultiPlan, SchneckeInput, SchneckePlan, plan_multi, plan_schnecke, zone_depth_mm,
+};
 pub use room::{RectifiedRoom, rectify, slab_fields};
 pub use schnecke::{Schnecke, build_schnecke};
 pub use search::{

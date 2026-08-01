@@ -26,6 +26,8 @@ use crate::plate::{
 /// Every nub the pipe has to clear, drawn at its real body.
 const PIPE_DIAMETER_MM: f64 = 16.0;
 const CHANNEL_PITCH_MM: f64 = 75.0;
+/// Channels sit midway between nub rows, at `37.5 + 75n`.
+const CHANNEL_OFFSET_MM: f64 = 37.5;
 const MAX_NOPPS: usize = 200_000;
 
 /// What the caller chooses. Millimetres throughout.
@@ -413,4 +415,231 @@ fn svg(
         length_mm / 1000.0,
     ));
     out
+}
+
+// ---------------------------------------------------------------------------
+// Many circuits, one nub field
+// ---------------------------------------------------------------------------
+
+/// One circuit of a multi-circuit room.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CircuitPlan {
+    /// The field it fills, in the shared plate-local frame.
+    pub rect_local: RectMm,
+    /// The loop as SVG path data, in that same shared frame — so every
+    /// circuit's path can be drawn into one picture without a per-circuit
+    /// translation, which is what having one lattice buys.
+    pub path_d: String,
+    pub lanes: usize,
+    pub total_length_mm: f64,
+    pub min_bend_radius_mm: f64,
+    pub min_center_distance_mm: f64,
+    pub penalty_sum_mm: f64,
+}
+
+/// Every circuit of a room, plus what they share.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MultiPlan {
+    pub circuits: Vec<CircuitPlan>,
+    /// The room outline in the shared plate-local frame.
+    pub room_local: Vec<Point>,
+    /// Fields that produced no certified circuit, with the reason.
+    pub refused: Vec<String>,
+    pub nopp_count: usize,
+}
+
+/// Plans every circuit of a rectilinear room against **one** nub field.
+///
+/// The plate instance, its nub lattice and the certified pose graph are built
+/// once, from one transform, and every field is planned against that. Planning
+/// each field as a room of its own — which is what calling [`plan_schnecke`]
+/// per field does — gives each one its own lattice anchored at its own origin,
+/// and those lattices do not agree: on the room this was built for they sat
+/// 2.3 to 20.9 mm apart, against 11.5 mm of clearance between a channel and a
+/// large nub's body. Only one of them could have been the real floor.
+///
+/// `room_local` must be an axis-parallel outline in the frame `transform`
+/// defines, and `fields` axis-parallel rectangles inside it. Both come from
+/// [`super::rectify`] and [`super::slab_fields`]; field edges are snapped onto
+/// the channel lattice here, because a cut off the lattice moves every lane in
+/// the field off it too.
+pub fn plan_multi(
+    room_world: &[Point],
+    fields_local: &[Field],
+    transform: &PlateTransform,
+    pipe_spacing_mm: f64,
+    wall_clearance_mm: f64,
+) -> Result<MultiPlan, LoopError> {
+    let polygon = Polygon::try_from_original(room_world.to_vec()).map_err(|error| {
+        reject(format!(
+            "the room outline is not a valid polygon: {error:?}"
+        ))
+    })?;
+    // One instance, one lattice, one graph — for every circuit in the room.
+    let base = PlateInstance::new(
+        polygon.clone(),
+        *transform,
+        PlateProfile::bekotec_en_23_fi_30_16(),
+        MAX_NOPPS,
+    )
+    .map_err(|error| reject(format!("the plate does not fit this room: {error:?}")))?;
+    let graph = build_embedded_graph(&base, wall_clearance_mm, PlateGraphLimits::default())
+        .map_err(|error| reject(format!("no certified pose graph for this room: {error:?}")))?;
+    let nopp_count = base.nopps.len();
+
+    let depth_mm = zone_depth_mm(wall_clearance_mm, pipe_spacing_mm);
+    let mut circuits = Vec::new();
+    let mut refused = Vec::new();
+    for field in fields_local {
+        let field = snap_to_channels(field);
+        let width = field.rect_local.max.x - field.rect_local.min.x;
+        match plan_one(
+            &field,
+            &graph,
+            &base,
+            transform,
+            pipe_spacing_mm,
+            wall_clearance_mm,
+            depth_mm,
+        ) {
+            Ok(circuit) => circuits.push(circuit),
+            Err(error) => refused.push(format!(
+                "field at ({:.0}, {:.0}), {width:.0} mm wide: {}",
+                field.rect_local.min.x, field.rect_local.min.y, error.message
+            )),
+        }
+    }
+
+    Ok(MultiPlan {
+        circuits,
+        room_local: room_world
+            .iter()
+            .map(|vertex| transform.to_local(*vertex))
+            .collect(),
+        refused,
+        nopp_count,
+    })
+}
+
+/// A field whose edges sit on the channel lattice.
+///
+/// Shrunk, never grown: a field that reached past its slab would put pipe in
+/// the neighbour's lane. The lost strip is under one channel pitch per edge.
+fn snap_to_channels(field: &Field) -> Field {
+    let inward = |value: f64| {
+        CHANNEL_OFFSET_MM
+            + ((value - CHANNEL_OFFSET_MM) / CHANNEL_PITCH_MM).ceil() * CHANNEL_PITCH_MM
+    };
+    let outward = |value: f64| {
+        CHANNEL_OFFSET_MM
+            + ((value - CHANNEL_OFFSET_MM) / CHANNEL_PITCH_MM).floor() * CHANNEL_PITCH_MM
+    };
+    Field {
+        id: field.id,
+        rect_local: RectMm {
+            min: Point::new(
+                inward(field.rect_local.min.x),
+                inward(field.rect_local.min.y),
+            ),
+            max: Point::new(
+                outward(field.rect_local.max.x),
+                outward(field.rect_local.max.y),
+            ),
+        },
+    }
+}
+
+/// One field against the shared lattice.
+///
+/// The connection zone is built from the *field's* own rectangle rather than
+/// the room's outline, so a field whose bottom edge is an interior cut still
+/// gets one. The zone rectangle it returns is in the shared frame, so the
+/// room-wide graph is what gets cut and the room-wide instance is what the
+/// noppen are checked against — the field never gets a plate of its own.
+fn plan_one(
+    field: &Field,
+    graph: &crate::plate::EmbeddedPoseGraph,
+    base: &PlateInstance,
+    transform: &PlateTransform,
+    pipe_spacing_mm: f64,
+    wall_clearance_mm: f64,
+    depth_mm: f64,
+) -> Result<CircuitPlan, LoopError> {
+    let rect = &field.rect_local;
+    let corners = [
+        transform.to_world(Point::new(rect.min.x, rect.min.y)),
+        transform.to_world(Point::new(rect.max.x, rect.min.y)),
+        transform.to_world(Point::new(rect.max.x, rect.max.y)),
+        transform.to_world(Point::new(rect.min.x, rect.max.y)),
+    ];
+    let field_polygon = Polygon::try_from_original(corners.to_vec())
+        .map_err(|error| reject(format!("the field is not a valid rectangle: {error:?}")))?;
+    let width = rect.max.x - rect.min.x;
+    let zone = build_connection_zone(
+        &field_polygon,
+        transform,
+        &crate::circuit::types::ConnectionInput {
+            edge_index: 0,
+            center_offset_mm: width / 2.0,
+            zone_width_mm: 600.0_f64.min(width / 2.0),
+            zone_depth_mm: depth_mm,
+        },
+    )?;
+    let view = build_graph_view(graph, &zone, transform);
+    let mut instance = base.clone();
+    filter_zone_nopps(&mut instance, &zone);
+
+    let schnecke = build_schnecke(
+        field,
+        pipe_spacing_mm,
+        wall_clearance_mm,
+        graph,
+        &view,
+        &zone,
+        &instance,
+    )?;
+    let candidate = assemble(&schnecke, graph, &zone, &instance)?;
+    let certificate = certify_loop(
+        &candidate,
+        &LoopContext {
+            instance: &instance,
+            graph,
+            view: &view,
+            zone: &zone,
+            lanes: &schnecke.lanes,
+        },
+    )?;
+
+    Ok(CircuitPlan {
+        rect_local: rect.clone(),
+        path_d: path_data_local(&candidate, transform),
+        lanes: schnecke.lanes.len(),
+        total_length_mm: certificate.total_length_mm,
+        min_bend_radius_mm: certificate.min_bend_radius_mm,
+        min_center_distance_mm: certificate.min_center_distance_mm.distance_mm,
+        penalty_sum_mm: certificate.penalty_sum_mm,
+    })
+}
+
+/// The loop as SVG path data in the shared plate-local frame.
+fn path_data_local(candidate: &LoopCandidate, transform: &PlateTransform) -> String {
+    let local = LoopCandidate {
+        sections: candidate
+            .sections
+            .iter()
+            .map(|section| LoopSection {
+                kind: section.kind,
+                edge_id: section.edge_id,
+                lane_id: section.lane_id,
+                primitives: section
+                    .primitives
+                    .iter()
+                    .map(|primitive| transform.primitive_to_local(primitive))
+                    .collect(),
+            })
+            .collect(),
+    };
+    path_data(&local)
 }

@@ -16,8 +16,9 @@
 //! them is the piece that is still missing. The geometry of every circuit is
 //! certified; the way they reach one manifold is not yet planned.
 
-use single_loop_solver::circuit::{Field, SchneckeInput, plan_schnecke, rectify, slab_fields};
+use single_loop_solver::circuit::{Field, plan_multi, rectify, slab_fields};
 use single_loop_solver::model::Point;
+use single_loop_solver::plate::PlateTransform;
 
 /// Enough pipe for one circuit, per the design spec.
 const MAX_LOOP_LENGTH_MM: f64 = 100_000.0;
@@ -56,35 +57,71 @@ fn main() -> Result<(), String> {
         fields.len()
     );
 
-    let mut circuits: Vec<(Field, String, f64, usize)> = Vec::new();
-    for field in &fields {
-        let width = field.rect_local.max.x - field.rect_local.min.x;
-        let height = field.rect_local.max.y - field.rect_local.min.y;
-        let plan = plan_schnecke(SchneckeInput {
-            width_mm: width,
-            height_mm: height,
-            pipe_spacing_mm: spacing_mm,
-            wall_clearance_mm: WALL_CLEARANCE_MM,
-            connection_offset_mm: width / 2.0,
-            zone_width_mm: 600.0_f64.min(width / 2.0),
-        });
-        match plan {
-            Ok(plan) => {
-                eprintln!(
-                    "  Feld {}: {width:.0} x {height:.0} mm, {:.2} m², {} Bahnen, {:.1} m",
-                    field.id,
-                    width * height / 1e6,
-                    plan.lanes,
-                    plan.total_length_mm / 1000.0
-                );
-                circuits.push((field.clone(), plan.path_d, plan.total_length_mm, plan.lanes));
-            }
-            Err(error) => eprintln!(
-                "  Feld {}: {width:.0} x {height:.0} mm — kein Kreis: {}",
-                field.id, error.message
-            ),
-        }
+    // One frame for the whole room, so one nub lattice for every circuit.
+    // Which edge it comes from does not matter to the lattice, only that it is
+    // the same one for all of them.
+    // Any wall gives the same lattice; this one is chosen so the drawing reads
+    // the way the room does — the longest wall running in +x, which puts the
+    // room upright in the shared frame instead of on its side.
+    let (start, end) = reference_wall(&room.vertices);
+    let transform = PlateTransform::from_edge(start, end, centroid(&room.vertices), 0.0, 0.0)
+        .map_err(|error| format!("the room's reference wall is degenerate: {error:?}"))?;
+    let fields_local: Vec<Field> = fields
+        .iter()
+        .map(|field| Field {
+            id: field.id,
+            rect_local: to_local_rect(&transform, &field.rect_local),
+        })
+        .collect();
+    let room_world: Vec<Point> = room.vertices.clone();
+
+    let plan = plan_multi(
+        &room_world,
+        &fields_local,
+        &transform,
+        spacing_mm,
+        WALL_CLEARANCE_MM,
+    )
+    .map_err(|error| error.message)?;
+
+    for circuit in &plan.circuits {
+        eprintln!(
+            "  Feld ({:.0}, {:.0}) {:.0} x {:.0} mm: {} Bahnen, {:.1} m, Biegeradius {:.1} mm, \
+             Strafe {:.1} mm",
+            circuit.rect_local.min.x,
+            circuit.rect_local.min.y,
+            circuit.rect_local.max.x - circuit.rect_local.min.x,
+            circuit.rect_local.max.y - circuit.rect_local.min.y,
+            circuit.lanes,
+            circuit.total_length_mm / 1000.0,
+            circuit.min_bend_radius_mm,
+            circuit.penalty_sum_mm,
+        );
     }
+    for refusal in &plan.refused {
+        eprintln!("  kein Kreis: {refusal}");
+    }
+    eprintln!(
+        "  ein Noppenfeld, {} Noppen, fuer alle Kreise",
+        plan.nopp_count
+    );
+
+    let circuits: Vec<(Field, String, f64, usize)> = plan
+        .circuits
+        .iter()
+        .enumerate()
+        .map(|(index, circuit)| {
+            (
+                Field {
+                    id: index as u32,
+                    rect_local: circuit.rect_local.clone(),
+                },
+                circuit.path_d.clone(),
+                circuit.total_length_mm,
+                circuit.lanes,
+            )
+        })
+        .collect();
 
     let laid: f64 = circuits.iter().map(|(_, _, length, _)| length).sum();
     let longest = circuits
@@ -108,7 +145,7 @@ fn main() -> Result<(), String> {
 
     print!(
         "{}",
-        compose(&room, &circuits, spacing_mm, laid, theoretical_m)
+        compose(&plan.room_local, &circuits, spacing_mm, laid, theoretical_m)
     );
     Ok(())
 }
@@ -174,14 +211,14 @@ fn area_mm2(vertices: &[Point]) -> f64 {
 }
 
 fn compose(
-    room: &single_loop_solver::circuit::RectifiedRoom,
+    room_local: &[Point],
     circuits: &[(Field, String, f64, usize)],
     spacing_mm: f64,
     laid_mm: f64,
     theoretical_m: f64,
 ) -> String {
-    let xs: Vec<f64> = room.vertices.iter().map(|vertex| vertex.x).collect();
-    let ys: Vec<f64> = room.vertices.iter().map(|vertex| vertex.y).collect();
+    let xs: Vec<f64> = room_local.iter().map(|vertex| vertex.x).collect();
+    let ys: Vec<f64> = room_local.iter().map(|vertex| vertex.y).collect();
     let (min_x, max_x) = (fold_min(&xs), fold_max(&xs));
     let (min_y, max_y) = (fold_min(&ys), fold_max(&ys));
     let margin = 260.0;
@@ -205,8 +242,7 @@ fn compose(
         min_y + max_y,
     );
 
-    let outline: String = room
-        .vertices
+    let outline: String = room_local
         .iter()
         .map(|vertex| format!("{:.1},{:.1}", vertex.x, vertex.y))
         .collect::<Vec<_>>()
@@ -225,11 +261,11 @@ fn compose(
             field.rect_local.max.x - field.rect_local.min.x,
             field.rect_local.max.y - field.rect_local.min.y,
         ));
+        // No per-field translate: one lattice means one frame, and every
+        // path is already in it.
         out.push_str(&format!(
-            "<g transform=\"translate({:.1},{:.1})\">\
-             <path fill=\"none\" stroke=\"{ink}\" stroke-width=\"16\" stroke-linecap=\"round\" \
-             stroke-linejoin=\"round\" opacity=\"0.9\" d=\"{path_d}\"/></g>\n",
-            field.rect_local.min.x, field.rect_local.min.y,
+            "<path fill=\"none\" stroke=\"{ink}\" stroke-width=\"16\" stroke-linecap=\"round\" \
+             stroke-linejoin=\"round\" opacity=\"0.9\" d=\"{path_d}\"/>\n"
         ));
     }
     out.push_str("</g>\n");
@@ -313,4 +349,53 @@ fn measured_ring() -> Result<Vec<Point>, String> {
         current = next;
     }
     Ok(ring.into_iter().map(|id| by_id[&id]).collect())
+}
+
+/// A world-frame rectangle expressed in `transform`'s local frame. The room is
+/// axis-parallel in both, so the corners map straight across.
+fn to_local_rect(
+    transform: &PlateTransform,
+    rect: &single_loop_solver::circuit::RectMm,
+) -> single_loop_solver::circuit::RectMm {
+    let corners = [
+        transform.to_local(Point::new(rect.min.x, rect.min.y)),
+        transform.to_local(Point::new(rect.max.x, rect.min.y)),
+        transform.to_local(Point::new(rect.max.x, rect.max.y)),
+        transform.to_local(Point::new(rect.min.x, rect.max.y)),
+    ];
+    let xs: Vec<f64> = corners.iter().map(|point| point.x).collect();
+    let ys: Vec<f64> = corners.iter().map(|point| point.y).collect();
+    single_loop_solver::circuit::RectMm {
+        min: Point::new(fold_min(&xs), fold_min(&ys)),
+        max: Point::new(fold_max(&xs), fold_max(&ys)),
+    }
+}
+
+fn centroid(vertices: &[Point]) -> Point {
+    let count = vertices.len() as f64;
+    Point::new(
+        vertices.iter().map(|point| point.x).sum::<f64>() / count,
+        vertices.iter().map(|point| point.y).sum::<f64>() / count,
+    )
+}
+
+/// The wall the shared frame is built from: the longest one running in +x, so
+/// the room stands upright in that frame. Falls back to the longest wall of
+/// any direction for a room that has none.
+fn reference_wall(vertices: &[Point]) -> (Point, Point) {
+    let mut best: Option<(f64, Point, Point)> = None;
+    let mut fallback: Option<(f64, Point, Point)> = None;
+    for index in 0..vertices.len() {
+        let from = vertices[index];
+        let to = vertices[(index + 1) % vertices.len()];
+        let length = (to.x - from.x).hypot(to.y - from.y);
+        if fallback.is_none_or(|(held, _, _)| held < length) {
+            fallback = Some((length, from, to));
+        }
+        if to.x > from.x && best.is_none_or(|(held, _, _)| held < length) {
+            best = Some((length, from, to));
+        }
+    }
+    let (_, from, to) = best.or(fallback).expect("a room has walls");
+    (from, to)
 }
