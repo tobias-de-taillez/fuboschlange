@@ -104,6 +104,57 @@ Kehrenspanne), die Eckparitäten schließen sich also weiterhin. Der Preis
 ist ein freier Kern in der Raummitte — genau dort, wo die Wendeschleife
 läuft und wo der Boden über die Kehre ohnehin am wärmsten ist.
 
+### 3a. Die Kehre darf ihre eigene Bahn nicht treffen
+
+Eine Reverse-Platzierung liegt nicht zwischen ihren Endpunkten: die
+`TeardropReverse` schlingt bis zu 192 mm darüber hinaus, die
+`BroadReverse180` 112 mm. Beide Enden sitzen auf **derselben Seite** der
+Bahn — was der Überstand also treffen kann, sind die zwei Seiten quer dazu.
+Bei 150 mm Verlegeabstand tut er das auch: die innerste Bahn ist dort nur
+225 mm hoch, die Kehre sitzt zwangsläufig direkt an ihrer Unterkante, und der
+Schwanz der Tropfenschleife landet exakt darauf.
+
+`turn_clears_its_own_lane` verwirft solche Platzierungen (Abstand < 50 mm,
+Spec §5) — und misst die Achse nach dem *Heading der Kehre*, nicht nach der
+Bahn: eine Kehre auf einer Spalte ragt in `y`, eine auf einer Zeile in `x`.
+Die falsche Achse würde stillschweigend durchwinken.
+
+### 3b. Die Kehre sitzt auf der Seite, die Platz hat
+
+Die Kehre kann auf jeder der vier Seiten der innersten Bahn liegen, und die
+Wahl zählt doppelt:
+
+- **Sie muss passen.** Der Überstand liegt quer zur Seite, auf der die Kehre
+  sitzt. Eine flache, breite Bahn hat auf den langen Seiten Platz und auf den
+  kurzen keinen.
+- **Sie kostet Deckung.** Kehrt der Arm auf Leg `i`, hat er die Seiten `0..=i`
+  der innersten Bahn gelegt, und der Rücklauf legt die Seiten `3-i..=3` der
+  nächsten. Von acht Seiten bekommen also `2(i+1)` Rohr.
+
+`walk_core` probiert deshalb Leg 3 zuerst und arbeitet sich zurück; erst wenn
+keine der vier passt, geht die Verschachtelung eine Windung flacher. Der
+Rücklauf startet dann bei Leg `3-i` seiner ersten Windung — die zwei
+Leg-Ordnungen laufen gegenläufig herum.
+
+Bei 150 mm ist genau das der Gewinn: die innerste Bahn ist 225 mm hoch und
+975 mm breit, die linke Spalte hat keinen Platz für den Tropfenüberstand, die
+obere Zeile schon. Kehre auf der oberen Zeile ⇒ **7 statt 5 Bahnen**.
+
+Bei 75 mm bringt es nichts: dort begrenzt die Eckenreichweite, nicht die
+Kehre.
+
+### 3c. Rangfolge: verlegtes Rohr, nicht Bahnzahl
+
+Eine tiefere Verschachtelung ist nicht automatisch mehr Fläche — sie kann die
+Kehre auf eine frühe Seite zwingen, und die Seiten, die die zwei innersten
+Bahnen dann verlieren, können die zusätzliche Windung überwiegen. Ebenso
+können zwei Kandidaten mit *gleicher* Bahnzahl weit auseinanderliegen.
+
+`build_from` und `build_schnecke` ranken deshalb nach **Kantenzahl des Pfades**
+(Stellvertreter für verlegtes Rohr), nicht nach Bahnzahl. Nach Bahnzahl
+gerankt verlor 225 mm zwei Meter Rohr an eine gleich tiefe, aber schlechter
+kehrende Variante.
+
 ## 4. Gebaut
 
 `src/circuit/schnecke.rs`, `build_schnecke(field, pipe_spacing_mm,
@@ -117,25 +168,16 @@ wall_clearance_mm, graph, view, zone, instance) -> Result<Schnecke, LoopError>`.
   beansprucht eine Bahn nur, wenn beide Endpunkte auf deren Rechteck liegen.
   Der Rest ist `SectionKind::Hop`. Das ist ehrlich und kann nicht
   auseinanderdriften, weil es dasselbe Prädikat benutzt wie der Validator.
-- Tiefste Verschachtelung zuerst; die erste, die durchläuft, gewinnt.
-  Beide Paritäten des äußersten Rings werden probiert.
-- Beide Port-Zuordnungen werden probiert; gewählt wird die mit der kürzeren
-  Summe Port→Anker. Die andere lässt die beiden Anschlussstücke einander
-  kreuzen.
-
-### 3a. Die Kehre darf ihre eigene Bahn nicht treffen
-
-Eine Reverse-Platzierung liegt nicht zwischen ihren Endpunkten: die
-`TeardropReverse` schlingt bis zu 192 mm darüber hinaus, die
-`BroadReverse180` 112 mm. Beide Enden sitzen auf einer Spalte — was der
-Überstand also treffen kann, ist die untere oder obere **Zeile derselben
-Bahn**. Bei 150 mm Verlegeabstand tut er das auch: die innerste Bahn ist
-dort nur 225 mm hoch, die Kehre sitzt zwangsläufig direkt an ihrer
-Unterkante, und der Schwanz der Tropfenschleife landet exakt darauf.
-
-`turn_clears_its_own_lane` verwirft solche Platzierungen (Abstand < 50 mm,
-Spec §5). Die Verschachtelung fällt dann um eine Windung zurück, statt eine
-sich kreuzende Schleife zu liefern.
+- Alle Verschachtelungstiefen und beide Paritäten des äußersten Rings werden
+  gelaufen; es gewinnt die mit dem meisten Rohr (§3c).
+- Beide Port-Zuordnungen werden probiert. Ob die zwei Anschlussstücke einander
+  kreuzen, wird **geprüft**, nicht geschätzt: `connectors_clear_the_loop`
+  benutzt `primitive_intersections` gegen die Regel „Primitive mit Abstand ≥ 2
+  dürfen sich nicht berühren", aber nur für die Paare, an denen ein
+  Anschlussstück beteiligt ist — der Rest steht schon per Konstruktion fest.
+  Der frühere Distanz-Stellvertreter (kürzere Summe Port→Anker) traf die
+  richtige Zuordnung, solange die Kehre immer auf der linken Spalte saß, und
+  fiel um, sobald sie das nicht mehr tat.
 
 ## 5. Abnahme — erreicht, aber anders als hier ursprünglich formuliert
 
@@ -161,7 +203,7 @@ Die ganze Leiter, im selben Testlauf zertifiziert:
 | Verlegeabstand | Bahnen | Länge | schlechtester Deckungspunkt |
 |---|---|---|---|
 | 75 mm | 11 | 67 421 mm | 354,6 mm |
-| 150 mm | 5 | 32 116 mm | 519 mm |
+| 150 mm | 7 | 37 010 mm | 519 mm |
 | 225 mm | 5 | 27 145 mm | 616 mm |
 | 300 mm | 3 | 18 890 mm | 663 mm |
 
@@ -169,15 +211,6 @@ Die ganze Leiter, im selben Testlauf zertifiziert:
 
 ## 6. Was offen bleibt
 
-- **Seite der Kehre.** Die Kehre sitzt immer auf der linken Spalte. Bei
-  75 mm kostet das nichts — dort begrenzt die *Eckenreichweite* die Tiefe,
-  nicht die Kehre (Bahn 12 und 14 scheitern beide an einer fehlenden Ecke).
-  Bei 150 mm dagegen ist die Kehre der Engpass: die innerste Bahn ist breit
-  und flach, auf der langen Seite wäre Platz, auf der kurzen nicht — das
-  kostet dort zwei Bahnen (5 statt 7). Die Kehre auf der Seite mit Platz zu
-  legen ist der lohnendste nächste Schritt, kostet aber Deckung auf der
-  innersten Rücklaufbahn: der Rücklauf beginnt dann mitten in seiner Windung
-  und legt die vorangehenden Seiten nicht mehr.
 - **Deckung bei 75 mm.** Schlechtester Punkt 354,6 mm (Raumecke). Ursache:
   die äußerste Windung ist zweifach unterbrochen — von der Anschlusszone
   *und* von der Naht in der Ecke unten links —, sodass die unterste Zeile

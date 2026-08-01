@@ -391,8 +391,18 @@ fn the_other_spacings_on_the_ladder_certify_too() {
     // different turn-around — two channels when the spacing is an even number
     // of channels, three when it is odd — so each is its own path through the
     // construction and each needs its own end-to-end run.
-    for spacing_mm in [150.0, 225.0, 300.0] {
+    // Lane counts pinned: 150 mm is the case that made the turn's side
+    // selectable at all. Its innermost lane is wide and flat, so the left
+    // column has no room for the turn's overhang and the top row does —
+    // turning there is worth two whole revolutions here (5 lanes before,
+    // 7 after).
+    for (spacing_mm, lanes) in [(150.0, 7), (225.0, 5), (300.0, 3)] {
         let pipeline = Pipeline::run_at(spacing_mm);
+        assert_eq!(
+            pipeline.lanes.len(),
+            lanes,
+            "spacing {spacing_mm} mm nests {lanes} lanes in this room"
+        );
         let candidate = assemble(&pipeline);
         let certificate = match certify_loop(&candidate, &pipeline.context()) {
             Ok(certificate) => certificate,
@@ -425,11 +435,15 @@ fn the_other_spacings_on_the_ladder_certify_too() {
             },
             "spacing {spacing_mm} mm: the innermost gap is the turn's own span; gaps {gaps:?}"
         );
+        let turn = pipeline.edges_by_id()[&pipeline.path.turn_edge_ids[0]];
         println!(
-            "spacing {spacing_mm:.0} mm: {} lanes, {:.0} mm, worst uncovered point {:.0} mm",
+            "spacing {spacing_mm:.0} mm: {} lanes, {:.0} mm, worst uncovered point {:.0} mm, \
+             turn on {:?} from {:?}",
             pipeline.lanes.len(),
             certificate.total_length_mm,
             certificate.coverage.upper_bound_mm,
+            turn.start.local_pose.heading,
+            turn.start.local_pose.point,
         );
     }
 }

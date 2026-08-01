@@ -66,7 +66,8 @@ use crate::circuit::fields::{Field, Lane};
 use crate::circuit::spiral::{SpiralEnds, SpiralPath};
 use crate::circuit::types::{LoopError, LoopErrorCode, RectMm};
 use crate::circuit::zone::{ConnectionZone, ENTRY_RING_MM, LoopGraphView, attach_port};
-use crate::model::Point;
+use crate::geometry::primitive_intersections;
+use crate::model::{PathPrimitive, Point};
 use crate::plate::{
     EmbeddedPoseGraph, Heading8, LocalPose, PlateInstance, PoseEdge, PoseNode, TemplateId,
 };
@@ -183,10 +184,10 @@ pub fn build_schnecke(
     for outermost in outermost_candidates(field, wall_clearance_mm) {
         match build_from(outermost, spacing_channels, turn_span, &index) {
             Ok(schnecke) => {
-                let deeper = best
+                if best
                     .as_ref()
-                    .is_none_or(|held| held.lanes.len() < schnecke.lanes.len());
-                if deeper {
+                    .is_none_or(|held| laid_edges(&held.path) < laid_edges(&schnecke.path))
+                {
                     best = Some(schnecke);
                 }
             }
@@ -309,8 +310,11 @@ fn build_from(
     let max_count = (room / (2 * spacing_channels).max(1)).max(0) as usize + 1;
 
     let mut failure: Option<LoopError> = None;
-    // Deepest first: more lanes is more of the floor covered, and the first
-    // depth whose corners all exist is the answer.
+    let mut best: Option<Schnecke> = None;
+    // Deepest first, but every depth is walked and the most pipe wins. A
+    // deeper nesting is not automatically more floor covered: it can force the
+    // turn onto an early side, and the sides the two innermost lanes then lose
+    // can outweigh the extra revolution.
     for count in (1..=max_count).rev() {
         if count.rem_euclid(2) == 1 {
             // Lanes `0..count` are the evenly spaced ones and lane `count` is
@@ -320,13 +324,29 @@ fn build_from(
         }
         let revolutions = nesting_sequence(outermost, spacing_channels, turn_span, count);
         match walk(&revolutions, index) {
-            Ok(schnecke) => return Ok(schnecke),
+            Ok(schnecke) => {
+                if best
+                    .as_ref()
+                    .is_none_or(|held| laid_edges(&held.path) < laid_edges(&schnecke.path))
+                {
+                    best = Some(schnecke);
+                }
+            }
             // The deepest attempt's failure is the informative one: it says
             // what stopped the spiral from nesting one revolution further.
             Err(error) => failure = failure.or(Some(error)),
         }
     }
-    Err(failure.unwrap_or_else(|| no_geometry("the room is too small for a single revolution")))
+    best.ok_or_else(|| {
+        failure.unwrap_or_else(|| no_geometry("the room is too small for a single revolution"))
+    })
+}
+
+/// How many certified edges the loop lays. The ranking objective: at equal
+/// legality, the Schnecke that puts more pipe on the floor is the better one,
+/// and edge count stands in for length without needing the geometry.
+fn laid_edges(path: &SpiralPath) -> usize {
+    path.inward_edge_ids.len() + path.turn_edge_ids.len() + path.return_edge_ids.len()
 }
 
 // ---------------------------------------------------------------------------
@@ -465,6 +485,14 @@ impl<'a> GraphIndex<'a> {
             .values()
             .copied()
             .find(|node| node.id == id)
+    }
+
+    fn edge_by_id(&self, id: u32) -> Option<&'a PoseEdge> {
+        self.edges_by_start
+            .values()
+            .flatten()
+            .copied()
+            .find(|edge| edge.id == id)
     }
 
     /// The single `Straight0` leaving `pose`, if the graph has one.
@@ -717,36 +745,30 @@ fn walk(revolutions: &[Revolution], index: &GraphIndex) -> Result<Schnecke, Loop
         .collect();
 
     let mut failure: Option<LoopError> = None;
-    let mut best: Option<(f64, SpiralPath)> = None;
     // Either port may serve as the entry; the other is then the exit. Both
-    // orders usually walk, but only one of them keeps the two connectors apart:
-    // if the entry port is the one further from the arm's own end of the zone,
-    // its connector has to reach across the exit's, and the two cross right in
-    // front of the manifold. Ranking by the summed port-to-anchor distance
-    // picks the non-crossing assignment without needing a crossing test — the
-    // crossing one is always the longer pairing.
+    // orders usually walk, but only one of them keeps the two connectors
+    // apart: if the entry port is the one further from the arm's own end of
+    // the zone, its connector has to reach across the exit's, and the two
+    // cross right in front of the manifold. Which order that is depends on
+    // where the turn put the return arm's outer end, so it is decided by the
+    // real crossing test rather than by a distance proxy standing in for one.
     for (entry_port, exit_port) in [
         (index.zone.start_port, index.zone.end_port),
         (index.zone.end_port, index.zone.start_port),
     ] {
+        // Westernmost entry pose first, so the arm lays as much of the
+        // outermost row as it can; the ones behind it are the fallback for
+        // when that start cannot walk the whole spiral or its connector
+        // crosses the loop.
         for entry in entry_poses(index, revolutions[0].bottom, entry_port) {
             match walk_from(revolutions, index, entry, entry_port, exit_port) {
-                Ok(path) => {
-                    let reach = connector_reach_mm(index, &path);
-                    if best.as_ref().is_none_or(|(held, _)| reach < *held) {
-                        best = Some((reach, path));
-                    }
-                    // The remaining entry poses on this port only run the arm
-                    // shorter; the next port order is what still has to be
-                    // compared.
-                    break;
-                }
+                Ok(path) => match connectors_clear_the_loop(index, &path) {
+                    Ok(()) => return Ok(Schnecke { lanes, path }),
+                    Err(error) => failure = failure.or(Some(error)),
+                },
                 Err(error) => failure = failure.or(Some(error)),
             }
         }
-    }
-    if let Some((_, path)) = best {
-        return Ok(Schnecke { lanes, path });
     }
     Err(failure.unwrap_or_else(|| {
         no_geometry(format!(
@@ -757,23 +779,91 @@ fn walk(revolutions: &[Revolution], index: &GraphIndex) -> Result<Schnecke, Loop
     }))
 }
 
-/// How far the two zone connectors have to reach, summed. The smaller sum is
-/// the assignment where each port serves the anchor on its own side.
-fn connector_reach_mm(index: &GraphIndex, path: &SpiralPath) -> f64 {
+/// Whether the two zone connectors keep clear of each other and of the loop.
+///
+/// The arms themselves cannot cross — that is what the nesting sequence buys —
+/// but the two free-form connectors are not part of that argument: they run
+/// from the ports out to the anchors through the one part of the room the
+/// lattice does not govern, and whether they cross depends on which port
+/// serves which anchor. Checked with the same predicate the validator uses,
+/// against the same "primitives two or more apart must not touch" rule, but
+/// only for the pairs involving a connector — the rest is already settled by
+/// construction, and checking it here would make this quadratic in the whole
+/// loop for nothing.
+fn connectors_clear_the_loop(index: &GraphIndex, path: &SpiralPath) -> Result<(), LoopError> {
     let Some(ends) = path.ends else {
-        return f64::INFINITY;
+        return Ok(());
     };
-    let reach = |port: Point, node_id: u32| {
+    let connector = |port: Point, node_id: u32| -> Vec<PathPrimitive> {
         index
             .node_by_id(node_id)
-            .map_or(f64::INFINITY, |node| distance(port, node.world_point))
+            .and_then(|node| attach_port(port, index.zone.inward, node, index.instance).ok())
+            .map(|attachment| attachment.primitives)
+            .unwrap_or_default()
     };
-    reach(ends.entry_port, ends.entry_anchor_node_id)
-        + reach(ends.exit_port, ends.exit_anchor_node_id)
+    let entry = connector(ends.entry_port, ends.entry_anchor_node_id);
+    let exit: Vec<PathPrimitive> = connector(ends.exit_port, ends.exit_anchor_node_id)
+        .iter()
+        .rev()
+        .map(reverse_primitive)
+        .collect();
+
+    let mut ordered: Vec<PathPrimitive> = entry.clone();
+    let entry_end = ordered.len();
+    for edge_id in path
+        .inward_edge_ids
+        .iter()
+        .chain(&path.turn_edge_ids)
+        .chain(&path.return_edge_ids)
+    {
+        if let Some(edge) = index.edge_by_id(*edge_id) {
+            ordered.extend(edge.primitives.iter().cloned());
+        }
+    }
+    let exit_start = ordered.len();
+    ordered.extend(exit);
+
+    for first in 0..ordered.len() {
+        let involves_connector = first < entry_end || first >= exit_start;
+        for second in (first + 2)..ordered.len() {
+            if !involves_connector && second < exit_start {
+                continue;
+            }
+            if !primitive_intersections(&ordered[first], &ordered[second])
+                .points()
+                .is_empty()
+            {
+                return Err(no_geometry(format!(
+                    "a zone connector crosses the loop at path primitives {first} and {second}"
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
-fn distance(left: Point, right: Point) -> f64 {
-    (left.x - right.x).hypot(left.y - right.y)
+/// The same primitive, traversed the other way round. The exit connector is
+/// built port → anchor and walked back.
+fn reverse_primitive(primitive: &PathPrimitive) -> PathPrimitive {
+    match primitive {
+        PathPrimitive::Line { start, end } => PathPrimitive::Line {
+            start: *end,
+            end: *start,
+        },
+        PathPrimitive::Arc {
+            start,
+            end,
+            center,
+            radius_mm,
+            sweep_rad,
+        } => PathPrimitive::Arc {
+            start: *end,
+            end: *start,
+            center: *center,
+            radius_mm: *radius_mm,
+            sweep_rad: -*sweep_rad,
+        },
+    }
 }
 
 /// The candidate starting poses: east-running nodes on the outermost lane's
@@ -831,23 +921,18 @@ fn walk_from(
         lane_id = next;
     }
 
-    // --- The innermost lane, up to where the turn-around begins. ---
-    let core = revolutions[innermost];
-    let core_claim = claim_for(revolutions, innermost);
-    for leg in inward_legs(core, core.bottom).into_iter().take(3) {
-        let stretch = walk_leg(index, inward.pose, leg, &core_claim)?;
-        inward.absorb(stretch);
-    }
-
-    // --- The turn-around: down the innermost left column, then reverse onto
-    //     the return arm's innermost lane. ---
-    let landing = revolutions[innermost - 1].left;
-    let (turn_edge_ids, turn_run, after_turn) =
-        walk_turn(index, inward.pose, core.left, landing, &core_claim)?;
-    inward.absorb(turn_run);
+    // --- The innermost lane and the turn-around. ---
+    let core = walk_core(index, revolutions, inward.pose)?;
+    inward.absorb(core.run);
+    let turn_edge_ids = core.turn_edge_ids;
 
     // --- Return: odd lanes, innermost to outermost. ---
-    let mut ret = Stretch::new(after_turn);
+    // The turn lands on the same side of the next lane out that it left the
+    // innermost one on, running the other way — so the return's first
+    // revolution starts at that side rather than at its left column. `3 - i`
+    // is that side: the two leg orders run opposite ways round.
+    let mut ret = Stretch::new(core.after_turn);
+    let mut first_return_leg = 3 - core.turn_leg;
     let mut lane_id = innermost - 1;
     loop {
         let next = lane_id.checked_sub(2);
@@ -856,6 +941,7 @@ fn walk_from(
         for (position, leg) in return_legs(revolutions[lane_id], next_left)
             .into_iter()
             .enumerate()
+            .skip(first_return_leg)
         {
             if position == 3 && next.is_none() {
                 // The outermost return lane has no lane to step out to: it
@@ -882,8 +968,71 @@ fn walk_from(
             let stretch = walk_leg(index, ret.pose, leg, &claim)?;
             ret.absorb(stretch);
         }
+        first_return_leg = 0;
         lane_id = next.expect("the outermost lane returns above");
     }
+}
+
+/// The innermost lane walked up to and including its turn-around.
+struct Core {
+    /// The innermost lane's sides, plus the run along the turning side.
+    run: Stretch,
+    turn_edge_ids: Vec<u32>,
+    after_turn: LocalPose,
+    /// Which of the four inward legs the turn was taken on.
+    turn_leg: usize,
+}
+
+/// Walks the innermost lane and turns around on the best side it offers.
+///
+/// The turn can go on any of the four sides, and which one matters twice
+/// over. It has to *fit*: a reverse-family placement overhangs its own
+/// endpoints — 192 mm for a `TeardropReverse`, 112 mm for a
+/// `BroadReverse180` — along the side it sits on, so a squat lane has room
+/// for it on the long sides and none on the short ones. And it costs
+/// coverage: turning on leg `i` means the inward arm laid sides `0..=i` of
+/// the innermost lane and the return lays sides `3-i..=3` of the next one
+/// out, so `2(i+1)` of those eight sides get pipe.
+///
+/// Hence: try the last leg first and walk back. The best-covering side that
+/// fits wins, and only if none of the four fits does the caller back the
+/// whole nesting off by a revolution.
+fn walk_core(
+    index: &GraphIndex,
+    revolutions: &[Revolution],
+    start: LocalPose,
+) -> Result<Core, LoopError> {
+    let innermost = revolutions.len() - 1;
+    let core = revolutions[innermost];
+    let claim = claim_for(revolutions, innermost);
+    let outward = revolutions[innermost - 1];
+    let landings = [outward.bottom, outward.right, outward.top, outward.left];
+    let legs = inward_legs(core, core.bottom);
+
+    let mut failure: Option<LoopError> = None;
+    for turn_leg in (0..4usize).rev() {
+        let mut run = Stretch::new(start);
+        let attempt = (|| {
+            for leg in legs.iter().take(turn_leg) {
+                let stretch = walk_leg(index, run.pose, *leg, &claim)?;
+                run.absorb(stretch);
+            }
+            walk_turn(index, run.pose, legs[turn_leg], landings[turn_leg], &claim)
+        })();
+        match attempt {
+            Ok((turn_edge_ids, turn_run, after_turn)) => {
+                run.absorb(turn_run);
+                return Ok(Core {
+                    run,
+                    turn_edge_ids,
+                    after_turn,
+                    turn_leg,
+                });
+            }
+            Err(error) => failure = failure.or(Some(error)),
+        }
+    }
+    Err(failure.unwrap_or_else(|| no_geometry("the innermost lane has no side to turn around on")))
 }
 
 /// The lane claim for nesting index `id`.
@@ -903,59 +1052,66 @@ fn claim_for(revolutions: &[Revolution], id: usize) -> Claim {
 fn walk_turn(
     index: &GraphIndex,
     start: LocalPose,
-    column: i64,
+    leg: Leg,
     landing: i64,
     claim: &Claim,
 ) -> Result<(Vec<u32>, Stretch, LocalPose), LoopError> {
+    if !on_channel(start, leg.channel) {
+        return Err(no_geometry(format!(
+            "the walk reached the turning side {:?} off its own channel {}",
+            leg.heading, leg.channel
+        )));
+    }
     let mut run = Stretch::new(start);
     for _ in 0..MAX_STRAIGHTS_PER_SIDE {
         if let Some(turn) = turn_from(index, run.pose, landing) {
             if !turn_clears_its_own_lane(index, turn, claim) {
                 // The turn's body reaches past its two endpoints — a
                 // `TeardropReverse` loops 192 mm beyond them — and here it
-                // would land on the innermost lane's own far side. There is no
-                // room lower down either, so this nesting is one revolution
-                // too deep; the caller retries a shallower one.
+                // would land on the innermost lane's own far side. Running
+                // further along this side only moves it closer, so this side
+                // is out; the caller tries the next one.
                 return Err(no_geometry(format!(
-                    "the turn-around from column {column} onto column {landing} would run into \
+                    "the turn-around from channel {} onto channel {landing} would run into \
                      lane {}'s own far side",
-                    claim.id
+                    leg.channel, claim.id
                 )));
             }
             return Ok((vec![turn.id], run, turn.end.local_pose));
         }
         let Some(straight) = index.straight(run.pose) else {
             return Err(no_geometry(format!(
-                "no turn-around from column {column} onto column {landing}, and no straight to \
+                "no turn-around from channel {} onto channel {landing}, and no straight to \
                  continue on, at ({:.1}, {:.1})",
-                run.pose.point.x, run.pose.point.y
+                leg.channel, run.pose.point.x, run.pose.point.y
             )));
         };
         run.push(straight, claim);
     }
     Err(no_geometry(
-        "the innermost column ran past its straight-segment bound without a turn-around",
+        "a turning side ran past its straight-segment bound without a turn-around",
     ))
 }
 
-/// Whether `turn`'s body keeps clear of the two rows bounding the lane it
+/// Whether `turn`'s body keeps clear of the two sides bounding the lane it
 /// turns out of.
 ///
 /// A reverse-family placement is not contained between its own endpoints: a
 /// `TeardropReverse` loops up to 192 mm past them, a `BroadReverse180` 112 mm.
-/// Both ends sit on a column, so what that overhang can run into is the lane's
-/// own bottom or top row — and it does, on a lane squat enough that the turn
-/// is forced to sit right against one of them. Rejecting it here is what makes
-/// the nesting back off by one revolution instead of producing a loop that
-/// crosses itself.
+/// Both ends sit on the same side of the lane, so what that overhang can run
+/// into is one of the two sides *perpendicular* to it — and on a lane squat
+/// enough that the turn is forced to sit right against one of them, it does.
+/// Rejecting it here is what lets `walk_core` try the next side, and failing
+/// that, the caller back the nesting off by a revolution.
 ///
-/// **Precondition: the turn sits on a column.** That is the only case
-/// [`walk_turn`] produces, and it is why the extent checked here is the `y`
-/// one. A turn placed on a *row* would overhang along `x` instead, and this
-/// check would pass vacuously — so moving the turn onto the long side of a
-/// squat lane (the open item that would buy back two lanes at 150 mm) means
-/// checking the extent along the turn's own travel axis, not `y`.
+/// Which axis to measure follows the turn's own heading, not the lane: a turn
+/// on a column overhangs along `y`, a turn on a row along `x`. Measuring the
+/// wrong one passes vacuously, which is the whole failure this guards against.
 fn turn_clears_its_own_lane(index: &GraphIndex, turn: &PoseEdge, claim: &Claim) -> bool {
+    let on_column = matches!(
+        turn.start.local_pose.heading,
+        Heading8::Deg90 | Heading8::Deg270
+    );
     let mut lowest = f64::MAX;
     let mut highest = f64::MIN;
     for primitive in &turn.primitives {
@@ -964,11 +1120,20 @@ fn turn_clears_its_own_lane(index: &GraphIndex, turn: &PoseEdge, claim: &Claim) 
             .transform
             .primitive_to_local(primitive)
             .bounds();
-        lowest = lowest.min(bounds.min.y);
-        highest = highest.max(bounds.max.y);
+        let (low, high) = if on_column {
+            (bounds.min.y, bounds.max.y)
+        } else {
+            (bounds.min.x, bounds.max.x)
+        };
+        lowest = lowest.min(low);
+        highest = highest.max(high);
     }
-    lowest >= claim.rect.min.y + TURN_BODY_CLEARANCE_MM
-        && highest <= claim.rect.max.y - TURN_BODY_CLEARANCE_MM
+    let (floor, ceiling) = if on_column {
+        (claim.rect.min.y, claim.rect.max.y)
+    } else {
+        (claim.rect.min.x, claim.rect.max.x)
+    };
+    lowest >= floor + TURN_BODY_CLEARANCE_MM && highest <= ceiling - TURN_BODY_CLEARANCE_MM
 }
 
 /// The reverse-family edge leaving `pose` that lands on column `landing`
