@@ -5,12 +5,14 @@ Kein Server, keine Dependencies, kein Build: `verlegeplan.html` im Browser öffn
 
 ## Was es macht
 
-- **Bifilare Doppelspirale** (Gegenstrom) als Verlegemuster, wandparallel mit
-  Ecken-Treppe. Vorlauf spiralt rein, Rücklauf um einen Bahnabstand versetzt raus.
-- **L-förmige Räume** über einen Ausschnitt (Notch), links oder rechts spiegelbar.
-- **Randzone an Fensterfronten** mit dichteren Bahnen; zusammenhängende
-  Fensterwände laufen als eine durchgehende U-Form um die Ecken.
-  Omega-Kehren an den Bahnenden halten den vollen Biegeradius ein.
+- **Beliebiger Grundriss**: eine Eckenliste, konkav und mit schrägen Wänden,
+  ohne Löcher. Import aus `raumaufmass.html`, oder ein Rechteck zum Schnellstart.
+- **Konturparallele Doppelspirale** (Gegenstrom): die Konturen kommen aus einem
+  Abstandsfeld, jede bekommt an einer gemeinsamen Naht eine Lücke, und alle
+  Ring-zu-Ring-Sprünge laufen durch diese Lücken. Zerfällt der Raum beim
+  Schrumpfen (U-, T-, H-Form), entsteht ein Konturbaum.
+- **Randzone an Fensterfronten** mit dichteren Bahnen. Fensterwände werden im
+  Plan angeklickt. Omega-Kehren an den Bahnenden halten den Biegeradius ein.
 - **Verteiler frei platzierbar** (Klick auf den Plan oder x/y-Felder). Die
   gesamte Verlegung wird darauf ausgerichtet: der Anbindekorridor liegt immer
   an der Verteilerwand.
@@ -36,10 +38,26 @@ kreuzen, und kein Rohr darf den Raum verlassen. Tiefer prüfen in der Konsole:
 crossingBench(500)   // liefert die fehlschlagenden Parametersets
 ```
 
+Zusätzlich prüfbar auf der Kommandozeile:
+
+```bash
+node test/verlegeplan.mjs
+```
+
 ## Stand
 
-Feldgeometrie und Randzone sind kreuzungsfrei; **die Anbindeleitungen sind es
-noch nicht** — der Bench schlägt fehl. Das Spurmodell für die Zuleitungen ist
-zu starr und braucht einen anderen Ansatz (siehe `docs/superpowers/specs/`).
+Die Feldgeometrie ist kreuzungsfrei, solange die Konturen beim Schrumpfen nicht
+zerfallen — nachgemessen an Rechteck, Trapez, L und einem Fünfeck mit zwei
+schrägen Wänden, je bei 100, 150 und 200 mm Bahnabstand. Zerfallende Grundrisse
+(U, T, H) werden vollständig verlegt, aber die Übergabe zwischen den Ästen ist
+noch nicht als kreuzungsfrei nachgewiesen; das Werkzeug weist das im Plan aus.
+
+**Die Anbindeleitungen sind noch nicht kreuzungsfrei** — der Bench schlägt fehl.
+Sie laufen inzwischen im Randkorridor statt quer durchs Feld, aber die
+Spurzuteilung ist noch nicht verschachtelt (siehe `docs/superpowers/specs/`).
+Der Bahnabstand ist weiterhin eine Eingabe und wird nicht aus dem Längenbudget
+gelöst; bei knapper Kreislänge kann deshalb ein Streifen in der Raummitte
+unbelegt bleiben.
+
 Das Tool weist Überlappungen, zu enge Kehren und unplausible Eingaben im Plan
 und als Warnung aus, statt sie still zu zeichnen.
