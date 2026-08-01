@@ -1224,6 +1224,70 @@ fn build_ring(
     }
 }
 
+/// One side of one revolution of a rectangular spiral: which wall it runs
+/// along, and how far in from that wall it sits.
+///
+/// Sides are numbered counter-clockwise from the connection edge: 0 = the
+/// wall carrying the connection, then 1, 2, 3 around the room.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SpiralSide {
+    /// Which revolution this side belongs to, counting outward-in from 0.
+    pub turn: u32,
+    /// 0..=3, counter-clockwise from the connection edge.
+    pub side: u8,
+    /// Distance from that side's wall, in plate-local millimeters.
+    pub inset_mm: f64,
+}
+
+/// The side sequence of one arm of a rectangular spiral, outermost first.
+///
+/// A rectangular spiral steps inward once per revolution: three of its four
+/// corners are ordinary right angles at constant inset, and the fourth — the
+/// seam, placed at the last corner of each revolution — steps in by the
+/// winding pitch. Both arms of a bifilar pair use this same sequence offset
+/// by the pipe spacing, which is what keeps them parallel everywhere and is
+/// why they cannot cross (see the plan's §2a).
+///
+/// `pipe_spacing_mm` is the gap between the outbound and return runs, so one
+/// arm's own winding pitch is twice that. On the 75 mm channel grid a pitch
+/// of 150 mm is exactly the smallest direction-preserving lateral shift the
+/// catalogue offers (two `BroadTurn45`), which is what makes a 75 mm pipe
+/// spacing constructible at all.
+///
+/// Stops before a revolution whose four sides no longer leave the turning
+/// core its own width, so the innermost lane always has room to be reached.
+pub fn spiral_side_sequence(
+    field: &Field,
+    pipe_spacing_mm: f64,
+    wall_clearance_mm: f64,
+) -> Vec<SpiralSide> {
+    let pitch_mm = 2.0 * pipe_spacing_mm;
+    if !(pitch_mm.is_finite() && pitch_mm > 0.0 && wall_clearance_mm.is_finite()) {
+        return Vec::new();
+    }
+    let width_mm = field.rect_local.max.x - field.rect_local.min.x;
+    let height_mm = field.rect_local.max.y - field.rect_local.min.y;
+    let mut sides = Vec::new();
+    for turn in 0u32.. {
+        let inset_mm = wall_clearance_mm + f64::from(turn) * pitch_mm;
+        // Both opposite walls must still leave the turning core its width,
+        // or the revolution has nowhere to run.
+        let free_width_mm = width_mm - 2.0 * inset_mm;
+        let free_height_mm = height_mm - 2.0 * inset_mm;
+        if free_width_mm < pitch_mm || free_height_mm < pitch_mm {
+            break;
+        }
+        for side in 0..4u8 {
+            sides.push(SpiralSide {
+                turn,
+                side,
+                inset_mm,
+            });
+        }
+    }
+    sides
+}
+
 #[cfg(test)]
 mod tests {
     //! Unit tests for invariants `find_corner_edge` relies on but the
@@ -1356,5 +1420,58 @@ mod tests {
         // diagnosed_nested_family in tests/circuit_lanes.rs pins the 7), so
         // an empty or short loop can't silently pass this test.
         assert_eq!(checked, 7 * 4);
+    }
+
+    /// The 3000 x 2400 fixture at a 75 mm pipe spacing: pitch 150, wall
+    /// clearance 75. Revolution t sits at inset 75 + 150t; it survives while
+    /// both free spans still clear the 150 mm pitch, so the last one is
+    /// t = 7 (inset 1125, free height 2400 - 2250 = 150). Hand-computed.
+    #[test]
+    fn a_75_mm_spiral_steps_inward_by_150_and_stops_with_room_for_the_turn() {
+        let field = Field {
+            id: 0,
+            rect_local: RectMm {
+                min: Point::new(0.0, 0.0),
+                max: Point::new(3000.0, 2400.0),
+            },
+        };
+        let sides = spiral_side_sequence(&field, 75.0, 75.0);
+
+        assert_eq!(sides.len(), 8 * 4, "eight revolutions, four sides each");
+        assert_eq!(sides[0].turn, 0);
+        assert_eq!(sides[0].side, 0);
+        assert!((sides[0].inset_mm - 75.0).abs() < 1e-9);
+        // One revolution on: inset advanced by exactly the pitch.
+        assert!((sides[4].inset_mm - 225.0).abs() < 1e-9);
+        assert_eq!(sides[4].turn, 1);
+        // The innermost revolution still leaves the turning core its width.
+        let innermost = sides.last().unwrap();
+        assert_eq!(innermost.turn, 7);
+        assert!((innermost.inset_mm - 1125.0).abs() < 1e-9);
+        assert!(2400.0 - 2.0 * innermost.inset_mm >= 150.0 - 1e-9);
+    }
+
+    /// Both arms share the sequence, offset by the pipe spacing — the
+    /// property that makes them parallel everywhere and therefore
+    /// non-crossing. Checked as a distance, not asserted as a comment.
+    #[test]
+    fn the_two_arms_hold_the_pipe_spacing_on_every_side() {
+        let field = Field {
+            id: 0,
+            rect_local: RectMm {
+                min: Point::new(0.0, 0.0),
+                max: Point::new(3000.0, 2400.0),
+            },
+        };
+        let outbound = spiral_side_sequence(&field, 75.0, 75.0);
+        let return_run = spiral_side_sequence(&field, 75.0, 75.0 + 75.0);
+
+        for (out, back) in outbound.iter().zip(return_run.iter()) {
+            assert_eq!(out.side, back.side, "the arms run the same sides in step");
+            assert!(
+                (back.inset_mm - out.inset_mm - 75.0).abs() < 1e-9,
+                "the return must hold 75 mm inside the outbound run"
+            );
+        }
     }
 }
