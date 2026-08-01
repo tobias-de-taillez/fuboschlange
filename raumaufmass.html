@@ -132,7 +132,15 @@
   #wpopThick .nb.bad{color:var(--warn)}
   #wpopThick:empty{display:none}
   #wpopThick .muted{color:var(--muted)}
+  /* Laufmessung: nur auf dem Telefon sichtbar, siehe Skriptblock "imu". */
+  #imuRow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;padding-top:8px;
+    border-top:1px solid var(--line);font-size:13px}
+  #imuRow[hidden]{display:none}
+  #imuMsg{flex:1;min-width:100%;color:var(--muted);font-size:12.5px}
+  #imuMsg.run{color:var(--accent)}
+  #imuMsg.bad{color:var(--warn)}
   @media(max-width:879px){
+    #imuBtn{min-height:44px}
     #wpop{position:fixed;left:0;right:0;bottom:0;min-width:0;border-radius:12px 12px 0 0;
       border-left:0;border-right:0;border-bottom:0;
       padding:12px 14px calc(12px + env(safe-area-inset-bottom))}
@@ -417,6 +425,10 @@
           <span class="unit">m</span>
           <button id="wpopOk">+ Wert</button>
           <button id="wpopNorth" title="Diese Wand parallel zur oberen Bildschirmkante drehen">Einnorden</button>
+        </div>
+        <div id="imuRow" hidden>
+          <button id="imuBtn">Laufmessung</button>
+          <span id="imuMsg"></span>
         </div>
         <div id="wpopThick"></div>
       </div>
@@ -6432,7 +6444,14 @@ $('wpopOk').onclick=()=>{
   if(d<100 && !confirm(`${fmtM(d)} m ist sehr kurz — als Meter gemeint?\n\nOK = so übernehmen`)) return;
   inp.style.borderColor='';
   snapshot();
-  M.meas.push({a:wpopPair.a, b:wpopPair.b, d, sigma:C.SIGMA_DEF, on:true});
+  // Steht hier noch unveraendert der Vorschlag aus der Laufmessung, ist das
+  // keine Lasermessung - er geht mit seiner eigenen, viel groesseren
+  // Standardabweichung in den Ausgleich, sonst zieht eine Schaetzung den Raum
+  // so hart wie ein Messwert mit +-5 mm.
+  const ausLauf = globalThis.IMU && IMU.guess!=null && IMU.guess===inp.value;
+  M.meas.push({a:wpopPair.a, b:wpopPair.b, d,
+    sigma: ausLauf ? IMU.SIGMA_LAUF : C.SIGMA_DEF, on:true});
+  if(globalThis.IMU) IMU.guess=null;
   inp.value='';
   recompute();
 };
@@ -7830,6 +7849,291 @@ if(!STORE.storageOk)
   setHintLive('Speichern auf diesem Gerät nicht möglich (privater Modus?) — Räume als Datei oder Link sichern.');
 </script>
 
+<script id="imu">
+"use strict";
+// ================= Laufmessung =================
+// Schaetzt die Strecke zwischen zwei Wandtipps aus den sechs IMU-Zeitreihen des
+// Telefons und schreibt sie ins Maß-Feld des Wand-Popups. Sie ersetzt den Laser
+// NICHT - sie fuellt das Feld vor, damit auf der Baustelle ein Wert dasteht, den
+// der Laser gleich ueberschreiben kann. Der Wert wird nicht selbst uebernommen;
+// dafuer bleibt "+ Wert" zustaendig.
+//
+// Warum das ueber fuenf Sekunden ueberhaupt gehen kann: beide Tipps sind echte
+// Null-Geschwindigkeits-Ereignisse. Ein KONSTANTER Beschleunigungsfehler (aus
+// einem Lagefehler bei der Ausrichtung) erzeugt einen LINEAREN
+// Geschwindigkeitsfehler, und den zieht die Randbedingung v(T)=0 vollstaendig
+// ab. Uebrig bleibt im Wesentlichen der Gyro-Restbias, der mit (1/12)*g*b*T^3
+// eingeht. Die Mathematik ist eine Kopie aus probe-imu.mjs im Hauptverzeichnis,
+// wo sie gegen synthetische Bahnen mit bekannter Wahrheit geprueft wird.
+(function(){
+
+// --- Quaternionen: q=[w,x,y,z], dreht vom Body- ins Nav-Frame ---
+const qmul=(a,b)=>[
+  a[0]*b[0]-a[1]*b[1]-a[2]*b[2]-a[3]*b[3],
+  a[0]*b[1]+a[1]*b[0]+a[2]*b[3]-a[3]*b[2],
+  a[0]*b[2]-a[1]*b[3]+a[2]*b[0]+a[3]*b[1],
+  a[0]*b[3]+a[1]*b[2]-a[2]*b[1]+a[3]*b[0]];
+const qnorm=q=>{ const n=Math.hypot(...q); return q.map(c=>c/n); };
+// Exponentialabbildung: exakt fuer konstante Drehrate im Intervall. Beim Gehen
+// erreicht die Drehrate 200-300 grad/s, da ist die Kleinwinkelnaeherung falsch.
+const expq=rv=>{
+  const th=Math.hypot(...rv);
+  if(th<1e-12) return [1,rv[0]/2,rv[1]/2,rv[2]/2];
+  const s=Math.sin(th/2)/th;
+  return [Math.cos(th/2),rv[0]*s,rv[1]*s,rv[2]*s];
+};
+const qrot=(q,v)=>{
+  const [w,x,y,z]=q;
+  const tx=2*(y*v[2]-z*v[1]), ty=2*(z*v[0]-x*v[2]), tz=2*(x*v[1]-y*v[0]);
+  return [v[0]+w*tx+(y*tz-z*ty), v[1]+w*ty+(z*tx-x*tz), v[2]+w*tz+(x*ty-y*tx)];
+};
+const qBetween=(u,v)=>{
+  const d=u[0]*v[0]+u[1]*v[1]+u[2]*v[2];
+  if(d>1-1e-12) return [1,0,0,0];
+  return qnorm([1+d, u[1]*v[2]-u[2]*v[1], u[2]*v[0]-u[0]*v[2], u[0]*v[1]-u[1]*v[0]]);
+};
+
+// --- Strapdown-Integration ---
+// samples: [{t:s, f:[m/s^2] spezifische Kraft im Body-Frame, w:[rad/s]}]
+// segment: [tA,tB] die beiden Tipps. Die Lage laeuft schon ab Ende der
+//   Ruhephase mit (das Aufnehmen des Telefons dreht es), Geschwindigkeit und
+//   Position starten aber erst bei tA auf null.
+function integrate(samples, opts={}){
+  const {staticSec=2, zupt=true, segment=null, coning=true,
+         injectTiltDeg=0, injectTiltAxis=[0,1,0]}=opts;
+
+  const t0=samples[0].t;
+  const stat=samples.filter(s=>s.t-t0<staticSec);
+  if(stat.length<10) throw new Error('Ruhephase zu kurz');
+  const mean=get=>[0,1,2].map(i=>stat.reduce((a,s)=>a+get(s)[i],0)/stat.length);
+
+  const bg=mean(s=>s.w);                    // im Stillstand ist die Wahrheit null
+  const fs=mean(s=>s.f);
+  const g=Math.hypot(...fs);                // lokales g, absorbiert den Skalenfehler
+  // Die gemittelte spezifische Kraft zeigt im Stillstand nach oben. Das Heading
+  // bleibt frei - pro Segment zaehlt nur der relative Verschiebungsvektor.
+  let q=qBetween(fs.map(c=>c/g),[0,0,1]);
+  if(injectTiltDeg!==0){
+    const a=Math.hypot(...injectTiltAxis);
+    q=qmul(q, expq(injectTiltAxis.map(c=>(c/a)*injectTiltDeg*Math.PI/180)));
+  }
+
+  const tA=segment?segment[0]:t0+staticSec, tB=segment?segment[1]:Infinity;
+  const traj=[]; let v=[0,0,0], p=[0,0,0], prev=null;
+
+  for(const s of samples){
+    if(s.t-t0<staticSec) continue;
+    if(s.t>tB) break;
+    if(prev){
+      const dt=s.t-prev.t;
+      if(!(dt>0)) continue;
+      const w1=[0,1,2].map(i=>prev.w[i]-bg[i]), w2=[0,1,2].map(i=>s.w[i]-bg[i]);
+      const rv=[0,1,2].map(i=>(w1[i]+w2[i])/2*dt);
+      if(coning){
+        // Zweite Ordnung. Bei 400 Hz egal, bei den 50-100 Hz eines Browsers
+        // nicht mehr: theta += (1/12)(w_{k-1} x w_k) dt^2
+        const c=[w1[1]*w2[2]-w1[2]*w2[1], w1[2]*w2[0]-w1[0]*w2[2], w1[0]*w2[1]-w1[1]*w2[0]];
+        for(let i=0;i<3;i++) rv[i]+=c[i]*dt*dt/12;
+      }
+      q=qnorm(qmul(q,expq(rv)));
+    }
+    const fNav=qrot(q,s.f);
+    const aNav=[fNav[0],fNav[1],fNav[2]-g];
+    if(s.t<tA){ prev={...s,aNav}; continue; }
+    if(!traj.length){ prev={...s,aNav}; traj.push({t:s.t,v:[...v],p:[...p]}); continue; }
+    const dt=s.t-prev.t;
+    // Trapez statt Euler - kostet nichts, halbiert den Diskretisierungsfehler.
+    const vN=[0,1,2].map(i=>v[i]+(aNav[i]+prev.aNav[i])/2*dt);
+    p=[0,1,2].map(i=>p[i]+(vN[i]+v[i])/2*dt);
+    v=vN;
+    prev={...s,aNav};
+    traj.push({t:s.t,v:[...v],p:[...p]});
+  }
+  if(traj.length<2) throw new Error('Messsegment zu kurz');
+  const raw={p:[...p],v:[...v],q,g,bg};
+  if(!zupt) return raw;
+
+  // Zwei-Punkt-ZUPT: beide Tipps sind v=0, der Rest bei tB ist reiner Fehler.
+  const T=traj[traj.length-1].t-traj[0].t, vT=traj[traj.length-1].v;
+  const vc=k=>{ const f=(traj[k].t-traj[0].t)/T;
+                return [0,1,2].map(i=>traj[k].v[i]-f*vT[i]); };
+  let pc=[0,0,0];
+  for(let k=1;k<traj.length;k++){
+    const dt=traj[k].t-traj[k-1].t, v1=vc(k-1), v2=vc(k);
+    pc=[0,1,2].map(i=>pc[i]+(v1[i]+v2[i])/2*dt);
+  }
+  return {...raw, p:pc, pRaw:raw.p, T};
+}
+globalThis.IMU={integrate};
+
+// ================= Aufnahme =================
+const RUHE_S=5;        // Kalibrierung des Gyro-Bias und Ausrichtung nach dem Lot
+const STILL_W=0.25;    // rad/s, darunter gilt das Telefon als ruhig liegend
+const TIPP_G=35;       // |f| darueber ist ein Wandtipp (Gehen bleibt darunter)
+const TIPP_SPERRE=1.0; // s Sperre nach einem Tipp
+// Der Aufprall ist ein Ausschlag von 40 m/s^2 und mehr, dauert aber nur wenige
+// Millisekunden - bei 60 Hz landet davon EIN Sample, das ueber ein ganzes
+// Intervall gestreckt wird und daraus fast einen Meter pro Sekunde Geschwindig-
+// keit macht, die es nie gab. Deshalb faengt das Segment erst an, wenn der
+// Ausschlag abgeklungen ist. Weiter darf das Fenster nicht reichen: schon kurz
+// nach dem Tipp laeuft das Telefon wieder, und dann gilt die Randbedingung
+// v=0 nicht mehr, auf der die ganze Rechnung steht.
+const RUHIG_F=15;      // m/s^2, darunter gilt der Aufprall als abgeklungen
+const BLEND_MAX=0.3;   // s, laenger wird nicht gewartet
+// Eine Laufmessung ist keine Lasermessung. Sie geht mit ihrer eigenen, viel
+// groesseren Standardabweichung in den Ausgleich, sonst zieht eine Schaetzung
+// den ganzen Raum so hart wie ein Messwert mit +-5 mm. Der Wert ist ein
+// Platzhalter, bis echte Laeufe eine Streuung liefern.
+const SIGMA_LAUF=200;  // mm
+const MIN_M=0.3, MAX_M=30;   // ausserhalb ist das Ergebnis kein Maß, sondern Muell
+
+let phase='aus', samples=[], t0=0, ruheAb=null, tA=0, tB0=0, lastTip=-9, paar=null, flip=false;
+
+const msg=(txt,cls='')=>{ const e=$('imuMsg'); e.textContent=txt; e.className=cls; };
+const buzz=n=>{ try{ navigator.vibrate?.(n); }catch{} };
+
+function stop(txt,cls){
+  window.removeEventListener('devicemotion',onMotion);
+  phase='aus'; samples=[]; paar=null;
+  $('imuBtn').textContent='Laufmessung';
+  $('imuBtn').disabled=false;
+  if(txt) msg(txt,cls);
+}
+
+function onMotion(e){
+  const a=e.accelerationIncludingGravity, r=e.rotationRate;
+  if(!a||a.x==null||!r) return;
+  // Popup zu oder andere Wand gewaehlt: die Messung gehoert dann nirgends mehr
+  // hin, also abbrechen statt still weiterlaufen.
+  if($('wpop').hidden||!wpopPair||!paar||wpopPair.a!==paar.a||wpopPair.b!==paar.b){
+    stop('Abgebrochen — die Strecke wurde gewechselt oder das Popup geschlossen.','bad');
+    return;
+  }
+  const t=performance.now()/1000, s=flip?-1:1;
+  samples.push({t, f:[s*a.x,s*a.y,s*a.z],
+    w:[(r.beta||0)*Math.PI/180,(r.gamma||0)*Math.PI/180,(r.alpha||0)*Math.PI/180]});
+  tick(t);
+}
+
+function tick(t){
+  const last=samples[samples.length-1];
+  const wm=Math.hypot(...last.w);
+
+  if(phase==='ruhe'){
+    // Erst wenn das Telefon wirklich liegt, laeuft die Ruhephase an - sonst
+    // wandert die Handbewegung als Bias in jede Messung.
+    if(wm>STILL_W){ ruheAb=null; msg('Telefon flach ablegen …'); return; }
+    if(ruheAb===null){ ruheAb=t; t0=t; samples=samples.slice(-1); return; }
+    const rest=RUHE_S-(t-ruheAb);
+    if(rest>0){ msg('Ruhig liegen lassen … '+Math.ceil(rest)+' s'); return; }
+    // iOS meldet accelerationIncludingGravity mit umgekehrtem Vorzeichen. Der
+    // Integrator erwartet die spezifische Kraft: flach liegend +g, nicht -g.
+    const z=samples.slice(-40).reduce((s,x)=>s+x.f[2],0)/Math.min(40,samples.length);
+    if(z<0){ flip=true; samples.forEach(x=>x.f=x.f.map(c=>-c)); }
+    phase='bereit'; buzz(80);
+    $('imuBtn').textContent='Tipp auslösen';
+    $('imuBtn').disabled=false;
+    msg('Aufnehmen, mit der oberen linken Ecke gegen die erste Wand tippen.','run');
+    return;
+  }
+
+  if(phase==='ende'){
+    // Nach dem zweiten Tipp weiter aufnehmen, bis der Aufprall abgeklungen ist.
+    // Erst dort steht das Telefon nachweislich wieder still, und nur an einem
+    // ruhenden Endpunkt gilt die Randbedingung v=0, auf der alles beruht. Das
+    // Abbremsen selbst gehoert dabei INS Segment - es ist echte Physik.
+    if(Math.hypot(...last.f)<RUHIG_F || t-tB0>BLEND_MAX) fertig(tA,t);
+    return;
+  }
+
+  if((phase==='bereit'||phase==='laeuft') && Math.hypot(...last.f)>TIPP_G
+     && t-lastTip>TIPP_SPERRE) tipp(t);
+}
+
+function tipp(t){
+  if(phase!=='bereit'&&phase!=='laeuft') return;
+  lastTip=t;
+  if(phase==='bereit'){
+    tA=t; phase='laeuft'; buzz(80);
+    msg('Läuft — zur zweiten Wand gehen und antippen.','run');
+  } else {
+    tB0=t; phase='ende'; buzz([80,60,80]);
+    msg('Kurz an der Wand halten …','run');
+  }
+}
+
+// Erstes Sample ab t, dessen |f| wieder normal ist. Nur fuer den ERSTEN Tipp:
+// dort liegt der Aufprall vor der Strecke und gehoert nicht hinein. Am zweiten
+// Tipp ist das Abbremsen Teil der Strecke, dort wird nicht geschnitten.
+function nachImpuls(t){
+  for(const s of samples){
+    if(s.t<t) continue;
+    if(s.t-t>BLEND_MAX) break;
+    if(Math.hypot(...s.f)<RUHIG_F) return s.t;
+  }
+  return t;
+}
+
+function fertig(a,b){
+  let r;
+  try { r=integrate(samples,{staticSec:RUHE_S, segment:[nachImpuls(a),b], zupt:true}); }
+  catch(err){ stop('Messung unbrauchbar: '+err.message,'bad'); return; }
+  const m=Math.hypot(...r.p);
+  // Ein unplausibler Wert darf nicht ins Maßfeld: von dort landet er per
+  // "+ Wert" im Ausgleich und verzieht den ganzen Raum.
+  if(!(m>=MIN_M&&m<=MAX_M)){
+    stop('Ergebnis unplausibel ('+m.toFixed(2)+' m) — verworfen.','bad'); return;
+  }
+  const inp=$('wpopVal');
+  inp.value=fmtM(m*1000);
+  inp.select?.();
+  // Merken, WELCHER Text aus der Laufmessung stammt: bleibt er unveraendert
+  // stehen, geht der Wert mit SIGMA_LAUF statt mit Laser-Genauigkeit in den
+  // Ausgleich (siehe wpopOk).
+  globalThis.IMU.guess=inp.value;
+  const hz=samples.filter(s=>s.t>=a&&s.t<=b).length/(b-a);
+  // Die Restgeschwindigkeit ist die Diagnose: an beiden Tipps steht das Telefon,
+  // also ist alles, was hier ueber null steht, aufgelaufener Fehler. Grosse
+  // Werte heissen, dass der Aufprall bei dieser Abtastrate nicht sauber
+  // erfasst wurde - dann ist die Zahl darueber nichts wert.
+  stop('Schätzung '+fmtM(m*1000)+' m in '+(b-a).toFixed(1)+' s bei '+hz.toFixed(0)
+    +' Hz, Rest '+Math.hypot(...r.v).toFixed(2)+' m/s — mit dem Laser überschreiben.');
+}
+
+// ================= Verdrahtung =================
+async function start(){
+  if(!wpopPair){ msg('Erst eine Strecke im Plan wählen.','bad'); return; }
+  // iOS verlangt die Freigabe aus einer echten Nutzeraktion heraus.
+  if(typeof DeviceMotionEvent.requestPermission==='function'){
+    let g; try{ g=await DeviceMotionEvent.requestPermission(); }catch{ g='denied'; }
+    if(g!=='granted'){ msg('Zugriff auf die Bewegungssensoren abgelehnt.','bad'); return; }
+  }
+  paar={...wpopPair}; samples=[]; flip=false; ruheAb=null; lastTip=-9;
+  phase='ruhe';
+  $('imuBtn').textContent='Abbrechen';
+  msg('Telefon flach ablegen …');
+  window.addEventListener('devicemotion',onMotion);
+}
+// Der Recorder haengt am globalen IMU, nicht nur am Knopf: sonst laesst sich
+// der Ablauf nur auf einem echten Telefon ausloesen, und genau der Zustands-
+// automat ist das, was auf der Baustelle bricht.
+// phase als Funktion, nicht als Getter: Object.assign wuerde einen Getter
+// auswerten und den Wert einfrieren, statt ihn durchzureichen.
+Object.assign(globalThis.IMU, {start, tipp, stop, phase:()=>phase, SIGMA_LAUF, guess:null});
+
+// Knopf nur am Telefon zeigen: am Schreibtisch gibt es keine Sensoren, und er
+// waere dort nur ein Versprechen, das die Seite nicht halten kann.
+if(typeof DeviceMotionEvent!=='undefined' && matchMedia('(pointer:coarse)').matches){
+  $('imuRow').hidden=false;
+  $('imuBtn').onclick=()=>{
+    if(phase==='bereit'||phase==='laeuft') tipp(performance.now()/1000);
+    else if(phase!=='aus') stop('Abgebrochen.');
+    else start();
+  };
+}
+})();
+</script>
+
 <script id="checks">
 "use strict";
 // Die Assert-Funktion heisst chk, nicht A - in mehreren Tests weiter unten
@@ -7838,6 +8142,45 @@ globalThis.selfChecks=function(){
   const C=globalThis.CORE, out=[]; let ok=true;
   const chk=(n,c)=>{ ok=ok&&!!c; out.push((c?'PASS ':'FAIL ')+n); };
   const near=(a,b,t)=>Math.abs(a-b)<=t;
+  // --- Laufmessung: Integrator ---
+  // Faengt eine kaputte Kopie der Strapdown-Mathematik ab. Synthetische Bahn
+  // mit bekannter Wahrheit: 4 m, Kosinusprofil, v=0 an beiden Enden.
+  {
+    const T=5, D=4, g=9.81, dt=1/200, sm=[];
+    for(let t=0;t<2;t+=dt) sm.push({t, f:[0,0,g], w:[0,0,0]});
+    for(let k=0;k*dt<=T;k++){ const t=k*dt;
+      sm.push({t:2+t, f:[D*Math.PI**2/(2*T**2)*Math.cos(Math.PI*t/T),0,g], w:[0,0,0]}); }
+    const len=o=>Math.hypot(...globalThis.IMU.integrate(sm,o).p);
+    chk('imu: perfekte Sensoren -> 4 m', near(len({zupt:false}),D,1e-3));
+    // Ein konstanter Lagefehler DREHT das Ergebnis, verkuerzt es aber nicht:
+    // die Zwei-Punkt-Randbedingung raeumt den linearen Anteil vollstaendig ab.
+    chk('imu: 1° Lagefehler + ZUPT -> Länge bleibt 4 m',
+      near(len({zupt:true,injectTiltDeg:1}),D,1e-3));
+    // Ohne die Randbedingung sind es 0.5*g*sin(1°)*T^2 = 2.14 m Fehler.
+    chk('imu: 1° Lagefehler ohne ZUPT -> 2,14 m daneben',
+      near(len({zupt:false,injectTiltDeg:1})-D, 0.5*g*Math.sin(Math.PI/180)*T*T, 0.02));
+  }
+  {
+    // Das Abbremsen an der zweiten Wand gehoert INS Segment. Profil laeuft von
+    // 0 auf V hoch und trifft die Wand mit V; ein einzelnes Sample vernichtet
+    // genau diesen Impuls. Wird es abgeschnitten, endet das Segment bei v=V,
+    // die Randbedingung v=0 ist verletzt und die Strecke faellt um V*T/2 = 3 m
+    // zu kurz aus. Genau diese Grenze war schon einmal falsch gesetzt.
+    const T=5, g=9.81, dt=1/60, V=4*Math.PI/(2*T), sm=[];
+    for(let t=0;t<2;t+=dt) sm.push({t, f:[0,0,g], w:[0,0,0]});
+    let k=0;
+    for(;k*dt<T;k++) sm.push({t:2+k*dt,
+      f:[V*Math.PI/(2*T)*Math.cos(Math.PI*k*dt/(2*T)),0,g], w:[0,0,0]});
+    sm.push({t:2+k*dt, f:[-V/dt,0,g], w:[0,0,0]});          // Aufprall
+    sm.push({t:2+(k+1)*dt, f:[0,0,g], w:[0,0,0]});          // steht an der Wand
+    // Segmentende ist das erste RUHIGE Sample nach dem Aufprall, nicht der
+    // Aufprall selbst: das Trapez mittelt jedes Sample mit seinem Nachbarn,
+    // ein Segment, das auf dem Ausschlag endet, sieht nur den halben Impuls.
+    // Genau darum wartet der Recorder nach dem zweiten Tipp noch kurz ab.
+    const rr=globalThis.IMU.integrate(sm,{segment:[2, 2+(k+1)*dt], zupt:true});
+    chk('imu: Aufprall am Ziel eingerechnet -> 4 m', near(Math.hypot(...rr.p),4,0.05));
+    chk('imu: Restgeschwindigkeit danach ~0', Math.hypot(...rr.v)<0.05);
+  }
   // --- residuals ---
   {
     const pts=[{id:'A',x:0,y:0},{id:'B',x:3000,y:4000}];
