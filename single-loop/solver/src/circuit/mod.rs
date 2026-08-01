@@ -3,6 +3,7 @@ mod fields;
 mod search;
 mod spiral;
 mod types;
+mod validate;
 mod zone;
 
 pub use escalate::{
@@ -22,6 +23,9 @@ pub use types::{
     LocatedSpacing, LoopConstraintCertificate, LoopError, LoopErrorCode, LoopPattern, LoopPlan,
     LoopWarning, LoopWarningCode, RectMm, SolveLoopInput, SolveLoopResult, SpacingPenalty,
     validate_input,
+};
+pub use validate::{
+    LoopCandidate, LoopCertificate, LoopContext, LoopSection, SectionKind, certify_loop,
 };
 pub use zone::{
     Attachment, ConnectionZone, LoopGraphView, attach_port, build_connection_zone,
