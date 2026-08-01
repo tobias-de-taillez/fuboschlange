@@ -138,6 +138,16 @@ pub enum SectionKind {
     Zone,
     /// One certified graph edge of the inward arm.
     Inward,
+    /// One certified graph edge of a lane change, in either arm.
+    ///
+    /// A hop runs from one ring to the next through a free lattice node that
+    /// belongs to neither, so it can name no lane — the same reason a turn
+    /// names none. It does not advance the inward/turn/return phase: a hop
+    /// inside the inward arm is still inward. Everything else still binds it,
+    /// because the geometric checks do not care what a section is called: it
+    /// must render a certified edge, chain G1 with its neighbours, clear the
+    /// noppen, and keep its distance from the rest of the pipe.
+    Hop,
     /// One certified graph edge of the turn-around.
     Turn,
     /// One certified graph edge of the return arm.
@@ -592,6 +602,9 @@ fn check_pattern_provenance(
             SectionKind::Inward => 0,
             SectionKind::Turn => 1,
             SectionKind::Return => 2,
+            // A hop belongs to whichever arm it sits in, so it carries the
+            // phase forward untouched instead of setting one.
+            SectionKind::Hop => phase,
             SectionKind::Zone => unreachable!("filtered above"),
         };
         if next_phase < phase {
@@ -609,6 +622,25 @@ fn check_pattern_provenance(
         phase = next_phase;
 
         match section.kind {
+            SectionKind::Hop => {
+                if section.lane_id.is_some() {
+                    return Err(reject(
+                        Reason::PatternProvenance,
+                        format!("hop section {index} claims a lane; a hop crosses two rings"),
+                    ));
+                }
+                // A hop may render any certified template, reverse family
+                // included: a spiral changes direction at the end of every
+                // winding, and on this catalogue the certified way to cross
+                // between two rings is sometimes exactly such a placement.
+                // What the single-Kehre rule forbids is a second *arm change*,
+                // and that is caught elsewhere and independently: the phase
+                // ladder below admits exactly one inward→return transition,
+                // and `check_ring_algebra` requires the inward rings to run
+                // strictly inward and the return rings strictly outward, so a
+                // hop that actually reversed the arm would break the ring
+                // sequence rather than pass as a lane change.
+            }
             SectionKind::Turn => {
                 if section.lane_id.is_some() {
                     return Err(reject(

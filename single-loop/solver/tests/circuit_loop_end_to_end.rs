@@ -218,8 +218,9 @@ fn reverse_primitive(primitive: &PathPrimitive) -> PathPrimitive {
 /// option, so these two are the whole space a caller can choose from.
 #[derive(Clone, Copy, PartialEq)]
 enum HopLabelling {
-    /// The hop names no ring, as the generator reports it.
-    AsReported,
+    /// The hop is labelled `SectionKind::Hop` and names no ring — how the
+    /// generator reports it and how a real plan is assembled.
+    AsHop,
     /// The most generous alternative: the hop claims the ring it departed.
     DepartingRing,
 }
@@ -282,10 +283,17 @@ fn assemble(pipeline: &Pipeline, path: &SpiralPath, hops: HopLabelling) -> LoopC
             if reported.is_some() {
                 departing_ring = reported;
             }
-            let lane_id = match (reported, hops) {
-                (Some(ring), _) => Some(ring),
-                (None, HopLabelling::AsReported) => None,
-                (None, HopLabelling::DepartingRing) => departing_ring,
+            let (kind, lane_id) = match (reported, hops) {
+                (Some(ring), _) => (kind, Some(ring)),
+                // A lane change: the generator reports no ring because the hop
+                // belongs to none. `Hop` is the section kind for exactly that.
+                // The turn block reports no lane either, but it is the Kehre,
+                // not a lane change: only arm sections become hops.
+                (None, HopLabelling::AsHop) if kind != SectionKind::Turn => {
+                    (SectionKind::Hop, None)
+                }
+                (None, HopLabelling::AsHop) => (kind, None),
+                (None, HopLabelling::DepartingRing) => (kind, departing_ring),
             };
             sections.push(LoopSection {
                 kind,
@@ -336,7 +344,7 @@ fn the_generator_produces_a_loop_the_validator_certifies() {
     )
     .expect("complete_spiral must produce a chained, attachable path");
 
-    let candidate = assemble(&pipeline, &path, HopLabelling::AsReported);
+    let candidate = assemble(&pipeline, &path, HopLabelling::AsHop);
     let certificate = certify_loop(&candidate, &pipeline.context())
         .expect("the pipeline's own loop must certify");
 
@@ -425,26 +433,16 @@ fn the_generated_loop_is_the_longest_one_this_room_admits() {
 const CATALOGUE_FLOOR_MM: f64 = 28.284_271_247_461_902;
 
 #[test]
-fn a_multi_ring_arm_cannot_be_expressed_as_a_loop_candidate_at_all() {
-    // The measurement behind this file's choice of room, and behind the
-    // report's finding for the controller. On the 3000 x 2400 room the arm
-    // spans four rings, so the path carries lane-change hops -- certified
-    // edges that run from a ring node through a free lattice node belonging to
-    // neither ring. `LoopSection` offers a hop exactly two labels, and both are
-    // rejected, which is what makes this "inexpressible" rather than "we
-    // labelled it wrong":
+fn a_four_ring_spiral_crosses_itself_and_the_validator_catches_it() {
+    // The real deliverable: a room with seven lanes, an arm that spirals
+    // inward across four of them, and a return that walks the reserved three
+    // back out — the shape a fitter actually lays. Five lane changes, two
+    // certified hops each, are what carry the pipe between rings; each is a
+    // `SectionKind::Hop`, which names no ring because it belongs to none.
     //
-    //   * naming the ring it departed  -> `check_section_on_lane` rejects it,
-    //     because only one of the edge's two endpoints is on that ring;
-    //   * naming no ring               -> `check_pattern_provenance` rejects
-    //     it, because a non-`Turn` graph section must name a lane.
-    //
-    // `Turn` is not a third option: it is reserved for exactly one
-    // reverse-family edge, and a hop is a `BroadTurn90` pair.
-    //
-    // The generator itself is fine here -- the path chains and reaches the zone
-    // -- so this is a gap in `certify_loop`'s own type, for a later task to
-    // close. Everything below is asserted, not assumed.
+    // Everything here comes out of the pipeline. The validator judges it
+    // whole: provenance against certified edges, G1 across every seam,
+    // noppen clearance, the 16 mm touching floor, coverage and length.
     let pipeline = Pipeline::run_in(TALL_ROOM_HEIGHT_MM);
     assert_eq!(pipeline.lanes.len(), 7);
 
@@ -473,11 +471,65 @@ fn a_multi_ring_arm_cannot_be_expressed_as_a_loop_candidate_at_all() {
         .chain(path.return_lane_ids.iter())
         .filter(|lane| lane.is_none())
         .count();
-    assert_eq!(
-        hop_count, 10,
-        "five lane changes, two certified hops each -- the pieces with no ring \
-         to name"
+    assert_eq!(hop_count, 10, "five lane changes, two certified hops each");
+
+    // ...and here the generator's ring model meets its limit. With `Hop` in
+    // place the candidate is now *expressible*, so the geometric checks get to
+    // run on it for the first time — and they find the pipe crossing itself.
+    //
+    // The cause is structural, not a slip: `build_lanes` produces *closed*
+    // rings and the arm changes ring with a hop that cuts across them. Ring 1
+    // is reserved for the return, so an inward hop from ring 0 to ring 2 has
+    // to cross the very lane the return will later occupy. A real Schnecke
+    // avoids this by not being concentric rings at all — it is one continuous
+    // curve laid at double spacing, i.e. every ring is *open* at a common
+    // seam, which is also why `walk_ring_backward` currently insists on closed
+    // rings (Task 7). Closing this needs an open-ring lane model, not a patch
+    // here.
+    //
+    // Pinned as a regression so the day the lane model changes, this test
+    // fails and someone reads the paragraph above.
+    let candidate = assemble(&pipeline, &path, HopLabelling::AsHop);
+    let error = certify_loop(&candidate, &pipeline.context())
+        .expect_err("the four-ring spiral crosses itself");
+    assert!(
+        error.message.starts_with("SELF_INTERSECTION"),
+        "expected the crossing to be what stops it, got: {}",
+        error.message
     );
+    assert!(
+        error
+            .journal_tail
+            .first()
+            .and_then(|entry| entry.witness)
+            .is_some(),
+        "the rejection must carry the crossing point"
+    );
+}
+
+#[test]
+fn a_hop_that_claims_the_ring_it_departed_is_still_rejected() {
+    // `Hop` widens what can be expressed, not what is accepted: mislabelling a
+    // lane change as ordinary arm geometry on the ring it left must still
+    // fail, because only one of its two endpoints sits on that ring.
+    let pipeline = Pipeline::run_in(TALL_ROOM_HEIGHT_MM);
+    let arm = plan_inward_arm(
+        &pipeline.lanes,
+        ZONE_SEGMENT,
+        SPACING_MM,
+        &pipeline.graph,
+        100_000,
+    )
+    .unwrap();
+    let path = complete_spiral(
+        &arm,
+        &pipeline.lanes,
+        &pipeline.graph,
+        &pipeline.view,
+        &pipeline.zone,
+        &pipeline.instance,
+    )
+    .unwrap();
 
     let departing = certify_loop(
         &assemble(&pipeline, &path, HopLabelling::DepartingRing),
@@ -489,17 +541,5 @@ fn a_multi_ring_arm_cannot_be_expressed_as_a_loop_candidate_at_all() {
             && departing.message.contains("does not walk it"),
         "expected the lane-membership branch, got: {}",
         departing.message
-    );
-
-    let unlabelled = certify_loop(
-        &assemble(&pipeline, &path, HopLabelling::AsReported),
-        &pipeline.context(),
-    )
-    .expect_err("a graph section that is not a turn must name a lane");
-    assert!(
-        unlabelled.message.starts_with("PATTERN_PROVENANCE")
-            && unlabelled.message.contains("names no lane"),
-        "expected the missing-lane branch, got: {}",
-        unlabelled.message
     );
 }
