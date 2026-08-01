@@ -1,94 +1,112 @@
 # Randzonen-Band: Bauplan
 
 **Datum:** 2026-08-02
-**Status:** durchgerechnet, nicht gebaut
+**Status:** Entwurf 1 vermessen und verworfen, Entwurf 2 steht
 **Vorgabe:** `docs/superpowers/specs/2026-08-02-wintergarten-drei-heizkreise.md` §3
+**Messungen:** `single-loop/solver/tests/plate_spiral_facts.rs`, Commit `ba0ac84`
 
 Vier Bahnen à 75 mm entlang eines Wandzugs, zwei hin, zwei zurück. Für den
 Wintergarten läuft der Zug über drei Wände — linke Wand, obere (die 7,85-m-
 Fensterfront), rechte Wand —, also ein U mit zwei freien Enden unten.
 
-## 1. Die Bahnfolge ist erzwungen, nicht gewählt
+## 1. Entwurf 1 ist unmöglich — gemessen, nicht vermutet
 
-Bahnen 0…3 von der Wand nach innen. Ein Kreis ist **ein** Rohr, also muss er
-alle vier nacheinander durchlaufen, und jeder Wechsel ist eine Kehre. Die
-Reverse-Familie überbrückt **2 oder 3 Gassen, nie 1** (gemessen,
-`tests/plate_spiral_facts.rs`) — bei 75 mm Bahnabstand heißt das: Schritte von
-±2 oder ±3 Bahnen, niemals ±1.
+Der erste Entwurf ging davon aus, ein Bahnwechsel sei eine einzelne
+Reverse-Kante. Die überbrückt 2 oder 3 Gassen, nie 1, und über vier Bahnen
+lässt das genau einen Hamiltonpfad zu: `2 → 0 → 3 → 1`. Drei Wechsel auf zwei
+Enden heißt: zwei teilen sich ein Ende, und beide überspannen eine Bahn, die
+die jeweils andere läuft.
 
-Hamiltonpfade über {0,1,2,3} mit Schritten aus {±2, ±3}:
+Zwei Messungen schließen das:
+
+| gemessen | Wert |
+|---|---|
+| Kehre kreuzt die überspannte Gasse … | 192,4 mm unter der Endpunktlinie (Teardrop), 112,4 mm (BroadReverse180) |
+| zwei Teardrops eine Gasse nebeneinander berühren sich bei | 0 und 150 mm Versatz; frei erst ab 300 mm |
+| Platzierungsraster längs einer Spalte | 150 mm — dazwischen gibt es nichts |
+
+Daraus: die gekreuzte Bahn verlangt Versatz **unter 142,4 mm** (192,4 minus
+50 mm Nennabstand), die beiden Kehrenkörper verlangen **mindestens 300 mm**.
+Leere Menge. Die Staffelung, die Entwurf 1 aus den Kehrenüberständen ableiten
+wollte, existiert nicht. Gepinnt als
+`a_four_lane_band_cannot_put_two_reverses_at_one_end`.
+
+## 2. Entwurf 2: das Band ist ein Mäander
+
+Die 75-mm-Kehre gibt es doch — nicht als eine Kante, sondern als **drei
+verkettete**. Westwärts ist die schmalste `TeardropReverse →
+BroadReverse180 → TeardropReverse` (−150, +225, −150 mm) und schlägt nur
+**85 mm** über ihre beiden Spalten hinaus; ostwärts schlägt die schmalste
+225 mm aus. Beide reichen 192,5 mm nach Süden und 112,5 mm nach Norden.
+
+Damit ist die Bahnfolge die naheliegende und die Vorgabe wörtlich erfüllt:
 
 ```
-1 → 3 → 0 → 2     (+2, −3, +2)
-2 → 0 → 3 → 1     (−2, +3, −2)
+Bahn 0  rechts → links     Kehre 0→1 am linken Ende
+Bahn 1  links  → rechts    Kehre 1→2 am rechten Ende
+Bahn 2  rechts → links     Kehre 2→3 am linken Ende
+Bahn 3  links  → rechts    Ausgang rechts
 ```
 
-Mehr gibt es nicht. Beide erfüllen die Vorgabe „zwei hin, zwei zurück"
-(Bahn 1 und 0 führen weg, 3 und 2 zurück) und beide lassen Ein- und Ausgang
-am **selben** Ende des Zuges liegen — was nötig ist, weil beide zum selben
-Verteiler müssen.
+Bahnen 0 und 2 laufen hin, 1 und 3 zurück — zwei hin, zwei zurück, überall
+echte 75 mm. Ein- und Ausgang liegen beide am rechten Ende, wo der Verteiler
+steht.
 
-Kehrenspannen: 2 Gassen = 150 mm = `TeardropReverse`, 3 Gassen = 225 mm =
-`BroadReverse180`. Beide existieren.
+**Das ist der Mäander, nicht die Schnecke.** `LoopPattern::Meander` gibt es
+in `types.rs` bereits.
 
-## 2. Der harte Punkt: die Kehren liegen übereinander
+## 3. Was am linken Ende noch zu klären ist
 
-Bei `1 → 3 → 0 → 2` liegen die Kehren abwechselnd an den Enden:
+Dort liegen zwei Kehren: 0→1 (Spalten X, X+75) und 2→3 (X+150, X+225). Keine
+überspannt eine fremde Bahn — das ist der ganze Gewinn. Aber der Ausschlag
+bleibt:
 
-| Kehre | Ende | überspannt Bahnen |
-|---|---|---|
-| 1 → 3 | rechts | 1, 2, 3 |
-| 3 → 0 | links | 0, 1, 2, 3 |
-| 0 → 2 | rechts | 0, 1, 2 |
+- 0→1 kann nicht nach Westen ausschlagen, dort ist die Wand. Nach Osten
+  reicht sie bis X+160, also 10 mm über Bahn 2s Spalte.
+- 2→3 schlägt nach Osten in den freien Raum aus, bis X+310.
 
-Am rechten Ende liegen **zwei** Kehren, und ihre Spannen überlappen sich in
-den Bahnen 1 und 2. Eine Kehre ist radial — sie kreuzt jede Bahn zwischen
-ihren Enden. Also gilt dasselbe wie in der Mitte der Schnecke: **eine Kehre
-darf nur dort liegen, wo die gekreuzten Bahnen noch nicht bzw. nicht mehr
-existieren.**
+Also braucht es weiterhin eine Staffelung, aber eine viel kleinere und aus
+einem anderen Grund: Bahn 2s Ende muss über bzw. unter dem y-Bereich von
+Kehre 0→1 liegen ([A−192,5, A+112,5]). Bei 150-mm-Raster heißt das ein
+Versatz von 300 mm. Das ist zu **suchen**, nicht abzuleiten — wie
+`walk_core` alle vier Seiten probiert und `build_from` jede Tiefe.
 
-Daraus folgt zwingend: **die Bahnenden sind gestaffelt**, nicht bündig. Jede
-Bahn endet ein Stück weiter vom Ende entfernt als die, die von einer späteren
-Kehre gekreuzt wird. Handwerklich ist das genau das aufgefächerte Bild, das
-man an einer Randzone sieht.
+## 4. Der Validator braucht das Mäander-Muster
 
-Die Staffelung ist zu vermessen, nicht zu schätzen: der Körper einer
-`TeardropReverse` reicht 192 mm über ihre Endpunkte hinaus, eine
-`BroadReverse180` 112 mm (gemessen, siehe `circuit::schnecke`). Die Prüfung
-dafür existiert schon — `turn_clears_its_own_lane`, achsenrichtig — und muss
-hier gegen die *Nachbarbahn* statt gegen die eigene laufen.
+`check_ring_algebra` beschreibt die Schnecke: Hinlauf in Zweierschritten,
+genau eine `Turn`-Sektion, Rücklauf auswärts in Zweierschritten. Ein Mäander
+läuft 0,1,2,3 in Einerschritten und hat drei Bahnwechsel. Das ist kein
+Sonderfall, sondern ein zweites Muster.
 
-## 3. Was wiederverwendet wird
+- `LoopContext` bekommt `pub pattern: LoopPattern` (11 Literale im Baum).
+- Für `Meander`: die gelaufenen Bahnen sind genau `0..n` in Folge, jede
+  einmal; jeder Wechsel ist ein `Hop`-Block; keine `Turn`/`Return`-Sektion.
+- **Nicht** aus der Bahnfolge erraten, welches Muster vorliegt — sonst geht
+  eine kaputte Schnecke als Band durch.
 
-Der Walker ist nah an dem der Schnecke, nur auf einem offenen Zug statt einem
-geschlossenen Rechteck:
+## 5. Reihenfolge
 
-- `walk_leg(index, pose, leg, claim)` — läuft Geraden auf einer Gasse und
-  nimmt die Ecke auf die nächste. Für jede Bahn dreimal: hoch die linke
-  Spalte, quer die obere Zeile, runter die rechte Spalte.
-- `walk_turn(index, pose, leg, landing, claim)` — findet die Reverse-Kante
-  auf die Zielgasse. Für die drei Bahnwechsel.
-- `Claim` / `point_on_rect_boundary` — die Bahnzuordnung entscheidet weiter
-  die Geometrie, nicht die Position im Ablauf.
+1. `LoopContext.pattern` + Mäander-Zweig in `check_pattern_provenance`.
+2. Bahn-Geometrie: aus Wandzug + Bahnzahl + Abstand die vier offenen
+   U-Züge, rein arithmetisch, ohne Graph testbar.
+3. Kehren-Kette: die drei verketteten Reverses im Graphen *finden*, nicht
+   konstruieren — dieselbe Disziplin wie `walk_leg`s Ecke.
+4. Walker: pro Bahn drei Legs, dazwischen die Kehren; Staffelung als
+   gesuchter Parameter in 150-mm-Schritten.
+5. Anbindung an den Verteiler an beiden Enden derselben Seite.
+6. Abnahme: `certify_loop` liefert `Ok`, vier Bahnen, genau drei
+   Bahnwechsel als `Hop`-Blöcke, Länge ≈ 55 m auf dem Wintergarten. Die
+   Strafsumme wird **gemessen und festgeschrieben**, nicht auf 0 gesetzt —
+   drei Kehren auf zwei Enden bei 75 mm werden Unterschreitungen des
+   50-mm-Nennabstands erzeugen.
 
-Alle drei sind heute privat in `src/circuit/schnecke.rs`. Das Band gehört
-entweder in dieses Modul oder die Helfer werden `pub(crate)`.
+## 6. Sackgassen, die nicht noch einmal gelaufen werden müssen
 
-## 4. Reihenfolge
-
-1. Bahnfolge und Gassen aus Wandzug + Bahnzahl + Abstand berechnen (rein
-   arithmetisch, testbar ohne Graph).
-2. Staffelung der Bahnenden aus den gemessenen Kehrenüberständen ableiten.
-3. Walker: pro Bahn drei Legs, dazwischen die Kehren.
-4. Anbindung an den Verteiler an beiden Enden derselben Seite.
-5. Abnahme: `certify_loop` liefert `Ok`, vier Bahnen, genau drei Kehren,
-   Länge ≈ 55 m auf dem Wintergarten, Strafsumme 0.
-
-## 5. Warum das hier steht statt im Code
-
-Die Analyse in §1 und §2 ist das eigentlich Schwierige und war ohne
-Messungen nicht zu haben. Sie hier abzulegen kostet nichts und spart der
-nächsten Sitzung, dieselbe Sackgasse noch einmal zu durchlaufen — insbesondere
-den naheliegenden, aber falschen Ansatz „Bahn 0 → 1 → 2 → 3 der Reihe nach",
-der an der 75-mm-Kehre scheitert, und den zweiten, „alle Bahnen bündig
-enden lassen", der an §2 scheitert.
+- „Bahn 0 → 1 → 2 → 3 der Reihe nach mit Reverse-Kanten" — es gibt keine
+  75-mm-Reverse-Kante.
+- „Alle Bahnenden bündig" — die beiden Kehren am selben Ende berühren sich.
+- „Staffelung aus den Kehrenüberständen ableiten" — Entwurf 1, §1: die
+  verlangten Fenster überschneiden sich nicht.
+- „Bahnen umnummerieren, damit die Schnecken-Ringalgebra durchgeht" — das
+  löscht die Prüfung und lässt das Zertifikat trotzdem
+  `pattern_provenance_ok: true` melden.
