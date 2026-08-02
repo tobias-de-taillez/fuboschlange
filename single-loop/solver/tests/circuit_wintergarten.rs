@@ -237,7 +237,10 @@ fn the_whole_room_plans_around_a_manifold_in_the_notch() {
             circuit.total_length_mm <= 100_000.0,
             "no circuit may exceed 100 m"
         );
-        assert!(circuit.min_bend_radius_mm >= 80.0, "5x diameter is the floor");
+        assert!(
+            circuit.min_bend_radius_mm >= 80.0,
+            "5x diameter is the floor"
+        );
         assert!(!circuit.path_d.is_empty(), "every circuit must draw");
     }
 }
@@ -263,6 +266,34 @@ fn the_circuit_count_override_is_obeyed_by_the_field_split() {
         plan.circuits.len() + plan.refused.len(),
         4,
         "four fields were forced; got {} circuits and {} refusals",
+        plan.circuits.len(),
+        plan.refused.len()
+    );
+}
+
+#[test]
+fn forcing_fewer_circuits_than_the_slab_rounding_wants_is_still_obeyed() {
+    use single_loop_solver::circuit::{RoomPlanInput, plan_room};
+
+    // The L-shape falls into two slabs with areas of roughly 82 % and 18 %.
+    // Per-slab rounding turns a forced 2 into round(1.63) + round(0.37).max(1)
+    // = 3 fields — one more than asked for, silently. Forcing must mean
+    // forcing in both directions: exactly 2 attempted fields, each either a
+    // certified circuit or an honest refusal. (225 mm keeps both fields under
+    // the 100 m cap, so this exercises the split, not the refusal path.)
+    let plan = plan_room(RoomPlanInput {
+        ring: measured_ring(),
+        manifold: None,
+        fill_spacing_mm: 225.0,
+        wall_clearance_mm: 75.0,
+        edge_band_mm: 300.0,
+        circuit_count: Some(2),
+    })
+    .expect("this room plans");
+    assert_eq!(
+        plan.circuits.len() + plan.refused.len(),
+        2,
+        "two fields were forced; got {} circuits and {} refusals",
         plan.circuits.len(),
         plan.refused.len()
     );

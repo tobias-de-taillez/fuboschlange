@@ -1,8 +1,8 @@
+mod band;
 mod escalate;
 mod fields;
 mod plan;
 mod room;
-mod band;
 mod schnecke;
 mod search;
 mod spiral;
@@ -10,6 +10,7 @@ mod types;
 mod validate;
 mod zone;
 
+pub use band::{Band, build_band};
 pub use escalate::{
     Candidate, LadderVerdict, SpacingOutcome, escalation_ladder, length_estimate_mm, rank,
     walk_ladder,
@@ -19,14 +20,13 @@ pub use fields::{
     spiral_side_sequence,
 };
 pub use plan::{
-    CircuitPlan, Frame, MultiPlan, RoomCircuit, RoomPlan, RoomPlanInput, SchneckeInput, SchneckePlan,
-    plan_multi, plan_room, plan_schnecke, zone_depth_mm,
+    CircuitPlan, Frame, MultiPlan, RoomCircuit, RoomPlan, RoomPlanInput, SchneckeInput,
+    SchneckePlan, plan_multi, plan_room, plan_schnecke, zone_depth_mm,
 };
 pub use room::{
     RectifiedRoom, area_mm2, centroid, inset_room, rectify, reference_wall, slab_fields,
-    split_by_area,
+    split_by_area, split_exact,
 };
-pub use band::{Band, build_band};
 pub use schnecke::{Schnecke, build_schnecke};
 pub use search::{
     Action, Decision, Invariant, Journal, PatternRules, SearchFailure, SearchFailureKind,

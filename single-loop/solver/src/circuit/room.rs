@@ -351,46 +351,85 @@ pub fn inset_room(room: &RectifiedRoom, inset_mm: f64) -> RectifiedRoom {
     }
 }
 
-/// Cuts the room into `wanted` fields of roughly equal area.
+/// How big a field's rectangle is, in mm².
+fn area_of(field: &Field) -> f64 {
+    (field.rect_local.max.x - field.rect_local.min.x)
+        * (field.rect_local.max.y - field.rect_local.min.y)
+}
+
+/// Cuts one slab into `pieces` equal strips — across whichever axis is
+/// longer, so the pieces stay squat. A long thin field spends its outermost
+/// ring on turns.
+fn cut_slab(slab: &Field, pieces: usize, fields: &mut Vec<Field>) {
+    let width = slab.rect_local.max.x - slab.rect_local.min.x;
+    let height = slab.rect_local.max.y - slab.rect_local.min.y;
+    for index in 0..pieces {
+        let (low, high) = (
+            index as f64 / pieces as f64,
+            (index + 1) as f64 / pieces as f64,
+        );
+        let rect = if width >= height {
+            RectMm {
+                min: Point::new(slab.rect_local.min.x + low * width, slab.rect_local.min.y),
+                max: Point::new(slab.rect_local.min.x + high * width, slab.rect_local.max.y),
+            }
+        } else {
+            RectMm {
+                min: Point::new(slab.rect_local.min.x, slab.rect_local.min.y + low * height),
+                max: Point::new(slab.rect_local.max.x, slab.rect_local.min.y + high * height),
+            }
+        };
+        fields.push(Field {
+            id: fields.len() as u32,
+            rect_local: rect,
+        });
+    }
+}
+
+/// Cuts the room into *about* `wanted` fields of roughly equal area.
 ///
 /// The slabs come first, then each is cut into the share of the circuits its
-/// own area earns — across whichever axis is longer, so the pieces stay squat.
-/// A long thin field spends its outermost ring on turns.
+/// own area earns. The per-slab rounding may land above `wanted` — fine for
+/// the auto heuristic, where `wanted` is only a lower bound derived from the
+/// length cap; a pinned count goes through [`split_exact`] instead.
 pub fn split_by_area(room: &RectifiedRoom, wanted: usize) -> Vec<Field> {
     let slabs = slab_fields(room, &[]);
-    let area_of = |field: &Field| {
-        (field.rect_local.max.x - field.rect_local.min.x)
-            * (field.rect_local.max.y - field.rect_local.min.y)
-    };
     let total: f64 = slabs.iter().map(area_of).sum();
     let target = total / wanted.max(1) as f64;
 
     let mut fields: Vec<Field> = Vec::new();
     for slab in &slabs {
         let pieces = (area_of(slab) / target).round().max(1.0) as usize;
-        let width = slab.rect_local.max.x - slab.rect_local.min.x;
-        let height = slab.rect_local.max.y - slab.rect_local.min.y;
-        for index in 0..pieces {
-            let (low, high) = (
-                index as f64 / pieces as f64,
-                (index + 1) as f64 / pieces as f64,
-            );
-            let rect = if width >= height {
-                RectMm {
-                    min: Point::new(slab.rect_local.min.x + low * width, slab.rect_local.min.y),
-                    max: Point::new(slab.rect_local.min.x + high * width, slab.rect_local.max.y),
-                }
-            } else {
-                RectMm {
-                    min: Point::new(slab.rect_local.min.x, slab.rect_local.min.y + low * height),
-                    max: Point::new(slab.rect_local.max.x, slab.rect_local.min.y + high * height),
-                }
-            };
-            fields.push(Field {
-                id: fields.len() as u32,
-                rect_local: rect,
-            });
-        }
+        cut_slab(slab, pieces, &mut fields);
+    }
+    fields
+}
+
+/// Cuts the room into *exactly* `wanted` fields — or one per slab, if the
+/// room's shape already forces more than asked for.
+///
+/// Used when the caller pins the circuit count: per-slab rounding
+/// ([`split_by_area`]) can overshoot on lopsided slabs (82 %/18 % forced to 2
+/// rounds to 2 + 1), and a forced count that comes back wrong in either
+/// direction is a broken promise. Every piece beyond the guaranteed one per
+/// slab goes to whichever slab currently has the biggest pieces, which keeps
+/// the areas as even as the slab shapes allow.
+pub fn split_exact(room: &RectifiedRoom, wanted: usize) -> Vec<Field> {
+    let slabs = slab_fields(room, &[]);
+    let mut pieces = vec![1usize; slabs.len()];
+    for _ in slabs.len()..wanted.max(1) {
+        let next = (0..slabs.len())
+            .max_by(|&a, &b| {
+                (area_of(&slabs[a]) / pieces[a] as f64)
+                    .total_cmp(&(area_of(&slabs[b]) / pieces[b] as f64))
+            })
+            .expect("a rectified room has at least one slab");
+        pieces[next] += 1;
+    }
+
+    let mut fields: Vec<Field> = Vec::new();
+    for (slab, count) in slabs.iter().zip(pieces) {
+        cut_slab(slab, count, &mut fields);
     }
     fields
 }

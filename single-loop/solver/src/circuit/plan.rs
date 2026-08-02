@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::circuit::fields::Field;
 use crate::circuit::room::{
-    area_mm2, centroid, inset_room, rectify, reference_wall, split_by_area,
+    area_mm2, centroid, inset_room, rectify, reference_wall, split_by_area, split_exact,
 };
 use crate::circuit::schnecke::build_schnecke;
 use crate::circuit::types::{LoopError, LoopErrorCode, LoopPattern, RectMm};
@@ -834,16 +834,25 @@ pub fn plan_room(input: RoomPlanInput) -> Result<RoomPlan, LoopError> {
     };
     let fill_area = area_mm2(&inner.vertices);
     let theoretical_mm = fill_area / input.fill_spacing_mm;
-    let wanted = input
-        .circuit_count
-        .unwrap_or_else(|| (theoretical_mm / MAX_CIRCUIT_LENGTH_MM).ceil().max(1.0) as usize)
-        .max(1);
-    let fields = split_by_area(&inner, wanted);
+    // A forced count is a promise and goes through the exact split; the auto
+    // count is only a lower bound from the length cap, so the heuristic split
+    // may round it up per slab.
+    let fields = match input.circuit_count {
+        Some(forced) => split_exact(&inner, forced),
+        None => {
+            let wanted = (theoretical_mm / MAX_CIRCUIT_LENGTH_MM).ceil().max(1.0) as usize;
+            split_by_area(&inner, wanted)
+        }
+    };
 
     // One frame for the whole room, so one nub lattice for every circuit.
     let (start, end) = reference_wall(&room.vertices);
     let transform = PlateTransform::from_edge(start, end, centroid(&room.vertices), 0.0, 0.0)
-        .map_err(|error| reject(format!("the room's reference wall is degenerate: {error:?}")))?;
+        .map_err(|error| {
+            reject(format!(
+                "the room's reference wall is degenerate: {error:?}"
+            ))
+        })?;
 
     let fields_local: Vec<(Field, f64)> = fields
         .iter()
@@ -868,7 +877,9 @@ pub fn plan_room(input: RoomPlanInput) -> Result<RoomPlan, LoopError> {
     )?;
 
     let to_local = |ring: &[Point]| -> Vec<Point> {
-        ring.iter().map(|point| transform.to_local(*point)).collect()
+        ring.iter()
+            .map(|point| transform.to_local(*point))
+            .collect()
     };
     Ok(RoomPlan {
         room_local: plan.room_local,
