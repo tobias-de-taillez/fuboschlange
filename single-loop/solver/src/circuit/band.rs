@@ -28,20 +28,31 @@
 //!
 //! ## What the plate does admit
 //!
-//! A one-channel U-turn, as a chain of three edges rather than one. Westward
-//! the narrowest is `TeardropReverse → BroadReverse180 → TeardropReverse`
-//! (−150, +225, −150 mm) and swings only 85 mm past its two columns. With it
-//! the lanes are walked 0, 1, 2, 3 in order and no turn ever straddles a lane
-//! at all — which is why this module searches for a *chain* and not a
-//! template, the same way [`walk_leg`] finds its corner by asking the graph
-//! instead of re-deriving it.
+//! A one-channel U-turn, as a *chain* rather than one edge. With it the lanes
+//! are walked 0, 1, 2, 3 in order and no turn ever straddles a lane at all —
+//! which is why this module searches for a chain and not a template, the same
+//! way [`walk_leg`] finds its corner by asking the graph instead of
+//! re-deriving it.
 //!
-//! What remains is that a chain still swings sideways, and at the end where
-//! two of them sit the second must keep clear of the first and of the lane
-//! ends beside it. That is a stagger too, but a small one and for a different
-//! reason, and it is *searched* rather than derived: the walk offers every row
-//! the graph admits a turn on, deepest first, and backtracks when the geometry
-//! rejects one.
+//! A chain is not free, and the price is not the one it first looks like. Its
+//! sideways swing straddles *both* of the columns it joins — the narrowest
+//! three-edge chain stands 85 mm past one and 75 mm past the other, 235 mm
+//! wide. But the binding constraint is northward, not sideways: lane `k`
+//! arrives southbound down the start column and lane `k + 1` departs
+//! northbound up the landing column, so both columns are occupied *north* of
+//! the turn, and a chain is usable only if its body never returns to either of
+//! them above that column's own endpoint row.
+//!
+//! That is what forces [`UTURN_CHAIN_LENGTHS`] to hold a four. Three-edge
+//! chains land cleanly on only one column parity per direction — westward from
+//! odd columns, eastward from even ones — while a U's two side columns are
+//! forced to *opposite* parity by its own corners. So three edges can never
+//! serve both ends of a band. Four break the lock.
+//!
+//! What is left is the end where two lane changes sit: the second must keep
+//! clear of the first and of the lane ends beside it. That is *searched*
+//! rather than derived — the walk offers every row the graph admits a turn on,
+//! deepest first, and backtracks when the geometry rejects one.
 
 use crate::circuit::fields::{Field, Lane};
 use crate::circuit::schnecke::{

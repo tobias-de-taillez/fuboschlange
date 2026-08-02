@@ -1,9 +1,9 @@
 # Randzonen-Band: Bauplan
 
 **Datum:** 2026-08-02
-**Status:** Entwurf 1 vermessen und verworfen, Entwurf 2 steht
+**Status:** Entwurf 2 gebaut bis auf den letzten Bahnwechsel (§3a)
 **Vorgabe:** `docs/superpowers/specs/2026-08-02-wintergarten-drei-heizkreise.md` §3
-**Messungen:** `single-loop/solver/tests/plate_spiral_facts.rs`, Commit `ba0ac84`
+**Messungen:** `single-loop/solver/tests/plate_spiral_facts.rs` (9 Fakten)
 
 Vier Bahnen à 75 mm entlang eines Wandzugs, zwei hin, zwei zurück. Für den
 Wintergarten läuft der Zug über drei Wände — linke Wand, obere (die 7,85-m-
@@ -33,12 +33,7 @@ wollte, existiert nicht. Gepinnt als
 
 ## 2. Entwurf 2: das Band ist ein Mäander
 
-Die 75-mm-Kehre gibt es doch — nicht als eine Kante, sondern als **drei
-verkettete**. Westwärts ist die schmalste `TeardropReverse →
-BroadReverse180 → TeardropReverse` (−150, +225, −150 mm) und schlägt nur
-**85 mm** über ihre beiden Spalten hinaus; ostwärts schlägt die schmalste
-225 mm aus. Beide reichen 192,5 mm nach Süden und 112,5 mm nach Norden.
-
+Die 75-mm-Kehre gibt es doch — nicht als eine Kante, sondern als **Kette**.
 Damit ist die Bahnfolge die naheliegende und die Vorgabe wörtlich erfüllt:
 
 ```
@@ -55,21 +50,18 @@ steht.
 **Das ist der Mäander, nicht die Schnecke.** `LoopPattern::Meander` gibt es
 in `types.rs` bereits.
 
-## 3. Was am linken Ende noch zu klären ist
+## 3. Was eine Kehrenkette wirklich kostet
 
-Dort liegen zwei Kehren: 0→1 (Spalten X, X+75) und 2→3 (X+150, X+225). Keine
-überspannt eine fremde Bahn — das ist der ganze Gewinn. Aber der Ausschlag
-bleibt:
+Der Ausschlag ist beidseitig, und die erste Notiz hier hat das unterschätzt:
+gemessen wurde nur der *größere* der beiden Überstände. Die kompakte
+Drei-Kanten-Kette `TeardropReverse → BroadReverse180 → TeardropReverse` steht
+85 mm über die eine und 75 mm über die andere ihrer beiden Spalten hinaus —
+**235 mm Gesamtbreite**, nicht 85. Jede Aussage der Form „diese Kehre passt
+neben die Wand, weil sie nur 85 mm ausschlägt" ist damit hinfällig.
 
-- 0→1 kann nicht nach Westen ausschlagen, dort ist die Wand. Nach Osten
-  reicht sie bis X+160, also 10 mm über Bahn 2s Spalte.
-- 2→3 schlägt nach Osten in den freien Raum aus, bis X+310.
-
-Also braucht es weiterhin eine Staffelung, aber eine viel kleinere und aus
-einem anderen Grund: Bahn 2s Ende muss über bzw. unter dem y-Bereich von
-Kehre 0→1 liegen ([A−192,5, A+112,5]). Bei 150-mm-Raster heißt das ein
-Versatz von 300 mm. Das ist zu **suchen**, nicht abzuleiten — wie
-`walk_core` alle vier Seiten probiert und `build_from` jede Tiefe.
+Und die maßgebliche Bedingung ist ohnehin eine andere, siehe §3a: nicht die
+Breite, sondern wie weit der Körper **nach Norden** auf die eigenen beiden
+Spalten zurückkommt.
 
 ## 3a. Was gebaut ist, und woran es hängt
 
