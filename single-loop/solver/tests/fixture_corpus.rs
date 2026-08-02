@@ -16,6 +16,12 @@ enum Expected {
     Error { code: String },
 }
 
+/// Every `.json` directly in `single-loop/fixtures` is a solver corpus file
+/// and is parsed as one — a file that is not gets an unwrap panic here, which
+/// is the intended behaviour: a corpus entry that silently stopped being read
+/// would be worse. Inputs of other shapes therefore live in subdirectories
+/// (`fixtures/rooms/` holds the surveyed-room exports), which `read_dir` does
+/// not descend into.
 #[test]
 fn fixture_corpus_matches_invariants() {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixtures");

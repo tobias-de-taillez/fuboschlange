@@ -2,7 +2,7 @@
 
 **Datum:** 2026-08-02
 **Status:** Vorgabe festgehalten, noch nicht gebaut
-**Raum:** `single-loop/fixtures/wintergarten.json` (Export aus `raumaufmass`)
+**Raum:** `single-loop/fixtures/rooms/wintergarten.json` (Export aus `raumaufmass`)
 
 ## 1. Die Vorgabe
 

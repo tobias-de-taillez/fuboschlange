@@ -24,7 +24,7 @@ use single_loop_solver::model::Point;
 /// is `rectify`'s job, and keeping the two apart is what lets the test measure
 /// what straightening costs.
 fn measured_ring() -> Vec<Point> {
-    let text = fs::read_to_string("../fixtures/wintergarten.json")
+    let text = fs::read_to_string("../fixtures/rooms/wintergarten.json")
         .expect("the surveyed room fixture must be readable");
     let value: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
 

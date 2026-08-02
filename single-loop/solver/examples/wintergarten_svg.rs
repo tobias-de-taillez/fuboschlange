@@ -340,7 +340,7 @@ fn fold_max(values: &[f64]) -> f64 {
 
 /// The surveyed ring, rebuilt from the export's points and walls.
 fn measured_ring() -> Result<Vec<Point>, String> {
-    let text = std::fs::read_to_string("../fixtures/wintergarten.json")
+    let text = std::fs::read_to_string("../fixtures/rooms/wintergarten.json")
         .map_err(|error| format!("cannot read the room fixture: {error}"))?;
     let value: serde_json::Value =
         serde_json::from_str(&text).map_err(|error| format!("invalid JSON: {error}"))?;
