@@ -750,6 +750,13 @@ pub struct RoomPlanInput {
     /// of its way, so adding it later does not move them.
     #[serde(default)]
     pub edge_band_mm: f64,
+    /// Forces how many fill circuits the room is cut into. `None` lets the
+    /// area arithmetic decide (`area / spacing / 100 m`, rounded up). The
+    /// override reaches only the field split — every field still has to
+    /// certify on its own, and one that cannot lands in `refused` rather
+    /// than being silently dropped or merged.
+    #[serde(default)]
+    pub circuit_count: Option<usize>,
 }
 
 /// One fill circuit, in the shared plate-local frame.
@@ -827,7 +834,10 @@ pub fn plan_room(input: RoomPlanInput) -> Result<RoomPlan, LoopError> {
     };
     let fill_area = area_mm2(&inner.vertices);
     let theoretical_mm = fill_area / input.fill_spacing_mm;
-    let wanted = (theoretical_mm / MAX_CIRCUIT_LENGTH_MM).ceil().max(1.0) as usize;
+    let wanted = input
+        .circuit_count
+        .unwrap_or_else(|| (theoretical_mm / MAX_CIRCUIT_LENGTH_MM).ceil().max(1.0) as usize)
+        .max(1);
     let fields = split_by_area(&inner, wanted);
 
     // One frame for the whole room, so one nub lattice for every circuit.

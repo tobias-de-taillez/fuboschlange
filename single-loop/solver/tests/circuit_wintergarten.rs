@@ -201,6 +201,7 @@ fn the_whole_room_plans_around_a_manifold_in_the_notch() {
         fill_spacing_mm: 150.0,
         wall_clearance_mm: 75.0,
         edge_band_mm: 300.0,
+        circuit_count: None,
     })
     .expect("this room plans");
 
@@ -239,4 +240,30 @@ fn the_whole_room_plans_around_a_manifold_in_the_notch() {
         assert!(circuit.min_bend_radius_mm >= 80.0, "5x diameter is the floor");
         assert!(!circuit.path_d.is_empty(), "every circuit must draw");
     }
+}
+
+#[test]
+fn the_circuit_count_override_is_obeyed_by_the_field_split() {
+    use single_loop_solver::circuit::{RoomPlanInput, plan_room};
+
+    // Auto on this room at 150 mm gives 3 fields (see the test above).
+    // Forcing 4 must yield exactly 4 attempted fields: every one either a
+    // certified circuit or an honest entry in `refused` — never silently
+    // fewer.
+    let plan = plan_room(RoomPlanInput {
+        ring: measured_ring(),
+        manifold: None,
+        fill_spacing_mm: 150.0,
+        wall_clearance_mm: 75.0,
+        edge_band_mm: 300.0,
+        circuit_count: Some(4),
+    })
+    .expect("this room plans");
+    assert_eq!(
+        plan.circuits.len() + plan.refused.len(),
+        4,
+        "four fields were forced; got {} circuits and {} refusals",
+        plan.circuits.len(),
+        plan.refused.len()
+    );
 }

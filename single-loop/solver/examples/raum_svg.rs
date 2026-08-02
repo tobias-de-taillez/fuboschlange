@@ -162,6 +162,7 @@ fn main() -> Result<(), String> {
         fill_spacing_mm: spacing,
         wall_clearance_mm: 75.0,
         edge_band_mm: 300.0,
+        circuit_count: None,
     })
     .map_err(|error| error.message)?;
 
