@@ -186,7 +186,9 @@ fn inner_of(axis: Axis, left: f64, right: f64, ring: &[Point]) -> f64 {
     }
 }
 
-fn centroid(ring: &[Point]) -> Point {
+/// The average of the vertices — good enough for a plate frame's interior
+/// reference point, which only has to be inside the room.
+pub fn centroid(ring: &[Point]) -> Point {
     let count = ring.len() as f64;
     Point::new(
         ring.iter().map(|point| point.x).sum::<f64>() / count,
@@ -270,4 +272,125 @@ fn spans_at(room: &RectifiedRoom, y: f64) -> Vec<(f64, f64)> {
         .filter(|pair| pair.len() == 2 && pair[1] - pair[0] > 1.0)
         .map(|pair| (pair[0], pair[1]))
         .collect()
+}
+
+// ---------------------------------------------------------------------------
+// From a rectified room to the fields a set of circuits is planned on
+// ---------------------------------------------------------------------------
+
+/// The polygon's area, sign discarded.
+pub fn area_mm2(vertices: &[Point]) -> f64 {
+    signed_area(vertices).abs()
+}
+
+/// The wall the shared plate frame is built from: the longest one running in
+/// +x, so the room stands upright in that frame rather than on its side. Any
+/// wall gives the same lattice; this one only decides how the drawing reads.
+/// Falls back to the longest wall of any direction.
+pub fn reference_wall(vertices: &[Point]) -> (Point, Point) {
+    let mut best: Option<(f64, Point, Point)> = None;
+    let mut fallback: Option<(f64, Point, Point)> = None;
+    for index in 0..vertices.len() {
+        let from = vertices[index];
+        let to = vertices[(index + 1) % vertices.len()];
+        let length = (to.x - from.x).hypot(to.y - from.y);
+        if fallback.is_none_or(|(held, _, _)| held < length) {
+            fallback = Some((length, from, to));
+        }
+        if to.x > from.x && best.is_none_or(|(held, _, _)| held < length) {
+            best = Some((length, from, to));
+        }
+    }
+    let (_, from, to) = best.or(fallback).expect("a room has walls");
+    (from, to)
+}
+
+/// The room shrunk by `inset_mm` on every wall — the area left once the edge
+/// band has taken its strip.
+///
+/// Each wall moves along its **own** inward normal and the corners are
+/// recomputed where the moved lines meet. Pulling every vertex toward the
+/// centroid instead is only right for a convex outline: at an L's reflex corner
+/// the two walls need opposite signs, and a naive inset puts that corner on the
+/// wrong side — which is what once left the lower leg of the Wintergarten
+/// without a circuit at all.
+pub fn inset_room(room: &RectifiedRoom, inset_mm: f64) -> RectifiedRoom {
+    let count = room.vertices.len();
+    // Counter-clockwise, so the interior is on the left of every wall.
+    let mut ring = room.vertices.clone();
+    if signed_area(&ring) < 0.0 {
+        ring.reverse();
+    }
+    let lines: Vec<(bool, f64)> = (0..count)
+        .map(|index| {
+            let from = ring[index];
+            let to = ring[(index + 1) % count];
+            let (dx, dy) = (to.x - from.x, to.y - from.y);
+            if dx.abs() >= dy.abs() {
+                (true, from.y + inset_mm * dx.signum())
+            } else {
+                (false, from.x - inset_mm * dy.signum())
+            }
+        })
+        .collect();
+    let vertices = (0..count)
+        .map(|index| {
+            let (horizontal, value) = lines[index];
+            let (_, next_value) = lines[(index + 1) % count];
+            if horizontal {
+                Point::new(next_value, value)
+            } else {
+                Point::new(value, next_value)
+            }
+        })
+        .collect();
+    RectifiedRoom {
+        vertices,
+        inscribed_loss_mm2: room.inscribed_loss_mm2,
+        dropped_walls: room.dropped_walls,
+    }
+}
+
+/// Cuts the room into `wanted` fields of roughly equal area.
+///
+/// The slabs come first, then each is cut into the share of the circuits its
+/// own area earns — across whichever axis is longer, so the pieces stay squat.
+/// A long thin field spends its outermost ring on turns.
+pub fn split_by_area(room: &RectifiedRoom, wanted: usize) -> Vec<Field> {
+    let slabs = slab_fields(room, &[]);
+    let area_of = |field: &Field| {
+        (field.rect_local.max.x - field.rect_local.min.x)
+            * (field.rect_local.max.y - field.rect_local.min.y)
+    };
+    let total: f64 = slabs.iter().map(area_of).sum();
+    let target = total / wanted.max(1) as f64;
+
+    let mut fields: Vec<Field> = Vec::new();
+    for slab in &slabs {
+        let pieces = (area_of(slab) / target).round().max(1.0) as usize;
+        let width = slab.rect_local.max.x - slab.rect_local.min.x;
+        let height = slab.rect_local.max.y - slab.rect_local.min.y;
+        for index in 0..pieces {
+            let (low, high) = (
+                index as f64 / pieces as f64,
+                (index + 1) as f64 / pieces as f64,
+            );
+            let rect = if width >= height {
+                RectMm {
+                    min: Point::new(slab.rect_local.min.x + low * width, slab.rect_local.min.y),
+                    max: Point::new(slab.rect_local.min.x + high * width, slab.rect_local.max.y),
+                }
+            } else {
+                RectMm {
+                    min: Point::new(slab.rect_local.min.x, slab.rect_local.min.y + low * height),
+                    max: Point::new(slab.rect_local.max.x, slab.rect_local.min.y + high * height),
+                }
+            };
+            fields.push(Field {
+                id: fields.len() as u32,
+                rect_local: rect,
+            });
+        }
+    }
+    fields
 }

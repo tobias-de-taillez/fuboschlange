@@ -183,3 +183,60 @@ fn the_room_slabs_into_rectangles_that_tile_it() {
         );
     }
 }
+
+#[test]
+fn the_whole_room_plans_around_a_manifold_in_the_notch() {
+    use single_loop_solver::circuit::{RoomPlanInput, plan_room};
+
+    // The manifold stands in the 357 mm notch at the bottom right — M-O-N-F in
+    // the survey. `rectify` drops that notch as an artefact, which is right for
+    // the heated area but not for the manifold, so its position is handed in
+    // separately rather than recovered from the outline.
+    let ring = measured_ring();
+    let manifold = Point::new(7420.0, -1850.0);
+
+    let plan = plan_room(RoomPlanInput {
+        ring: ring.clone(),
+        manifold: Some(manifold),
+        fill_spacing_mm: 150.0,
+        wall_clearance_mm: 75.0,
+        edge_band_mm: 300.0,
+    })
+    .expect("this room plans");
+
+    println!(
+        "gemessen {:.2} m², begradigt {:.2} m², Fuellflaeche {:.2} m² ({} kurze Waende verworfen)",
+        plan.measured_area_m2, plan.rectified_area_m2, plan.fill_area_m2, plan.dropped_walls
+    );
+    for (index, circuit) in plan.circuits.iter().enumerate() {
+        println!(
+            "  Kreis {index}: {:.0} x {:.0} mm, {} Bahnen, {:.1} m bei {:.0} mm, \
+             Biegeradius {:.1} mm, Strafe {:.1} mm",
+            circuit.rect_local.max.x - circuit.rect_local.min.x,
+            circuit.rect_local.max.y - circuit.rect_local.min.y,
+            circuit.lanes,
+            circuit.total_length_mm / 1000.0,
+            circuit.pipe_spacing_mm,
+            circuit.min_bend_radius_mm,
+            circuit.penalty_sum_mm,
+        );
+    }
+    for refusal in &plan.refused {
+        println!("  kein Kreis: {refusal}");
+    }
+    println!("  ein Noppenfeld, {} Noppen", plan.nopp_count);
+
+    assert!(!plan.circuits.is_empty(), "the room must get circuits");
+    assert!(
+        plan.manifold_local.is_some(),
+        "the manifold position must survive into the shared frame"
+    );
+    for circuit in &plan.circuits {
+        assert!(
+            circuit.total_length_mm <= 100_000.0,
+            "no circuit may exceed 100 m"
+        );
+        assert!(circuit.min_bend_radius_mm >= 80.0, "5x diameter is the floor");
+        assert!(!circuit.path_d.is_empty(), "every circuit must draw");
+    }
+}

@@ -9,6 +9,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::circuit::fields::Field;
+use crate::circuit::room::{
+    area_mm2, centroid, inset_room, rectify, reference_wall, split_by_area,
+};
 use crate::circuit::schnecke::build_schnecke;
 use crate::circuit::types::{LoopError, LoopErrorCode, LoopPattern, RectMm};
 use crate::circuit::validate::{
@@ -472,6 +475,7 @@ pub fn plan_multi(
     fields_local: &[(Field, f64)],
     transform: &PlateTransform,
     wall_clearance_mm: f64,
+    manifold_local: Option<Point>,
 ) -> Result<MultiPlan, LoopError> {
     let polygon = Polygon::try_from_original(room_world.to_vec()).map_err(|error| {
         reject(format!(
@@ -507,6 +511,7 @@ pub fn plan_multi(
             *pipe_spacing_mm,
             wall_clearance_mm,
             depth_mm,
+            manifold_local,
         ) {
             Ok(circuit) => circuits.push(circuit),
             Err(error) => refused.push(format!(
@@ -555,6 +560,33 @@ fn snap_to_channels(field: &Field) -> Field {
     }
 }
 
+/// Where a field's connection zone goes: on the field's bottom edge, at the
+/// point on it nearest the manifold.
+///
+/// Only the offset moves, never the edge. `build_schnecke` enters on the
+/// outermost lane's **bottom row** and leaves on it, so a zone anywhere else is
+/// a zone the spiral cannot reach — it walks up to the wall and stops. Which
+/// edge counts as "bottom" is the shared frame's, and that frame comes from the
+/// room's reference wall, so the whole room agrees on it.
+///
+/// Without a manifold the zone sits in the middle, which is what this did
+/// before the manifold could be placed at all.
+fn zone_placement(rect: &RectMm, manifold_local: Option<Point>) -> (u32, f64, f64) {
+    let width = rect.max.x - rect.min.x;
+    let zone_width = 600.0_f64.min(width / 2.0);
+    let Some(manifold) = manifold_local else {
+        return (0, width / 2.0, zone_width);
+    };
+
+    // The zone may not run into the two edges meeting the bottom one at the
+    // corners: `build_connection_zone` rejects a zone any other boundary
+    // segment cuts, and a zone ending exactly on a corner is cut by definition.
+    let free = width / 2.0 - zone_width / 2.0;
+    let inset = (zone_width / 2.0 + CORNER_MARGIN_MM).min(zone_width / 2.0 + free);
+    let offset = (manifold.x - rect.min.x).clamp(inset, width - inset);
+    (0, offset, zone_width)
+}
+
 /// One field against the shared lattice.
 ///
 /// The connection zone is built from the *field's* own rectangle rather than
@@ -562,6 +594,7 @@ fn snap_to_channels(field: &Field) -> Field {
 /// gets one. The zone rectangle it returns is in the shared frame, so the
 /// room-wide graph is what gets cut and the room-wide instance is what the
 /// noppen are checked against — the field never gets a plate of its own.
+#[allow(clippy::too_many_arguments)] // every one of them is a distinct input
 fn plan_one(
     field: &Field,
     graph: &crate::plate::EmbeddedPoseGraph,
@@ -570,6 +603,7 @@ fn plan_one(
     pipe_spacing_mm: f64,
     wall_clearance_mm: f64,
     depth_mm: f64,
+    manifold_local: Option<Point>,
 ) -> Result<CircuitPlan, LoopError> {
     let rect = &field.rect_local;
     let corners = [
@@ -580,53 +614,76 @@ fn plan_one(
     ];
     let field_polygon = Polygon::try_from_original(corners.to_vec())
         .map_err(|error| reject(format!("the field is not a valid rectangle: {error:?}")))?;
-    let width = rect.max.x - rect.min.x;
-    let zone = build_connection_zone(
-        &field_polygon,
-        transform,
-        &crate::circuit::types::ConnectionInput {
-            edge_index: 0,
-            center_offset_mm: width / 2.0,
-            zone_width_mm: 600.0_f64.min(width / 2.0),
-            zone_depth_mm: depth_mm,
-        },
-    )?;
-    let view = build_graph_view(graph, &zone, transform);
-    let mut instance = base.clone();
-    filter_zone_nopps(&mut instance, &zone);
 
-    let schnecke = build_schnecke(
-        field,
-        pipe_spacing_mm,
-        wall_clearance_mm,
-        graph,
-        &view,
-        &zone,
-        &instance,
-    )?;
-    let candidate = assemble(&schnecke, graph, &zone, &instance)?;
-    let certificate = certify_loop(
-        &candidate,
-        &LoopContext {
-            instance: &instance,
-            graph,
-            view: &view,
-            zone: &zone,
-            lanes: &schnecke.lanes,
-            pattern: LoopPattern::Spiral,
-        },
-    )?;
+    // The manifold decides where the zone wants to sit; whether the spiral can
+    // still be walked from there decides whether it gets it. `build_schnecke`
+    // enters running east along the outermost lane's bottom row, so a zone
+    // pushed hard against the field's east end leaves the arm no run-up. Rather
+    // than guess how much run-up that is, ask for the placement the manifold
+    // wants and fall back to the middle when the walk refuses it — the same
+    // try-and-let-it-reject discipline the walk itself uses.
+    let mut placements = Vec::new();
+    if manifold_local.is_some() {
+        placements.push(zone_placement(rect, manifold_local));
+    }
+    placements.push(zone_placement(rect, None));
 
-    Ok(CircuitPlan {
-        rect_local: rect.clone(),
-        pipe_spacing_mm,
-        path_d: path_data_local(&candidate, transform),
-        lanes: schnecke.lanes.len(),
-        total_length_mm: certificate.total_length_mm,
-        min_bend_radius_mm: certificate.min_bend_radius_mm,
-        min_center_distance_mm: certificate.min_center_distance_mm.distance_mm,
-        penalty_sum_mm: certificate.penalty_sum_mm,
-    })
+    let mut failure = None;
+    for (edge_index, center_offset_mm, zone_width_mm) in placements {
+        let attempt = (|| {
+            let zone = build_connection_zone(
+                &field_polygon,
+                transform,
+                &crate::circuit::types::ConnectionInput {
+                    edge_index,
+                    center_offset_mm,
+                    zone_width_mm,
+                    zone_depth_mm: depth_mm,
+                },
+            )?;
+            let view = build_graph_view(graph, &zone, transform);
+            let mut instance = base.clone();
+            filter_zone_nopps(&mut instance, &zone);
+            let schnecke = build_schnecke(
+                field,
+                pipe_spacing_mm,
+                wall_clearance_mm,
+                graph,
+                &view,
+                &zone,
+                &instance,
+            )?;
+            let candidate = assemble(&schnecke, graph, &zone, &instance)?;
+            let certificate = certify_loop(
+                &candidate,
+                &LoopContext {
+                    instance: &instance,
+                    graph,
+                    view: &view,
+                    zone: &zone,
+                    lanes: &schnecke.lanes,
+                    pattern: LoopPattern::Spiral,
+                },
+            )?;
+            Ok::<_, LoopError>((candidate, certificate, schnecke.lanes.len()))
+        })();
+        match attempt {
+            Ok((candidate, certificate, lanes)) => {
+                return Ok(CircuitPlan {
+                    rect_local: rect.clone(),
+                    pipe_spacing_mm,
+                    path_d: path_data_local(&candidate, transform),
+                    lanes,
+                    total_length_mm: certificate.total_length_mm,
+                    min_bend_radius_mm: certificate.min_bend_radius_mm,
+                    min_center_distance_mm: certificate.min_center_distance_mm.distance_mm,
+                    penalty_sum_mm: certificate.penalty_sum_mm,
+                });
+            }
+            Err(error) => failure = failure.or(Some(error)),
+        }
+    }
+    Err(failure.expect("at least one placement is always attempted"))
 }
 
 /// The loop as SVG path data in the shared plate-local frame.
@@ -648,4 +705,184 @@ fn path_data_local(candidate: &LoopCandidate, transform: &PlateTransform) -> Str
             .collect(),
     };
     path_data(&local)
+}
+
+// ---------------------------------------------------------------------------
+// A surveyed room, a manifold position, and the circuits that follow
+// ---------------------------------------------------------------------------
+
+/// The longest a single circuit may be (design spec §5). Used here only to
+/// work out how many circuits a room needs; the real limit is enforced by
+/// `certify_loop`.
+const MAX_CIRCUIT_LENGTH_MM: f64 = 100_000.0;
+
+/// How far a connection zone stays clear of the corners of the field it sits
+/// on. Not a spec number — just enough that a manifold off to one side does not
+/// push the zone onto a corner, where the adjacent wall cuts it.
+const CORNER_MARGIN_MM: f64 = 150.0;
+
+/// What the browser hands over: the room as surveyed, and where the manifold
+/// stands.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoomPlanInput {
+    /// The surveyed outline, in the survey's own coordinates. Straightening is
+    /// this function's job, not the caller's.
+    pub ring: Vec<Point>,
+    /// Where the manifold stands, same coordinates. Every circuit's connection
+    /// zone reaches for it — that is what makes them one set of circuits on one
+    /// manifold rather than several unrelated loops. `None` puts each zone in
+    /// the middle of its own field's bottom edge, as before it could be placed.
+    #[serde(default)]
+    pub manifold: Option<Point>,
+    /// Pipe spacing for the fill circuits.
+    pub fill_spacing_mm: f64,
+    pub wall_clearance_mm: f64,
+    /// How wide a strip along the walls the edge band reserves. The band itself
+    /// is not laid yet (`circuit::band`); this only keeps the fill circuits out
+    /// of its way, so adding it later does not move them.
+    #[serde(default)]
+    pub edge_band_mm: f64,
+}
+
+/// One fill circuit, in the shared plate-local frame.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoomCircuit {
+    pub rect_local: RectMm,
+    pub path_d: String,
+    pub pipe_spacing_mm: f64,
+    pub lanes: usize,
+    pub total_length_mm: f64,
+    pub min_bend_radius_mm: f64,
+    pub min_center_distance_mm: f64,
+    pub penalty_sum_mm: f64,
+}
+
+/// Everything the drawing needs, all of it in one frame.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoomPlan {
+    /// The straightened outline the circuits were planned in.
+    pub room_local: Vec<Point>,
+    /// The outline as surveyed, same frame — so the drawing can show what
+    /// straightening cost instead of hiding it.
+    pub measured_local: Vec<Point>,
+    /// The strip the edge band reserves, as an inner outline. Empty when no
+    /// band was reserved.
+    pub band_inner_local: Vec<Point>,
+    pub manifold_local: Option<Point>,
+    pub circuits: Vec<RoomCircuit>,
+    /// Fields that produced no certified circuit, with the reason. Reported,
+    /// never hidden: an unplanned field is floor that stays cold.
+    pub refused: Vec<String>,
+    pub nopp_count: usize,
+    pub measured_area_m2: f64,
+    pub rectified_area_m2: f64,
+    pub fill_area_m2: f64,
+    pub dropped_walls: usize,
+}
+
+/// Plans a whole surveyed room: straighten it, reserve the edge band, cut the
+/// rest into fields, and lay one certified circuit in each — all against one
+/// nub lattice, with every connection zone reaching for the same manifold.
+///
+/// How many fill circuits the room gets is arithmetic, not a setting: a
+/// serpentine at the requested spacing would take `area / spacing` of pipe and
+/// one circuit holds 100 m, so the count is that ratio rounded up. The real
+/// laid length always comes out lower — the wall clearance, the free core and
+/// the ring the connection zone cuts each take their share — which is why the
+/// per-circuit lengths are reported rather than assumed.
+pub fn plan_room(input: RoomPlanInput) -> Result<RoomPlan, LoopError> {
+    let room = rectify(&input.ring)?;
+    let measured_area = area_mm2(&input.ring);
+    let rectified_area = area_mm2(&room.vertices);
+
+    let inner = if input.edge_band_mm > 0.0 {
+        inset_room(&room, input.edge_band_mm)
+    } else {
+        room.clone()
+    };
+    let fill_area = area_mm2(&inner.vertices);
+    let theoretical_mm = fill_area / input.fill_spacing_mm;
+    let wanted = (theoretical_mm / MAX_CIRCUIT_LENGTH_MM).ceil().max(1.0) as usize;
+    let fields = split_by_area(&inner, wanted);
+
+    // One frame for the whole room, so one nub lattice for every circuit.
+    let (start, end) = reference_wall(&room.vertices);
+    let transform = PlateTransform::from_edge(start, end, centroid(&room.vertices), 0.0, 0.0)
+        .map_err(|error| reject(format!("the room's reference wall is degenerate: {error:?}")))?;
+
+    let fields_local: Vec<(Field, f64)> = fields
+        .iter()
+        .map(|field| {
+            (
+                Field {
+                    id: field.id,
+                    rect_local: to_local_rect(&transform, &field.rect_local),
+                },
+                input.fill_spacing_mm,
+            )
+        })
+        .collect();
+
+    let manifold_local = input.manifold.map(|point| transform.to_local(point));
+    let plan = plan_multi(
+        &room.vertices,
+        &fields_local,
+        &transform,
+        input.wall_clearance_mm,
+        manifold_local,
+    )?;
+
+    let to_local = |ring: &[Point]| -> Vec<Point> {
+        ring.iter().map(|point| transform.to_local(*point)).collect()
+    };
+    Ok(RoomPlan {
+        room_local: plan.room_local,
+        measured_local: to_local(&input.ring),
+        band_inner_local: if input.edge_band_mm > 0.0 {
+            to_local(&inner.vertices)
+        } else {
+            Vec::new()
+        },
+        manifold_local,
+        circuits: plan
+            .circuits
+            .iter()
+            .map(|circuit| RoomCircuit {
+                rect_local: circuit.rect_local.clone(),
+                path_d: circuit.path_d.clone(),
+                pipe_spacing_mm: circuit.pipe_spacing_mm,
+                lanes: circuit.lanes,
+                total_length_mm: circuit.total_length_mm,
+                min_bend_radius_mm: circuit.min_bend_radius_mm,
+                min_center_distance_mm: circuit.min_center_distance_mm,
+                penalty_sum_mm: circuit.penalty_sum_mm,
+            })
+            .collect(),
+        refused: plan.refused,
+        nopp_count: plan.nopp_count,
+        measured_area_m2: measured_area / 1e6,
+        rectified_area_m2: rectified_area / 1e6,
+        fill_area_m2: fill_area / 1e6,
+        dropped_walls: room.dropped_walls,
+    })
+}
+
+/// A world-space rectangle's bounding box in the plate-local frame.
+fn to_local_rect(transform: &PlateTransform, rect: &RectMm) -> RectMm {
+    let corners = [
+        transform.to_local(Point::new(rect.min.x, rect.min.y)),
+        transform.to_local(Point::new(rect.max.x, rect.min.y)),
+        transform.to_local(Point::new(rect.max.x, rect.max.y)),
+        transform.to_local(Point::new(rect.min.x, rect.max.y)),
+    ];
+    let fold = |pick: fn(&Point) -> f64, best: fn(f64, f64) -> f64| {
+        corners.iter().map(pick).fold(f64::NAN, best)
+    };
+    RectMm {
+        min: Point::new(fold(|p| p.x, f64::min), fold(|p| p.y, f64::min)),
+        max: Point::new(fold(|p| p.x, f64::max), fold(|p| p.y, f64::max)),
+    }
 }

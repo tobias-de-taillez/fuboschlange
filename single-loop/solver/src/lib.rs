@@ -34,6 +34,17 @@ pub fn plan_schnecke_wasm(input: JsValue) -> Result<JsValue, JsValue> {
         .map_err(|error| JsValue::from_str(&format!("cannot serialize SchneckePlan: {error}")))
 }
 
+#[wasm_bindgen(js_name = planRoom)]
+pub fn plan_room_wasm(input: JsValue) -> Result<JsValue, JsValue> {
+    console_error_panic_hook::set_once();
+    let input = serde_wasm_bindgen::from_value(input)
+        .map_err(|error| JsValue::from_str(&format!("invalid RoomPlanInput: {error}")))?;
+    let result = circuit::plan_room(input)
+        .map_err(|error| JsValue::from_str(&format!("{:?}: {}", error.code, error.message)))?;
+    serde_wasm_bindgen::to_value(&result)
+        .map_err(|error| JsValue::from_str(&format!("cannot serialize RoomPlan: {error}")))
+}
+
 #[wasm_bindgen(js_name = solveSingleLoop)]
 pub fn solve_single_loop_wasm(input: JsValue) -> Result<JsValue, JsValue> {
     console_error_panic_hook::set_once();

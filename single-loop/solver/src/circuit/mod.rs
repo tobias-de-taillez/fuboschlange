@@ -19,9 +19,13 @@ pub use fields::{
     spiral_side_sequence,
 };
 pub use plan::{
-    CircuitPlan, MultiPlan, SchneckeInput, SchneckePlan, plan_multi, plan_schnecke, zone_depth_mm,
+    CircuitPlan, MultiPlan, RoomCircuit, RoomPlan, RoomPlanInput, SchneckeInput, SchneckePlan,
+    plan_multi, plan_room, plan_schnecke, zone_depth_mm,
 };
-pub use room::{RectifiedRoom, rectify, slab_fields};
+pub use room::{
+    RectifiedRoom, area_mm2, centroid, inset_room, rectify, reference_wall, slab_fields,
+    split_by_area,
+};
 pub use band::{Band, build_band};
 pub use schnecke::{Schnecke, build_schnecke};
 pub use search::{

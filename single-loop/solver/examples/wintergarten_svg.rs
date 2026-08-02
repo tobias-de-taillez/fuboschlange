@@ -93,7 +93,7 @@ fn main() -> Result<(), String> {
         .collect();
     let room_world: Vec<Point> = room.vertices.clone();
 
-    let plan = plan_multi(&room_world, &fields_local, &transform, WALL_CLEARANCE_MM)
+    let plan = plan_multi(&room_world, &fields_local, &transform, WALL_CLEARANCE_MM, None)
         .map_err(|error| error.message)?;
 
     for circuit in &plan.circuits {
