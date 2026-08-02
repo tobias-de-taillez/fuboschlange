@@ -19,7 +19,7 @@ pub use fields::{
     spiral_side_sequence,
 };
 pub use plan::{
-    CircuitPlan, MultiPlan, RoomCircuit, RoomPlan, RoomPlanInput, SchneckeInput, SchneckePlan,
+    CircuitPlan, Frame, MultiPlan, RoomCircuit, RoomPlan, RoomPlanInput, SchneckeInput, SchneckePlan,
     plan_multi, plan_room, plan_schnecke, zone_depth_mm,
 };
 pub use room::{

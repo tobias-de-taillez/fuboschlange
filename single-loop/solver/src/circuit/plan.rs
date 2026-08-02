@@ -583,7 +583,14 @@ fn zone_placement(rect: &RectMm, manifold_local: Option<Point>) -> (u32, f64, f6
     // segment cuts, and a zone ending exactly on a corner is cut by definition.
     let free = width / 2.0 - zone_width / 2.0;
     let inset = (zone_width / 2.0 + CORNER_MARGIN_MM).min(zone_width / 2.0 + free);
-    let offset = (manifold.x - rect.min.x).clamp(inset, width - inset);
+    // And it may not be pushed past the middle: `build_schnecke` enters running
+    // **east** along the outermost lane's bottom row, so the zone needs the
+    // room east of it as run-up. A zone in the eastern half has none, the walk
+    // refuses, and the field falls back to the middle anyway — at the price of
+    // a whole exhausted search. Clamping here is what keeps the common case to
+    // one attempt instead of two.
+    let east_limit = (width / 2.0).max(inset);
+    let offset = (manifold.x - rect.min.x).clamp(inset, east_limit);
     (0, offset, zone_width)
 }
 
@@ -759,6 +766,20 @@ pub struct RoomCircuit {
     pub penalty_sum_mm: f64,
 }
 
+/// How the shared plate-local frame maps back to the survey's coordinates:
+/// `world = origin + u * local.x + v * local.y`.
+///
+/// Returned so a caller that lets the user point at the drawing can turn that
+/// point back into a manifold position, without having to know how the frame
+/// was chosen.
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Frame {
+    pub origin: Point,
+    pub u: Point,
+    pub v: Point,
+}
+
 /// Everything the drawing needs, all of it in one frame.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -772,6 +793,7 @@ pub struct RoomPlan {
     /// band was reserved.
     pub band_inner_local: Vec<Point>,
     pub manifold_local: Option<Point>,
+    pub frame: Frame,
     pub circuits: Vec<RoomCircuit>,
     /// Fields that produced no certified circuit, with the reason. Reported,
     /// never hidden: an unplanned field is floor that stays cold.
@@ -847,6 +869,16 @@ pub fn plan_room(input: RoomPlanInput) -> Result<RoomPlan, LoopError> {
             Vec::new()
         },
         manifold_local,
+        frame: {
+            let origin = transform.to_world(Point::new(0.0, 0.0));
+            let along = transform.to_world(Point::new(1.0, 0.0));
+            let across = transform.to_world(Point::new(0.0, 1.0));
+            Frame {
+                origin,
+                u: Point::new(along.x - origin.x, along.y - origin.y),
+                v: Point::new(across.x - origin.x, across.y - origin.y),
+            }
+        },
         circuits: plan
             .circuits
             .iter()

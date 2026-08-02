@@ -6,7 +6,16 @@
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
-    "lib": ["ES2022", "WebWorker"]
+    "lib": [
+      "ES2022",
+      "WebWorker"
+    ]
   },
-  "include": ["src/api", "src/worker/protocol.ts", "src/worker/solver.worker.ts"]
+  "include": [
+    "src/api",
+    "src/worker/protocol.ts",
+    "src/worker/solver.worker.ts",
+    "src/worker/room-protocol.ts",
+    "src/worker/room.worker.ts"
+  ]
 }

@@ -6,9 +6,23 @@
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
-    "lib": ["ES2022", "DOM"],
-    "types": ["vitest/globals", "node"]
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
+    "types": [
+      "vitest/globals",
+      "node"
+    ]
   },
-  "include": ["src", "tests", "vite.config.ts", "playwright.config.ts"],
-  "exclude": ["src/worker/solver.worker.ts"]
+  "include": [
+    "src",
+    "tests",
+    "vite.config.ts",
+    "playwright.config.ts"
+  ],
+  "exclude": [
+    "src/worker/solver.worker.ts",
+    "src/worker/room.worker.ts"
+  ]
 }

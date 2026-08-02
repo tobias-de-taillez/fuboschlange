@@ -9,6 +9,7 @@ export default defineConfig({
         index: fileURLToPath(new URL("index.html", import.meta.url)),
         plate: fileURLToPath(new URL("plate.html", import.meta.url)),
         schnecke: fileURLToPath(new URL("schnecke.html", import.meta.url)),
+        raum: fileURLToPath(new URL("raum.html", import.meta.url)),
       },
     },
   },

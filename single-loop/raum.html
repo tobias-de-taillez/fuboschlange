@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Raum – Verlegeplan</title>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <p class="eyebrow">BEKOTEC-EN 23 FI 30 · Rohr 16 mm · Noppenraster 75 mm</p>
+          <h1>Verlegeplan</h1>
+          <p class="banner" id="banner">Raum wird geladen …</p>
+        </div>
+        <button id="plan">Neu planen</button>
+      </header>
+
+      <section class="controls">
+        <label>
+          Aufmaß
+          <input id="file" type="file" accept="application/json,.json" />
+        </label>
+        <label>
+          Verlegeabstand Füllkreise
+          <select id="spacing">
+            <option value="75">75 mm</option>
+            <option value="100">100 mm</option>
+            <option value="150" selected>150 mm</option>
+            <option value="200">200 mm</option>
+            <option value="225">225 mm</option>
+          </select>
+        </label>
+        <label>Wandabstand <input id="clearance" type="number" min="75" step="25" value="75" /> mm</label>
+        <label>
+          Randzone reserviert
+          <input id="band" type="number" min="0" step="75" value="300" /> mm
+        </label>
+      </section>
+
+      <p class="hint" id="hint">
+        In den Plan klicken setzt den Verteiler. Alle Kreise laufen dorthin.
+      </p>
+
+      <section class="canvas">
+        <div id="plot" aria-label="Verlegeplan"></div>
+        <aside>
+          <h2>Kreise</h2>
+          <ul id="circuits"></ul>
+          <h2>Raum</h2>
+          <dl id="facts"></dl>
+          <h2>Nicht belegt</h2>
+          <ul id="refused"></ul>
+        </aside>
+      </section>
+    </main>
+    <script type="module" src="/src/raum-main.ts"></script>
+  </body>
+</html>
