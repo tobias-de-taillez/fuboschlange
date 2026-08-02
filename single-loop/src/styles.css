@@ -23,3 +23,36 @@
   height: auto;
   cursor: crosshair;
 }
+
+/* ---- Verlegetool: die alte Modalität ---------------------------------- */
+.app { display: grid; grid-template-columns: 340px 1fr; min-height: 100vh; }
+.side { padding: 1rem; border-right: 1px solid #e2ddd5; overflow-y: auto; }
+.side h1 { font-size: 1.15rem; margin: 0 0 0.2rem; }
+.side h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em;
+  color: #6b6257; margin: 1.1rem 0 0.4rem; border-top: 1px solid #eee8df; padding-top: 0.8rem; }
+.side label { display: flex; justify-content: space-between; align-items: center;
+  gap: 0.5rem; margin: 0.35rem 0; font-size: 0.9rem; }
+.side input[type="number"], .side select { width: 7.5rem; }
+.pbtn { width: 100%; padding: 0.45rem; margin: 0.3rem 0; cursor: pointer; }
+.pbtn.primary { font-weight: 650; }
+.fixed, .hint { font-size: 0.8rem; color: #6b6257; margin: 0.3rem 0; }
+.seg button { padding: 0.3rem 0.7rem; cursor: pointer; }
+.seg button.on { background: #111; color: #fff; }
+.banner { font-size: 0.85rem; min-height: 2.2em; }
+main { padding: 1rem; }
+.badge { font-weight: 650; margin: 0.5rem 0; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 0.6rem; }
+.cards .card { border: 1px solid #e2ddd5; border-radius: 0.4rem; padding: 0.55rem 0.7rem; font-size: 0.85rem; }
+.cards .card .big { font-size: 1.25rem; font-weight: 650; display: block; }
+.notes { margin-top: 0.8rem; font-size: 0.85rem; color: #4b4238; }
+.notes li { margin: 0.15rem 0; }
+#plot svg { width: 100%; height: auto; cursor: crosshair; }
+#plot.stale svg { opacity: 0.45; filter: grayscale(0.6); }
+#plot.stale { position: relative; }
+#plot.stale::after { content: "Plan veraltet — Neu planen"; position: absolute; inset: 0;
+  display: grid; place-content: center; font-weight: 650; color: #7a1f1f; pointer-events: none; }
+@media print {
+  .side { display: none; }
+  .app { grid-template-columns: 1fr; }
+  #plot.stale::after { content: none; }
+}

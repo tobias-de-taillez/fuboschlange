@@ -3,57 +3,63 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Raum – Verlegeplan</title>
+    <title>Verlegeplan – Noppenplatte</title>
   </head>
   <body>
-    <main>
-      <header>
-        <div>
-          <p class="eyebrow">BEKOTEC-EN 23 FI 30 · Rohr 16 mm · Noppenraster 75 mm</p>
-          <h1>Verlegeplan</h1>
-          <p class="banner" id="banner">Raum wird geladen …</p>
-        </div>
-        <button id="plan">Neu planen</button>
-      </header>
+    <div class="app">
+      <aside class="side">
+        <h1>Verlegeplan Fußbodenheizung</h1>
+        <p class="eyebrow">BEKOTEC-EN 23 FI 30 · Rohr 16 mm · Noppenraster 75 mm</p>
+        <button id="printBtn" class="pbtn" onclick="window.print()">Drucken / PDF</button>
 
-      <section class="controls">
-        <label>
-          Aufmaß
-          <input id="file" type="file" accept="application/json,.json" />
-        </label>
-        <label>
-          Verlegeabstand Füllkreise
+        <h2>Raum</h2>
+        <button id="impBtn" class="pbtn">Raum importieren …</button>
+        <input id="impFile" type="file" accept="application/json,.json" hidden />
+        <p class="hint" id="impName"></p>
+        <label>Breite <input id="rectW" type="number" min="1500" step="75" value="3000" /> mm</label>
+        <label>Tiefe <input id="rectH" type="number" min="1500" step="75" value="2400" /> mm</label>
+
+        <h2>Verlegung</h2>
+        <label>Verlegeabstand
           <select id="spacing">
             <option value="75">75 mm</option>
-            <option value="100">100 mm</option>
             <option value="150" selected>150 mm</option>
-            <option value="200">200 mm</option>
             <option value="225">225 mm</option>
+            <option value="300">300 mm</option>
           </select>
         </label>
-        <label>Wandabstand <input id="clearance" type="number" min="75" step="25" value="75" /> mm</label>
-        <label>
-          Randzone reserviert
-          <input id="band" type="number" min="0" step="75" value="300" /> mm
-        </label>
-      </section>
+        <label>Randabstand <input id="clearance" type="number" min="75" step="25" value="75" /> mm</label>
+        <p class="fixed">Rohr-Ø <strong>16 mm</strong> · Biegeradius <strong>80 mm</strong> (Profil, fix)</p>
 
-      <p class="hint" id="hint">
-        In den Plan klicken setzt den Verteiler. Alle Kreise laufen dorthin.
-      </p>
+        <h2>Randzone (Fenster)</h2>
+        <label>reservierter Streifen <input id="band" type="number" min="0" step="75" value="300" /> mm</label>
+        <p class="hint">Streifen wird freigehalten — das Band selbst ist noch nicht verlegbar.</p>
 
-      <section class="canvas">
+        <h2>Heizkreise</h2>
+        <div class="seg" id="countSeg">
+          <button data-n="auto" class="on">Auto</button>
+          <button data-n="1">1</button>
+          <button data-n="2">2</button>
+          <button data-n="3">3</button>
+        </div>
+        <p class="fixed">max. Kreislänge <strong>100 m</strong> (fix)</p>
+
+        <h2>Verteiler</h2>
+        <label>x <input id="mfx" type="number" step="10" /> mm</label>
+        <label>y <input id="mfy" type="number" step="10" /> mm</label>
+        <p class="hint">Klick in den Plan setzt den Verteiler und plant neu.</p>
+
+        <button id="plan" class="pbtn primary">Neu planen</button>
+        <p class="banner" id="banner">Raum wird geladen …</p>
+      </aside>
+
+      <main>
         <div id="plot" aria-label="Verlegeplan"></div>
-        <aside>
-          <h2>Kreise</h2>
-          <ul id="circuits"></ul>
-          <h2>Raum</h2>
-          <dl id="facts"></dl>
-          <h2>Nicht belegt</h2>
-          <ul id="refused"></ul>
-        </aside>
-      </section>
-    </main>
+        <div id="badge" class="badge"></div>
+        <section id="cards" class="cards"></section>
+        <section id="notes" class="notes"></section>
+      </main>
+    </div>
     <script type="module" src="/src/raum-main.ts"></script>
   </body>
 </html>
