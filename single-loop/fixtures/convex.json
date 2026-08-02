@@ -1,0 +1,1 @@
+[{"name":"convex-standard","input":{"polygon":[{"x":0,"y":0},{"x":6000,"y":0},{"x":6500,"y":2500},{"x":3000,"y":4500},{"x":0,"y":3500}],"connection":{"edgeIndex":0,"centerOffsetMm":3000},"requestedSpacingMm":150,"wallClearanceMm":75},"expected":{"kind":"success"}}]

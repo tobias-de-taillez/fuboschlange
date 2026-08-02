@@ -3,3 +3,10 @@
 node_modules/
 venv/
 .DS_Store
+
+.worktrees/
+single-loop/dist/
+single-loop/src/wasm/pkg/
+single-loop/solver/target/
+single-loop/playwright-report/
+single-loop/test-results/

@@ -1,0 +1,337 @@
+use approx::assert_abs_diff_eq;
+use single_loop_solver::constants::LOCAL_ARC_LENGTH_MM;
+use single_loop_solver::geometry::{ParameterRange, erode_for_centerline};
+use single_loop_solver::input::{NormalizedConnection, validate_and_normalize};
+use single_loop_solver::model::{ConnectionInput, PathPrimitive, Point, SolveSingleLoopInput};
+use single_loop_solver::validation::{
+    CandidateKey, CandidatePath, ParentPair, PathProvenance, PrimitiveRole, ValidationContext,
+    minimum_nonlocal_distance, validate_hard_constraints,
+};
+use std::f64::consts::{FRAC_PI_2, PI};
+
+fn point(x: f64, y: f64) -> Point {
+    Point::new(x, y)
+}
+
+fn polygon(points: &[(f64, f64)]) -> Vec<Point> {
+    points.iter().map(|&(x, y)| point(x, y)).collect()
+}
+
+fn line(start: (f64, f64), end: (f64, f64)) -> PathPrimitive {
+    PathPrimitive::Line {
+        start: point(start.0, start.1),
+        end: point(end.0, end.1),
+    }
+}
+
+fn arc(
+    start: (f64, f64),
+    end: (f64, f64),
+    center: (f64, f64),
+    radius_mm: f64,
+    sweep_rad: f64,
+) -> PathPrimitive {
+    PathPrimitive::Arc {
+        start: point(start.0, start.1),
+        end: point(end.0, end.1),
+        center: point(center.0, center.1),
+        radius_mm,
+        sweep_rad,
+    }
+}
+
+fn request() -> SolveSingleLoopInput {
+    SolveSingleLoopInput {
+        polygon: polygon(&[(0.0, 0.0), (600.0, 0.0), (600.0, 400.0), (0.0, 400.0)]),
+        connection: ConnectionInput {
+            edge_index: 0,
+            center_offset_mm: 300.0,
+        },
+        requested_spacing_mm: 120.0,
+        wall_clearance_mm: 20.0,
+    }
+}
+
+fn context_and_connection() -> (ValidationContext, NormalizedConnection) {
+    let normalized = validate_and_normalize(request()).unwrap();
+    let allowed_region = erode_for_centerline(&normalized).unwrap();
+    (
+        ValidationContext {
+            polygon: normalized.polygon.clone(),
+            allowed_region,
+        },
+        normalized.connection,
+    )
+}
+
+fn candidate_from_parts(
+    primitives: Vec<PathPrimitive>,
+    roles: Vec<PrimitiveRole>,
+    parent_pairs: Vec<ParentPair>,
+    connection: NormalizedConnection,
+    key: Vec<u32>,
+) -> CandidatePath {
+    CandidatePath::from_primitives(
+        primitives,
+        PathProvenance {
+            roles,
+            parent_pairs,
+            start_port_edge_offset_mm: connection.start_port_edge_offset_mm,
+            end_port_edge_offset_mm: connection.end_port_edge_offset_mm,
+        },
+        connection,
+        120.0,
+        CandidateKey(key),
+    )
+    .unwrap()
+}
+
+fn valid_port_pair_candidate() -> CandidatePath {
+    let (_context, connection) = context_and_connection();
+    let x1 = connection.start_port.x;
+    let x2 = connection.end_port.x;
+    let r = 80.0;
+    let angle = PI / 6.0;
+    let lead_length = (r * angle.cos() - 25.0) / angle.sin();
+    let lead_dx = lead_length * angle.sin();
+    let lead_y = lead_length * angle.cos();
+    let start_one_third = (x1 - lead_dx / 3.0, lead_y / 3.0);
+    let start_two_thirds = (x1 - 2.0 * lead_dx / 3.0, 2.0 * lead_y / 3.0);
+    let arc_start = (x1 - lead_dx, lead_y);
+    let center = (arc_start.0 + r * angle.cos(), arc_start.1 + r * angle.sin());
+    let arc_sweep = -(PI + 2.0 * angle);
+    let arc_end = (x2 + lead_dx, lead_y);
+    let end_one_third = (x2 + 2.0 * lead_dx / 3.0, 2.0 * lead_y / 3.0);
+    let end_two_thirds = (x2 + lead_dx / 3.0, lead_y / 3.0);
+
+    candidate_from_parts(
+        vec![
+            line((x1, 0.0), start_one_third),
+            line(start_one_third, start_two_thirds),
+            line(start_two_thirds, arc_start),
+            arc(arc_start, arc_end, center, r, arc_sweep),
+            line(arc_end, end_one_third),
+            line(end_one_third, end_two_thirds),
+            line(end_two_thirds, (x2, 0.0)),
+        ],
+        vec![
+            PrimitiveRole::StartLead,
+            PrimitiveRole::Inbound { winding: 0 },
+            PrimitiveRole::Inbound { winding: 2 },
+            PrimitiveRole::InnerTurn,
+            PrimitiveRole::Outbound { winding: 3 },
+            PrimitiveRole::Outbound { winding: 1 },
+            PrimitiveRole::EndLead,
+        ],
+        vec![
+            ParentPair {
+                first_primitive: 1,
+                first_range: ParameterRange::FULL,
+                second_primitive: 5,
+                second_range: ParameterRange::FULL,
+                first_winding: 0,
+                second_winding: 1,
+            },
+            ParentPair {
+                first_primitive: 2,
+                first_range: ParameterRange::FULL,
+                second_primitive: 4,
+                second_range: ParameterRange::FULL,
+                first_winding: 2,
+                second_winding: 3,
+            },
+        ],
+        connection,
+        vec![1, 2, 3],
+    )
+}
+
+fn parallel_return_path(split: bool) -> CandidatePath {
+    let (_context, connection) = context_and_connection();
+    let mut primitives = vec![
+        line((40.0, 40.0), (340.0, 40.0)),
+        arc((340.0, 40.0), (340.0, 200.0), (340.0, 120.0), 80.0, PI),
+    ];
+    let mut roles = vec![PrimitiveRole::StartLead, PrimitiveRole::InnerTurn];
+
+    if split {
+        primitives.push(line((340.0, 200.0), (190.0, 200.0)));
+        primitives.push(line((190.0, 200.0), (40.0, 200.0)));
+        roles.push(PrimitiveRole::Outbound { winding: 1 });
+        roles.push(PrimitiveRole::EndLead);
+    } else {
+        primitives.push(line((340.0, 200.0), (40.0, 200.0)));
+        roles.push(PrimitiveRole::EndLead);
+    }
+
+    candidate_from_parts(primitives, roles, vec![], connection, vec![9, split as u32])
+}
+
+fn near_threshold_arc_path(split_arcs: bool) -> CandidatePath {
+    let (_context, connection) = context_and_connection();
+    let radius_mm: f64 = 12.5;
+    let target_distance_mm: f64 = 49.999_999;
+    let horizontal_gap_mm = (target_distance_mm.powi(2) - (2.0 * radius_mm).powi(2)).sqrt();
+
+    let (primitives, roles) = if split_arcs {
+        (
+            vec![
+                arc(
+                    (0.0, 0.0),
+                    (radius_mm, radius_mm),
+                    (0.0, radius_mm),
+                    radius_mm,
+                    FRAC_PI_2,
+                ),
+                arc(
+                    (radius_mm, radius_mm),
+                    (0.0, 2.0 * radius_mm),
+                    (0.0, radius_mm),
+                    radius_mm,
+                    FRAC_PI_2,
+                ),
+                line(
+                    (0.0, 2.0 * radius_mm),
+                    (-horizontal_gap_mm, 2.0 * radius_mm),
+                ),
+                arc(
+                    (-horizontal_gap_mm, 2.0 * radius_mm),
+                    (-horizontal_gap_mm - radius_mm, 3.0 * radius_mm),
+                    (-horizontal_gap_mm, 3.0 * radius_mm),
+                    radius_mm,
+                    -FRAC_PI_2,
+                ),
+                arc(
+                    (-horizontal_gap_mm - radius_mm, 3.0 * radius_mm),
+                    (-horizontal_gap_mm, 4.0 * radius_mm),
+                    (-horizontal_gap_mm, 3.0 * radius_mm),
+                    radius_mm,
+                    -FRAC_PI_2,
+                ),
+            ],
+            vec![
+                PrimitiveRole::Inbound { winding: 0 },
+                PrimitiveRole::Inbound { winding: 1 },
+                PrimitiveRole::InnerTurn,
+                PrimitiveRole::Outbound { winding: 1 },
+                PrimitiveRole::Outbound { winding: 0 },
+            ],
+        )
+    } else {
+        (
+            vec![
+                arc(
+                    (0.0, 0.0),
+                    (0.0, 2.0 * radius_mm),
+                    (0.0, radius_mm),
+                    radius_mm,
+                    PI,
+                ),
+                line(
+                    (0.0, 2.0 * radius_mm),
+                    (-horizontal_gap_mm, 2.0 * radius_mm),
+                ),
+                arc(
+                    (-horizontal_gap_mm, 2.0 * radius_mm),
+                    (-horizontal_gap_mm, 4.0 * radius_mm),
+                    (-horizontal_gap_mm, 3.0 * radius_mm),
+                    radius_mm,
+                    -PI,
+                ),
+            ],
+            vec![
+                PrimitiveRole::Inbound { winding: 0 },
+                PrimitiveRole::InnerTurn,
+                PrimitiveRole::Outbound { winding: 0 },
+            ],
+        )
+    };
+
+    candidate_from_parts(
+        primitives,
+        roles,
+        vec![],
+        connection,
+        vec![4, 2, split_arcs as u32],
+    )
+}
+
+fn triangular_boundary_path() -> CandidatePath {
+    let (_context, connection) = context_and_connection();
+    candidate_from_parts(
+        vec![
+            line((0.0, 0.0), (100.0, 0.0)),
+            arc((100.0, 0.0), (100.0, 160.0), (100.0, 80.0), 80.0, PI),
+            line((100.0, 160.0), (0.0, 160.0)),
+            arc((0.0, 160.0), (0.0, 320.0), (0.0, 240.0), 80.0, -PI),
+            line((0.0, 320.0), (100.0, 320.0)),
+        ],
+        vec![
+            PrimitiveRole::StartLead,
+            PrimitiveRole::Inbound { winding: 0 },
+            PrimitiveRole::InnerTurn,
+            PrimitiveRole::Outbound { winding: 0 },
+            PrimitiveRole::EndLead,
+        ],
+        vec![],
+        connection,
+        vec![2, 7, 1, 8],
+    )
+}
+
+#[test]
+fn nonlocal_result_is_invariant_under_line_subdivision() {
+    let whole = parallel_return_path(false);
+    let split = parallel_return_path(true);
+    let a = minimum_nonlocal_distance(&whole, LOCAL_ARC_LENGTH_MM).unwrap();
+    let b = minimum_nonlocal_distance(&split, LOCAL_ARC_LENGTH_MM).unwrap();
+    assert_abs_diff_eq!(a.distance_mm, 160.0, epsilon = 1e-9);
+    assert_abs_diff_eq!(b.distance_mm, 160.0, epsilon = 1e-9);
+    assert_abs_diff_eq!(a.distance_mm, b.distance_mm, epsilon = 1e-9);
+}
+
+#[test]
+fn triangular_boundary_minimum_is_not_replaced_by_nearby_samples() {
+    let candidate = triangular_boundary_path();
+    let constrained_horizontal_gap_mm = 12.345_678_9;
+    let local_arc_length_mm = 200.0 + 160.0 * PI + constrained_horizontal_gap_mm;
+
+    let result = minimum_nonlocal_distance(&candidate, local_arc_length_mm).unwrap();
+
+    assert_abs_diff_eq!(
+        result.distance_mm,
+        320.0_f64.hypot(constrained_horizontal_gap_mm),
+        epsilon = 1e-12
+    );
+    assert_abs_diff_eq!(
+        result.second_path_offset_mm - result.first_path_offset_mm,
+        local_arc_length_mm,
+        epsilon = 1e-12
+    );
+}
+
+#[test]
+fn near_fifty_arc_boundary_minimum_is_invariant_under_arc_subdivision() {
+    let whole = near_threshold_arc_path(false);
+    let split = near_threshold_arc_path(true);
+    let local_arc_length_mm = 12.5 * PI + (49.999_999_f64.powi(2) - 25.0_f64.powi(2)).sqrt();
+
+    let whole_result = minimum_nonlocal_distance(&whole, local_arc_length_mm).unwrap();
+    let split_result = minimum_nonlocal_distance(&split, local_arc_length_mm).unwrap();
+
+    assert_abs_diff_eq!(whole_result.distance_mm, 49.999_999, epsilon = 1e-9);
+    assert_abs_diff_eq!(split_result.distance_mm, 49.999_999, epsilon = 1e-9);
+    assert_abs_diff_eq!(
+        whole_result.distance_mm,
+        split_result.distance_mm,
+        epsilon = 1e-9
+    );
+    assert!(whole_result.distance_mm < 50.0);
+}
+
+#[test]
+fn mandated_ports_certify_exactly_fifty_mm() {
+    let (context, _connection) = context_and_connection();
+    let report = validate_hard_constraints(&valid_port_pair_candidate(), &context).unwrap();
+    assert_eq!(report.min_nonlocal_spacing.lower_bound_mm, 50.0);
+}

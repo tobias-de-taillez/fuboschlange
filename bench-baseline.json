@@ -1,0 +1,23 @@
+{
+ "runs": 20,
+ "crossFails": 12,
+ "covFails": 7,
+ "radFails": 17,
+ "outFails": 0,
+ "loopsOutside": 0,
+ "worstLoopsOutside": 0,
+ "segsOutside": 0,
+ "errFails": 0,
+ "worstCoverage": 26,
+ "worstRadius": 0,
+ "worstGap": 1568,
+ "worstCross": 51,
+ "medianCross": 2,
+ "medianGap": 816,
+ "medianCoverage": 41,
+ "medianRadius": 50,
+ "crossFailRate": 0.6,
+ "covFailRate": 0.35,
+ "radFailRate": 0.85,
+ "outFailRate": 0
+}

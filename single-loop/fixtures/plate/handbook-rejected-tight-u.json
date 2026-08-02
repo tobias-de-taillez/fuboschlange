@@ -1,0 +1,21 @@
+{
+  "source": "Schlüter-BEKOTEC-THERM technisches Handbuch 2025/2026, Seite 39, Verlegediagramm: enge 180-Grad-Kehre um eine einzelne Noppenreihe ist unzulässig (Radius 37,5 mm unter dem Mindestbiegeradius 5 x 16 mm = 80 mm, Seite 119 BEKOTEC-THERM-HR).",
+  "expectedClassification": "REJECTED",
+  "expectedRejectionCode": "BEND_RADIUS_TOO_SMALL",
+  "profileVersion": "2026.07.31-1",
+  "template": {
+    "id": "HANDBOOK_REJECTED_TIGHT_U",
+    "start": { "point": { "x": -37.5, "y": 0.0 }, "heading": "DEG270" },
+    "end": { "point": { "x": 37.5, "y": 0.0 }, "heading": "DEG90" },
+    "primitives": [
+      {
+        "kind": "arc",
+        "start": { "x": -37.5, "y": 0.0 },
+        "end": { "x": 37.5, "y": 0.0 },
+        "center": { "x": 0.0, "y": 0.0 },
+        "radiusMm": 37.5,
+        "sweepRad": 3.141592653589793
+      }
+    ]
+  }
+}

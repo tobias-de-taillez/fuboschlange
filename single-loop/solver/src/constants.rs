@@ -1,0 +1,13 @@
+pub const PIPE_DIAMETER_MM: f64 = 16.0;
+pub const MIN_RADIUS_MM: f64 = 80.0;
+pub const MIN_NONLOCAL_SPACING_MM: f64 = 50.0;
+pub const MIN_WALL_CLEARANCE_MM: f64 = 8.0;
+pub const MAX_LENGTH_MM: f64 = 100_000.0;
+pub const LOCAL_ARC_LENGTH_MM: f64 = std::f64::consts::PI * MIN_RADIUS_MM;
+pub const TOPOLOGY_QUANTIZATION_MM: f64 = 0.001;
+pub const GENERATION_MARGIN_MM: f64 = 0.01;
+pub const COVERAGE_ERROR_MM: f64 = 0.1;
+pub const MAX_CANDIDATE_VALIDATIONS: usize = 20_000;
+pub const MAX_COVERAGE_CELLS: usize = 2_000_000;
+pub const MAX_SPACING_CELLS: usize = 2_000_000;
+pub const MAX_POSE_EXPANSIONS: usize = 5_000_000;

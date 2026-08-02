@@ -1,0 +1,2 @@
+import{expect,it}from"vitest";import{createEditorState,moveVertex,selectEdge,toInput}from"../../src/ui/state";
+it("edits polygon immutably and maps solve input",()=>{const state=createEditorState();const moved=moveVertex(state,0,{x:10,y:20});expect(state.polygon[0]).not.toEqual(moved.polygon[0]);const selected=selectEdge(moved,2);expect(toInput(selected).connection.edgeIndex).toBe(2);expect(toInput(selected).polygon[0]).toEqual({x:10,y:20})});

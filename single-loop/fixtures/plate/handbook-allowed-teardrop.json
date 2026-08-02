@@ -1,0 +1,80 @@
+{
+  "source": "Schlüter-BEKOTEC-THERM technisches Handbuch 2025/2026, Seite 39, Verlegediagramm: breite tropfenförmige 180-Grad-Kehre ist zulässig; hier als zertifizierte Katalogkehre über einen Kanalabstand von 150 mm aus zwei ko-radialen 80-mm-Bögen mit Ein- und Auslaufgerade auf dem Ankerraster.",
+  "expectedClassification": "ACCEPTED",
+  "profileVersion": "2026.07.31-1",
+  "template": {
+    "id": "TEARDROP_REVERSE",
+    "start": {
+      "point": {
+        "x": 0.0,
+        "y": 112.5
+      },
+      "heading": "DEG0"
+    },
+    "end": {
+      "point": {
+        "x": 0.0,
+        "y": 262.5
+      },
+      "heading": "DEG180"
+    },
+    "primitives": [
+      {
+        "kind": "line",
+        "start": {
+          "x": 0.0,
+          "y": 112.5
+        },
+        "end": {
+          "x": 56.822356371699776,
+          "y": 112.5
+        }
+      },
+      {
+        "kind": "arc",
+        "start": {
+          "x": 56.822356371699776,
+          "y": 112.5
+        },
+        "end": {
+          "x": 84.66117818584988,
+          "y": 107.5
+        },
+        "center": {
+          "x": 56.822356371699776,
+          "y": 32.5
+        },
+        "radiusMm": 80.0,
+        "sweepRad": -0.3554212016902235
+      },
+      {
+        "kind": "arc",
+        "start": {
+          "x": 84.66117818584988,
+          "y": 107.5
+        },
+        "end": {
+          "x": 112.50000000000001,
+          "y": 262.5
+        },
+        "center": {
+          "x": 112.49999999999999,
+          "y": 182.5
+        },
+        "radiusMm": 80.0,
+        "sweepRad": 3.4970138552800165
+      },
+      {
+        "kind": "line",
+        "start": {
+          "x": 112.50000000000001,
+          "y": 262.5
+        },
+        "end": {
+          "x": 0.0,
+          "y": 262.5
+        }
+      }
+    ]
+  }
+}

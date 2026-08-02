@@ -1,0 +1,63 @@
+{
+  "source": "Schlüter-BEKOTEC-THERM technisches Handbuch 2025/2026, Seite 39, Abschnitt \"Verlegung des Heizrohrs\": breite 90-Grad-Umlenkung über mehrere Noppenreihen ist zulässig; hier als zertifizierte Katalogumlenkung Gerade + 80-mm-Viertelbogen + Gerade, deren Endposen exakt auf dem Ankerraster der Geradenketten liegen.",
+  "expectedClassification": "ACCEPTED",
+  "profileVersion": "2026.07.31-1",
+  "template": {
+    "id": "BROAD_TURN90",
+    "start": {
+      "point": {
+        "x": 0.0,
+        "y": 37.5
+      },
+      "heading": "DEG0"
+    },
+    "end": {
+      "point": {
+        "x": 187.5,
+        "y": 150.0
+      },
+      "heading": "DEG90"
+    },
+    "primitives": [
+      {
+        "kind": "line",
+        "start": {
+          "x": 0.0,
+          "y": 37.5
+        },
+        "end": {
+          "x": 107.5,
+          "y": 37.5
+        }
+      },
+      {
+        "kind": "arc",
+        "start": {
+          "x": 107.5,
+          "y": 37.5
+        },
+        "end": {
+          "x": 187.5,
+          "y": 117.5
+        },
+        "center": {
+          "x": 107.5,
+          "y": 117.5
+        },
+        "radiusMm": 80.0,
+        "sweepRad": 1.5707963267948966
+      },
+      {
+        "kind": "line",
+        "start": {
+          "x": 187.5,
+          "y": 117.5
+        },
+        "end": {
+          "x": 187.5,
+          "y": 150.0
+        }
+      }
+    ]
+  }
+}
