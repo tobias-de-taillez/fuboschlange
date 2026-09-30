@@ -83,8 +83,10 @@
   /* bottom:56px statt 30: der Hinweistext darunter wird auf schmalen
      Screens zweizeilig (~40px hoch) und wurde sonst ueberdeckt. */
   #ring{position:absolute;right:8px;bottom:56px;z-index:4}
-  /* Erscheint nur, wenn der geschlossene Zug sich tatsaechlich kreuzt. */
-  #untangle{position:absolute;right:8px;bottom:104px;z-index:4;
+  /* Erscheint nur, wenn der geschlossene Zug sich tatsaechlich kreuzt - und
+     damit nie gleichzeitig mit #ring, der den OFFENEN Zug schliesst. Beide
+     duerfen deshalb auf demselben Platz sitzen. */
+  #untangle{position:absolute;right:8px;bottom:56px;z-index:4;
     color:var(--bad);border-color:#e2c4be;display:none}
   #empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
     pointer-events:none;padding:24px;text-align:left}
@@ -101,7 +103,11 @@
   #entryVal{font:inherit;font-size:18px;font-variant-numeric:tabular-nums;width:110px;text-align:right;
     padding:8px;border:1px solid var(--line);border-radius:6px;min-width:0}
   #entryVal.bad{border-color:var(--bad);background:var(--bad-bg)}
-  #entry .unit{color:var(--muted)}
+  /* Die Einheit ist kein Etikett mehr, sondern der Umschalter. Sie sieht
+     weiter wie ein Etikett aus - der Titel und der Zeiger verraten den Rest. */
+  .unit{color:var(--muted);background:none;border:0;border-bottom:1px dotted var(--muted);
+    padding:0 1px;font:inherit;cursor:pointer;min-width:2.2em;text-align:left}
+  .unit:active{color:var(--ink)}
   #entryOk{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600;min-width:64px}
   #entryX{min-width:44px}
   @media(max-width:879px){
@@ -301,6 +307,21 @@
   #tip[hidden]{display:none}
   .rowbtn{min-height:28px;padding:0 8px;font-size:12px}
   #why{color:var(--muted);font-size:12.5px;margin-top:6px}
+  /* Fliesen-Modus: der Abschnitt ersetzt die Mess-Abschnitte im Panel. */
+  body.tilesmode #panel > section:not(#tilesec){display:none}
+  #tilesec h4{margin:12px 0 6px;font-size:12.5px;color:var(--muted);font-weight:600}
+  .tgrid{display:grid;grid-template-columns:1fr 1fr;gap:6px 10px}
+  .tgrid label{display:flex;align-items:center;gap:4px;font-size:12.5px;color:var(--muted)}
+  .tgrid input{width:4.5em;font:inherit;padding:4px 6px;border:1px solid var(--line);border-radius:6px;text-align:right}
+  .trow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:4px 0}
+  .trow input{width:3.5em;font:inherit;padding:3px 5px;border:1px solid var(--line);border-radius:6px;text-align:right}
+  .tpal{touch-action:none;cursor:grab;font-weight:600}
+  #tilesec button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+  .tnote{font-size:12px;color:var(--muted);margin-top:4px}
+  .ttab{border-collapse:collapse;font-size:12.5px;margin:4px 0;font-variant-numeric:tabular-nums}
+  .ttab td,.ttab th{padding:2px 8px;text-align:right}
+  .ttab td:first-child{text-align:left}
+  .twarn{color:var(--bad);font-size:12.5px}
 </style>
 
 <div id="app">
@@ -310,12 +331,16 @@
         <button data-mode="draw" aria-pressed="true">Zeichnen</button>
         <button data-mode="measure" aria-pressed="false">Messen</button>
         <button data-mode="wall" aria-pressed="false" title="Erst verfügbar, wenn die Form des Grundrisses eindeutig ist">Wände</button>
+        <button data-mode="tiles" aria-pressed="false" title="Fliesen verlegen — erst verfügbar, wenn der Grundriss geschlossen und eingemessen ist">Fliesen</button>
       </div>
       <div id="ribbon">
         <button id="lib" title="Meine Räume"><svg viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg><span>Räume</span></button>
         <button id="undo" title="Rückgängig (Strg+Z)"><svg viewBox="0 0 24 24"><path d="M8 5 4 9l4 4"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg><span>Rückgängig</span></button>
-        <button id="unfold" title="Wandansichten im Grundriss aufklappen"><svg viewBox="0 0 24 24"><path d="M4 20h16"/><path d="M7 20V9l5-4 5 4v11"/></svg><span>Aufklappen</span></button>
+        <button id="unfold" title="Wandansichten aufklappen — blendet die Nachbarräume aus"><svg viewBox="0 0 24 24"><path d="M4 20h16"/><path d="M7 20V9l5-4 5 4v11"/></svg><span>Aufklappen</span></button>
         <button id="fitview" title="Ansicht einpassen"><svg viewBox="0 0 24 24"><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5"/></svg><span>Einpassen</span></button>
+        <button id="rotate" title="Ansicht um 15° drehen — mit Umschalt zurück"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.7"/><path d="M20 4v4h-4"/></svg><span>Drehen</span></button>
+        <button id="mirror" title="Raum spiegeln — kein Maß kann einen Raum von seinem Spiegelbild unterscheiden"><svg viewBox="0 0 24 24"><path d="M12 3v18"/><path d="M9 7 4 12l5 5z"/><path d="M15 7l5 5-5 5z"/></svg><span>Spiegeln</span></button>
+        <button id="snapfit" title="Skizze den Messungen folgen lassen"><svg viewBox="0 0 24 24"><path d="M4 18 9 8l4 6 3-4 4 8z"/><path d="M3 21h18"/></svg><span>Ausrichten</span></button>
         <i class="sep"></i>
         <button id="filesave" title="Raum als Datei sichern"><svg viewBox="0 0 24 24"><path d="M12 4v10m0 0 4-4m-4 4-4-4"/><path d="M4 17v3h16v-3"/></svg><span>Sichern</span></button>
         <button id="fileopen" title="Datei als neuen Raum öffnen"><svg viewBox="0 0 24 24"><path d="M12 14V4m0 0 4 4m-4-4-4 4"/><path d="M4 17v3h16v-3"/></svg><span>Öffnen</span></button>
@@ -358,7 +383,7 @@
         <div id="entryLabel"></div>
         <div id="entryRow">
           <input id="entryVal" inputmode="decimal" autocomplete="off" enterkeyhint="done">
-          <span class="unit">m</span>
+          <button class="unit" title="Einheit umschalten: m → cm → mm">m</button>
           <button id="entryOk">OK</button>
           <button id="entryX" aria-label="Abbrechen">✕</button>
         </div>
@@ -422,7 +447,7 @@
         <table id="wpopTbl"><tbody></tbody></table>
         <div id="wpopAdd">
           <input id="wpopVal" inputmode="decimal" autocomplete="off" enterkeyhint="done" placeholder="Maß">
-          <span class="unit">m</span>
+          <button class="unit" title="Einheit umschalten: m → cm → mm">m</button>
           <button id="wpopOk">+ Wert</button>
           <button id="wpopNorth" title="Diese Wand parallel zur oberen Bildschirmkante drehen">Einnorden</button>
         </div>
@@ -439,6 +464,49 @@
     <div id="status" class="warn"><div id="roomname" title="Antippen: Raum umbenennen">—</div><div id="statustxt">—</div><div id="geo"></div></div>
     <div id="wallwarn"></div>
     <div id="nbwarn"></div>
+    <section id="tilesec" hidden>
+      <h3>Fliesen · Chevron</h3>
+      <div class="tgrid">
+        <label>Breite <input id="tW" inputmode="decimal"> mm</label>
+        <label>Länge <input id="tL" inputmode="decimal"> mm</label>
+        <label>Winkel <input id="tA" inputmode="decimal"> °</label>
+        <label>Fuge <input id="tJ" inputmode="decimal"> mm</label>
+        <label>Randfuge <input id="tE" inputmode="decimal"> mm</label>
+      </div>
+      <h4>Legen</h4>
+      <div class="trow">
+        <button id="tAddL" class="tpal" title="Tippen: in die Bildmitte · Ziehen: auf den Plan">L-Fliese</button>
+        <button id="tAddR" class="tpal" title="Tippen: in die Bildmitte · Ziehen: auf den Plan">R-Fliese</button>
+        <button id="tPair" title="L und R als fertiges Chevron-Paar">Chevron-Paar</button>
+      </div>
+      <div class="trow">
+        <button id="tDup" title="Strg/⌘+D">Duplizieren</button>
+        <button id="tExt" title="Letzten Duplizier-Versatz bis zur Wand fortsetzen">Weiterstrecken</button>
+      </div>
+      <div class="trow">
+        <button id="tRotL" title="Q (Umschalt: 1°)">⟲ 15°</button>
+        <button id="tRotR" title="E (Umschalt: 1°)">⟳ 15°</button>
+        <button id="tFlip" title="F — L und R tauschen">Spiegeln</button>
+        <button id="tDel" title="Entf">Löschen</button>
+      </div>
+      <div class="trow">
+        <button id="tAll" title="Strg/⌘+A">Alle wählen</button>
+        <button id="tClear">Alle Fliesen entfernen</button>
+      </div>
+      <div id="tSelInfo" class="tnote"></div>
+      <h4>Dehnungsfugen</h4>
+      <div class="tgrid"><label>Breite neuer Fugen <input id="tXW" inputmode="decimal"> mm</label></div>
+      <div class="trow">
+        <button id="tJC" aria-pressed="false">Ecke → Ecke</button>
+        <button id="tJF" aria-pressed="false">Wand → Wand (frei)</button>
+      </div>
+      <div id="tJList"></div>
+      <h4>Stückliste</h4>
+      <div id="tStats"></div>
+      <label class="tnote"><input type="checkbox" id="tNums" checked> Schnittnummern im Plan zeigen</label>
+      <h4>Drucken</h4>
+      <div class="trow"><button id="tPrint">Plan + Schnittblätter (A4 / PDF)</button></div>
+    </section>
     <section id="nextsec">
       <h3>Als Nächstes messen</h3>
       <div id="sugg">—</div>
@@ -3147,36 +3215,38 @@ function pointInPoly(p, poly){
   return inside;
 }
 
-// Messbar heisst: die Strecke bleibt im Raum. Abtasten statt Kantenschnitte -
-// faengt auch den Fall ab, dass die Strecke genau durch eine einspringende Ecke
-// laeuft. ponytail: bei drei kollinearen Ecken liegen die Abtastpunkte auf dem
-// Rand und das Ergebnis ist willkuerlich - ein solcher Raum ist entartet.
-function segInPoly(p, q, poly, steps=32){
-  for(let i=1;i<steps;i++){
-    const t=i/steps;
-    if(!pointInPoly({x:p.x+(q.x-p.x)*t, y:p.y+(q.y-p.y)*t}, poly)) return false;
-  }
-  return true;
-}
-
 const pairKey=(a,b)=>[a,b].sort().join('|');
 
-// Messbarkeit eines Punktpaars fuer die Vorschlagsliste. Eine Wand ist per
-// Definition messbar - man steht in einer Ecke und misst geradeaus zur
-// naechsten. segInPoly darf dafuer gar nicht erst gefragt werden: die Wand
-// LIEGT auf dem Polygonrand, und genau dort ist pointInPolys Paritaetstest
-// undefiniert - Abtastpunkte auf dem Rand fallen je nach Rundung zufaellig
-// rein oder raus (siehe Kommentar an segInPoly; am Test-L etwa segInPoly(A,B)
-// true, segInPoly(B,C) false, obwohl beides Waende sind). Fuer echte
-// Diagonalen bleibt segInPoly die richtige, einzige Pruefung - dort
-// funktioniert sie, und genau dort muss z.B. die Diagonale C-F im Test-L
-// weiterhin ausgeschlossen bleiben, weil sie den einspringenden Bereich quert.
+// Messbarkeit eines Punktpaars fuer die Vorschlagsliste: die beiden Ecken
+// muessen einander SEHEN. Zwei Fragen, in dieser Reihenfolge:
+//
+// 1. Steht eine Wand im Weg? Exakter Segmentschnitt (wallCrossesExisting),
+//    kein Abtasten. Die alte Fassung tastete die Strecke mit 32 Stuetzpunkten
+//    ab und liess dadurch Strecken durch, die eine Wand nur knapp schneiden -
+//    browser-gesehen im Raum vom 23.8.2026 schlug sie A-F vor, obwohl das
+//    Wand L-J quert; erst bei 200 Stuetzpunkten faellt es auf. Der Schnitt
+//    braucht kein Polygon und gilt deshalb auch, solange der Zug noch offen
+//    oder gekreuzt ist - genau dort, wo der Filter frueher ganz aussetzte.
+// 2. Liegt die Strecke ueberhaupt drinnen? Kreuzungsfrei heisst noch nicht
+//    innen: im L-Raum laeuft die Strecke zwischen den beiden Schenkelenden
+//    komplett AUSSEN um die einspringende Ecke herum, ohne eine Wand zu
+//    schneiden. Weil Frage 1 den Rand ausschliesst, entscheidet ein einziger
+//    Punkt fuer die ganze Strecke.
+//
+// Eine Wand ist per Definition messbar - man steht in einer Ecke und misst
+// geradeaus zur naechsten. Sie LIEGT auf dem Rand, und dort ist pointInPolys
+// Paritaetstest undefiniert; deshalb wird sie vorweg beantwortet.
+// ponytail: laeuft die Strecke exakt durch eine Ecke, ist der Schnitttest
+// blind und der Mittelpunkt entscheidet allein - ein solcher Raum ist entartet.
 function pairMeasurable(pts, walls, poly, a, b){
   const k=pairKey(a,b);
   if(walls.some(([x,y])=>pairKey(x,y)===k)) return true;
+  if(wallCrossesExisting(pts, walls, a, b)) return false;
   if(!poly) return true;
   const I=idx(pts);
-  return segInPoly(pts[I[a]], pts[I[b]], poly);
+  if(I[a]==null||I[b]==null) return true;
+  const p=pts[I[a]], q=pts[I[b]];
+  return pointInPoly({x:(p.x+q.x)/2, y:(p.y+q.y)/2}, poly);
 }
 
 // Zwei Phasen in einem Durchlauf. Solange Messungen fehlen: die Messung
@@ -3260,8 +3330,474 @@ globalThis.CORE={ TOL_RANK, TOL_RED, TOL_MODE, SIGMA_DEF, SUGGEST_CHECK_MAX,
                   dist, idx, activeMeas, residuals, jacobian, luSolve, matTmat, matTvec,
                   gramSchmidt, nullSpace, leverage, gaugeFixed, freeCols, scaleSketch, solve, analyze,
                   trivialModes, covariance, ellipse, segCross, ringSelfIntersects, wallCrossesExisting,
-                  wallPolygonRing, wallPolygon, pointInPoly, segInPoly,
+                  wallPolygonRing, wallPolygon, pointInPoly,
                   pairMeasurable, suggest, dragAlongModes };
+</script>
+
+<script id="tiles">
+"use strict";
+// ================= Fliesen: Geometrie =================
+// Reine Geometrie ohne DOM - laeuft in test/run.mjs genauso wie im Browser.
+//
+// Alle Fliesenlagen leben im RAUMRAHMEN: Ursprung in der ersten Ecke der
+// ersten Wand, x-Achse entlang dieser Wand (ausgeglichene Form). Der Solver
+// darf den Grundriss bei jeder neuen Messung frei verschieben und drehen -
+// Weltkoordinaten waeren danach verrutscht, Rahmenkoordinaten nicht.
+//
+// Eine Chevron-Fliese ist ein Parallelogramm: zwei lange Kanten der Laenge l
+// im Abstand w, die kurzen Kanten stehen unter dem Winkel angle (Grad) zur
+// langen. 'L' und 'R' sind Spiegelbilder - ein Chevron braucht beide.
+(()=>{
+const D2R=Math.PI/180;
+const TILE_DEF={w:150, l:850, angle:45, joint:2, edgeGap:0, expWidth:8};
+
+const rotP=(p,c,s)=>({x:p.x*c-p.y*s, y:p.x*s+p.y*c});
+const sub=(a,b)=>({x:a.x-b.x, y:a.y-b.y});
+const dot=(a,b)=>a.x*b.x+a.y*b.y;
+const crs=(a,b)=>a.x*b.y-a.y*b.x;
+const len=a=>Math.hypot(a.x,a.y);
+const unit=a=>{ const L=len(a)||1; return {x:a.x/L, y:a.y/L}; };
+const normDeg=a=>{ a%=360; return a<0?a+360:a; };
+
+// Ecken im Fliesenrahmen, gegen den Uhrzeigersinn (y nach oben gedacht):
+// p0-p1 lange Unterkante, p1-p2 kurze Schraegkante, p2-p3 lange Oberkante.
+function tileShape(spec, kind){
+  const w=spec.w, l=spec.l, k=w/Math.tan(spec.angle*D2R);
+  return kind==='R'
+    ? [{x:0,y:0},{x:l,y:0},{x:l-k,y:w},{x:-k,y:w}]
+    : [{x:0,y:0},{x:l,y:0},{x:l+k,y:w},{x:k,y:w}];
+}
+function tileCorners(spec, it){
+  const c=Math.cos(it.rot*D2R), s=Math.sin(it.rot*D2R);
+  return tileShape(spec, it.kind).map(p=>{ const r=rotP(p,c,s); return {x:r.x+it.x, y:r.y+it.y}; });
+}
+// Rahmen -> Fliesenrahmen (Umkehrung von tileCorners)
+function toTile(it, p){
+  const c=Math.cos(-it.rot*D2R), s=Math.sin(-it.rot*D2R);
+  return rotP(sub(p,it), c, s);
+}
+function polyArea(P){
+  let a=0;
+  for(let i=0,j=P.length-1;i<P.length;j=i++) a+=P[j].x*P[i].y-P[i].x*P[j].y;
+  return a/2;
+}
+// Kanten mit Aussennormale. Die Normale haengt vom Umlaufsinn ab - einmal
+// ueber die Flaeche bestimmt, dann stimmt sie fuer jedes Polygon.
+function edgesOf(P){
+  const ccw=polyArea(P)>0, out=[];
+  for(let i=0;i<P.length;i++){
+    const a=P[i], b=P[(i+1)%P.length], d=unit(sub(b,a));
+    out.push({a, b, d, n: ccw ? {x:d.y, y:-d.x} : {x:-d.y, y:d.x}});
+  }
+  return out;
+}
+
+// Raumrahmen aus Punkten und erster Wand. null, solange es keine Wand gibt.
+function frameOf(pts, walls){
+  if(!walls || !walls.length) return null;
+  const A=pts.find(p=>p.id===walls[0][0]), B=pts.find(p=>p.id===walls[0][1]);
+  if(!A||!B) return null;
+  const u=unit(sub(B,A));
+  return {o:{x:A.x,y:A.y}, u, v:{x:-u.y, y:u.x}};
+}
+const toLocal=(F,p)=>{ const q=sub(p,F.o); return {x:dot(q,F.u), y:dot(q,F.v)}; };
+const toWorldF=(F,p)=>({x:F.o.x+F.u.x*p.x+F.v.x*p.y, y:F.o.y+F.u.y*p.x+F.v.y*p.y});
+
+// Sutherland-Hodgman: beliebiges (auch konkaves) Subjekt gegen ein KONVEXES
+// Clip-Polygon. Die Fliese ist immer konvex, der Raum nicht - also wird der
+// Raum an der Fliese beschnitten, nie umgekehrt. Bei konkaven Subjekten
+// entstehen evtl. Nullbreiten-Stege, die Flaeche stimmt trotzdem.
+function clipConvex(subject, clip){
+  const ccw=polyArea(clip)>0;
+  let out=subject;
+  for(let i=0;i<clip.length && out.length;i++){
+    const a=clip[i], b=clip[(i+1)%clip.length], e=sub(b,a);
+    const n=ccw ? {x:-e.y, y:e.x} : {x:e.y, y:-e.x};   // zeigt nach innen
+    out=clipHalf(out, a, n);
+  }
+  return dedupe(out);
+}
+// Halbebene dot(p-a, n) >= 0 behalten.
+function clipHalf(poly, a, n){
+  const out=[], side=p=>dot(sub(p,a),n);
+  for(let j=0;j<poly.length;j++){
+    const P=poly[j], Q=poly[(j+1)%poly.length], sp=side(P), sq=side(Q);
+    if(sp>=-1e-9) out.push(P);
+    if((sp>=-1e-9)!==(sq>=-1e-9)){
+      const t=sp/(sp-sq);
+      out.push({x:P.x+(Q.x-P.x)*t, y:P.y+(Q.y-P.y)*t});
+    }
+  }
+  return out;
+}
+function dedupe(P){
+  const out=[];
+  P.forEach(p=>{ const q=out[out.length-1]; if(!q || len(sub(p,q))>1e-6) out.push(p); });
+  if(out.length>1 && len(sub(out[0],out[out.length-1]))<=1e-6) out.pop();
+  return out;
+}
+// Trennende Achse fuer zwei konvexe Polygone. Beruehrung (Fuge 0) zaehlt
+// nicht als Ueberlappung - dafuer die kleine Toleranz.
+function convexOverlap(A, B, tol=0.5){
+  for(const P of [A,B]) for(const e of edgesOf(P)){
+    let aMin=Infinity,aMax=-Infinity,bMin=Infinity,bMax=-Infinity;
+    for(const p of A){ const t=dot(p,e.n); aMin=Math.min(aMin,t); aMax=Math.max(aMax,t); }
+    for(const p of B){ const t=dot(p,e.n); bMin=Math.min(bMin,t); bMax=Math.max(bMax,t); }
+    if(aMax<=bMin+tol || bMax<=aMin+tol) return false;
+  }
+  return true;
+}
+
+// Dehnungsfuge als Streifen (konvexes Viereck) der Breite width um a-b.
+function jointStrip(j){
+  const d=unit(sub(j.b,j.a)), h=j.width/2, n={x:-d.y*h, y:d.x*h};
+  return [{x:j.a.x+n.x,y:j.a.y+n.y},{x:j.b.x+n.x,y:j.b.y+n.y},
+          {x:j.b.x-n.x,y:j.b.y-n.y},{x:j.a.x-n.x,y:j.a.y-n.y}];
+}
+
+// Snap-Ziele: Strecken mit einer Normalen, die in den Bereich zeigt, in dem
+// die Fliese liegen darf, und dem Abstand, den sie dort halten muss.
+//  - andere Fliesen: Aussennormale, Abstand = Fuge
+//  - Waende: Normale ins Rauminnere, Abstand = Randfuge
+//  - Dehnungsfugen: beide Streifenkanten nach aussen, Abstand = 0 (die Fuge
+//    selbst IST der Abstand)
+function snapTargets(spec, others, ring, joints){
+  const T=[];
+  others.forEach(P=>edgesOf(P).forEach(e=>T.push({a:e.a,b:e.b,d:e.d,n:e.n,gap:spec.joint,kind:'tile'})));
+  if(ring && ring.length>=3){
+    // edgesOf liefert die AUSSENnormale des Raums - die Fliese liegt innen.
+    edgesOf(ring).forEach(e=>T.push({a:e.a,b:e.b,d:e.d,n:{x:-e.n.x,y:-e.n.y},gap:spec.edgeGap,kind:'wall'}));
+  }
+  (joints||[]).forEach(j=>edgesOf(jointStrip(j)).forEach((e,i)=>{
+    if(i%2===0) T.push({a:e.a,b:e.b,d:e.d,n:e.n,gap:0,kind:'joint'});
+  }));
+  return T;
+}
+
+// Starre Bewegung {dth (Grad), px, py (Drehpunkt), dx, dy} auf Punkte/Lagen.
+function movePt(p, m){
+  const c=Math.cos(m.dth*D2R), s=Math.sin(m.dth*D2R);
+  const r=rotP(sub(p,{x:m.px,y:m.py}),c,s);
+  return {x:r.x+m.px+m.dx, y:r.y+m.py+m.dy};
+}
+function moveItem(it, m){
+  const p=movePt(it,m);
+  return {...it, x:p.x, y:p.y, rot:normDeg(it.rot+m.dth)};
+}
+
+// Kern des Einrastens. polys: die bewegten Fliesen (bereits an der
+// Zielstelle, ohne Snap). Sucht eine Kante, die einem Ziel fast
+// gegenueberliegt (Normalen antiparallel innerhalb tolDeg, Abstand zur
+// Soll-Lage innerhalb tolMm, Strecken ueberlappen laengs). Dreht exakt
+// parallel und schiebt auf den Sollabstand. Danach ein zweiter, laengs
+// wirkender Snap: entweder eine andere, nicht parallele Kante an ein zweites
+// Ziel (Raumecke, Fliese quer) oder Ecke-auf-Ecke entlang der ersten Kante.
+function snapGroup(polys, targets, tolMm, tolDeg=8){
+  const E=[]; polys.forEach(P=>edgesOf(P).forEach(e=>E.push(e)));
+  let best=null;
+  for(const e of E) for(const t of targets){
+    const want={x:-t.n.x, y:-t.n.y};
+    if(dot(e.n,want)<Math.cos(tolDeg*D2R)) continue;
+    const dth=Math.atan2(crs(e.n,want), dot(e.n,want))/D2R;
+    const mid={x:(e.a.x+e.b.x)/2, y:(e.a.y+e.b.y)/2};
+    const m0={dth, px:mid.x, py:mid.y, dx:0, dy:0};
+    const a=movePt(e.a,m0), b=movePt(e.b,m0);
+    const off=t.gap-dot(sub(a,t.a),t.n);
+    if(Math.abs(off)>tolMm) continue;
+    const ta1=dot(sub(t.b,t.a),t.d);
+    const s0=dot(sub(a,t.a),t.d), s1=dot(sub(b,t.a),t.d);
+    const lo=Math.max(Math.min(s0,s1),Math.min(0,ta1)), hi=Math.min(Math.max(s0,s1),Math.max(0,ta1));
+    if(hi-lo<=Math.min(tolMm*0.5, 5)) continue;
+    const cost=Math.abs(off)+Math.abs(dth)*20;
+    if(!best || cost<best.cost) best={cost, e, t, m:{...m0, dx:t.n.x*off, dy:t.n.y*off}};
+  }
+  if(!best) return null;
+  const m=best.m, t=best.t, lines=[t];
+  // Zweiter Snap laengs t.d.
+  let slide=null;
+  const moved=polys.map(P=>P.map(p=>movePt(p,m)));
+  const E2=[]; moved.forEach(P=>edgesOf(P).forEach(e=>E2.push(e)));
+  for(const e of E2) for(const t2 of targets){
+    if(t2===t) continue;
+    if(-dot(e.n,t2.n)<Math.cos(1*D2R)) continue;       // nur schon parallele
+    const along=dot(t.d,t2.n);
+    if(Math.abs(along)<0.2) continue;                   // parallel zu t: schiebt nicht
+    const s=(t2.gap-dot(sub(e.a,t2.a),t2.n))/along;
+    if(Math.abs(s)>tolMm) continue;
+    const ta1=dot(sub(t2.b,t2.a),t2.d);
+    const ea={x:e.a.x+t.d.x*s,y:e.a.y+t.d.y*s}, eb={x:e.b.x+t.d.x*s,y:e.b.y+t.d.y*s};
+    const s0=dot(sub(ea,t2.a),t2.d), s1=dot(sub(eb,t2.a),t2.d);
+    const lo=Math.max(Math.min(s0,s1),Math.min(0,ta1)), hi=Math.min(Math.max(s0,s1),Math.max(0,ta1));
+    if(hi-lo<=0) continue;
+    if(!slide || Math.abs(s)<Math.abs(slide.s)) slide={s, t2};
+  }
+  if(!slide){
+    // Ecke-auf-Ecke: NUR die Enden der eingerasteten Kante auf die Enden des
+    // Ziels. Nimmt man jede Ecke der Gruppe, faengt in einer Chevron-Spalte
+    // die Ecke der Nachbarreihe - die liegt nur eine Fuge daneben, und die
+    // Spalten stuenden um genau diese Fuge versetzt.
+    const corners=[best.e.a, best.e.b].map(p=>movePt(p,m));
+    for(const p of corners) for(const q of [t.a,t.b]){
+      if(Math.abs(dot(sub(p,q),t.n)-t.gap)>0.5) continue;
+      const s=dot(sub(q,p),t.d);
+      if(Math.abs(s)<=tolMm && (!slide || Math.abs(s)<Math.abs(slide.s))) slide={s, corner:q};
+    }
+  }
+  if(slide){
+    m.dx+=t.d.x*slide.s; m.dy+=t.d.y*slide.s;
+    if(slide.t2) lines.push(slide.t2);
+  }
+  return {m, lines};
+}
+
+// Rotation auf Raster (step Grad), step 0 = frei.
+const snapAngle=(a,step)=>step>0 ? normDeg(Math.round(a/step)*step) : normDeg(a);
+
+// Die tatsaechlich verlegten Stuecke EINER Fliese (Rahmenkoordinaten):
+// Raum geschnitten mit der Fliese, dann an jeder Dehnungsfuge, die sie
+// kreuzt, in die beiden Seiten geteilt - eine Fliese ueber einer Fuge ergibt
+// zwei getrennte Schnittstuecke. Leere und Splitter < 1 mm2 fallen weg.
+function tilePieces(spec, it, ring, joints){
+  const P=tileCorners(spec,it);
+  let pieces=[ring ? clipConvex(ring,P) : P];
+  for(const j of (joints||[])){
+    const S=jointStrip(j);
+    if(!convexOverlap(P,S,0.01)) continue;
+    const d=unit(sub(j.b,j.a)), n={x:-d.y, y:d.x}, h=j.width/2;
+    const a1={x:j.a.x+n.x*h, y:j.a.y+n.y*h}, a2={x:j.a.x-n.x*h, y:j.a.y-n.y*h};
+    pieces=pieces.flatMap(q=>[dedupe(clipHalf(q,a1,n)), dedupe(clipHalf(q,a2,{x:-n.x,y:-n.y}))]);
+  }
+  return pieces.filter(q=>q.length>=3 && Math.abs(polyArea(q))>=1);
+}
+
+// Status gegen Raum und Fugen.
+//  whole: genau ein Stueck, deckungsgleich mit der Fliese
+//  cut:   Stuecke kleiner als die Fliese (Rand, Fuge)
+//  out:   gar nicht im Raum
+function tileStatus(spec, it, ring, joints){
+  const A=spec.w*spec.l, pieces=tilePieces(spec,it,ring,joints);
+  const inA=pieces.reduce((s,q)=>s+Math.abs(polyArea(q)),0);
+  const st = !pieces.length ? 'out' : (pieces.length===1 && inA>=A*(1-1e-6)) ? 'whole' : 'cut';
+  return {status:st, area:A, inArea:inA, pieces};
+}
+
+// Nummerierung der Schnittstuecke: stabil nach Lage (Zeilen quer zur
+// ersten Wand, dann laengs), damit dieselbe Verlegung dieselben Nummern
+// bekommt. Liefert je Stueck {no, item, poly (Rahmen), tilePoly (Fliese)}.
+function cutList(spec, items, ring, joints){
+  const cuts=[];
+  items.forEach(it=>{
+    const s=tileStatus(spec,it,ring,joints);
+    if(s.status!=='cut') return;
+    s.pieces.forEach(q=>{
+      let cx=0, cy=0; q.forEach(p=>{ cx+=p.x; cy+=p.y; });
+      cuts.push({item:it, poly:q, c:{x:cx/q.length, y:cy/q.length}});
+    });
+  });
+  const row=Math.max(spec.w,100);
+  cuts.sort((a,b)=>Math.round(a.c.y/row)-Math.round(b.c.y/row) || a.c.x-b.c.x);
+  cuts.forEach((c,i)=>{ c.no=i+1; c.tilePoly=c.poly.map(p=>toTile(c.item,p)); });
+  return cuts;
+}
+
+// Bemassung eines Schnittstuecks im Fliesenrahmen - so, wie der
+// Fliesenleger die Fliese vor sich liegen hat. Fuer jede Schnittkante:
+// wo sie die Fliesenkanten trifft, gemessen von der naechsten Fliesenecke
+// entlang dieser Kante. Dazu die Laengen aller Stueckkanten.
+function pieceDims(spec, kind, tilePoly){
+  const T=tileShape(spec,kind), marks=[], edges=[];
+  const onEdge=p=>{
+    for(let i=0;i<4;i++){
+      const a=T[i], b=T[(i+1)%4], d=sub(b,a), L=len(d);
+      const t=dot(sub(p,a),d)/(L*L);
+      if(t<-1e-6||t>1+1e-6) continue;
+      const q={x:a.x+d.x*t, y:a.y+d.y*t};
+      if(len(sub(p,q))<0.5) return {i, t, L};
+    }
+    return null;
+  };
+  const isCorner=p=>T.some(c=>len(sub(p,c))<0.5);
+  tilePoly.forEach(p=>{
+    if(isCorner(p)) return;
+    const e=onEdge(p);
+    if(!e) return;
+    const fromA=e.t*e.L, fromB=(1-e.t)*e.L;
+    marks.push(fromA<=fromB ? {p, edge:e.i, corner:e.i, dist:fromA}
+                            : {p, edge:e.i, corner:(e.i+1)%4, dist:fromB});
+  });
+  for(let i=0;i<tilePoly.length;i++){
+    const a=tilePoly[i], b=tilePoly[(i+1)%tilePoly.length];
+    const ea=onEdge(a), eb=onEdge(b);
+    const alongTile = ea && eb && ea.i===eb.i;
+    edges.push({a, b, len:len(sub(b,a)), cut:!alongTile});
+  }
+  return {shape:T, marks, edges, area:Math.abs(polyArea(tilePoly))};
+}
+
+// Stueckliste. Ueberlappungen werden gezaehlt, nicht verhindert - ein
+// Fliesenleger soll sehen, dass zwei Steine auf demselben Platz liegen.
+function tileStats(spec, items, ring, joints){
+  const r={L:{whole:0,cut:0}, R:{whole:0,cut:0}, out:0, placed:0, pieces:0, covered:0, tileArea:0, overlaps:0, roomArea:0};
+  items.forEach(it=>{
+    const s=tileStatus(spec,it,ring,joints);
+    if(s.status==='out'){ r.out++; return; }
+    r[it.kind][s.status]++; r.placed++;
+    if(s.status==='cut') r.pieces+=s.pieces.length;
+    r.covered+=s.inArea; r.tileArea+=s.area;
+  });
+  const P=items.map(it=>tileCorners(spec,it));
+  for(let i=0;i<P.length;i++) for(let j=i+1;j<P.length;j++) if(convexOverlap(P[i],P[j])) r.overlaps++;
+  if(ring){
+    r.roomArea=Math.abs(polyArea(ring));
+    (joints||[]).forEach(j=>{ r.roomArea-=Math.abs(polyArea(clipConvex(ring,jointStrip(j)))); });
+  }
+  r.waste = r.tileArea>0 ? 1-r.covered/r.tileArea : 0;
+  return r;
+}
+
+// Weiterstrecken: Kopien der Gruppe um k*vec, vorwaerts und rueckwaerts,
+// solange eine Kopie das umschliessende Rechteck des Raums noch schneidet.
+// Bewusst NICHT "solange sie den Raum beruehrt": in einem L- oder
+// Stufenraum ist eine Spalte aus dem niedrigen Teil zu kurz, seitlich
+// kopiert erreicht sie den hohen Teil nie, und das Weiterstrecken hoerte an
+// der ersten Luecke auf. Ganz aussen liegende Einzelfliesen sortiert der
+// Aufrufer aus. Liefert NUR die neuen Lagen; max gegen winzige Vektoren.
+function extendItems(spec, group, vec, ring, max=400, both=true){
+  if(len(vec)<1 || !group.length) return [];
+  const out=[];
+  const bx0=Math.min(...ring.map(p=>p.x)), bx1=Math.max(...ring.map(p=>p.x));
+  const by0=Math.min(...ring.map(p=>p.y)), by1=Math.max(...ring.map(p=>p.y));
+  const touches=items=>items.some(it=>tileCorners(spec,it).some(p=>p.x>bx0&&p.x<bx1&&p.y>by0&&p.y<by1)
+    || Math.abs(polyArea(clipConvex(ring,tileCorners(spec,it))))>1);
+  for(const sgn of both?[1,-1]:[1]){
+    for(let k=1;k<=max;k++){
+      const copy=group.map(it=>({...it, x:it.x+vec.x*k*sgn, y:it.y+vec.y*k*sgn}));
+      if(!touches(copy)) break;
+      out.push(...copy);
+    }
+  }
+  return out;
+}
+
+// Naechster Punkt auf dem Ring zu p: {q, i (Kante), t, dist}
+function nearestOnRing(ring, p){
+  let best=null;
+  for(let i=0;i<ring.length;i++){
+    const a=ring[i], b=ring[(i+1)%ring.length], d=sub(b,a), L2=dot(d,d)||1;
+    const t=Math.max(0,Math.min(1,dot(sub(p,a),d)/L2));
+    const q={x:a.x+d.x*t, y:a.y+d.y*t}, dist=len(sub(p,q));
+    if(!best || dist<best.dist) best={q,i,t,dist};
+  }
+  return best;
+}
+// Endpunkt einer Dehnungsfuge. mode 'corner': nur Raumecken. Sonst Ecke
+// bevorzugt (innerhalb tol), dann Lotfusspunkt auf der naechsten Wand.
+function jointEndSnap(ring, p, tol, mode){
+  let bc=null;
+  ring.forEach((c,i)=>{ const d=len(sub(p,c)); if(!bc || d<bc.d) bc={d,i,q:{x:c.x,y:c.y}}; });
+  if(mode==='corner') return bc && bc.d<=tol*3 ? {q:bc.q, corner:bc.i} : null;
+  if(bc && bc.d<=tol) return {q:bc.q, corner:bc.i};
+  const n=nearestOnRing(ring,p);
+  return n && n.dist<=tol ? {q:n.q, edge:n.i, t:n.t} : null;
+}
+function pointInRing(p, poly){
+  let inside=false;
+  for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+    const a=poly[i], b=poly[j];
+    if((a.y>p.y)!==(b.y>p.y) && p.x<(b.x-a.x)*(p.y-a.y)/(b.y-a.y)+a.x) inside=!inside;
+  }
+  return inside;
+}
+// Liegt die Fuge im Raum? Stichproben innen und keine Wand echt gekreuzt
+// (die Endpunkte liegen AUF Waenden - Beruehrung dort zaehlt nicht).
+function jointValid(ring, a, b){
+  if(len(sub(b,a))<50) return false;
+  // Eine "Fuge" auf der Wand entlang ist keine - die Stichproben laegen dort
+  // auf dem Rand, und pointInRing entscheidet am Rand willkuerlich.
+  for(const f of [0.25,0.5,0.75]){
+    const n=nearestOnRing(ring,{x:a.x+(b.x-a.x)*f, y:a.y+(b.y-a.y)*f});
+    if(n && n.dist<1) return false;
+  }
+  for(const f of [0.25,0.5,0.75])
+    if(!pointInRing({x:a.x+(b.x-a.x)*f, y:a.y+(b.y-a.y)*f}, ring)) return false;
+  const d=sub(b,a);
+  for(let i=0;i<ring.length;i++){
+    const c=ring[i], e=sub(ring[(i+1)%ring.length],c);
+    const den=crs(d,e); if(Math.abs(den)<1e-9) continue;
+    const t=crs(sub(c,a),e)/den, u=crs(sub(c,a),d)/den;
+    if(t>1e-3 && t<1-1e-3 && u>1e-3 && u<1-1e-3) return false;
+  }
+  return true;
+}
+// Lage eines Fugenendpunkts fuer die Bemassung: Abstand zur naechsten
+// Raumecke auf derselben Wand.
+function endDim(ring, p){
+  const n=nearestOnRing(ring,p);
+  if(!n) return null;
+  const a=ring[n.i], b=ring[(n.i+1)%ring.length], L=len(sub(b,a));
+  const da=n.t*L, db=(1-n.t)*L;
+  if(da<0.5 || db<0.5) return {corner: da<0.5 ? n.i : (n.i+1)%ring.length, dist:0};
+  return da<=db ? {corner:n.i, dist:da, edge:n.i} : {corner:(n.i+1)%ring.length, dist:db, edge:n.i};
+}
+
+// Druckbild: Drehung und Massstab, damit der Raum das Blatt fuellt.
+// Kandidaten sind die Wandrichtungen (Raum liegt dann achsparallel), je
+// Blattbox (Hoch-/Querformat haben verschieden viel Platz neben der
+// Fusszeile). boxes: [{w,h,landscape}] in Blatt-mm. Liefert die Kombination
+// mit dem groessten Massstab: {rot (Grad), scale (Blatt-mm je Raum-mm),
+// box, w, h, x0, y0 (gedrehte Raum-Box)}.
+function printLayout(ring, boxes){
+  let best=null;
+  const cand=new Set([0]);
+  edgesOf(ring).forEach(e=>cand.add(Math.round(-Math.atan2(e.d.y,e.d.x)/D2R*1e4)/1e4));
+  for(const deg of cand){
+    const c=Math.cos(deg*D2R), s=Math.sin(deg*D2R);
+    const R=ring.map(p=>rotP(p,c,s));
+    const x0=Math.min(...R.map(p=>p.x)), y0=Math.min(...R.map(p=>p.y));
+    const w=Math.max(...R.map(p=>p.x))-x0, h=Math.max(...R.map(p=>p.y))-y0;
+    for(const box of boxes){
+      const scale=Math.min(box.w/w, box.h/h);
+      if(!best || scale>best.scale*1.0001) best={rot:deg, scale, box, w, h, x0, y0};
+    }
+  }
+  return best;
+}
+// Rahmen-Punkt -> Blatt-mm fuer ein Layout (Ursprung links oben der Box).
+function printPt(L, p){
+  const c=Math.cos(L.rot*D2R), s=Math.sin(L.rot*D2R), r=rotP(p,c,s);
+  return {x:(r.x-L.x0)*L.scale, y:(r.y-L.y0)*L.scale};
+}
+
+// Gespeicherte Fliesen einlesen - tolerant: fehlt das Feld (aeltere Raeume,
+// Fremdimporte), gibt es eine leere Verlegung mit Standardmassen. Kaputte
+// Eintraege fallen einzeln weg statt den Raum unlesbar zu machen.
+function normTiles(o){
+  const spec={...TILE_DEF};
+  if(o && o.spec) for(const k in TILE_DEF) if(Number.isFinite(o.spec[k]) && o.spec[k]>=0) spec[k]=o.spec[k];
+  if(!(spec.w>0)) spec.w=TILE_DEF.w;
+  if(!(spec.l>0)) spec.l=TILE_DEF.l;
+  spec.angle=Math.min(90, Math.max(5, spec.angle||TILE_DEF.angle));
+  const fin=(...v)=>v.every(Number.isFinite);
+  const items=(o && Array.isArray(o.items) ? o.items : [])
+    .filter(it=>it && (it.kind==='L'||it.kind==='R') && fin(it.x,it.y,it.rot))
+    .map(it=>({id:it.id, kind:it.kind, x:it.x, y:it.y, rot:normDeg(it.rot)}));
+  const joints=(o && Array.isArray(o.joints) ? o.joints : [])
+    .filter(j=>j && j.a && j.b && fin(j.a.x,j.a.y,j.b.x,j.b.y) && Number.isFinite(j.width) && j.width>0)
+    .map(j=>({id:j.id, a:{x:j.a.x,y:j.a.y}, b:{x:j.b.x,y:j.b.y}, width:j.width}));
+  let seq=1;
+  items.concat(joints).forEach(x=>{ if(Number.isInteger(x.id) && x.id>=seq) seq=x.id+1; });
+  items.concat(joints).forEach(x=>{ if(!Number.isInteger(x.id)) x.id=seq++; });
+  // Doppelte IDs (Handimport) entzerren - Auswahl haengt an der ID.
+  const seen=new Set();
+  items.concat(joints).forEach(x=>{ if(seen.has(x.id)) x.id=seq++; seen.add(x.id); });
+  return {spec, items, joints, seq};
+}
+
+globalThis.TILES={ TILE_DEF, tileShape, tileCorners, toTile, polyArea, edgesOf, frameOf, toLocal, toWorldF,
+  clipConvex, clipHalf, convexOverlap, jointStrip, snapTargets, snapGroup, movePt, moveItem, snapAngle, normDeg,
+  tilePieces, tileStatus, cutList, pieceDims, tileStats, extendItems, nearestOnRing, jointEndSnap, jointValid,
+  pointInRing, endDim, printLayout, printPt, normTiles };
+})();
 </script>
 
 <script id="store">
@@ -3728,11 +4264,14 @@ globalThis.swingLimit=function(pts, walls, ownWall, hinge, radius, dir0, sense){
 };
 
 // ================= Abwicklung =================
-// Die Waende klappen im Grundriss nach AUSSEN weg, wie ein aufgefalteter
-// Karton. Der Klappgrad haengt vom Abstand zum Fokuspunkt ab: Waende
-// direkt unter dem Fokus bleiben flach (nur eine Linie), ferne stellen
-// sich auf und zeigen ihren Inhalt. Ueber der Raummitte schwebend sind
-// alle gleich weit weg - das ist die symmetrische Uebersicht.
+// Die Waende legen sich im Grundriss flach hin wie ein SCHATTEN, mit dem
+// Licht im Fokuspunkt: jeder Wandpunkt faellt radial vom Fokus weg, nicht
+// entlang der Wandnormalen. Dadurch faechert die Wand auf, statt starr um
+// ihre Fusslinie zu scharnieren. Der Klappgrad haengt vom Abstand zum
+// Fokuspunkt ab: Waende direkt unter dem Fokus bleiben flach (nur eine
+// Linie), ferne legen sich hin und zeigen ihren Inhalt. Ueber der
+// Raummitte schwebend sind alle gleich weit weg - die symmetrische
+// Uebersicht.
 const VIEW_FADE = 0.3;   // ab diesem cos ist die Wand voll aufgeklappt
 globalThis.unfoldFactor=function(mitte, fokus, refDist, nOut){
   if(!(refDist>0)) return 0;
@@ -3750,6 +4289,24 @@ globalThis.unfoldFactor=function(mitte, fokus, refDist, nOut){
     f*=Math.max(0, Math.min(1, cos/VIEW_FADE));
   }
   return f;
+};
+// Schattenwurf: die Richtung, in die eine Wand weggelegt wird, zeigt vom
+// Fokus zur Wandmitte. EINE Richtung fuer die ganze Wand - laege jede Ecke
+// radial zu ihrem eigenen Fusspunkt, waere die Wand-Decken-Kante nicht mehr
+// parallel zur Wand-Boden-Kante und die Ansicht verzerrt.
+globalThis.unfoldDir=function(mitte, fokus, nFallback){
+  let dx=mitte.x-fokus.x, dy=mitte.y-fokus.y;
+  const d=Math.hypot(dx,dy);
+  if(d>1e-9) return {x:dx/d, y:dy/d};
+  return nFallback ? {x:nFallback.x, y:nFallback.y} : {x:0, y:0};  // genau unterm Fokus
+};
+// Ein Wandpunkt (Fusspunkt base, Hoehe y) in der Welt. Die Auslenkung ist
+// auf UNFOLD_MAX der Hoehe gedeckelt - voll ausgelegt deckte eine
+// 2,5-m-Wand den halben Grundriss zu.
+const UNFOLD_MAX = 1/3;
+globalThis.unfoldPoint=function(base, dir, y, f){
+  const s=y*f*UNFOLD_MAX;
+  return {x:base.x+dir.x*s, y:base.y+dir.y*s};
 };
 // Halbe Diagonale der Bounding-Box - der natuerliche Bezug fuer "weit weg".
 globalThis.planRefDist=function(pts){
@@ -3879,6 +4436,39 @@ function mulberry32(seed){
 // die Masse gezogen), 3) zufaellige Stoerungen entlang der freien Moden
 // des Netzes, jeweils mit solve() als Korrektor. Gewinnt die kleinste
 // Winkel-Energie unter den kreuzungsfreien, masshaltigen Lagen.
+// Von zwei spiegelgleichen Loesungen die nehmen, die naeher an der Vorlage
+// liegt. Gebraucht, weil Abstaende spiegelblind sind: ein Raum und sein
+// Spiegelbild haben exakt dieselben Masse, und keine Lagesuche kann sie
+// unterscheiden. Der Umlaufsinn des Wandrings taugt als Vergleich NICHT - die
+// Vorlage kreuzt sich ja gerade, und ein gekreuzter Ring hat keine
+// Haendigkeit (seine Flaeche ist die Differenz der Schlaufen, das Vorzeichen
+// beliebig).
+//
+// Verglichen wird deshalb die LAGE: welche Variante laesst sich durch Drehen,
+// Schieben und Skalieren besser auf die Vorlage legen. Das hat eine
+// geschlossene Loesung - fasst man die zentrierten Punkte als komplexe Zahlen
+// auf, ist der beste erreichbare Wert |Summe x*conj(y)|^2, und Spiegeln
+// heisst dort schlicht conj(y) durch y ersetzen. Kein Suchen, ein Durchlauf.
+function spiegelWieVorlage(vorlage, pts){
+  const C=globalThis.CORE, I=C.idx(pts), paare=[];
+  vorlage.forEach(p=>{ const q=pts[I[p.id]]; if(q) paare.push([p,q]); });
+  if(paare.length<3) return pts;
+  const n=paare.length;
+  const mx=paare.reduce((s,[p])=>s+p.x,0)/n, my=paare.reduce((s,[p])=>s+p.y,0)/n;
+  const nx=paare.reduce((s,[,q])=>s+q.x,0)/n, ny=paare.reduce((s,[,q])=>s+q.y,0)/n;
+  let ar=0, ai=0, br=0, bi=0;              // a = Summe x*conj(y), b = Summe x*y
+  paare.forEach(([p,q])=>{
+    const xr=p.x-mx, xi=p.y-my, yr=q.x-nx, yi=q.y-ny;
+    ar+=xr*yr+xi*yi;  ai+=xi*yr-xr*yi;
+    br+=xr*yr-xi*yi;  bi+=xr*yi+xi*yr;
+  });
+  if(br*br+bi*bi <= ar*ar+ai*ai) return pts;
+  // Am eigenen Schwerpunkt spiegeln, nicht an der y-Achse: der Raum soll sich
+  // umdrehen, nicht zusaetzlich quer ueber den Bildschirm wandern.
+  const cx=pts.reduce((s,p)=>s+p.x,0)/pts.length;
+  return pts.map(p=>({...p, x:2*cx-p.x}));
+}
+
 globalThis.untangle=function(pts, walls, meas, tries, seed){
   const C=globalThis.CORE;
   const ring0=C.wallPolygonRing(pts, walls);
@@ -3938,7 +4528,11 @@ globalThis.untangle=function(pts, walls, meas, tries, seed){
     }
     consider(evalCand(base));
   }
-  return best ? best.P : null;
+  // Spiegelblind: der Kandidat "regelmaessiges Polygon" oben legt die Ecken
+  // IMMER gegen den Uhrzeigersinn hin. Wer seinen Raum andersherum gezeichnet
+  // hat, bekam ihn bisher seitenverkehrt zurueck - gemessen am Raum vom
+  // 23.8.2026 in 40 von 40 Laeufen.
+  return best ? spiegelWieVorlage(pts, best.P) : null;
 };
 
 // ================= Gebaeude: Raeume im gemeinsamen System =================
@@ -4547,6 +5141,9 @@ const escapeHtml=s=>String(s==null?'':s).replace(/[&<>"']/g, c=>ESC[c]);
 // verbindet sie sofort - den Raum "ablaufen" statt Punkte- und Wandmodus zu
 // jonglieren. null = kein Zug aktiv.
 const M={ pts:[], walls:[], meas:[], mode:'draw', sel:[], chain:null,
+          // Zieht sich die Skizze auf die ausgeglichene Form? Standard: nein.
+          // Siehe den Ausrichten-Knopf und den Rueckschrieb in recompute().
+          snapfit:false,
           fit:null, an:null, sugg:[], suspects:new Set(), narrow:[],
           drag:null, dragMode:null, highlight:null, nearPairs:[],
           openings:[], hmeas:[], opmeas:[], wallSel:null, openSel:null,
@@ -4592,22 +5189,52 @@ const fmtGrad=v=>v.toFixed(1).replace('.', ',');
 // bis "Einpassen" gedrueckt wird oder eine neue Szene entsteht.
 let userView=false;
 
+// Die Punkte, die der Nutzer SIEHT und anfasst. Mit Ausrichten die
+// ausgeglichene Form, ohne sie die Skizze, wie sie angelegt wurde; waehrend
+// eines Zugs immer die Skizze, sonst haengt der gezogene Punkt eine Iteration
+// hinterher. Ausdruecklich NICHT dasselbe wie "was die Messungen beweisen" -
+// Flaeche, Wandlaengen, Oeffnungslagen und Vorschlaege lesen weiter direkt
+// M.fit.pts, damit Kontroll- und Fehlerlinien in beiden Stellungen stimmen.
+const viewPts=()=>(M.drag || !M.snapfit) ? M.pts : (M.fit ? M.fit.pts : M.pts);
+
 // Ein Zustand ist genau das, was der Nutzer eingegeben hat: Punkte, Waende,
 // Messungen. Fit und Analyse werden daraus jederzeit neu gerechnet und
 // gehoeren deshalb nicht hinein.
 const serialize=()=>JSON.stringify({
-  pts:M.pts.map(p=>({id:p.id,x:p.x,y:p.y})),
+  // pts ist das AUFMASS, nicht die Zeichnung. Andere Raeume lesen genau dieses
+  // Feld, um ihre Lage im Gebaeude abzuleiten (ankopplung nimmt data.pts von
+  // Eltern und Kind), und daraus kommen Wandlaengen und Flaeche. Steht
+  // Ausrichten aus, sind Skizze und Aufmass verschiedene Formen - dann gehoert
+  // hier die ausgeglichene hin, sonst baut das Gebaeude auf Handstrichen.
+  pts:(M.fit?M.fit.pts:M.pts).map(p=>({id:p.id,x:p.x,y:p.y})),
+  // Die Zeichnung gehoert nur DIESEM Raum und kommt beim Oeffnen und beim
+  // Rueckgaengig zurueck. Mit Ausrichten an ist sie mit dem Aufmass identisch
+  // und wird weggelassen - fehlt das Feld, ist das Aufmass die Zeichnung, und
+  // damit verhalten sich aeltere Raeume und Fremdimporte wie bisher.
+  sketch:M.snapfit ? undefined : M.pts.map(p=>({id:p.id,x:p.x,y:p.y})),
   walls:M.walls.map(w=>[...w]),
   meas:M.meas.map(m=>({...m})),
   openings:M.openings.map(o=>({...o})),
   hmeas:M.hmeas.map(m=>({...m})),
   opmeas:M.opmeas.map(m=>({...m})),
   thick:{...M.thick}, shared:{...M.shared},
+  snapfit:M.snapfit,
   qmeas:M.qmeas.map(m=>({...m})),
+  // Fliesenverlegung - fehlt bei Raeumen ohne Fliesen ganz.
+  tiles:(M.tiles && (M.tiles.items.length || M.tiles.joints.length)) ? M.tiles : undefined,
   idSeq, openSeq,
 });
 function deserialize(o){
-  M.pts=o.pts.map(p=>({...p}));
+  // Die eigene Zeichnung, falls es eine gibt; sonst ist das Aufmass zugleich
+  // die Zeichnung (aeltere Raeume, Fremdimporte, Ausrichten an). Die Ecken
+  // muessen dieselben sein - zeigten Zeichnung und Messungen auf verschiedene
+  // Punkte, wirft recompute() bei jedem Bild. Lieber das Aufmass zeichnen als
+  // einer kaputten Skizze glauben.
+  const skizze = Array.isArray(o.sketch) && o.sketch.length===o.pts.length
+    && o.sketch.every((p,i)=>p && p.id===o.pts[i].id
+         && typeof p.x==='number' && typeof p.y==='number')
+    ? o.sketch : o.pts;
+  M.pts=skizze.map(p=>({...p}));
   M.walls=o.walls.map(w=>[...w]);
   M.meas=o.meas.map(m=>({...m}));
   // Oeffnungen sind optional: aeltere Raeume und Fremdimporte haben sie
@@ -4622,11 +5249,22 @@ function deserialize(o){
   M.thick=(o.thick && typeof o.thick==='object') ? {...o.thick} : {};
   M.shared=(o.shared && typeof o.shared==='object') ? {...o.shared} : {};
   M.qmeas=Array.isArray(o.qmeas) ? o.qmeas.map(x=>({...x})) : [];
+  // Fliesen: optional, fehlerhafte Eintraege fallen einzeln weg.
+  M.tiles=globalThis.TILES.normTiles(o.tiles);
+  // Gehoert zum Raum, nicht zur Sitzung: ein fertig eingemessener Raum darf
+  // ausgerichtet bleiben, waehrend der naechste frisch skizziert wird. Aeltere
+  // Raeume und Fremdimporte kennen das Feld nicht - Standard ist aus.
+  M.snapfit = o.snapfit===true;
   if(typeof o.idSeq==='number') idSeq=o.idSeq;
   if(typeof o.openSeq==='number') openSeq=o.openSeq;
   else openSeq=M.openings.length+1;
   M.sel=[]; M.chain=null; M.drag=null; M.fit=null; M.an=null;
   M.wallSel=null; M.openSel=null;
+  // Hier, nicht bei den Aufrufern: deserialize() ist der EINZIGE Weg, auf dem
+  // M.snapfit von aussen gesetzt wird - Raumwechsel, Import UND Rueckgaengig.
+  // Am Aufrufer haengend log der Knopf nach einem Undo (nachgestellt: Modell
+  // false, aria-pressed true).
+  syncSnapfitBtn();
 }
 
 // Formvalidierung fuer alles, was deserialize() bekommt - VOLLSTAENDIG und
@@ -4764,21 +5402,21 @@ function fitView(P, rot, auf){
 }
 
 function autofit(){
-  const P=M.fit?M.fit.pts:M.pts;
+  const P=viewPts();
   // Zu kleine oder noch nicht angeschlossene Zeichenflaeche: die Ansicht
   // NICHT anfassen. fitView zieht sonst den Rand von der Breite ab und
   // liefert einen negativen Massstab - daran ist der Boot schon einmal
   // gestorben (ctx.ellipse mit IndexSizeError).
   if(cv.width<200 || cv.height<200) return;
   if(!P.length){ VIEW={s:1,ox:cv.width/2,oy:cv.height/2,rot:VIEW.rot}; return; }
-  // Aufgeklappte Waende stehen bis zur Wandhoehe nach aussen - sie
+  // Aufgeklappte Waende stehen bis zu UNFOLD_MAX der Wandhoehe nach aussen - sie
   // gehoeren in die Bounding-Box, sonst ragen sie aus dem Bild. Ueber den
   // Rand zu rechnen waere zirkulaer (Rand braucht den Massstab, den er
   // selbst bestimmt) und lieferte einen negativen Massstab.
   let auf=0;
   if(unfoldOn && M.openings.length){
     const H=cornerHeights(P, M.hmeas);
-    auf=Math.max(...Object.values(H).map(x=>x.h), 0);
+    auf=Math.max(...Object.values(H).map(x=>x.h), 0)*UNFOLD_MAX;
   }
   // Der Wandkoerper steht IMMER nach aussen, nicht nur beim Aufklappen -
   // sonst schneidet der Bildrand die Aussenkante ab.
@@ -4796,7 +5434,7 @@ function zoomAt(dx,dy,f){
 // Einnorden: die Wand a-b parallel zur oberen Bildschirmkante drehen.
 // Reine Ansichtssache. Dieselbe Wand nochmal einnorden dreht zurueck auf 0.
 function northWall(a,b,force){
-  const P=M.fit?M.fit.pts:M.pts, I=C.idx(P);
+  const P=viewPts(), I=C.idx(P);
   if(I[a]==null||I[b]==null) return;
   const p=P[I[a]], q=P[I[b]];
   const target=-Math.atan2(q.y-p.y, q.x-p.x);
@@ -4816,12 +5454,24 @@ function recompute(){
   if(M.pts.length>=2 && C.activeMeas(M.meas).length){
     M.fit=C.solve(M.pts, M.meas);
     M.an=C.analyze(M.fit.pts, M.meas);
-    // Skizze auf den Fit ziehen: solve() liefert frische Punkte in mm, M.pts
-    // bliebe sonst auf Klick-Pixeln stehen, waehrend render/hit/autofit ab
-    // hier M.fit.pts zeigen. Ziehen und Neuanlage schreiben aber immer in
-    // M.pts - ohne Angleich liefen beide Arrays auseinander.
     const I=C.idx(M.pts);
-    M.fit.pts.forEach(fp=>{ const p=M.pts[I[fp.id]]; if(p){ p.x=fp.x; p.y=fp.y; } });
+    if(M.snapfit){
+      // Skizze auf den Fit ziehen: solve() liefert frische Punkte in mm, M.pts
+      // bliebe sonst auf Klick-Pixeln stehen, waehrend render/hit/autofit ab
+      // hier M.fit.pts zeigen. Ziehen und Neuanlage schreiben aber immer in
+      // M.pts - ohne Angleich liefen beide Arrays auseinander.
+      M.fit.pts.forEach(fp=>{ const p=M.pts[I[fp.id]]; if(p){ p.x=fp.x; p.y=fp.y; } });
+    } else {
+      // Ausrichten aus: die FORM der Skizze bleibt unangetastet, aber die
+      // EINHEIT muss mitgehen. Sonst stuende M.pts weiter auf Klick-Pixeln,
+      // waehrend M.fit.pts in Millimetern rechnet - dieselbe Divergenz wie
+      // oben, nur andersherum. scaleSketch ist ein reiner Massstab: jeder
+      // Punkt behaelt seinen Platz in der Zeichnung, der Zahlenbereich passt
+      // sich an. Der Faktor laeuft ueber die Durchgaenge gegen 1.
+      C.scaleSketch(M.pts, M.meas).forEach(sp=>{
+        const p=M.pts[I[sp.id]]; if(p){ p.x=sp.x; p.y=sp.y; }
+      });
+    }
   } else { M.fit=null; M.an=null; }
   // Mit der ersten Messung springen die Koordinaten von Skizzenpixeln auf
   // Millimeter (scaleSketch) - eine gemerkte Nutzer-Ansicht zeigte dann ins
@@ -4830,6 +5480,9 @@ function recompute(){
   // Einmal je Aenderung, nicht je Bild: suggest() ruft intern analyze() je
   // Kandidat auf, im Zug waere das ein Ruckeln.
   M.sugg = (M.an && M.pts.length>=3)
+    // BEWUSST der Fit, nicht viewPts(): ob zwei Ecken einander sehen, ist eine
+    // Frage an den echten Raum. Die Skizze darf verzerrt sein - dann schlaegt
+    // sie Strecken vor, die es in Wirklichkeit nicht gibt.
     ? C.suggest(M.fit?M.fit.pts:M.pts, M.walls, M.meas) : [];
   // Einmal je Aenderung berechnet, von Tabelle UND Plan konsumiert - die
   // Indizes zaehlen ueber activeMeas, wie an.w selbst.
@@ -5014,7 +5667,7 @@ function neighborAt(wx,wy){
   // 115 mm sind das wenige Bildschirmpixel. Der Strich des Nachbarn darf
   // der eigenen Wand die Tipps nicht wegnehmen: er gewinnt nur, wenn er
   // wirklich naeher liegt.
-  const P=M.fit?M.fit.pts:M.pts, IO=C.idx(P);
+  const P=viewPts(), IO=C.idx(P);
   let eigen=Infinity;
   for(const [a,b] of M.walls){
     if(IO[a]==null||IO[b]==null) continue;
@@ -5057,7 +5710,9 @@ function drawRoomLabel(name, P, dpr, col, px){
 let ownLabelRect=null;
 
 function drawNeighbors(dpr){
-  if(!neighbors.length) return;
+  // Entweder Nachbarn oder Abwicklung: die aufgeklappten Waende legen sich
+  // genau dorthin, wo die Nachbarraeume liegen - beides zusammen ist Brei.
+  if(!neighbors.length || unfoldOn) return;
   neighbors.forEach(n=>{
     const hot=(n.id===hoverRoom);
     if(n.poly){
@@ -5110,7 +5765,7 @@ function fragWanddicke(vorschlag){
 function createNeighborRoom(opId){
   const o=M.openings.find(x=>x.id===opId);
   if(!o || !currentRoom) return;
-  const P=M.fit?M.fit.pts:M.pts;
+  const P=viewPts();
   const k=wallKey(o.a, o.b);
   const t=fragWanddicke(M.thick[k] || 240);
   if(t==null) return;
@@ -5350,7 +6005,7 @@ function enterCross(a, raum, b){
 function commitCross(){
   if(!crossPair) return;
   const inp=$('entryVal');
-  const d=parseFloat(inp.value.replace(',','.'))*1000;
+  const d=parseLen(inp.value);
   if(!isFinite(d)||d<=0){ inp.classList.add('bad'); return; }
   snapshot();
   M.qmeas.push({a:crossPair.a, raum:crossPair.raum, b:crossPair.b, d, on:true});
@@ -5470,7 +6125,7 @@ const wToWall=(sx,sy)=>({x:(sx-WV.ox)/WV.s, y:(WV.oy-sy)/WV.s});
 
 function currentShape(){
   if(!M.wallSel) return null;
-  const P=M.fit?M.fit.pts:M.pts;
+  const P=viewPts();
   return wallShape(P, M.hmeas, M.wallSel.a, M.wallSel.b);
 }
 function wallFit(shape){
@@ -5620,9 +6275,9 @@ function drawWallMarks(P, I, dpr){
   });
 }
 
-// Abwicklung: die Waende mit Inhalt nach aussen weggeklappt. Der
-// Klappgrad kommt aus dem Abstand zum Fokus (Bildschirmmitte), so dass
-// die Uebersicht am besten ist, wenn man ueber der Raummitte schwebt.
+// Abwicklung: die Waende mit Inhalt als Schatten vom Fokus (Bildschirm-
+// mitte) weggelegt. Der Klappgrad kommt aus dem Abstand zum Fokus, so
+// dass die Uebersicht am besten ist, wenn man ueber der Raummitte schwebt.
 function drawUnfolded(P, I, dpr){
   if(!unfoldOn || !M.openings.length || !M.fit) return;
   const fokus=toWorld(cv.width/2, cv.height/2);
@@ -5638,13 +6293,17 @@ function drawUnfolded(P, I, dpr){
     const L=shape.L||1;
     const u={x:(B.x-A.x)/L, y:(B.y-A.y)/L};
     const n=outerNormal(P, M.walls, a, b);
-    const f=unfoldFactor({x:(A.x+B.x)/2, y:(A.y+B.y)/2}, fokus, ref, n);
+    const mitte={x:(A.x+B.x)/2, y:(A.y+B.y)/2};
+    const f=unfoldFactor(mitte, fokus, ref, n);
     if(f<0.02) return;                       // flach unterm Fokus: nichts zu zeigen
-    // Wandkoordinate -> Welt: entlang der Wand, dann nach aussen geklappt.
-    const w2w=(x,y)=>({x:A.x+u.x*x+n.x*y*f, y:A.y+u.y*x+n.y*y*f});
+    // Wandkoordinate -> Welt: entlang der Wand, dann als Schatten vom Fokus
+    // weg. Der Winkel richtet sich nach dem Fokus, die Auslenkung ist fuer
+    // die ganze Wand gleich - die Wand bleibt ein Parallelogramm.
+    const dir=unfoldDir(mitte, fokus, n);
+    const w2w=(x,y)=>unfoldPoint({x:A.x+u.x*x, y:A.y+u.y*x}, dir, y, f);
     const eck=[w2w(0,0), w2w(L,0), w2w(L,shape.hb), w2w(0,shape.ha)].map(toScr);
     ctx.save();
-    ctx.globalAlpha=0.35+0.45*f;             // ferne Waende deutlicher
+    ctx.globalAlpha=0.18+0.27*f;             // ferne Waende deutlicher, alle durchscheinend
     ctx.beginPath();
     eck.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
     ctx.closePath();
@@ -5863,6 +6522,7 @@ function drawQuer(P, I, dpr){
 }
 
 function drawCanvas(){
+  if(M.mode==='tiles'){ drawTilesView(); return; }
   const dpr=DPR();
   cv.width=cv.clientWidth*dpr; cv.height=cv.clientHeight*dpr;
   // 0x0-Canvas (verstecktes oder noch nicht angeschlossenes Layout):
@@ -5877,7 +6537,7 @@ function drawCanvas(){
   // Loesung gibt es keinen sinnvollen Massstab. Und eine vom Nutzer gewaehlte
   // Ansicht (userView) wird grundsaetzlich nicht angefasst.
   if(!M.drag && M.fit && !userView) autofit();
-  const P=M.drag?M.pts:(M.fit?M.fit.pts:M.pts), I=C.idx(P);
+  const P=viewPts(), I=C.idx(P);
   // Raster und Massstab erst, wenn die Koordinaten Millimeter sind - vorher
   // waere beides eine Aussage ueber Bildschirmpixel.
   if(M.fit){ drawGrid(dpr); drawScalebar(dpr); }
@@ -5980,7 +6640,7 @@ function drawCanvas(){
     // das Paar teilt sich einen Beschriftungsplatz.
     const susPair=alle.some(x=>M.suspects.has(actM.indexOf(x)));
     const p=toScr(P[I[m.a]]), q=toScr(P[I[m.b]]);
-    const txt=alle.length>1 ? `${fmtM(m.d)} (${alle.length}×)` : fmtM(m.d);
+    const txt=alle.length>1 ? `${fmtLen(m.d)} (${alle.length}×)` : fmtLen(m.d);
     const mx=(p.x+q.x)/2, my=(p.y+q.y)/2;
     const tw=ctx.measureText(txt).width;
     ctx.fillStyle=susPair?INK.labelBadBg:INK.labelBg;
@@ -6065,7 +6725,7 @@ function drawCanvas(){
 // ================= Treffer =================
 
 function hit(wx,wy){
-  const P=M.fit?M.fit.pts:M.pts;
+  const P=viewPts();
   let best=null, bd=Infinity;
   P.forEach(p=>{ const d=C.dist(p,{x:wx,y:wy}); if(d<bd){bd=d;best=p;} });
   return (best && bd*VIEW.s < HIT_R*DPR()) ? best : null;
@@ -6080,7 +6740,7 @@ function distToSeg(p,a,b){
 // Naechste Wand unterm Finger. Nur die mittleren 70 Prozent zaehlen - nahe
 // den Enden soll der Eckpunkt gewinnen, sonst kaeme man nicht mehr an ihn heran.
 function nearestWall(wx,wy){
-  const P=M.drag?M.pts:(M.fit?M.fit.pts:M.pts), I=C.idx(P);
+  const P=viewPts(), I=C.idx(P);
   let best=null, bd=Infinity;
   M.walls.forEach(([a,b])=>{
     if(I[a]==null||I[b]==null) return;
@@ -6094,7 +6754,7 @@ function nearestWall(wx,wy){
 // markierte Messung direkt antippbar ist, um nachzumessen. Waende deckt
 // nearestWall schon ab; das hier faengt den Rest.
 function nearestMeas(wx,wy){
-  const P=M.drag?M.pts:(M.fit?M.fit.pts:M.pts), I=C.idx(P);
+  const P=viewPts(), I=C.idx(P);
   let best=null, bd=Infinity;
   C.activeMeas(M.meas).forEach(m=>{
     if(I[m.a]==null||I[m.b]==null) return;
@@ -6128,7 +6788,7 @@ const isDesktop=()=>matchMedia('(min-width:880px)').matches;
 // Ursache dafuer, dass ein getipptes "4.250" einen 4,25-mm-Raum ergab, ohne
 // dass eine Pruefung anschlug.
 function enterMeasurement(a,b,guided=false){
-  const P=M.fit?M.fit.pts:M.pts, I=C.idx(P);
+  const P=viewPts(), I=C.idx(P);
   if(I[a]==null||I[b]==null) return;
   if(wpopPair) closeWallPopup();     // Eingabe und Wand-Popup nie gleichzeitig
   entryPair={a,b}; entryGuided=guided;
@@ -6137,7 +6797,7 @@ function enterMeasurement(a,b,guided=false){
   M.highlight={a,b};
   const vorhanden=M.meas.filter(m=>(m.a===a&&m.b===b)||(m.a===b&&m.b===a));
   $('entryLabel').textContent = vorhanden.length
-    ? `${a}–${b} — bisher ${vorhanden.map(m=>fmtM(m.d)).join(' · ')} m, weiterer Wert:`
+    ? `${a}–${b} — bisher ${vorhanden.map(m=>fmtLen(m.d)).join(' · ')} ${unit}, weiterer Wert:`
     : `Strecke ${a}–${b}`;
   const box=$('entry');
   box.hidden=false;
@@ -6160,7 +6820,7 @@ function placeEntry(){
   }
   box.style.transform='';
   if(!entryPair) return;
-  const P=M.fit?M.fit.pts:M.pts, I=C.idx(P);
+  const P=viewPts(), I=C.idx(P);
   const mid={x:(P[I[entryPair.a]].x+P[I[entryPair.b]].x)/2,
              y:(P[I[entryPair.a]].y+P[I[entryPair.b]].y)/2};
   const s=toScr(mid), dpr=DPR();
@@ -6179,9 +6839,9 @@ function closeEntry(){
 function commitEntry(){
   if(!entryPair) return;
   const inp=$('entryVal');
-  const d=parseFloat(inp.value.replace(',','.'))*1000;
+  const d=parseLen(inp.value);
   if(!isFinite(d)||d<=0){ inp.classList.add('bad'); return; }
-  if(d<100 && !confirm(`${fmtM(d)} m ist sehr kurz — als Meter gemeint?\n\nOK = so übernehmen`)) return;
+  if(!zuKurzFrage(d,'kurz',100)) return;
   snapshot();
   M.meas.push({a:entryPair.a, b:entryPair.b, d, sigma:C.SIGMA_DEF, on:true});
   const wasGuided=entryGuided;
@@ -6261,6 +6921,10 @@ function openWallPopup(a,b){
   renderWallPopup();
   $('wpop').hidden=false;
   placeWpop();
+  // Wer eine Wand antippt, will messen - also steht der Cursor schon im Feld.
+  // Muss NACH hidden=false stehen: ein verstecktes Feld nimmt keinen Fokus.
+  // preventScroll, weil iOS sonst den Plan unter dem Popup wegscrollt.
+  $('wpopVal').focus({preventScroll:true});
   drawCanvas();
 }
 function closeWallPopup(){
@@ -6281,7 +6945,7 @@ function placeWpop(){
   }
   box.style.transform='';
   if(!wpopPair) return;
-  const P=M.fit?M.fit.pts:M.pts, I=C.idx(P);
+  const P=viewPts(), I=C.idx(P);
   if(I[wpopPair.a]==null||I[wpopPair.b]==null) return;
   const mid={x:(P[I[wpopPair.a]].x+P[I[wpopPair.b]].x)/2,
              y:(P[I[wpopPair.a]].y+P[I[wpopPair.b]].y)/2};
@@ -6295,10 +6959,10 @@ function renderWallPopup(){
   const {a,b}=wpopPair;
   const k=[a,b].sort().join('|');
   const isWall=M.walls.some(([x,y])=>[x,y].sort().join('|')===k);
-  const P=M.fit?M.fit.pts:M.pts, I=C.idx(P);
+  const P=viewPts(), I=C.idx(P);
   $('wpopTitle').textContent=(isWall?'Wand ':'Strecke ')+a+'–'+b;
   $('wpopLen').textContent=(M.fit && I[a]!=null && I[b]!=null)
-    ? fmtM(C.dist(P[I[a]],P[I[b]]))+' m ausgeglichen' : '';
+    ? fmtLenU(C.dist(P[I[a]],P[I[b]]))+' ausgeglichen' : '';
   const act=C.activeMeas(M.meas);
   const tb=document.querySelector('#wpopTbl tbody');
   tb.innerHTML='';
@@ -6313,17 +6977,17 @@ function renderWallPopup(){
       : sus ? '<span class="badge suspect">verdächtig</span>'
       : w!=null ? '<span class="badge ok">geprüft</span>'
       : '<span class="badge unchecked">ungeprüft</span>';
-    tr.innerHTML=`<td><input class="d" inputmode="decimal" value="${fmtM(m.d)}"></td>`
+    tr.innerHTML=`<td><input class="d" inputmode="decimal" value="${fmtLen(m.d)}"></td>`
       +`<td>${m.von==='nachbar' ? 'vom Nachbarn' : (w==null?'—':'w '+w.toFixed(1))}</td>`
       +`<td>${badge}</td>`
       +`<td><button class="rowbtn del" title="Diesen Messwert löschen">×</button></td>`;
     const inp=tr.querySelector('.d');
     inp.onchange=()=>{
-      const d=parseFloat(inp.value.replace(',','.'))*1000;
+      const d=parseLen(inp.value);
       // Wer den Wert selbst eintippt, hat ihn gemessen - der Vermerk
       // "vom Nachbarn" gilt dann nicht mehr.
       if(isFinite(d)&&d>0){ snapshot(); m.d=d; delete m.von; recompute(); }
-      else { inp.value=fmtM(m.d); setHint('Ungültig — Maß muss eine Zahl größer 0 sein.'); }
+      else { inp.value=fmtLen(m.d); setHint('Ungültig — Maß muss eine Zahl größer 0 sein.'); }
     };
     if(sus) attachTip(tr.children[2],
       `w = ${w.toFixed(1)}: dieser Wert weicht am stärksten vom Rest ab — wahrscheinlich falsch gemessen oder vertippt. × löscht ihn.`);
@@ -6439,9 +7103,9 @@ $('wpopX').onclick=closeWallPopup;
 $('wpopOk').onclick=()=>{
   if(!wpopPair) return;
   const inp=$('wpopVal');
-  const d=parseFloat(inp.value.replace(',','.'))*1000;
+  const d=parseLen(inp.value);
   if(!isFinite(d)||d<=0){ inp.style.borderColor='var(--bad)'; return; }
-  if(d<100 && !confirm(`${fmtM(d)} m ist sehr kurz — als Meter gemeint?\n\nOK = so übernehmen`)) return;
+  if(!zuKurzFrage(d,'kurz',100)) return;
   inp.style.borderColor='';
   snapshot();
   // Steht hier noch unveraendert der Vorschlag aus der Laufmessung, ist das
@@ -6521,6 +7185,10 @@ cv.addEventListener('pointerdown',e=>{
   hidePop();
   if(pointers.size===2){ startPinch(); return; }
   if(pointers.size>2 || pinch) return;
+  if(M.mode==='tiles'){
+    if(!tilesDown(e)) gesture={t:'bg',x0:e.clientX,y0:e.clientY,lx:e.clientX,ly:e.clientY,moved:false,wall:null,popOpen};
+    return;
+  }
   const d=evDev(e), w=toWorld(d.x,d.y);
   const h=hit(w.x,w.y);
   if(h){
@@ -6543,7 +7211,7 @@ cv.addEventListener('pointerdown',e=>{
   if(wall && M.mode==='draw'){
     armLongpress(()=>{
       gesture=null;
-      const P=M.fit?M.fit.pts:M.pts, I=C.idx(P);
+      const P=viewPts(), I=C.idx(P);
       const mid=toScr({x:(P[I[wall.a]].x+P[I[wall.b]].x)/2, y:(P[I[wall.a]].y+P[I[wall.b]].y)/2});
       showPop(mid.x,mid.y,`Wand ${wall.a}–${wall.b} löschen?`,()=>deleteWall(wall.a,wall.b));
     });
@@ -6555,7 +7223,7 @@ cv.addEventListener('pointerdown',e=>{
 function updateHover(e){
   const d=evDev(e), w=toWorld(d.x,d.y);
   const ueberPlus=doorPluses.some(p=>Math.hypot(d.x-p.x, d.y-p.y)<=p.r+6*DPR());
-  const id=(!ueberPlus && neighbors.length) ? neighborAt(w.x,w.y) : null;
+  const id=(!ueberPlus && neighbors.length && !unfoldOn) ? neighborAt(w.x,w.y) : null;
   cv.style.cursor=(id||ueberPlus)?'pointer':'';
   if(id===hoverRoom) return;
   hoverRoom=id;
@@ -6568,6 +7236,7 @@ cv.addEventListener('pointerleave',()=>{
 
 cv.addEventListener('pointermove',e=>{
   if(!pointers.has(e.pointerId)){
+    if(M.mode==='tiles'){ tilesHover(e); return; }
     if(e.pointerType==='mouse' && M.mode!=='wall' && !swim) updateHover(e);
     return;
   }
@@ -6576,6 +7245,7 @@ cv.addEventListener('pointermove',e=>{
   if(!gesture) return;
   const moved=Math.hypot(e.clientX-gesture.x0,e.clientY-gesture.y0)>TAP_SLOP;
   if(moved && !gesture.moved){ gesture.moved=true; cancelLongpress(); }
+  if(gesture.t==='tiles'){ tilesMove(e, gesture); return; }
   if(gesture.t==='point' && gesture.moved){
     // Erste echte Bewegung dieses Zugs: jetzt erst den beim Druecken
     // gemerkten Vorzustand auf den Undo-Stapel legen.
@@ -6660,6 +7330,12 @@ function endPointer(e){
     if(!g.moved && !g.popOpen) tapPointMeasure(g.id);
     return;
   }
+  if(g.t==='tiles'){ tilesUp(e, g); return; }
+  if(M.mode==='tiles'){
+    if(g.moved) render();
+    else if(e.type!=='pointercancel') tilesTap(e);
+    return;
+  }
   // g.t==='bg'
   if(g.moved){ render(); return; }
   if(e.type==='pointercancel' || g.popOpen) return;
@@ -6676,7 +7352,7 @@ function endPointer(e){
        && d.y>=ownLabelRect.y && d.y<=ownLabelRect.y+ownLabelRect.h){
       renameCurrentRoom(); return;
     }
-    const nb=neighborAt(w.x,w.y);
+    const nb=unfoldOn?null:neighborAt(w.x,w.y);   // ausgeblendet heisst auch: nicht anfassbar
     if(nb){ swimTo(nb); return; }
   }
   if(M.mode==='measure'){
@@ -6701,7 +7377,7 @@ cv.addEventListener('pointercancel',endPointer);
 // der eigene Timer, hier nur den Browserdialog unterdruecken.
 cv.addEventListener('contextmenu',e=>{
   e.preventDefault();
-  if(lastPtrType!=='mouse') return;
+  if(lastPtrType!=='mouse' || M.mode==='tiles') return;
   const d=evDev(e), w=toWorld(d.x,d.y);
   const h=hit(w.x,w.y);
   if(h){
@@ -6742,7 +7418,7 @@ function tapPointDraw(id){
     // wandert trotzdem weiter.
     snapshot(); M.walls.splice(at,1); M.chain=b; recompute(); return;
   }
-  if(C.wallCrossesExisting(M.fit?M.fit.pts:M.pts, M.walls, a, b)){
+  if(C.wallCrossesExisting(viewPts(), M.walls, a, b)){
     setHint('Diese Wand würde eine bestehende kreuzen — nicht angelegt.');
     render(); return;
   }
@@ -6869,7 +7545,7 @@ function enterHeight(pointId){
   heightAt=pointId;
   const vorhanden=M.hmeas.filter(m=>m.at===pointId && m.on!==false);
   $('entryLabel').textContent = vorhanden.length
-    ? `Höhe an Ecke ${pointId} — bisher ${vorhanden.map(m=>fmtM(m.d)).join(' · ')} m, weiterer Wert:`
+    ? `Höhe an Ecke ${pointId} — bisher ${vorhanden.map(m=>fmtLen(m.d)).join(' · ')} ${unit}, weiterer Wert:`
     : `Raumhöhe an Ecke ${pointId}`;
   const box=$('entry');
   box.hidden=false;
@@ -6885,9 +7561,9 @@ function enterHeight(pointId){
 }
 function commitHeight(){
   const inp=$('entryVal');
-  const d=parseFloat(inp.value.replace(',','.'))*1000;
+  const d=parseLen(inp.value);
   if(!isFinite(d)||d<=0){ inp.classList.add('bad'); return; }
-  if(d<1000 && !confirm(`${fmtM(d)} m ist sehr niedrig — als Meter gemeint?\n\nOK = so übernehmen`)) return;
+  if(!zuKurzFrage(d,'niedrig',1000)) return;
   snapshot();
   M.hmeas.push({kind:'h', at:heightAt, d, sigma:C.SIGMA_DEF, on:true});
   heightAt=null;
@@ -7092,7 +7768,7 @@ document.querySelectorAll('.mbtn').forEach(b=>{
 function commitOpMeasure(){
   const o=selectedOpening();
   const inp=$('entryVal');
-  const d=parseFloat(inp.value.replace(',','.'))*1000;
+  const d=parseLen(inp.value);
   if(!o || !isFinite(d) || d<0){ inp.classList.add('bad'); return; }
   snapshot();
   M.opmeas.push({id:'om'+(opMeasSeq++), op:o.id, edge:opMeasEdge, d, sigma:C.SIGMA_DEF, on:true});
@@ -7152,6 +7828,7 @@ const MODE_HINTS={
   draw:'Antippen setzt Ecken und verbindet sie · Ziehen verschiebt · gedrückt halten löscht.',
   measure:'Wand oder zwei Ecken antippen, Maß in Metern eintippen.',
   wall:'Öffnung einsetzen und ziehen — sie bleibt immer innerhalb der Wand.',
+  tiles:'Fliese aus dem Panel ziehen · Ziehen rastet an Fliesen und Wänden ein · Q/E drehen · F spiegeln · ⌘D duplizieren.',
 };
 let hintTimer=null;
 // setHint(text): fluechtige Meldung, faellt nach ein paar Sekunden auf den
@@ -7170,6 +7847,12 @@ function setMode(mode){
     setHint('Wandansichten erst, wenn die Form des Grundrisses eindeutig ist.');
     return;
   }
+  if(mode==='tiles' && !tilesReady()){
+    setHint('Fliesen erst, wenn der Wandzug geschlossen und eingemessen ist.');
+    return;
+  }
+  // Beim Verlassen des Fliesen-Modus: Werkzeug zurueck, Auswahl weg.
+  if(M.mode==='tiles' && mode!=='tiles'){ TS.sel.clear(); TS.tool='move'; TS.draft=null; TS.lines=[]; }
   M.mode=mode; M.sel=[];
   if(mode!=='draw') M.chain=null;
   if(entryPair && mode!=='measure') closeEntry();
@@ -7181,7 +7864,10 @@ function setMode(mode){
     M.wallSel={a:M.walls[0][0], b:M.walls[0][1]};
     wallUserView=false;
   }
-  $('ring').style.display = mode==='draw' ? '' : 'none';
+  // Beide Schwebeknoepfe erst mal weg; renderPanel entscheidet gleich, ob
+  // einer davon etwas zu tun hat. Hier nur zu verstecken statt zu setzen
+  // vermeidet ein Aufblitzen beim Moduswechsel.
+  $('ring').style.display='none';
   $('untangle').style.display='none';
   document.querySelectorAll('#modes button[data-mode]').forEach(x=>
     x.setAttribute('aria-pressed', String(x.dataset.mode===mode)));
@@ -7228,9 +7914,68 @@ $('ring').onclick=()=>{
 
 $('undo').onclick=()=>{ if(!undo()) setHint('Nichts mehr rückgängig zu machen.'); };
 $('fitview').onclick=()=>{ userView=false; autofit(); render(); };
+
+// Drehen ist reine ANSICHTSSACHE, wie das Einnorden: die Koordinaten bleiben,
+// wo sie sind, nur der Blick kippt. 15 Grad je Klick, mit Umschalt zurueck -
+// vier Klicks sind ein rechter Winkel, und dazwischen liegt genug, um eine
+// schraege Skizze aufs Auge auszurichten.
+const DREH=Math.PI/12;
+$('rotate').onclick=e=>{
+  VIEW.rot += (e.shiftKey ? -DREH : DREH);
+  northWallPair=null;        // von Hand gedreht: die eingenordete Wand gilt nicht mehr
+  userView=false; autofit(); render();
+};
+
+// Spiegeln ist KEINE Ansichtssache: die Haendigkeit gehoert zur Geometrie, und
+// kein Abstandsmass legt sie fest (siehe ringOrientation). Wer den Raum
+// seitenverkehrt gezeichnet hat, dreht ihn hier um - die Messungen sind
+// Abstaende und gelten unveraendert weiter.
+$('mirror').onclick=()=>{
+  if(!M.pts.length){ setHint('Nichts zu spiegeln — erst Ecken antippen.'); return; }
+  snapshot();
+  M.pts.forEach(p=>{ p.x=-p.x; });
+  recompute();
+  if(northWallPair) northWall(northWallPair.a, northWallPair.b, true);
+  else { userView=false; autofit(); }
+  render();
+  setHint('Raum gespiegelt — die Maße gelten unverändert, nur die Seite ist getauscht.');
+};
+
+// Ausrichten: laesst die Skizze den Messungen folgen. AUS ist der Normalfall -
+// beim ersten Durchgang durch einen verwinkelten Raum ist die Skizze die
+// Orientierung, und Ecken, die unter der Hand wegwandern, machen das Messen
+// schwerer statt leichter. Der Solver laeuft in beiden Stellungen; nur das
+// Ergebnis wird nicht in die Zeichnung zurueckgeschrieben. Kontrolllinien,
+// Vorschlaege, Residuen und Flaeche kommen weiter aus dem Fit.
+function syncSnapfitBtn(){
+  const b=$('snapfit');
+  b.setAttribute('aria-pressed', String(!!M.snapfit));
+  b.title = M.snapfit
+    ? 'Skizze folgt den Messungen — klicken, um sie liegen zu lassen'
+    : 'Skizze bleibt liegen — klicken, um sie den Messungen folgen zu lassen';
+}
+$('snapfit').onclick=()=>{
+  snapshot();
+  M.snapfit=!M.snapfit;
+  syncSnapfitBtn();
+  userView=false;
+  recompute();
+  setHint(M.snapfit
+    ? 'Ausrichten an — die Skizze zieht sich auf die ausgeglichene Form.'
+    : 'Ausrichten aus — die Ecken bleiben liegen, gerechnet wird trotzdem weiter.');
+};
+// Der Knopf schaltet zwischen zwei Ansichten um, darum beschriftet er das,
+// was der naechste Klick BRINGT - nicht den Zustand, in dem er gerade ist.
+function syncUnfoldBtn(){
+  const b=$('unfold');
+  b.setAttribute('aria-pressed', String(unfoldOn));
+  b.querySelector('span').textContent = unfoldOn ? 'Nachbarn' : 'Aufklappen';
+  b.title = unfoldOn ? 'Nachbarräume wieder einblenden — klappt die Wände zu'
+                     : 'Wandansichten aufklappen — blendet die Nachbarräume aus';
+}
 $('unfold').onclick=()=>{ unfoldOn=!unfoldOn;
-  $('unfold').setAttribute('aria-pressed', String(unfoldOn));
-  setHint(unfoldOn?'Wände aufgeklappt — Fokus verschieben zeigt die gegenüberliegende Wand deutlicher.':'Aufklappen aus.');
+  syncUnfoldBtn();
+  setHint(unfoldOn?'Wände aufgeklappt, Nachbarräume ausgeblendet — Fokus verschieben zeigt die gegenüberliegende Wand deutlicher.':'Aufklappen aus — Nachbarräume wieder sichtbar.');
   render(); };
 // Zwei Wege zum selben Dialog: die Statuskarte und der Name im Plan.
 function renameCurrentRoom(){
@@ -7328,6 +8073,7 @@ addEventListener('keydown',e=>{
     if(!undo()) setHint('Nichts mehr rückgängig zu machen.');
     return;
   }
+  if(M.mode==='tiles' && tilesKey(e)) return;
   const mode={1:'draw',2:'measure'}[e.key];
   if(mode) setMode(mode);
 });
@@ -7432,6 +8178,67 @@ $('qrwrap').addEventListener('pointerdown',e=>{ if(e.target===$('qrwrap')) $('qr
 // ================= Panel =================
 
 const fmtM=mm=>(mm/1000).toFixed(3).replace('.',',');
+
+// ================= Einheiten =================
+// Am Laser steht mm, im Kopf rechnet man in Metern. Statt das zu entscheiden:
+// ein Umschalter, der bleibt. Er gilt fuer die MESSEINGABEN - alles, was durch
+// das Feld unter dem Plan oder durch das Wand-Popup geht - und fuer deren
+// Anzeige. Die Oeffnungs-ABMESSUNGEN (Breite x Hoehe) bleiben bewusst fest in
+// mm: eine Tuer ist 885 mm breit, nie 0,885 m.
+const UNITS={ m:{f:1000, dez:3}, cm:{f:10, dez:1}, mm:{f:1, dez:0} };
+const UNIT_ORDER=['m','cm','mm'];
+let unit='m';
+try{ const u=localStorage.getItem('raumaufmass.unit'); if(UNITS[u]) unit=u; }catch{}
+// Zahl in der aktuellen Einheit -> Millimeter. Liefert NaN wie parseFloat;
+// alle Aufrufer pruefen mit isFinite, das war vorher schon so.
+const parseLen=s=>parseFloat(String(s).replace(',','.'))*UNITS[unit].f;
+// Millimeter -> Zahl OHNE Kuerzel, fuer Eingabefelder, deren Inhalt wieder
+// durch parseLen laeuft.
+const fmtLen=mm=>(mm/UNITS[unit].f).toFixed(UNITS[unit].dez).replace('.',',');
+// Millimeter -> Zahl MIT Kuerzel, fuer Anzeigen. Geschuetztes Leerzeichen,
+// damit "3,077 m" nicht umbricht.
+const fmtLenU=mm=>fmtLen(mm)+' '+unit;
+// Ein Mass unterhalb dieser Schwelle ist vermutlich in der falschen Einheit
+// getippt. Die Rueckfrage muss mitwandern: in Metern faellt "3" statt "3000"
+// sofort auf, in Millimetern ist dieselbe 3 nur ein sehr kurzes Mass.
+const zuKurzFrage=(mm,was,grenze)=>
+  unit==='mm' || mm>=grenze ||
+  confirm(`${fmtLenU(mm)} ist sehr ${was} — als ${unit} gemeint?\n\nOK = so übernehmen`);
+function setUnit(u){
+  if(!UNITS[u]) return;
+  unit=u;
+  try{ localStorage.setItem('raumaufmass.unit', u); }catch{}
+  document.querySelectorAll('.unit').forEach(b=>{ b.textContent=u; });
+  if(wpopPair) renderWallPopup();
+  render();
+}
+// Ein halb getippter Wert soll beim Umschalten derselbe WERT bleiben, nicht
+// dieselbe Ziffer - sonst wird aus 3,08 m beim Wechsel plaetzlich 3,08 mm.
+function cycleUnit(){
+  const alt=unit;
+  const warFokus=document.activeElement;
+  const halten=['entryVal','wpopVal'].map(id=>{
+    const v=parseFloat(String($(id).value).replace(',','.'));
+    return {id, mm: isFinite(v) ? v*UNITS[alt].f : null};
+  });
+  setUnit(UNIT_ORDER[(UNIT_ORDER.indexOf(alt)+1)%UNIT_ORDER.length]);
+  halten.forEach(h=>{ if(h.mm!=null) $(h.id).value=fmtLen(h.mm); });
+  // Umschalten mitten in der Eingabe darf den Cursor nicht kosten. Auf Touch
+  // hat der Knopf den Fokus trotz allem geholt - hier kommt er zurueck, und
+  // weil wir noch im Klick stecken, bleibt die Tastatur oben.
+  if(warFokus && warFokus.tagName==='INPUT') warFokus.focus({preventScroll:true});
+}
+document.querySelectorAll('.unit').forEach(b=>{
+  b.textContent=unit;
+  b.onclick=cycleUnit;
+  // Der Umschalter steht direkt neben dem Feld, in dem gerade getippt wird,
+  // und ein Knopf zieht beim Druecken den Fokus an sich. preventDefault im
+  // mousedown haelt ihn am Feld; der Klick kommt trotzdem an. NICHT auch im
+  // touchstart - dort wuerde preventDefault den Klick selbst verschlucken und
+  // der Knopf waere auf dem Telefon tot. Fuer Touch setzt cycleUnit den Fokus
+  // hinterher zurueck.
+  b.addEventListener('mousedown', e=>e.preventDefault());
+});
 const fmt2=x=>x.toFixed(2).replace('.',',');
 
 // Groesstes |v_i|/sigma_i ueber alle aktiven Messungen - je Messung gegen ihr
@@ -7519,13 +8326,22 @@ function renderPanel(){
   // ist - vorher waeren Wandlaengen Skizzenpixel.
   const wt=document.querySelector('#modes button[data-mode="wall"]');
   if(wt) wt.disabled=!wallTabReady();
+  // Der tiles-ui-Block laedt NACH diesem - beim ersten Bild waehrend des
+  // Boots gibt es ihn noch nicht. Danach rendert er seinen Teil selbst mit.
+  if(typeof renderTilesPanel==='function'){
+    const ft=document.querySelector('#modes button[data-mode="tiles"]');
+    if(ft) ft.disabled=!tilesReady();
+    // Fliesen-Modus ohne gueltigen Grundriss (z.B. nach Rueckgaengig): raus.
+    if(M.mode==='tiles' && !tilesReady()){ setMode('draw'); return; }
+    renderTilesPanel();
+  }
   renderWallBar();
   renderOpeningPopup();
   renderOpeningMeasures();
   $('empty').style.display = M.pts.length ? 'none' : 'flex';
   $('undo').disabled = !undoStack.length;
 
-  const P=M.drag?M.pts:(M.fit?M.fit.pts:M.pts), I=C.idx(P);
+  const P=viewPts(), I=C.idx(P);
 
   // Flaeche und Umfang sind DAS Ergebnis des Aufmasses - direkt unter den
   // Status. Erst mit dem ersten Fit sind die Koordinaten Millimeter; vorher
@@ -7557,6 +8373,11 @@ function renderPanel(){
   // Zug, der sich kreuzt, im Zeichnen-Modus.
   $('untangle').style.display =
     (M.mode==='draw' && ring && C.ringSelfIntersects(ring)) ? 'block' : 'none';
+  // Schliessen nur anbieten, solange der Zug OFFEN ist. Ein geschlossener
+  // Ring hat nichts mehr zu schliessen, und der Knopf stand bisher trotzdem
+  // die ganze Zeit da. Unter drei Ecken gibt es noch keinen Raum zu schliessen.
+  $('ring').style.display =
+    (M.mode==='draw' && M.pts.length>=3 && !ring) ? '' : 'none';
   wwEl.style.display = ringBroken ? 'block' : 'none';
   if(ringBroken) wwEl.textContent = (ring && C.ringSelfIntersects(ring))
     ? 'Wände kreuzen sich — Fläche und Vorschlagsfilter sind ausgesetzt.'
@@ -7600,7 +8421,7 @@ function renderPanel(){
     });
     const rowHtml=(a2,b2)=>{
       const e=byPair.get(wk(a2,b2));
-      const len=(M.fit && I[a2]!=null && I[b2]!=null) ? fmtM(C.dist(P[I[a2]],P[I[b2]]))+'\u00a0m' : '\u2014';
+      const len=(M.fit && I[a2]!=null && I[b2]!=null) ? fmtLenU(C.dist(P[I[a2]],P[I[b2]])) : '\u2014';
       // Badge = schlechtester Status der Werte dieser Strecke: verdaechtig
       // schlaegt ungeprueft schlaegt geprueft; ganz ohne Wert: "ohne Mass".
       const badge = e&&e.sus ? '<span class="badge suspect">verd\u00e4chtig</span>'
@@ -7773,7 +8594,9 @@ function renderPanel(){
 // ================= Daten =================
 
 $('exp').onclick=async()=>{
-  const P=M.drag?M.pts:(M.fit?M.fit.pts:M.pts);
+  // BEWUSST der Fit, nicht viewPts(): exportiert wird das Aufmass, nicht die
+  // Handskizze. Steht Ausrichten aus, sind das verschiedene Formen.
+  const P=M.fit?M.fit.pts:M.pts;
   const json=JSON.stringify({
     pts:P.map(p=>({id:p.id, x:Math.round(p.x), y:Math.round(p.y)})),
     walls:M.walls,
@@ -7840,6 +8663,7 @@ if(!currentRoom){
   }
 }
 setMode('draw');
+syncSnapfitBtn();
 recompute();
 // setHintLive statt setHint: Boot-Meldungen duerfen nicht nach vier
 // Sekunden verschwinden, bevor ueberhaupt jemand hingesehen hat - sie
@@ -7847,6 +8671,780 @@ recompute();
 if(bootMsg) setHintLive(bootMsg);
 if(!STORE.storageOk)
   setHintLive('Speichern auf diesem Gerät nicht möglich (privater Modus?) — Räume als Datei oder Link sichern.');
+</script>
+
+<script id="tiles-ui">
+"use strict";
+// ================= Fliesen: Bedienung =================
+// Haengt am ui-Block: M, VIEW, toScr/toWorld, snapshot/pushSnapshot, STORE.
+// Der Modus 'tiles' zeichnet ueber drawTilesView() (Einstieg ganz oben in
+// drawCanvas) und bekommt seine Zeiger-Ereignisse aus den gemeinsamen
+// Handlern (tilesDown/tilesMove/tilesUp/tilesTap).
+const TL=globalThis.TILES;
+const TD2R=Math.PI/180;
+const TS={ tool:'move', jmode:'free', sel:new Set(), vec:null, dup:null, lines:[],
+           draft:null, hover:null, drag:false, cache:null, cacheKey:'', lastRot:0,
+           showNums:true, jointKey:'', pal:null, axis:null };
+const TILE_INK={ L:'#e2c48f', R:'#c99b5e', cutL:'#f0dfc0', cutR:'#e3c79f', edge:'#6b4f2a',
+                 joint:'#4a4a4a', floor:'#fbfaf6', overlap:'#b3261e' };
+
+function tilesData(){ if(!M.tiles) M.tiles=TL.normTiles(null); return M.tiles; }
+// Raum im Fliesenrahmen - nur mit ausgeglichener, geschlossener Form.
+function tilesCtx(){
+  if(!M.fit) return null;
+  const F=TL.frameOf(M.fit.pts, M.walls);
+  const ringW=F && C.wallPolygon(M.fit.pts, M.walls);
+  if(!ringW) return null;
+  return {F, ringW, ring:ringW.map(p=>TL.toLocal(F,p))};
+}
+const tilesReady=()=>!!tilesCtx();
+const tScr=(K,p)=>toScr(TL.toWorldF(K.F,p));
+const tEvLocal=(K,e)=>{ const d=evDev(e); return TL.toLocal(K.F, toWorld(d.x,d.y)); };
+const tTol=()=>16*DPR()/VIEW.s;                // Fangradius in mm, zoomunabhaengig
+const selItems=()=>tilesData().items.filter(it=>TS.sel.has(it.id));
+const fmtMm=v=>Math.round(v).toLocaleString('de-DE');
+
+// Speichern ohne recompute(): Fliesen aendern die Geometrie des Raums nicht,
+// der Solver muesste umsonst laufen.
+function tilesSave(){
+  TS.cacheKey='';
+  if(currentRoom && !STORE.save(currentRoom, {data:JSON.parse(serialize()), area:polyAreaM2()}))
+    setHint('Speichern fehlgeschlagen (Speicher voll?) — Raum als Datei sichern!');
+  render();
+}
+
+// Auswertung (Status, Schnittstuecke, Ueberlappungen) nur neu rechnen, wenn
+// sich etwas geaendert hat - nicht je Mausbewegung.
+function tilesEval(K){
+  const T=tilesData();
+  const key=JSON.stringify([T.spec,T.items,T.joints,K.ring]);
+  if(key===TS.cacheKey && TS.cache) return TS.cache;
+  const stats=TL.tileStats(T.spec, T.items, K.ring, T.joints);
+  const cuts=TL.cutList(T.spec, T.items, K.ring, T.joints);
+  const status=new Map();
+  T.items.forEach(it=>status.set(it.id, TL.tileStatus(T.spec,it,K.ring,T.joints).status));
+  const polys=T.items.map(it=>TL.tileCorners(T.spec,it)), over=new Set();
+  for(let i=0;i<polys.length;i++) for(let j=i+1;j<polys.length;j++)
+    if(TL.convexOverlap(polys[i],polys[j])){ over.add(T.items[i].id); over.add(T.items[j].id); }
+  TS.cache={stats, cuts, status, over}; TS.cacheKey=key;
+  return TS.cache;
+}
+
+// ---------- Zeichnen ----------
+let hatchPat=null;
+function hatch(dpr){
+  if(hatchPat) return hatchPat;
+  const c=document.createElement('canvas'); c.width=c.height=Math.round(8*dpr);
+  const g=c.getContext('2d'); g.strokeStyle='rgba(107,79,42,.45)'; g.lineWidth=dpr;
+  g.beginPath(); g.moveTo(0,c.height); g.lineTo(c.width,0); g.stroke();
+  hatchPat=ctx.createPattern(c,'repeat');
+  return hatchPat;
+}
+function drawTilesView(){
+  const dpr=DPR();
+  cv.width=cv.clientWidth*dpr; cv.height=cv.clientHeight*dpr;
+  if(!cv.width || !cv.height) return;
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.clearRect(0,0,cv.width,cv.height);
+  const K=tilesCtx();
+  if(!K) return;
+  if(!userView && !TS.drag && cv.width>=200 && cv.height>=200) VIEW=fitView(K.ringW, VIEW.rot, 250);
+  drawGrid(dpr); drawScalebar(dpr);
+  const T=tilesData(), S=T.spec;
+  const path=P=>{ ctx.beginPath(); P.forEach((p,i)=>{ const q=tScr(K,p); i?ctx.lineTo(q.x,q.y):ctx.moveTo(q.x,q.y); }); ctx.closePath(); };
+  const ev=TS.drag ? null : tilesEval(K);
+  path(K.ring); ctx.fillStyle=TILE_INK.floor; ctx.fill();
+  // Ueberstand ausserhalb des Raums blass - man sieht, was abgeschnitten wird.
+  ctx.save(); ctx.globalAlpha=.18;
+  T.items.forEach(it=>{ path(TL.tileCorners(S,it)); ctx.fillStyle=TILE_INK[it.kind]; ctx.fill(); });
+  ctx.restore();
+  ctx.save(); path(K.ring); ctx.clip();
+  T.items.forEach(it=>{
+    const st=ev ? ev.status.get(it.id) : 'whole';
+    path(TL.tileCorners(S,it));
+    ctx.fillStyle=st==='cut' ? TILE_INK['cut'+it.kind] : TILE_INK[it.kind]; ctx.fill();
+    if(st==='cut'){ ctx.fillStyle=hatch(dpr); ctx.fill(); }
+    ctx.strokeStyle=(ev && ev.over.has(it.id)) ? TILE_INK.overlap : TILE_INK.edge;
+    ctx.lineWidth=((ev && ev.over.has(it.id)) ? 2 : .8)*dpr; ctx.stroke();
+  });
+  T.joints.forEach(j=>{ path(TL.jointStrip(j)); ctx.fillStyle=TILE_INK.joint; ctx.fill(); });
+  ctx.restore();
+  // Waende
+  path(K.ring); ctx.strokeStyle=INK.wall; ctx.lineWidth=2.5*dpr; ctx.stroke();
+  // Dehnungsfugen: Mittellinie gestrichelt, damit auch schmale sichtbar bleiben
+  ctx.setLineDash([6*dpr,4*dpr]); ctx.strokeStyle=TILE_INK.joint; ctx.lineWidth=1.2*dpr;
+  T.joints.forEach(j=>{ const a=tScr(K,j.a), b=tScr(K,j.b); ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke(); });
+  ctx.setLineDash([]);
+  // Auswahl
+  ctx.strokeStyle=INK.accent; ctx.lineWidth=2.2*dpr;
+  selItems().forEach(it=>{ path(TL.tileCorners(S,it)); ctx.stroke(); });
+  // Schnittnummern
+  if(ev && TS.showNums){
+    ctx.font=`600 ${11*dpr}px system-ui`; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ev.cuts.forEach(c=>{
+      const q=tScr(K,c.c), r=(8+(c.no>9?3:0)+(c.no>99?3:0))*dpr;
+      ctx.fillStyle='rgba(255,255,255,.9)'; ctx.beginPath(); ctx.arc(q.x,q.y,r,0,7); ctx.fill();
+      ctx.strokeStyle=TILE_INK.edge; ctx.lineWidth=dpr; ctx.stroke();
+      ctx.fillStyle='#26241f'; ctx.fillText(String(c.no), q.x, q.y+.5*dpr);
+    });
+    ctx.textAlign='start'; ctx.textBaseline='alphabetic';
+  }
+  // Drehgriff
+  const hnd=rotHandle(K);
+  if(hnd){
+    ctx.strokeStyle=INK.accent; ctx.lineWidth=1.5*dpr;
+    ctx.beginPath(); ctx.moveTo(hnd.c.x,hnd.c.y); ctx.lineTo(hnd.h.x,hnd.h.y); ctx.stroke();
+    ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(hnd.h.x,hnd.h.y,9*dpr,0,7); ctx.fill(); ctx.stroke();
+    ctx.fillStyle=INK.accent; ctx.font=`${12*dpr}px system-ui`; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText('⟳', hnd.h.x, hnd.h.y); ctx.textAlign='start'; ctx.textBaseline='alphabetic';
+  }
+  // Eingerastete Kanten
+  ctx.strokeStyle='#0b72a3'; ctx.lineWidth=4*dpr; ctx.globalAlpha=.6;
+  TS.lines.forEach(t=>{ const a=tScr(K,t.a), b=tScr(K,t.b); ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke(); });
+  ctx.globalAlpha=1;
+  // Dehnungsfuge im Entstehen
+  if(TS.tool==='joint'){
+    const dot=(p,col)=>{ const q=tScr(K,p); ctx.fillStyle=col; ctx.beginPath(); ctx.arc(q.x,q.y,6*dpr,0,7); ctx.fill(); };
+    if(TS.jmode==='corner') K.ring.forEach(p=>{ const q=tScr(K,p); ctx.strokeStyle=INK.mode; ctx.lineWidth=1.5*dpr; ctx.beginPath(); ctx.arc(q.x,q.y,10*dpr,0,7); ctx.stroke(); });
+    if(TS.draft){
+      dot(TS.draft.q, INK.accent);
+      if(TS.hover){
+        const a=tScr(K,TS.draft.q), b=tScr(K,TS.hover.q);
+        const ok=TL.jointValid(K.ring, TS.draft.q, TS.hover.q);
+        ctx.strokeStyle=ok?INK.accent:INK.measBad; ctx.lineWidth=Math.max(3*dpr, S.expWidth*VIEW.s);
+        ctx.globalAlpha=.6; ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke(); ctx.globalAlpha=1;
+      }
+    }
+    if(TS.hover) dot(TS.hover.q, TS.hover.corner!=null ? INK.mode : '#0b72a3');
+  }
+}
+
+// Drehgriff: 36 px ueber dem obersten Bildpunkt der Auswahl, waagerecht
+// mittig - nie auf den Fliesen selbst, sonst greift man bei grossen Gruppen
+// den Griff, wenn man verschieben will.
+function selCentre(){
+  const T=tilesData(), P=[]; selItems().forEach(it=>TL.tileCorners(T.spec,it).forEach(p=>P.push(p)));
+  if(!P.length) return null;
+  const xs=P.map(p=>p.x), ys=P.map(p=>p.y);
+  return {x:(Math.min(...xs)+Math.max(...xs))/2, y:(Math.min(...ys)+Math.max(...ys))/2};
+}
+function rotHandle(K){
+  if(TS.tool!=='move' || !TS.sel.size) return null;
+  const c0=selCentre(); if(!c0) return null;
+  const c=tScr(K,c0), S=tilesData().spec;
+  let top=Infinity; selItems().forEach(it=>TL.tileCorners(S,it).forEach(p=>{ top=Math.min(top, tScr(K,p).y); }));
+  return {c0, c, h:{x:c.x, y:top-36*DPR()}};
+}
+
+// ---------- Zeiger ----------
+function tileAt(p){
+  const T=tilesData();
+  for(let i=T.items.length-1;i>=0;i--)
+    if(TL.pointInRing(p, TL.tileCorners(T.spec,T.items[i]))) return T.items[i];
+  return null;
+}
+// true: Geste gehoert den Fliesen. false: Hintergrund (Verschieben der
+// Ansicht; ein Tipp landet in tilesTap).
+function tilesDown(e){
+  const K=tilesCtx(); if(!K || TS.tool!=='move') return false;
+  const d=evDev(e), p=tEvLocal(K,e), hnd=rotHandle(K);
+  if(hnd && Math.hypot(d.x-hnd.h.x, d.y-hnd.h.y)<=16*DPR()){
+    gesture={t:'tiles', k:'rot', x0:e.clientX, y0:e.clientY, moved:false, snap:serialize(),
+             c:hnd.c0, a0:Math.atan2(p.y-hnd.c0.y, p.x-hnd.c0.x), orig:selItems().map(it=>({...it}))};
+    return true;
+  }
+  const it=tileAt(p);
+  if(!it) return false;
+  if(e.shiftKey){
+    TS.sel.has(it.id) ? TS.sel.delete(it.id) : TS.sel.add(it.id);
+    gesture={t:'tiles', k:'none', x0:e.clientX, y0:e.clientY, moved:false};
+    render(); return true;
+  }
+  if(!TS.sel.has(it.id)) TS.sel=new Set([it.id]);
+  gesture={t:'tiles', k:'move', x0:e.clientX, y0:e.clientY, moved:false, snap:serialize(),
+           p0:p, orig:selItems().map(x=>({...x}))};
+  render();
+  return true;
+}
+// Ziele in Reichweite - bei hunderten Fliesen nicht jede Kante pruefen.
+function nearTargets(K, moving){
+  const T=tilesData(), S=T.spec, reach=2*(S.l+S.w*2)+tTol();
+  const ids=new Set(moving.map(it=>it.id));
+  const others=T.items.filter(o=>!ids.has(o.id) && moving.some(m=>Math.hypot(o.x-m.x,o.y-m.y)<=reach))
+                      .map(o=>TL.tileCorners(S,o));
+  return TL.snapTargets(S, others, K.ring, T.joints);
+}
+function applyItems(list){
+  const T=tilesData(), by=new Map(list.map(it=>[it.id,it]));
+  T.items=T.items.map(it=>by.get(it.id)||it);
+}
+function snapMoving(K, cand, free){
+  TS.lines=[];
+  if(free) return cand;
+  const S=tilesData().spec;
+  // Bei grossen Gruppen nur die Randfliesen fangen lassen waere genauer -
+  // jede Kante zu pruefen ist bei ueblichen Gruppengroessen schnell genug.
+  const r=TL.snapGroup(cand.map(it=>TL.tileCorners(S,it)), nearTargets(K,cand), tTol());
+  if(!r) return cand;
+  TS.lines=r.lines;
+  return cand.map(it=>TL.moveItem(it,r.m));
+}
+function tilesMove(e, g){
+  const K=tilesCtx(); if(!K || !g.moved || g.k==='none') return;
+  if(g.snap){ pushSnapshot(g.snap); g.snap=null; }
+  TS.drag=true;
+  const p=tEvLocal(K,e);
+  if(g.k==='move'){
+    const dx=p.x-g.p0.x, dy=p.y-g.p0.y;
+    applyItems(snapMoving(K, g.orig.map(it=>({...it, x:it.x+dx, y:it.y+dy})), e.altKey));
+  } else if(g.k==='rot'){
+    const a=Math.atan2(p.y-g.c.y, p.x-g.c.x), raw=(a-g.a0)/TD2R;
+    const r0=g.orig[0].rot, want=e.shiftKey ? TL.normDeg(r0+raw) : chevronAngle(r0+raw);
+    const m={dth:want-r0, px:g.c.x, py:g.c.y, dx:0, dy:0};
+    applyItems(g.orig.map(it=>TL.moveItem(it,m)));
+    setHintLive(`Drehung ${fmtGrad(TL.normDeg(want))}° — Umschalt: frei`);
+  }
+  render();
+}
+function tilesUp(e, g){
+  TS.drag=false; TS.lines=[];
+  if(g.moved && g.k!=='none'){
+    const S=selItems();
+    if(S.length) TS.lastRot=S[0].rot;
+    // Wurde gerade ein Duplikat an seinen Platz gezogen, merkt sich das
+    // Muster genau diesen Versatz - "Weiterstrecken" setzt ihn fort.
+    if(TS.dup && g.k==='move' && TS.sel.size===TS.dup.dst.length && TS.dup.dst.every(id=>TS.sel.has(id))){
+      const T=tilesData();
+      const src=T.items.find(it=>it.id===TS.dup.src[0]), dst=T.items.find(it=>it.id===TS.dup.dst[0]);
+      if(src && dst){ TS.vec={x:dst.x-src.x, y:dst.y-src.y}; setHint('Mustervektor gemerkt — „Weiterstrecken“ setzt ihn bis zur Wand fort.'); }
+    }
+    tilesSave();
+    return;
+  }
+  render();
+}
+// Tipp ins Leere
+function tilesTap(e){
+  const K=tilesCtx(); if(!K) return;
+  const p=tEvLocal(K,e);
+  if(TS.tool==='joint'){
+    const s=TL.jointEndSnap(K.ring, p, tTol()*1.5, TS.jmode);
+    if(!s){ setHint(TS.jmode==='corner' ? 'Eine Raumecke antippen.' : 'Auf eine Wand tippen — Anfang und Ende der Fuge liegen auf Wänden.'); return; }
+    if(!TS.draft){ TS.draft=s; setHint('Endpunkt auf einer Wand antippen.'); render(); return; }
+    if(!TL.jointValid(K.ring, TS.draft.q, s.q)){ setHint('Die Fuge muss durch den Raum laufen — anderen Endpunkt wählen.'); return; }
+    const T=tilesData();
+    snapshot();
+    T.joints.push({id:T.seq++, a:{...TS.draft.q}, b:{...s.q}, width:T.spec.expWidth});
+    TS.draft=null;
+    setHint('Dehnungsfuge gesetzt.');
+    tilesSave();
+    return;
+  }
+  if(TS.sel.size){ TS.sel.clear(); render(); }
+}
+function tilesHover(e){
+  if(TS.tool!=='joint') return;
+  const K=tilesCtx(); if(!K) return;
+  TS.hover=TL.jointEndSnap(K.ring, tEvLocal(K,e), tTol()*1.5, TS.jmode);
+  drawTilesView();
+}
+
+// ---------- Aktionen ----------
+function tileCentreOffset(kind, rot){
+  const P=TL.tileShape(tilesData().spec,kind);
+  const c={x:P.reduce((s,p)=>s+p.x,0)/4, y:P.reduce((s,p)=>s+p.y,0)/4};
+  const co=Math.cos(rot*TD2R), si=Math.sin(rot*TD2R);
+  return {x:c.x*co-c.y*si, y:c.x*si+c.y*co};
+}
+// Drehraster: 15er-Schritte UND die Chevron-Lagen ±(90°-α) samt Vielfachen
+// von 90° - bei einem Schnittwinkel wie 40° laegen die sonst zwischen zwei
+// Rasterstufen.
+function chevronAngle(a){
+  const c=90-tilesData().spec.angle, cand=[];
+  for(let k=0;k<24;k++) cand.push(k*15);
+  for(let k=0;k<4;k++){ cand.push(TL.normDeg(c+k*90)); cand.push(TL.normDeg(-c+k*90)); }
+  a=TL.normDeg(a);
+  let best=cand[0], bd=Infinity;
+  cand.forEach(x=>{ const d=Math.abs(TL.normDeg(a-x+180)-180); if(d<bd){ bd=d; best=x; } });
+  return best;
+}
+// Chevron-Paar: L und R so gedreht, dass ihre Schraegkanten senkrecht stehen,
+// Stoss an Stoss mit Fuge - die Keimzelle des Musters.
+function tilesAddPair(){
+  const K=tilesCtx(); if(!K) return;
+  const T=tilesData(), S=T.spec, c=90-S.angle;
+  const p=TL.toLocal(K.F, toWorld(cv.width/2, cv.height/2));
+  let L={id:T.seq++, kind:'L', x:0, y:0, rot:TL.normDeg(c)};
+  let R={id:T.seq++, kind:'R', x:0, y:0, rot:TL.normDeg(-c)};
+  const PL=TL.tileCorners(S,L), PR=TL.tileCorners(S,R);
+  // R so verschieben, dass seine Ecke A an L's Ecke B liegt, dann einrasten
+  R={...R, x:PL[1].x-PR[0].x+S.joint, y:PL[1].y-PR[0].y};
+  const r=TL.snapGroup([TL.tileCorners(S,R)], TL.snapTargets(S,[TL.tileCorners(S,L)],null,[]), S.w);
+  if(r) R=TL.moveItem(R,r.m);
+  // Paar mittig unter die Bildmitte
+  const all=[...TL.tileCorners(S,L),...TL.tileCorners(S,R)];
+  const mx=(Math.min(...all.map(q=>q.x))+Math.max(...all.map(q=>q.x)))/2;
+  const my=(Math.min(...all.map(q=>q.y))+Math.max(...all.map(q=>q.y)))/2;
+  [L,R]=[L,R].map(it=>({...it, x:it.x+p.x-mx, y:it.y+p.y-my}));
+  snapshot();
+  T.items.push(L,R);
+  TS.sel=new Set([L.id,R.id]); TS.dup=null; TS.lastRot=L.rot; TS.axis=null;
+  setHint('Chevron-Paar gelegt — an eine Wand ziehen, dann duplizieren und weiterstrecken.');
+  tilesSave();
+}
+// Neue Fliese mit Mittelpunkt an p (Rahmen); rastet sofort ein, wenn nah.
+function tilesAdd(kind, p){
+  const K=tilesCtx(); if(!K) return;
+  const T=tilesData();
+  if(!p) p=TL.toLocal(K.F, toWorld(cv.width/2, cv.height/2));
+  const o=tileCentreOffset(kind, TS.lastRot);
+  snapshot();
+  let it={id:T.seq++, kind, x:p.x-o.x, y:p.y-o.y, rot:TS.lastRot};
+  it=snapMoving(K,[it],false)[0]; TS.lines=[];
+  T.items.push(it);
+  TS.sel=new Set([it.id]); TS.dup=null; TS.axis=null;
+  tilesSave();
+}
+function tilesRotate(deg){
+  const S=selItems(), c=selCentre(); if(!S.length) return;
+  snapshot();
+  applyItems(S.map(it=>TL.moveItem(it,{dth:deg, px:c.x, py:c.y, dx:0, dy:0})));
+  TS.lastRot=selItems()[0].rot;
+  tilesSave();
+}
+// Spiegeln: L<->R an Ort und Stelle (Mittelpunkt bleibt liegen).
+function tilesFlip(){
+  const S=selItems(); if(!S.length) return;
+  snapshot();
+  applyItems(S.map(it=>{
+    const k=it.kind==='L'?'R':'L', a=tileCentreOffset(it.kind,it.rot), b=tileCentreOffset(k,it.rot);
+    return {...it, kind:k, x:it.x+a.x-b.x, y:it.y+a.y-b.y};
+  }));
+  tilesSave();
+}
+function tilesDelete(){
+  if(!TS.sel.size) return;
+  snapshot();
+  const T=tilesData(); T.items=T.items.filter(it=>!TS.sel.has(it.id));
+  TS.sel.clear(); TS.dup=null;
+  tilesSave();
+}
+function tilesNudge(dx,dy){
+  const S=selItems(); if(!S.length) return;
+  snapshot();
+  applyItems(S.map(it=>({...it, x:it.x+dx, y:it.y+dy})));
+  tilesSave();
+}
+// Standardversatz fuers erste Duplikat: die naechste Fliese in derselben
+// Chevron-Spalte - quer zur Laengskante um Breite+Fuge, laengs so weit, dass
+// die Schraegkanten eine durchgehende Linie bilden.
+function defaultVec(it){
+  const S=tilesData().spec, k=1/Math.tan(S.angle*TD2R), h=S.w+S.joint;
+  const lx=(it.kind==='R'?-k:k)*h, ly=h, c=Math.cos(it.rot*TD2R), s=Math.sin(it.rot*TD2R);
+  return {x:lx*c-ly*s, y:lx*s+ly*c};
+}
+function tilesDup(){
+  const S=selItems(); if(!S.length){ setHint('Erst Fliesen auswählen.'); return; }
+  const T=tilesData(), v=TS.vec||defaultVec(S[0]);
+  snapshot();
+  const copies=S.map(it=>({...it, id:T.seq++, x:it.x+v.x, y:it.y+v.y}));
+  T.items.push(...copies);
+  TS.dup={src:S.map(it=>it.id), dst:copies.map(it=>it.id)};
+  TS.sel=new Set(TS.dup.dst);
+  // Der Versatz gilt sofort als Muster - passt er, kann direkt
+  // weitergestreckt werden; wird das Duplikat verschoben, gilt der neue.
+  TS.vec=v;
+  setHint('Duplikat liegt eine Reihe weiter — passt es, „Weiterstrecken“; sonst an seinen Platz ziehen.');
+  tilesSave();
+}
+function tilesExtend(){
+  const K=tilesCtx(), S=selItems();
+  if(!K || !S.length){ setHint('Erst die Gruppe auswählen, die sich wiederholen soll.'); return; }
+  if(!TS.vec){ setHint('Erst duplizieren und das Duplikat an seinen Platz ziehen — daraus entsteht die Richtung.'); return; }
+  const T=tilesData();
+  const key=t=>`${t.kind}|${Math.round(t.x)}|${Math.round(t.y)}|${Math.round(TL.normDeg(t.rot)*100)%36000}`;
+  let cand=TL.extendItems(T.spec, S, TS.vec, K.ring);
+  // Zweite Richtung: war schon einmal in eine ANDERE Richtung gestreckt
+  // worden, ist das ein Gitter. Die Ausgangsgruppe ist dann eine Reihe, die
+  // im Raum zu Recht an einer Wand endet - seitlich kopiert erreichte sie
+  // Raumteile jenseits einer Stufe nie. Also das Ganze zusaetzlich entlang
+  // der ersten Richtung ueber das Raumrechteck fuellen.
+  const ax=TS.axis;
+  if(ax && Math.abs(ax.x*TS.vec.y-ax.y*TS.vec.x) > 0.2*Math.hypot(ax.x,ax.y)*Math.hypot(TS.vec.x,TS.vec.y))
+    cand=cand.concat(TL.extendItems(T.spec, S.concat(cand), ax, K.ring));
+  TS.axis=TS.vec;
+  // Kopien, die ganz ausserhalb landen, gar nicht erst anlegen; doppelte
+  // (schon liegende oder mehrfach erzeugte) nur einmal.
+  const seen=new Set(T.items.map(key)), add=[];
+  cand.forEach(n=>{
+    const k=key(n); if(seen.has(k)) return; seen.add(k);
+    if(TL.tileStatus(T.spec,n,K.ring,[]).status!=='out') add.push(n);
+  });
+  if(!add.length){ setHint('Nichts mehr zu ergänzen — die Reihe reicht schon bis zur Wand.'); return; }
+  snapshot();
+  add.forEach(a=>{ a.id=T.seq++; });
+  T.items.push(...add);
+  add.forEach(it=>TS.sel.add(it.id));
+  // Die neue, groessere Gruppe bekommt beim naechsten Duplizieren den
+  // Standardversatz, den der Nutzer dann an die naechste Reihe zieht.
+  TS.vec=null; TS.dup=null;
+  setHint(`${add.length} Fliesen ergänzt. Die ganze Reihe ist ausgewählt — duplizieren und an die nächste Reihe ziehen.`);
+  tilesSave();
+}
+function tilesKey(e){
+  const k=e.key, mod=e.ctrlKey||e.metaKey;
+  if(mod && k.toLowerCase()==='d'){ e.preventDefault(); tilesDup(); return true; }
+  if(mod && k.toLowerCase()==='a'){ e.preventDefault(); TS.sel=new Set(tilesData().items.map(it=>it.id)); render(); return true; }
+  if(mod) return false;
+  if(k==='Escape'){
+    if(TS.draft){ TS.draft=null; render(); return true; }
+    if(TS.tool!=='move'){ setTileTool('move'); return true; }
+    if(TS.sel.size){ TS.sel.clear(); render(); return true; }
+    return false;
+  }
+  if(k==='Delete'||k==='Backspace'){ e.preventDefault(); tilesDelete(); return true; }
+  if(k==='q'||k==='Q'){ tilesRotate(e.shiftKey?-1:-15); return true; }
+  if(k==='e'||k==='E'){ tilesRotate(e.shiftKey?1:15); return true; }
+  if(k==='f'||k==='F'){ tilesFlip(); return true; }
+  // Pfeile schieben im BILD (die Ansicht kann gedreht sein) - also die
+  // Bildrichtung in den Raumrahmen umrechnen. 1 mm, mit Umschalt 10 mm.
+  const arr={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]}[k];
+  if(arr && TS.sel.size){
+    e.preventDefault();
+    const K=tilesCtx(); if(!K) return true;
+    const o=TL.toLocal(K.F,toWorld(0,0)), w=TL.toLocal(K.F,toWorld(arr[0],arr[1]));
+    const d={x:w.x-o.x, y:w.y-o.y}, L=Math.hypot(d.x,d.y)||1, step=e.shiftKey?10:1;
+    tilesNudge(d.x/L*step, d.y/L*step);
+    return true;
+  }
+  return false;
+}
+function setTileTool(tool, jmode){
+  TS.tool=tool; TS.draft=null; TS.hover=null;
+  if(jmode) TS.jmode=jmode;
+  if(tool==='joint') TS.sel.clear();
+  $('tJC').setAttribute('aria-pressed', String(tool==='joint' && TS.jmode==='corner'));
+  $('tJF').setAttribute('aria-pressed', String(tool==='joint' && TS.jmode==='free'));
+  setHint(tool==='joint'
+    ? (TS.jmode==='corner' ? 'Dehnungsfuge: erste Raumecke antippen, dann die zweite.' : 'Dehnungsfuge: Anfang auf einer Wand antippen, dann das Ende.')
+    : null);
+  render();
+}
+
+// ---------- Panel ----------
+const SPEC_FIELDS=[['tW','w'],['tL','l'],['tA','angle'],['tJ','joint'],['tE','edgeGap'],['tXW','expWidth']];
+SPEC_FIELDS.forEach(([id,key])=>{
+  $(id).addEventListener('change',()=>{
+    const v=parseFloat($(id).value.replace(',','.'));
+    const T=tilesData();
+    const ok = Number.isFinite(v) && (key==='angle' ? v>=5 && v<=90 : (key==='joint'||key==='edgeGap') ? v>=0 : v>0);
+    if(!ok){ $(id).value=String(T.spec[key]).replace('.',','); setHint('Ungültiger Wert.'); return; }
+    snapshot(); T.spec[key]=v; tilesSave();
+  });
+});
+// Palette: Tippen legt die Fliese in die Bildmitte, Ziehen auf die
+// Zeichenflaeche legt sie dort ab, wo der Zeiger losgelassen wird.
+['L','R'].forEach(kind=>{
+  const b=$('tAdd'+kind);
+  b.addEventListener('pointerdown',e=>{ TS.pal={kind}; b.setPointerCapture(e.pointerId); });
+  b.addEventListener('pointerup',e=>{
+    if(!TS.pal) return;
+    TS.pal=null;
+    const r=cv.getBoundingClientRect(), br=b.getBoundingClientRect();
+    const inR=R=>e.clientX>=R.left && e.clientX<=R.right && e.clientY>=R.top && e.clientY<=R.bottom;
+    if(inR(r)){
+      const K=tilesCtx(); if(!K) return;
+      tilesAdd(kind, TL.toLocal(K.F, toWorld((e.clientX-r.left)*DPR(), (e.clientY-r.top)*DPR())));
+    } else if(inR(br)) tilesAdd(kind);
+  });
+  b.addEventListener('pointercancel',()=>{ TS.pal=null; });
+});
+$('tPair').onclick=tilesAddPair;
+$('tDup').onclick=tilesDup;
+$('tExt').onclick=tilesExtend;
+$('tRotL').onclick=()=>tilesRotate(-15);
+$('tRotR').onclick=()=>tilesRotate(15);
+$('tFlip').onclick=tilesFlip;
+$('tDel').onclick=tilesDelete;
+$('tAll').onclick=()=>{ TS.sel=new Set(tilesData().items.map(it=>it.id)); render(); };
+$('tClear').onclick=()=>{
+  const T=tilesData(); if(!T.items.length) return;
+  if(!confirm(`Alle ${T.items.length} Fliesen entfernen? (Rückgängig bleibt möglich.)`)) return;
+  snapshot(); T.items=[]; TS.sel.clear(); TS.vec=null; TS.dup=null; tilesSave();
+};
+$('tJC').onclick=()=>setTileTool(TS.tool==='joint'&&TS.jmode==='corner'?'move':'joint','corner');
+$('tJF').onclick=()=>setTileTool(TS.tool==='joint'&&TS.jmode==='free'?'move':'joint','free');
+$('tNums').onchange=()=>{ TS.showNums=$('tNums').checked; render(); };
+$('tPrint').onclick=()=>tilesPrint();
+
+function renderTilesPanel(){
+  const on=M.mode==='tiles';
+  $('tilesec').hidden=!on;
+  document.body.classList.toggle('tilesmode', on);
+  if(!on) return;
+  const K=tilesCtx(), T=tilesData();
+  SPEC_FIELDS.forEach(([id,key])=>{ if(document.activeElement!==$(id)) $(id).value=String(T.spec[key]).replace('.',','); });
+  const n=TS.sel.size;
+  $('tSelInfo').textContent = n
+    ? `${n} Fliese${n>1?'n':''} ausgewählt${TS.vec?' · Mustervektor '+fmtMm(Math.hypot(TS.vec.x,TS.vec.y))+' mm':''}`
+    : 'Fliese antippen zum Auswählen · Umschalt = mehrere · Alt beim Ziehen = ohne Einrasten';
+  ['tDup','tRotL','tRotR','tFlip','tDel'].forEach(id=>{ $(id).disabled=!n; });
+  $('tExt').disabled=!n || !TS.vec;
+  // Fugenliste nur neu bauen, wenn sich die Fugen aendern - sonst verliert
+  // ein Eingabefeld bei jedem Bild den Fokus.
+  const jk=JSON.stringify(T.joints);
+  if(jk!==TS.jointKey){
+    TS.jointKey=jk;
+    const L=$('tJList'); L.innerHTML='';
+    if(!T.joints.length) L.innerHTML='<small>Noch keine Dehnungsfuge.</small>';
+    T.joints.forEach((j,i)=>{
+      const row=document.createElement('div'); row.className='trow';
+      const len=Math.hypot(j.b.x-j.a.x, j.b.y-j.a.y);
+      row.innerHTML=`<span>DF ${i+1} · ${fmtMm(len)} mm</span>
+        <label>Breite <input inputmode="decimal" size="3" value="${String(j.width).replace('.',',')}"> mm</label>
+        <button>Löschen</button>`;
+      row.querySelector('input').onchange=ev=>{
+        const v=parseFloat(ev.target.value.replace(',','.'));
+        if(!(v>0)){ ev.target.value=String(j.width).replace('.',','); return; }
+        snapshot(); tilesData().joints.find(x=>x.id===j.id).width=v; tilesSave();
+      };
+      row.querySelector('button').onclick=()=>{ snapshot(); T.joints=T.joints.filter(x=>x.id!==j.id); tilesSave(); };
+      L.appendChild(row);
+    });
+  }
+  if(!K){ $('tStats').innerHTML='<small>Fliesen gibt es erst, wenn der Grundriss geschlossen und eingemessen ist.</small>'; return; }
+  if(TS.drag) return;
+  const s=tilesEval(K).stats;
+  const m2=v=>fmt2(v/1e6);
+  $('tStats').innerHTML=`<table class="ttab">
+    <tr><th></th><th>L</th><th>R</th><th>Σ</th></tr>
+    <tr><td>ganz</td><td>${s.L.whole}</td><td>${s.R.whole}</td><td>${s.L.whole+s.R.whole}</td></tr>
+    <tr><td>geschnitten</td><td>${s.L.cut}</td><td>${s.R.cut}</td><td>${s.L.cut+s.R.cut}</td></tr>
+    <tr><td>Fliesen</td><td>${s.L.whole+s.L.cut}</td><td>${s.R.whole+s.R.cut}</td><td><b>${s.placed}</b></td></tr>
+  </table>
+  <div>Schnittstücke: <b>${s.pieces}</b> (nummeriert)</div>
+  <div>Belegt ${m2(s.covered)} m² von ${m2(s.roomArea)} m² · offen ${m2(Math.max(0,s.roomArea-s.covered))} m²</div>
+  <div>Fliesenfläche ${m2(s.tileArea)} m² · Verschnitt ${fmt2(s.waste*100)} %</div>
+  ${s.out?`<div class="twarn">${s.out} Fliese(n) liegen ganz außerhalb. <button id="tOut" class="rowbtn">entfernen</button></div>`:''}
+  ${s.overlaps?`<div class="twarn">${s.overlaps} Überlappung(en) — rot markiert.</div>`:''}`;
+  const bo=$('tOut');
+  if(bo) bo.onclick=()=>{
+    const ev=tilesEval(K);
+    snapshot();
+    T.items=T.items.filter(it=>ev.status.get(it.id)!=='out');
+    TS.sel=new Set([...TS.sel].filter(id=>T.items.some(it=>it.id===id)));
+    tilesSave();
+  };
+}
+
+// ---------- Druck ----------
+// Ein Fenster mit A4-Seiten: Seite 1 der Gesamtplan (blattfuellend, alle
+// Schnittstuecke nummeriert), danach je Schnittstueck ein Blatt mit der
+// Fliese in Draufsicht und den Schnittmassen ab den Fliesenecken.
+const f1=v=>(Math.round(v*10)/10).toLocaleString('de-DE');
+const n2=v=>v.toFixed(2);
+function svgPoly(P, attrs){ return `<polygon points="${P.map(p=>`${n2(p.x)},${n2(p.y)}`).join(' ')}" ${attrs}/>`; }
+function svgText(x,y,t,attrs=''){ return `<text x="${n2(x)}" y="${n2(y)}" ${attrs}>${escapeHtml(t)}</text>`; }
+function svgLine(a,b,attrs){ return `<line x1="${n2(a.x)}" y1="${n2(a.y)}" x2="${n2(b.x)}" y2="${n2(b.y)}" ${attrs}/>`; }
+const CORNER_NAMES=['A','B','C','D'];
+
+// Startfliese: die erste gelegte, im Raum liegende Fliese. Ihre Ecke A wird
+// zu zwei nicht parallelen Waenden bemasst - von dort legt der Fliesenleger los.
+function refDims(K, T, ev){
+  const it=T.items.find(x=>ev.status.get(x.id)!=='out');
+  if(!it) return null;
+  const A=TL.tileCorners(T.spec,it)[0];
+  const cands=TL.edgesOf(K.ring).map(e=>{
+    const t=(A.x-e.a.x)*e.d.x+(A.y-e.a.y)*e.d.y, L=Math.hypot(e.b.x-e.a.x,e.b.y-e.a.y);
+    const foot={x:e.a.x+e.d.x*t, y:e.a.y+e.d.y*t};
+    return {e, foot, dist:Math.hypot(A.x-foot.x, A.y-foot.y), inSeg:t>=-1 && t<=L+1};
+  }).filter(c=>c.inSeg).sort((a,b)=>a.dist-b.dist);
+  if(!cands.length) return {it, A, dims:[]};
+  const first=cands[0];
+  const second=cands.find(c=>Math.abs(c.e.d.x*first.e.d.x+c.e.d.y*first.e.d.y)<Math.cos(30*TD2R));
+  return {it, A, dims:[first, second].filter(Boolean)};
+}
+
+function overviewSvg(K, T, ev, L, ox, oy, opts={}){
+  const pg=p=>{ const q=TL.printPt(L,p); return {x:q.x+ox, y:q.y+oy}; };
+  const S=T.spec, out=[], id=opts.id||'o';
+  const ringP=K.ring.map(pg);
+  out.push(`<defs><clipPath id="room${id}">${svgPoly(ringP,'')}</clipPath>
+    <pattern id="hat${id}" width="1.6" height="1.6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <line x1="0" y1="0" x2="0" y2="1.6" stroke="#000" stroke-width="0.25" stroke-opacity=".45"/></pattern></defs>`);
+  out.push(svgPoly(ringP,'fill="#fff" stroke="none"'));
+  out.push(`<g clip-path="url(#room${id})">`);
+  T.items.forEach(it=>{
+    const st=ev.status.get(it.id); if(st==='out') return;
+    const P=TL.tileCorners(S,it).map(pg);
+    out.push(svgPoly(P, `fill="${it.kind==='L'?'#ececec':'#c8c8c8'}" stroke="#333" stroke-width="${opts.thin?0.08:0.15}"`));
+    if(st==='cut') out.push(svgPoly(P, `fill="url(#hat${id})" stroke="none"`));
+  });
+  T.joints.forEach(j=>out.push(svgPoly(TL.jointStrip(j).map(pg),'fill="#000"')));
+  out.push('</g>');
+  out.push(svgPoly(ringP,`fill="none" stroke="#000" stroke-width="${opts.thin?0.35:0.7}"`));
+  if(opts.highlightPiece) out.push(svgPoly(opts.highlightPiece.map(pg),'fill="#c00" fill-opacity=".8" stroke="#000" stroke-width="0.3"'));
+  if(opts.thin) return out.join('');
+  // Wandmasse und Eckbuchstaben
+  const nR=TL.edgesOf(ringP);
+  TL.edgesOf(K.ring).forEach((e,i)=>{
+    const a=pg(e.a), b=pg(e.b), n=nR[i].n;
+    const m={x:(a.x+b.x)/2+n.x*3.2, y:(a.y+b.y)/2+n.y*3.2};
+    let ang=Math.atan2(b.y-a.y,b.x-a.x)/TD2R; if(ang>90) ang-=180; if(ang<-90) ang+=180;
+    out.push(svgText(m.x,m.y,fmtMm(Math.hypot(e.b.x-e.a.x,e.b.y-e.a.y)),
+      `font-size="2.6" text-anchor="middle" dominant-baseline="middle" transform="rotate(${n2(ang)} ${n2(m.x)} ${n2(m.y)})"`));
+  });
+  K.ringW.forEach((pw,i)=>{
+    const q=ringP[i], n1=nR[(i+nR.length-1)%nR.length].n, n2_=nR[i].n;
+    const n={x:n1.x+n2_.x, y:n1.y+n2_.y}, l=Math.hypot(n.x,n.y)||1;
+    out.push(svgText(q.x+n.x/l*3.5, q.y+n.y/l*3.5, pw.id||'', 'font-size="3" font-weight="700" text-anchor="middle" dominant-baseline="middle"'));
+  });
+  // Dehnungsfugen: Lage der Enden ab der naechsten Ecke
+  T.joints.forEach((j,k)=>{
+    const a=pg(j.a), b=pg(j.b), m={x:(a.x+b.x)/2, y:(a.y+b.y)/2};
+    const nm=d=>d ? `${K.ringW[d.corner].id||'?'}${d.dist?` + ${fmtMm(d.dist)}`:''}` : '?';
+    out.push(svgText(m.x+1.5, m.y-1.5, `DF${k+1} · ${f1(j.width)} mm · ${nm(TL.endDim(K.ring,j.a))} → ${nm(TL.endDim(K.ring,j.b))}`,
+      'font-size="2.3" stroke="#fff" stroke-width="0.6" paint-order="stroke"'));
+  });
+  // Schnittnummern
+  ev.cuts.forEach(c=>{
+    const q=pg(c.c), r=c.no>99?2.3:c.no>9?1.9:1.6;
+    out.push(`<circle cx="${n2(q.x)}" cy="${n2(q.y)}" r="${r}" fill="#fff" stroke="#000" stroke-width="0.2"/>`);
+    out.push(svgText(q.x,q.y+0.05,String(c.no),'font-size="2" font-weight="700" text-anchor="middle" dominant-baseline="middle"'));
+  });
+  // Startfliese
+  const ref=refDims(K,T,ev);
+  if(ref){
+    out.push(svgPoly(TL.tileCorners(S,ref.it).map(pg),'fill="none" stroke="#000" stroke-width="0.6"'));
+    const A=pg(ref.A);
+    out.push(`<circle cx="${n2(A.x)}" cy="${n2(A.y)}" r="0.9" fill="#000"/>`);
+    ref.dims.forEach(d=>{
+      const f=pg(d.foot);
+      out.push(svgLine(A,f,'stroke="#000" stroke-width="0.25" marker-end="url(#arr)" stroke-dasharray="1 0.6"'));
+      out.push(svgText((A.x+f.x)/2+1, (A.y+f.y)/2-1, fmtMm(d.dist), 'font-size="2.6" font-weight="700" stroke="#fff" stroke-width="0.7" paint-order="stroke"'));
+    });
+    out.push(svgText(A.x+1.2, A.y+3.2, 'Start (Ecke A)', 'font-size="2.2" stroke="#fff" stroke-width="0.6" paint-order="stroke"'));
+  }
+  return out.join('');
+}
+
+function pieceSheet(K, T, ev, c, total, head){
+  const S=T.spec, D=TL.pieceDims(S, c.item.kind, c.tilePoly), sh=D.shape;
+  const xs=sh.map(p=>p.x), ys=sh.map(p=>p.y);
+  const x0=Math.min(...xs), y0=Math.min(...ys), bw=Math.max(...xs)-x0, bh=Math.max(...ys)-y0;
+  const sc=Math.min(160/bw, 80/bh), ox=25+(160-bw*sc)/2, oy=52;
+  // Fliesenrahmen hat Ecke A unten links, y nach oben - aufs Blatt
+  // gespiegelt, damit die Fliese so liegt, wie der Fliesenleger sie sieht.
+  const tp=p=>({x:ox+(p.x-x0)*sc, y:oy+(bh-(p.y-y0))*sc});
+  const out=[];
+  out.push(svgText(15,18,`Schnittstück Nr. ${c.no}`,'font-size="9" font-weight="700"'));
+  out.push(svgText(15,26,`${c.item.kind==='L'?'L-Fliese':'R-Fliese'} · ${fmtMm(S.w)} × ${fmtMm(S.l)} mm · Winkel ${f1(S.angle)}° · Blatt ${c.no} von ${total}`,'font-size="3.6"'));
+  out.push(svgText(15,32,`${head} · Draufsicht auf die Sichtseite · Maße in mm ab der genannten Fliesenecke entlang der Kante`,'font-size="2.8" fill="#444"'));
+  out.push(`<defs><pattern id="ph" width="2" height="2" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="2" stroke="#000" stroke-width="0.3" stroke-opacity=".35"/></pattern>
+    <marker id="tk" viewBox="-2 -2 4 4" markerWidth="4" markerHeight="4" orient="auto"><line x1="0" y1="-1.5" x2="0" y2="1.5" stroke="#c00" stroke-width="0.6"/></marker></defs>`);
+  const shP=sh.map(tp), pcP=c.tilePoly.map(tp);
+  out.push(svgPoly(shP,'fill="url(#ph)" stroke="#000" stroke-width="0.3" stroke-dasharray="2 1"'));
+  out.push(svgPoly(pcP,'fill="#e8e8e8" stroke="#000" stroke-width="0.7"'));
+  const cx=shP.reduce((s,p)=>s+p.x,0)/4, cy=shP.reduce((s,p)=>s+p.y,0)/4;
+  shP.forEach((p,i)=>{
+    const d={x:p.x-cx, y:p.y-cy}, l=Math.hypot(d.x,d.y)||1;
+    out.push(svgText(p.x+d.x/l*5, p.y+d.y/l*5, CORNER_NAMES[i], 'font-size="5" font-weight="700" text-anchor="middle" dominant-baseline="middle"'));
+  });
+  out.push(svgText(15,oy+bh*sc+12,'Schraffiert = Verschnitt · grau = verlegtes Stück','font-size="2.8" fill="#444"'));
+  // Schnittpunkte auf den Fliesenkanten, bemasst ab der naechsten Ecke
+  const rows=[];
+  // Mehrere Schnittpunkte auf derselben Kante: Masslinien gestaffelt nach
+  // aussen, die kuerzeste innen - sonst liegen die Zahlen uebereinander.
+  const perEdge={};
+  D.marks.slice().sort((a,b)=>a.dist-b.dist).forEach(m=>{ const k=m.edge; m.lvl=perEdge[k]=(perEdge[k]==null?0:perEdge[k]+1); });
+  D.marks.forEach(m=>{
+    const p=tp(m.p), a=tp(sh[m.corner]);
+    const e={x:p.x-a.x, y:p.y-a.y}, el=Math.hypot(e.x,e.y)||1;
+    const mid={x:(p.x+a.x)/2-cx, y:(p.y+a.y)/2-cy};
+    let n={x:-e.y/el, y:e.x/el}; if(n.x*mid.x+n.y*mid.y<0) n={x:-n.x,y:-n.y};
+    const o=7+m.lvl*7, A2={x:a.x+n.x*o, y:a.y+n.y*o}, P2={x:p.x+n.x*o, y:p.y+n.y*o};
+    out.push(`<circle cx="${n2(p.x)}" cy="${n2(p.y)}" r="1" fill="#c00"/>`);
+    out.push(svgLine(A2,P2,'stroke="#c00" stroke-width="0.3" marker-start="url(#tk)" marker-end="url(#tk)"'));
+    out.push(svgLine(a,A2,'stroke="#c00" stroke-width="0.15"'));
+    out.push(svgLine(p,P2,'stroke="#c00" stroke-width="0.15"'));
+    const M2={x:(A2.x+P2.x)/2+n.x*2.8, y:(A2.y+P2.y)/2+n.y*2.8};
+    out.push(svgText(M2.x,M2.y,fmtMm(m.dist),'font-size="3.4" font-weight="700" fill="#c00" text-anchor="middle" dominant-baseline="middle" stroke="#fff" stroke-width="0.8" paint-order="stroke"'));
+    rows.push(`Kante ${CORNER_NAMES[m.edge]}–${CORNER_NAMES[(m.edge+1)%4]}: ${fmtMm(m.dist)} mm ab Ecke ${CORNER_NAMES[m.corner]}`);
+  });
+  const cutEdges=D.edges.filter(e=>e.cut);
+  cutEdges.forEach(e=>{
+    const a=tp(e.a), b=tp(e.b), m={x:(a.x+b.x)/2, y:(a.y+b.y)/2};
+    const d={x:m.x-cx, y:m.y-cy}, l=Math.hypot(d.x,d.y)||1;
+    out.push(svgText(m.x-d.x/l*4, m.y-d.y/l*4, `✂ ${fmtMm(e.len)}`,'font-size="2.8" text-anchor="middle" dominant-baseline="middle" fill="#333" stroke="#fff" stroke-width="0.6" paint-order="stroke"'));
+  });
+  let y=oy+bh*sc+24;
+  out.push(svgText(15,y,'Anreißen','font-size="4" font-weight="700"')); y+=6;
+  if(!rows.length) rows.push('Schnitt läuft nur durch Ecken bzw. Innenpunkte — Maße siehe Zeichnung.');
+  rows.forEach(r=>{ out.push(svgText(18,y,'• '+r,'font-size="3.4"')); y+=5.2; });
+  out.push(svgText(18,y,`• Schnittkanten ${cutEdges.map(e=>fmtMm(e.len)).join(' / ')} mm · Stückfläche ${fmt2(D.area/1e4)} dm²`,'font-size="3.4"')); y+=10;
+  // Lage im Raum, klein
+  out.push(svgText(15,y,'Lage im Raum','font-size="4" font-weight="700"')); y+=4;
+  const L=TL.printLayout(K.ring,[{w:180,h:Math.max(40,285-y),landscape:false}]);
+  out.push(overviewSvg(K,T,ev,L,15+(180-L.w*L.scale)/2,y,{thin:true,id:'p'+c.no,highlightPiece:c.poly}));
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 210 297" width="210mm" height="297mm">${out.join('')}</svg>`;
+}
+
+function tilesPrint(){
+  const html=tilesPrintHtml();
+  if(!html) return;
+  const w=window.open('', '_blank');
+  if(!w){ setHint('Druckfenster wurde blockiert — Pop-ups für diese Seite erlauben.'); return; }
+  w.document.open(); w.document.write(html); w.document.close();
+}
+function tilesPrintHtml(){
+  const K=tilesCtx(); if(!K){ setHint('Erst den Grundriss schließen und einmessen.'); return null; }
+  const T=tilesData();
+  if(!T.items.length){ setHint('Noch keine Fliesen gelegt.'); return null; }
+  TS.cacheKey='';
+  const ev=tilesEval(K), s=ev.stats, S=T.spec;
+  // A4 hoch 210x297 / quer 297x210: 10 mm Rand, 40 mm Fusszeile.
+  const L=TL.printLayout(K.ring,[{w:190,h:237,landscape:false},{w:277,h:150,landscape:true}]);
+  const land=L.box.landscape, PW=land?297:210, PH=land?210:297;
+  const ox=10+(L.box.w-L.w*L.scale)/2, oy=10+(L.box.h-L.h*L.scale)/2;
+  const head=`${currentRoomName} · ${new Date().toLocaleDateString('de-DE')}`;
+  const bar=1000*L.scale, fy=PH-38;
+  const legend=[
+    `<rect x="10" y="${fy}" width="${PW-20}" height="30" fill="none" stroke="#000" stroke-width="0.2"/>`,
+    svgText(13,fy+6,`Fliesenplan · ${head}`,'font-size="4" font-weight="700"'),
+    svgText(13,fy+12,`Chevron ${fmtMm(S.w)} × ${fmtMm(S.l)} mm · Winkel ${f1(S.angle)}° · Fuge ${f1(S.joint)} mm · Randfuge ${f1(S.edgeGap)} mm · Maßstab ≈ 1:${f1(1/L.scale)}`,'font-size="2.8"'),
+    svgText(13,fy+17.5,`Fliesen ${s.placed} (L ${s.L.whole+s.L.cut} · R ${s.R.whole+s.R.cut}) · ganz ${s.L.whole+s.R.whole} · geschnitten ${s.L.cut+s.R.cut} → ${s.pieces} nummerierte Schnittstücke · Verschnitt ${fmt2(s.waste*100)} %`,'font-size="2.8"'),
+    svgText(13,fy+23,`Belegt ${fmt2(s.covered/1e6)} m² · Dehnungsfugen ${T.joints.length} · Maße in mm · Ecke A der Startfliese (fett) ist zu den Wänden bemaßt`,'font-size="2.8"'),
+    // Legende rechts in Zeile 1, Massstabsbalken rechts in Zeile 2 - die
+    // Zeilen 3 und 4 laufen ueber die volle Breite.
+    `<rect x="${PW-62}" y="${fy+3}" width="4" height="3" fill="#ececec" stroke="#333" stroke-width="0.15"/>`, svgText(PW-57,fy+5.6,'L','font-size="2.6"'),
+    `<rect x="${PW-52}" y="${fy+3}" width="4" height="3" fill="#c8c8c8" stroke="#333" stroke-width="0.15"/>`, svgText(PW-47,fy+5.6,'R','font-size="2.6"'),
+    `<rect x="${PW-42}" y="${fy+3}" width="4" height="3" fill="url(#hato)" stroke="#333" stroke-width="0.15"/>`, svgText(PW-37,fy+5.6,'Schnitt','font-size="2.6"'),
+    svgLine({x:PW-62,y:fy+10},{x:PW-62+bar,y:fy+10},'stroke="#000" stroke-width="0.8"'),
+    svgText(PW-62,fy+13.5,'0','font-size="2.4"'), svgText(PW-62+bar,fy+13.5,'1 m','font-size="2.4" text-anchor="end"'),
+  ].join('');
+  const overview=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PW} ${PH}" width="${PW}mm" height="${PH}mm">
+    <defs><marker id="arr" viewBox="0 -2 4 4" refX="4" markerWidth="4" markerHeight="4" orient="auto"><path d="M0 -1.5 L4 0 L0 1.5z" fill="#000"/></marker></defs>
+    ${overviewSvg(K,T,ev,L,ox,oy)}${legend}</svg>`;
+  const sheets=ev.cuts.map(c=>`<section class="sheet p">${pieceSheet(K,T,ev,c,ev.cuts.length,head)}</section>`).join('');
+  const html=`<!doctype html><html lang="de"><head><meta charset="utf-8"><title>Fliesenplan ${escapeHtml(currentRoomName)}</title>
+<style>
+  @page p{size:A4 portrait;margin:0} @page l{size:A4 landscape;margin:0}
+  html,body{margin:0;background:#888;font-family:system-ui,sans-serif}
+  .sheet{background:#fff;margin:8mm auto;box-shadow:0 2px 8px rgba(0,0,0,.3);break-after:page;overflow:hidden}
+  .sheet:last-child{break-after:auto}
+  .sheet.p{page:p;width:210mm;height:297mm} .sheet.l{page:l;width:297mm;height:210mm}
+  .sheet svg{display:block;font-family:system-ui,sans-serif}
+  .bar{position:sticky;top:0;background:#222;color:#fff;padding:8px 12px;display:flex;gap:12px;align-items:center;z-index:2}
+  .bar button{font:inherit;padding:6px 12px}
+  @media print{ html,body{background:#fff} .sheet{margin:0;box-shadow:none} .bar{display:none} }
+</style></head><body>
+<div class="bar"><b>Fliesenplan</b><span>1 Übersicht + ${ev.cuts.length} Schnittblätter · Drucken → „Als PDF sichern“ · Skalierung 100 %</span><button onclick="print()">Drucken</button></div>
+<section class="sheet ${land?'l':'p'}">${overview}</section>${sheets}
+</body></html>`;
+  return html;
+}
+// Erstes Bild nach dem Boot: jetzt kennt renderPanel den Fliesen-Knopf.
+render();
 </script>
 
 <script id="imu">
@@ -8085,7 +9683,7 @@ function fertig(a,b){
     stop('Ergebnis unplausibel ('+m.toFixed(2)+' m) — verworfen.','bad'); return;
   }
   const inp=$('wpopVal');
-  inp.value=fmtM(m*1000);
+  inp.value=fmtLen(m*1000);
   inp.select?.();
   // Merken, WELCHER Text aus der Laufmessung stammt: bleibt er unveraendert
   // stehen, geht der Wert mit SIGMA_LAUF statt mit Laser-Genauigkeit in den
@@ -8096,7 +9694,7 @@ function fertig(a,b){
   // also ist alles, was hier ueber null steht, aufgelaufener Fehler. Grosse
   // Werte heissen, dass der Aufprall bei dieser Abtastrate nicht sauber
   // erfasst wurde - dann ist die Zahl darueber nichts wert.
-  stop('Schätzung '+fmtM(m*1000)+' m in '+(b-a).toFixed(1)+' s bei '+hz.toFixed(0)
+  stop('Schätzung '+fmtLenU(m*1000)+' in '+(b-a).toFixed(1)+' s bei '+hz.toFixed(0)
     +' Hz, Rest '+Math.hypot(...r.v).toFixed(2)+' m/s — mit dem Laser überschreiben.');
 }
 
@@ -8577,35 +10175,42 @@ globalThis.selfChecks=function(){
     chk('wallPolygon: geschlossener Zug -> 6 Ecken', poly && poly.length===6);
     chk('pointInPoly: Punkt im schmalen Schenkel', poly && C.pointInPoly({x:6000,y:1000},poly));
     chk('pointInPoly: Punkt im ausgesparten Bereich', poly && !C.pointInPoly({x:6000,y:4000},poly));
-    chk('segInPoly: C-F verlaesst den Raum -> unzulaessig',
-       poly && !C.segInPoly({x:8000,y:2000},{x:0,y:5000},poly));
-    chk('segInPoly: A-E bleibt im Raum -> zulaessig',
-       poly && C.segInPoly({x:0,y:0},{x:3000,y:5000},poly));
     chk('wallPolygon: offener Zug -> null',
        C.wallPolygon(L,[['A','B'],['B','C'],['C','D']])===null);
     chk('wallPolygon: Knotengrad ungleich 2 -> null',
        C.wallPolygon(L,walls.concat([['A','D']]))===null);
   }
   // --- pairMeasurable: Waende sind immer messbar, echte Diagonalen bleiben
-  // gefiltert (Review-Finding 3). segInPoly ist fuer Kanten, die auf dem
-  // Polygonrand LIEGEN, undefiniert: von den 6 Waenden des Test-L liefert
-  // segInPoly nur fuer A-B und F-A "messbar", fuer die anderen vier
-  // faelschlich "nicht messbar" (geprueft unten) - pairMeasurable darf sich
-  // fuer Waende darauf nicht verlassen, muss aber fuer echte Diagonalen wie
-  // C-F weiterhin genau das leisten, was segInPoly dort richtig beantwortet.
+  // gefiltert (Review-Finding 3). Die beiden Haelften des Tests sind die
+  // beiden Fragen, die pairMeasurable stellt: steht eine Wand im Weg (C-F),
+  // und liegt die kreuzungsfreie Strecke ueberhaupt drinnen (C-E).
   {
     const L=[{id:'A',x:0,y:0},{id:'B',x:8000,y:0},{id:'C',x:8000,y:2000},
              {id:'D',x:3000,y:2000},{id:'E',x:3000,y:5000},{id:'F',x:0,y:5000}];
     const walls=[['A','B'],['B','C'],['C','D'],['D','E'],['E','F'],['F','A']];
     const poly=C.wallPolygon(L,walls);
-    chk('pairMeasurable: segInPoly ist auf Waenden roh unzuverlaessig (Beleg fuer die Notwendigkeit des Fixes)',
-       poly && C.segInPoly(L[0],L[1],poly)===true && C.segInPoly(L[1],L[2],poly)===false);
     walls.forEach(([a,b])=>chk(`pairMeasurable: Wand ${a}-${b} ist messbar`,
        poly && C.pairMeasurable(L,walls,poly,a,b)));
-    chk('pairMeasurable: C-F verlaesst den Raum -> weiterhin nicht messbar',
+    chk('pairMeasurable: C-F quert Wand D-E -> nicht messbar',
        poly && !C.pairMeasurable(L,walls,poly,'C','F'));
+    chk('pairMeasurable: C-E kreuzt keine Wand, laeuft aber aussen herum -> nicht messbar',
+       poly && !C.pairMeasurable(L,walls,poly,'C','E'));
     chk('pairMeasurable: A-E bleibt messbar (Kontrolle: gueltige Diagonale)',
        poly && C.pairMeasurable(L,walls,poly,'A','E'));
+    // Ohne Polygon (offener Zug) traegt der Schnitttest allein - frueher fiel
+    // der Filter hier komplett aus und schlug C-F vor.
+    const offen=[['A','B'],['B','C'],['C','D'],['D','E'],['E','F']];
+    chk('pairMeasurable: offener Zug -> C-F bleibt am Wandschnitt haengen',
+       C.wallPolygon(L,offen)===null && !C.pairMeasurable(L,offen,null,'C','F'));
+    // Der Fall aus dem Raum vom 23.8.2026: die Strecke schneidet die Wand so
+    // flach, dass von 32 gleichmaessigen Stuetzpunkten keiner ausserhalb lag.
+    // Der Segmentschnitt sieht ihn unabhaengig von der Abtastung.
+    {
+      const flach=[{id:'A',x:0,y:0},{id:'C',x:10000,y:60},
+                   {id:'P',x:4000,y:-30},{id:'Q',x:4000,y:30}];
+      chk('pairMeasurable: flacher, knapper Wandschnitt faellt auf (32-Stuetzpunkt-Bug)',
+         !C.pairMeasurable(flach, [['P','Q']], null, 'A', 'C'));
+    }
   }
   // --- Waende duerfen sich nicht kreuzen (Task 11) ---
   {
@@ -8673,7 +10278,7 @@ globalThis.selfChecks=function(){
     chk('suggest: genau 3 Vorschlaege fuer Bestimmtheit',
        s.filter(x=>x.why==='bestimmt').length===3);
     chk('suggest: kein Vorschlag verlaesst den Raum',
-       s.length>0 && s.every(x=>C.segInPoly(L[I[x.a]],L[I[x.b]],C.wallPolygon(L,walls))));
+       s.length>0 && s.every(x=>C.pairMeasurable(L,walls,C.wallPolygon(L,walls),x.a,x.b)));
     chk('suggest: C-F wird nie vorgeschlagen',
        s.length>0 && !s.some(x=>[x.a,x.b].sort().join('')==='CF'));
     chk('suggest: Pruefbarkeitsphase ist gedeckelt',
@@ -9421,6 +11026,41 @@ globalThis.selfChecks=function(){
              return !!u&&!!u2 && u.every((p,i)=>Math.abs(p.x-u2[i].x)<1e-9 && Math.abs(p.y-u2[i].y)<1e-9); })());
     chk('entwirren: offener Zug -> null',
       globalThis.untangle(bow.map(p=>({...p})), [['A','B'],['B','C']], meas1, 8, 1)===null);
+    // Spiegelblindheit. Der Kandidat "regelmaessiges Polygon" in untangle legt
+    // die Ecken IMMER gegen den Uhrzeigersinn hin - ein Raum, der andersherum
+    // gezeichnet wurde, kam deshalb seitenverkehrt zurueck (am echten Raum vom
+    // 23.8.2026 in 40 von 40 Laeufen, hier am kleinen L nachgebaut). Geprueft
+    // wird gegen die UNGEKREUZTE Vorlage: nur die hat einen Umlaufsinn.
+    {
+      const sinn=P=>{ const r=C.wallPolygonRing(P, LW);
+        if(!r) return 0;
+        let a=0; for(let i=0,j=r.length-1;i<r.length;j=i++) a+=r[j].x*r[i].y-r[i].x*r[j].y;
+        return Math.sign(a); };
+      const LW=[['A','B'],['B','C'],['C','D'],['D','E'],['E','F'],['F','A']];
+      const glatt=[{id:'A',x:0,y:0},{id:'B',x:8000,y:0},{id:'C',x:8000,y:2000},
+                   {id:'D',x:3000,y:2000},{id:'E',x:3000,y:5000},{id:'F',x:0,y:5000}];
+      // Beide Umlaufrichtungen durchspielen - der Fehler trat nur in EINER auf.
+      [['wie gezeichnet', glatt], ['andersherum gezeichnet', glatt.map(p=>({...p,x:-p.x}))]]
+        .forEach(([wie, vorlage])=>{
+          const VI=C.idx(vorlage);
+          const m=[...LW,['A','C'],['A','D'],['A','E']].map(([a,b])=>
+            ({a, b, d:C.dist(vorlage[VI[a]],vorlage[VI[b]]), sigma:5, on:true}));
+          // verheddern: C und D vertauschen
+          const wirr=vorlage.map(p=>({...p}));
+          const ci=wirr.findIndex(p=>p.id==='C'), di=wirr.findIndex(p=>p.id==='D');
+          [wirr[ci].x,wirr[di].x]=[wirr[di].x,wirr[ci].x];
+          [wirr[ci].y,wirr[di].y]=[wirr[di].y,wirr[ci].y];
+          let gespiegelt=0, geloest=0;
+          for(let seed=1;seed<=8;seed++){
+            const u=globalThis.untangle(wirr.map(p=>({...p})), LW, m, 24, seed);
+            if(!u) continue;
+            geloest++;
+            if(sinn(u)!==sinn(vorlage)) gespiegelt++;
+          }
+          chk(`entwirren: ${wie} -> Haendigkeit bleibt (${geloest} Loesungen)`,
+            geloest>0 && gespiegelt===0);
+        });
+    }
   }
   // --- Wandansichten: Hoehe an der Ecke, Wandflaeche, Oeffnungen ---
   {
@@ -9546,6 +11186,23 @@ globalThis.selfChecks=function(){
                return streif<steil && streif>=0; })());
       chk('abwicklung: gedeckelt bei 1',
         near(uf({x:0,y:0},{x:99999,y:0},2500), 1, 1e-12));
+      chk('abwicklung: Schatten faellt vom Fokus weg',
+        (()=>{ const d=globalThis.unfoldDir({x:1000,y:0},{x:2000,y:1500});
+               return d.x<0 && d.y<0 && near(Math.hypot(d.x,d.y),1,1e-12); })());
+      chk('abwicklung: Auslenkung gedeckelt bei einem Drittel der Hoehe',
+        (()=>{ const b={x:2000,y:0}, d=globalThis.unfoldDir(b,{x:2000,y:1500});
+               const p=globalThis.unfoldPoint(b, d, 2400, 1);
+               return near(Math.hypot(p.x-b.x,p.y-b.y), 800, 1e-9); })());
+      chk('abwicklung: Decken- bleibt parallel zur Bodenkante',
+        (()=>{ const A={x:0,y:0}, B={x:4000,y:0}, fok={x:1200,y:1500};
+               const d=globalThis.unfoldDir({x:2000,y:0}, fok);
+               const up=globalThis.unfoldPoint;
+               // beide Ecken um denselben Vektor versetzt -> Parallelogramm
+               const oa=up(A,d,2400,1), ob=up(B,d,2400,1);
+               return near(oa.x-A.x, ob.x-B.x, 1e-9) && near(oa.y-A.y, ob.y-B.y, 1e-9); })());
+      chk('abwicklung: Fokus genau auf der Wandmitte -> Aussennormale rettet die Richtung',
+        (()=>{ const d=globalThis.unfoldDir({x:2000,y:0},{x:2000,y:0},{x:0,y:-1});
+               return near(d.x,0,1e-12) && near(d.y,-1,1e-12); })());
       chk('abwicklung: Aussennormale zeigt aus dem Raum',
         (()=>{ const C2=globalThis.CORE, poly=C2.wallPolygon(R,W);
                return W.every(([a,b])=>{
@@ -9713,6 +11370,109 @@ globalThis.selfChecks=function(){
         (()=>{ const kante=ecke.map(p=>p.id==='B'?{...p,y:-299.9}:p);
                const rr=dmp(kante,w2,'B',0,-400,soft);
                return Math.abs(rr.dy) >= 400*0.05; })());
+    }
+  }
+  // --- Fliesen (Chevron) ---
+  {
+    const T=globalThis.TILES, S={...T.TILE_DEF};
+    const ring=[{x:0,y:0},{x:4000,y:0},{x:4000,y:3000},{x:0,y:3000}];
+    const area=P=>Math.abs(T.polyArea(P));
+    chk('fliesen: Fläche = Breite × Länge',
+      near(area(T.tileCorners(S,{kind:'L',x:0,y:0,rot:0})),150*850,1e-6)
+      && near(area(T.tileCorners({...S,angle:30},{kind:'R',x:5,y:7,rot:33})),150*850,1e-6));
+    chk('fliesen: L und R sind Spiegelbilder',
+      (()=>{ const a=T.tileShape(S,'L'), b=T.tileShape(S,'R'), l=S.l;
+             // R = L an der Mittelsenkrechten der Unterkante gespiegelt (x -> l-x), Ecken umlaufend neu
+             const m=a.map(p=>({x:l-p.x, y:p.y}));
+             return m.every(p=>b.some(q=>near(p.x,q.x,1e-9)&&near(p.y,q.y,1e-9))); })());
+    // Fliese an Fliese: fast parallel, etwas daneben -> exakt parallel, Abstand = Fuge
+    {
+      const A=T.tileCorners(S,{kind:'L',x:100,y:100,rot:0});
+      const mv={id:2,kind:'L',x:130,y:257,rot:3};
+      const r=T.snapGroup([T.tileCorners(S,mv)], T.snapTargets(S,[A],ring,[]), 40);
+      const it=r && T.moveItem(mv,r.m);
+      chk('fliesen: Snap an Fliese -> parallel, Abstand = Fuge',
+        !!it && near(T.normDeg(it.rot+180)-180,0,1e-9) && near(it.y,100+150+S.joint,1e-6));
+    }
+    {
+      // Chevron-Spalte neben Chevron-Spalte: die Nachbarreihe liegt nur eine
+      // Fuge neben der richtigen Ecke - eingerastet werden muss die richtige.
+      const c=45, L0={id:1,kind:'L',x:0,y:0,rot:c}, PL=T.tileCorners(S,L0);
+      let R0={id:2,kind:'R',x:0,y:0,rot:360-c}; const PR=T.tileCorners(S,R0);
+      R0={...R0, x:PL[1].x-PR[0].x+S.joint, y:PL[1].y-PR[0].y};
+      const step=(S.w+S.joint)/Math.sin(c*Math.PI/180);          // Reihenabstand senkrecht
+      const col=[]; for(let k=-2;k<=2;k++) [L0,R0].forEach(t=>col.push({...t, id:col.length+1, y:t.y+k*step}));
+      const PRc=T.tileCorners(S,R0), vx=PRc[1].x+S.joint-PL[0].x;  // Soll-Versatz der naechsten Spalte
+      const moving=col.map(t=>({...t, id:100+t.id, x:t.x+vx+4, y:t.y+6}));
+      const r=T.snapGroup(moving.map(t=>T.tileCorners(S,t)), T.snapTargets(S,col.map(t=>T.tileCorners(S,t)),null,[]), 60);
+      const it=r && T.moveItem(moving[0],r.m);
+      chk('fliesen: Chevron-Spalten fluchten (keine Fuge Versatz)',
+        !!it && near(it.x-col[0].x, vx, 1e-6) && near(it.y-col[0].y, 0, 1e-6));
+    }
+    chk('fliesen: Snap an Wand -> Abstand = Randfuge',
+      (()=>{ const w={kind:'L',x:500,y:6,rot:1};
+             const r=T.snapGroup([T.tileCorners(S,w)], T.snapTargets({...S,edgeGap:5},[],ring,[]), 20);
+             return r && near(T.moveItem(w,r.m).y,5,1e-6); })());
+    chk('fliesen: Raumecke — Ecke A rastet auf die Raumecke',
+      (()=>{ const w={kind:'R',x:160,y:8,rot:0};
+             const r=T.snapGroup([T.tileCorners(S,w)], T.snapTargets(S,[],ring,[]), 200);
+             const it=r && T.moveItem(w,r.m);
+             return it && near(it.x,0,1e-6) && near(it.y,0,1e-6); })());
+    chk('fliesen: zwei Wände gleichzeitig (Rechteckfliese in der Ecke)',
+      (()=>{ const S9={...S,angle:90,edgeGap:3}, w={kind:'L',x:40,y:25,rot:2};
+             const r=T.snapGroup([T.tileCorners(S9,w)], T.snapTargets(S9,[],ring,[]), 60);
+             const it=r && T.moveItem(w,r.m);
+             return it && near(it.x,3,1e-6) && near(it.y,3,1e-6) && r.lines.length===2; })());
+    chk('fliesen: halb über der Wand -> Anteil stimmt',
+      near(T.tileStatus(S,{kind:'L',x:3600,y:1000,rot:0},ring,[]).inArea, (400+250)/2*150, 1e-6));
+    {
+      const L=[{x:0,y:0},{x:3000,y:0},{x:3000,y:1000},{x:1000,y:1000},{x:1000,y:3000},{x:0,y:3000}];
+      const it={kind:'L',x:800,y:800,rot:0};            // haengt in die einspringende Ecke
+      const st=T.tileStatus({...S,angle:90},it,L,[]);
+      // Rechteck 800..1650 x 800..950, im L-Raum: y<1000 ueberall -> alles innen
+      chk('fliesen: konkaver Raum, Fliese im Knick ganz innen', st.status==='whole');
+      const st2=T.tileStatus({...S,angle:90},{kind:'L',x:800,y:900,rot:0},L,[]);
+      // 800..1650 x 900..1050: oberhalb y=1000 nur x<1000 innen
+      chk('fliesen: konkaver Raum, Schnitt an der einspringenden Ecke',
+        st2.status==='cut' && near(st2.inArea, 850*100+200*50, 1e-6));
+    }
+    {
+      const J=[{a:{x:2000,y:0},b:{x:2000,y:3000},width:8}];
+      const st=T.tileStatus(S,{kind:'L',x:1600,y:1000,rot:0},ring,J);
+      chk('fliesen: Dehnungsfuge teilt die Fliese in zwei Stücke',
+        st.status==='cut' && st.pieces.length===2 && near(st.inArea,150*850-8*150,1e-6));
+      const cl=T.cutList(S,[{kind:'L',x:3600,y:1000,rot:0},{kind:'L',x:1600,y:1000,rot:0}],ring,J);
+      chk('fliesen: Schnittstücke fortlaufend nummeriert', cl.map(c=>c.no).join()==='1,2,3');
+      const d=T.pieceDims(S,'L',cl[0].tilePoly);
+      chk('fliesen: Schnittmaß ab Fliesenecke', d.marks.length===2 && d.marks.some(m=>near(m.dist,396,1e-6)));
+      chk('fliesen: Fuge Ecke→Wand liegt im Raum', T.jointValid(ring,J[0].a,J[0].b)
+        && !T.jointValid(ring,{x:0,y:0},{x:4000,y:0}));
+      const e=T.jointEndSnap(ring,{x:1990,y:15},30,'free');
+      chk('fliesen: Fugenende rastet auf die Wand', e && near(e.q.y,0,1e-9) && near(e.q.x,1990,1e-9));
+      chk('fliesen: Fugenende im Eckmodus nur auf Ecken',
+        T.jointEndSnap(ring,{x:1990,y:15},30,'corner')===null
+        && near(T.jointEndSnap(ring,{x:40,y:30},30,'corner').q.x,0,1e-9));
+    }
+    chk('fliesen: Weiterstrecken läuft über die Stufe eines Stufenraums hinaus',
+      (()=>{ const st=[{x:0,y:0},{x:4000,y:0},{x:4000,y:1000},{x:2000,y:1000},{x:2000,y:3000},{x:0,y:3000}];
+             // Spalte im niedrigen Teil (x=3100): endet sie an der Stufe (y=1000),
+             // erreicht die seitlich kopierte Spalte den hohen Teil nie.
+             const add=T.extendItems({...S,angle:90},[{kind:'L',x:3100,y:0,rot:0}],{x:0,y:152},st);
+             return add.some(t=>t.y>2800); })());
+    chk('fliesen: Weiterstrecken bis zur Wand',
+      T.extendItems(S,[{kind:'L',x:0,y:0,rot:0}],{x:852,y:0},ring).length===5);
+    {
+      const L=T.printLayout(ring,[{w:190,h:237,landscape:false},{w:277,h:150,landscape:true}]);
+      const w=L.w*L.scale, h=L.h*L.scale;
+      chk('fliesen: Druck füllt das Blatt', w<=L.box.w+1e-6 && h<=L.box.h+1e-6
+        && Math.max(w/L.box.w, h/L.box.h)>0.999);
+    }
+    {
+      const n=T.normTiles({spec:{angle:200,joint:-1},items:[{kind:'L',x:1,y:2,rot:-15,id:4},{kind:'X'},{kind:'R',x:0,y:0,rot:0,id:4}]});
+      chk('fliesen: Import tolerant (Winkel begrenzt, kaputte Einträge weg, IDs eindeutig)',
+        n.spec.angle===90 && n.spec.joint===T.TILE_DEF.joint && n.items.length===2
+        && n.items[0].rot===345 && new Set(n.items.map(i=>i.id)).size===2 && n.seq>n.items[1].id);
+      chk('fliesen: fehlendes Feld -> leere Verlegung', T.normTiles(undefined).items.length===0);
     }
   }
   return {ok, out};
