@@ -340,6 +340,7 @@
         <button id="fitview" title="Ansicht einpassen"><svg viewBox="0 0 24 24"><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5"/></svg><span>Einpassen</span></button>
         <button id="rotate" title="Ansicht um 15° drehen — mit Umschalt zurück"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.7"/><path d="M20 4v4h-4"/></svg><span>Drehen</span></button>
         <button id="mirror" title="Raum spiegeln — kein Maß kann einen Raum von seinem Spiegelbild unterscheiden"><svg viewBox="0 0 24 24"><path d="M12 3v18"/><path d="M9 7 4 12l5 5z"/><path d="M15 7l5 5-5 5z"/></svg><span>Spiegeln</span></button>
+        <button id="ortho" aria-pressed="false" title="Ecken innerhalb ±2° auf 90° setzen, wo die Messungen das zulassen"><svg viewBox="0 0 24 24"><path d="M5 4v15h15"/><path d="M5 13h6v6"/></svg><span>90°</span></button>
         <button id="snapfit" title="Skizze den Messungen folgen lassen"><svg viewBox="0 0 24 24"><path d="M4 18 9 8l4 6 3-4 4 8z"/><path d="M3 21h18"/></svg><span>Ausrichten</span></button>
         <i class="sep"></i>
         <button id="filesave" title="Raum als Datei sichern"><svg viewBox="0 0 24 24"><path d="M12 4v10m0 0 4-4m-4 4-4-4"/><path d="M4 17v3h16v-3"/></svg><span>Sichern</span></button>
@@ -488,6 +489,10 @@
         <button id="tRotR" title="E (Umschalt: 1°)">⟳ 15°</button>
         <button id="tFlip" title="F — L und R tauschen">Spiegeln</button>
         <button id="tDel" title="Entf">Löschen</button>
+      </div>
+      <div class="trow">
+        <button id="tMiter" title="G — zwei überlappende Fliesen auf Gehrung schneiden">Gehrung</button>
+        <button id="tUncut" title="Gehrungsschnitte der Auswahl entfernen">Schnitt entfernen</button>
       </div>
       <div class="trow">
         <button id="tAll" title="Strg/⌘+A">Alle wählen</button>
@@ -2859,7 +2864,9 @@ const activeMeas=meas=>meas.filter(m=>m.on!==false);
 
 function residuals(pts, meas){
   const I=idx(pts);
-  return activeMeas(meas).map(m=>dist(pts[I[m.a]], pts[I[m.b]]) - m.d);
+  // wt: Gewicht fuer Hilfsstrecken (rechte Winkel, siehe orthoFit). Echte
+  // Messungen tragen keins und zaehlen wie immer mit 1.
+  return activeMeas(meas).map(m=>(dist(pts[I[m.a]], pts[I[m.b]]) - m.d)*(m.wt||1));
 }
 
 // Zeile je Messung: d|xa-xb|/dxa = +u, d/dxb = -u, alles andere 0.
@@ -2870,8 +2877,8 @@ function jacobian(pts, meas){
     const L=dist(pa,pb)||1e-9;   // ponytail: zwei deckungsgleiche Punkte sind
                                  // Eingabefehler, nicht Mathematik - nur kein NaN
     const ux=(pa.x-pb.x)/L, uy=(pa.y-pb.y)/L;
-    const row=new Array(2*n).fill(0);
-    row[2*a]=ux; row[2*a+1]=uy; row[2*b]=-ux; row[2*b+1]=-uy;
+    const row=new Array(2*n).fill(0), w=m.wt||1;
+    row[2*a]=ux*w; row[2*a+1]=uy*w; row[2*b]=-ux*w; row[2*b+1]=-uy*w;
     return row;
   });
 }
@@ -3176,6 +3183,21 @@ function wallCrossesExisting(pts, walls, a, b){
 // Adjazenzpruefung, unabhaengig von der Geometrie - siehe wallPolygon fuer
 // die geometrische Kreuzungspruefung, die hier bewusst NICHT stattfindet.
 function wallPolygonRing(pts, walls){
+  const loops=wallLoops(pts, walls);
+  if(!loops) return null;
+  // Aussen ist der groesste Zug, nicht der erste in pts-Reihenfolge.
+  let k=0; loops.forEach((L,i)=>{ if(loopArea(L)>loopArea(loops[k])) k=i; });
+  const ring=loops[k];
+  ring.holes=loops.filter((_,i)=>i!==k);
+  return ring;
+}
+// Alle geschlossenen Wandzuege. Jede Ecke hat genau zwei Waende; die Waende
+// zerfallen dann in disjunkte Kreise. Der Raum ist der groesste davon, jeder
+// weitere ist eine INSEL darin (freistehende Wand, Pfeiler, Wandstueck neben
+// einem Durchbruch) - er begrenzt den Raum von innen. wallPolygonRing haengt
+// die Inseln als .holes an den Aussenring; ohne Inseln ist .holes leer und
+// alles verhaelt sich wie bisher. null, solange irgendwo ein Zug offen ist.
+function wallLoops(pts, walls){
   if(walls.length<3 || pts.length<3) return null;
   const adj={}; pts.forEach(p=>adj[p.id]=[]);
   for(const [a,b] of walls){
@@ -3183,15 +3205,27 @@ function wallPolygonRing(pts, walls){
     adj[a].push(b); adj[b].push(a);
   }
   if(pts.some(p=>adj[p.id].length!==2)) return null;
-  const I=idx(pts), order=[pts[0].id];
-  let prev=null, cur=pts[0].id;
-  for(let i=1;i<pts.length;i++){
-    const nxt=adj[cur].find(x=>x!==prev);
-    if(nxt==null || order.includes(nxt)) return null;
-    prev=cur; cur=nxt; order.push(cur);
+  const I=idx(pts), seen=new Set(), loops=[];
+  for(const start of pts){
+    if(seen.has(start.id)) continue;
+    const order=[start.id]; seen.add(start.id);
+    let prev=null, cur=start.id;
+    for(;;){
+      const nxt=adj[cur].find(x=>x!==prev);
+      if(nxt==null) return null;
+      if(nxt===start.id) break;
+      if(seen.has(nxt)) return null;
+      seen.add(nxt); order.push(nxt); prev=cur; cur=nxt;
+    }
+    if(order.length<3) return null;
+    loops.push(order.map(id=>pts[I[id]]));
   }
-  if(adj[cur].find(x=>x!==prev)!==pts[0].id) return null;
-  return order.map(id=>pts[I[id]]);
+  return loops;
+}
+function loopArea(R){
+  let a=0;
+  for(let i=0,j=R.length-1;i<R.length;j=i++) a+=R[j].x*R[i].y-R[i].x*R[j].y;
+  return Math.abs(a)/2;
 }
 
 // Ein Raum ist ein EINFACHES Polygon: der Ring darf sich nicht selbst kreuzen.
@@ -3203,15 +3237,42 @@ function wallPolygonRing(pts, walls){
 function wallPolygon(pts, walls){
   const ring=wallPolygonRing(pts, walls);
   if(!ring || ringSelfIntersects(ring)) return null;
+  // Inseln: je kreuzungsfrei, ganz im Aussenring, nicht ineinander und ohne
+  // Kreuzung mit einem anderen Zug - sonst ist die Form so unbestimmt wie
+  // ein gekreuzter Ring.
+  const all=[ring, ...ring.holes];
+  for(const h of ring.holes){
+    if(ringSelfIntersects(h)) return null;
+    if(!h.every(p=>pointInRing(p, ring))) return null;
+    if(ring.holes.some(o=>o!==h && pointInRing(h[0], o))) return null;
+  }
+  for(let i=0;i<all.length;i++) for(let j=i+1;j<all.length;j++){
+    const P=all[i], Q=all[j];
+    for(let a=0;a<P.length;a++) for(let b=0;b<Q.length;b++)
+      if(segCross(P[a],P[(a+1)%P.length],Q[b],Q[(b+1)%Q.length])) return null;
+  }
   return ring;
 }
+// Flaeche eines Raums abzueglich seiner Inseln (mm2).
+function roomArea(poly){
+  return loopArea(poly) - (poly.holes||[]).reduce((s,h)=>s+loopArea(h),0);
+}
 
-function pointInPoly(p, poly){
+function pointInRing(p, poly){
   let inside=false;
   for(let i=0,j=poly.length-1;i<poly.length;j=i++){
     const a=poly[i], b=poly[j];
     if((a.y>p.y)!==(b.y>p.y) && p.x < (b.x-a.x)*(p.y-a.y)/(b.y-a.y)+a.x) inside=!inside;
   }
+  return inside;
+}
+// Paritaet ueber ALLE Ringe (even-odd): innen heisst im Aussenring und in
+// keiner Insel. Wer ein wallPolygon()-Ergebnis uebergibt, bekommt die
+// Inseln damit ohne eigenes Zutun beruecksichtigt (Sichtlinien, Innenseite
+// einer Wand, Nachbar unter dem Zeiger).
+function pointInPoly(p, poly){
+  let inside=pointInRing(p, poly);
+  for(const h of (poly.holes||[])) if(pointInRing(p, h)) inside=!inside;
   return inside;
 }
 
@@ -3306,6 +3367,57 @@ function suggest(pts, walls, meas){
   return out;
 }
 
+// Rechte Winkel annehmen. Ein Laser misst Strecken, keine Winkel - an einer
+// kurzen Wand verschieben 5 mm Messfehler den Winkel um 1-2 Grad, und der
+// Ausgleich landet dann bei 87,7 statt 90, obwohl nichts dagegen spricht.
+// Jede Ecke, die im Ausgleich innerhalb tolDeg von 90 Grad liegt, bekommt
+// als Hilfsstrecke die Diagonale ueber die Ecke (Pythagoras aus den
+// Schenkeln, stark gewichtet) - aber nur, wenn die Messungen das zulassen:
+// die Fehlerquadratsumme darf je Ecke um hoechstens ORTHO_CHI2 wachsen
+// (chi2 mit 1 Freiheitsgrad, 95 %). Widerspricht eine Ecke, bleibt sie, wie
+// sie gemessen ist. Die Schenkel aendern sich beim Ausgleich - deshalb die
+// Diagonale ein paar Mal aus der neuen Lage nachfuehren.
+const ORTHO_CHI2=3.84, ORTHO_WT=40, ORTHO_W=3.29;   // W = Baardas Grenze, wie BAARDA_W0 im UI
+function orthoFit(pts, walls, meas, tolDeg){
+  const fit0=solve(pts, meas);
+  const loops=wallLoops(fit0.pts, walls);
+  if(!loops) return {fit:fit0, ortho:[], rejected:[]};
+  const act=activeMeas(meas);
+  const chi=P=>{ const I=idx(P); return act.reduce((s,m)=>s+((dist(P[I[m.a]],P[I[m.b]])-m.d)/(m.sigma||SIGMA_DEF))**2,0); };
+  const angleAt=(P,[a,c,b])=>{ const I=idx(P), A=P[I[a]], Cc=P[I[c]], B=P[I[b]];
+    const u={x:A.x-Cc.x,y:A.y-Cc.y}, v={x:B.x-Cc.x,y:B.y-Cc.y};
+    return Math.abs(Math.atan2(u.x*v.y-u.y*v.x, u.x*v.x+u.y*v.y))*180/Math.PI; };
+  const pseudo=(P,list)=>{ const I=idx(P); return list.map(([a,c,b])=>({a, b, wt:ORTHO_WT,
+    d:Math.hypot(dist(P[I[a]],P[I[c]]), dist(P[I[b]],P[I[c]]))})); };
+  const solveWith=list=>{ let f=fit0; for(let k=0;k<3;k++) f=solve(f.pts, meas.concat(pseudo(f.pts,list))); return f; };
+  const corners=[];
+  loops.forEach(L=>L.forEach((p,i)=>corners.push([L[(i+L.length-1)%L.length].id, p.id, L[(i+1)%L.length].id])));
+  const base=chi(fit0.pts), ortho=[], rejected=[];
+  corners.forEach(k=>{
+    const ang=angleAt(fit0.pts,k);
+    if(Math.abs(ang-90)>tolDeg) return;
+    const inc=chi(solveWith([k]).pts)-base;
+    (inc<=ORTHO_CHI2 ? ortho : rejected).push(inc<=ORTHO_CHI2 ? k : {corner:k, ang, inc});
+  });
+  // Gemeinsam pruefen: einzeln vertraegliche Ecken koennen zusammen zu viel
+  // verlangen. Dann die teuerste einzeln wieder freigeben, bis es passt.
+  let fit=ortho.length ? solveWith(ortho) : fit0;
+  // 95-%-Grenze fuer k Freiheitsgrade (Naeherung), und: keine Messung darf
+  // durch die rechten Winkel neu ueber die Ausreissergrenze rutschen - sonst
+  // meldet die Tabelle eine verdaechtige Messung, die es ohne gar nicht gibt.
+  const limit=k=>k+1.645*Math.sqrt(2*k);
+  const maxW=P=>{ const a=analyze(P, meas); return Math.max(0, ...a.w.map(Math.abs)); };
+  const w0=Math.max(ORTHO_W, maxW(fit0.pts));
+  while(ortho.length && (chi(fit.pts)-base>limit(ortho.length) || maxW(fit.pts)>w0+1e-9)){
+    let worst=0, wInc=-1;
+    ortho.forEach((k,i)=>{ const inc=chi(solveWith(ortho.filter((_,j)=>j!==i)).pts); if(wInc<0 || inc<wInc){ wInc=inc; worst=i; } });
+    const [k]=ortho.splice(worst,1);
+    rejected.push({corner:k, ang:angleAt(fit0.pts,k), inc:NaN});
+    fit=ortho.length ? solveWith(ortho) : fit0;
+  }
+  return {fit, ortho:ortho.map(k=>k[1]), rejected:rejected.map(r=>({id:r.corner[1], ang:r.ang}))};
+}
+
 // Einen Zug am Punkt i auf die verbliebenen Beweglichkeiten projizieren.
 // Die Moden sind die LINEARISIERTE Beweglichkeit an der aktuellen Stelle -
 // ein endlicher Zug driftet also von den Messungen weg. Der Aufrufer laesst
@@ -3330,8 +3442,8 @@ globalThis.CORE={ TOL_RANK, TOL_RED, TOL_MODE, SIGMA_DEF, SUGGEST_CHECK_MAX,
                   dist, idx, activeMeas, residuals, jacobian, luSolve, matTmat, matTvec,
                   gramSchmidt, nullSpace, leverage, gaugeFixed, freeCols, scaleSketch, solve, analyze,
                   trivialModes, covariance, ellipse, segCross, ringSelfIntersects, wallCrossesExisting,
-                  wallPolygonRing, wallPolygon, pointInPoly,
-                  pairMeasurable, suggest, dragAlongModes };
+                  wallPolygonRing, wallPolygon, pointInPoly, wallLoops, roomArea,
+                  pairMeasurable, suggest, dragAlongModes, orthoFit, ORTHO_CHI2 };
 </script>
 
 <script id="tiles">
@@ -3358,6 +3470,9 @@ const crs=(a,b)=>a.x*b.y-a.y*b.x;
 const len=a=>Math.hypot(a.x,a.y);
 const unit=a=>{ const L=len(a)||1; return {x:a.x/L, y:a.y/L}; };
 const normDeg=a=>{ a%=360; return a<0?a+360:a; };
+// Der Raum ist der Aussenring; Inseln haengen als ring.holes daran (wie bei
+// CORE.wallPolygon). Alle Ringe zusammen begrenzen die Flaeche.
+const ringsOf=r=>r ? [r, ...(r.holes||[])] : [];
 
 // Ecken im Fliesenrahmen, gegen den Uhrzeigersinn (y nach oben gedacht):
 // p0-p1 lange Unterkante, p1-p2 kurze Schraegkante, p2-p3 lange Oberkante.
@@ -3367,9 +3482,15 @@ function tileShape(spec, kind){
     ? [{x:0,y:0},{x:l,y:0},{x:l-k,y:w},{x:-k,y:w}]
     : [{x:0,y:0},{x:l,y:0},{x:l+k,y:w},{x:k,y:w}];
 }
+// Die Form, wie die Fliese liegt: volles Parallelogramm, dann an jedem
+// eigenen Schnitt (Gehrung) beschnitten. Schnitte stehen im Fliesenrahmen
+// ({p, n}: behalten wird die Seite, in die n zeigt) und wandern deshalb beim
+// Verschieben, Drehen, Duplizieren und Weiterstrecken mit. Bleibt konvex.
 function tileCorners(spec, it){
   const c=Math.cos(it.rot*D2R), s=Math.sin(it.rot*D2R);
-  return tileShape(spec, it.kind).map(p=>{ const r=rotP(p,c,s); return {x:r.x+it.x, y:r.y+it.y}; });
+  let P=tileShape(spec, it.kind);
+  (it.cuts||[]).forEach(k=>{ P=dedupe(clipHalf(P, k.p, k.n)); });
+  return P.map(p=>{ const r=rotP(p,c,s); return {x:r.x+it.x, y:r.y+it.y}; });
 }
 // Rahmen -> Fliesenrahmen (Umkehrung von tileCorners)
 function toTile(it, p){
@@ -3448,6 +3569,40 @@ function convexOverlap(A, B, tol=0.5){
   return true;
 }
 
+// Gehrung zweier ueberlappender Fliesen. Die Schnittlinie verbindet zwei
+// Ecken der Ueberlappungsflaeche und trennt die beiden Fliesen - bei zwei
+// Friesen an einer Raumecke ist das die Diagonale von der Innen- zur
+// Aussenecke. Unter allen Eckpaaren gewinnt das, bei dem beide Schwerpunkte
+// am deutlichsten auf verschiedenen Seiten liegen. Jede Fliese behaelt ihre
+// Seite, um die halbe Fuge zurueckgesetzt. Liefert die beiden neuen Lagen
+// (mit angehaengtem Schnitt im Fliesenrahmen) oder null.
+function miterPair(spec, A, B){
+  const PA=tileCorners(spec,A), PB=tileCorners(spec,B);
+  if(!convexOverlap(PA,PB)) return null;
+  const O=clipConvex(PA,PB);
+  if(O.length<3) return null;
+  const cen=P=>({x:P.reduce((s,p)=>s+p.x,0)/P.length, y:P.reduce((s,p)=>s+p.y,0)/P.length});
+  const ca=cen(PA), cb=cen(PB);
+  let best=null;
+  for(let i=0;i<O.length;i++) for(let j=i+1;j<O.length;j++){
+    const d=sub(O[j],O[i]); if(len(d)<1) continue;
+    const n=unit({x:-d.y, y:d.x});
+    const sa=dot(sub(ca,O[i]),n), sb=dot(sub(cb,O[i]),n);
+    if(sa*sb>=0) continue;
+    const score=Math.min(Math.abs(sa),Math.abs(sb));
+    if(!best || score>best.score) best={score, p:O[i], n: sa>0 ? n : {x:-n.x,y:-n.y}};
+  }
+  if(!best) return null;
+  const h=spec.joint/2;
+  const cutFor=(it,n)=>{
+    const p={x:best.p.x+n.x*h, y:best.p.y+n.y*h};               // halbe Fuge zur eigenen Seite
+    const c=Math.cos(-it.rot*D2R), s=Math.sin(-it.rot*D2R);
+    return {p:rotP(sub(p,it),c,s), n:rotP(n,c,s)};
+  };
+  const nB={x:-best.n.x, y:-best.n.y};
+  return [{...A, cuts:[...(A.cuts||[]), cutFor(A,best.n)]}, {...B, cuts:[...(B.cuts||[]), cutFor(B,nB)]}];
+}
+
 // Dehnungsfuge als Streifen (konvexes Viereck) der Breite width um a-b.
 function jointStrip(j){
   const d=unit(sub(j.b,j.a)), h=j.width/2, n={x:-d.y*h, y:d.x*h};
@@ -3467,6 +3622,8 @@ function snapTargets(spec, others, ring, joints){
   if(ring && ring.length>=3){
     // edgesOf liefert die AUSSENnormale des Raums - die Fliese liegt innen.
     edgesOf(ring).forEach(e=>T.push({a:e.a,b:e.b,d:e.d,n:{x:-e.n.x,y:-e.n.y},gap:spec.edgeGap,kind:'wall'}));
+    // Inseln: ihre Aussennormale zeigt bereits in den Raum.
+    (ring.holes||[]).forEach(h=>edgesOf(h).forEach(e=>T.push({a:e.a,b:e.b,d:e.d,n:e.n,gap:spec.edgeGap,kind:'wall'})));
   }
   (joints||[]).forEach(j=>edgesOf(jointStrip(j)).forEach((e,i)=>{
     if(i%2===0) T.push({a:e.a,b:e.b,d:e.d,n:e.n,gap:0,kind:'joint'});
@@ -3556,18 +3713,28 @@ const snapAngle=(a,step)=>step>0 ? normDeg(Math.round(a/step)*step) : normDeg(a)
 // Die tatsaechlich verlegten Stuecke EINER Fliese (Rahmenkoordinaten):
 // Raum geschnitten mit der Fliese, dann an jeder Dehnungsfuge, die sie
 // kreuzt, in die beiden Seiten geteilt - eine Fliese ueber einer Fuge ergibt
-// zwei getrennte Schnittstuecke. Leere und Splitter < 1 mm2 fallen weg.
+// zwei getrennte Schnittstuecke. Inseln im Raum werden nicht boolesch
+// abgezogen, sondern als AUSSPARUNGEN (Insel ∩ Fliese, exakt, weil die
+// Fliese konvex ist) am Stueck gefuehrt - so zeichnet und bemasst sie das
+// Schnittblatt auch. Liefert [{poly, cutouts, area}], Splitter < 1 mm2 weg.
 function tilePieces(spec, it, ring, joints){
   const P=tileCorners(spec,it);
-  let pieces=[ring ? clipConvex(ring,P) : P];
+  let pieces=[{poly: ring ? clipConvex(ring,P) : P, planes:[]}];
   for(const j of (joints||[])){
     const S=jointStrip(j);
     if(!convexOverlap(P,S,0.01)) continue;
-    const d=unit(sub(j.b,j.a)), n={x:-d.y, y:d.x}, h=j.width/2;
+    const d=unit(sub(j.b,j.a)), n={x:-d.y, y:d.x}, h=j.width/2, m={x:-n.x, y:-n.y};
     const a1={x:j.a.x+n.x*h, y:j.a.y+n.y*h}, a2={x:j.a.x-n.x*h, y:j.a.y-n.y*h};
-    pieces=pieces.flatMap(q=>[dedupe(clipHalf(q,a1,n)), dedupe(clipHalf(q,a2,{x:-n.x,y:-n.y}))]);
+    pieces=pieces.flatMap(q=>[{poly:dedupe(clipHalf(q.poly,a1,n)), planes:[...q.planes,[a1,n]]},
+                              {poly:dedupe(clipHalf(q.poly,a2,m)), planes:[...q.planes,[a2,m]]}]);
   }
-  return pieces.filter(q=>q.length>=3 && Math.abs(polyArea(q))>=1);
+  const holes=((ring && ring.holes)||[]).map(h=>clipConvex(h,P)).filter(c=>c.length>=3 && Math.abs(polyArea(c))>=1);
+  return pieces.map(q=>{
+    const cutouts=holes.map(c=>q.planes.reduce((acc,[a,n])=>dedupe(clipHalf(acc,a,n)), c))
+                       .filter(c=>c.length>=3 && Math.abs(polyArea(c))>=1);
+    const area=Math.abs(polyArea(q.poly)) - cutouts.reduce((s,c)=>s+Math.abs(polyArea(c)),0);
+    return {poly:q.poly, cutouts, area};
+  }).filter(q=>q.poly.length>=3 && q.area>=1);
 }
 
 // Status gegen Raum und Fugen.
@@ -3576,8 +3743,9 @@ function tilePieces(spec, it, ring, joints){
 //  out:   gar nicht im Raum
 function tileStatus(spec, it, ring, joints){
   const A=spec.w*spec.l, pieces=tilePieces(spec,it,ring,joints);
-  const inA=pieces.reduce((s,q)=>s+Math.abs(polyArea(q)),0);
-  const st = !pieces.length ? 'out' : (pieces.length===1 && inA>=A*(1-1e-6)) ? 'whole' : 'cut';
+  const inA=pieces.reduce((s,q)=>s+q.area,0);
+  const st = !pieces.length ? 'out'
+    : (pieces.length===1 && !pieces[0].cutouts.length && inA>=A*(1-1e-6)) ? 'whole' : 'cut';
   return {status:st, area:A, inArea:inA, pieces};
 }
 
@@ -3590,13 +3758,16 @@ function cutList(spec, items, ring, joints){
     const s=tileStatus(spec,it,ring,joints);
     if(s.status!=='cut') return;
     s.pieces.forEach(q=>{
-      let cx=0, cy=0; q.forEach(p=>{ cx+=p.x; cy+=p.y; });
-      cuts.push({item:it, poly:q, c:{x:cx/q.length, y:cy/q.length}});
+      let cx=0, cy=0; q.poly.forEach(p=>{ cx+=p.x; cy+=p.y; });
+      cuts.push({item:it, poly:q.poly, cutouts:q.cutouts, area:q.area, c:{x:cx/q.poly.length, y:cy/q.poly.length}});
     });
   });
   const row=Math.max(spec.w,100);
   cuts.sort((a,b)=>Math.round(a.c.y/row)-Math.round(b.c.y/row) || a.c.x-b.c.x);
-  cuts.forEach((c,i)=>{ c.no=i+1; c.tilePoly=c.poly.map(p=>toTile(c.item,p)); });
+  cuts.forEach((c,i)=>{
+    c.no=i+1; c.tilePoly=c.poly.map(p=>toTile(c.item,p));
+    c.tileCutouts=c.cutouts.map(C=>C.map(p=>toTile(c.item,p)));
+  });
   return cuts;
 }
 
@@ -3604,7 +3775,7 @@ function cutList(spec, items, ring, joints){
 // Fliesenleger die Fliese vor sich liegen hat. Fuer jede Schnittkante:
 // wo sie die Fliesenkanten trifft, gemessen von der naechsten Fliesenecke
 // entlang dieser Kante. Dazu die Laengen aller Stueckkanten.
-function pieceDims(spec, kind, tilePoly){
+function pieceDims(spec, kind, tilePoly, tileCutouts){
   const T=tileShape(spec,kind), marks=[], edges=[];
   const onEdge=p=>{
     for(let i=0;i<4;i++){
@@ -3627,11 +3798,31 @@ function pieceDims(spec, kind, tilePoly){
   });
   for(let i=0;i<tilePoly.length;i++){
     const a=tilePoly[i], b=tilePoly[(i+1)%tilePoly.length];
-    const ea=onEdge(a), eb=onEdge(b);
-    const alongTile = ea && eb && ea.i===eb.i;
+    // Liegt die Stueckkante auf EINER Fliesenkante? Eine Fliesenecke liegt
+    // auf zwei Kanten - deshalb gegen jede Kante pruefen, nicht nur gegen
+    // die erste, die onEdge findet.
+    const alongTile=[0,1,2,3].some(i=>{
+      const u=T[i], v=T[(i+1)%4], d=sub(v,u), L=len(d);
+      const off=p=>Math.abs(crs(d,sub(p,u)))/L, t=p=>dot(sub(p,u),d)/(L*L);
+      return off(a)<0.5 && off(b)<0.5 && t(a)>-1e-6 && t(a)<1+1e-6 && t(b)>-1e-6 && t(b)<1+1e-6;
+    });
     edges.push({a, b, len:len(sub(b,a)), cut:!alongTile});
   }
-  return {shape:T, marks, edges, area:Math.abs(polyArea(tilePoly))};
+  // Aussparungen (Inseln): Punkte auf einer Fliesenkante wie oben ab Ecke,
+  // Punkte im Inneren als Koordinate - laengs A-B ab Ecke A und quer ab
+  // Kante A-B. Die Fliese liegt im Fliesenrahmen genau so: A=(0,0), A-B = x.
+  const inner=[];
+  (tileCutouts||[]).forEach((cu,k)=>cu.forEach(p=>{
+    if(isCorner(p)) return;
+    const e=onEdge(p);
+    if(e){
+      const fromA=e.t*e.L, fromB=(1-e.t)*e.L;
+      marks.push(fromA<=fromB ? {p, edge:e.i, corner:e.i, dist:fromA, cutout:k}
+                              : {p, edge:e.i, corner:(e.i+1)%4, dist:fromB, cutout:k});
+    } else inner.push({p, cutout:k, along:p.x, off:p.y});
+  }));
+  const area=Math.abs(polyArea(tilePoly)) - (tileCutouts||[]).reduce((s,c)=>s+Math.abs(polyArea(c)),0);
+  return {shape:T, marks, inner, edges, area};
 }
 
 // Stueckliste. Ueberlappungen werden gezaehlt, nicht verhindert - ein
@@ -3648,7 +3839,7 @@ function tileStats(spec, items, ring, joints){
   const P=items.map(it=>tileCorners(spec,it));
   for(let i=0;i<P.length;i++) for(let j=i+1;j<P.length;j++) if(convexOverlap(P[i],P[j])) r.overlaps++;
   if(ring){
-    r.roomArea=Math.abs(polyArea(ring));
+    r.roomArea=ringsOf(ring).reduce((s,R,i)=>s+(i?-1:1)*Math.abs(polyArea(R)),0);
     (joints||[]).forEach(j=>{ r.roomArea-=Math.abs(polyArea(clipConvex(ring,jointStrip(j)))); });
   }
   r.waste = r.tileArea>0 ? 1-r.covered/r.tileArea : 0;
@@ -3680,13 +3871,14 @@ function extendItems(spec, group, vec, ring, max=400, both=true){
 }
 
 // Naechster Punkt auf dem Ring zu p: {q, i (Kante), t, dist}
+// Ueber alle Ringe (Aussenwand und Inseln); r ist der getroffene Ring.
 function nearestOnRing(ring, p){
   let best=null;
-  for(let i=0;i<ring.length;i++){
-    const a=ring[i], b=ring[(i+1)%ring.length], d=sub(b,a), L2=dot(d,d)||1;
+  for(const R of ringsOf(ring)) for(let i=0;i<R.length;i++){
+    const a=R[i], b=R[(i+1)%R.length], d=sub(b,a), L2=dot(d,d)||1;
     const t=Math.max(0,Math.min(1,dot(sub(p,a),d)/L2));
     const q={x:a.x+d.x*t, y:a.y+d.y*t}, dist=len(sub(p,q));
-    if(!best || dist<best.dist) best={q,i,t,dist};
+    if(!best || dist<best.dist) best={q,i,t,dist,r:R};
   }
   return best;
 }
@@ -3694,7 +3886,7 @@ function nearestOnRing(ring, p){
 // bevorzugt (innerhalb tol), dann Lotfusspunkt auf der naechsten Wand.
 function jointEndSnap(ring, p, tol, mode){
   let bc=null;
-  ring.forEach((c,i)=>{ const d=len(sub(p,c)); if(!bc || d<bc.d) bc={d,i,q:{x:c.x,y:c.y}}; });
+  ringsOf(ring).forEach(R=>R.forEach((c,i)=>{ const d=len(sub(p,c)); if(!bc || d<bc.d) bc={d,i,q:{x:c.x,y:c.y}}; }));
   if(mode==='corner') return bc && bc.d<=tol*3 ? {q:bc.q, corner:bc.i} : null;
   if(bc && bc.d<=tol) return {q:bc.q, corner:bc.i};
   const n=nearestOnRing(ring,p);
@@ -3708,6 +3900,11 @@ function pointInRing(p, poly){
   }
   return inside;
 }
+function pointInRoom(p, ring){
+  let inside=pointInRing(p, ring);
+  for(const h of (ring.holes||[])) if(pointInRing(p,h)) inside=!inside;
+  return inside;
+}
 // Liegt die Fuge im Raum? Stichproben innen und keine Wand echt gekreuzt
 // (die Endpunkte liegen AUF Waenden - Beruehrung dort zaehlt nicht).
 function jointValid(ring, a, b){
@@ -3719,10 +3916,10 @@ function jointValid(ring, a, b){
     if(n && n.dist<1) return false;
   }
   for(const f of [0.25,0.5,0.75])
-    if(!pointInRing({x:a.x+(b.x-a.x)*f, y:a.y+(b.y-a.y)*f}, ring)) return false;
+    if(!pointInRoom({x:a.x+(b.x-a.x)*f, y:a.y+(b.y-a.y)*f}, ring)) return false;
   const d=sub(b,a);
-  for(let i=0;i<ring.length;i++){
-    const c=ring[i], e=sub(ring[(i+1)%ring.length],c);
+  for(const R of ringsOf(ring)) for(let i=0;i<R.length;i++){
+    const c=R[i], e=sub(R[(i+1)%R.length],c);
     const den=crs(d,e); if(Math.abs(den)<1e-9) continue;
     const t=crs(sub(c,a),e)/den, u=crs(sub(c,a),d)/den;
     if(t>1e-3 && t<1-1e-3 && u>1e-3 && u<1-1e-3) return false;
@@ -3731,13 +3928,15 @@ function jointValid(ring, a, b){
 }
 // Lage eines Fugenendpunkts fuer die Bemassung: Abstand zur naechsten
 // Raumecke auf derselben Wand.
+// Liefert den Eckpunkt selbst (mit id, falls der Aufrufer sie mitgibt).
 function endDim(ring, p){
   const n=nearestOnRing(ring,p);
   if(!n) return null;
-  const a=ring[n.i], b=ring[(n.i+1)%ring.length], L=len(sub(b,a));
+  const R=n.r, a=R[n.i], b=R[(n.i+1)%R.length], L=len(sub(b,a));
   const da=n.t*L, db=(1-n.t)*L;
-  if(da<0.5 || db<0.5) return {corner: da<0.5 ? n.i : (n.i+1)%ring.length, dist:0};
-  return da<=db ? {corner:n.i, dist:da, edge:n.i} : {corner:(n.i+1)%ring.length, dist:db, edge:n.i};
+  if(da<0.5) return {corner:a, dist:0};
+  if(db<0.5) return {corner:b, dist:0};
+  return da<=db ? {corner:a, dist:da} : {corner:b, dist:db};
 }
 
 // Druckbild: Drehung und Massstab, damit der Raum das Blatt fuellt.
@@ -3780,7 +3979,14 @@ function normTiles(o){
   const fin=(...v)=>v.every(Number.isFinite);
   const items=(o && Array.isArray(o.items) ? o.items : [])
     .filter(it=>it && (it.kind==='L'||it.kind==='R') && fin(it.x,it.y,it.rot))
-    .map(it=>({id:it.id, kind:it.kind, x:it.x, y:it.y, rot:normDeg(it.rot)}));
+    .map(it=>{
+      const out={id:it.id, kind:it.kind, x:it.x, y:it.y, rot:normDeg(it.rot)};
+      const cuts=(Array.isArray(it.cuts)?it.cuts:[]).filter(k=>k && k.p && k.n
+        && fin(k.p.x,k.p.y,k.n.x,k.n.y) && Math.hypot(k.n.x,k.n.y)>0.5)
+        .map(k=>({p:{x:k.p.x,y:k.p.y}, n:{x:k.n.x,y:k.n.y}}));
+      if(cuts.length) out.cuts=cuts;
+      return out;
+    });
   const joints=(o && Array.isArray(o.joints) ? o.joints : [])
     .filter(j=>j && j.a && j.b && fin(j.a.x,j.a.y,j.b.x,j.b.y) && Number.isFinite(j.width) && j.width>0)
     .map(j=>({id:j.id, a:{x:j.a.x,y:j.a.y}, b:{x:j.b.x,y:j.b.y}, width:j.width}));
@@ -3796,7 +4002,7 @@ function normTiles(o){
 globalThis.TILES={ TILE_DEF, tileShape, tileCorners, toTile, polyArea, edgesOf, frameOf, toLocal, toWorldF,
   clipConvex, clipHalf, convexOverlap, jointStrip, snapTargets, snapGroup, movePt, moveItem, snapAngle, normDeg,
   tilePieces, tileStatus, cutList, pieceDims, tileStats, extendItems, nearestOnRing, jointEndSnap, jointValid,
-  pointInRing, endDim, printLayout, printPt, normTiles };
+  pointInRing, pointInRoom, ringsOf, endDim, printLayout, printPt, normTiles, miterPair };
 })();
 </script>
 
@@ -4472,7 +4678,8 @@ function spiegelWieVorlage(vorlage, pts){
 globalThis.untangle=function(pts, walls, meas, tries, seed){
   const C=globalThis.CORE;
   const ring0=C.wallPolygonRing(pts, walls);
-  if(!ring0) return null;
+  // Entwirren permutiert EINEN Ring - mit Inseln gibt es mehrere.
+  if(!ring0 || ring0.holes.length) return null;
   const order=ring0.map(p=>p.id);
   const rnd=mulberry32(seed==null?1:seed);
   const act=C.activeMeas(meas);
@@ -5077,7 +5284,8 @@ const C=globalThis.CORE;
 // exakt 0. Eine einzelne "Gewinnerin" waere dort reiner Rundungsstaub.
 // Siehe task-11-report.md.
 const BAARDA_W0 = 3.29; // Baardas kritischer Wert fuer Data Snooping - erst darueber gilt eine Messung ueberhaupt als Ausreisser
-const TIE_TOL   = 0.02; // Toleranzband ums groesste w (2% relativ): alles darin gilt als gleich verdaechtig statt durch Rundung getrennt
+const TIE_TOL   = 0.02;
+const ORTHO_TOL = 2;    // Grad: so nah an 90 muss eine Ecke liegen, damit "90°" sie setzen darf // Toleranzband ums groesste w (2% relativ): alles darin gilt als gleich verdaechtig statt durch Rundung getrennt
 
 // Bei redundancy===0 ist jedes Residuum strukturell exakt 0 - ABER nur, wenn
 // die Messungen zueinander passen. Widersprechen sie sich (z.B. ein Zahlendreher),
@@ -5144,6 +5352,9 @@ const M={ pts:[], walls:[], meas:[], mode:'draw', sel:[], chain:null,
           // Zieht sich die Skizze auf die ausgeglichene Form? Standard: nein.
           // Siehe den Ausrichten-Knopf und den Rueckschrieb in recompute().
           snapfit:false,
+          // Rechte Winkel annehmen (orthoFit): Ecken innerhalb ORTHO_TOL von
+          // 90 Grad werden gesetzt, sofern die Messungen es zulassen.
+          ortho:false, orthoInfo:null,
           fit:null, an:null, sugg:[], suspects:new Set(), narrow:[],
           drag:null, dragMode:null, highlight:null, nearPairs:[],
           openings:[], hmeas:[], opmeas:[], wallSel:null, openSel:null,
@@ -5219,6 +5430,7 @@ const serialize=()=>JSON.stringify({
   opmeas:M.opmeas.map(m=>({...m})),
   thick:{...M.thick}, shared:{...M.shared},
   snapfit:M.snapfit,
+  ortho:M.ortho || undefined,
   qmeas:M.qmeas.map(m=>({...m})),
   // Fliesenverlegung - fehlt bei Raeumen ohne Fliesen ganz.
   tiles:(M.tiles && (M.tiles.items.length || M.tiles.joints.length)) ? M.tiles : undefined,
@@ -5255,6 +5467,7 @@ function deserialize(o){
   // ausgerichtet bleiben, waehrend der naechste frisch skizziert wird. Aeltere
   // Raeume und Fremdimporte kennen das Feld nicht - Standard ist aus.
   M.snapfit = o.snapfit===true;
+  M.ortho = o.ortho===true;
   if(typeof o.idSeq==='number') idSeq=o.idSeq;
   if(typeof o.openSeq==='number') openSeq=o.openSeq;
   else openSeq=M.openings.length+1;
@@ -5265,6 +5478,7 @@ function deserialize(o){
   // Am Aufrufer haengend log der Knopf nach einem Undo (nachgestellt: Modell
   // false, aria-pressed true).
   syncSnapfitBtn();
+  if(typeof syncOrthoBtn==='function') syncOrthoBtn();
 }
 
 // Formvalidierung fuer alles, was deserialize() bekommt - VOLLSTAENDIG und
@@ -5452,7 +5666,10 @@ function recompute(){
   // Masseingabe haelt ihr Highlight selbst (enterMeasurement setzt es neu).
   if(!entryPair) M.highlight=null;
   if(M.pts.length>=2 && C.activeMeas(M.meas).length){
-    M.fit=C.solve(M.pts, M.meas);
+    if(M.ortho && M.walls.length){
+      const r=C.orthoFit(M.pts, M.walls, M.meas, ORTHO_TOL);
+      M.fit=r.fit; M.orthoInfo=r;
+    } else { M.fit=C.solve(M.pts, M.meas); M.orthoInfo=null; }
     M.an=C.analyze(M.fit.pts, M.meas);
     const I=C.idx(M.pts);
     if(M.snapfit){
@@ -5539,10 +5756,7 @@ function polyAreaM2(){
   const P=M.fit.pts;
   const poly=C.wallPolygon(P, M.walls);
   if(!poly) return null;
-  let a=0;
-  for(let i=0,j=poly.length-1;i<poly.length;j=i++)
-    a+=poly[j].x*poly[i].y-poly[i].x*poly[j].y;
-  return Math.abs(a)/2/1e6;
+  return C.roomArea(poly)/1e6;              // abzueglich Inseln
 }
 
 function openRoom(id){
@@ -6521,6 +6735,24 @@ function drawQuer(P, I, dpr){
   }
 }
 
+// Gesetzte rechte Winkel: kleines Quadrat innen in der Ecke, wie im
+// Bauplan. Nur fuer Ecken, die orthoFit wirklich gesetzt hat.
+function drawOrthoMarks(P, I, dpr){
+  if(!M.orthoInfo || !M.orthoInfo.ortho.length) return;
+  const loops=C.wallLoops(P, M.walls);
+  if(!loops) return;
+  const set=new Set(M.orthoInfo.ortho), r=11*dpr;
+  ctx.save(); ctx.strokeStyle=INK.meas; ctx.lineWidth=1.3*dpr;
+  loops.forEach(L=>L.forEach((p,i)=>{
+    if(!set.has(p.id)) return;
+    const a=toScr(L[(i+L.length-1)%L.length]), c=toScr(p), b=toScr(L[(i+1)%L.length]);
+    const u=(q)=>{ const l=Math.hypot(q.x-c.x,q.y-c.y)||1; return {x:(q.x-c.x)/l*r, y:(q.y-c.y)/l*r}; };
+    const ua=u(a), ub=u(b);
+    ctx.beginPath(); ctx.moveTo(c.x+ua.x,c.y+ua.y); ctx.lineTo(c.x+ua.x+ub.x,c.y+ua.y+ub.y); ctx.lineTo(c.x+ub.x,c.y+ub.y); ctx.stroke();
+  }));
+  ctx.restore();
+}
+
 function drawCanvas(){
   if(M.mode==='tiles'){ drawTilesView(); return; }
   const dpr=DPR();
@@ -6578,6 +6810,7 @@ function drawCanvas(){
     ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y);
     ctx.stroke();
   });
+  drawOrthoMarks(P, I, dpr);
   drawUnfolded(P, I, dpr);
   drawWallMarks(P, I, dpr);
   drawOpeningsOnPlan(P, I, dpr);
@@ -7828,7 +8061,7 @@ const MODE_HINTS={
   draw:'Antippen setzt Ecken und verbindet sie · Ziehen verschiebt · gedrückt halten löscht.',
   measure:'Wand oder zwei Ecken antippen, Maß in Metern eintippen.',
   wall:'Öffnung einsetzen und ziehen — sie bleibt immer innerhalb der Wand.',
-  tiles:'Fliese aus dem Panel ziehen · Ziehen rastet an Fliesen und Wänden ein · Q/E drehen · F spiegeln · ⌘D duplizieren.',
+  tiles:'Fliese aus dem Panel ziehen · Umschalt+Ziehen: Rahmenauswahl · Q/E drehen · F spiegeln · G Gehrung · ⌘C/⌘V · ⌘D duplizieren.',
 };
 let hintTimer=null;
 // setHint(text): fluechtige Meldung, faellt nach ein paar Sekunden auf den
@@ -7963,6 +8196,20 @@ $('snapfit').onclick=()=>{
   setHint(M.snapfit
     ? 'Ausrichten an — die Skizze zieht sich auf die ausgeglichene Form.'
     : 'Ausrichten aus — die Ecken bleiben liegen, gerechnet wird trotzdem weiter.');
+};
+function syncOrthoBtn(){
+  const b=$('ortho');
+  b.setAttribute('aria-pressed', String(!!M.ortho));
+}
+$('ortho').onclick=()=>{
+  snapshot();
+  M.ortho=!M.ortho;
+  syncOrthoBtn();
+  recompute();
+  const r=M.orthoInfo;
+  setHint(!M.ortho ? 'Rechte Winkel aus — alle Ecken so, wie gemessen.'
+    : r ? `${r.ortho.length} Ecke(n) auf 90° gesetzt` + (r.rejected.length ? ` · ${r.rejected.length} bleiben, wie gemessen (die Messungen sprechen dagegen)` : '')
+        : 'Rechte Winkel an — greifen, sobald gemessen ist.');
 };
 // Der Knopf schaltet zwischen zwei Ansichten um, darum beschriftet er das,
 // was der naechste Klick BRINGT - nicht den Zustand, in dem er gerade ist.
@@ -8349,12 +8596,14 @@ function renderPanel(){
   const poly=C.wallPolygon(P, M.walls);
   const geo=$('geo');
   if(poly && M.fit){
-    let a=0, u=0;
-    for(let i=0,j=poly.length-1;i<poly.length;j=i++){
-      a+=poly[j].x*poly[i].y-poly[i].x*poly[j].y;
-      u+=C.dist(poly[j],poly[i]);
-    }
-    geo.innerHTML=`${fmt2(Math.abs(a)/2/1e6)} m² <small>· Umfang ${fmt2(u/1000)} m</small>`;
+    // Umfang inklusive Inseln - das ist die Sockelleiste, die man braucht.
+    let u=0;
+    [poly, ...poly.holes].forEach(R=>{ for(let i=0,j=R.length-1;i<R.length;j=i++) u+=C.dist(R[j],R[i]); });
+    const inseln=poly.holes.length ? ` · ${poly.holes.length} Insel${poly.holes.length>1?'n':''}` : '';
+    const oi=M.orthoInfo;
+    const ortho = oi ? `<br><small>90° gesetzt: ${oi.ortho.join(', ')||'—'}${oi.rejected.length
+      ? ` · wie gemessen: ${oi.rejected.map(r=>`${escapeHtml(r.id)} ${fmtGrad(r.ang)}°`).join(', ')}` : ''}</small>` : '';
+    geo.innerHTML=`${fmt2(C.roomArea(poly)/1e6)} m² <small>· Umfang ${fmt2(u/1000)} m${inseln}</small>${ortho}`;
   } else if(poly){
     geo.innerHTML='<small>Fläche folgt mit der ersten Messung.</small>';
   } else {
@@ -8664,6 +8913,7 @@ if(!currentRoom){
 }
 setMode('draw');
 syncSnapfitBtn();
+syncOrthoBtn();
 recompute();
 // setHintLive statt setHint: Boot-Meldungen duerfen nicht nach vier
 // Sekunden verschwinden, bevor ueberhaupt jemand hingesehen hat - sie
@@ -8695,7 +8945,10 @@ function tilesCtx(){
   const F=TL.frameOf(M.fit.pts, M.walls);
   const ringW=F && C.wallPolygon(M.fit.pts, M.walls);
   if(!ringW) return null;
-  return {F, ringW, ring:ringW.map(p=>TL.toLocal(F,p))};
+  // Rahmenkoordinaten mit Ecken-ID (fuer Bemassungen), Inseln wie in CORE.
+  const loc=R=>R.map(p=>({...TL.toLocal(F,p), id:p.id}));
+  const ring=loc(ringW); ring.holes=ringW.holes.map(loc);
+  return {F, ringW, ring};
 }
 const tilesReady=()=>!!tilesCtx();
 const tScr=(K,p)=>toScr(TL.toWorldF(K.F,p));
@@ -8751,14 +9004,17 @@ function drawTilesView(){
   if(!userView && !TS.drag && cv.width>=200 && cv.height>=200) VIEW=fitView(K.ringW, VIEW.rot, 250);
   drawGrid(dpr); drawScalebar(dpr);
   const T=tilesData(), S=T.spec;
-  const path=P=>{ ctx.beginPath(); P.forEach((p,i)=>{ const q=tScr(K,p); i?ctx.lineTo(q.x,q.y):ctx.moveTo(q.x,q.y); }); ctx.closePath(); };
+  const sub=P=>{ P.forEach((p,i)=>{ const q=tScr(K,p); i?ctx.lineTo(q.x,q.y):ctx.moveTo(q.x,q.y); }); ctx.closePath(); };
+  const path=P=>{ ctx.beginPath(); sub(P); };
+  // Raum mit Inseln: alle Ringe in EINEM Pfad, gefuellt/geclippt even-odd.
+  const room=()=>{ ctx.beginPath(); TL.ringsOf(K.ring).forEach(sub); };
   const ev=TS.drag ? null : tilesEval(K);
-  path(K.ring); ctx.fillStyle=TILE_INK.floor; ctx.fill();
+  room(); ctx.fillStyle=TILE_INK.floor; ctx.fill('evenodd');
   // Ueberstand ausserhalb des Raums blass - man sieht, was abgeschnitten wird.
   ctx.save(); ctx.globalAlpha=.18;
   T.items.forEach(it=>{ path(TL.tileCorners(S,it)); ctx.fillStyle=TILE_INK[it.kind]; ctx.fill(); });
   ctx.restore();
-  ctx.save(); path(K.ring); ctx.clip();
+  ctx.save(); room(); ctx.clip('evenodd');
   T.items.forEach(it=>{
     const st=ev ? ev.status.get(it.id) : 'whole';
     path(TL.tileCorners(S,it));
@@ -8769,8 +9025,9 @@ function drawTilesView(){
   });
   T.joints.forEach(j=>{ path(TL.jointStrip(j)); ctx.fillStyle=TILE_INK.joint; ctx.fill(); });
   ctx.restore();
-  // Waende
-  path(K.ring); ctx.strokeStyle=INK.wall; ctx.lineWidth=2.5*dpr; ctx.stroke();
+  // Waende, Inseln grau hinterlegt
+  K.ring.holes.forEach(h=>{ path(h); ctx.fillStyle='#d8d4c8'; ctx.fill(); });
+  room(); ctx.strokeStyle=INK.wall; ctx.lineWidth=2.5*dpr; ctx.stroke();
   // Dehnungsfugen: Mittellinie gestrichelt, damit auch schmale sichtbar bleiben
   ctx.setLineDash([6*dpr,4*dpr]); ctx.strokeStyle=TILE_INK.joint; ctx.lineWidth=1.2*dpr;
   T.joints.forEach(j=>{ const a=tScr(K,j.a), b=tScr(K,j.b); ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke(); });
@@ -8798,6 +9055,14 @@ function drawTilesView(){
     ctx.fillStyle=INK.accent; ctx.font=`${12*dpr}px system-ui`; ctx.textAlign='center'; ctx.textBaseline='middle';
     ctx.fillText('⟳', hnd.h.x, hnd.h.y); ctx.textAlign='start'; ctx.textBaseline='alphabetic';
   }
+  if(TS.box){
+    const {a,b}=TS.box;
+    ctx.save(); ctx.setLineDash([5*dpr,4*dpr]); ctx.strokeStyle=INK.accent; ctx.lineWidth=1.2*dpr;
+    ctx.fillStyle='rgba(194,65,12,.06)';
+    ctx.fillRect(Math.min(a.x,b.x),Math.min(a.y,b.y),Math.abs(b.x-a.x),Math.abs(b.y-a.y));
+    ctx.strokeRect(Math.min(a.x,b.x),Math.min(a.y,b.y),Math.abs(b.x-a.x),Math.abs(b.y-a.y));
+    ctx.restore();
+  }
   // Eingerastete Kanten
   ctx.strokeStyle='#0b72a3'; ctx.lineWidth=4*dpr; ctx.globalAlpha=.6;
   TS.lines.forEach(t=>{ const a=tScr(K,t.a), b=tScr(K,t.b); ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke(); });
@@ -8805,7 +9070,7 @@ function drawTilesView(){
   // Dehnungsfuge im Entstehen
   if(TS.tool==='joint'){
     const dot=(p,col)=>{ const q=tScr(K,p); ctx.fillStyle=col; ctx.beginPath(); ctx.arc(q.x,q.y,6*dpr,0,7); ctx.fill(); };
-    if(TS.jmode==='corner') K.ring.forEach(p=>{ const q=tScr(K,p); ctx.strokeStyle=INK.mode; ctx.lineWidth=1.5*dpr; ctx.beginPath(); ctx.arc(q.x,q.y,10*dpr,0,7); ctx.stroke(); });
+    if(TS.jmode==='corner') TL.ringsOf(K.ring).flat().forEach(p=>{ const q=tScr(K,p); ctx.strokeStyle=INK.mode; ctx.lineWidth=1.5*dpr; ctx.beginPath(); ctx.arc(q.x,q.y,10*dpr,0,7); ctx.stroke(); });
     if(TS.draft){
       dot(TS.draft.q, INK.accent);
       if(TS.hover){
@@ -8854,6 +9119,12 @@ function tilesDown(e){
     return true;
   }
   const it=tileAt(p);
+  // Umschalt + Ziehen im Leeren: Auswahlrahmen (Bildschirmrechteck - die
+  // Ansicht kann gedreht sein, der Rahmen bleibt trotzdem achsparallel).
+  if(!it && e.shiftKey){
+    gesture={t:'tiles', k:'box', x0:e.clientX, y0:e.clientY, moved:false, d0:d};
+    return true;
+  }
   if(!it) return false;
   if(e.shiftKey){
     TS.sel.has(it.id) ? TS.sel.delete(it.id) : TS.sel.add(it.id);
@@ -8891,6 +9162,7 @@ function snapMoving(K, cand, free){
 }
 function tilesMove(e, g){
   const K=tilesCtx(); if(!K || !g.moved || g.k==='none') return;
+  if(g.k==='box'){ TS.box={a:g.d0, b:evDev(e)}; drawTilesView(); return; }
   if(g.snap){ pushSnapshot(g.snap); g.snap=null; }
   TS.drag=true;
   const p=tEvLocal(K,e);
@@ -8908,6 +9180,19 @@ function tilesMove(e, g){
 }
 function tilesUp(e, g){
   TS.drag=false; TS.lines=[];
+  if(g.k==='box'){
+    const b=TS.box; TS.box=null;
+    const K=tilesCtx();
+    if(g.moved && b && K){
+      // Nur Fliesen, die VOLLSTAENDIG im Rahmen liegen - Beruehren reicht nicht.
+      const x0=Math.min(b.a.x,b.b.x), x1=Math.max(b.a.x,b.b.x), y0=Math.min(b.a.y,b.b.y), y1=Math.max(b.a.y,b.b.y);
+      const S=tilesData().spec;
+      tilesData().items.forEach(it=>{
+        if(TL.tileCorners(S,it).every(p=>{ const q=tScr(K,p); return q.x>=x0&&q.x<=x1&&q.y>=y0&&q.y<=y1; })) TS.sel.add(it.id);
+      });
+    }
+    render(); return;
+  }
   if(g.moved && g.k!=='none'){
     const S=selItems();
     if(S.length) TS.lastRot=S[0].rot;
@@ -8943,8 +9228,9 @@ function tilesTap(e){
   if(TS.sel.size){ TS.sel.clear(); render(); }
 }
 function tilesHover(e){
-  if(TS.tool!=='joint') return;
   const K=tilesCtx(); if(!K) return;
+  TS.ptr=tEvLocal(K,e);                 // Ziel fuers Einfuegen
+  if(TS.tool!=='joint') return;
   TS.hover=TL.jointEndSnap(K.ring, tEvLocal(K,e), tTol()*1.5, TS.jmode);
   drawTilesView();
 }
@@ -9018,8 +9304,25 @@ function tilesFlip(){
   snapshot();
   applyItems(S.map(it=>{
     const k=it.kind==='L'?'R':'L', a=tileCentreOffset(it.kind,it.rot), b=tileCentreOffset(k,it.rot);
-    return {...it, kind:k, x:it.x+a.x-b.x, y:it.y+a.y-b.y};
+    // Ein Schnitt gehoert zur Form - gespiegelt passt er nicht mehr.
+    const o={...it, kind:k, x:it.x+a.x-b.x, y:it.y+a.y-b.y}; delete o.cuts; return o;
   }));
+  tilesSave();
+}
+// Gehrung: genau zwei ausgewaehlte, ueberlappende Fliesen.
+function tilesMiter(){
+  const S=selItems();
+  if(S.length!==2){ setHint('Für eine Gehrung genau zwei überlappende Fliesen auswählen (Umschalt+Klick).'); return; }
+  const r=TL.miterPair(tilesData().spec, S[0], S[1]);
+  if(!r){ setHint('Die beiden Fliesen überlappen nicht — erst übereinanderschieben.'); return; }
+  snapshot(); applyItems(r);
+  setHint('Auf Gehrung geschnitten — mit Fuge dazwischen.');
+  tilesSave();
+}
+function tilesUncut(){
+  const S=selItems().filter(it=>it.cuts && it.cuts.length);
+  if(!S.length) return;
+  snapshot(); applyItems(S.map(it=>{ const o={...it}; delete o.cuts; return o; }));
   tilesSave();
 }
 function tilesDelete(){
@@ -9091,8 +9394,31 @@ function tilesExtend(){
   setHint(`${add.length} Fliesen ergänzt. Die ganze Reihe ist ausgewählt — duplizieren und an die nächste Reihe ziehen.`);
   tilesSave();
 }
+// Zwischenablage nur innerhalb der App - Fliesenlagen sind kein Text, den
+// man woanders einfuegen will. Eingefuegt wird mit dem Mittelpunkt der
+// Gruppe unter dem Zeiger, ohne Zeiger versetzt neben dem Original.
+function tilesCopy(){
+  const S=selItems(); if(!S.length) return;
+  TS.clip=S.map(it=>JSON.parse(JSON.stringify(it)));
+  setHint(`${S.length} Fliese(n) kopiert.`);
+}
+function tilesPaste(){
+  if(!TS.clip || !TS.clip.length){ setHint('Nichts kopiert.'); return; }
+  const K=tilesCtx(); if(!K) return;
+  const T=tilesData(), P=TS.clip.flatMap(it=>TL.tileCorners(T.spec,it));
+  const c={x:(Math.min(...P.map(p=>p.x))+Math.max(...P.map(p=>p.x)))/2, y:(Math.min(...P.map(p=>p.y))+Math.max(...P.map(p=>p.y)))/2};
+  const to=TS.ptr || {x:c.x+T.spec.l/2, y:c.y+T.spec.l/2};
+  snapshot();
+  const add=TS.clip.map(it=>({...JSON.parse(JSON.stringify(it)), id:T.seq++, x:it.x+to.x-c.x, y:it.y+to.y-c.y}));
+  T.items.push(...add);
+  TS.sel=new Set(add.map(it=>it.id)); TS.dup=null;
+  setHint(`${add.length} Fliese(n) eingefügt — an ihren Platz ziehen, sie rasten ein.`);
+  tilesSave();
+}
 function tilesKey(e){
   const k=e.key, mod=e.ctrlKey||e.metaKey;
+  if(mod && k.toLowerCase()==='c'){ if(TS.sel.size){ e.preventDefault(); tilesCopy(); return true; } return false; }
+  if(mod && k.toLowerCase()==='v'){ if(TS.clip){ e.preventDefault(); tilesPaste(); return true; } return false; }
   if(mod && k.toLowerCase()==='d'){ e.preventDefault(); tilesDup(); return true; }
   if(mod && k.toLowerCase()==='a'){ e.preventDefault(); TS.sel=new Set(tilesData().items.map(it=>it.id)); render(); return true; }
   if(mod) return false;
@@ -9106,6 +9432,7 @@ function tilesKey(e){
   if(k==='q'||k==='Q'){ tilesRotate(e.shiftKey?-1:-15); return true; }
   if(k==='e'||k==='E'){ tilesRotate(e.shiftKey?1:15); return true; }
   if(k==='f'||k==='F'){ tilesFlip(); return true; }
+  if(k==='g'||k==='G'){ tilesMiter(); return true; }
   // Pfeile schieben im BILD (die Ansicht kann gedreht sein) - also die
   // Bildrichtung in den Raumrahmen umrechnen. 1 mm, mit Umschalt 10 mm.
   const arr={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]}[k];
@@ -9166,6 +9493,8 @@ $('tRotL').onclick=()=>tilesRotate(-15);
 $('tRotR').onclick=()=>tilesRotate(15);
 $('tFlip').onclick=tilesFlip;
 $('tDel').onclick=tilesDelete;
+$('tMiter').onclick=tilesMiter;
+$('tUncut').onclick=tilesUncut;
 $('tAll').onclick=()=>{ TS.sel=new Set(tilesData().items.map(it=>it.id)); render(); };
 $('tClear').onclick=()=>{
   const T=tilesData(); if(!T.items.length) return;
@@ -9187,8 +9516,10 @@ function renderTilesPanel(){
   const n=TS.sel.size;
   $('tSelInfo').textContent = n
     ? `${n} Fliese${n>1?'n':''} ausgewählt${TS.vec?' · Mustervektor '+fmtMm(Math.hypot(TS.vec.x,TS.vec.y))+' mm':''}`
-    : 'Fliese antippen zum Auswählen · Umschalt = mehrere · Alt beim Ziehen = ohne Einrasten';
+    : 'Fliese antippen zum Auswählen · Umschalt+Klick = mehrere · Umschalt+Ziehen = Rahmen · Alt beim Ziehen = ohne Einrasten';
   ['tDup','tRotL','tRotR','tFlip','tDel'].forEach(id=>{ $(id).disabled=!n; });
+  $('tMiter').disabled = n!==2;
+  $('tUncut').disabled = !selItems().some(it=>it.cuts && it.cuts.length);
   $('tExt').disabled=!n || !TS.vec;
   // Fugenliste nur neu bauen, wenn sich die Fugen aendern - sonst verliert
   // ein Eingabefeld bei jedem Bild den Fokus.
@@ -9254,7 +9585,7 @@ function refDims(K, T, ev){
   const it=T.items.find(x=>ev.status.get(x.id)!=='out');
   if(!it) return null;
   const A=TL.tileCorners(T.spec,it)[0];
-  const cands=TL.edgesOf(K.ring).map(e=>{
+  const cands=TL.ringsOf(K.ring).flatMap(R=>TL.edgesOf(R)).map(e=>{
     const t=(A.x-e.a.x)*e.d.x+(A.y-e.a.y)*e.d.y, L=Math.hypot(e.b.x-e.a.x,e.b.y-e.a.y);
     const foot={x:e.a.x+e.d.x*t, y:e.a.y+e.d.y*t};
     return {e, foot, dist:Math.hypot(A.x-foot.x, A.y-foot.y), inSeg:t>=-1 && t<=L+1};
@@ -9268,8 +9599,9 @@ function refDims(K, T, ev){
 function overviewSvg(K, T, ev, L, ox, oy, opts={}){
   const pg=p=>{ const q=TL.printPt(L,p); return {x:q.x+ox, y:q.y+oy}; };
   const S=T.spec, out=[], id=opts.id||'o';
-  const ringP=K.ring.map(pg);
-  out.push(`<defs><clipPath id="room${id}">${svgPoly(ringP,'')}</clipPath>
+  const ringP=K.ring.map(pg), holesP=K.ring.holes.map(h=>h.map(pg));
+  const roomD=[ringP,...holesP].map(R=>'M'+R.map(p=>`${n2(p.x)},${n2(p.y)}`).join('L')+'Z').join('');
+  out.push(`<defs><clipPath id="room${id}"><path d="${roomD}" clip-rule="evenodd"/></clipPath>
     <pattern id="hat${id}" width="1.6" height="1.6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
     <line x1="0" y1="0" x2="0" y2="1.6" stroke="#000" stroke-width="0.25" stroke-opacity=".45"/></pattern></defs>`);
   out.push(svgPoly(ringP,'fill="#fff" stroke="none"'));
@@ -9282,27 +9614,31 @@ function overviewSvg(K, T, ev, L, ox, oy, opts={}){
   });
   T.joints.forEach(j=>out.push(svgPoly(TL.jointStrip(j).map(pg),'fill="#000"')));
   out.push('</g>');
-  out.push(svgPoly(ringP,`fill="none" stroke="#000" stroke-width="${opts.thin?0.35:0.7}"`));
+  holesP.forEach(h=>out.push(svgPoly(h,`fill="#bbb" stroke="none"`)));
+  out.push(`<path d="${roomD}" fill="none" stroke="#000" stroke-width="${opts.thin?0.35:0.7}"/>`);
   if(opts.highlightPiece) out.push(svgPoly(opts.highlightPiece.map(pg),'fill="#c00" fill-opacity=".8" stroke="#000" stroke-width="0.3"'));
   if(opts.thin) return out.join('');
-  // Wandmasse und Eckbuchstaben
-  const nR=TL.edgesOf(ringP);
-  TL.edgesOf(K.ring).forEach((e,i)=>{
+  // Wandmasse und Eckbuchstaben - aussen am Raum, bei Inseln aussen an der
+  // Insel (also im Raum; edgesOf zeigt dort ohnehin in den Raum).
+  [[K.ring,ringP],...K.ring.holes.map((h,i)=>[h,holesP[i]])].forEach(([R,RP])=>{
+  const nR=TL.edgesOf(RP);
+  TL.edgesOf(R).forEach((e,i)=>{
     const a=pg(e.a), b=pg(e.b), n=nR[i].n;
     const m={x:(a.x+b.x)/2+n.x*3.2, y:(a.y+b.y)/2+n.y*3.2};
     let ang=Math.atan2(b.y-a.y,b.x-a.x)/TD2R; if(ang>90) ang-=180; if(ang<-90) ang+=180;
     out.push(svgText(m.x,m.y,fmtMm(Math.hypot(e.b.x-e.a.x,e.b.y-e.a.y)),
       `font-size="2.6" text-anchor="middle" dominant-baseline="middle" transform="rotate(${n2(ang)} ${n2(m.x)} ${n2(m.y)})"`));
   });
-  K.ringW.forEach((pw,i)=>{
-    const q=ringP[i], n1=nR[(i+nR.length-1)%nR.length].n, n2_=nR[i].n;
+  R.forEach((pw,i)=>{
+    const q=RP[i], n1=nR[(i+nR.length-1)%nR.length].n, n2_=nR[i].n;
     const n={x:n1.x+n2_.x, y:n1.y+n2_.y}, l=Math.hypot(n.x,n.y)||1;
     out.push(svgText(q.x+n.x/l*3.5, q.y+n.y/l*3.5, pw.id||'', 'font-size="3" font-weight="700" text-anchor="middle" dominant-baseline="middle"'));
+  });
   });
   // Dehnungsfugen: Lage der Enden ab der naechsten Ecke
   T.joints.forEach((j,k)=>{
     const a=pg(j.a), b=pg(j.b), m={x:(a.x+b.x)/2, y:(a.y+b.y)/2};
-    const nm=d=>d ? `${K.ringW[d.corner].id||'?'}${d.dist?` + ${fmtMm(d.dist)}`:''}` : '?';
+    const nm=d=>d ? `${d.corner.id||'?'}${d.dist?` + ${fmtMm(d.dist)}`:''}` : '?';
     out.push(svgText(m.x+1.5, m.y-1.5, `DF${k+1} · ${f1(j.width)} mm · ${nm(TL.endDim(K.ring,j.a))} → ${nm(TL.endDim(K.ring,j.b))}`,
       'font-size="2.3" stroke="#fff" stroke-width="0.6" paint-order="stroke"'));
   });
@@ -9329,7 +9665,7 @@ function overviewSvg(K, T, ev, L, ox, oy, opts={}){
 }
 
 function pieceSheet(K, T, ev, c, total, head){
-  const S=T.spec, D=TL.pieceDims(S, c.item.kind, c.tilePoly), sh=D.shape;
+  const S=T.spec, D=TL.pieceDims(S, c.item.kind, c.tilePoly, c.tileCutouts), sh=D.shape;
   const xs=sh.map(p=>p.x), ys=sh.map(p=>p.y);
   const x0=Math.min(...xs), y0=Math.min(...ys), bw=Math.max(...xs)-x0, bh=Math.max(...ys)-y0;
   const sc=Math.min(160/bw, 80/bh), ox=25+(160-bw*sc)/2, oy=52;
@@ -9345,6 +9681,8 @@ function pieceSheet(K, T, ev, c, total, head){
   const shP=sh.map(tp), pcP=c.tilePoly.map(tp);
   out.push(svgPoly(shP,'fill="url(#ph)" stroke="#000" stroke-width="0.3" stroke-dasharray="2 1"'));
   out.push(svgPoly(pcP,'fill="#e8e8e8" stroke="#000" stroke-width="0.7"'));
+  // Aussparungen (Inseln im Raum): weiss ausgeschnitten, rot umrandet
+  c.tileCutouts.forEach(cu=>out.push(svgPoly(cu.map(tp),'fill="#fff" stroke="#c00" stroke-width="0.5"')));
   const cx=shP.reduce((s,p)=>s+p.x,0)/4, cy=shP.reduce((s,p)=>s+p.y,0)/4;
   shP.forEach((p,i)=>{
     const d={x:p.x-cx, y:p.y-cy}, l=Math.hypot(d.x,d.y)||1;
@@ -9371,6 +9709,13 @@ function pieceSheet(K, T, ev, c, total, head){
     out.push(svgText(M2.x,M2.y,fmtMm(m.dist),'font-size="3.4" font-weight="700" fill="#c00" text-anchor="middle" dominant-baseline="middle" stroke="#fff" stroke-width="0.8" paint-order="stroke"'));
     rows.push(`Kante ${CORNER_NAMES[m.edge]}–${CORNER_NAMES[(m.edge+1)%4]}: ${fmtMm(m.dist)} mm ab Ecke ${CORNER_NAMES[m.corner]}`);
   });
+  // Innenpunkte von Aussparungen: laengs A-B ab Ecke A, quer ab Kante A-B
+  D.inner.forEach(m=>{
+    const p=tp(m.p);
+    out.push(`<circle cx="${n2(p.x)}" cy="${n2(p.y)}" r="0.8" fill="#c00"/>`);
+    out.push(svgText(p.x+1.5, p.y-1.5, `${fmtMm(m.along)} | ${fmtMm(m.off)}`,'font-size="2.6" fill="#c00" stroke="#fff" stroke-width="0.6" paint-order="stroke"'));
+    rows.push(`Aussparung: ${fmtMm(m.along)} mm längs A–B ab Ecke A, ${fmtMm(m.off)} mm quer ab Kante A–B`);
+  });
   const cutEdges=D.edges.filter(e=>e.cut);
   cutEdges.forEach(e=>{
     const a=tp(e.a), b=tp(e.b), m={x:(a.x+b.x)/2, y:(a.y+b.y)/2};
@@ -9379,6 +9724,7 @@ function pieceSheet(K, T, ev, c, total, head){
   });
   let y=oy+bh*sc+24;
   out.push(svgText(15,y,'Anreißen','font-size="4" font-weight="700"')); y+=6;
+  if(c.tileCutouts.length) rows.unshift(`${c.tileCutouts.length} Aussparung(en) für Wand/Pfeiler — rot umrandet`);
   if(!rows.length) rows.push('Schnitt läuft nur durch Ecken bzw. Innenpunkte — Maße siehe Zeichnung.');
   rows.forEach(r=>{ out.push(svgText(18,y,'• '+r,'font-size="3.4"')); y+=5.2; });
   out.push(svgText(18,y,`• Schnittkanten ${cutEdges.map(e=>fmtMm(e.len)).join(' / ')} mm · Stückfläche ${fmt2(D.area/1e4)} dm²`,'font-size="3.4"')); y+=10;
@@ -11372,6 +11718,79 @@ globalThis.selfChecks=function(){
                return Math.abs(rr.dy) >= 400*0.05; })());
     }
   }
+  // --- Rechte Winkel annehmen (orthoFit) ---
+  {
+    // Rechteck 4000 x 3000 mit einer kurzen Zunge; die Zungenmasse sind so
+    // verrauscht, dass der Ausgleich dort 1-2 Grad daneben liegt.
+    const mk=(pts,pairs)=>pairs.map(([a,b,e])=>{ const A=pts.find(p=>p.id===a), B=pts.find(p=>p.id===b);
+      return {a,b,d:Math.hypot(A.x-B.x,A.y-B.y)+(e||0)}; });
+    const R=[['A',0,0],['B',4000,0],['C',4000,3000],['D',0,3000]].map(([id,x,y])=>({id,x,y}));
+    const W=[['A','B'],['B','C'],['C','D'],['D','A']];
+    const meas=mk(R,[['A','B'],['B','C'],['C','D'],['D','A',6],['A','C',-5]]);
+    const r=C.orthoFit(R.map(p=>({...p,x:p.x+30,y:p.y-20})),W,meas,2);
+    const I=C.idx(r.fit.pts), P=r.fit.pts;
+    const ang=(a,c,b)=>{ const u={x:P[I[a]].x-P[I[c]].x,y:P[I[a]].y-P[I[c]].y}, v={x:P[I[b]].x-P[I[c]].x,y:P[I[b]].y-P[I[c]].y};
+      return Math.abs(Math.atan2(u.x*v.y-u.y*v.x,u.x*v.x+u.y*v.y))*180/Math.PI; };
+    chk('90°: verträgliche Ecken werden rechtwinklig', r.ortho.length>=3 && Math.abs(ang('D','A','B')-90)<0.05);
+    // Parallelogramm, sauber gemessen: 3 Grad schief, mit Diagonalen - darf
+    // NICHT auf 90 gezogen werden, auch wenn die Toleranz es erlaubte.
+    const sh=Math.tan(1.5*Math.PI/180)*3000;
+    const Q=[['A',0,0],['B',4000,0],['C',4000+sh,3000],['D',sh,3000]].map(([id,x,y])=>({id,x,y}));
+    const r2=C.orthoFit(Q.map(p=>({...p})),W,mk(Q,[['A','B'],['B','C'],['C','D'],['D','A'],['A','C'],['B','D']]),2);
+    chk('90°: gut gemessene schiefe Ecke bleibt schief', r2.ortho.length===0 && r2.rejected.length===4);
+    chk('90°: außerhalb der Toleranz wird nichts angefasst',
+      C.orthoFit(Q.map(p=>({...p})),W,mk(Q,[['A','B'],['B','C'],['C','D'],['D','A'],['A','C'],['B','D']]),1).rejected.length===0);
+    chk('90°: Gewicht ändert echte Messungen nicht (ohne wt wie bisher)',
+      Math.abs(C.residuals(R,[{a:'A',b:'B',d:3990}])[0]-10)<1e-9 && Math.abs(C.residuals(R,[{a:'A',b:'B',d:3990,wt:40}])[0]-400)<1e-9);
+  }
+  // --- Raum-Inseln (freistehende Wand, Pfeiler, Wand neben Durchbruch) ---
+  {
+    const P=[['A',0,0],['B',6000,0],['C',6000,4000],['D',0,4000],
+             ['I',2900,1000],['J',3100,1000],['K',3100,3000],['L',2900,3000]].map(([id,x,y])=>({id,x,y}));
+    const W=[['A','B'],['B','C'],['C','D'],['D','A'],['I','J'],['J','K'],['K','L'],['L','I']];
+    const poly=C.wallPolygon(P,W);
+    chk('inseln: zweiter geschlossener Zug wird Insel', !!poly && poly.length===4 && poly.holes.length===1);
+    chk('inseln: Aussen ist der größte Zug, auch wenn die Insel zuerst kommt',
+      (()=>{ const r=C.wallPolygon(P.slice(4).concat(P.slice(0,4)), W.slice(4).concat(W.slice(0,4)));
+             return r && r.some(p=>p.id==='A') && r.holes[0].some(p=>p.id==='I'); })());
+    chk('inseln: Fläche abzüglich Insel', !!poly && near(C.roomArea(poly), 6000*4000-200*2000, 1e-6));
+    chk('inseln: Punkt in der Insel ist nicht im Raum',
+      !!poly && !C.pointInPoly({x:3000,y:2000},poly) && C.pointInPoly({x:1000,y:2000},poly));
+    chk('inseln: Sichtlinie durch die Insel ist nicht messbar',
+      (()=>{ const Q=P.concat([{id:'E',x:1000,y:2000},{id:'F',x:5000,y:2000}]);
+             return !C.pairMeasurable(Q,W,poly,'E','F'); })());
+    chk('inseln: Insel außerhalb des Raums -> keine gültige Form',
+      C.wallPolygon(P.map(p=>'IJKL'.includes(p.id)?{...p,x:p.x+5000}:p),W)===null);
+    chk('inseln: Insel kreuzt die Außenwand -> keine gültige Form',
+      C.wallPolygon(P.map(p=>p.id==='I'||p.id==='L'?{...p,x:-100}:p),W)===null);
+    chk('inseln: offener zweiter Zug -> Ring noch nicht geschlossen',
+      C.wallPolygonRing(P,W.slice(0,7))===null);
+    // Fliesen an der Insel
+    const T=globalThis.TILES, S={...T.TILE_DEF, angle:90};
+    const ring=poly.map(p=>({x:p.x,y:p.y,id:p.id})); ring.holes=poly.holes.map(h=>h.map(p=>({x:p.x,y:p.y,id:p.id})));
+    const st=T.tileStatus(S,{kind:'L',x:2500,y:1500,rot:0},ring,[]);
+    chk('inseln: Fliese über der Insel ist geschnitten, Aussparung abgezogen',
+      st.status==='cut' && st.pieces.length===1 && st.pieces[0].cutouts.length===1
+      && near(st.inArea, 850*150-200*150, 1e-6));
+    chk('inseln: Fliese rastet an die Inselwand',
+      (()=>{ const w={kind:'L',x:2030,y:1500,rot:0};         // rechte Kante bei 2880, Insel ab 2900
+             const r=T.snapGroup([T.tileCorners(S,w)], T.snapTargets({...S,edgeGap:5},[],ring,[]), 40);
+             const it=r && T.moveItem(w,r.m);
+             return it && near(it.x+850, 2900-5, 1e-6); })());
+    chk('inseln: Dehnungsfuge von Wand an Insel gültig, durch Insel nicht',
+      T.jointValid(ring,{x:0,y:2000},{x:2900,y:2000}) && !T.jointValid(ring,{x:0,y:2000},{x:6000,y:2000}));
+    chk('inseln: Fugenende rastet auf die Inselwand',
+      (()=>{ const e=T.jointEndSnap(ring,{x:2890,y:2000},30,'free'); return e && near(e.q.x,2900,1e-9); })());
+    chk('inseln: Stückliste zieht Inselfläche ab',
+      near(T.tileStats(S,[],ring,[]).roomArea, 6000*4000-200*2000, 1e-6));
+    const cl=T.cutList(S,[{kind:'L',x:2500,y:1500,rot:0}],ring,[]);
+    const d=T.pieceDims(S,'L',cl[0].tilePoly,cl[0].tileCutouts);
+    chk('inseln: ganze Fliese mit Aussparung hat keine Schnittkanten außen',
+      (()=>{ const c=T.cutList(S,[{kind:'L',x:2800,y:900,rot:0}],ring,[])[0];
+             return c && T.pieceDims(S,'L',c.tilePoly,c.tileCutouts).edges.every(e=>!e.cut); })());
+    chk('inseln: Schnittblatt bemaßt die Aussparung ab Fliesenecke',
+      d.marks.filter(m=>m.cutout===0).map(m=>Math.round(m.dist)).sort((a,b)=>a-b).join()==='250,250,400,400');
+  }
   // --- Fliesen (Chevron) ---
   {
     const T=globalThis.TILES, S={...T.TILE_DEF};
@@ -11452,6 +11871,30 @@ globalThis.selfChecks=function(){
       chk('fliesen: Fugenende im Eckmodus nur auf Ecken',
         T.jointEndSnap(ring,{x:1990,y:15},30,'corner')===null
         && near(T.jointEndSnap(ring,{x:40,y:30},30,'corner').q.x,0,1e-9));
+    }
+    {
+      // Zwei Friese (Rechteckfliesen) treffen sich in einer Raumecke und
+      // ueberlappen dort im Quadrat 150 x 150.
+      const S9={...S,angle:90};
+      const H={id:1,kind:'L',x:0,y:0,rot:0};           // waagerecht, x 0..850, y 0..150
+      const V={id:2,kind:'L',x:150,y:0,rot:90};         // senkrecht, x 0..150, y 0..850
+      const r=T.miterPair(S9,H,V);
+      const PH=r&&T.tileCorners(S9,r[0]), PV=r&&T.tileCorners(S9,r[1]);
+      chk('gehrung: danach keine Überlappung', !!r && !T.convexOverlap(PH,PV,0.01));
+      chk('gehrung: je Fliese fehlt das halbe Eckquadrat (abzüglich halber Fuge)',
+        !!r && [PH,PV].every(P=>{ const a=Math.abs(T.polyArea(P)), full=850*150, tri=150*150/2;
+          // die halbe Fuge laeuft auf der 212 mm langen Diagonale zusaetzlich ab
+          return a<=full-tri+1e-6 && a>full-tri-S9.joint*212; }));
+      chk('gehrung: Schnitt unter 45° von Innen- zu Außenecke',
+        !!r && (()=>{ const k=r[0].cuts[0]; return Math.abs(Math.abs(k.n.x)-Math.abs(k.n.y))<1e-9; })());
+      chk('gehrung: Schnitt wandert beim Verschieben mit',
+        !!r && (()=>{ const m={...r[0], x:r[0].x+1000, y:r[0].y+500};
+          const a=T.tileCorners(S9,r[0]), b=T.tileCorners(S9,m);
+          return a.length===b.length && a.every((p,i)=>Math.abs(b[i].x-p.x-1000)<1e-9 && Math.abs(b[i].y-p.y-500)<1e-9); })());
+      chk('gehrung: Fliese gilt als geschnitten und bekommt ein Schnittblatt',
+        !!r && T.cutList(S9,r,null,[]).length===2);
+      chk('gehrung: Schnitte überstehen Speichern/Laden', !!r && T.normTiles({items:r}).items[0].cuts.length===1);
+      chk('gehrung: nicht überlappend -> keine Gehrung', T.miterPair(S9,H,{...V,x:2000})===null);
     }
     chk('fliesen: Weiterstrecken läuft über die Stufe eines Stufenraums hinaus',
       (()=>{ const st=[{x:0,y:0},{x:4000,y:0},{x:4000,y:1000},{x:2000,y:1000},{x:2000,y:3000},{x:0,y:3000}];
