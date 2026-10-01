@@ -4127,6 +4127,23 @@ function trimToRoom(spec, it, lay, joints){
   return changed ? pieces : null;
 }
 
+// Dehnungsfuge durch eine Fliese: an beiden Streifenkanten teilen. Jeder
+// Rest ab 1 % der Fliese bleibt (auch ein schmaler Streifen muss verlegt
+// werden); die Schnitte tragen die Fugen-ID bj, damit Aendern/Loeschen der
+// Fuge die Fliese wiederherstellen kann. null, wenn die Fuge sie nicht trifft.
+function cutByJoint(spec, it, j){
+  const S=jointStrip(j), P=tileCorners(spec,it);
+  if(!convexOverlap(P,S,0.01)) return null;
+  const ar=Q=>Q.length>=3 ? Math.abs(polyArea(Q)) : 0, out=[];
+  const c=Math.cos(-it.rot*D2R), s=Math.sin(-it.rot*D2R);
+  edgesOf(S).forEach(e=>{
+    const k=dedupe(clipHalf(P,e.a,e.n));
+    if(ar(k)>=0.01*spec.w*spec.l && !out.some(o=>convexOverlap(tileCorners(spec,o),k,0.01)))
+      out.push({...it, cuts:[...(it.cuts||[]), {p:rotP(sub(e.a,it),c,s), n:rotP(e.n,c,s), bj:j.id}]});
+  });
+  return out;
+}
+
 // Ecke an Kreuzung: die Ecke vi der Fliese movIt (mit ihrer Gruppe) soll an
 // den Punkt X, an dem sich Ecken anderer Fliesen treffen, und dort die
 // Luecke sinnvoll fuellen. Kandidaten-Drehungen: jede der beiden Kanten an
@@ -4409,6 +4426,7 @@ function normTiles(o){
           if(k.pe && fin(k.pe.x,k.pe.y)) c.pe={x:k.pe.x,y:k.pe.y};
           if(k.wall===true) c.wall=true;
           if(Number.isInteger(k.by)) c.by=k.by;
+          if(Number.isInteger(k.bj)) c.bj=k.bj;
           return c; });
       if(cuts.length) out.cuts=cuts;
       return out;
@@ -4434,7 +4452,7 @@ globalThis.TILES={ TILE_DEF, tileShape, tileCorners, toTile, polyArea, edgesOf, 
   clipConvex, clipHalf, convexOverlap, jointStrip, snapTargets, snapGroup, movePt, moveItem, snapAngle, normDeg,
   tilePieces, tileStatus, cutList, pieceDims, tileStats, extendItems, nearestOnRing, jointEndSnap, jointValid,
   pointInRing, pointInRoom, ringsOf, endDim, printLayout, printPt, normTiles, miterPair, miterAt, miterInfo, miterSnapPoints,
-  rayToRing, jointRayEnd, settleItems, alignMove, alignTiles, edgeAt, insetRoom, trimBy, matchCorner, trimToRoom };
+  rayToRing, jointRayEnd, settleItems, alignMove, alignTiles, edgeAt, insetRoom, trimBy, matchCorner, trimToRoom, cutByJoint };
 })();
 </script>
 
@@ -9853,7 +9871,9 @@ function tilesTap(e){
     if(!TL.jointValid(K.ring, TS.draft.q, s.q)){ setHint('Die Fuge muss durch den Raum laufen — anderen Endpunkt wählen.'); return; }
     const T=tilesData();
     snapshot();
-    T.joints.push({id:T.seq++, a:{...TS.draft.q}, b:{...s.q}, width:T.spec.expWidth});
+    const nj={id:T.seq++, a:{...TS.draft.q}, b:{...s.q}, width:T.spec.expWidth};
+    T.joints.push(nj);
+    jointApply(nj);                                       // Fliesen an der Fuge teilen
     TS.draft=null;
     setHint('Dehnungsfuge gesetzt.');
     tilesSave();
@@ -10078,6 +10098,32 @@ function freshFrom(copies){
     if(c.from!=null){ if(!map.has(c.from)) map.set(c.from, T.seq++); o={...o, from:map.get(c.from)}; }
     if(o.cuts && o.cuts.some(k=>k.m!=null)) o={...o, cuts:o.cuts.map(k=>{ if(k.m==null) return k; if(!mmap.has(k.m)) mmap.set(k.m, T.seq++); return {...k, m:mmap.get(k.m)}; })};
     return o;
+  });
+}
+// Dehnungsfuge in die Fliesen schneiden bzw. wieder herausnehmen.
+function jointApply(j){
+  const T=tilesData();
+  T.items=T.items.flatMap(it=>{
+    const parts=TL.cutByJoint(T.spec,it,j);
+    if(!parts) return [it];
+    if(!parts.length) return [];
+    const from=it.from!=null ? it.from : it.id;
+    return parts.map((q,i)=>i===0 ? {...q, ...(parts.length>1?{from}:{})} : {...q, id:T.seq++, from});
+  });
+}
+function jointRemove(jid){
+  // Reste derselben Fliese (gleiches from) mit Schnitt dieser Fuge wieder
+  // zu einer Fliese zusammenfuehren: ein Rest bleibt, ohne die Fugenschnitte.
+  const T=tilesData(), seen=new Set();
+  T.items=T.items.flatMap(it=>{
+    if(!(it.cuts||[]).some(k=>k.bj===jid)) return [it];
+    const key=it.from!=null ? it.from : it.id;
+    if(seen.has(key)) return [];
+    seen.add(key);
+    const cuts=it.cuts.filter(k=>k.bj!==jid), o={...it};
+    if(cuts.length) o.cuts=cuts; else delete o.cuts;
+    if(o.from===o.id) delete o.from;                    // war nur fuer die Fugenreste gesetzt
+    return [o];
   });
 }
 function tilesUncut(){
@@ -10326,9 +10372,9 @@ function renderTilesPanel(){
       row.querySelector('input').onchange=ev=>{
         const v=parseFloat(ev.target.value.replace(',','.'));
         if(!(v>0)){ ev.target.value=String(j.width).replace('.',','); return; }
-        snapshot(); tilesData().joints.find(x=>x.id===j.id).width=v; tilesSave();
+        snapshot(); const jj=tilesData().joints.find(x=>x.id===j.id); jointRemove(jj.id); jj.width=v; jointApply(jj); tilesSave();
       };
-      row.querySelector('button').onclick=()=>{ snapshot(); T.joints=T.joints.filter(x=>x.id!==j.id); tilesSave(); };
+      row.querySelector('button').onclick=()=>{ snapshot(); jointRemove(j.id); tilesData().joints=tilesData().joints.filter(x=>x.id!==j.id); tilesSave(); };
       L.appendChild(row);
     });
     (T.wallJoints||[]).forEach(w=>{
@@ -12941,6 +12987,17 @@ globalThis.selfChecks=function(){
     chk('anschneiden: Schnitt merkt sich die verursachende Fliese',
       (()=>{ const S9={...S,angle:90}, fr={id:41,kind:'L',x:1150,y:-200,rot:90}, h={id:42,kind:'L',x:300,y:0,rot:0};
              const r=(T.trimBy(S9,fr,h)||[])[0]; return !!r && r.cuts[0].by===41 && T.normTiles({items:[r]}).items[0].cuts[0].by===41; })());
+    {
+      // Fuge durch eine Fliese: zwei Reste an den Streifenkanten, beide mit
+      // bj; auch ein schmaler Rest (20 mm) bleibt.
+      const S9={...S,angle:90}, j={id:77,a:{x:0,y:200},b:{x:4000,y:200},width:8};
+      const parts=T.cutByJoint(S9,{id:5,kind:'L',x:500,y:74,rot:0},j)||[];          // y 74..224
+      const ys=parts.map(q=>T.tileCorners(S9,q)).map(Q=>[Math.min(...Q.map(p=>p.y)),Math.max(...Q.map(p=>p.y))]);
+      chk('dehnungsfuge: teilt die Fliese an beiden Streifenkanten',
+        parts.length===2 && ys.some(([a,b])=>Math.abs(b-196)<1e-6) && ys.some(([a,b])=>Math.abs(a-204)<1e-6)
+        && parts.every(q=>q.cuts.some(k=>k.bj===77)));
+      chk('dehnungsfuge: verfehlt -> nichts', T.cutByJoint(S9,{id:6,kind:'L',x:500,y:600,rot:0},j)===null);
+    }
     chk('dehnungsfuge: 90° zur Wand rastet und läuft bis zur Gegenwand',
       (()=>{ const r=T.jointRayEnd(ring,{x:1000,y:0},{x:1,y:0},{x:1100,y:900},15);
              return r && Math.abs(r.q.x-1000)<1e-6 && Math.abs(r.q.y-3000)<1e-6 && Math.abs(r.deg-90)<1e-9; })());
