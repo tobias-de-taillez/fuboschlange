@@ -4185,6 +4185,42 @@ function cutByJoint(spec, it, j){
   return out;
 }
 
+// Kante einer Fliese parallel verschieben. a,b: die Kante (Rahmen), t: Weg
+// nach aussen in mm (negativ = nach innen). Liegt auf der Kante ein Schnitt,
+// wandert er; reicht er dann ueber die ganze Fliese hinaus, faellt er weg -
+// die Grundfliese ist die Grenze. Eine Originalkante kann nur nach innen
+// (dann neuer Schnitt). Nach innen bleibt mindestens 1 % der Fliese.
+// Liefert {item, t (tatsaechlich), atMax} oder null.
+function moveTileEdge(spec, it, a, b, t){
+  const c=Math.cos(-it.rot*D2R), s=Math.sin(-it.rot*D2R), L=q=>rotP(sub(q,it),c,s);
+  const la=L(a), lb=L(b), d=unit(sub(lb,la));
+  const base=tileShape(spec,it.kind), ar=Q=>Q.length>=3 ? Math.abs(polyArea(Q)) : 0;
+  const cuts=it.cuts||[];
+  const ki=cuts.findIndex(k=>Math.abs(dot(sub(la,k.p),k.n))<0.5 && Math.abs(dot(sub(lb,k.p),k.n))<0.5);
+  // innen-Normale der Kante: zur Fliesenmitte
+  const cen=cenOf(base); let nIn={x:-d.y, y:d.x}; if(dot(sub(cen,la),nIn)<0) nIn={x:-nIn.x,y:-nIn.y};
+  const minA=0.01*spec.w*spec.l;
+  const shapeWith=cs=>{ let P=base; cs.forEach(k=>{ P=dedupe(clipHalf(P,k.p,k.n)); }); return P; };
+  const others=ki>=0 ? cuts.filter((_,i)=>i!==ki) : cuts;
+  // Weg nach innen begrenzen: Reststueck >= 1 %
+  const at=tt=>{ const p0=ki>=0 ? cuts[ki].p : la, nk=ki>=0 ? cuts[ki].n : nIn;
+    return {p:{x:p0.x-nk.x*tt, y:p0.y-nk.y*tt}, n:nk}; };
+  if(ki<0 && t>=0) return {item:it, t:0, atMax:true};           // Originalkante: groesser geht nicht
+  let tt=t;
+  if(tt<0){ let lo=tt, hi=0;
+    if(ar(shapeWith([...others, {...(ki>=0?cuts[ki]:{}), ...at(lo)}]))<minA){
+      for(let i=0;i<40;i++){ const m=(lo+hi)/2; if(ar(shapeWith([...others, {...(ki>=0?cuts[ki]:{}), ...at(m)}]))<minA) lo=m; else hi=m; }
+      tt=hi; } }
+  if(ki<0){ const k=at(tt); return {item:{...it, cuts:[...cuts, {p:k.p, n:k.n}]}, t:tt, atMax:false}; }
+  const k={...cuts[ki], ...at(tt)};
+  // Schnitt laeuft ueber die Grundfliese hinaus -> entfaellt (Maximum erreicht)
+  const free=base.every(v=>dot(sub(v,k.p),k.n)>=-1e-6);
+  const nc=free ? others : cuts.map((x,i)=>i===ki ? k : x);
+  const out={...it}; if(nc.length) out.cuts=nc; else delete out.cuts;
+  const tmax=-Math.min(...base.map(v=>dot(sub(v,cuts[ki].p),cuts[ki].n)));
+  return {item:out, t:free ? tmax : tt, atMax:free};
+}
+
 // Konvexe Huelle (Andrew's Monotone Chain), gegen den Uhrzeigersinn.
 function hull(points){
   const P=points.slice().sort((a,b)=>a.x-b.x||a.y-b.y), lo=[], up=[];
@@ -4546,7 +4582,7 @@ globalThis.TILES={ TILE_DEF, tileShape, tileCorners, toTile, polyArea, edgesOf, 
   clipConvex, clipHalf, convexOverlap, jointStrip, snapTargets, snapGroup, movePt, moveItem, snapAngle, normDeg,
   tilePieces, tileStatus, cutList, pieceDims, tileStats, extendItems, nearestOnRing, jointEndSnap, jointValid,
   pointInRing, pointInRoom, ringsOf, endDim, printLayout, printPt, normTiles, miterPair, miterAt, miterInfo, miterSnapPoints, tileNotches, tileOverlapArea,
-  rayToRing, jointRayEnd, settleItems, alignMove, alignTiles, edgeAt, insetRoom, trimBy, matchCorner, trimToRoom, cutByJoint, mergeTiles, hull };
+  rayToRing, jointRayEnd, settleItems, alignMove, alignTiles, edgeAt, insetRoom, trimBy, matchCorner, trimToRoom, cutByJoint, mergeTiles, hull, moveTileEdge };
 })();
 </script>
 
@@ -8187,6 +8223,12 @@ cv.addEventListener('contextmenu',e=>{
 // Mausrad und Trackpad-Pinch (ctrlKey) zoomen um den Cursor.
 cv.addEventListener('wheel',e=>{
   e.preventDefault();
+  // ⌘ + Zwei-Finger-Wischen auf dem Touchpad: Ansicht verschieben statt zoomen.
+  if(e.metaKey){
+    const dpr=DPR(), f=e.deltaMode===1 ? 16 : 1;      // Zeilen- statt Pixel-Deltas
+    VIEW.ox-=e.deltaX*f*dpr; VIEW.oy-=e.deltaY*f*dpr;
+    userView=true; render(); return;
+  }
   const d=evDev(e);
   const f=Math.exp(-e.deltaY*(e.ctrlKey?0.01:0.0015));
   zoomAt(d.x,d.y,f);
@@ -9666,6 +9708,11 @@ function drawTilesView(){
     ctx.strokeRect(Math.min(a.x,b.x),Math.min(a.y,b.y),Math.abs(b.x-a.x),Math.abs(b.y-a.y));
     ctx.restore();
   }
+  if(TS.tool==='move' && TS.edgeHover && TS.sel.has(TS.edgeHover.item.id)){
+    const a=tScr(K,TS.edgeHover.a), b=tScr(K,TS.edgeHover.b);
+    ctx.save(); ctx.strokeStyle=TILE_INK.sel; ctx.lineWidth=5*dpr; ctx.globalAlpha=.7;
+    ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke(); ctx.restore();
+  }
   // Fluchten: gewaehlte Kante/Ecke der bewegten Fliese (blau) und das Ziel
   // unter dem Zeiger (gruen, die Bezugskante gestrichelt verlaengert)
   if(TS.tool==='align'){
@@ -9772,6 +9819,17 @@ function tilesDown(e){
              c:hnd.c0, a0:Math.atan2(p.y-hnd.c0.y, p.x-hnd.c0.x), orig:selItems().map(it=>({...it}))};
     return true;
   }
+  // Kante einer ausgewaehlten Fliese greifen: parallel ziehen
+  if(!e.shiftKey && TS.sel.size){
+    const S=tilesData().spec, ed=TL.edgeAt(S, selItems(), p, 8*DPR()/VIEW.s);
+    if(ed){
+      const a=ed.a, b=ed.b, dd={x:b.x-a.x,y:b.y-a.y}, Ld=Math.hypot(dd.x,dd.y)||1;
+      const c=TL.tileCorners(S,ed.item).reduce((s,q)=>({x:s.x+q.x,y:s.y+q.y}),{x:0,y:0}), nP=TL.tileCorners(S,ed.item).length;
+      let nOut={x:dd.y/Ld, y:-dd.x/Ld}; if((a.x-c.x/nP)*nOut.x+(a.y-c.y/nP)*nOut.y<0) nOut={x:-nOut.x,y:-nOut.y};
+      gesture={t:'tiles', k:'edge', x0:e.clientX, y0:e.clientY, moved:false, snap:serialize(), p0:p, orig:{...ed.item}, a, b, nOut};
+      return true;
+    }
+  }
   const it=tileAt(p);
   // Umschalt + Ziehen im Leeren: Auswahlrahmen (Bildschirmrechteck - die
   // Ansicht kann gedreht sein, der Rahmen bleibt trotzdem achsparallel).
@@ -9833,6 +9891,25 @@ function tilesMove(e, g){
     const m={dth:want-r0, px:g.c.x, py:g.c.y, dx:0, dy:0};
     applyItems(g.orig.map(it=>TL.moveItem(it,m)));
     setHintLive(`Drehung ${fmtGrad(TL.normDeg(want))}° — ⌘/Strg: frei`);
+  } else if(g.k==='edge'){
+    const S=tilesData().spec;
+    let t=(p.x-g.p0.x)*g.nOut.x+(p.y-g.p0.y)*g.nOut.y;
+    // Einrasten: Kante mit Fugen-/Randabstand an einer gegenueberliegenden,
+    // fast parallelen Kante (Nachbarfliese oder Wand); ⌘/Strg frei.
+    if(!(e.metaKey||e.ctrlKey)){
+      const tg=nearTargets(K,[g.orig]), dd={x:g.b.x-g.a.x,y:g.b.y-g.a.y}, Ld=Math.hypot(dd.x,dd.y)||1;
+      let best=null;
+      tg.forEach(q=>{ if(-(q.n.x*g.nOut.x+q.n.y*g.nOut.y)<Math.cos(2*TD2R)) return;
+        const m={x:(g.a.x+g.b.x)/2, y:(g.a.y+g.b.y)/2};
+        const dist=(m.x-q.a.x)*q.n.x+(m.y-q.a.y)*q.n.y;                // jetziger Abstand
+        const want=dist-q.gap;                                        // so weit nach aussen
+        const proj=((m.x-q.a.x)*q.d.x+(m.y-q.a.y)*q.d.y), Lq=Math.hypot(q.b.x-q.a.x,q.b.y-q.a.y);
+        if(proj<-Ld || proj>Lq+Ld) return;
+        if(Math.abs(want-t)<=tTol() && (!best || Math.abs(want-t)<Math.abs(best-t))) best=want; });
+      if(best!=null) t=best;
+    }
+    const r=TL.moveTileEdge(S, g.orig, g.a, g.b, t);
+    if(r){ applyItems([r.item]); setHintLive(`Kante ${r.t>=0?'+':''}${f1(r.t)} mm${r.atMax?' — Grundfliese erreicht (Maximum)':''} · ⌘/Strg: ohne Einrasten`); }
   } else if(g.k==='miter'){
     // Endpunkt: zuerst auf Kreuzungen der Kantenfluchten, sonst Winkel gegen
     // die Laengskante von A in 5er-Schritten; mit ⌘/Strg frei.
@@ -9986,6 +10063,12 @@ function jointSnapped(K, e, p){
 function tilesHover(e){
   const K=tilesCtx(); if(!K) return;
   TS.ptr=tEvLocal(K,e);                 // Ziel fuers Einfuegen
+  if(TS.tool==='move' && TS.sel.size){
+    const S=tilesData().spec, ed=TL.edgeAt(S, selItems(), TS.ptr, 8*DPR()/VIEW.s);
+    const k=ed ? ed.item.id+':'+ed.i : '';
+    cv.style.cursor = ed ? 'col-resize' : '';
+    if(k!==TS.edgeHoverKey){ TS.edgeHoverKey=k; TS.edgeHover=ed; drawTilesView(); }
+  }
   if(TS.tool==='miter2'){ TS.hover=(e.metaKey||e.ctrlKey) ? {q:TS.ptr} : miterSnap(TS.ptr, TS.msnap); drawTilesView(); return; }
   if(TS.tool==='align'){
     // Ecke vor Kante: wer nahe an einer Ecke zeigt, meint die Ecke. Nach
@@ -13143,6 +13226,19 @@ globalThis.selfChecks=function(){
       chk('anschneiden: Ausklinkung nimmt nur Überlappung + Fuge weg', lost>ov && lost<ov*3+500);
       chk('anschneiden: nach Ausklinkung keine Überlappung mehr', T.tileOverlapArea(S9,r[0],c)<1);
       chk('ausklinkung übersteht Speichern/Laden', T.normTiles({items:r}).items[0].notches.length===1);
+    }
+    {
+      // Kante ziehen: angeschnittene Fliese (x 0..500) waechst bis zur
+      // Grundfliese (850) und nicht weiter; Originalkante nur nach innen.
+      const S9={...S,angle:90}, it={id:1,kind:'L',x:0,y:0,rot:0,cuts:[{p:{x:500,y:0},n:{x:-1,y:0}}]};
+      const r1=T.moveTileEdge(S9,it,{x:500,y:0},{x:500,y:150},200), P1=T.tileCorners(S9,r1.item);
+      chk('kante ziehen: Schnittkante wandert (500 -> 700)', Math.abs(Math.max(...P1.map(p=>p.x))-700)<1e-6 && !r1.atMax);
+      const r2=T.moveTileEdge(S9,it,{x:500,y:0},{x:500,y:150},999);
+      chk('kante ziehen: Grundfliese begrenzt, Schnitt entfällt', r2.atMax && !r2.item.cuts && Math.abs(r2.t-350)<1e-6);
+      const r3=T.moveTileEdge(S9,{id:2,kind:'L',x:0,y:0,rot:0},{x:0,y:150},{x:0,y:0},50);
+      chk('kante ziehen: Originalkante wächst nicht', r3.t===0 && !r3.item.cuts);
+      const r4=T.moveTileEdge(S9,{id:2,kind:'L',x:0,y:0,rot:0},{x:0,y:150},{x:0,y:0},-100), P4=T.tileCorners(S9,r4.item);
+      chk('kante ziehen: Originalkante nach innen -> neuer Schnitt', Math.abs(Math.min(...P4.map(p=>p.x))-100)<1e-6);
     }
     chk('dehnungsfuge: 90° zur Wand rastet und läuft bis zur Gegenwand',
       (()=>{ const r=T.jointRayEnd(ring,{x:1000,y:0},{x:1,y:0},{x:1100,y:900},15);
