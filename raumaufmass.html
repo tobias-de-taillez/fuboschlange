@@ -4930,7 +4930,11 @@ function jointOffsets(spec, polys, tol, skip){
 // hoechstens eine Fuge (+tol) von ihr entfernt ist - normale Fugen sind
 // keine Luecke. Dehnungsfugen zaehlen als belegt. Liefert Zellen, Flaeche
 // und zusammenhaengende Luecken {area, c, cells}.
-function uncovered(spec, items, lay, joints, cell, tol){
+// inc (optional): {prev, rects} - prev ist ein frueheres Ergebnis auf
+// demselben Raster, rects die Rahmenrechtecke [x0,y0,x1,y1], in denen sich
+// seither etwas geaendert hat. Nur deren Zellen werden neu bewertet, der Rest
+// kommt aus prev.base. Beim Ziehen einer Fliese spart das fast das ganze Raster.
+function uncovered(spec, items, lay, joints, cell, tol, inc){
   cell=cell||15; tol=tol??1;
   if(!lay) return {cells:[], area:0, comps:[]};
   const reach=spec.joint+tol, polys=items.map(it=>tileCorners(spec,it)), notch=items.map(it=>tileNotches(spec,it));
@@ -4967,12 +4971,19 @@ function uncovered(spec, items, lay, joints, cell, tol){
       if(!inN) return true; }
     return false;
   };
-  const grid=new Uint8Array(nx*ny), cells=[];
-  for(let j=0;j<ny;j++) for(let i=0;i<nx;i++){
-    const p={x:x0+(i+0.5)*cell, y:y0+(j+0.5)*cell};
-    if(!pointInRoom(p,lay) || covered(p)) continue;
-    grid[j*nx+i]=1; cells.push(p);
-  }
+  const pv=inc && inc.prev, same=pv && pv.base && pv.nx===nx && pv.ny===ny && pv.x0===x0 && pv.y0===y0 && pv.cell===cell;
+  const base=same ? pv.base.slice() : new Uint8Array(nx*ny);
+  const evalCell=(i,j)=>{ const p={x:x0+(i+0.5)*cell, y:y0+(j+0.5)*cell};
+    base[j*nx+i]=(!pointInRoom(p,lay) || covered(p)) ? 0 : 1; };
+  if(same){
+    for(const [rx0,ry0,rx1,ry1] of inc.rects){
+      const i0=Math.max(0,Math.floor((rx0-x0)/cell)), i1=Math.min(nx-1,Math.ceil((rx1-x0)/cell));
+      const j0=Math.max(0,Math.floor((ry0-y0)/cell)), j1=Math.min(ny-1,Math.ceil((ry1-y0)/cell));
+      for(let j=j0;j<=j1;j++) for(let i=i0;i<=i1;i++) evalCell(i,j);
+    }
+  } else for(let j=0;j<ny;j++) for(let i=0;i<nx;i++) evalCell(i,j);
+  const grid=base.slice(), cells=[];
+  for(let k=0;k<grid.length;k++) if(grid[k]){ const i=k%nx, j=(k-i)/nx; cells.push({x:x0+(i+0.5)*cell, y:y0+(j+0.5)*cell}); }
   const comps=[];
   for(let k=0;k<grid.length;k++){ if(grid[k]!==1) continue;
     const st=[k], C=[]; grid[k]=2;
@@ -4981,7 +4992,7 @@ function uncovered(spec, items, lay, joints, cell, tol){
     comps.push({area:C.length*cell*cell, c:{x:C.reduce((a,p)=>a+p.x,0)/C.length, y:C.reduce((a,p)=>a+p.y,0)/C.length}, cells:C});
   }
   comps.sort((a,b)=>b.area-a.area);
-  return {cells, area:cells.length*cell*cell, comps, cell};
+  return {cells, area:cells.length*cell*cell, comps, cell, base, nx, ny, x0, y0};
 }
 
 // An Wand anschneiden: die Fliese bekommt fuer jede Kante der Verlegekante
@@ -5191,7 +5202,15 @@ function moveTileEdge(spec, it, a, b, t){
   const c=Math.cos(-it.rot*D2R), s=Math.sin(-it.rot*D2R), L=q=>rotP(sub(q,it),c,s);
   const la=L(a), lb=L(b), d=unit(sub(lb,la));
   const base=tileShape(spec,it.kind), ar=Q=>Q.length>=3 ? Math.abs(polyArea(Q)) : 0;
-  const cuts=it.cuts||[];
+  // Nur Schnitte, die die Form gerade wirklich begrenzen. Ein frueherer Schnitt,
+  // den ein spaeterer, tieferer verdeckt, bleibt sonst gespeichert - und die
+  // Kante bliebe beim Herausziehen an ihm haengen, obwohl die Fliese laenger
+  // sein koennte. Die Form aendert sich durch das Weglassen nicht.
+  let cur=base; (it.cuts||[]).forEach(k=>{ cur=dedupe(clipHalf(cur,k.p,k.n)); });
+  const onLine=k=>cur.some((v,i)=>{ const w=cur[(i+1)%cur.length];
+    return Math.abs(dot(sub(v,k.p),k.n))<0.5 && Math.abs(dot(sub(w,k.p),k.n))<0.5 && len(sub(w,v))>0.5; });
+  const cuts=(it.cuts||[]).filter(onLine);
+  if(cuts.length!==(it.cuts||[]).length){ it={...it}; if(cuts.length) it.cuts=cuts; else delete it.cuts; }
   const ki=cuts.findIndex(k=>Math.abs(dot(sub(la,k.p),k.n))<0.5 && Math.abs(dot(sub(lb,k.p),k.n))<0.5);
   // innen-Normale der Kante: zur Fliesenmitte
   const cen=cenOf(base); let nIn={x:-d.y, y:d.x}; if(dot(sub(cen,la),nIn)<0) nIn={x:-nIn.x,y:-nIn.y};
@@ -11413,10 +11432,30 @@ const fmtMm=v=>Math.round(v).toLocaleString('de-DE');
 // Fugenversatz ist teuer (alle Fugenpaare) - nur neu rechnen, wenn sich
 // Fliesen oder Masse geaendert haben.
 let jOffCache={key:null, val:[]}, gapCache={key:null, val:null};
+// Inkrementell: aendern sich nur einzelne Fliesen (Ziehen, Drehen, Schneiden),
+// werden nur die Zellen um ihre alte und neue Lage neu bewertet. Raum, Fugen
+// oder Fliesenmasse geaendert -> alles neu.
 function uncoveredCached(){
   const T=tilesData(), K=tilesCtx(); if(!K) return null;
-  const key=JSON.stringify([T.spec,T.items,T.joints,K.lay,K.lay.holes]);
-  if(gapCache.key!==key) gapCache={key, val:TL.uncovered(T.spec,T.items,K.lay,T.joints,8,1)};
+  const frame=JSON.stringify([T.spec,T.joints,K.lay,K.lay.holes]);
+  const sig=new Map(T.items.map(it=>[it.id, JSON.stringify(it)]));
+  if(gapCache.frame===frame && gapCache.sig && gapCache.val){
+    const changed=[];
+    sig.forEach((v,id)=>{ if(gapCache.sig.get(id)!==v) changed.push(id); });
+    gapCache.sig.forEach((v,id)=>{ if(!sig.has(id)) changed.push(id); });
+    if(!changed.length) return gapCache.val;
+    if(changed.length<=60){
+      const pad=T.spec.joint+1+2*8, box=it=>{ const Q=TL.tileCorners(T.spec,it), xs=Q.map(p=>p.x), ys=Q.map(p=>p.y);
+        return [Math.min(...xs)-pad, Math.min(...ys)-pad, Math.max(...xs)+pad, Math.max(...ys)+pad]; };
+      const rects=[];
+      changed.forEach(id=>{ const now=T.items.find(it=>it.id===id); if(now) rects.push(box(now));
+        const was=gapCache.items.get(id); if(was) rects.push(box(was)); });
+      gapCache={frame, sig, items:new Map(T.items.map(it=>[it.id,it])),
+                val:TL.uncovered(T.spec,T.items,K.lay,T.joints,8,1,{prev:gapCache.val, rects})};
+      return gapCache.val;
+    }
+  }
+  gapCache={frame, sig, items:new Map(T.items.map(it=>[it.id,it])), val:TL.uncovered(T.spec,T.items,K.lay,T.joints,8,1)};
   return gapCache.val;
 }
 function jointOffsetsCached(){
@@ -11949,6 +11988,46 @@ function tilesMove(e, g){
         t=(fl.a.x-g.a.x)*g.nOut.x+(fl.a.y-g.a.y)*g.nOut.y;
         TS.lines=[{a:fl.a,b:fl.b}];
       } else if(TS.lines.length) TS.lines=[];
+      // Schraeg auf eine Kante: die vorderste Ecke der gezogenen Kante kommt
+      // im Fugenabstand vor einer Zielkante an (Fliese oder Wand), die bis 75
+      // Grad von ihr abweicht (Chevron: kurze Kante auf Laengsseite = 45) ->
+      // die Kante wird parallel zur Zielkante geschnitten, mit Fuge.
+      // Auch fast parallele Kanten (bis 2 Grad) laufen hier durch: der reine
+      // Abstands-Snap oben setzt nur den Abstand, die Kante bliebe leicht schief
+      // und die Fuge wuerde keilfoermig (z. B. 2,3-2,8 statt 2,5 mm).
+      if(!fl){
+        const tg=nearTargets(K,[g.orig]), ud0={x:g.b.x-g.a.x,y:g.b.y-g.a.y}, Lu=Math.hypot(ud0.x,ud0.y)||1, ud={x:ud0.x/Lu,y:ud0.y/Lu};
+        const Q0=TL.tileCorners(S,g.orig), cen={x:Q0.reduce((s2,q)=>s2+q.x,0)/Q0.length, y:Q0.reduce((s2,q)=>s2+q.y,0)/Q0.length};
+        let tilt=null, td=Math.max(tTol(), 2*S.joint+4);
+        tg.forEach(q=>{
+          const Lq=Math.hypot(q.b.x-q.a.x,q.b.y-q.a.y)||1, qd={x:(q.b.x-q.a.x)/Lq, y:(q.b.y-q.a.y)/Lq};
+          const sinA=Math.abs(ud.x*qd.y-ud.y*qd.x);
+          if(sinA>Math.sin(75*TD2R)) return;                                         // quer ist kein Anlegen
+          if(q.n.x*g.nOut.x+q.n.y*g.nOut.y>=0) return;                               // Zielkante muss uns zugewandt sein
+          // Gezogene Kante an ihrer jetzigen Lage; vorderste Ecke = naechste zur Zielkante.
+          const ea={x:g.a.x+g.nOut.x*t, y:g.a.y+g.nOut.y*t}, eb={x:g.b.x+g.nOut.x*t, y:g.b.y+g.nOut.y*t};
+          const da=(ea.x-q.a.x)*q.n.x+(ea.y-q.a.y)*q.n.y, db=(eb.x-q.a.x)*q.n.x+(eb.y-q.a.y)*q.n.y;
+          const lead=da<db ? ea : eb, dz=Math.abs(Math.min(da,db)-q.gap);
+          const sq=(lead.x-q.a.x)*qd.x+(lead.y-q.a.y)*qd.y;
+          if(sq<-td || sq>Lq+td) return;
+          if((cen.x-q.a.x)*q.n.x+(cen.y-q.a.y)*q.n.y<=q.gap) return;                // Fliese muss diesseits bleiben
+          if(dz<td){ td=dz; tilt=q; } });
+        if(tilt){
+          const it0=g.orig, c=Math.cos(-it0.rot*TD2R), sn=Math.sin(-it0.rot*TD2R);
+          const loc=v=>({x:v.x*c-v.y*sn, y:v.x*sn+v.y*c});
+          const P0={x:tilt.a.x+tilt.n.x*tilt.gap, y:tilt.a.y+tilt.n.y*tilt.gap};
+          const la=loc({x:g.a.x-it0.x,y:g.a.y-it0.y}), lb=loc({x:g.b.x-it0.x,y:g.b.y-it0.y});
+          // Bisheriger Schnitt dieser Kante faellt weg, der neue ersetzt ihn.
+          const keep=(it0.cuts||[]).filter(k=>!(Math.abs((la.x-k.p.x)*k.n.x+(la.y-k.p.y)*k.n.y)<0.5 && Math.abs((lb.x-k.p.x)*k.n.x+(lb.y-k.p.y)*k.n.y)<0.5));
+          const item={...it0, cuts:[...keep, {p:loc({x:P0.x-it0.x,y:P0.y-it0.y}), n:loc(tilt.n)}]};
+          const Qn=TL.tileCorners(S,item);
+          if(Qn.length>=3 && Math.abs(TL.polyArea(Qn))>=0.01*TL.tileArea(S,it0.kind)){
+            applyItems([item]); TS.lines=[{a:tilt.a,b:tilt.b}];
+            setHintLive(`Kante parallel zur ${tilt.kind==='wall'?'Wand':'Nachbarfliese'}, ${f1(tilt.gap)} mm ${tilt.kind==='wall'?'Randfuge':'Fuge'} · ⌘/Strg: ohne Einrasten`);
+            render(); return;
+          }
+        }
+      }
     }
     const r=TL.moveTileEdge(S, g.orig, g.a, g.b, t);
     if(r){ applyItems([r.item]); setHintLive(`Kante ${r.t>=0?'+':''}${f1(r.t)} mm${TS.lines.length?' · fluchtet':''}${r.atMax?' · Grundfliese erreicht (Maximum)':''} · ⌘/Strg: ohne Einrasten`); }
@@ -12324,6 +12403,10 @@ function tilesTrim(){
     const cover=T.items.filter(o=>o.id!==it.id && !TS.sel.has(o.id)).map(o=>TL.tileCorners(T.spec,o))
       .filter(Q=>TL.convexOverlap(Q, TL.tileCorners(T.spec,it), -T.spec.l));
     cutters.forEach(c=>{ parts=parts.flatMap(q=>TL.trimBy(T.spec,c,q,cover)||[q]); });
+    // Ragt ein angeschnittenes Stueck ueber die Wand, gehoert auch das weg:
+    // sonst bliebe hinter der Ausklinkung ein Bein jenseits der Verlegekante
+    // stehen, und Teile, die ganz draussen liegen, blieben als eigene Fliese.
+    if(K && !(parts.length===1 && parts[0]===it)) parts=parts.flatMap(q=>{ const r=TL.trimToRoom(T.spec,q,K.layCut,T.joints); return r ? r : [q]; });
     if(parts.length===1 && parts[0]===it){ next.push(it); return; }
     touched++;
     const from=it.from!=null ? it.from : it.id;
