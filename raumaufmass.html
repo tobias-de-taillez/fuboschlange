@@ -11847,6 +11847,29 @@ function tileAt(p){
 // gutes Fuenftel der schmalen Fliesenseite - sonst ist in der Uebersicht die
 // ganze Fliese "Kante" und die Mitte verschiebt nicht mehr.
 function edgeTol(S){ return Math.min(8*DPR()/VIEW.s, 0.22*Math.min(S.w, S.l)); }
+// Spitze Ecke (Chevron, unter 85 Grad) einer ausgewaehlten Fliese unter dem
+// Zeiger, nur solange sie noch ungekappt ist. Liefert die Spitze und die
+// Richtung der kurzen Kante - lokal (Fliesenrahmen) und im Raumrahmen.
+function tipAt(K, d){
+  const S=tilesData().spec;
+  for(const it of selItems()){
+    const def=TL.tileDef(S,it.kind); if(def.shape!=='chevron') continue;
+    const B=TL.tileShape(S,it.kind), Q=TL.tileCorners(S,it), n=B.length;
+    const c=Math.cos(it.rot*TD2R), sn=Math.sin(it.rot*TD2R), W=v=>({x:it.x+v.x*c-v.y*sn, y:it.y+v.x*sn+v.y*c});
+    for(let i=0;i<n;i++){
+      const v=B[i], a=B[(i+n-1)%n], b=B[(i+1)%n];
+      const ang=Math.abs(Math.atan2((a.x-v.x)*(b.y-v.y)-(a.y-v.y)*(b.x-v.x), (a.x-v.x)*(b.x-v.x)+(a.y-v.y)*(b.y-v.y)))/TD2R;
+      if(ang>=85) continue;
+      const w=W(v), sc=tScr(K,w);
+      if(Math.hypot(sc.x-d.x, sc.y-d.y)>10*DPR()) continue;
+      if(!Q.some(q=>Math.hypot(q.x-w.x,q.y-w.y)<0.5)) continue;             // schon gekappt/geschnitten
+      const la=Math.hypot(a.x-v.x,a.y-v.y), lb=Math.hypot(b.x-v.x,b.y-v.y), s=la<lb?a:b, L=Math.min(la,lb);
+      const ul={x:(s.x-v.x)/L, y:(s.y-v.y)/L}, uw={x:ul.x*c-ul.y*sn, y:ul.x*sn+ul.y*c};
+      return {item:it, i, tl:v, ul, w, uw, len:L};
+    }
+  }
+  return null;
+}
 function tilesDown(e){
   const K=tilesCtx(); if(!K) return false;
   if(rulerDown(e, K)) return true;            // Lineal liegt oben und greift zuerst
@@ -11866,6 +11889,11 @@ function tilesDown(e){
     gesture={t:'tiles', k:'rot', x0:e.clientX, y0:e.clientY, moved:false, snap:serialize(),
              c:hnd.c0, a0:Math.atan2(p.y-hnd.c0.y, p.x-hnd.c0.x), orig:selItems().map(it=>({...it}))};
     return true;
+  }
+  // Spitze Ecke einer Chevron-Fliese greifen: Spitze kappen, rechtwinklig zur kurzen Kante
+  if(!e.shiftKey && TS.sel.size){
+    const tp=tipAt(K, evDev(e));
+    if(tp){ gesture={t:'tiles', k:'tip', x0:e.clientX, y0:e.clientY, moved:false, snap:serialize(), p0:p, orig:{...tp.item}, tip:tp}; return true; }
   }
   // Kante einer ausgewaehlten Fliese greifen: parallel ziehen
   if(!e.shiftKey && TS.sel.size){
@@ -11935,6 +11963,22 @@ function snapMoving(K, cand, free){
 function tilesMove(e, g){
   const K=tilesCtx(); if(!K || !g.moved || g.k==='none') return;
   if(g.k==='ruler'){ TS.drag=true; rulerMove(e, g, K); return; }
+  if(g.k==='tip'){
+    if(g.snap){ pushSnapshot(g.snap); g.snap=null; }
+    TS.drag=true;
+    const p=tEvLocal(K,e), q=g.tip, it0=g.orig;
+    // Weg entlang der kurzen Kante, von der Spitze nach innen; ganze Millimeter,
+    // mit ⌘/Strg frei.
+    let t=(p.x-q.w.x)*q.uw.x+(p.y-q.w.y)*q.uw.y;
+    if(!(e.metaKey||e.ctrlKey)) t=Math.round(t);
+    t=Math.max(0, Math.min(q.len-1, t));
+    const cuts=(it0.cuts||[]).filter(k=>k.tip!==q.i);
+    const item={...it0}; if(t>0) item.cuts=[...cuts, {p:{x:q.tl.x+q.ul.x*t, y:q.tl.y+q.ul.y*t}, n:q.ul, tip:q.i}];
+    else if(cuts.length) item.cuts=cuts; else delete item.cuts;
+    applyItems([item]);
+    setHintLive(`Spitze gekappt: ${f1(t)} mm entlang der kurzen Kante, Schnitt rechtwinklig dazu · ⌘/Strg: frei`);
+    render(); return;
+  }
   if(g.k==='box'){ TS.box={a:g.d0, b:evDev(e)}; drawTilesView(); return; }
   if(g.snap){ pushSnapshot(g.snap); g.snap=null; }
   TS.drag=true;
@@ -12208,6 +12252,7 @@ function tilesHover(e){
   const rh=rulerHit(K, evDev(e));
   if(rh){ cv.style.cursor=rh==='body'?'move':'grab'; TS.rulerCur=true; return; }
   if(TS.rulerCur){ cv.style.cursor=''; TS.rulerCur=false; }
+  if(TS.tool==='move' && TS.sel.size && tipAt(K, evDev(e))){ cv.style.cursor='crosshair'; return; }
   if(TS.tool==='move' && TS.sel.size){
     const S=tilesData().spec, ne=TL.notchEdgeAt(S, selItems(), TS.ptr, edgeTol(S));
     const ed=ne ? {item:ne.item, a:ne.a, b:ne.b, i:'n'+ne.ni+'_'+ne.ei} : TL.edgeAt(S, selItems(), TS.ptr, edgeTol(S));
