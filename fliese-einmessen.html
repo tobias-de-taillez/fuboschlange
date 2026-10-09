@@ -1,0 +1,1089 @@
+<!doctype html>
+<html lang="de">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fliese einmessen</title>
+<!--
+  Misst eine Chevron-Fliese ohne Winkelmessung aus: vier Kanten und zwei
+  Diagonalen, jede gern mehrfach. Das ist das verstrebte Viereck der
+  Trilateration - fuenf Freiheitsgrade, sechs Strecken, eine Kontrolle.
+  Ausgleich ohne Winkel: https://www.isprs.org/proceedings/XXIX/congress/part3/28_XXIX-part3.pdf
+
+  Zwei Auswertungen aus denselben Strecken:
+  - Parallelogramm (l, w, Winkel) wie TILE_DEF in raumaufmass.html, per
+    Ausgleich mit Standardabweichungen. Das sind die Werte fuers Fliesenset.
+  - Allgemeines Viereck ueber den Einmess-Kern: die echte Form der Fliese,
+    mit Eckwinkeln, Breite an beiden Enden und der Pruefung, ob die
+    Messungen untereinander stimmen.
+
+  Der Script-Block "core" ist eine byte-gleiche Kopie aus raumaufmass.html.
+  test/fliese-einmessen.mjs prueft das und rechnet synthetische Fliesen mit
+  bekannter Wahrheit nach; der Selbstcheck in der Konsole wiederholt den
+  wichtigsten dieser Tests, damit eine kaputte Kopie auffaellt.
+-->
+<style>
+  :root {
+    --bg: #f6f6f4; --card: #ffffff; --line: #e2e2dd; --ink: #1c1d1f;
+    --mute: #6b6e74; --accent: #2563eb; --accent-soft: #dbe6fd;
+    --ok: #15803d; --warn: #b45309; --bad: #b91c1c; --field: #ffffff;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14161a; --card: #1c1f25; --line: #2c3038; --ink: #e6e8eb;
+      --mute: #8b929c; --accent: #60a5fa; --accent-soft: #1e3a5f;
+      --ok: #4ade80; --warn: #fbbf24; --bad: #f87171; --field: #14161a;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px 16px 32px; background: var(--bg); color: var(--ink);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  h1 { font-size: 18px; margin: 0; }
+  h2 { font-size: 13px; font-weight: 600; margin: 0 0 10px; color: var(--mute);
+       text-transform: uppercase; letter-spacing: .04em; }
+  .sub { color: var(--mute); margin: 2px 0 16px; }
+  .layout { display: grid; grid-template-columns: minmax(340px, 500px) minmax(0, 1fr);
+            gap: 14px; align-items: start; max-width: 1200px; }
+  @media (max-width: 860px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+          padding: 14px; margin-bottom: 14px; }
+  .layout > section > .card:last-child { margin-bottom: 0; }
+
+  svg { display: block; width: 100%; height: auto; }
+  .sk-edge { stroke: var(--ink); stroke-width: 2; fill: none; }
+  .sk-diag { stroke: var(--mute); stroke-width: 1.5; stroke-dasharray: 6 5; }
+  .sk-hit { stroke: transparent; stroke-width: 16; cursor: pointer; }
+  .sk-tile { fill: var(--accent-soft); opacity: .5; }
+  .sk-key { font: 600 13px system-ui, sans-serif; fill: var(--mute); }
+  .sk-pt { font: 700 15px system-ui, sans-serif; fill: var(--ink); }
+  .sk-arc { stroke: var(--accent); stroke-width: 1.5; fill: none; }
+  .sk-note { font: 11px system-ui, sans-serif; fill: var(--accent); }
+  g.on .sk-edge, g.on .sk-diag { stroke: var(--accent); stroke-width: 3.5; stroke-dasharray: none; }
+  g.on .sk-key { fill: var(--accent); }
+
+  .fields { display: grid; grid-template-columns: 34px minmax(0, 1fr) minmax(0, 150px);
+            gap: 6px 10px; align-items: center; margin-top: 12px; }
+  .fields .key { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .fields .name { color: var(--mute); }
+  .fields .row-on { color: var(--accent); }
+  input { width: 100%; padding: 7px 9px; font: inherit; font-variant-numeric: tabular-nums;
+          border: 1px solid var(--line); border-radius: 6px; background: var(--field); color: var(--ink); }
+  input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
+  input.bad { border-color: var(--bad); }
+  .sigma { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+  .sigma input { width: 70px; }
+  .hint { color: var(--mute); font-size: 12.5px; margin: 10px 0 0; }
+  .buttons { display: flex; gap: 8px; margin-top: 12px; }
+  button { font: inherit; padding: 6px 12px; border-radius: 6px; cursor: pointer;
+           border: 1px solid var(--line); background: var(--card); color: var(--ink); }
+  button:hover { border-color: var(--accent); }
+  button.copy { padding: 1px 7px; font-size: 12px; color: var(--mute); margin-left: 6px; vertical-align: middle; }
+
+  .vals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .val .k { color: var(--mute); font-size: 12.5px; }
+  .val .v { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.2; }
+  .val .pm { color: var(--mute); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  .facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px;
+           font-variant-numeric: tabular-nums; margin: 0; }
+  .facts dt { color: var(--mute); }
+  .facts dd { margin: 0; }
+  .verdict { margin: 0 0 10px; font-weight: 600; }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .bad { color: var(--bad); }
+  .empty { color: var(--mute); margin: 0; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 5px 6px; border-bottom: 1px solid var(--line); }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--mute); font-weight: 500; font-size: 12.5px; }
+  td .n { color: var(--mute); font-size: 12px; }
+</style>
+<body>
+
+<h1>Chevron-Fliese einmessen</h1>
+<p class="sub">Nur Strecken: vier Kanten, zwei Diagonalen. Winkel und Breite rechnet der Ausgleich.</p>
+
+<main class="layout">
+<section>
+  <div class="card">
+    <h2>Messen</h2>
+    <svg id="sketch" viewBox="0 0 540 200" aria-label="Skizze der Fliese mit Ecken A bis D">
+      <polygon class="sk-tile" points="40,165 380,165 500,45 160,45"/>
+      <g data-k="AC"><line class="sk-diag" x1="40" y1="165" x2="500" y2="45"/><line class="sk-hit" x1="40" y1="165" x2="500" y2="45"/><text class="sk-key" x="176" y="147">AC</text></g>
+      <g data-k="BD"><line class="sk-diag" x1="380" y1="165" x2="160" y2="45"/><line class="sk-hit" x1="380" y1="165" x2="160" y2="45"/><text class="sk-key" x="322" y="149">BD</text></g>
+      <g data-k="AB"><line class="sk-edge" x1="40" y1="165" x2="380" y2="165"/><line class="sk-hit" x1="40" y1="165" x2="380" y2="165"/><text class="sk-key" x="198" y="187">AB</text></g>
+      <g data-k="DC"><line class="sk-edge" x1="160" y1="45" x2="500" y2="45"/><line class="sk-hit" x1="160" y1="45" x2="500" y2="45"/><text class="sk-key" x="318" y="35">DC</text></g>
+      <g data-k="AD"><line class="sk-edge" x1="40" y1="165" x2="160" y2="45"/><line class="sk-hit" x1="40" y1="165" x2="160" y2="45"/><text class="sk-key" x="72" y="98">AD</text></g>
+      <g data-k="BC"><line class="sk-edge" x1="380" y1="165" x2="500" y2="45"/><line class="sk-hit" x1="380" y1="165" x2="500" y2="45"/><text class="sk-key" x="452" y="118">BC</text></g>
+      <g data-k="W"><line class="sk-diag" x1="260" y1="165" x2="260" y2="45"/><line class="sk-hit" x1="260" y1="165" x2="260" y2="45"/><path class="sk-arc" d="M 260 155 h 10 v 10"/><text class="sk-key" x="266" y="100">W</text></g>
+      <path class="sk-arc" d="M 74 165 A 34 34 0 0 0 64 141"/>
+      <path class="sk-arc" d="M 466 45 A 34 34 0 0 0 476 69"/>
+      <text class="sk-note" x="26" y="194">spitz</text>
+      <text class="sk-note" x="486" y="22">spitz</text>
+      <text class="sk-pt" x="18" y="175">A</text>
+      <text class="sk-pt" x="388" y="185">B</text>
+      <text class="sk-pt" x="508" y="50">C</text>
+      <text class="sk-pt" x="140" y="38">D</text>
+    </svg>
+
+    <div class="fields" id="fields">
+      <span class="key" data-k="AB">AB</span><label class="name" data-k="AB" for="f-AB">Lange Kante unten</label><input id="f-AB" data-k="AB" inputmode="decimal" autocomplete="off" placeholder="mm">
+      <span class="key" data-k="DC">DC</span><label class="name" data-k="DC" for="f-DC">Lange Kante oben</label><input id="f-DC" data-k="DC" inputmode="decimal" autocomplete="off" placeholder="mm">
+      <span class="key" data-k="AD">AD</span><label class="name" data-k="AD" for="f-AD">Kurze Kante links</label><input id="f-AD" data-k="AD" inputmode="decimal" autocomplete="off" placeholder="mm">
+      <span class="key" data-k="BC">BC</span><label class="name" data-k="BC" for="f-BC">Kurze Kante rechts</label><input id="f-BC" data-k="BC" inputmode="decimal" autocomplete="off" placeholder="mm">
+      <span class="key" data-k="AC">AC</span><label class="name" data-k="AC" for="f-AC">Lange Diagonale, spitz zu spitz</label><input id="f-AC" data-k="AC" inputmode="decimal" autocomplete="off" placeholder="mm">
+      <span class="key" data-k="W">W</span><label class="name" data-k="W" for="f-W">Breite rechtwinklig AB → DC</label><input id="f-W" data-k="W" inputmode="decimal" autocomplete="off" placeholder="mm">
+      <span class="key" data-k="BD">BD</span><label class="name" data-k="BD" for="f-BD">Kurze Diagonale, stumpf zu stumpf</label><input id="f-BD" data-k="BD" inputmode="decimal" autocomplete="off" placeholder="mm">
+    </div>
+
+    <div class="sigma">
+      <label for="sigma">Messgenauigkeit je Strecke ±</label>
+      <input id="sigma" inputmode="decimal" autocomplete="off" value="0,5"><span>mm</span>
+    </div>
+    <div class="buttons">
+      <button id="example" type="button">Beispiel laden</button>
+      <button id="clear" type="button">Leeren</button>
+    </div>
+    <p class="hint">Mehrfach gemessen? Werte mit Leerzeichen trennen, z.&nbsp;B. „850,5 851“. Jede Wiederholung ist eine eigene Messung und schärft die Kontrolle.</p>
+    <p class="hint">Die lange Diagonale ist gut einen Meter lang, also Maßband statt Zollstock. An gefasten Spitzen bis zum Schnittpunkt der verlängerten Kanten messen, sonst wird AC zu kurz. Links- oder Rechtsfliese ist egal: Das Spiegelbild hat dieselben Strecken.</p>
+  </div>
+</section>
+
+<section id="out">
+  <div class="card" id="c-app"></div>
+  <div class="card" id="c-shape"></div>
+  <div class="card" id="c-table"></div>
+</section>
+</main>
+
+<script id="core">
+"use strict";
+// ================= Konstanten =================
+const TOL_RANK = 1e-8;   // Rangtoleranz, relativ zur größten Spaltennorm
+const TOL_RED  = 0.01;   // darunter gilt eine Messung als nicht prüfbar
+const TOL_MODE = 0.05;   // Anteil am Flex-Mode -> Pfeil statt Ellipse
+const SIGMA_DEF = 5;     // angenommene Standardabweichung je Messung, mm
+const SUGGEST_CHECK_MAX = 3;  // Deckel der Vorschlaege zur Pruefbarkeit
+
+// ================= Grundlagen =================
+const dist=(p,q)=>Math.hypot(p.x-q.x, p.y-q.y);
+const idx=pts=>{ const m={}; pts.forEach((p,i)=>m[p.id]=i); return m; };
+const activeMeas=meas=>meas.filter(m=>m.on!==false);
+
+function residuals(pts, meas){
+  const I=idx(pts);
+  // wt: Gewicht fuer Hilfsstrecken (rechte Winkel, siehe orthoFit). Echte
+  // Messungen tragen keins und zaehlen wie immer mit 1.
+  return activeMeas(meas).map(m=>(dist(pts[I[m.a]], pts[I[m.b]]) - m.d)*(m.wt||1));
+}
+
+// Zeile je Messung: d|xa-xb|/dxa = +u, d/dxb = -u, alles andere 0.
+function jacobian(pts, meas){
+  const I=idx(pts), n=pts.length;
+  return activeMeas(meas).map(m=>{
+    const a=I[m.a], b=I[m.b], pa=pts[a], pb=pts[b];
+    const L=dist(pa,pb)||1e-9;   // ponytail: zwei deckungsgleiche Punkte sind
+                                 // Eingabefehler, nicht Mathematik - nur kein NaN
+    const ux=(pa.x-pb.x)/L, uy=(pa.y-pb.y)/L;
+    const row=new Array(2*n).fill(0), w=m.wt||1;
+    row[2*a]=ux*w; row[2*a+1]=uy*w; row[2*b]=-ux*w; row[2*b+1]=-uy*w;
+    return row;
+  });
+}
+
+// Gauss-Jordan mit Spaltenpivotierung, mehrere rechte Seiten.
+// ponytail: dicht und dumm - bei 2n <= 60 Unbekannten ist sparse reiner Aufwand.
+function luSolve(A, B){
+  const k=A.length; if(!k) return [];
+  const p=B[0].length;
+  let mx=0; for(const r of A) for(const x of r) mx=Math.max(mx,Math.abs(x));
+  const eps=1e-12*(mx||1);
+  const M=A.map((r,i)=>r.concat(B[i]));
+  for(let c=0;c<k;c++){
+    let piv=c;
+    for(let r=c+1;r<k;r++) if(Math.abs(M[r][c])>Math.abs(M[piv][c])) piv=r;
+    if(Math.abs(M[piv][c])<eps) return null;
+    [M[c],M[piv]]=[M[piv],M[c]];
+    const d=M[c][c];
+    for(let j=c;j<k+p;j++) M[c][j]/=d;
+    for(let r=0;r<k;r++){
+      if(r===c) continue;
+      const f=M[r][c]; if(f===0) continue;
+      for(let j=c;j<k+p;j++) M[r][j]-=f*M[c][j];
+    }
+  }
+  return M.map(r=>r.slice(k));
+}
+
+function matTmat(A){
+  const m=A.length, k=m?A[0].length:0;
+  const N=Array.from({length:k},()=>new Array(k).fill(0));
+  for(let i=0;i<m;i++) for(let a=0;a<k;a++){
+    const va=A[i][a]; if(!va) continue;
+    for(let b=a;b<k;b++) N[a][b]+=va*A[i][b];
+  }
+  for(let a=0;a<k;a++) for(let b=0;b<a;b++) N[a][b]=N[b][a];
+  return N;
+}
+
+function matTvec(A,v){
+  const m=A.length, k=m?A[0].length:0, g=new Array(k).fill(0);
+  for(let i=0;i<m;i++) for(let a=0;a<k;a++) g[a]+=A[i][a]*v[i];
+  return g;
+}
+
+// Rangaufdeckendes modifiziertes Gram-Schmidt ueber die SPALTEN.
+// Doppelte Orthogonalisierung: die Rangerkennung ist genau die Stelle, an der
+// einfache Genauigkeit kippt, und ein falscher Rang ist eine falsche Aussage
+// darueber, wieviele Messungen fehlen.
+function gramSchmidt(rows, tol){
+  const m=rows.length, k=m?rows[0].length:0;
+  const col=j=>rows.map(r=>r[j]);
+  let scale=0;
+  for(let j=0;j<k;j++) scale=Math.max(scale, Math.hypot(...col(j)));
+  const t=(tol??TOL_RANK)*(scale||1);
+  const Q=[], R=[], piv=[];
+  for(let j=0;j<k;j++){
+    const v=col(j), coef=new Array(Q.length).fill(0);
+    for(let pass=0;pass<2;pass++){
+      for(let q=0;q<Q.length;q++){
+        let d=0; for(let i=0;i<m;i++) d+=Q[q][i]*v[i];
+        coef[q]+=d;
+        for(let i=0;i<m;i++) v[i]-=d*Q[q][i];
+      }
+    }
+    R.forEach((row,q)=>row[j]=coef[q]);
+    const nv=Math.hypot(...v);
+    if(nv>t){
+      for(let i=0;i<m;i++) v[i]/=nv;
+      Q.push(v); piv.push(j);
+      const row=new Array(k).fill(0); row[j]=nv; R.push(row);
+    }
+  }
+  return {Q, R, piv, rank:Q.length, m, k};
+}
+
+// Jede abhaengige Spalte liefert genau einen Nullraum-Vektor. R eingeschraenkt
+// auf die Pivotspalten ist obere Dreiecksmatrix -> Rueckwaertseinsetzen.
+// k kommt aus gs, nicht aus R: bei Rang 0 ist R leer, die Spaltenzahl aber
+// trotzdem bekannt - und genau dann besteht der Nullraum aus allem.
+function nullSpace(gs){
+  const {R,piv,rank,k}=gs;
+  const isPiv=new Set(piv), out=[];
+  for(let j=0;j<k;j++){
+    if(isPiv.has(j)) continue;
+    const c=new Array(rank).fill(0);
+    for(let q=rank-1;q>=0;q--){
+      let s=R[q][j];
+      for(let q2=q+1;q2<rank;q2++) s-=R[q][piv[q2]]*c[q2];
+      c[q]=s/R[q][piv[q]];
+    }
+    const z=new Array(k).fill(0);
+    z[j]=1; piv.forEach((p,q)=>z[p]=-c[q]);
+    const nrm=Math.hypot(...z)||1;
+    out.push(z.map(x=>x/nrm));
+  }
+  return out;
+}
+
+// h_i = Zeilennorm^2 der Orthonormalbasis der Spalten = Diagonale der Hutmatrix.
+function leverage(gs){
+  const h=new Array(gs.m).fill(0);
+  gs.Q.forEach(q=>q.forEach((v,i)=>h[i]+=v*v));
+  return h;
+}
+
+// P0.x, P0.y und eine Koordinate von P1 = genau die 3 Starrfreiheitsgrade.
+// Welche Koordinate von P1: eine Drehung um P0 aendert P1.y mit der Rate
+// (P1.x - P0.x). Liegt P1 senkrecht ueber P0, fixiert P1.y die Drehung gar
+// nicht und das System bliebe singulaer.
+function gaugeFixed(pts){
+  if(pts.length<2) return [];
+  const dx=Math.abs(pts[1].x-pts[0].x), dy=Math.abs(pts[1].y-pts[0].y);
+  return [0, 1, dx>=dy ? 3 : 2];
+}
+
+function freeCols(pts){
+  const fx=new Set(gaugeFixed(pts)), out=[];
+  for(let c=0;c<2*pts.length;c++) if(!fx.has(c)) out.push(c);
+  return out;
+}
+
+// Skizze auf Messgroesse bringen, bevor iteriert wird. Eine Zeile, rettet den
+// Solver wenn jemand einen 8-Meter-Raum als 300-Pixel-Kritzelei gezeichnet hat.
+function scaleSketch(pts, meas){
+  const I=idx(pts), act=activeMeas(meas);
+  if(!act.length) return pts.map(p=>({...p}));
+  let sd=0, sm=0;
+  act.forEach(m=>{ sd+=dist(pts[I[m.a]],pts[I[m.b]]); sm+=m.d; });
+  if(sd<1e-9) return pts.map(p=>({...p}));
+  const f=sm/sd;
+  return pts.map(p=>({...p, x:p.x*f, y:p.y*f}));
+}
+
+// Levenberg-Marquardt. Die Daempfung geht gegen 0, sobald das System gut
+// gestellt ist - sonst waere das Ergebnis systematisch zur Skizze hin verzogen.
+// Bei unterbestimmten Netzen bleibt sie stehen und haelt die freien Richtungen
+// genau dort, wo die Skizze sie hatte. Das ist gewollt.
+function solve(pts0, meas){
+  let pts=scaleSketch(pts0, meas);
+  const free=freeCols(pts), nf=free.length, act=activeMeas(meas);
+  if(!nf || !act.length) return {pts, iters:0, converged:true};
+  const cost=P=>residuals(P,meas).reduce((s,r)=>s+r*r,0);
+  let lambda=1e-3, c0=cost(pts), it=0, converged=false;
+  for(; it<30; it++){
+    const J=jacobian(pts,meas).map(r=>free.map(c=>r[c]));
+    const v=residuals(pts,meas);
+    const N=matTmat(J), g=matTvec(J,v);
+    let stepNorm=0, ok=false;
+    for(let tries=0; tries<8 && !ok; tries++){
+      const A=N.map((row,i)=>row.map((x,j)=>i===j ? x+lambda*(1+x) : x));
+      const sol=luSolve(A, g.map(x=>[-x]));
+      if(!sol){ lambda*=10; continue; }
+      const d=sol.map(r=>r[0]);
+      const cand=pts.map(p=>({...p}));
+      free.forEach((c,i)=>{ const p=cand[c>>1]; if(c&1) p.y+=d[i]; else p.x+=d[i]; });
+      const c1=cost(cand);
+      if(c1<=c0){ pts=cand; c0=c1; lambda=Math.max(lambda/3,1e-12); stepNorm=Math.hypot(...d); ok=true; }
+      else lambda*=10;
+    }
+    if(!ok) break;
+    if(stepNorm<0.01){ converged=true; it++; break; }
+  }
+  return {pts, iters:it, converged};
+}
+
+// Eine Zerlegung, drei Antworten: Rang (= fehlende Messungen), Nullraum
+// (= welche Punkte noch wackeln) und Hebelwerte (= welche Messung pruefbar ist).
+function analyze(pts, meas){
+  const act=activeMeas(meas), m=act.length, n=pts.length;
+  const free=freeCols(pts), nf=free.length;
+  const Jfull=jacobian(pts,meas);
+  const J=Jfull.map(r=>free.map(c=>r[c]));
+  const gs=gramSchmidt(J, TOL_RANK);
+  // Ohne aktive Messungen hat J null Zeilen - gramSchmidt kennt dann die Spalten-
+  // zahl nicht und setzt k=0 statt nf (siehe dort). analyze kennt nf aber genau:
+  // ohne jede Messung ist jede freie Koordinate ein Flex-Mode, der Nullraum also
+  // die volle freie Dimension, nicht leer.
+  if(m===0) gs.k=nf;
+  const rank=gs.rank;
+  const dof=Math.max(0, nf-rank);
+  const redundancy=m-rank;
+  const h=leverage(gs);
+  const red=h.map(x=>Math.max(0, 1-x));
+  const v=residuals(pts,meas);
+  const sigmaHat = redundancy>0
+    ? Math.sqrt(v.reduce((s,r)=>s+r*r,0)/redundancy)
+    : null;
+  const w=act.map((mm,i)=> red[i]<TOL_RED
+    ? null
+    : Math.abs(v[i])/((mm.sigma??SIGMA_DEF)*Math.sqrt(red[i])));
+  // Moden liegen in den freien Koordinaten - auf die vollen 2n aufblasen.
+  // Starrbewegungen koennen nicht dabei sein, die hat das Pinnen entfernt.
+  const modes=nullSpace(gs).map(z=>{
+    const f=new Array(2*n).fill(0);
+    free.forEach((c,i)=>f[c]=z[i]);
+    return f;
+  });
+  return {rank, dof, redundancy, h, red, v, w, sigmaHat, modes, free, n, m};
+}
+
+// Die drei Starrbewegungen, Drehung um den Schwerpunkt (haelt sie unabhaengig
+// von der Lage des Netzes klein und numerisch gutartig).
+function trivialModes(pts){
+  const n=pts.length;
+  const cx=pts.reduce((s,p)=>s+p.x,0)/n, cy=pts.reduce((s,p)=>s+p.y,0)/n;
+  const t1=[],t2=[],t3=[];
+  pts.forEach(p=>{ t1.push(1,0); t2.push(0,1); t3.push(-(p.y-cy), p.x-cx); });
+  const out=[];
+  for(const v0 of [t1,t2,t3]){
+    const v=v0.slice();
+    for(const q of out){
+      let d=0; for(let i=0;i<v.length;i++) d+=q[i]*v[i];
+      for(let i=0;i<v.length;i++) v[i]-=d*q[i];
+    }
+    const nrm=Math.hypot(...v);
+    if(nrm>1e-9) out.push(v.map(x=>x/nrm));
+  }
+  return out;
+}
+
+// Freie Netzausgleichung mit inneren Bedingungen:
+//   [ JtJ  G ] [X]   [I]
+//   [ Gt   0 ] [.] = [0]
+// X ist die gesuchte Pseudoinverse. Wuerde stattdessen das gepinnte System
+// invertiert, waeren die Ellipsen an P0 genagelt und wuechsen mit dem Abstand
+// davon - ein Artefakt der Eichung, nicht der Messqualitaet.
+function covariance(pts, meas, sigmaHat){
+  const n=pts.length, k=2*n;
+  if(n<3) return null;
+  const G=trivialModes(pts);
+  if(G.length<3) return null;
+  // Ohne aktive Messungen hat jacobian() 0 Zeilen; matTmat() kennt die Spaltenzahl
+  // dann nicht (siehe dort) und liefert [] statt einer k x k Nullmatrix. N[i][j]
+  // waere darauf ein Zugriff auf undefined[j] - ausgerechnet im unterbestimmtesten
+  // Fall, den es gibt, statt der vertraglich vorgesehenen null-Antwort.
+  if(!activeMeas(meas).length) return null;
+  const N=matTmat(jacobian(pts,meas));
+  const A=Array.from({length:k+3},()=>new Array(k+3).fill(0));
+  for(let i=0;i<k;i++) for(let j=0;j<k;j++) A[i][j]=N[i][j];
+  for(let i=0;i<k;i++) for(let g=0;g<3;g++){ A[i][k+g]=G[g][i]; A[k+g][i]=G[g][i]; }
+  const B=Array.from({length:k+3},(_,i)=>{
+    const r=new Array(k).fill(0); if(i<k) r[i]=1; return r;
+  });
+  const X=luSolve(A,B);
+  if(!X) return null;                       // unterbestimmt -> Pfeile statt Ellipsen
+  const s2=(sigmaHat!=null ? sigmaHat*sigmaHat : SIGMA_DEF*SIGMA_DEF);
+  return pts.map((p,i)=>({
+    xx:s2*X[2*i][2*i], xy:s2*X[2*i][2*i+1], yy:s2*X[2*i+1][2*i+1],
+  }));
+}
+
+// Eigenwerte einer 2x2-Kovarianz in geschlossener Form.
+function ellipse(c){
+  const tr=c.xx+c.yy, det=c.xx*c.yy-c.xy*c.xy;
+  const r=Math.sqrt(Math.max(0, tr*tr/4-det));
+  return {
+    a:Math.sqrt(Math.max(tr/2+r,0)),
+    b:Math.sqrt(Math.max(tr/2-r,0)),
+    ang:0.5*Math.atan2(2*c.xy, c.xx-c.yy),
+  };
+}
+
+// Echter Schnitt zweier Strecken, gemeinsame Endpunkte zaehlen nicht.
+function segCross(p1,p2,p3,p4){
+  const d=(p2.x-p1.x)*(p4.y-p3.y)-(p2.y-p1.y)*(p4.x-p3.x);
+  if(Math.abs(d)<1e-12) return false;
+  const t=((p3.x-p1.x)*(p4.y-p3.y)-(p3.y-p1.y)*(p4.x-p3.x))/d;
+  const u=((p3.x-p1.x)*(p2.y-p1.y)-(p3.y-p1.y)*(p2.x-p1.x))/d;
+  const e=1e-9;
+  return t>e && t<1-e && u>e && u<1-e;
+}
+// Ein Raum ist ein EINFACHES Polygon. Kreuzen sich zwei Waende, ist es keins -
+// und dann liefern pointInPoly, segInPoly und die Flaeche stillschweigend
+// Unsinn: bei einem gekreuzten Viereck gilt die Raummitte als aussen und die
+// Flaeche kommt als 0 heraus.
+function ringSelfIntersects(poly){
+  const n=poly.length;
+  for(let i=0;i<n;i++){
+    const a1=poly[i], a2=poly[(i+1)%n];
+    for(let j=i+1;j<n;j++){
+      if(j===i || (j+1)%n===i || (i+1)%n===j) continue;   // benachbarte Kanten
+      if(segCross(a1,a2,poly[j],poly[(j+1)%n])) return true;
+    }
+  }
+  return false;
+}
+// Wuerde eine neue Wand a-b eine bestehende kreuzen?
+function wallCrossesExisting(pts, walls, a, b){
+  const I=idx(pts);
+  if(I[a]==null||I[b]==null) return false;
+  const p=pts[I[a]], q=pts[I[b]];
+  return walls.some(([c,d])=>{
+    if(c===a||c===b||d===a||d===b) return false;          // teilt einen Endpunkt
+    if(I[c]==null||I[d]==null) return false;
+    return segCross(p,q,pts[I[c]],pts[I[d]]);
+  });
+}
+
+// Wandzug in Ecken-Reihenfolge bringen. Null, wenn es kein geschlossener
+// Ring ueber alle Punkte ist - dann gibt es kein Polygon zum Filtern. Reine
+// Adjazenzpruefung, unabhaengig von der Geometrie - siehe wallPolygon fuer
+// die geometrische Kreuzungspruefung, die hier bewusst NICHT stattfindet.
+function wallPolygonRing(pts, walls){
+  const loops=wallLoops(pts, walls);
+  if(!loops) return null;
+  // Aussen ist der groesste Zug, nicht der erste in pts-Reihenfolge.
+  let k=0; loops.forEach((L,i)=>{ if(loopArea(L)>loopArea(loops[k])) k=i; });
+  const ring=loops[k];
+  ring.holes=loops.filter((_,i)=>i!==k);
+  return ring;
+}
+// Alle geschlossenen Wandzuege. Jede Ecke hat genau zwei Waende; die Waende
+// zerfallen dann in disjunkte Kreise. Der Raum ist der groesste davon, jeder
+// weitere ist eine INSEL darin (freistehende Wand, Pfeiler, Wandstueck neben
+// einem Durchbruch) - er begrenzt den Raum von innen. wallPolygonRing haengt
+// die Inseln als .holes an den Aussenring; ohne Inseln ist .holes leer und
+// alles verhaelt sich wie bisher. null, solange irgendwo ein Zug offen ist.
+function wallLoops(pts, walls){
+  if(walls.length<3 || pts.length<3) return null;
+  const adj={}; pts.forEach(p=>adj[p.id]=[]);
+  for(const [a,b] of walls){
+    if(!adj[a]||!adj[b]) return null;
+    adj[a].push(b); adj[b].push(a);
+  }
+  if(pts.some(p=>adj[p.id].length!==2)) return null;
+  const I=idx(pts), seen=new Set(), loops=[];
+  for(const start of pts){
+    if(seen.has(start.id)) continue;
+    const order=[start.id]; seen.add(start.id);
+    let prev=null, cur=start.id;
+    for(;;){
+      const nxt=adj[cur].find(x=>x!==prev);
+      if(nxt==null) return null;
+      if(nxt===start.id) break;
+      if(seen.has(nxt)) return null;
+      seen.add(nxt); order.push(nxt); prev=cur; cur=nxt;
+    }
+    if(order.length<3) return null;
+    loops.push(order.map(id=>pts[I[id]]));
+  }
+  return loops;
+}
+function loopArea(R){
+  let a=0;
+  for(let i=0,j=R.length-1;i<R.length;j=i++) a+=R[j].x*R[i].y-R[i].x*R[j].y;
+  return Math.abs(a)/2;
+}
+
+// Ein Raum ist ein EINFACHES Polygon: der Ring darf sich nicht selbst kreuzen.
+// wallPolygonRing prueft nur die Adjazenz (ein geschlossener Zug ueber alle
+// Punkte), nicht die Geometrie - ein gekreuztes Viereck besteht diese Pruefung
+// anstandslos. Getrennt von wallPolygonRing, damit der rohe Ring auch im
+// gekreuzten Fall zur Inspektion zur Verfuegung steht (siehe Statuszeile:
+// "nicht geschlossen" und "kreuzt sich" sind verschiedene Meldungen).
+function wallPolygon(pts, walls){
+  const ring=wallPolygonRing(pts, walls);
+  if(!ring || ringSelfIntersects(ring)) return null;
+  // Inseln: je kreuzungsfrei, ganz im Aussenring, nicht ineinander und ohne
+  // Kreuzung mit einem anderen Zug - sonst ist die Form so unbestimmt wie
+  // ein gekreuzter Ring.
+  const all=[ring, ...ring.holes];
+  for(const h of ring.holes){
+    if(ringSelfIntersects(h)) return null;
+    if(!h.every(p=>pointInRing(p, ring))) return null;
+    if(ring.holes.some(o=>o!==h && pointInRing(h[0], o))) return null;
+  }
+  for(let i=0;i<all.length;i++) for(let j=i+1;j<all.length;j++){
+    const P=all[i], Q=all[j];
+    for(let a=0;a<P.length;a++) for(let b=0;b<Q.length;b++)
+      if(segCross(P[a],P[(a+1)%P.length],Q[b],Q[(b+1)%Q.length])) return null;
+  }
+  return ring;
+}
+// Flaeche eines Raums abzueglich seiner Inseln (mm2).
+function roomArea(poly){
+  return loopArea(poly) - (poly.holes||[]).reduce((s,h)=>s+loopArea(h),0);
+}
+
+function pointInRing(p, poly){
+  let inside=false;
+  for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+    const a=poly[i], b=poly[j];
+    if((a.y>p.y)!==(b.y>p.y) && p.x < (b.x-a.x)*(p.y-a.y)/(b.y-a.y)+a.x) inside=!inside;
+  }
+  return inside;
+}
+// Paritaet ueber ALLE Ringe (even-odd): innen heisst im Aussenring und in
+// keiner Insel. Wer ein wallPolygon()-Ergebnis uebergibt, bekommt die
+// Inseln damit ohne eigenes Zutun beruecksichtigt (Sichtlinien, Innenseite
+// einer Wand, Nachbar unter dem Zeiger).
+function pointInPoly(p, poly){
+  let inside=pointInRing(p, poly);
+  for(const h of (poly.holes||[])) if(pointInRing(p, h)) inside=!inside;
+  return inside;
+}
+
+const pairKey=(a,b)=>[a,b].sort().join('|');
+
+// Messbarkeit eines Punktpaars fuer die Vorschlagsliste: die beiden Ecken
+// muessen einander SEHEN. Zwei Fragen, in dieser Reihenfolge:
+//
+// 1. Steht eine Wand im Weg? Exakter Segmentschnitt (wallCrossesExisting),
+//    kein Abtasten. Die alte Fassung tastete die Strecke mit 32 Stuetzpunkten
+//    ab und liess dadurch Strecken durch, die eine Wand nur knapp schneiden -
+//    browser-gesehen im Raum vom 23.8.2026 schlug sie A-F vor, obwohl das
+//    Wand L-J quert; erst bei 200 Stuetzpunkten faellt es auf. Der Schnitt
+//    braucht kein Polygon und gilt deshalb auch, solange der Zug noch offen
+//    oder gekreuzt ist - genau dort, wo der Filter frueher ganz aussetzte.
+// 2. Liegt die Strecke ueberhaupt drinnen? Kreuzungsfrei heisst noch nicht
+//    innen: im L-Raum laeuft die Strecke zwischen den beiden Schenkelenden
+//    komplett AUSSEN um die einspringende Ecke herum, ohne eine Wand zu
+//    schneiden. Weil Frage 1 den Rand ausschliesst, entscheidet ein einziger
+//    Punkt fuer die ganze Strecke.
+//
+// Eine Wand ist per Definition messbar - man steht in einer Ecke und misst
+// geradeaus zur naechsten. Sie LIEGT auf dem Rand, und dort ist pointInPolys
+// Paritaetstest undefiniert; deshalb wird sie vorweg beantwortet.
+// ponytail: laeuft die Strecke exakt durch eine Ecke, ist der Schnitttest
+// blind und der Mittelpunkt entscheidet allein - ein solcher Raum ist entartet.
+function pairMeasurable(pts, walls, poly, a, b){
+  const k=pairKey(a,b);
+  if(walls.some(([x,y])=>pairKey(x,y)===k)) return true;
+  if(wallCrossesExisting(pts, walls, a, b)) return false;
+  if(!poly) return true;
+  const I=idx(pts);
+  if(I[a]==null||I[b]==null) return true;
+  const p=pts[I[a]], q=pts[I[b]];
+  return pointInPoly({x:(p.x+q.x)/2, y:(p.y+q.y)/2}, poly);
+}
+
+// Zwei Phasen in einem Durchlauf. Solange Messungen fehlen: die Messung
+// waehlen, deren Rigiditaetszeile am staerksten in die noch freien Richtungen
+// zeigt. Danach: die Messung waehlen, die die meisten bisher unpruefbaren
+// Messungen pruefbar macht. Jeder Vorschlag traegt in `why`, aus welcher Phase
+// er stammt - ohne das stuenden hier fuenf Eintraege, waehrend die Statuszeile
+// "3 Messungen fehlen" meldet.
+function suggest(pts, walls, meas){
+  const poly=wallPolygon(pts,walls), I=idx(pts);
+  const have=new Set(activeMeas(meas).map(m=>pairKey(m.a,m.b)));
+  const cand=[], repeats=[];
+  for(let i=0;i<pts.length;i++) for(let j=i+1;j<pts.length;j++){
+    const key=pairKey(pts[i].id,pts[j].id);
+    if(!pairMeasurable(pts, walls, poly, pts[i].id, pts[j].id)) continue;
+    const pair={a:pts[i].id, b:pts[j].id};
+    // Eine Wiederholung macht genau ihr eigenes Paar pruefbar - nachgemessen:
+    // red steigt fuer beide Zeilen auf 0.500, alle uebrigen bleiben 0. Zur
+    // Herstellung der Bestimmtheit taugt sie deshalb nie.
+    if(have.has(key)) repeats.push(pair); else cand.push(pair);
+  }
+  const virt=c=>({a:c.a, b:c.b, d:dist(pts[I[c.a]],pts[I[c.b]]), sigma:SIGMA_DEF});
+  const out=[]; let work=activeMeas(meas).slice();
+  const taken=new Set();
+  let checkPhase=0;
+  for(let guard=0; guard<2*pts.length; guard++){
+    const an=analyze(pts, work);
+    let best=null, bestScore=0, why='bestimmt', bestRepeat=false;
+    if(an.dof>0){
+      for(const c of cand){
+        if(taken.has(pairKey(c.a,c.b))) continue;
+        const row=jacobian(pts,[{a:c.a,b:c.b,d:0}])[0];
+        const score=an.modes.reduce((s,mo)=>{
+          let d=0; for(let i=0;i<row.length;i++) d+=row[i]*mo[i];
+          return s+d*d;
+        },0);
+        if(score>bestScore){ bestScore=score; best=c; }
+      }
+    } else {
+      if(checkPhase>=SUGGEST_CHECK_MAX) break;
+      why='pruefbar';
+      const unchecked=a=>a.w.filter(x=>x===null).length;
+      const base=unchecked(an);
+      if(base===0) break;
+      for(const c of cand.concat(repeats)){
+        if(taken.has(pairKey(c.a,c.b))) continue;
+        const gain=base-unchecked(analyze(pts, work.concat([virt(c)])));
+        if(gain>bestScore){ bestScore=gain; best=c; bestRepeat=repeats.includes(c); }
+      }
+      checkPhase++;
+    }
+    if(!best) break;
+    taken.add(pairKey(best.a,best.b));
+    out.push(bestRepeat ? {a:best.a, b:best.b, why, repeat:true} : {a:best.a, b:best.b, why});
+    work=work.concat([virt(best)]);
+  }
+  return out;
+}
+
+// Rechte Winkel annehmen. Ein Laser misst Strecken, keine Winkel - an einer
+// kurzen Wand verschieben 5 mm Messfehler den Winkel um 1-2 Grad, und der
+// Ausgleich landet dann bei 87,7 statt 90, obwohl nichts dagegen spricht.
+// Jede Ecke, die im Ausgleich innerhalb tolDeg von 90 Grad liegt, bekommt
+// als Hilfsstrecke die Diagonale ueber die Ecke (Pythagoras aus den
+// Schenkeln, stark gewichtet) - aber nur, wenn die Messungen das zulassen:
+// die Fehlerquadratsumme darf je Ecke um hoechstens ORTHO_CHI2 wachsen
+// (chi2 mit 1 Freiheitsgrad, 95 %). Widerspricht eine Ecke, bleibt sie, wie
+// sie gemessen ist. Die Schenkel aendern sich beim Ausgleich - deshalb die
+// Diagonale ein paar Mal aus der neuen Lage nachfuehren.
+const ORTHO_CHI2=3.84, ORTHO_WT=40, ORTHO_W=3.29;   // W = Baardas Grenze, wie BAARDA_W0 im UI
+function orthoFit(pts, walls, meas, tolDeg){
+  const fit0=solve(pts, meas);
+  const loops=wallLoops(fit0.pts, walls);
+  if(!loops) return {fit:fit0, ortho:[], rejected:[]};
+  const act=activeMeas(meas);
+  const chi=P=>{ const I=idx(P); return act.reduce((s,m)=>s+((dist(P[I[m.a]],P[I[m.b]])-m.d)/(m.sigma||SIGMA_DEF))**2,0); };
+  const angleAt=(P,[a,c,b])=>{ const I=idx(P), A=P[I[a]], Cc=P[I[c]], B=P[I[b]];
+    const u={x:A.x-Cc.x,y:A.y-Cc.y}, v={x:B.x-Cc.x,y:B.y-Cc.y};
+    return Math.abs(Math.atan2(u.x*v.y-u.y*v.x, u.x*v.x+u.y*v.y))*180/Math.PI; };
+  const pseudo=(P,list)=>{ const I=idx(P); return list.map(([a,c,b])=>({a, b, wt:ORTHO_WT,
+    d:Math.hypot(dist(P[I[a]],P[I[c]]), dist(P[I[b]],P[I[c]]))})); };
+  const solveWith=list=>{ let f=fit0; for(let k=0;k<3;k++) f=solve(f.pts, meas.concat(pseudo(f.pts,list))); return f; };
+  const corners=[];
+  loops.forEach(L=>L.forEach((p,i)=>corners.push([L[(i+L.length-1)%L.length].id, p.id, L[(i+1)%L.length].id])));
+  const base=chi(fit0.pts), ortho=[], rejected=[];
+  corners.forEach(k=>{
+    const ang=angleAt(fit0.pts,k);
+    if(Math.abs(ang-90)>tolDeg) return;
+    const inc=chi(solveWith([k]).pts)-base;
+    (inc<=ORTHO_CHI2 ? ortho : rejected).push(inc<=ORTHO_CHI2 ? k : {corner:k, ang, inc});
+  });
+  // Gemeinsam pruefen: einzeln vertraegliche Ecken koennen zusammen zu viel
+  // verlangen. Dann die teuerste einzeln wieder freigeben, bis es passt.
+  let fit=ortho.length ? solveWith(ortho) : fit0;
+  // 95-%-Grenze fuer k Freiheitsgrade (Naeherung), und: keine Messung darf
+  // durch die rechten Winkel neu ueber die Ausreissergrenze rutschen - sonst
+  // meldet die Tabelle eine verdaechtige Messung, die es ohne gar nicht gibt.
+  const limit=k=>k+1.645*Math.sqrt(2*k);
+  const maxW=P=>{ const a=analyze(P, meas); return Math.max(0, ...a.w.map(Math.abs)); };
+  const w0=Math.max(ORTHO_W, maxW(fit0.pts));
+  while(ortho.length && (chi(fit.pts)-base>limit(ortho.length) || maxW(fit.pts)>w0+1e-9)){
+    let worst=0, wInc=-1;
+    ortho.forEach((k,i)=>{ const inc=chi(solveWith(ortho.filter((_,j)=>j!==i)).pts); if(wInc<0 || inc<wInc){ wInc=inc; worst=i; } });
+    const [k]=ortho.splice(worst,1);
+    rejected.push({corner:k, ang:angleAt(fit0.pts,k), inc:NaN});
+    fit=ortho.length ? solveWith(ortho) : fit0;
+  }
+  return {fit, ortho:ortho.map(k=>k[1]), rejected:rejected.map(r=>({id:r.corner[1], ang:r.ang}))};
+}
+
+// Einen Zug am Punkt i auf die verbliebenen Beweglichkeiten projizieren.
+// Die Moden sind die LINEARISIERTE Beweglichkeit an der aktuellen Stelle -
+// ein endlicher Zug driftet also von den Messungen weg. Der Aufrufer laesst
+// deshalb solve() als Korrektor nachlaufen (Praediktor-Korrektor).
+function dragAlongModes(pts, modes, i, dx, dy){
+  const k=modes.length;
+  if(!k) return null;
+  const A=[modes.map(m=>m[2*i]), modes.map(m=>m[2*i+1])];   // 2 x k
+  const N=matTmat(A), g=matTvec(A,[dx,dy]);
+  for(let j=0;j<k;j++) N[j][j]+=1e-9;
+  const sol=luSolve(N, g.map(x=>[x]));
+  if(!sol) return null;
+  const c=sol.map(r=>r[0]);
+  return pts.map((p,q)=>{
+    let ax=0, ay=0;
+    modes.forEach((m,j)=>{ ax+=c[j]*m[2*q]; ay+=c[j]*m[2*q+1]; });
+    return {...p, x:p.x+ax, y:p.y+ay};
+  });
+}
+
+globalThis.CORE={ TOL_RANK, TOL_RED, TOL_MODE, SIGMA_DEF, SUGGEST_CHECK_MAX,
+                  dist, idx, activeMeas, residuals, jacobian, luSolve, matTmat, matTvec,
+                  gramSchmidt, nullSpace, leverage, gaugeFixed, freeCols, scaleSketch, solve, analyze,
+                  trivialModes, covariance, ellipse, segCross, ringSelfIntersects, wallCrossesExisting,
+                  wallPolygonRing, wallPolygon, pointInPoly, wallLoops, roomArea,
+                  pairMeasurable, suggest, dragAlongModes, orthoFit, ORTHO_CHI2 };
+</script>
+
+<script id="chevron">
+"use strict";
+// ================= Chevron-Fliese aus Strecken =================
+// Reine Geometrie ohne DOM - laeuft in test/fliese-einmessen.mjs genauso.
+//
+// Ecken wie tileShape() in raumaufmass.html (Kind 'L'): A unten links,
+// B unten rechts, C oben rechts, D oben links. AB und DC sind die langen
+// Kanten, AD und BC die kurzen Schraegkanten. Spitz sind A und C - die
+// lange Diagonale AC verbindet sie.
+(()=>{
+const R2D=180/Math.PI;
+// W: Abstand der langen Kanten, rechtwinklig von AB nach DC gemessen.
+const KEYS=['AB','DC','AD','BC','AC','BD','W'];
+const DIST_KEYS=KEYS.filter(k=>k!=='W');
+const PAIRS={AB:['A','B'], DC:['D','C'], AD:['A','D'], BC:['B','C'], AC:['A','C'], BD:['B','D']};
+const BAARDA_W0=3.29;    // wie im UI von raumaufmass.html
+
+// Ein Feld, mehrere Messungen: Leerzeichen oder ; trennen, Komma ist das
+// Dezimalzeichen ("850,5 851"). bad sammelt, was keine positive Zahl ist.
+function parseValues(s){
+  const vals=[], bad=[];
+  for(const t of String(s||'').trim().split(/[\s;]+/)){
+    if(!t) continue;
+    const x=Number(t.replace(',','.'));
+    if(Number.isFinite(x) && x>0) vals.push(x); else bad.push(t);
+  }
+  return {vals, bad};
+}
+
+// Parallelogramm mit Parametern [l, k, w]: A(0,0) B(l,0) C(l+k,w) D(k,w).
+// k ist der Versatz der Oberkante, w der Abstand der langen Kanten; der
+// Winkel an A ist atan2(w,k). DER: Ableitung jeder Eckkoordinate nach
+// [l, k, w] - daraus die Ableitung jeder Strecke ohne Fallunterscheidung.
+const corners=p=>({A:{x:0,y:0}, B:{x:p.l,y:0}, C:{x:p.l+p.k,y:p.w}, D:{x:p.k,y:p.w}});
+const DER={A:{x:[0,0,0],y:[0,0,0]}, B:{x:[1,0,0],y:[0,0,0]},
+           C:{x:[1,1,0],y:[0,0,1]}, D:{x:[0,1,0],y:[0,0,1]}};
+function modelRow(key, p){
+  if(key==='W') return {d:p.w, g:[0,0,1]};
+  const P=corners(p), [a,b]=PAIRS[key];
+  const dx=P[b].x-P[a].x, dy=P[b].y-P[a].y, d=Math.hypot(dx,dy)||1e-9;
+  const g=[0,1,2].map(j=>(dx*(DER[b].x[j]-DER[a].x[j])+dy*(DER[b].y[j]-DER[a].y[j]))/d);
+  return {d, g};
+}
+
+const mean=a=>a.length ? a.reduce((s,x)=>s+x,0)/a.length : null;
+const valsOf=(obs,keys)=>obs.filter(o=>keys.includes(o.key)).map(o=>o.d);
+
+// Gauss-Newton mit Schrittkuerzung. Startwert geschlossen: l und s als
+// Mittel der Kanten, k aus den Diagonalen (Parallelogrammgesetz:
+// AC^2 - BD^2 = 4 l k), w aus s^2 = k^2 + w^2. Alle Messungen haben
+// dasselbe sigma, die Gewichte kuerzen sich also heraus.
+function fitParallelogram(obs, sigma){
+  const l0=mean(valsOf(obs,['AB','DC'])), s0=mean(valsOf(obs,['AD','BC']));
+  const ac=mean(valsOf(obs,['AC'])), bd=mean(valsOf(obs,['BD']));
+  const k0 = ac!=null && bd!=null ? (ac*ac-bd*bd)/(4*l0)
+           : ac!=null ? (ac*ac-l0*l0-s0*s0)/(2*l0)
+           : (l0*l0+s0*s0-bd*bd)/(2*l0);
+  const w2=s0*s0-k0*k0;
+  const wm=mean(valsOf(obs,['W']));
+  if(ac==null && bd==null) return fitFrom({l:l0, k:Math.sqrt(Math.max(s0*s0-wm*wm,0)), w:wm}, obs, sigma);
+  if(!(w2>0)) return {error:'Die Strecken ergeben kein Viereck: Eine Diagonale ist zu lang oder zu kurz für die Kanten.'};
+  return fitFrom({l:l0, k:k0, w:Math.sqrt(w2)}, obs, sigma);
+}
+// Ohne Diagonale ist nur das Vorzeichen von k offen - der spitze Winkel
+// ist fuer beide gleich, also reicht der positive Start.
+function fitFrom(p, obs, sigma){
+  const resid=P=>obs.map(o=>modelRow(o.key,P).d-o.d);
+  const cost=P=>resid(P).reduce((s,r)=>s+r*r,0);
+  let c0=cost(p), converged=false;
+  for(let it=0; it<50; it++){
+    const J=obs.map(o=>modelRow(o.key,p).g), v=resid(p);
+    const sol=CORE.luSolve(CORE.matTmat(J), CORE.matTvec(J,v).map(x=>[-x]));
+    if(!sol) return {error:'Die Form ist aus diesen Strecken nicht bestimmbar.'};
+    const d=sol.map(r=>r[0]);
+    let t=1, cand=null, c1=Infinity;
+    for(let h=0; h<30; h++){
+      cand={l:p.l+t*d[0], k:p.k+t*d[1], w:p.w+t*d[2]};
+      c1=cost(cand);
+      if(c1<=c0) break;
+      t/=2;
+    }
+    if(!(c1<=c0)){ converged=true; break; }     // kein Abstieg mehr: am Minimum
+    p=cand; c0=c1;
+    if(Math.hypot(...d)*t<1e-9){ converged=true; break; }
+  }
+  if(!converged || ![p.l,p.k,p.w].every(Number.isFinite))
+    return {error:'Der Ausgleich findet keine Lösung. Passen die Strecken zu den Feldern?'};
+  // Spiegelbild hat dieselben Strecken - w positiv halten.
+  p.w=Math.abs(p.w);
+  const J=obs.map(o=>modelRow(o.key,p).g), N=CORE.matTmat(J);
+  const Q=CORE.luSolve(N, [[1,0,0],[0,1,0],[0,0,1]]);
+  const s=Math.hypot(p.k,p.w), theta=Math.atan2(p.w,p.k)*R2D;
+  // Winkel-Gradient nach [l,k,w], in Grad.
+  const ga=[0, -p.w/(s*s)*R2D, p.k/(s*s)*R2D];
+  const qa=Q ? ga.reduce((sum,gi,i)=>sum+gi*ga.reduce((t2,gj,j)=>t2+Q[i][j]*gj,0),0) : NaN;
+  const v=resid(p), red=obs.length-3;
+  const model={}; KEYS.forEach(k=>model[k]=modelRow(k,p).d);
+  return {
+    l:p.l, k:p.k, w:p.w, s,
+    angle: theta>90 ? 180-theta : theta,
+    obtuseAtA: theta>90,
+    sd: Q ? {l:sigma*Math.sqrt(Q[0][0]), w:sigma*Math.sqrt(Q[2][2]), angle:sigma*Math.sqrt(qa)} : null,
+    redundancy:red,
+    sigmaHat: red>0 ? Math.sqrt(v.reduce((a,r)=>a+r*r,0)/red) : null,
+    v, model, corners:corners(p),
+  };
+}
+
+// Innenwinkel an c zwischen den Nachbarn a und b, in Grad.
+function angleAt(P, a, c, b){
+  const u={x:P[a].x-P[c].x, y:P[a].y-P[c].y}, w={x:P[b].x-P[c].x, y:P[b].y-P[c].y};
+  return Math.abs(Math.atan2(u.x*w.y-u.y*w.x, u.x*w.x+u.y*w.y))*R2D;
+}
+
+// Die echte Form: vier Punkte, jede Strecke eine Messung, Ausgleich ueber den
+// Einmess-Kern. Startform ist das ausgeglichene Parallelogramm - A liegt dann
+// im Ursprung, B auf der x-Achse, und genau das haelt die Eichung des Kerns fest.
+function fitQuad(obs, sigma, seed){
+  const pts=['A','B','C','D'].map(id=>({id, x:seed[id].x, y:seed[id].y}));
+  // Der Kern kennt nur Punkt-zu-Punkt-Strecken; W bleibt beim Parallelogramm.
+  const at=[], meas=[];
+  obs.forEach((o,i)=>{ if(PAIRS[o.key]){ at.push(i); meas.push({a:PAIRS[o.key][0], b:PAIRS[o.key][1], d:o.d, sigma}); } });
+  const pre=CORE.analyze(pts, meas);
+  if(pre.dof>0) return {dof:pre.dof};
+  let f=CORE.solve(pts, meas);
+  f=CORE.solve(f.pts, meas);           // zweiter Lauf zieht die letzten Hundertstel nach
+  const an=CORE.analyze(f.pts, meas);
+  const P={}; f.pts.forEach(q=>P[q.id]=q);
+  const len=(a,b)=>Math.hypot(P[b].x-P[a].x, P[b].y-P[a].y);
+  const ab=len('A','B');
+  const hOf=id=>Math.abs((P.B.x-P.A.x)*(P[id].y-P.A.y)-(P.B.y-P.A.y)*(P[id].x-P.A.x))/ab;
+  const ang={A:angleAt(P,'D','A','B'), B:angleAt(P,'A','B','C'), C:angleAt(P,'B','C','D'), D:angleAt(P,'C','D','A')};
+  const lens={}; DIST_KEYS.forEach(k=>lens[k]=len(...PAIRS[k]));
+  // v und w auf die Reihenfolge aller Messungen zurueckspreizen (W: null).
+  const spread=a=>{ const o=obs.map(()=>null); at.forEach((i,j)=>o[i]=a[j]); return o; };
+  const tested=an.w.filter(x=>x!==null);
+  return {
+    dof:0, P, ang, lens, converged:f.converged,
+    widthD:hOf('D'), widthC:hOf('C'),
+    // 0, wenn die Gegenkanten parallel sind: Nachbarwinkel ergaenzen sich zu 180.
+    longSkew:ang.A+ang.D-180, shortSkew:ang.A+ang.B-180,
+    redundancy:an.redundancy, sigmaHat:an.sigmaHat, v:spread(an.v), w:spread(an.w),
+    maxW: tested.length ? Math.max(...tested) : null,
+  };
+}
+
+// Felder -> Auswertung. fields: {AB:'850,5 851', ...}, sigma in mm.
+function measure(fields, sigma){
+  const obs=[], bad=[];
+  for(const key of KEYS){
+    const r=parseValues(fields[key]);
+    r.vals.forEach(d=>obs.push({key, d}));
+    if(r.bad.length) bad.push(key);
+  }
+  if(bad.length) return {obs, bad, error:`Nicht lesbar: ${bad.join(', ')}. Erlaubt sind Zahlen in mm, getrennt durch Leerzeichen.`};
+  if(!(sigma>0)) return {obs, error:'Die Messgenauigkeit muss größer als 0 sein.'};
+  const has=k=>obs.some(o=>o.key===k), missing=[];
+  if(!has('AB') && !has('DC')) missing.push('eine lange Kante (AB oder DC)');
+  if(!has('AD') && !has('BC')) missing.push('eine kurze Kante (AD oder BC)');
+  if(!has('AC') && !has('BD') && !has('W')) missing.push('eine Diagonale (AC oder BD) oder die Breite W');
+  if(missing.length) return {obs, missing};
+  const par=fitParallelogram(obs, sigma);
+  if(par.error) return {obs, error:par.error};
+  return {obs, par, quad:fitQuad(obs, sigma, par.corners)};
+}
+
+// Bekannte Wahrheit: 850 x 150, 45 Grad. Jede Strecke exakt -> der Ausgleich
+// muss die Parameter zurueckgeben und das Viereck ohne Widerspruch schliessen.
+function selfCheck(){
+  const t={l:850, k:150, w:150}, f={};
+  KEYS.forEach(k=>f[k]=String(modelRow(k,t).d));
+  const r=measure(f, 0.5), out=[];
+  const chk=(name,ok)=>out.push((ok?'ok   ':'FEHLT ')+name);
+  chk('Parallelogramm l', r.par && Math.abs(r.par.l-850)<1e-6);
+  chk('Parallelogramm w', r.par && Math.abs(r.par.w-150)<1e-6);
+  chk('Parallelogramm Winkel', r.par && Math.abs(r.par.angle-45)<1e-6);
+  chk('Viereck bestimmt, eine Kontrolle', r.quad && r.quad.dof===0 && r.quad.redundancy===1);
+  chk('Viereck ohne Widerspruch', r.quad && r.quad.sigmaHat<1e-3);
+  chk('Ecke A 45 Grad', r.quad && Math.abs(r.quad.ang.A-45)<1e-3);
+  return {ok:out.every(s=>s.startsWith('ok')), out};
+}
+
+globalThis.CHEVRON={KEYS, DIST_KEYS, PAIRS, BAARDA_W0, parseValues, modelRow, corners,
+                    fitParallelogram, fitQuad, measure, angleAt, selfCheck};
+})();
+</script>
+
+<script id="ui">
+"use strict";
+(()=>{
+const {KEYS, BAARDA_W0, measure, selfCheck}=CHEVRON;
+const $=id=>document.getElementById(id);
+const STORE='fliese-einmessen';
+const EXAMPLE={AB:'850,5 850,5', DC:'851', AD:'212', BC:'212,5', AC:'1011,5 1012', BD:'716', W:'150 149,5'};
+
+// Zahlen deutsch: Komma, echtes Minus.
+const num=(x,n)=>(x<0?'−':'')+Math.abs(x).toFixed(n).replace('.',',');
+const sgn=(x,n)=>(Math.abs(x)<0.5*10**-n ? '±' : x>0 ? '+' : '−')+Math.abs(x).toFixed(n).replace('.',',');
+const mm=x=>String(x).replace('.',',');            // Eingabewert so, wie er getippt wurde
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+const inputs=KEYS.map(k=>$('f-'+k));
+const fields=()=>Object.fromEntries(KEYS.map(k=>[k,$('f-'+k).value]));
+const sigmaVal=()=>Number($('sigma').value.trim().replace(',','.'));
+
+function save(){
+  try{ localStorage.setItem(STORE, JSON.stringify({fields:fields(), sigma:$('sigma').value})); }catch(e){}
+}
+function load(){
+  try{
+    const o=JSON.parse(localStorage.getItem(STORE)||'null');
+    if(!o) return;
+    KEYS.forEach(k=>{ if(typeof o.fields?.[k]==='string') $('f-'+k).value=o.fields[k]; });
+    if(typeof o.sigma==='string') $('sigma').value=o.sigma;
+  }catch(e){}
+}
+
+// Feld <-> Linie in der Skizze: Fokus oder Zeiger hebt beides hervor.
+function highlight(key){
+  document.querySelectorAll('#sketch g[data-k]').forEach(g=>g.classList.toggle('on', g.dataset.k===key));
+  document.querySelectorAll('#fields [data-k]').forEach(el=>el.classList.toggle('row-on', el.dataset.k===key && el.tagName!=='INPUT'));
+}
+
+function renderApp(r){
+  const el=$('c-app');
+  if(r.error){ el.innerHTML=`<h2>Werte für die App</h2><p class="bad">${esc(r.error)}</p>`; return; }
+  if(r.missing){
+    el.innerHTML=`<h2>Werte für die App</h2><p class="empty">Es fehlt noch ${r.missing.map(esc).join(', ')}.</p>`;
+    return;
+  }
+  const p=r.par, sd=p.sd, sig=sigmaVal();
+  const val=(k,v,unit,pm,n)=>`<div class="val"><div class="k">${k}</div>
+    <div class="v">${num(v,n)}${unit}<button class="copy" type="button" data-copy="${num(v,n)}" title="Wert kopieren">kopieren</button></div>
+    <div class="pm">${pm!=null && Number.isFinite(pm) ? '± '+num(pm,n===1?1:2)+unit : '&nbsp;'}</div></div>`;
+  el.innerHTML=`<h2>Werte für die App</h2>
+    <div class="vals">
+      ${val('Breite w', p.w, ' mm', sd?.w, 1)}
+      ${val('Länge l', p.l, ' mm', sd?.l, 1)}
+      ${val('Winkel', p.angle, '°', sd?.angle, 2)}
+    </div>
+    <p class="hint">Kurze Kante ${num(p.s,1)} mm. ± gilt bei ${mm(sig)} mm Messgenauigkeit je Strecke
+      ${p.redundancy>0 ? `· ${p.redundancy} Strecke${p.redundancy>1?'n':''} mehr als nötig` : '· keine Strecke zu viel, also auch keine Kontrolle'}.
+      ${p.obtuseAtA ? 'A und C sind bei dir stumpf, die Werte gelten trotzdem.' : ''}</p>`;
+}
+
+function renderShape(r){
+  const el=$('c-shape');
+  if(r.error || r.missing){ el.innerHTML=`<h2>Echte Form</h2><p class="empty">Erst wenn die Werte oben stehen.</p>`; return; }
+  const q=r.quad;
+  if(q.dof>0){
+    el.innerHTML=`<h2>Echte Form</h2><p class="empty">Für die echte Form ${q.dof===1?'fehlt noch eine Strecke':`fehlen noch ${q.dof} Strecken`}.
+      Mit allen vier Kanten und beiden Diagonalen ist sie bestimmt und kontrolliert.</p>`;
+    return;
+  }
+  const sig=sigmaVal();
+  let verdict;
+  if(q.redundancy===0) verdict=`<p class="verdict warn">Keine Kontrolle: Mit genau fünf Strecken passt jede Form. Die sechste prüft.</p>`;
+  else if(q.maxW==null) verdict=`<p class="verdict warn">Die zusätzlichen Strecken prüfen keine der übrigen.</p>`;
+  else if(q.maxW<=BAARDA_W0) verdict=`<p class="verdict ok">Messungen passen zusammen${q.sigmaHat!=null?` (Streuung ${num(q.sigmaHat,2)} mm)`:''}.</p>`;
+  else verdict=`<p class="verdict bad">Widerspruch: Die Strecken passen nicht zu einer Form${q.sigmaHat!=null?` (Streuung ${num(q.sigmaHat,2)} mm statt ±${mm(sig)} mm)`:''}.
+    ${q.redundancy===1 ? 'Mit nur einer Kontrolle lässt sich nicht sagen, welche. Strecken wiederholen grenzt es ein.' : 'Die Tabelle zeigt, welche Strecke heraussticht.'}</p>`;
+  const deg=x=>num(x,2)+'°';
+  el.innerHTML=`<h2>Echte Form</h2>${verdict}
+    <dl class="facts">
+      <dt>Eckwinkel</dt><dd>A ${deg(q.ang.A)} · B ${deg(q.ang.B)} · C ${deg(q.ang.C)} · D ${deg(q.ang.D)}</dd>
+      <dt>Breite an den Enden</dt><dd>bei D ${num(q.widthD,1)} mm · bei C ${num(q.widthC,1)} mm</dd>
+      <dt>Lange Kanten</dt><dd>AB ${num(q.lens.AB,1)} · DC ${num(q.lens.DC,1)} mm, Differenz ${sgn(q.lens.AB-q.lens.DC,1)} mm</dd>
+      <dt>Kurze Kanten</dt><dd>AD ${num(q.lens.AD,1)} · BC ${num(q.lens.BC,1)} mm, Differenz ${sgn(q.lens.AD-q.lens.BC,1)} mm</dd>
+      <dt>Gegenkanten schief</dt><dd>lange ${num(Math.abs(q.longSkew),2)}° · kurze ${num(Math.abs(q.shortSkew),2)}° (0° = parallel)</dd>
+    </dl>`;
+}
+
+function renderTable(r){
+  const el=$('c-table');
+  if(!r.obs.length){ el.innerHTML=`<h2>Strecken</h2><p class="empty">Noch keine Messung eingetragen.</p>`; return; }
+  const ok=!r.error && !r.missing, q=ok && r.quad.dof===0 ? r.quad : null, sig=sigmaVal();
+  const rows=KEYS.map(k=>{
+    const idx=r.obs.map((o,i)=>o.key===k?i:-1).filter(i=>i>=0);
+    if(!idx.length) return `<tr><td>${k}</td><td colspan="3" class="empty">–</td></tr>`;
+    const m=idx.reduce((s,i)=>s+r.obs[i].d,0)/idx.length;
+    // Beide Spalten gegen das Mittel der Wiederholungen. Rot nur, wenn der
+    // Test eine einzelne Messung dieser Strecke verwirft - mit nur einer
+    // Kontrolle schlaegt er bei allen gleich aus und zeigt auf keine.
+    let quad='–';
+    if(q && k!=='W'){
+      const flag=q.redundancy>1 && idx.some(i=>q.w[i]!=null && q.w[i]>BAARDA_W0);
+      quad=`<span class="${flag?'bad':''}">${sgn(q.lens[k]-m,2)}</span>`;
+    }
+    let par='–';
+    if(ok){
+      const d=r.par.model[k]-m;
+      par=`<span class="${Math.abs(d)>2*sig?'warn':''}">${sgn(d,2)}</span>`;
+    }
+    return `<tr><td>${k}</td><td>${num(m,2)}${idx.length>1?` <span class="n">(${idx.length}×)</span>`:''}</td><td>${quad}</td><td>${par}</td></tr>`;
+  }).join('');
+  el.innerHTML=`<h2>Strecken in mm</h2>
+    <table><thead><tr><th>Strecke</th><th>gemessen</th><th>echte Form − gemessen</th><th>Parallelogramm − gemessen</th></tr></thead>
+    <tbody>${rows}</tbody></table>
+    <p class="hint">„Echte Form“ zeigt Messfehler, „Parallelogramm“ zusätzlich, wie weit die Fliese vom idealen Parallelogramm der App abweicht.</p>`;
+}
+
+function update(){
+  const r=measure(fields(), sigmaVal());
+  inputs.forEach(i=>i.classList.toggle('bad', !!r.bad?.includes(i.dataset.k)));
+  $('sigma').classList.toggle('bad', !(sigmaVal()>0));
+  renderApp(r); renderShape(r); renderTable(r);
+  save();
+}
+
+inputs.forEach(i=>{
+  i.addEventListener('input', update);
+  i.addEventListener('focus', ()=>highlight(i.dataset.k));
+  i.addEventListener('blur', ()=>highlight(null));
+});
+$('sigma').addEventListener('input', update);
+document.querySelectorAll('#sketch g[data-k]').forEach(g=>{
+  g.addEventListener('mouseenter', ()=>highlight(g.dataset.k));
+  g.addEventListener('mouseleave', ()=>highlight(document.activeElement?.dataset?.k ?? null));
+  g.addEventListener('click', ()=>$('f-'+g.dataset.k).focus());
+});
+$('example').addEventListener('click', ()=>{ KEYS.forEach(k=>$('f-'+k).value=EXAMPLE[k]); $('sigma').value='0,5'; update(); });
+$('clear').addEventListener('click', ()=>{ KEYS.forEach(k=>$('f-'+k).value=''); update(); $('f-AB').focus(); });
+$('c-app').addEventListener('click', e=>{
+  const b=e.target.closest('button[data-copy]');
+  if(!b) return;
+  const done=()=>{ b.textContent='kopiert'; setTimeout(()=>b.textContent='kopieren', 1200); };
+  try{ navigator.clipboard.writeText(b.dataset.copy).then(done, ()=>{}); }catch(e){}
+});
+
+const sc=selfCheck();
+(sc.ok ? console.info : console.error)('Selbstcheck '+(sc.ok?'grün':'ROT')+'\n'+sc.out.join('\n'));
+load(); update();
+})();
+</script>
