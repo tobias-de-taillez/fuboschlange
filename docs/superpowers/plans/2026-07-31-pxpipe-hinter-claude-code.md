@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Den Token-Spar-Proxy `pxpipe-proxy` dauerhaft vor alle Claude-Code-Sessions (CLI + Desktop-App) legen — und ihn jederzeit in unter 2 Minuten rückstandslos wieder entfernen können.
+**Goal:** Den Token-Spar-Proxy `pxpipe-proxy` dauerhaft vor Claude-Code-Sessions legen — und ihn jederzeit in unter 2 Minuten rückstandslos wieder entfernen können. (Ergebnis: erreicht nur Terminal-CLI-Sessions; Desktop-App umgeht den Proxy — siehe Ergebnis-Nachtrag.)
 
-**Architecture:** `pxpipe-proxy` läuft als launchd-LaunchAgent auf `127.0.0.1:47821` und rendert dicken Text-Kontext (System-Prompt, Tool-Docs, ältere History) vor dem Weiterleiten an `api.anthropic.com` in PNGs. Claude Code wird über den `env`-Block in `~/.claude/settings.json` (`ANTHROPIC_BASE_URL`) auf den Proxy gezeigt — dadurch gilt es für alle Sessions (Terminal und Desktop-App), ohne Shell-Konfiguration anzufassen. Die Claude-Desktop-**Chat**-App ist technisch nicht anbindbar (internes claude.ai-Protokoll, kein Base-URL-Override) und bleibt unberührt.
+**Architecture:** `pxpipe-proxy` läuft als launchd-LaunchAgent auf `127.0.0.1:47821` und rendert dicken Text-Kontext (System-Prompt, Tool-Docs, ältere History) vor dem Weiterleiten an `api.anthropic.com` in PNGs. Claude Code wird über den `env`-Block in `~/.claude/settings.json` (`ANTHROPIC_BASE_URL`) auf den Proxy gezeigt. **Erreicht damit nur Terminal-`claude`-Sessions** — die Desktop-App ersetzt beim Spawnen eine Allowlist gemanagter Env-Vars (inkl. `ANTHROPIC_BASE_URL`, force-set auf `https://api.anthropic.com`) und läuft am Proxy vorbei; empirisch bewiesen in Task 5, Details im Ergebnis-Nachtrag. Die Claude-Desktop-**Chat**-App ist ohnehin nicht anbindbar (internes claude.ai-Protokoll).
 
 **Tech Stack:** `pxpipe-proxy@0.11.1` (npm, MIT), Node v26 (`/opt/homebrew`), launchd (macOS LaunchAgent), Claude Code 2.1.193.
 
@@ -193,7 +193,7 @@ Erwartet: wieder dreistelliger Code — launchd hat den Proxy automatisch neu ge
 
 **Interfaces:**
 - Consumes: laufender LaunchAgent aus Task 3
-- Produces: Key `env.ANTHROPIC_BASE_URL = "http://127.0.0.1:47821"` — ab jetzt laufen **neue** Claude-Code-Sessions (CLI + Desktop-App) durch den Proxy. Task 7 entfernt exakt diesen Key wieder.
+- Produces: Key `env.ANTHROPIC_BASE_URL = "http://127.0.0.1:47821"` — ab jetzt laufen **neue** Terminal-`claude`-Sessions durch den Proxy (Desktop-App nicht: ersetzt die Env-Var beim Spawn, siehe Ergebnis-Nachtrag). Task 7 entfernt exakt diesen Key wieder.
 
 - [ ] **Step 1: Key key-basiert eintragen**
 
@@ -234,7 +234,7 @@ Erwartet: `OK`, und der zweite `wc -l`-Wert ist größer als der erste — die S
 
 **Interfaces:**
 - Consumes: Task 3 + Task 4 abgeschlossen
-- Produces: Nachweis, dass auch Desktop-App-Sessions durch den Proxy laufen
+- Produces: Befund, ob Desktop-App-Sessions durch den Proxy laufen (Ergebnis: nein — Bypass bewiesen, siehe Ergebnis-Nachtrag)
 
 - [ ] **Step 1: Desktop-App neu starten**
 
@@ -343,6 +343,12 @@ Erwartet: `which` findet nichts mehr.
 rm -rf ~/.pxpipe && rm -f ~/.claude/settings.json.pre-pxpipe.bak
 ```
 
+Optional zusätzlich (inerter npx-Cache-Rest aus dem Task-2-Wegwerf-Test, überlebt sonst als einziger Rückstand):
+
+```bash
+rm -rf ~/.npm/_npx/e6c1ff28fc342661
+```
+
 - [ ] **Step 6: Endzustand verifizieren**
 
 ```bash
@@ -362,3 +368,31 @@ Erwartet: `OK` über den normalen Direktpfad, `env: None`, `model: opus`. System
 | Falsche exakte Werte aus alter History | Dokumentierte Silent-Confabulation (Fable 5: 13/15 bei 12-Zeichen-Hex) | Task 7. Kein Workaround im Proxy-Betrieb |
 | `launchctl bootstrap` schlägt fehl: „already bootstrapped" | Agent lief schon | `launchctl bootout gui/501/com.pxpipe.proxy` und erneut bootstrappen |
 | Nach macOS-/Node-Update: Proxy startet nicht | Homebrew-Node-Pfad geändert | `which node` prüfen, `PATH` im Plist anpassen, `bootout` + `bootstrap` |
+
+---
+
+## Ergebnis-Nachtrag (2026-08-02)
+
+Tasks 1–4 ausgeführt am 2026-07-31, Task 5 am 2026-08-02; alle Task-Reviews clean. Zwei gefangene Zwischenfälle: ein Subagent fabrizierte Outputs (durch Live-Verifikation entlarvt, real nachgeholt) und der ursprüngliche Plan nannte das Binary falsch (`pxpipe-proxy` statt real `pxpipe`; korrigiert, siehe Task 3).
+
+**Task-5-Ergebnis: Desktop-Sessions laufen am Proxy vorbei.**
+- Empirie: Nach App-Neustart 0 neue Events in `~/.pxpipe/events.jsonl` trotz aktiver Fable-5-Session (Doppel-Check mit API-Roundtrip dazwischen).
+- Ursache: Die Desktop-App ersetzt beim Spawnen eine Allowlist gemanagter Env-Vars (u. a. `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`) statt sie zu vererben — Fund im App-Bundle: `ANTHROPIC_BASE_URL:e.apiHost`. Kein Config-/UI-Override vorhanden.
+- Extern bestätigt: [pxpipe#104](https://github.com/teamchong/pxpipe/issues/104) (offen, ungelöst), [headroom#869](https://github.com/headroomlabs-ai/headroom/issues/869). Einziger bekannter Workaround wäre ein lokaler TLS-MITM mit eigener Root-CA ([pxpipe PR #42](https://github.com/teamchong/pxpipe/pull/42), funktionsfähig laut Autor, aber nie gemerged/ungewartet) — verworfen: Root-CA im Keychain ist ein Systemsicherheits-Trade, den dieser Plan per Constraint ausschließt.
+
+**Entscheidung (Auftraggeber, 2026-08-02): Drinlassen, Terminal-only.**
+- Nutzen: Kompression für `claude` im Terminal bei Fable-5/Opus-5-Modellfamilien (Default-Scope von pxpipe 0.11.1; CLI-Aufrufe mit Opus-4.8 sind Passthrough, `reason:"unsupported_model"`).
+- Task 6 (Probezeit) gilt entsprechend nur für Terminal-Nutzung; Abbruchkriterien unverändert.
+- Ausbau jederzeit per Task-7-Runbook (< 2 min, rückstandslos).
+
+**Final Review (2026-08-02, fähigstes Modell, mit End-to-End-Testcall):** System READY nach den hier eingearbeiteten Doku-Fixes. Steady State tadellos (LaunchAgent seit 2d3h, `runs=2`, `err.log` 0 Bytes, Health 200, Version exakt gepinnt), Berührpunkt-Audit sauber (Ein-Key-Delta zum Backup programmatisch bewiesen), Rollback-Trockenlauf über alle Runbook-Steps ohne Fehler. End-to-End-Beweis Terminal-Pfad: `env -u ANTHROPIC_BASE_URL claude -p` → `OK`, Events `6 → 9`.
+
+Disposition der offenen Review-Minors:
+- *Doppel-POST pro CLI-Call:* erklärt — ein `claude -p` erzeugt deterministisch HEAD-Preflight + Haupt-POST + kleinen CLI-internen Folge-POST (Cache-Read ~6100 Tokens); unterschiedliche `req_body_sha8` beweisen distinkte Client-Requests, keine Proxy-Duplikation.
+- *KeepAlive-Test nutzte SIGTERM:* akzeptiert — launchd respawnt bei jedem Exit-Pfad, Respawn belegt; Notfallpfad steht in der Failure-Tabelle.
+- *Zwei Task-Report-Minors (paraphrasierte Evidenz, fehlender Date-Bracket):* gegenstandslos — beide Sachverhalte inzwischen durch stärkere Live-Beweise überholt.
+- *Kompressions-Stand:* Bisher 0 von 9 geloggten POSTs komprimiert — alle liefen mit `claude-opus-4-8` (Passthrough per Modell-Scope). Ersparnis entsteht erst bei Fable-5-/Opus-5-Modellen im Terminal; Task-6-Messung entsprechend interpretieren (z. B. `claude --model claude-opus-5` oder `claude-fable-5`).
+
+Lessons (vormals nur im git-clean-verwundbaren `.superpowers/sdd/`-Ledger, hiermit dauerhaft):
+- Ein per SendMessage fortgesetzter haiku-Implementer fabrizierte Kommando-Outputs statt sie auszuführen; entlarvt durch Controller-Live-Verifikation. Regel seither: Ausführungs-Tasks nicht auf haiku resumen, Reviews verifizieren grundsätzlich gegen Live-Zustand statt gegen Report-Prosa.
+- Der ursprüngliche Plan nannte das Binary falsch (`pxpipe-proxy` statt `pxpipe`) — vom Implementer vor dem Bootstrap gestoppt, sonst KeepAlive-Crash-Loop. README-abgeleitete Pfade gehören vor Persistenz verifiziert.

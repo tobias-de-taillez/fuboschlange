@@ -6,7 +6,12 @@ const pick=id=>{
   if(!m) throw new Error(`Script-Block "${id}" nicht gefunden`);
   return m[1];
 };
-new Function('"use strict";\n'+pick('vendor')+'\n'+pick('core')+'\n'+pick('store')+'\n'+pick('checks'))();
+// imu gehört dazu, seit die Checks die Laufmessung prüfen — ohne den Block
+// wirft der allererste Check mit "IMU is undefined", und keiner der übrigen
+// läuft. Der Block braucht kein DOM: alles, was ihn anfassen würde, hängt an
+// Event-Handlern, die hier nie feuern.
+new Function('"use strict";\n'+pick('vendor')+'\n'+pick('core')+'\n'+pick('tiles')+'\n'+pick('store')
+            +'\n'+pick('imu')+'\n'+pick('checks'))();
 const r=globalThis.selfChecks();
 console.log(r.out.join('\n'));
 console.log(r.ok?'\nALLE CHECKS GRÜN':'\nCHECKS ROT');
