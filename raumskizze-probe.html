@@ -1,0 +1,3079 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Raumskizze per Kamera</title>
+<!--
+  Probe: Kann das Telefon im Browser die Rohskizze eines Raums aus der Kamera
+  ableiten? Wände kommen aus der Wand-Decke-Kante, Ecken als Schnitt
+  benachbarter Wandlinien - auch hinter Schränken. Die Präzision kommt danach
+  wie immer vom Laser in raumaufmass.html; hier zählt die Topologie.
+
+  Stufe 0 misst, was Chrome auf diesem Gerät kann (Features, Kamerabild,
+  readPixels-Kosten, Tracking). Stufe 1 erfasst Decke und Wände: Bodenpunkt
+  setzen, Raumhöhe vom Laser, dann je Wand die Wand-Decke-Kante anzielen.
+  Die Höhe aus der Parallaxe läuft nur zum Vergleich mit.
+
+  WebXR braucht einen sicheren Kontext: https oder localhost. file:// reicht
+  für WebXR nicht.
+    - Live: https://raumaufmass.irazari-te.ch/raumskizze-probe.html
+      (scripts/deploy-hetzner.sh kennt die Datei noch nicht; hochgeladen
+      wird sie einzeln per FTPS nach public_html/raumaufmass/).
+    - Lokal: im Repo `python3 -m http.server 8741`, Telefon per USB mit
+      USB-Debugging, am Mac chrome://inspect/#devices -> Port forwarding
+      8741 -> localhost:8741, am Telefon http://localhost:8741/raumskizze-probe.html
+  ?debug legt den Zustand als globalThis.PROBE in die Konsole,
+  ?app=<URL> ändert das Ziel des Links, ?ds=<px> die Größe des gelesenen Bilds.
+
+  Die Rechnung steht im Block "geo" und wird von test/raumskizze-probe.mjs
+  gegen synthetische Kameras und gerenderte Bilder mit bekannter Wahrheit
+  geprüft. Recherche: docs/superpowers/research/2026-10-24-kamera-raumerfassung-android.md
+-->
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { padding: 16px; font: 16px/1.5 system-ui, sans-serif;
+         background: #14161a; color: #e6e8eb; -webkit-text-size-adjust: 100%; }
+  h1 { font-size: 19px; margin: 0 0 4px; }
+  h2 { font-size: 16px; margin: 0 0 8px; }
+  .sub { color: #8b929c; font-size: 13px; margin-bottom: 16px; }
+  .card { background: #1c1f25; border: 1px solid #2a2e36; border-radius: 12px;
+          padding: 14px; margin-bottom: 12px; }
+  .hint { color: #9aa2ad; font-size: 14px; }
+  button { width: 100%; padding: 16px; font-size: 17px; font-weight: 600;
+           border: 0; border-radius: 10px; background: #3b82f6; color: #fff; }
+  button:disabled { background: #333840; color: #6b7280; }
+  button.ghost { background: #2a2e36; color: #e6e8eb; font-size: 15px; padding: 12px; }
+  label { display: block; font-size: 13px; color: #9aa2ad; margin-bottom: 4px; }
+  input { width: 100%; padding: 12px; font-size: 17px; border-radius: 8px;
+          border: 1px solid #2a2e36; background: #14161a; color: #e6e8eb; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px;
+          font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 5px 4px; border-bottom: 1px solid #262a31;
+           vertical-align: top; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: #8b929c; font-weight: 500; }
+  td.l { text-align: left; word-break: break-word; }
+  #resWalls th, #resWalls td { white-space: nowrap; }
+  .ok { color: #4ade80; } .warn { color: #fbbf24; } .bad { color: #f87171; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+  #plan { width: 100%; aspect-ratio: 1; background: #101216; border-radius: 8px; display: block; }
+  #linkOut { font-size: 12px; word-break: break-all; color: #9aa2ad; }
+  .hidden { display: none !important; }
+  label.chk { display: flex; gap: 10px; align-items: flex-start; font-size: 15px; color: #e6e8eb; margin-top: 12px; }
+  label.chk input { width: 22px; height: 22px; flex: none; margin: 1px 0 0; }
+
+  /* AR-Overlay: liegt per dom-overlay über dem Kamerabild. */
+  #ar { position: fixed; inset: 0; color: #fff; font: 14px/1.4 system-ui, sans-serif; }
+  #ar canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  #arTop { position: absolute; top: 0; left: 0; right: 0; padding: 10px 12px;
+           padding-top: max(10px, env(safe-area-inset-top));
+           background: rgba(0,0,0,.8); font-size: 12px; font-variant-numeric: tabular-nums; }
+  #arTop span { margin-right: 10px; white-space: nowrap; }
+  #arHint { margin-top: 6px; font-size: 15px; font-weight: 600; color: #fff; }
+  /* Warnungen als weisser Text mit farbigem Rand: farbiger Text war ueber
+     heller Decke kaum lesbar. */
+  #arHint.warn, #arHint.bad { border-left: 4px solid #fbbf24; padding-left: 8px; color: #fff; }
+  #arHint.bad { border-left-color: #f87171; }
+  /* Zustandsbalken: steht die Erfassung, steht es hier - kein Hinweis
+     ueberschreibt ihn. Rot = nichts wird erfasst, gelb = Ersatzbezug. */
+  #arState { margin-top: 6px; padding: 6px 8px; border-radius: 6px; font-size: 15px; font-weight: 700; }
+  #arState.stop { background: #b91c1c; }
+  #arState.sub { background: #a16207; }
+  #cross { position: absolute; left: 50%; top: 50%; width: 44px; height: 44px;
+           margin: -22px 0 0 -22px; pointer-events: none; }
+  #cross::before, #cross::after { content: ""; position: absolute; background: #fff;
+           box-shadow: 0 0 2px #000; }
+  #cross::before { left: 21px; top: 0; width: 2px; height: 44px; }
+  #cross::after { top: 21px; left: 0; height: 2px; width: 44px; }
+  #arBottom { position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 12px;
+              padding-bottom: max(12px, env(safe-area-inset-bottom));
+              background: rgba(0,0,0,.8); }
+  #arBottom .row { grid-template-columns: 1fr 1fr 1fr; }
+  #arBottom button { padding: 14px 6px; font-size: 15px; }
+  #arWall { font-size: 13px; margin-bottom: 6px; font-variant-numeric: tabular-nums; }
+  /* Mini-Grundriss: was der Schwenk bisher ergeben hat. */
+  #ar #miniMap { inset: auto; right: 10px; bottom: 150px; width: 136px; height: 136px;
+                 background: rgba(0,0,0,.65); border-radius: 8px; }
+</style>
+
+<h1>Raumskizze per Kamera</h1>
+<div class="sub">Probe: Wände aus der Wand-Decke-Kante, Ecken als Linienschnitt. Ergebnis geht als Skizze an Raumaufmaß.</div>
+
+<div class="card">
+  <h2>Stufe 0 · Gerät</h2>
+  <table id="caps"><tr><th>Prüfung</th><th>Ergebnis</th></tr></table>
+</div>
+
+<div class="card">
+  <label for="hoehe">Raumhöhe vom Laser (mm)</label>
+  <input id="hoehe" type="number" step="1" min="1500" max="6000" placeholder="z. B. 2550" inputmode="numeric">
+  <div class="hint" style="margin-top:8px">Automatisch geht es auch ohne: Die Höhe kommt dann aus der Parallaxe – zwischendurch ein paar Schritte gehen hilft. Mit Laser-Wert wird sie zur Kreuzprobe. Von Hand ist sie nötig.</div>
+  <label class="chk"><input type="checkbox" id="auto" checked> <span>Automatisch: Boden und Kanten von selbst – einfach mit dem Fadenkreuz die Deckenkante entlangschwenken</span></label>
+</div>
+
+<div class="card">
+  <button id="start" disabled>AR starten</button>
+  <div class="hint" id="startHint" style="margin-top:8px">Prüfe das Gerät …</div>
+  <button id="dlLast" class="ghost hidden" style="margin-top:8px">Protokoll vom letzten Seitenaufruf (JSON)</button>
+  <div class="hint" style="margin-top:8px">Automatisch: (1) Kurz auf freien Boden halten – der Boden setzt sich selbst. (2) Fadenkreuz langsam an der Kante zwischen Wand und Decke entlangführen, einmal rundum, ruhig auch hinter Schränken weiter. Zwischendurch ein paar Schritte gehen hilft. (3) Zurück an der ersten Wand schließt sich der Raum.</div>
+  <div class="hint" style="margin-top:8px">Von Hand: „Boden setzen“, je Wand „Kante erfassen“ (am besten zweimal aus verschiedenem Abstand), „Nächste Wand“ der Reihe nach, zum Schluss „Raum schließen“.</div>
+</div>
+
+<div class="card hidden" id="result">
+  <h2>Ergebnis</h2>
+  <canvas id="plan" width="800" height="800"></canvas>
+  <div id="resSummary" style="margin-top:10px"></div>
+  <table id="resWalls" style="margin-top:10px"></table>
+  <div class="row">
+    <button id="send">An Raumaufmaß</button>
+    <button id="open" class="ghost">Hier öffnen</button>
+  </div>
+  <div class="row">
+    <button id="dlRoom" class="ghost">Skizze (JSON)</button>
+    <button id="dlLog" class="ghost">Protokoll (JSON)</button>
+  </div>
+  <div id="linkOut" style="margin-top:8px"></div>
+</div>
+
+<div id="ar" class="hidden">
+  <canvas id="arCanvas"></canvas>
+  <canvas id="miniMap" width="272" height="272"></canvas>
+  <div id="cross"></div>
+  <div id="arTop">
+    <div id="arStats"></div>
+    <div id="arState" class="hidden"></div>
+    <div id="arHint"></div>
+  </div>
+  <div id="arBottom">
+    <div id="arWall"></div>
+    <div class="row" id="arBtnsBoden">
+      <button id="btnBoden" disabled>Boden setzen</button>
+      <button id="btnFlip" class="ghost">Bild y-Spiegel</button>
+      <button id="btnEnd" class="ghost">Beenden</button>
+    </div>
+    <div class="row hidden" id="arBtnsWand">
+      <button id="btnKante">Kante erfassen</button>
+      <button id="btnPause">Pause</button>
+      <button id="btnNext" class="ghost">Nächste Wand</button>
+      <button id="btnUndo" class="ghost">Rückgängig</button>
+    </div>
+    <div class="row hidden" id="arBtnsWand2">
+      <button id="btnClose">Raum schließen</button>
+      <button id="btnFlip2" class="ghost">Bild y-Spiegel</button>
+      <button id="btnEnd2" class="ghost">Beenden</button>
+    </div>
+  </div>
+</div>
+
+<script id="vendor">
+// lz-string 1.5.0 (MIT, Pieroxy) - Zeile byte-gleich aus raumaufmass.html, damit
+// der Link genau so kodiert ist, wie parseShareFragment() ihn erwartet.
+var LZString=function(){var r=String.fromCharCode,o="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=",n="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-$",e={};function t(r,o){if(!e[r]){e[r]={};for(var n=0;n<r.length;n++)e[r][r.charAt(n)]=n}return e[r][o]}var i={compressToBase64:function(r){if(null==r)return"";var n=i._compress(r,6,function(r){return o.charAt(r)});switch(n.length%4){default:case 0:return n;case 1:return n+"===";case 2:return n+"==";case 3:return n+"="}},decompressFromBase64:function(r){return null==r?"":""==r?null:i._decompress(r.length,32,function(n){return t(o,r.charAt(n))})},compressToUTF16:function(o){return null==o?"":i._compress(o,15,function(o){return r(o+32)})+" "},decompressFromUTF16:function(r){return null==r?"":""==r?null:i._decompress(r.length,16384,function(o){return r.charCodeAt(o)-32})},compressToUint8Array:function(r){for(var o=i.compress(r),n=new Uint8Array(2*o.length),e=0,t=o.length;e<t;e++){var s=o.charCodeAt(e);n[2*e]=s>>>8,n[2*e+1]=s%256}return n},decompressFromUint8Array:function(o){if(null==o)return i.decompress(o);for(var n=new Array(o.length/2),e=0,t=n.length;e<t;e++)n[e]=256*o[2*e]+o[2*e+1];var s=[];return n.forEach(function(o){s.push(r(o))}),i.decompress(s.join(""))},compressToEncodedURIComponent:function(r){return null==r?"":i._compress(r,6,function(r){return n.charAt(r)})},decompressFromEncodedURIComponent:function(r){return null==r?"":""==r?null:(r=r.replace(/ /g,"+"),i._decompress(r.length,32,function(o){return t(n,r.charAt(o))}))},compress:function(o){return i._compress(o,16,function(o){return r(o)})},_compress:function(r,o,n){if(null==r)return"";var e,t,i,s={},u={},a="",p="",c="",l=2,f=3,h=2,d=[],m=0,v=0;for(i=0;i<r.length;i+=1)if(a=r.charAt(i),Object.prototype.hasOwnProperty.call(s,a)||(s[a]=f++,u[a]=!0),p=c+a,Object.prototype.hasOwnProperty.call(s,p))c=p;else{if(Object.prototype.hasOwnProperty.call(u,c)){if(c.charCodeAt(0)<256){for(e=0;e<h;e++)m<<=1,v==o-1?(v=0,d.push(n(m)),m=0):v++;for(t=c.charCodeAt(0),e=0;e<8;e++)m=m<<1|1&t,v==o-1?(v=0,d.push(n(m)),m=0):v++,t>>=1}else{for(t=1,e=0;e<h;e++)m=m<<1|t,v==o-1?(v=0,d.push(n(m)),m=0):v++,t=0;for(t=c.charCodeAt(0),e=0;e<16;e++)m=m<<1|1&t,v==o-1?(v=0,d.push(n(m)),m=0):v++,t>>=1}0==--l&&(l=Math.pow(2,h),h++),delete u[c]}else for(t=s[c],e=0;e<h;e++)m=m<<1|1&t,v==o-1?(v=0,d.push(n(m)),m=0):v++,t>>=1;0==--l&&(l=Math.pow(2,h),h++),s[p]=f++,c=String(a)}if(""!==c){if(Object.prototype.hasOwnProperty.call(u,c)){if(c.charCodeAt(0)<256){for(e=0;e<h;e++)m<<=1,v==o-1?(v=0,d.push(n(m)),m=0):v++;for(t=c.charCodeAt(0),e=0;e<8;e++)m=m<<1|1&t,v==o-1?(v=0,d.push(n(m)),m=0):v++,t>>=1}else{for(t=1,e=0;e<h;e++)m=m<<1|t,v==o-1?(v=0,d.push(n(m)),m=0):v++,t=0;for(t=c.charCodeAt(0),e=0;e<16;e++)m=m<<1|1&t,v==o-1?(v=0,d.push(n(m)),m=0):v++,t>>=1}0==--l&&(l=Math.pow(2,h),h++),delete u[c]}else for(t=s[c],e=0;e<h;e++)m=m<<1|1&t,v==o-1?(v=0,d.push(n(m)),m=0):v++,t>>=1;0==--l&&(l=Math.pow(2,h),h++)}for(t=2,e=0;e<h;e++)m=m<<1|1&t,v==o-1?(v=0,d.push(n(m)),m=0):v++,t>>=1;for(;;){if(m<<=1,v==o-1){d.push(n(m));break}v++}return d.join("")},decompress:function(r){return null==r?"":""==r?null:i._decompress(r.length,32768,function(o){return r.charCodeAt(o)})},_decompress:function(o,n,e){var t,i,s,u,a,p,c,l=[],f=4,h=4,d=3,m="",v=[],g={val:e(0),position:n,index:1};for(t=0;t<3;t+=1)l[t]=t;for(s=0,a=Math.pow(2,2),p=1;p!=a;)u=g.val&g.position,g.position>>=1,0==g.position&&(g.position=n,g.val=e(g.index++)),s|=(u>0?1:0)*p,p<<=1;switch(s){case 0:for(s=0,a=Math.pow(2,8),p=1;p!=a;)u=g.val&g.position,g.position>>=1,0==g.position&&(g.position=n,g.val=e(g.index++)),s|=(u>0?1:0)*p,p<<=1;c=r(s);break;case 1:for(s=0,a=Math.pow(2,16),p=1;p!=a;)u=g.val&g.position,g.position>>=1,0==g.position&&(g.position=n,g.val=e(g.index++)),s|=(u>0?1:0)*p,p<<=1;c=r(s);break;case 2:return""}for(l[3]=c,i=c,v.push(c);;){if(g.index>o)return"";for(s=0,a=Math.pow(2,d),p=1;p!=a;)u=g.val&g.position,g.position>>=1,0==g.position&&(g.position=n,g.val=e(g.index++)),s|=(u>0?1:0)*p,p<<=1;switch(c=s){case 0:for(s=0,a=Math.pow(2,8),p=1;p!=a;)u=g.val&g.position,g.position>>=1,0==g.position&&(g.position=n,g.val=e(g.index++)),s|=(u>0?1:0)*p,p<<=1;l[h++]=r(s),c=h-1,f--;break;case 1:for(s=0,a=Math.pow(2,16),p=1;p!=a;)u=g.val&g.position,g.position>>=1,0==g.position&&(g.position=n,g.val=e(g.index++)),s|=(u>0?1:0)*p,p<<=1;l[h++]=r(s),c=h-1,f--;break;case 2:return v.join("")}if(0==f&&(f=Math.pow(2,d),d++),l[c])m=l[c];else{if(c!==h)return null;m=i+i.charAt(0)}v.push(m),l[h++]=i+m.charAt(0),i=m,0==--f&&(f=Math.pow(2,d),d++)}}};return i}();"function"==typeof define&&define.amd?define(function(){return LZString}):"undefined"!=typeof module&&null!=module?module.exports=LZString:"undefined"!=typeof angular&&null!=angular&&angular.module("LZString",[]).factory("LZString",function(){return LZString});
+</script>
+
+<script id="geo">
+// Raumskizze per Kamera - Geometrie und Kantensuche. Rein, ohne DOM und ohne
+// WebXR: test/raumskizze-probe.mjs prueft genau diesen Block gegen
+// synthetische Kameras und gerenderte Bilder mit bekannter Wahrheit.
+//
+// Konventionen (wie WebXR):
+//   4x4-Matrizen spaltenweise (column-major), wie XRRigidTransform.matrix und
+//   XRView.projectionMatrix sie liefern.
+//   Ankerraum: Meter, +Y nach oben (gegen die Schwerkraft), Boden bei y=0.
+//   Die Kamera schaut in ihrem eigenen Raum entlang -Z.
+//   NDC: x, y in [-1, 1], y nach oben.
+//   Bild: Pixel (u, r), u nach rechts, r = Zeile von UNTEN (wie readPixels).
+//   Grundriss: (X, Z) des Ankerraums. raumaufmass.html zeichnet y nach unten;
+//   mit y = Z liegt "vorn" (-Z) im Plan oben, und nichts ist gespiegelt.
+(function(){
+'use strict';
+const G={};
+
+// ------------------------------------------------------------------ Matrizen
+G.m4mul=(a,b)=>{
+  const o=new Array(16);
+  for(let c=0;c<4;c++) for(let r=0;r<4;r++){
+    let s=0; for(let k=0;k<4;k++) s+=a[k*4+r]*b[c*4+k];
+    o[c*4+r]=s;
+  }
+  return o;
+};
+G.m4vec=(m,v)=>[0,1,2,3].map(r=>m[r]*v[0]+m[4+r]*v[1]+m[8+r]*v[2]+m[12+r]*v[3]);
+// Allgemeine Inverse (Projektionsmatrizen sind nicht starr). null wenn singulaer.
+G.m4inv=m=>{
+  const [a00,a01,a02,a03,a10,a11,a12,a13,a20,a21,a22,a23,a30,a31,a32,a33]=m;
+  const b00=a00*a11-a01*a10, b01=a00*a12-a02*a10, b02=a00*a13-a03*a10,
+        b03=a01*a12-a02*a11, b04=a01*a13-a03*a11, b05=a02*a13-a03*a12,
+        b06=a20*a31-a21*a30, b07=a20*a32-a22*a30, b08=a20*a33-a23*a30,
+        b09=a21*a32-a22*a31, b10=a21*a33-a23*a31, b11=a22*a33-a23*a32;
+  let det=b00*b11-b01*b10+b02*b09+b03*b08-b04*b07+b05*b06;
+  if(!det || !Number.isFinite(det)) return null;
+  det=1/det;
+  return [
+    (a11*b11-a12*b10+a13*b09)*det, (a02*b10-a01*b11-a03*b09)*det,
+    (a31*b05-a32*b04+a33*b03)*det, (a22*b04-a21*b05-a23*b03)*det,
+    (a12*b08-a10*b11-a13*b07)*det, (a00*b11-a02*b08+a03*b07)*det,
+    (a32*b02-a30*b05-a33*b01)*det, (a20*b05-a22*b02+a23*b01)*det,
+    (a10*b10-a11*b08+a13*b06)*det, (a01*b08-a00*b10-a03*b06)*det,
+    (a30*b04-a31*b02+a33*b00)*det, (a21*b02-a20*b04-a23*b00)*det,
+    (a11*b07-a10*b09-a12*b06)*det, (a00*b09-a01*b07+a02*b06)*det,
+    (a31*b01-a30*b03-a32*b00)*det, (a20*b03-a21*b01+a22*b00)*det,
+  ];
+};
+const norm3=v=>{ const n=Math.hypot(v[0],v[1],v[2]); return [v[0]/n, v[1]/n, v[2]/n]; };
+// Drehung einer Richtung mit dem 3x3-Anteil einer Matrix.
+const rot3=(m,v)=>[m[0]*v[0]+m[4]*v[1]+m[8]*v[2], m[1]*v[0]+m[5]*v[1]+m[9]*v[2], m[2]*v[0]+m[6]*v[1]+m[10]*v[2]];
+
+// ------------------------------------------------- Strahlen und Projektion
+// Strahl durch einen NDC-Punkt. camTo bildet den Kameraraum in den Zielraum
+// ab (view.transform.matrix, ggf. schon in den Ankerraum umgerechnet). Der
+// Nahebenen-Punkt liegt bei einer Perspektive auf dem Strahl durch den
+// Kameraursprung - seine Richtung ist die gesuchte.
+G.ray=(proj, camTo, x, y)=>{
+  const ip=G.m4inv(proj); if(!ip) return null;
+  const p=G.m4vec(ip,[x,y,-1,1]);
+  if(!p[3]) return null;
+  const dc=norm3([p[0]/p[3], p[1]/p[3], p[2]/p[3]]);
+  return {o:[camTo[12],camTo[13],camTo[14]], d:norm3(rot3(camTo,dc))};
+};
+// Punkt im Zielraum -> NDC [x,y]; null, wenn er hinter der Kamera liegt.
+G.project=(proj, camTo, P)=>{
+  const inv=G.m4inv(camTo); if(!inv) return null;
+  const c=G.m4vec(proj, G.m4vec(inv,[P[0],P[1],P[2],1]));
+  if(!(c[3]>1e-9)) return null;
+  return [c[0]/c[3], c[1]/c[3]];
+};
+// Strecke projizieren und dabei an der Ebene knapp vor der Kamera kappen -
+// sonst kippt ein Endpunkt hinter der Kamera auf die Gegenseite des Bilds.
+G.projectSegment=(proj, camTo, A, B, zNear=0.05)=>{
+  const inv=G.m4inv(camTo); if(!inv) return null;
+  let a=G.m4vec(inv,[A[0],A[1],A[2],1]), b=G.m4vec(inv,[B[0],B[1],B[2],1]);
+  const fa=a[2]<-zNear, fb=b[2]<-zNear;
+  if(!fa && !fb) return null;
+  const cut=(p,q)=>{ const t=(-zNear-p[2])/(q[2]-p[2]); return p.map((v,i)=>v+t*(q[i]-v)); };
+  if(!fa) a=cut(a,b); else if(!fb) b=cut(b,a);
+  const na=G.m4vec(proj,a), nb=G.m4vec(proj,b);
+  return [[na[0]/na[3], na[1]/na[3]], [nb[0]/nb[3], nb[1]/nb[3]]];
+};
+// Schnitt eines Strahls mit der waagerechten Ebene y = yPlane, nur nach vorn.
+G.hitY=(ray, yPlane, tMax=25)=>{
+  if(!ray) return null;
+  const dy=ray.d[1];
+  if(Math.abs(dy)<1e-6) return null;
+  const t=(yPlane-ray.o[1])/dy;
+  if(!(t>0) || t>tMax) return null;
+  return [ray.o[0]+t*ray.d[0], yPlane, ray.o[2]+t*ray.d[2]];
+};
+// Bildrichtung einer Senkrechten an der Stelle (x,y) in NDC: der Punkt 2 m
+// den Strahl entlang und 20 cm darueber, beide projiziert. Dient dazu,
+// Wand-Wand-Ecken von der gesuchten Wand-Decke-Kante zu unterscheiden.
+G.verticalNdc=(proj, camTo, x, y)=>{
+  const r=G.ray(proj, camTo, x, y); if(!r) return null;
+  const P=[r.o[0]+2*r.d[0], r.o[1]+2*r.d[1], r.o[2]+2*r.d[2]];
+  const a=G.project(proj, camTo, P), b=G.project(proj, camTo, [P[0],P[1]+0.2,P[2]]);
+  if(!a || !b) return null;
+  const n=Math.hypot(b[0]-a[0], b[1]-a[1]);
+  return n>1e-9 ? [(b[0]-a[0])/n, (b[1]-a[1])/n] : null;
+};
+
+// ------------------------------------------------------------- Bildraum
+// Pixelmitte (u, r) eines W x H-Bilds <-> NDC. r zaehlt von unten wie bei
+// readPixels. flipY fuer Geraete, deren Kameratextur andersherum liegt -
+// das zeigt sich sofort daran, dass die live gezeichnete Linie nicht auf der
+// Kante sitzt; der Schalter dafuer liegt im Overlay.
+G.pixToNdc=(u,r,W,H,flipY)=>[(u+0.5)/W*2-1, flipY ? 1-(r+0.5)/H*2 : (r+0.5)/H*2-1];
+G.ndcToPix=(x,y,W,H,flipY)=>[(x+1)/2*W-0.5, flipY ? (1-y)/2*H-0.5 : (y+1)/2*H-0.5];
+// RGBA (Uint8) -> Helligkeit (Rec. 601), als Float32Array.
+G.luma=(rgba, n)=>{
+  const g=new Float32Array(n);
+  for(let i=0,j=0;i<n;i++,j+=4) g[i]=0.299*rgba[j]+0.587*rgba[j+1]+0.114*rgba[j+2];
+  return g;
+};
+
+const COS=new Float64Array(180), SIN=new Float64Array(180);
+for(let t=0;t<180;t++){ COS[t]=Math.cos(t*Math.PI/180); SIN[t]=Math.sin(t*Math.PI/180); }
+// Sobel an (x,y); gx waechst nach rechts, gy mit der Zeile.
+const sobel=(g,W,x,y)=>{
+  const i=y*W+x;
+  const a=g[i-W-1], b=g[i-W], c=g[i-W+1], d=g[i-1], f=g[i+1], h=g[i+W-1], k=g[i+W], l=g[i+W+1];
+  return [(c+2*f+l)-(a+2*d+h), (h+2*k+l)-(a+2*b+c)];
+};
+G.sobel=sobel;
+
+// Suchradius des Einrastens. Steht hier und nicht in der App, damit der
+// Selbsttest mit genau dem ausgelieferten Wert rechnet. Bei 0,12 der kurzen
+// Seite rastete im gerenderten Testraum jede zwoelfte Erfassung auf eine
+// 20-50 Grad schraege Rauschlinie ein; bei 0,16 keine.
+G.snapRadius=(w,h)=>Math.round(Math.max(24, 0.16*Math.min(w,h)));
+
+// Kantenkandidaten nahe (cx, cy). Statt Canny mit Schwellen: Hough-artig
+// SIGNIERT aufsummieren. Jeder Pixel stimmt mit g·n fuer die Normalenwinkel
+// nahe seiner Gradientenrichtung; entlang einer echten Kante addiert sich das
+// Signal linear, Rauschen nur mit der Wurzel. So bleibt auch der Uebergang
+// zwischen zwei weissen Flaechen mit wenigen Graustufen Unterschied
+// auffindbar, an dem Canny scheitert (CV-Strang der Recherche).
+// exclude = {dir:[dx,dy], deg}: Linienrichtungen nahe dir werden verworfen
+// (die Senkrechte - Wand-Wand-Ecken sind nicht gemeint).
+// Ergebnis: je Abstand rho ein Kandidat (lokale Maxima, ±3 px), sortiert nach
+// Wurzel der Staerke mal Naehe-Gewicht (sigma = R/4). Ein Bilderrahmen 15 cm
+// unter der Decke hat leicht zehnmal mehr Kontrast als die weisse
+// Wand-Decke-Kante; linear gewichtet gewaenne er, sobald man knapp daneben
+// zielt. Welcher Kandidat es wird, entscheidet snapLine.
+G.edgeCandidates=(g,W,H,cx,cy,o={})=>{
+  const R=o.radius||40, spread=o.spread??12, sig=o.sigmaCenter||R/4;
+  const r0=Math.ceil(R)+1, NR=2*r0+1;
+  const acc=new Float64Array(180*NR);
+  const x0=Math.max(1,Math.floor(cx-R)), x1=Math.min(W-2,Math.ceil(cx+R));
+  const y0=Math.max(1,Math.floor(cy-R)), y1=Math.min(H-2,Math.ceil(cy+R));
+  for(let y=y0;y<=y1;y++) for(let x=x0;x<=x1;x++){
+    const dx=x-cx, dy=y-cy;
+    if(dx*dx+dy*dy>R*R) continue;
+    const [gx,gy]=sobel(g,W,x,y);
+    if(Math.abs(gx)+Math.abs(gy)<(o.minGrad??0.5)) continue;
+    const a=((Math.round(Math.atan2(gy,gx)*180/Math.PI)%180)+180)%180;
+    for(let k=-spread;k<=spread;k++){
+      const t=(a+k+180)%180;
+      const ri=Math.round(dx*COS[t]+dy*SIN[t])+r0;
+      acc[t*NR+ri]+=gx*COS[t]+gy*SIN[t];
+    }
+  }
+  let ex=null;
+  if(o.exclude && o.exclude.dir){
+    const e=Math.atan2(o.exclude.dir[1], o.exclude.dir[0])*180/Math.PI;
+    ex=t=>{ const d=(((t+90-e)%180)+270)%180-90; return Math.abs(d)<o.exclude.deg; };
+  }
+  // Je rho die staerkste erlaubte Richtung. Das Naehe-Gewicht haengt nur an
+  // rho, gewichtet und ungewichtet ist es also dieselbe Richtung.
+  const A=new Float64Array(NR), T=new Int16Array(NR).fill(-1);
+  for(let t=0;t<180;t++){
+    if(ex && ex(t)) continue;
+    for(let ri=1;ri<NR-1;ri++){ const a=Math.abs(acc[t*NR+ri]); if(a>A[ri]){ A[ri]=a; T[ri]=t; } }
+  }
+  const out=[];
+  for(let ri=1;ri<NR-1;ri++){
+    if(T[ri]<0 || !(A[ri]>0)) continue;
+    let peak=true;
+    for(let k=-3;k<=3 && peak;k++) if(k && ri+k>=0 && ri+k<NR && A[ri+k]>A[ri]) peak=false;
+    if(!peak) continue;
+    const t=T[ri];
+    const a=Math.abs(acc[t*NR+ri-1]), b=A[ri], c=Math.abs(acc[t*NR+ri+1]), den=a-2*b+c;
+    const rho=ri-r0+(den<0 ? Math.max(-0.5, Math.min(0.5, 0.5*(a-c)/den)) : 0);
+    const nx=COS[t], ny=SIN[t], raw=Math.sqrt(b);
+    out.push({px:cx+rho*nx, py:cy+rho*ny, nx, ny, dx:-ny, dy:nx, theta:t, rho,
+              sign:Math.sign(acc[t*NR+ri])||1, raw, score:raw*Math.exp(-0.5*((ri-r0)/sig)**2)});
+  }
+  out.sort((p,q)=>q.score-p.score);
+  return out.slice(0, o.max??8);
+};
+// Nur der beste Kandidat - fuer die 2D-Checks des Selbsttests.
+G.snapEdge=(g,W,H,cx,cy,o={})=>G.edgeCandidates(g,W,H,cx,cy,{...o, max:1})[0]||null;
+
+// Total-Least-Squares-Gerade durch gewichtete 2D-Punkte [[x,y,w?],...].
+G.fitLine2D=P=>{
+  let sw=0, mx=0, my=0;
+  for(const p of P){ const w=p[2]??1; sw+=w; mx+=w*p[0]; my+=w*p[1]; }
+  if(P.length<2 || !(sw>0)) return null;
+  mx/=sw; my/=sw;
+  let sxx=0, sxy=0, syy=0;
+  for(const p of P){ const w=p[2]??1, dx=p[0]-mx, dy=p[1]-my; sxx+=w*dx*dx; sxy+=w*dx*dy; syy+=w*dy*dy; }
+  const th=0.5*Math.atan2(2*sxy, sxx-syy);
+  const ux=Math.cos(th), uy=Math.sin(th);
+  let ss=0;
+  for(const p of P){ const w=p[2]??1, e=-(p[0]-mx)*uy+(p[1]-my)*ux; ss+=w*e*e; }
+  return {c:[mx,my], u:[ux,uy], rms:Math.sqrt(ss/sw)};
+};
+
+// Ist eine Gerade wirklich eine Kante? Mittel der signierten Antwort g·n
+// GENAU auf der Geraden, geteilt durch seinen Standardfehler. Eine echte
+// Kante hat ueberall dasselbe Vorzeichen (z um 30 im Testraum), Rauschen
+// mittelt sich weg (z 0..3) - auch wenn es jede Verhaeltnis-Schwelle
+// passiert, die nur gegen die eigene Umgebung misst.
+G.lineSupport=(g,W,H,L,t0,t1)=>{
+  let n=0, s=0, s2=0;
+  for(let t=Math.ceil(t0);t<=t1;t++){
+    const xi=Math.round(L.px+t*L.dx), yi=Math.round(L.py+t*L.dy);
+    if(xi<1 || yi<1 || xi>W-2 || yi>H-2) continue;
+    const [gx,gy]=sobel(g,W,xi,yi);
+    const v=(gx*L.nx+gy*L.ny)*L.sign;
+    n++; s+=v; s2+=v*v;
+  }
+  if(n<8) return {z:0, n, mean:0};
+  const m=s/n, sd=Math.sqrt(Math.max(1e-12, (s2-n*m*m)/(n-1)));
+  return {z:m/(sd/Math.sqrt(n)), n, mean:m};
+};
+
+// Kandidat ueber das ganze Bild verlaengern: in 1-px-Schritten entlang der
+// Geraden quer im Band nach der staerksten Antwort mit dem Vorzeichen der
+// Saat suchen. Als Stuetze zaehlt nur, was ueber dem Rauschboden liegt -
+// gemessen 6 px neben der Geraden, auf beiden Seiten. Gefittet wird mit
+// aller Stuetze, auch hinter Verdeckungen (Schrank, Leuchte): die Gerade
+// laeuft durch sie hindurch. Die Endpunkte dagegen kommen nur aus der
+// zusammenhaengenden Stuetze um die Saat (Luecken bis 20 px) - sonst laufen
+// sie bei schwachen Kanten bis an den Bildrand, ueber die Ecke hinaus.
+G.extendLine=(g,W,H,s,o={})=>{
+  const off=o.noiseOffset??6, gapMax=o.gap??20;
+  const resp=(x,y,nx,ny)=>{
+    const xi=Math.round(x), yi=Math.round(y);
+    if(xi<1 || yi<1 || xi>W-2 || yi>H-2) return null;
+    const [gx,gy]=sobel(g,W,xi,yi);
+    return (gx*nx+gy*ny)*s.sign;
+  };
+  let L={px:s.px, py:s.py, dx:s.dx, dy:s.dy, nx:s.nx, ny:s.ny};
+  let S=[], thr=0, pts=[];
+  for(const band of [o.band??3, 1.5]){
+    const walk=t=>{
+      const bx=L.px+t*L.dx, by=L.py+t*L.dy;
+      let bv=-Infinity, bo=0, inside=false;
+      for(let k=-band;k<=band+1e-9;k+=0.5){
+        const v=resp(bx+k*L.nx, by+k*L.ny, L.nx, L.ny);
+        if(v===null) continue;
+        inside=true;
+        if(v>bv){ bv=v; bo=k; }
+      }
+      if(!inside) return null;
+      const n1=resp(bx+off*L.nx, by+off*L.ny, L.nx, L.ny), n2=resp(bx-off*L.nx, by-off*L.ny, L.nx, L.ny);
+      return {t, x:bx+bo*L.nx, y:by+bo*L.ny, v:bv, nz:[n1,n2].filter(v=>v!==null).map(Math.abs)};
+    };
+    S=[];
+    for(const dir of [1,-1]) for(let t=(dir>0?0:-1);;t+=dir){
+      const w=walk(t); if(!w) break;
+      S.push(w);
+    }
+    if(S.length<16) return null;
+    const nz=S.flatMap(w=>w.nz).sort((p,q)=>p-q);
+    const noise=nz.length ? nz[nz.length>>1] : 0;
+    const near=S.filter(w=>Math.abs(w.t)<=8).map(w=>w.v).sort((p,q)=>p-q);
+    const ref=near.length ? near[near.length>>1] : 0;
+    if(!(ref>0)) return null;
+    thr=Math.max((o.minRel??0.35)*ref, 2.5*noise);
+    pts=S.filter(w=>w.v>=thr);
+    if(pts.length<8) return null;
+    // Ausreisser (fremde Kanten im Band) nach dem ersten Fit verwerfen.
+    let f=G.fitLine2D(pts.map(w=>[w.x,w.y,w.v]));
+    if(!f) return null;
+    const dev=w=>Math.abs(-(w.x-f.c[0])*f.u[1]+(w.y-f.c[1])*f.u[0]);
+    pts=pts.filter(w=>dev(w)<=Math.max(1.0, 2.5*f.rms));
+    f=G.fitLine2D(pts.map(w=>[w.x,w.y,w.v]));
+    if(!f || pts.length<8) return null;
+    // Richtung der Saat beibehalten, damit das Vorzeichen der Normalen stimmt.
+    let ux=f.u[0], uy=f.u[1];
+    if(ux*L.dx+uy*L.dy<0){ ux=-ux; uy=-uy; }
+    L={px:f.c[0], py:f.c[1], dx:ux, dy:uy, nx:uy, ny:-ux};
+    if(L.nx*s.nx+L.ny*s.ny<0){ L.nx=-L.nx; L.ny=-L.ny; }
+  }
+  const tOf=(x,y)=>(x-L.px)*L.dx+(y-L.py)*L.dy;
+  const sup=pts.map(w=>tOf(w.x,w.y)).sort((p,q)=>p-q);
+  const ts=tOf(s.px, s.py);
+  let i=0; for(let k=1;k<sup.length;k++) if(Math.abs(sup[k]-ts)<Math.abs(sup[i]-ts)) i=k;
+  let lo=i, hi=i;
+  while(lo>0 && sup[lo]-sup[lo-1]<=gapMax) lo--;
+  while(hi<sup.length-1 && sup[hi+1]-sup[hi]<=gapMax) hi++;
+  const tmin=Math.min(sup[lo], ts), tmax=Math.max(sup[hi], ts);
+  const z=G.lineSupport(g,W,H,{...L, sign:s.sign}, tmin, tmax);
+  return {x1:L.px+tmin*L.dx, y1:L.py+tmin*L.dy, x2:L.px+tmax*L.dx, y2:L.py+tmax*L.dy,
+          px:L.px, py:L.py, dx:L.dx, dy:L.dy, nx:L.nx, ny:L.ny, sign:s.sign,
+          n:pts.length, frac:S.length ? pts.length/S.length : 0, z:z.z, zn:z.n};
+};
+
+// Kante am Fadenkreuz: Kandidaten sammeln, jeden verlaengern und am z-Wert
+// pruefen, dann waehlen. Gewinner ist der am besten bewertete gueltige
+// Kandidat. Mit up (Bildrichtung von +Y) gewinnt unter seinen Parallelen
+// nahe dem Fadenkreuz die oberste: Die Wand-Decke-Kante ist die hoechste
+// waagerechte Kante einer Wand, Bilderrahmen, Gardinenleisten und Stuerze
+// liegen darunter. Fuer diese Wahl genuegt ein Fuenftel der UNGEWICHTETEN
+// Staerke - gewichtet waere die fernere, schwache Deckenkante doppelt
+// bestraft. Schraeg laufende Kanten (Regalseite zur Wand hin) entscheidet
+// nur die Bewertung.
+G.snapLine=(g,W,H,cx,cy,o={})=>{
+  const R=o.radius||G.snapRadius(W,H), sig=R/4;
+  const C=G.edgeCandidates(g,W,H,cx,cy,{radius:R, exclude:o.exclude, max:o.max??8});
+  const V=[];
+  for(const c of C){ const e=G.extendLine(g,W,H,c); if(e && e.z>=(o.zMin??8)) V.push({c,e}); }
+  if(!V.length) return null;
+  let pick=V[0];
+  if(o.up){
+    const un=Math.hypot(o.up[0],o.up[1]), ux=o.up[0]/un, uy=o.up[1]/un, t0=pick.c.theta;
+    const par=V.filter(v=>v===pick || (Math.abs(((v.c.theta-t0)%180+270)%180-90)<=(o.upParDeg??15) && Math.abs(v.c.rho)<=2*sig));
+    const rawMax=Math.max(...par.map(v=>v.c.raw));
+    let best=-Infinity;
+    for(const v of par){
+      if(v.c.raw<(o.upFrac??0.2)*rawMax) continue;
+      const upc=v.c.rho*(v.c.nx*ux+v.c.ny*uy);
+      if(upc>best){ best=upc; pick=v; }
+    }
+  }
+  return {...pick.e, seed:pick.c, good:pick.e.z>=(o.zGood??15), candidates:C.length, valid:V.length};
+};
+
+// NDC-Richtung -> Bildpixel-Richtung (r von unten; mit flipY von oben).
+G.ndcDirToPix=(v,W,H,flipY)=>[v[0]*W/2, (flipY ? -1 : 1)*v[1]*H/2];
+// Der ganze Weg vom Kamerabild (Helligkeit, W x H) zur Kante am Fadenkreuz,
+// so wie die App ihn geht: Senkrechte ausschliessen, "oben" aus der Pose.
+// Ergebnis in NDC, dazu z und good.
+G.captureEdge=(g,W,H,proj,camTo,flipY,o={})=>{
+  const v=G.verticalNdc(proj, camTo, 0, 0);
+  const vd=v ? G.ndcDirToPix(v,W,H,flipY) : null;
+  const L=G.snapLine(g,W,H,(W-1)/2,(H-1)/2,{...o, exclude:vd ? {dir:vd, deg:20} : null, up:vd});
+  if(!L) return null;
+  return {A:G.pixToNdc(L.x1,L.y1,W,H,flipY), B:G.pixToNdc(L.x2,L.y2,W,H,flipY),
+          z:L.z, zn:L.zn, n:L.n, frac:L.frac, good:L.good, candidates:L.candidates, valid:L.valid};
+};
+// Endpunkte (NDC) -> Beobachtung mit zwei Strahlen. Laesst sich ein
+// Endpunkt nicht auf y=H heben (Strahl unter dem Horizont oder weiter als
+// tMax), wird er zum Fadenkreuz hin gekuerzt, statt die Erfassung zu
+// verwerfen. null nur, wenn schon der dem Fadenkreuz naechste Punkt nicht
+// auf Deckenhoehe liegt.
+G.obsFromNdc=(proj,camTo,A,B,H,tMax=12)=>{
+  const ab=[B[0]-A[0], B[1]-A[1]], L2=ab[0]*ab[0]+ab[1]*ab[1];
+  const s0=L2>0 ? Math.max(0, Math.min(1, -(A[0]*ab[0]+A[1]*ab[1])/L2)) : 0;
+  const at=s=>[A[0]+s*ab[0], A[1]+s*ab[1]];
+  const ok=s=>{ const q=at(s); return G.hitY(G.ray(proj,camTo,q[0],q[1]), H, tMax)!==null; };
+  if(!ok(s0)) return null;
+  const clip=s1=>{
+    if(ok(s1)) return s1;
+    let lo=s0, hi=s1;
+    for(let i=0;i<30;i++){ const m=(lo+hi)/2; if(ok(m)) lo=m; else hi=m; }
+    return lo;
+  };
+  const sa=clip(0), sb=clip(1), qa=at(sa), qb=at(sb);
+  return {ra:G.ray(proj,camTo,qa[0],qa[1]), rb:G.ray(proj,camTo,qb[0],qb[1]), clipped:sa>0 || sb<1};
+};
+
+// ----------------------------------------------------------- Wände, Raum
+// Eine Beobachtung haelt die beiden Strahlen durch die Endpunkte der
+// erfassten Kante (Ankerraum). Gehoben wird erst bei Bedarf - so laesst
+// sich dieselbe Beobachtung fuer jede Kandidatenhoehe neu auswerten.
+G.liftObs=(ob,H)=>{
+  const a=G.hitY(ob.ra,H), b=G.hitY(ob.rb,H);
+  return a && b ? [[a[0],a[2]],[b[0],b[2]]] : null;
+};
+// Jede Beobachtung zaehlt gleich (5 Stuetzpunkte), egal wie lang ihr
+// sichtbares Stueck ist.
+G.wallLine=(obs,H)=>{
+  const P=[];
+  for(const ob of obs){
+    const s=G.liftObs(ob,H); if(!s) continue;
+    for(let i=0;i<5;i++){ const t=i/4; P.push([s[0][0]+t*(s[1][0]-s[0][0]), s[0][1]+t*(s[1][1]-s[0][1])]); }
+  }
+  return P.length>=2 ? G.fitLine2D(P) : null;
+};
+// Schnitt zweier Geraden {c,u}; null bei schleifendem Schnitt (< minDeg).
+G.intersect=(l1,l2,minDeg=10)=>{
+  const cr=l1.u[0]*l2.u[1]-l1.u[1]*l2.u[0];
+  if(Math.abs(cr)<Math.sin(minDeg*Math.PI/180)) return null;
+  const dx=l2.c[0]-l1.c[0], dy=l2.c[1]-l1.c[1];
+  const s=(dx*l2.u[1]-dy*l2.u[0])/cr;
+  return [l1.c[0]+s*l1.u[0], l1.c[1]+s*l1.u[1]];
+};
+const segX=(p1,p2,p3,p4)=>{
+  const d=(a,b,c)=>(b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]);
+  const d1=d(p3,p4,p1), d2=d(p3,p4,p2), d3=d(p1,p2,p3), d4=d(p1,p2,p4);
+  return ((d1>0&&d2<0)||(d1<0&&d2>0)) && ((d3>0&&d4<0)||(d3<0&&d4>0));
+};
+G.ringArea=R=>{ let a=0; for(let i=0;i<R.length;i++){ const p=R[i], q=R[(i+1)%R.length]; a+=p[0]*q[1]-q[0]*p[1]; } return a/2; };
+// Ecke i = Schnitt von Wand i-1 und Wand i, Wand i laeuft von Ecke i nach
+// Ecke i+1 - genau der Wandzug, den raumaufmass.html erwartet.
+G.buildRoom=(lines,o={})=>{
+  const n=lines.length, warnings=[];
+  if(n<3) return {corners:null, warnings:['Mindestens drei Wände nötig.']};
+  const corners=[];
+  for(let i=0;i<n;i++){
+    const p=G.intersect(lines[(i-1+n)%n], lines[i], o.minDeg??10);
+    if(!p){ warnings.push(`Wand ${(i-1+n)%n+1} und ${i+1} sind fast parallel – Ecke nicht bestimmbar.`); corners.push(null); continue; }
+    corners.push(p);
+  }
+  if(corners.some(c=>!c)) return {corners:null, warnings};
+  for(let i=0;i<n;i++) for(let j=i+2;j<n;j++){
+    if(i===0 && j===n-1) continue;
+    if(segX(corners[i],corners[(i+1)%n],corners[j],corners[(j+1)%n]))
+      warnings.push(`Wand ${i+1} kreuzt Wand ${j+1} – Reihenfolge prüfen.`);
+  }
+  const maxSide=Math.max(...corners.map((c,i)=>Math.hypot(c[0]-corners[(i+1)%n][0], c[1]-corners[(i+1)%n][1])));
+  if(maxSide>(o.maxWall??30)) warnings.push(`Eine Wand ist ${maxSide.toFixed(1)} m lang – vermutlich falscher Schnitt.`);
+  return {corners, area:Math.abs(G.ringArea(corners)), warnings};
+};
+
+// Deckenhoehe aus der Parallaxe - nur zum Vergleich mit dem Laser.
+// Eine Kante, gehoben auf eine falsche Hoehe H, ist um die Kameraposition
+// gestreckt (Faktor (H-h)/(H0-h)). Zwei Beobachtungen aus verschiedenem
+// Wandabstand landen nur bei der wahren Hoehe auf derselben Geraden. Kosten
+// je Wand: Streuung der Geraden-Abstaende, relativ zur Entfernung - sonst
+// gewinnt die triviale Loesung H = Augenhoehe, bei der alles zur Kamera
+// zusammenschrumpft.
+G.parallaxH=(walls,o={})=>{
+  const used=walls.filter(obs=>obs.length>=2);
+  if(!used.length) return {H:null, used:0, reason:'Keine Wand mit zwei Beobachtungen.'};
+  const camTop=Math.max(...used.flat().map(ob=>Math.max(ob.ra.o[1], ob.rb.o[1])));
+  const hMin=Math.max(o.hMin??1.6, camTop+0.3), hMax=o.hMax??6, step=o.step??0.005;
+  const cost=H=>{
+    let c=0, k=0;
+    for(const obs of used){
+      const segs=obs.map(ob=>({ob, s:G.liftObs(ob,H)})).filter(x=>x.s);
+      if(segs.length<2) continue;
+      const f=G.fitLine2D(segs.flatMap(x=>x.s));
+      if(!f) continue;
+      const nx=-f.u[1], ny=f.u[0];
+      const off=[], rng=[];
+      for(const {ob,s} of segs){
+        const m=[(s[0][0]+s[1][0])/2, (s[0][1]+s[1][1])/2];
+        off.push(m[0]*nx+m[1]*ny);
+        rng.push(Math.hypot(m[0]-ob.ra.o[0], m[1]-ob.ra.o[2]));
+      }
+      const mo=off.reduce((a,b)=>a+b,0)/off.length;
+      const mr=rng.reduce((a,b)=>a+b,0)/rng.length;
+      c+=off.reduce((a,b)=>a+(b-mo)**2,0)/off.length/(mr*mr); k++;
+    }
+    return k ? c/k : null;
+  };
+  const curve=[];
+  for(let H=hMin;H<=hMax+1e-9;H+=step){ const c=cost(H); if(c!==null) curve.push([H,c]); }
+  if(curve.length<3) return {H:null, used:used.length, reason:'Zu wenig auswertbare Beobachtungen.'};
+  let bi=0; for(let i=1;i<curve.length;i++) if(curve[i][1]<curve[bi][1]) bi=i;
+  let H=curve[bi][0];
+  const edge=bi===0 || bi===curve.length-1;
+  if(!edge){
+    const a=curve[bi-1][1], b=curve[bi][1], c=curve[bi+1][1], den=a-2*b+c;
+    if(den>0) H+=0.5*step*(a-c)/den;
+  }
+  // Wie verschieden die Wandabstaende waren - ohne Unterschied keine Parallaxe.
+  const spread=used.map(obs=>{
+    const f=G.wallLine(obs, H); if(!f) return 0;
+    const nx=-f.u[1], ny=f.u[0];
+    const d=obs.map(ob=>Math.abs((ob.ra.o[0]-f.c[0])*nx+(ob.ra.o[2]-f.c[1])*ny));
+    return Math.max(...d)-Math.min(...d);
+  });
+  // Ein Minimum gibt es immer, auch wenn alle Beobachtungen vom selben Fleck
+  // kommen - dann ist die Kurve flaches Rauschen. Bestimmt ist H nur, wenn
+  // die Kosten um das Minimum herum schnell steigen: Bereich, in dem sie
+  // unter 2·Minimum + 1e-4 bleiben (1e-4 = 1 % relative Streuung). Ist er
+  // breiter als 20 cm oder stoesst an den Suchrand, gibt es keinen Wert.
+  const thr=2*curve[bi][1]+(o.costFloor??1e-4);
+  let lo=bi, hi=bi;
+  while(lo>0 && curve[lo-1][1]<=thr) lo--;
+  while(hi<curve.length-1 && curve[hi+1][1]<=thr) hi++;
+  const interval=[curve[lo][0], curve[hi][0]];
+  if(lo===0 || hi===curve.length-1 || interval[1]-interval[0]>(o.maxWidth??0.2))
+    return {H:null, used:used.length, atEdge:edge, spread, interval, curve,
+            reason:`unbestimmt (${interval[0].toFixed(2)}–${interval[1].toFixed(2)} m) – zu wenig Abstandsunterschied zur Wand`};
+  return {H, used:used.length, atEdge:edge, spread, interval, curve};
+};
+
+// ---------------------------------------------- Schwenk: Waende von selbst
+// Beim Schwenken entstehen viele Erfassungen hintereinander; clusterSweep
+// ordnet sie in der Reihenfolge des Schwenks Waenden zu. Vorbild ist die
+// Umfangsschaetzung aus Video (US 11600049): Gerade je Cluster, Zuordnung
+// ueber Richtung und Abstand, Ecken aus den Schnitten.
+// - Eine neue Wand entsteht erst, wenn zwei Erfassungen in Folge zueinander
+//   passen und zu keiner bekannten Wand. Ein einzelner Fehlgriff bleibt so
+//   liegen.
+// - Eine Kante unter der Decke (Tuersturz, Bilderrahmen, Gardinenleiste)
+//   landet beim Heben auf y=H HINTER ihrer Wand. Passt eine Erfassung zu
+//   keiner Wand, liegt aber parallel draussen hinter einer, deren
+//   gesehenes Stueck sie ueberlappt, wird sie verworfen: hinter einer Wand
+//   gibt es keine Deckenkante. Ohne die Ueberlappung verwuerfe eine Nische
+//   ihre eigene Rueckwand - die liegt parallel 30 cm hinter dem Nachbarn.
+// - Passt eine Erfassung nach mindestens drei Waenden wieder zur ersten, ist
+//   der Raum geschlossen.
+const segLine=s=>{
+  const dx=s[1][0]-s[0][0], dy=s[1][1]-s[0][1], L=Math.hypot(dx,dy);
+  return L>1e-6 ? {c:[(s[0][0]+s[1][0])/2, (s[0][1]+s[1][1])/2], u:[dx/L, dy/L], len:L} : null;
+};
+// Wie gut passt Strecke s (gesehen von cam) zur Geraden l? Winkel in Grad,
+// Abstand der Streckenmitte, und ob sie auf der der Kamera abgewandten Seite liegt.
+const fitTo=(l,s,cam)=>{
+  const sl=segLine(s); if(!sl) return null;
+  const ang=Math.acos(Math.min(1, Math.abs(l.u[0]*sl.u[0]+l.u[1]*sl.u[1])))*180/Math.PI;
+  const nx=-l.u[1], ny=l.u[0];
+  const dm=(sl.c[0]-l.c[0])*nx+(sl.c[1]-l.c[1])*ny, dc=(cam[0]-l.c[0])*nx+(cam[1]-l.c[1])*ny;
+  return {ang, off:Math.abs(dm), outward:dm*dc<0, range:Math.hypot(sl.c[0]-cam[0], sl.c[1]-cam[1])};
+};
+G.clusterSweep=(obs,H,o={})=>{
+  const angTol=o.angDeg??8, offTol=o.offTol??0.12, outTol=o.outTol??0.15, minNew=o.minNew??2;
+  const walls=[], rejected=[];
+  let pending=[], closed=false, closedAt=null;
+  const lineOf=ids=>G.wallLine(ids.map(i=>obs[i]), H);
+  const ok=(f)=>f && f.ang<=angTol && f.off<=offTol+0.02*f.range;
+  const reject=(i,why)=>rejected.push({i, why});
+  // Gesehene Ausdehnung einer Wand entlang ihrer Geraden, und ob Strecke s
+  // darin liegt (30 cm Rand).
+  const along=(w,p)=>p[0]*w.line.u[0]+p[1]*w.line.u[1];
+  const overlaps=(w,s)=>{
+    let lo=Infinity, hi=-Infinity;
+    for(const i of w.ids){ const q=G.liftObs(obs[i],H); if(!q) continue; for(const p of q){ const t=along(w,p); lo=Math.min(lo,t); hi=Math.max(hi,t); } }
+    const a=along(w,s[0]), b=along(w,s[1]);
+    return Math.min(hi,Math.max(a,b))-Math.max(lo,Math.min(a,b))>=0.1;
+  };
+  for(let i=0;i<obs.length;i++){
+    const ob=obs[i], s=G.liftObs(ob,H);
+    if(!s){ reject(i,'nicht auf Deckenhöhe'); continue; }
+    const cam=[ob.ra.o[0], ob.ra.o[2]];
+    const last=walls[walls.length-1];
+    if(last && ok(fitTo(last.line,s,cam))){
+      last.ids.push(i); last.line=lineOf(last.ids);
+      pending.forEach(p=>reject(p,'einzeln')); pending=[];
+      continue;
+    }
+    // Zurueck an der ersten Wand: Raum geschlossen. Danach zaehlt nur noch,
+    // was zu einer bekannten Wand passt.
+    const k=walls.findIndex(w=>ok(fitTo(w.line,s,cam)));
+    if(k>=0){
+      walls[k].ids.push(i); walls[k].line=lineOf(walls[k].ids);
+      if(k===0 && walls.length>=3 && !closed){ closed=true; closedAt=i; }
+      pending.forEach(p=>reject(p,'einzeln')); pending=[];
+      continue;
+    }
+    // Hinter einer bekannten Wand: tiefer als die Decke, verwerfen.
+    const behind=walls.findIndex(w=>{ const f=fitTo(w.line,s,cam); return f && f.ang<=angTol && f.outward && f.off>outTol && overlaps(w,s); });
+    if(behind>=0){ reject(i, `hinter Wand ${behind+1}`); continue; }
+    if(closed){ reject(i,'nach Abschluss'); continue; }
+    const pl=pending.length ? lineOf(pending) : null;
+    if(pl && ok(fitTo(pl,s,cam))){
+      pending.push(i);
+      if(pending.length>=minNew){ walls.push({ids:pending, line:lineOf(pending)}); pending=[]; }
+    } else {
+      pending.forEach(p=>reject(p,'einzeln'));
+      pending=[i];
+    }
+  }
+  return {walls, closed, closedAt, rejected, pending};
+};
+
+// Wandzug aus den Clustern. Folgen zwei fast parallele Waende aufeinander,
+// fehlt dazwischen ein kurzer Versprung (Nische, Vorlage), den niemand
+// abgefahren hat - er wird senkrecht an der Grenze der beiden gesehenen
+// Stuecke eingefuegt. Fast deckungsgleiche Nachbarn werden eine Wand.
+G.ringFromClusters=(cl,obs,H,o={})=>{
+  const minDeg=o.minDeg??10, warnings=[];
+  let W=cl.walls.map(w=>({ids:w.ids.slice(), line:w.line}));
+  // Ausdehnung einer Wand entlang ihrer Richtung u, aus den gehobenen Strecken.
+  const extent=(w,u)=>{
+    let lo=Infinity, hi=-Infinity;
+    for(const i of w.ids){ const s=G.liftObs(obs[i],H); if(!s) continue;
+      for(const p of s){ const t=p[0]*u[0]+p[1]*u[1]; if(t<lo) lo=t; if(t>hi) hi=t; } }
+    return [lo,hi];
+  };
+  // Deckungsgleiche Nachbarn verschmelzen (auch letzte mit erster).
+  for(let i=0;i<W.length && W.length>1;){
+    const a=W[i], b=W[(i+1)%W.length];
+    const cr=Math.abs(a.line.u[0]*b.line.u[1]-a.line.u[1]*b.line.u[0]);
+    const off=Math.abs(-(b.line.c[0]-a.line.c[0])*a.line.u[1]+(b.line.c[1]-a.line.c[1])*a.line.u[0]);
+    if(cr<Math.sin(minDeg*Math.PI/180) && off<0.05){
+      a.ids.push(...b.ids); a.line=G.wallLine(a.ids.map(k=>obs[k]),H);
+      W.splice((i+1)%W.length,1);
+      warnings.push('Zwei Abschnitte derselben Wand zusammengelegt.');
+      continue;
+    }
+    i++;
+  }
+  const lines=[], virtual=[];
+  for(let i=0;i<W.length;i++){
+    const a=W[i], b=W[(i+1)%W.length];
+    lines.push(a.line); virtual.push(false);
+    if(W.length<2) continue;
+    const cr=Math.abs(a.line.u[0]*b.line.u[1]-a.line.u[1]*b.line.u[0]);
+    if(cr>=Math.sin(minDeg*Math.PI/180)) continue;
+    const u=a.line.u, [a0,a1]=extent(a,u), [b0,b1]=extent(b,u);
+    let t, sure=true;
+    if(a1<=b0) t=(a1+b0)/2; else if(b1<=a0) t=(b1+a0)/2;
+    else { t=(Math.max(a0,b0)+Math.min(a1,b1))/2; sure=false; }
+    const ta=a.line.c[0]*u[0]+a.line.c[1]*u[1];
+    lines.push({c:[a.line.c[0]+(t-ta)*u[0], a.line.c[1]+(t-ta)*u[1]], u:[-u[1], u[0]], rms:0});
+    virtual.push(true);
+    warnings.push(`Versprung zwischen Wand ${i+1} und ${(i+1)%W.length+1} angenommen`+(sure ? '.' : ' – Lage unsicher, beide Stücke überlappen.'));
+  }
+  const room=lines.length>=3 ? G.buildRoom(lines,o) : {corners:null, warnings:['Weniger als drei Wände erkannt.']};
+  return {corners:room.corners, area:room.area, warnings:[...warnings, ...room.warnings], lines, virtual, walls:W};
+};
+
+// ======================== Schwenk-Auswertung als Schaetzer (solveSweep)
+// Statt Regeln ein Messmodell, eine global optimale Segmentierung und eine
+// gemeinsame robuste Ausgleichung, die sich abwechseln:
+//   1. Jede Erfassung liefert zwei Grundrisspunkte (Endpunkte, gehoben auf
+//      y=H) mit eigener Unsicherheit senkrecht zur Wand (ptSigma).
+//   2. Optimale Partitionierung der Zeitfolge in Waende (dynamische
+//      Programmierung, Jackson et al. 2005): Kosten je Abschnitt = Restsumme
+//      der gewichteten Geradenanpassung (aus Praefixsummen in O(1)), Strafe
+//      beta je Abschnitt, kappa je Ausreisser.
+//   3. Zusammenfuehren per Likelihood-Quotient (Zuwachs der Restsumme beim
+//      Vereinen, F-Test gegen den Varianzfaktor): Nachbarn, Rueckkehr zur
+//      ersten Wand, spaeteres Wiederkehren - letzteres nur bei raeumlicher
+//      Ueberlappung, sonst verloere eine Nische ihre zweite Haelfte.
+//   4. Gemeinsame Ausgleichung (Gauss-Newton, Huber-IRLS): alle Waende,
+//      Drift als Zufallsweg (Verschiebung und Gier an Stuetzstellen), die
+//      Deckenhoehe mit Laser- oder schwachem Vorwissen, und rechte Winkel,
+//      wo ein Test sie traegt. Der Rundgang ist ein geschlossener
+//      Polygonzug - mit der Rueckkehr zur ersten Wand wird die Drift
+//      beobachtbar wie der Schlussfehler im Polygonzug.
+//   5. Mit korrigierter Drift und Hoehe von vorn (2 Durchlaeufe).
+const SW={
+  sigE:0.2*Math.PI/180,   // Winkelfehler je Strahl (Pixel + Orientierung), rad
+  sigT:0.01,              // Lagefehler der Kamera je Erfassung, m
+  kappa:13.8,             // Kosten einer Erfassung als Ausreisser (chi²₂, 99,9 %)
+  minSeg:2,               // Erfassungen je Abschnitt mindestens
+  knotDt:8,               // Stuetzstellen der Drift alle 8 s
+  breakT:0.2, breakDeg:2, // Bezugsbruch: Sprung-Vorwissen (sigma), m und Grad
+  qT:(0.006)**2,          // Zufallsweg der Drift: m²/s
+  qPsi:(0.08*Math.PI/180)**2, // rad²/s
+  Fmerge:9,               // F-Schwelle fuers Vereinen (2 Freiheitsgrade, ~99,9 %)
+  outTol:0.15,            // so weit hinter einer Wand: tiefer als die Decke
+  // Rechter Winkel, wenn |δ| < 1,5° (Toleranzregel: fuer die Skizze ist das
+  // rechtwinklig, den Rest misst der Laser) und nicht ganz unvertraeglich
+  // mit der Messung (< 7,5 σ; σ_θ enthaelt die Drift, ~0,45°). Mit 4° als
+  // Grenze wurden 2-3° schiefe Waende gerade gezogen.
+  orthoK:7.5, orthoMax:1.5,
+};
+// Unsicherheit eines gehobenen Punkts senkrecht zur Richtung u (Grundriss).
+// Hoehenwinkel e mit tan e = Δ/d: ∂d/∂e = -(d²+Δ²)/Δ (Entfernung), seitlich
+// wirkt der Winkelfehler ueber die Raumentfernung sqrt(d²+Δ²).
+G.ptSigma=(p,cam,Delta,u,o={})=>{
+  const sE=o.sigE??SW.sigE, sT=o.sigT??SW.sigT;
+  const vx=p[0]-cam[0], vz=p[1]-cam[1], d=Math.hypot(vx,vz)||1e-6, r2=d*d+Delta*Delta;
+  const sR=r2/Math.max(Delta,0.05)*sE, sL=Math.sqrt(r2)*sE;
+  const nx=-u[1], nz=u[0], c=Math.abs((vx*nx+vz*nz)/d), s=Math.sqrt(Math.max(0,1-c*c));
+  return Math.sqrt(sR*sR*c*c+sL*sL*s*s+sT*sT);
+};
+// Gewichtete TLS aus Momenten: {W, mx, mz, cxx, cxz, czz} -> Gerade + Restsumme.
+const momLine=m=>{
+  const W=m[0]; if(!(W>0)) return null;
+  const mx=m[1]/W, mz=m[2]/W;
+  const cxx=m[3]/W-mx*mx, cxz=m[4]/W-mx*mz, czz=m[5]/W-mz*mz;
+  const tr=(cxx+czz)/2, df=Math.sqrt(((cxx-czz)/2)**2+cxz*cxz);
+  const lmin=Math.max(0,tr-df), lmax=tr+df;
+  const th=0.5*Math.atan2(2*cxz, cxx-czz);           // Richtung der Geraden
+  return {c:[mx,mz], u:[Math.cos(th),Math.sin(th)], cost:W*lmin, spread:lmax, W};
+};
+const addMom=(m,p,w)=>{ m[0]+=w; m[1]+=w*p[0]; m[2]+=w*p[1]; m[3]+=w*p[0]*p[0]; m[4]+=w*p[0]*p[1]; m[5]+=w*p[1]*p[1]; };
+const sumMom=(a,b)=>a.map((v,i)=>v+b[i]);
+
+// Drift an Zeit t: lineare Interpolation der Stuetzstellen [tx,tz,psi].
+// Stuetzstelle j und Anteil a an Zeit t: gleichabstaendig (D.dt) wie bisher,
+// oder an gegebenen Zeiten D.ts - ein Bezugsbruch bekommt dort ein Paar mit
+// Abstand 0, das Inkrement dazwischen ist der Sprung.
+const knotAt=(D,t)=>{
+  const n=D.knots.length;
+  if(!D.ts){ const j=Math.max(0, Math.min(n-2, Math.floor((t-D.t0)/D.dt))); return [j, Math.max(0, Math.min(1, (t-D.t0)/D.dt-j))]; }
+  const ts=D.ts; let lo=0, hi=n-2;
+  while(lo<hi){ const m=(lo+hi+1)>>1; if(ts[m]<=t) lo=m; else hi=m-1; }
+  const span=ts[lo+1]-ts[lo];
+  return [lo, span>0 ? Math.max(0, Math.min(1, (t-ts[lo])/span)) : 1];
+};
+const driftAt=(D,t)=>{
+  if(!D || D.knots.length<2) return [0,0,0];
+  const k=D.knots, [j,a]=knotAt(D,t);
+  return [0,1,2].map(i=>(1-a)*k[j][i]+a*k[j+1][i]);
+};
+const applyDrift=(p,q)=>{ const c=Math.cos(q[2]), s=Math.sin(q[2]); return [c*p[0]-s*p[1]+q[0], s*p[0]+c*p[1]+q[1]]; };
+
+// Erfassungen fuer gegebenes H und Drift vorbereiten: Endpunkte, Kamera,
+// Gewichte. Was nicht auf y=H zu heben ist, faellt heraus.
+function prepSweep(obs,H,D,o){
+  const P=[];
+  obs.forEach((ob,i)=>{
+    if(ob.skip) return;
+    const s=G.liftObs(ob,H); if(!s) return;
+    const q=driftAt(D, ob.t??i);
+    const a=applyDrift(s[0],q), b=applyDrift(s[1],q), cam=applyDrift([ob.ra.o[0], ob.ra.o[2]],q);
+    const L=Math.hypot(b[0]-a[0], b[1]-a[1]); if(!(L>1e-4)) return;
+    const u=[(b[0]-a[0])/L, (b[1]-a[1])/L], Delta=H-ob.ra.o[1];
+    if(!(Delta>0.05)) return;
+    const wa=1/G.ptSigma(a,cam,Delta,u,o)**2, wb=1/G.ptSigma(b,cam,Delta,u,o)**2;
+    const m=[0,0,0,0,0,0]; addMom(m,a,wa); addMom(m,b,wb);
+    P.push({i, t:ob.t??i, a, b, cam, u, wa, wb, m, raw:s});
+  });
+  return P;
+}
+
+// Optimale Partitionierung mit Ausreisser-Zustand. s0 = Varianzfaktor, um den
+// die Kosten geteilt werden (Drift und Modellfehler machen die echten Reste
+// groesser als das Messmodell sagt).
+function segmentDP(P,s0,beta,o){
+  const n=P.length, kap=o.kappa??SW.kappa, mn=o.minSeg??SW.minSeg;
+  const pre=[[0,0,0,0,0,0]];
+  for(const p of P) pre.push(sumMom(pre[pre.length-1], p.m));
+  const cost=(a,b)=>{ const m=pre[b+1].map((v,k)=>v-pre[a][k]); const l=momLine(m); return l ? l.cost/s0 : Infinity; };
+  // PELT (Killick et al. 2012): ein Abschnittsanfang s faellt endgueltig weg,
+  // sobald F(s)+C(s..t) >= F(t) - die Kosten wachsen mit jedem Punkt, also
+  // kann s nie mehr gewinnen. Gleiches Optimum, ein Bruchteil der Arbeit.
+  // Mit Mindestlaenge mn ist die Fortsetzung ab t erst nach mn Punkten ein
+  // Abschnitt; bis dahin gilt nur F(T) <= F(t)+(T-t)·kappa. Darum der
+  // Zuschlag (mn-1)·kappa-beta - sonst faellt bei kleinem beta (kurze
+  // Schwenks) ein Anfang weg, der noch gewinnen kann.
+  const F=new Float64Array(n+1), from=new Int32Array(n+1), kind=new Int8Array(n+1);
+  const slack=Math.max(0,(mn-1)*kap-beta);
+  let Rset=[0];
+  for(let b=1;b<=n;b++){
+    F[b]=F[b-1]+kap; from[b]=b-1; kind[b]=0;
+    const cs=new Map();
+    for(const a of Rset){
+      if(b-a<mn) continue;
+      const c0=F[a]+cost(a,b-1); cs.set(a,c0);
+      if(c0+beta<F[b]){ F[b]=c0+beta; from[b]=a; kind[b]=1; }
+    }
+    Rset=Rset.filter(a=>b-a<mn || cs.get(a)<F[b]+slack);
+    Rset.push(b);
+  }
+  const segs=[], out=[];
+  for(let b=n;b>0;){ if(kind[b]) segs.unshift({a:from[b], b:b-1}); else out.unshift(b-1); b=from[b]; }
+  return {segs, out, cost};
+}
+
+// Kosten und Gerade einer Menge von Erfassungen (Indizes in P), dazu die
+// mittlere Zeit - fuer die Drift, die zwischen zwei Gruppen auflaufen kann.
+const groupLine=(P,ids)=>{ let m=[0,0,0,0,0,0], tw=0, tt=0;
+  for(const k of ids){ m=sumMom(m,P[k].m); tw+=P[k].m[0]; tt+=P[k].m[0]*P[k].t; }
+  return Object.assign(momLine(m)||{}, {m, tm:tw>0 ? tt/tw : 0}); };
+// Echte Ueberlappung zweier Gruppen entlang u (m, negativ = Luecke).
+const overlapOf=(P,a,b,u)=>{ const [a0,a1]=extentOf(P,a,u), [b0,b1]=extentOf(P,b,u); return Math.min(a1,b1)-Math.max(a0,b0); };
+// Hoehe einer Gruppe aus der Parallaxe, als Regression: Liegt die Kante in
+// Wahrheit um dH hoeher als H, landet der gehobene Punkt q bei
+// cam + (p-cam)·Δ/(Δ+dH). Entlang der Wandnormalen heisst das exakt
+// n·q = rho_wahr - g·dH mit g = (n·q - n·c)/Δ, gerechnet aus dem gehobenen
+// Punkt selbst - linear in dH, auch fuer grosse dH (ein Tuersturz 0,5 m
+// unter der Decke). Punkte aus grosser Entfernung (oder tiefer Kamera)
+// wandern weiter. Ohne Unterschied in g (alle aus demselben Abstand) ist dH
+// nicht bestimmbar (sigma gross).
+// Rechnet in O(n); 3,29 sigma = zweiseitig 99,9 %. s0 = Varianzfaktor.
+function groupHeight(obs,P,ids,H,s0=1){
+  const l=groupLine(P,ids); if(!l || !l.u) return {dH:0, sdH:Infinity, determined:false};
+  const nx=-l.u[1], nz=l.u[0], rho=nx*l.c[0]+nz*l.c[1];
+  let sw=0, sg=0, sr=0;
+  const rows=[];
+  for(const k of ids){ const p=P[k], ob=obs[p.i], Delta=H-ob.ra.o[1]; if(!(Delta>0.05)) continue;
+    const nc=nx*p.cam[0]+nz*p.cam[1];
+    for(const [q,w] of [[p.a,p.wa],[p.b,p.wb]]){ const nq=nx*q[0]+nz*q[1], g=(nq-nc)/Delta, r=nq-rho;
+      rows.push([g,r,w]); sw+=w; sg+=w*g; sr+=w*r; } }
+  if(rows.length<4) return {dH:0, sdH:Infinity, determined:false};
+  const gm=sg/sw, rm=sr/sw; let sgg=0, sgr=0;
+  for(const [g,r,w] of rows){ sgg+=w*(g-gm)**2; sgr+=w*(g-gm)*(r-rm); }
+  if(!(sgg>0)) return {dH:0, sdH:Infinity, determined:false};
+  // r = -g·dH + const: positive Steigung = Kante liegt TIEFER als H.
+  const dH=-sgr/sgg, sdH=Math.sqrt(s0/sgg);
+  // Eine Kante unter der hoechsten Kamera der Gruppe ist mit steigenden
+  // Strahlen unmoeglich - dann traegt das Modell nicht (Posefehler,
+  // Kantenwechsel). Protokoll 1: Leiter 9-14 'bestimmt' bei 1,64 m.
+  let hCam=-Infinity; for(const k of ids) hCam=Math.max(hCam, obs[P[k].i].ra.o[1]);
+  if(H+dH<hCam+0.05) return {dH, sdH, h:H+dH, determined:false, impossible:true};
+  return {dH, sdH, h:H+dH, determined:sdH<0.03};
+}
+// Gesehene Ausdehnung entlang Richtung u.
+const extentOf=(P,ids,u)=>{ let lo=Infinity, hi=-Infinity;
+  for(const k of ids) for(const p of [P[k].a,P[k].b]){ const t=p[0]*u[0]+p[1]*u[1]; lo=Math.min(lo,t); hi=Math.max(hi,t); }
+  return [lo,hi]; };
+// Sind zwei Gruppen dieselbe Wand? Test auf die Differenz der
+// Geradenparameter (Winkel, Abstand am gemeinsamen Mittelpunkt). Die
+// Kovarianz enthaelt die Fit-Unsicherheit beider Gruppen UND die Drift, die
+// zwischen ihren Zeiten auflaufen kann (Zufallsweg: q·Δt, Gier mal Hebel),
+// dazu eine Untergrenze fuer Spruenge. Ohne den Driftanteil zerfiel jede
+// Wand, deren Erfassungen 20 s auseinanderliegen - der Rundgang schloss nie.
+// Ergebnis: chi² mit 2 Freiheitsgraden.
+const mergeChi2=(g1,g2,s0,o)=>{
+  if(!g1.u || !g2.u) return Infinity;
+  let dot=g1.u[0]*g2.u[0]+g1.u[1]*g2.u[1];
+  const u2=dot<0 ? [-g2.u[0],-g2.u[1]] : g2.u;
+  const dth=Math.atan2(g1.u[0]*u2[1]-g1.u[1]*u2[0], Math.abs(dot));
+  const um=[g1.u[0]+u2[0], g1.u[1]+u2[1]], ul=Math.hypot(um[0],um[1])||1, n=[-um[1]/ul, um[0]/ul];
+  const cm=[(g1.c[0]+g2.c[0])/2, (g1.c[1]+g2.c[1])/2];
+  const off=g=>n[0]*(cm[0]-g.c[0])+n[1]*(cm[1]-g.c[1]);
+  const along=g=>Math.hypot(cm[0]-g.c[0], cm[1]-g.c[1]);
+  const vth=g=>s0/Math.max(1e-9, g.W*g.spread);
+  const vrho=g=>s0/g.W+vth(g)*along(g)**2;
+  const dt=Math.abs(g1.tm-g2.tm), lever=o.lever??3;
+  const qT=o.qT??SW.qT, qP=o.qPsi??SW.qPsi;
+  const fTh=(o.jumpDeg??0.5)*Math.PI/180, fRho=o.jumpM??0.03;
+  let bT=0, bP=0;
+  if(o.breaks) for(const b of o.breaks){ const tb=typeof b==='number' ? b : b.t;
+    if((g1.tm<tb)!==(g2.tm<tb)){ const sT=b.sT??o.breakT, sP=(b.sDeg??o.breakDeg)*Math.PI/180; bT+=sT*sT; bP+=sP*sP; } }
+  const Vth=vth(g1)+vth(g2)+qP*dt+fTh*fTh+bP;
+  const Vrho=vrho(g1)+vrho(g2)+qT*dt+qP*dt*lever*lever+fRho*fRho+bT+bP*lever*lever;
+  return dth*dth/Vth+(off(g1)-off(g2))**2/Vrho;
+};
+const CHI2_2=13.8;   // 99,9 % mit 2 Freiheitsgraden
+
+function assignWalls(P,s0,beta,o,obs,H){
+  const dp=segmentDP(P,s0,beta,o);
+  const outTol=o.outTol??SW.outTol;
+  let groups=dp.segs.map(s=>{ const ids=[]; for(let k=s.a;k<=s.b;k++) ids.push(k); return {ids, ...groupLine(P,ids)}; });
+  const outliers=dp.out.map(k=>({k, why:'einzeln'}));
+  const same=(a,b)=>mergeChi2(a,b,s0,o)<CHI2_2;
+  // 1. Nachbarn (auch ueber Ausreisser hinweg) vereinen, solange der Test traegt.
+  for(let changed=true; changed;){
+    changed=false;
+    for(let j=0;j+1<groups.length;j++){
+      if(same(groups[j],groups[j+1])){
+        const ids=[...groups[j].ids, ...groups[j+1].ids];
+        groups.splice(j,2,{ids, ...groupLine(P,ids)}); changed=true; break;
+      }
+    }
+  }
+  // 2. Zwei parallele Gruppen, die sich entlang der Wand ueberlappen, koennen
+  //    nicht beide Deckenkante sein. Welche liegt unter der Decke? Erst die
+  //    Parallaxe-Hoehe je Gruppe (bestimmt nur bei Abstandsunterschied):
+  //    liegt eine sicher tiefer als H, ist sie es. Sonst die Regel aus der
+  //    Physik des Hebens: eine Kante unter der Decke landet HINTER ihrer
+  //    Wand - die aeussere, kleinere Gruppe faellt. Fast deckungsgleich
+  //    (< 10 cm) ist es dieselbe Wand mit Drift: vereinen. Ordnungsunabhaengig:
+  //    es zaehlt nicht, welche Gruppe zuerst gesehen wurde.
+  const camOf=g=>g.ids.reduce((s,k)=>[s[0]+P[k].cam[0]/g.ids.length, s[1]+P[k].cam[1]/g.ids.length],[0,0]);
+  const heights=new Map();
+  const hOf=g=>{ if(!heights.has(g)) heights.set(g, groupHeight(obs,P,g.ids,H,s0)); return heights.get(g); };
+  const warnings=[];
+  const leisteOf=(A,B)=>{
+    const nx=-A.u[1], nz=A.u[0], rho=nx*A.c[0]+nz*A.c[1], sRhoA2=s0/Math.max(1e-9,A.W);
+    let sw=0, sd=0; const rows=[];
+    for(const k of B.ids){ const p=P[k], ob=obs[p.i], Delta=H-ob.ra.o[1]; if(!(Delta>0.05)) return null;
+      const nc=nx*p.cam[0]+nz*p.cam[1];
+      for(const [q,w] of [[p.a,p.wa],[p.b,p.wb]]){ const nq=nx*q[0]+nz*q[1], den=nq-nc; if(!(Math.abs(den)>1e-6)) return null;
+        const d=Delta*(nq-rho)/den, s=Delta/Math.abs(den)*Math.sqrt(s0/w+sRhoA2), ww=1/(s*s);
+        rows.push([d,ww]); sw+=ww; sd+=ww*d; } }
+    if(rows.length<4) return null;
+    const m=sd/sw; if(!(m>=0.03 && m<=0.45)) return null;
+    // jede Erfassung vertraeglich mit EINER Tiefe (k sigma, dazu 2 cm Modellspiel)
+    if(!rows.every(([d,ww])=>Math.abs(d-m)<=3.29/Math.sqrt(ww)+0.02)) return null;
+    return {dH:m, sdH:1/Math.sqrt(sw), n:B.ids.length};
+  };
+  // Stuetze einer Linie: alle Erfassungen paralleler Gruppen auf derselben
+  // Geraden - die echte Wand zerfaellt um ein Phantom herum in Stuecke, und
+  // jedes Stueck allein hat weniger Erfassungen als das Phantom.
+  const nSup=A=>groups.reduce((s,g)=>{
+    const ang=Math.acos(Math.min(1,Math.abs(A.u[0]*g.u[0]+A.u[1]*g.u[1])))*180/Math.PI; if(ang>8) return s;
+    const o=Math.abs((g.c[0]-A.c[0])*(-A.u[1])+(g.c[1]-A.c[1])*A.u[0]);
+    return s+((g===A || o<0.1 || same(A,g)) ? g.ids.length : 0); },0);
+  for(let changed=true; changed;){
+    changed=false;
+    outer: for(let i=0;i<groups.length;i++) for(let j=0;j<groups.length;j++){
+      if(i===j) continue;
+      const A=groups[i], B=groups[j];
+      const ang=Math.acos(Math.min(1,Math.abs(A.u[0]*B.u[0]+A.u[1]*B.u[1])))*180/Math.PI; if(ang>8) continue;
+      if(overlapOf(P,A.ids,B.ids,A.u)<0.2) continue;
+      const nx=-A.u[1], nz=A.u[0], cam=camOf(A), camB=camOf(B);
+      const dB=(B.c[0]-A.c[0])*nx+(B.c[1]-A.c[1])*nz, dc=(cam[0]-A.c[0])*nx+(cam[1]-A.c[1])*nz;
+      const dcB=(camB[0]-A.c[0])*nx+(camB[1]-A.c[1])*nz;
+      if(dB*dc>0) continue;            // B liegt nicht hinter A (von A aus gesehen)
+      // Ein Phantom hinter A wurde DURCH A hindurch gesehen - von Kameras auf
+      // A's Seite. Die Innenwand des anderen Schenkels eines U liegt zwar auch
+      // "hinter" A, wurde aber von der anderen Seite aus gesehen.
+      if(dcB*dc<0) continue;
+      const off=Math.abs(dB);
+      // Weiter als 1,5 m hinter A ist ein Phantom nur, wenn es DURCH A
+      // gesehen wurde: der Strahl Kamera -> Erfassung von B schneidet A's
+      // Gerade innerhalb der gesehenen Ausdehnung von A (samt ihrer Stuecke).
+      // Eine Leiste dH unter der Decke landet etwa d·dH/(Δ-dH) hinter ihrer
+      // Wand - ein Tuersturz 0,55 m unter der Decke aus 1,6 m schon 1,6 m.
+      // Eine echte Wand weit dahinter (U-Raum, Raumteiler) sieht man dagegen
+      // an A vorbei.
+      const through=()=>{ let lo=Infinity, hi=-Infinity;
+        for(const g of groups){ if(Math.acos(Math.min(1,Math.abs(A.u[0]*g.u[0]+A.u[1]*g.u[1])))*180/Math.PI>8) continue;
+          const o2=Math.abs((g.c[0]-A.c[0])*nx+(g.c[1]-A.c[1])*nz); if(g!==A && o2>=0.1 && !same(A,g)) continue;
+          const [e0,e1]=extentOf(P,g.ids,A.u); lo=Math.min(lo,e0); hi=Math.max(hi,e1); }
+        let inside=0;
+        for(const k of B.ids){ const p=P[k], m=[(p.a[0]+p.b[0])/2,(p.a[1]+p.b[1])/2];
+          const dm=(m[0]-A.c[0])*nx+(m[1]-A.c[1])*nz, dq=(p.cam[0]-A.c[0])*nx+(p.cam[1]-A.c[1])*nz;
+          if(!(Math.abs(dq-dm)>1e-9)) continue; const s=dq/(dq-dm); if(!(s>0 && s<1.0001)) continue;
+          const t=(p.cam[0]+s*(m[0]-p.cam[0]))*A.u[0]+(p.cam[1]+s*(m[1]-p.cam[1]))*A.u[1];
+          if(t>=lo-0.3 && t<=hi+0.3) inside++; }
+        return inside>=0.5*B.ids.length; };
+      if(off>1.5 && !same(A,B) && !through()) continue;
+      let drop=null, why='', lei=null;
+      const hA=hOf(A), hB=hOf(B), below=x=>x.determined && x.dH<-Math.max(0.1, 3.29*x.sdH);
+      // Dieselbe Wand mit Drift dazwischen (Rueckkehr nach 20 s)? Der
+      // driftbewusste Test kommt zuerst - sonst verwirft die Rueckkehr den
+      // Anfang der ersten Wand als "dahinter" oder "unter der Decke".
+      if(off<0.1 || same(A,B)){
+        // Die vereinte Gruppe nimmt den frueheren Platz - die Reihenfolge der
+        // Gruppen ist die Reihenfolge des Rundgangs.
+        const ids=[...A.ids, ...B.ids].sort((x,y)=>x-y), lo=Math.min(i,j), hi=Math.max(i,j);
+        groups[lo]={ids, ...groupLine(P,ids)}; groups.splice(hi,1); changed=true; break outer; }
+      else if(below(hB)){ drop=j; why=`unter der Decke (${hB.h.toFixed(2)} m)`; }
+      else if(below(hA)){ drop=i; why=`unter der Decke (${hA.h.toFixed(2)} m)`; }
+      else if(off>outTol && nSup(B)<=nSup(A)){ drop=j; why='hinter Wand';
+        const b0=Math.min(...B.ids), b1=Math.max(...B.ids);
+        const pre=A.ids.some(a=>a<b0 && P[b0].t-P[a].t<=1), post=A.ids.some(a=>a>b1 && P[a].t-P[b1].t<=1);
+        // Name ohne Zahl: die Tiefe ist von EINEM Standpunkt nur zusammen mit
+        // dem Abstand bestimmt (Gegenpruefung: cm-Angaben auch bei Schraenken
+        // und Scheinbewegungen).
+        if((pre?1:0)+(post?1:0)>=1){ lei=leisteOf(A,B); if(lei) why='Kante tiefer als die Decke (Leiste, Stuck oder Schrank?)'; } }
+      else { drop=nSup(A)<nSup(B) ? i : j; why='doppelt';
+        warnings.push('Zwei parallele Kanten an derselben Wand (Schrank oder Leiste?) – die schwächere verworfen, bitte prüfen.'); }
+      groups[drop].ids.forEach(x=>outliers.push({k:x, why}));
+      groups.splice(drop,1); changed=true; break outer;
+    }
+  }
+  // 3. Wiederkehr und Rueckkehr: spaetere Gruppe zu frueherer, nicht
+  //    benachbarter - nur bei Ueberlappung (Nische!) und tragendem Test.
+  const walls=[]; let closed=false;
+  for(const g of groups){
+    let hit=-1;
+    for(let w=0; w<walls.length-1; w++){
+      const W=walls[w];
+      if(!same(W,g)) continue;
+      if(overlapOf(P,W.ids,g.ids,W.u)>=0.1){ hit=w; break; }
+    }
+    if(hit>=0){
+      const W=walls[hit], ids=[...W.ids, ...g.ids];
+      walls[hit]={ids, ...groupLine(P,ids)};
+      if(hit===0 && walls.length>=3) closed=true;
+    } else if(walls.length && same(walls[walls.length-1],g)){
+      const W=walls[walls.length-1], ids=[...W.ids, ...g.ids]; walls[walls.length-1]={ids, ...groupLine(P,ids)};
+    } else walls.push(g);
+  }
+  const outSet=new Set(outliers.map(x=>x.k)), angU=(a,b)=>Math.acos(Math.min(1,Math.abs(a[0]*b[0]+a[1]*b[1])))*180/Math.PI;
+  // Nie unter drei Waende: sonst faellt der ganze Durchlauf weg (Protokoll 2).
+  for(let w=0; w<walls.length && walls.length>3; w++){ const W=walls[w]; if(W.ids.length>=3) continue;
+    const nb=[walls[w-1], walls[w+1]].filter(Boolean);
+    if(!nb.some(g=>angU(W.u,g.u)<8)) continue;
+    const k0=Math.min(...W.ids), k1=Math.max(...W.ids);
+    const run=k=>outSet.has(k) && P[k] && angU(P[k].u,W.u)<8;
+    if(!(run(k0-1) && run(k0-2)) && !(run(k1+1) && run(k1+2))) continue;
+    W.ids.forEach(x=>outliers.push({k:x, why:'Ende einer Leiter neben paralleler Wand'})); walls.splice(w,1); w--; }
+  // Letzte Wand = erste (Schwenk endet in der ersten Wand): vereinen.
+  if(walls.length>=4){
+    const f=walls[0], l=walls[walls.length-1];
+    if(same(f,l) && overlapOf(P,f.ids,l.ids,f.u)>=0.1){ walls[0]={ids:[...f.ids, ...l.ids], ...groupLine(P,[...f.ids, ...l.ids])}; walls.pop(); closed=true; }
+  }
+  // Geschlossen, wenn Wand 1 noch einmal erfasst wurde, nachdem jede andere
+  // Wand schon gesehen war - egal, in welchem Schritt die Rueckkehr vereint
+  // wurde (Index in P = Zeitfolge). Mindestens drei solche Erfassungen: eine
+  // einzelne, die die Drift-Toleranz spaet in Wand 1 schiebt, ist noch keine
+  // Rueckkehr.
+  if(walls.length>=3){
+    const lastFirst=Math.max(...walls.slice(1).map(w=>Math.min(...w.ids)));
+    closed=walls[0].ids.filter(id=>id>lastFirst).length>=3;
+  }
+  return {walls, outliers, closed, nSeg:dp.segs.length, warnings};
+}
+
+// Kleine dichte Cholesky-Loesung von N x = g (N symmetrisch positiv definit).
+const cholSolve=(N,g)=>{
+  const n=g.length, L=N.map(r=>r.slice());
+  for(let j=0;j<n;j++){
+    let d=L[j][j]; for(let k=0;k<j;k++) d-=L[j][k]*L[j][k];
+    if(!(d>1e-14)) return null; d=Math.sqrt(d); L[j][j]=d;
+    for(let i=j+1;i<n;i++){ let s=L[i][j]; for(let k=0;k<j;k++) s-=L[i][k]*L[j][k]; L[i][j]=s/d; }
+  }
+  const y=new Float64Array(n);
+  for(let i=0;i<n;i++){ let s=g[i]; for(let k=0;k<i;k++) s-=L[i][k]*y[k]; y[i]=s/L[i][i]; }
+  const x=new Float64Array(n);
+  for(let i=n-1;i>=0;i--){ let s=y[i]; for(let k=i+1;k<n;k++) s-=L[k][i]*x[k]; x[i]=s/L[i][i]; }
+  return {x, L};
+};
+const invFromChol=(L,n)=>{ // Diagonale und volle Inverse fuer kleine n
+  const I=[]; for(let c=0;c<n;c++){ const e=new Float64Array(n); e[c]=1;
+    const y=new Float64Array(n); for(let i=0;i<n;i++){ let s=e[i]; for(let k=0;k<i;k++) s-=L[i][k]*y[k]; y[i]=s/L[i][i]; }
+    const x=new Float64Array(n); for(let i=n-1;i>=0;i--){ let s=y[i]; for(let k=i+1;k<n;k++) s-=L[k][i]*x[k]; x[i]=s/L[i][i]; }
+    I.push(x); } return I; };
+const wrapPi=a=>{ while(a>Math.PI) a-=2*Math.PI; while(a<-Math.PI) a+=2*Math.PI; return a; };
+const wrap90=a=>{ const q=Math.PI/2; return a-q*Math.round(a/q); };
+
+// Gemeinsame Ausgleichung. Unbekannte: je Wand (theta, rho) in Normalform
+// n·p = rho; Drift-Stuetzstellen 1..J-1 (tx, tz, psi; Stuetzstelle 0 = 0
+// legt den Bezug fest); H; Hauptrichtung phi0, falls Waende als rechtwinklig
+// gelten. Beobachtungen: alle Endpunkte (roh gehoben bei H, dann Drift).
+function adjust(obs,P,walls,o,H0,Hprior,D0,ortho){
+  const K=walls.length, J=D0.knots.length;
+  const nP=2*K+3*(J-1)+1+(ortho ? 1 : 0), iH=2*K+3*(J-1), iPhi=iH+1;
+  // Startwerte aus den Gruppengeraden.
+  const x=new Float64Array(nP);
+  walls.forEach((w,k)=>{ const th=Math.atan2(w.u[0], -w.u[1]); x[2*k]=th; x[2*k+1]=Math.cos(th)*w.c[0]+Math.sin(th)*w.c[1]; });
+  for(let j=1;j<J;j++) for(let c=0;c<3;c++) x[2*K+3*(j-1)+c]=D0.knots[j][c];
+  x[iH]=H0;
+  if(ortho) x[iPhi]=ortho.phi0;
+  const qT=o.qT??SW.qT, qPsi=o.qPsi??SW.qPsi;
+  const pts=[]; // [captureIndex in P, endpoint 0/1, wall]
+  walls.forEach((w,k)=>w.ids.forEach(id=>{ pts.push([id,0,k]); pts.push([id,1,k]); }));
+  let s0=1, lastCost=Infinity, cov=null;
+  const huber=2.0;
+  for(let it=0; it<12; it++){
+    const N=Array.from({length:nP},()=>new Float64Array(nP)), g=new Float64Array(nP);
+    let cost=0, nres=0;
+    const D={t0:D0.t0, dt:D0.dt, ts:D0.ts, brk:D0.brk, knots:[[0,0,0], ...Array.from({length:J-1},(_,j)=>[x[2*K+3*j],x[2*K+3*j+1],x[2*K+3*j+2]])]};
+    const add=(idx,val,r,w)=>{ // eine Zeile: Ableitungen val an idx, Rest r, Gewicht w
+      for(let a=0;a<idx.length;a++){ g[idx[a]]+=w*val[a]*r; for(let b=0;b<idx.length;b++) N[idx[a]][idx[b]]+=w*val[a]*val[b]; }
+      cost+=w*r*r; nres++;
+    };
+    const H=x[iH];
+    for(const [id,e,k] of pts){
+      const p=P[id], ob=obs[p.i];
+      const ray=e ? ob.rb : ob.ra; const ty=(H-ray.o[1])/ray.d[1];
+      if(!(ty>0)) continue;
+      const raw=[ray.o[0]+ty*ray.d[0], ray.o[2]+ty*ray.d[2]], dRaw=[ray.d[0]/ray.d[1], ray.d[2]/ray.d[1]];
+      const t=p.t, [j,al]=knotAt(D0,t);
+      const q=driftAt(D,t), cs=Math.cos(q[2]), sn=Math.sin(q[2]);
+      const pp=[cs*raw[0]-sn*raw[1]+q[0], sn*raw[0]+cs*raw[1]+q[1]];
+      const th=x[2*k], nx=Math.cos(th), nz=Math.sin(th);
+      // Massstabsfrei (o.scaleInv, ohne Laser immer): der Rest waechst beim
+      // Heben mit Δ = H - h, die Gewichte sind aber bei H0 eingefroren. Ohne
+      // Ausgleich wird jeder Rest mit kleinerem H billiger - aus der Hand
+      // gedreht (Telefon kreist ~0,3 m um den Koerper) kippte H so bis zu
+      // 0,7 m Richtung Kamera, Flaeche 3 statt 20 m², "geschlossen". Mit
+      // sc = Δ0/Δ ist der Rest ein Winkel mal fester Laenge, H kommt nur aus
+      // Parallaxe und Vorwissen. Rest-Verzerrung im Messaufbau +5..7 cm (fest
+      // in Metern liegende Posefehler), eingefroren -5..8 cm.
+      const dl=H-ray.o[1], sc=o.scaleInv ? (H0-ray.o[1])/dl : 1;
+      const r0=nx*pp[0]+nz*pp[1]-x[2*k+1], r=r0*sc;
+      const w0=e ? p.wb : p.wa;
+      // Huber: grosse normierte Reste werden heruntergewichtet.
+      const z=Math.abs(r)*Math.sqrt(w0/s0), w=w0*(z<=huber ? 1 : huber/z);
+      const idx=[2*k, 2*k+1, iH], val=[sc*(-nz*pp[0]+nx*pp[1]), -sc,
+        sc*(nx*(cs*dRaw[0]-sn*dRaw[1])+nz*(sn*dRaw[0]+cs*dRaw[1]))-(o.scaleInv ? r/dl : 0)];
+      const dpsi=nx*(-sn*raw[0]-cs*raw[1])+nz*(cs*raw[0]-sn*raw[1]);
+      for(const [jj,ff] of [[j,1-al],[j+1,al]]){ if(jj===0 || ff===0) continue; const b=2*K+3*(jj-1); idx.push(b,b+1,b+2); val.push(sc*ff*nx, sc*ff*nz, sc*ff*dpsi); }
+      add(idx,val,r,w);
+    }
+    // Drift als Zufallsweg: Zuwaechse zwischen Stuetzstellen.
+    for(let j=1;j<J;j++){
+      const b=2*K+3*(j-1), pb=j>1 ? 2*K+3*(j-2) : -1;
+      for(let c=0;c<3;c++){
+        const dtj=D0.ts ? D0.ts[j]-D0.ts[j-1] : D0.dt, bk=D0.brk && D0.brk[j];
+        const qv=(c<2 ? qT : qPsi)*dtj+(bk ? (c<2 ? bk.sT*bk.sT : bk.sP*bk.sP) : 0), w=1/Math.max(qv,1e-12);
+        const r=x[b+c]-(pb>=0 ? x[pb+c] : 0);
+        if(pb>=0) add([b+c,pb+c],[1,-1],r,w); else add([b+c],[1],r,w);
+      }
+    }
+    // Hoehe: Laser oder schwaches Vorwissen.
+    add([iH],[1],x[iH]-Hprior.H,1/Hprior.s**2);
+    // Rechte Winkel: theta_k = phi0 + m·90° fuer die getesteten Waende.
+    if(ortho) for(const [k,m] of ortho.walls){ const r=wrapPi(x[2*k]-(x[iPhi]+m*Math.PI/2)); add([2*k,iPhi],[1,-1],r,1/(0.02*Math.PI/180)**2); }
+    // Kleine Daempfung haelt unbestimmte Richtungen fest.
+    for(let i=0;i<nP;i++) N[i][i]+=1e-9+1e-6*N[i][i];
+    const sol=cholSolve(N, Array.from(g,v=>-v));
+    if(!sol) return null;
+    // Vertrauensbereich fuer H: hoechstens 15 cm je Schritt, und nie unter
+    // o.Hmin (Kamera + 0,3 m). Darunter trifft kein Strahl mehr die Decke,
+    // die Reste fallen weg und die Kosten mit ihnen - ein Scheinminimum.
+    const f=Math.min(1, 0.15/Math.max(1e-12,Math.abs(sol.x[iH])));
+    let step=0; for(let i=0;i<nP;i++){ x[i]+=f*sol.x[i]; step=Math.max(step,Math.abs(f*sol.x[i])); }
+    if(o.Hmin && x[iH]<o.Hmin) x[iH]=o.Hmin;
+    s0=Math.max(1, cost/Math.max(1,nres-nP));
+    cov={L:sol.L};
+    if(step<1e-6 || Math.abs(lastCost-cost)<1e-6*cost) break;
+    lastCost=cost;
+  }
+  const D={t0:D0.t0, dt:D0.dt, ts:D0.ts, brk:D0.brk, knots:[[0,0,0], ...Array.from({length:J-1},(_,j)=>[x[2*K+3*j],x[2*K+3*j+1],x[2*K+3*j+2]])]};
+  const Ninv=cov ? invFromChol(cov.L,nP) : null;
+  const lines=walls.map((w,k)=>{ const th=x[2*k], n=[Math.cos(th),Math.sin(th)], rho=x[2*k+1];
+    return {c:[n[0]*rho,n[1]*rho], u:[-n[1],n[0]], theta:th, rho,
+      sTheta:Ninv ? Math.sqrt(s0*Ninv[2*k][2*k]) : null, sRho:Ninv ? Math.sqrt(s0*Ninv[2*k+1][2*k+1]) : null}; });
+  return {lines, D, H:x[iH], sH:Ninv ? Math.sqrt(s0*Ninv[iH][iH]) : null, s0, phi0:ortho ? x[iPhi] : null, Ninv, x, K};
+}
+
+// Rechte Winkel testen: Hauptrichtung aus vierfachen Winkeln (Kreisstatistik),
+// je Wand |δ| gegen ihre Unsicherheit. Nur was traegt, wird Bedingung.
+function orthoTest(lines,o){
+  let C=0, S=0;
+  for(const l of lines){ const w=1/Math.max(1e-8,(l.sTheta||0.01)**2); C+=w*Math.cos(4*l.theta); S+=w*Math.sin(4*l.theta); }
+  const phi0=Math.atan2(S,C)/4, walls=[];
+  lines.forEach((l,k)=>{
+    const d=wrap90(l.theta-phi0), sd=Math.max(l.sTheta||0, 0.2*Math.PI/180);
+    if(Math.abs(d)<(o.orthoK??SW.orthoK)*sd && Math.abs(d)<(o.orthoMax??SW.orthoMax)*Math.PI/180)
+      walls.push([k, Math.round((l.theta-phi0)/(Math.PI/2))]);
+  });
+  return walls.length>=2 ? {phi0, walls} : null;
+}
+
+// Wandzug aus ausgeglichenen Geraden; zwischen parallelen Nachbarn ein
+// Versprung an der Grenze der gesehenen Stuecke. Zwei Faelle sind KEIN
+// Versprung:
+//  - flacher Knick (170-180°): die Geraden schneiden sich dort, wo die
+//    gesehenen Stuecke aneinanderstossen - dann ist der Schnitt die Ecke;
+//  - gegenueberliegende Waende: jede liegt auf der Kameraseite der anderen
+//    (die Kameras stehen zwischen ihnen). Dazwischen fehlt eine Wand - der
+//    Raum gilt dann nicht als geschlossen ("fehlt" in den Warnungen); die
+//    Behelfswand bleibt, damit die Skizze zeichenbar ist.
+function ringOf(P,walls,lines,o){
+  const out=[], virtual=[], warnings=[], minDeg=o.minDeg??10;
+  let bend=false;
+  const camOf=ids=>ids.reduce((s,k)=>[s[0]+P[k].cam[0]/ids.length, s[1]+P[k].cam[1]/ids.length],[0,0]);
+  const side=(l,p)=>-l.u[1]*(p[0]-l.c[0])+l.u[0]*(p[1]-l.c[1]);
+  for(let i=0;i<walls.length;i++){
+    const j=(i+1)%walls.length, a=lines[i], b=lines[j];
+    out.push(a); virtual.push(false);
+    if(walls.length<2) continue;
+    const cr=Math.abs(a.u[0]*b.u[1]-a.u[1]*b.u[0]);
+    if(cr>=Math.sin(minDeg*Math.PI/180)) continue;
+    const u=a.u, [a0,a1]=extentOf(P,walls[i].ids,u), [b0,b1]=extentOf(P,walls[j].ids,u);
+    let t, sure=true, e1, e2;
+    if(a1<=b0){ t=(a1+b0)/2; e1=a1; e2=b0; }
+    else if(b1<=a0){ t=(b1+a0)/2; e1=b1; e2=a0; }
+    else { e1=Math.max(a0,b0); e2=Math.min(a1,b1); t=(e1+e2)/2; sure=false; }
+    const X=G.intersect(a,b,0.5);
+    if(X){ const tx=X[0]*u[0]+X[1]*u[1]; if(tx>=Math.min(e1,e2)-0.3 && tx<=Math.max(e1,e2)+0.3){ bend=true; continue; } }
+    const ca=camOf(walls[i].ids), cb=camOf(walls[j].ids);
+    const facing=side(a,b.c)*side(a,ca)>0 && side(b,a.c)*side(b,cb)>0;
+    if(facing){
+      // Fehlende Wand zwischen gegenueberliegenden Waenden: Sie liegt dort,
+      // wohin der Schwenk Wand i verlassen und Wand j betreten hat - und
+      // hinter allen Kameras (die stehen im Raum). In der Mitte der gesehenen
+      // Stuecke schnitt sie in Protokoll 1 den ersten Standpunkt ab (6 statt
+      // mindestens 11 m², 15 von 60 Kameras ausserhalb).
+      const along=ids=>{ const n=ids.length, k=Math.max(1, Math.floor(n/3)), pr=id=>{ const p=P[id]; return ((p.a[0]+p.b[0])*u[0]+(p.a[1]+p.b[1])*u[1])/2; };
+        const s=[...ids].sort((x,y)=>x-y), m=arr=>arr.reduce((q,id)=>q+pr(id),0)/arr.length; return m(s.slice(n-k))-m(s.slice(0,k)); };
+      const dir=along(walls[i].ids)-along(walls[j].ids);
+      if(Math.abs(dir)>0.2){
+        const cu=P.map(p=>p.cam[0]*u[0]+p.cam[1]*u[1]);
+        t=dir>0 ? Math.max(a1, b1, Math.max(...cu)+0.3) : Math.min(a0, b0, Math.min(...cu)-0.3);
+      }
+    }
+    const ta=a.c[0]*u[0]+a.c[1]*u[1];
+    out.push({c:[a.c[0]+(t-ta)*u[0], a.c[1]+(t-ta)*u[1]], u:[-u[1],u[0]]}); virtual.push(true);
+    warnings.push(facing ? `Wand zwischen ${i+1} und ${j+1} fehlt (gegenüberliegende Wände) – dort weiter schwenken.`
+      : `Versprung zwischen Wand ${i+1} und ${j+1} ergänzt`+(sure ? '.' : ' – Lage unsicher.'));
+  }
+  // Mit flachem Knick darf buildRoom auch fast parallele Nachbarn schneiden.
+  const room=out.length>=3 ? G.buildRoom(out,bend ? {...o, minDeg:0.5} : o) : {corners:null, warnings:['Weniger als drei Wände erkannt.']};
+  return {corners:room.corners, area:room.area, lines:out, virtual, warnings:[...warnings, ...room.warnings]};
+}
+
+// Exkursion vor einem Relokalisierungssprung (Protokoll 24.10., obs 38-43 -> 44: 0,83 m in 0,29 s).
+// Ein Sprung (waagerecht > jumpDist mit > jumpSpeed) nimmt eine vorausgehende, gerichtete Scheinbewegung
+// zurueck: die Erfassungen davor liefen mit > excSpeed in Gegenrichtung des Sprungs, und nach dem Sprung
+// steht die Kamera wieder nahe am Anfang der Exkursion. Nur dann - ein Standortwechsel (Gehen) hat
+// keine Rueckkehr zum Anfang. Die Erfassungen der Exkursion werden VERWORFEN (mode 'drop'): wohin sie
+// gehoeren, haengt an einer unbelegten Annahme ueber die Hoehe waehrend der Scheinbewegung; verwerfen
+// war im Messaufbau gleich gut oder besser (Gegenpruefung Strang Geometrie). 'const' verschiebt x,z
+// auf die Lage nach dem Sprung, 'lin' anteilig.
+function fixExcursions(obs,o){
+  const vJ=o.jumpSpeed??1.5, dJ=o.jumpDist??0.3, vEx=o.excSpeed??0.3, mode=o.excMode??'drop';
+  const out=obs.slice(), tt=i=>obs[i].t??i, hz=(p,q)=>Math.hypot(q[0]-p[0],q[2]-p[2]);
+  const fixes=[], drop=new Set();
+  for(let k=0;k+1<obs.length;k++){
+    const a=obs[k].ra.o, b=obs[k+1].ra.o, dt=Math.max(1e-3,tt(k+1)-tt(k)), dj=hz(a,b);
+    if(!(dj>dJ && dj/dt>vJ)) continue;
+    let s=k, vmax=0; while(s>0){ const v=hz(obs[s-1].ra.o,obs[s].ra.o)/Math.max(1e-3,tt(s)-tt(s-1)); if(!(v>vEx)) break; vmax=Math.max(vmax,v); s--; }
+    // Sprung deutlich schneller als die Exkursion (Faktor 3): sonst ist es gleichmaessiges Gehen.
+    if(s===k || !(dj/dt>3*vmax)) continue;
+    const c0=obs[s].ra.o, J=[b[0]-a[0], b[2]-a[2]], E=[a[0]-c0[0], a[2]-c0[2]], e=Math.hypot(E[0],E[1]);
+    if(!(e>=0.5*dj && (E[0]*J[0]+E[1]*J[1])/(e*dj)<-0.7 && Math.hypot(b[0]-c0[0],b[2]-c0[2])<0.5*dj)) continue;
+    if(mode==='drop'){ for(let i=s;i<=k;i++) drop.add(i); fixes.push({from:s, to:k, jump:+dj.toFixed(3)}); continue; }
+    const cum=[0];
+    for(let i=s+1;i<=k;i++) cum.push(cum[cum.length-1]+hz(obs[i-1].ra.o,obs[i].ra.o));
+    const tot=cum[cum.length-1]||1;
+    for(let i=s;i<=k;i++){
+      const q=obs[i].ra.o, sh=mode==='const' ? [b[0]-q[0], b[2]-q[2]] : [J[0]*cum[i-s]/tot, J[1]*cum[i-s]/tot];
+      const mv=r=>({o:[r.o[0]+sh[0], r.o[1], r.o[2]+sh[1]], d:r.d});
+      out[i]={...obs[i], ra:mv(obs[i].ra), rb:mv(obs[i].rb)};
+    }
+    fixes.push({from:s, to:k, jump:+dj.toFixed(3)});
+  }
+  return {obs:out, fixes, drop};
+}
+// Gesehene Ausdehnung einer Wand auf ihrer ausgeglichenen Geraden: die aeussersten
+// Endpunkte der zugeordneten Erfassungen (wie die Abdeckungspruefung, aus P des letzten
+// Durchlaufs), als zwei Punkte im Modellrahmen. Was zwischen ihnen und der Ecke liegt, hat
+// niemand gesehen - das Live-Overlay zeigt es.
+const seenOf=(P,ids,l)=>{ let lo=Infinity, hi=-Infinity;
+  for(const id of ids) for(const p of [P[id].a,P[id].b]){ const t=(p[0]-l.c[0])*l.u[0]+(p[1]-l.c[1])*l.u[1]; if(t<lo) lo=t; if(t>hi) hi=t; }
+  return Number.isFinite(lo) ? [[l.c[0]+lo*l.u[0], l.c[1]+lo*l.u[1]], [l.c[0]+hi*l.u[0], l.c[1]+hi*l.u[1]]] : null; };
+G._sweep={fixExcursions, prepSweep, segmentDP, groupHeight, assignWalls, adjust, orthoTest, ringOf, SW};
+G.solveSweep=(obs,opt={})=>{
+  const o={...SW, ...opt};
+  const EX=o.fixExc===false ? {obs, fixes:[], drop:new Set()} : fixExcursions(obs,o);
+  // Verworfene Exkursion: aus der Auswertung (prepSweep ueberspringt), mit eigenem Grund im Ergebnis.
+  obs=EX.drop.size ? EX.obs.map((ob,i)=>EX.drop.has(i) ? {...ob, skip:true} : ob) : EX.obs;
+  const laser=Number.isFinite(opt.H) && opt.H>0;
+  const Hprior=laser ? {H:opt.H, s:0.005} : {H:opt.H0??2.5, s:opt.Hsigma??0.3};
+  let H=Hprior.H;
+  const ts=obs.map((ob,i)=>ob.t??i), t0=Math.min(...ts), t1=Math.max(...ts);
+  const J=Math.max(2, Math.ceil((t1-t0)/o.knotDt)+1);
+  let D={t0, dt:Math.max(1e-6,(t1-t0)/(J-1)), knots:Array.from({length:J},()=>[0,0,0])};
+  // Bezugsbrueche (Anker verloren, Ersatzbezug; Pose-Sprung): zwischen den
+  // Bruechen gleichabstaendig, am Bruch ein Stuetzstellenpaar.
+  const brks=(o.breaks||[]).map(b=>typeof b==='number' ? {t:b} : b).filter(b=>b.t>t0 && b.t<t1).sort((a,b)=>a.t-b.t);
+  if(brks.length){
+    const ts=[t0], edges=[t0, ...brks.map(b=>b.t), t1];
+    for(let s=0;s<edges.length-1;s++){ const a=edges[s], b=edges[s+1], n=Math.max(1, Math.ceil((b-a)/o.knotDt));
+      for(let i=1;i<n;i++) ts.push(a+(b-a)*i/n);
+      ts.push(b); if(s<brks.length) ts.push(b); }
+    let bi=0; const brk=ts.map((x,j)=>{ if(j>0 && x===ts[j-1]){ const b=brks[bi++];
+      return {sT:b.sT??o.breakT, sP:(b.sDeg??o.breakDeg)*Math.PI/180}; } return null; });
+    D={t0, dt:D.dt, ts, brk, knots:ts.map(()=>[0,0,0])};
+  }
+  // Ohne Laser darf H nicht unter die hoechste Kamera + 0,3 m: dort liegt
+  // das Scheinminimum "Decke auf Augenhoehe" (siehe adjust).
+  const Hmin=laser ? 0 : Math.max(...obs.map(ob=>ob.ra.o[1]))+0.3;
+  o.Hmin=Hmin;
+  // Ohne Laser massstabsfreie Reste (siehe adjust); mit Laser ist H fest,
+  // dann spielt es keine Rolle.
+  if(o.scaleInv==null) o.scaleInv=!laser;
+  let res=null, A=null, P=null, s0=1, ortho=null, Hpri=Hprior, Hstuck=false;
+  // Jeder Durchlauf rechnet auf eigenen Groessen; uebernommen wird erst,
+  // wenn er ganz durchgelaufen ist. Bricht ein spaeterer ab, bleibt der
+  // letzte vollstaendige Stand - nie ein Gemisch aus beiden.
+  for(let pass=0; pass<(o.passes??2); pass++){
+    const Pn=prepSweep(obs,H,D,o);
+    if(Pn.length<3) break;
+    const nPts=2*Pn.length, beta=o.beta??(3*Math.log(nPts));
+    // Varianzfaktor schaetzen: einmal mit 1, dann mit dem robusten Mittel
+    // der Abschnittsreste (Varianzkomponentenschaetzung).
+    let An=assignWalls(Pn,s0,beta,o,obs,H);
+    const per=An.walls.map(w=>w.cost/Math.max(1,2*w.ids.length-2)).filter(Number.isFinite).sort((a,b)=>a-b);
+    const s0n=per.length ? Math.max(1, per[per.length>>1]) : 1;
+    if(Math.abs(s0n-s0)/s0>0.25){ s0=s0n; An=assignWalls(Pn,s0,beta,o,obs,H); }
+    if(An.walls.length<3) break;
+    let rn=adjust(obs,Pn,An.walls,o,H,Hpri,D,null);
+    if(!rn) break;
+    // H an der Schranke = aus den Daten nicht bestimmbar (ein Standpunkt,
+    // keine Parallaxe: H skaliert nur den Grundriss). Spaeter Durchlauf:
+    // der vorige Stand bleibt. Erster: H auf dem Vorwissen festhalten und
+    // das sagen - die Form stimmt, der Massstab kommt vom Laser.
+    if(!laser && !Hstuck && rn.H<=Hmin+0.02){
+      if(res) break;
+      Hstuck=true; Hpri={H:Hprior.H, s:0.005};
+      rn=adjust(obs,Pn,An.walls,o,Hprior.H,Hpri,D,null); if(!rn) break;
+    }
+    let on=null;
+    if(o.manhattan!==false){
+      on=orthoTest(rn.lines,o);
+      if(on){ const r2=adjust(obs,Pn,An.walls,o,rn.H,Hpri,rn.D,on); if(r2) rn=r2; }
+    }
+    P=Pn; A=An; res=rn; ortho=on;
+    H=res.H; D=res.D;
+  }
+  if(!res || !A) return {corners:null, closed:false, walls:[], warnings:['Zu wenig Erfassungen.'], H, labels:obs.map(()=>null)};
+  if(Hstuck){ res.sH=Hprior.s;
+    A.warnings=[...(A.warnings||[]), `Raumhöhe aus der Kamera nicht bestimmbar – mit ${Hprior.H.toFixed(2)} m gerechnet, der Maßstab ist unsicher. Laser-Höhe eintragen oder von einem zweiten Standpunkt weiterschwenken.`]; }
+  const ring=ringOf(P,A.walls,res.lines,o);
+  // Geschlossen heisst: Rueckkehr zur ersten Wand UND ein einfacher Umriss,
+  // der sich einmal ganz dreht (Summe der Aussenwinkel ±360°). Eine einzelne
+  // Erfassung auf der Verlaengerung von Wand 1 schliesst so nichts.
+  let turn=null, closed=A.closed;
+  if(ring.corners){
+    const C=ring.corners, n=C.length; turn=0;
+    for(let i=0;i<n;i++){ const a=C[i], b=C[(i+1)%n], c=C[(i+2)%n];
+      turn+=Math.atan2((b[0]-a[0])*(c[1]-b[1])-(b[1]-a[1])*(c[0]-b[0]), (b[0]-a[0])*(c[0]-b[0])+(b[1]-a[1])*(c[1]-b[1])); }
+    turn=turn*180/Math.PI;
+    if(closed && (Math.abs(Math.abs(turn)-360)>45 || ring.warnings.some(w=>/kreuzt|fehlt/.test(w)))) closed=false;
+    // Abdeckung (Wand-Evidenz wie Cabral & Furukawa 2014): Keine echte Wand darf an einem Ende mehr
+    // als gapMax ungesehen bis zu ihrer Ecke laufen. Fehlt eine Wand zwischen NICHT parallelen
+    // Nachbarn, laufen beide ungesehen bis zu ihrem Schnitt - der Gegenueber-Test sieht das nicht.
+    // Im Messaufbau sinken die falschen Abschluesse (App nachgespielt) z. B. Rechteck 25 -> 12 %,
+    // L 28 -> 5 %, verdeckte schraege Wand 48 -> 0 %; richtige bleiben (65 -> 67 %, 37 -> 35 %).
+    if(closed){ let k=0;
+      for(let j=0;j<n && closed;j++){ if(ring.virtual[j]) continue; const w=A.walls[k++]; if(!w) continue;
+        const a=C[j], b=C[(j+1)%n], L=Math.hypot(b[0]-a[0],b[1]-a[1]); if(!(L>1e-6)) continue;
+        const u=[(b[0]-a[0])/L,(b[1]-a[1])/L]; let lo=Infinity, hi=-Infinity;
+        for(const id of w.ids) for(const p of [P[id].a,P[id].b]){ const t=(p[0]-a[0])*u[0]+(p[1]-a[1])*u[1]; if(t<lo) lo=t; if(t>hi) hi=t; }
+        const gap=Math.max(lo, L-hi);
+        if(gap>(o.gapMax??0.8)){ closed=false; ring.warnings.push(`Wand ${k}: zur Ecke hin ${gap.toFixed(1)} m ungesehen – fehlt dort ein Stück? Dorthin schwenken.`); } } }
+  } else closed=false;
+  // Unbestimmte Hoehe: nicht von selbst abschliessen - der Nutzer soll die
+  // Warnung sehen, bevor die Sitzung endet.
+  if(Hstuck) closed=false;
+  const labels=obs.map(()=>'nicht auf Deckenhöhe');
+  P.forEach(p=>{ labels[p.i]='offen'; });
+  A.walls.forEach((w,k)=>w.ids.forEach(id=>{ labels[P[id].i]=k; }));
+  A.outliers.forEach(x=>{ labels[P[x.k].i]='verworfen: '+x.why; });
+  EX.drop.forEach(i=>{ labels[i]='verworfen: Scheinbewegung vor Relokalisierung'; });
+  return {corners:ring.corners, area:ring.area, closed, turn, warnings:[...(A.warnings||[]), ...ring.warnings], virtual:ring.virtual,
+    walls:A.walls.map((w,k)=>({n:w.ids.length, obs:w.ids.map(id=>P[id].i), line:res.lines[k], seen:seenOf(P,w.ids,res.lines[k])})),
+    lines:ring.lines, labels, H:res.H, sH:res.sH, Hfixed:Hstuck, returned:!!A.closed, laser, s0:res.s0, drift:res.D,
+    ortho:ortho ? {phi0:ortho.phi0, walls:ortho.walls.map(w=>w[0])} : null, nSeg:A.nSeg};
+};
+
+// ------------------------------------------------------------ Export
+// IDs wie nextId() in raumaufmass.html: A..Z, AA, AB, ...
+G.idOf=i=>{ let s=''; do{ s=String.fromCharCode(65+i%26)+s; i=Math.floor(i/26)-1; }while(i>=0); return s; };
+// Ecken (Meter, [X,Z]) -> Raumdaten. pts IST die Skizze (kein eigenes
+// sketch-Feld), meas bleibt leer: der Laser kommt danach. Die Laser-Hoehe
+// ist eine echte Messung und geht als hmeas mit.
+G.toRoomData=(corners, hLaserMm)=>{
+  const pts=corners.map((c,i)=>({id:G.idOf(i), x:Math.round(c[0]*1000), y:Math.round(c[1]*1000)}));
+  const walls=pts.map((p,i)=>[p.id, pts[(i+1)%pts.length].id]);
+  const hmeas=Number.isFinite(hLaserMm) && hLaserMm>0
+    ? [{kind:'h', at:pts[0].id, d:Math.round(hLaserMm), sigma:5, on:true}] : [];
+  return {pts, walls, meas:[], openings:[], hmeas, idSeq:pts.length, openSeq:1};
+};
+// Fragment im Format von encodeShare()/parseShareFragment() der App.
+G.shareFragment=(name, data)=>'#raum='+globalThis.LZString.compressToEncodedURIComponent(JSON.stringify({name, data}));
+// Bezugsbrueche (Tracking-Verlust mit Ersatzbezug) nur nutzen, wenn es ohne
+// sie nicht schliesst: bei Spruengen bis ~10 cm kostet die Marke kaum etwas,
+// ab ~40 cm/3° rettet sie Laeufe (Messaufbau Strang Anker, dpAuto).
+// Bezugsrahmen nach einem echten Sprung des Bodenankers (opt.frames: Zeiten;
+// Protokoll 3: 3,5 m und 91° in einem Bild). Jeder Rahmen wird ueber
+// wiedergesehene Waende an den groessten angeschlossen: je zwei nicht parallele
+// Wandgruppen bestimmen Drehung und Versatz exakt (RANSAC ueber alle Paare,
+// Bewertung = Erfassungen in passenden Gruppen; Vorbild Floorplan-Jigsaw,
+// 1812.06677). Mehrdeutig (Rivale mit >= 80 % der Bewertung, > 15 cm oder > 2°
+// daneben) oder ohne Lage: der Rahmen bleibt draussen - eine Teilskizze ist
+// ehrlicher als ein verdrehter Gesamtumriss.
+const rotYp=(a,x,z)=>[Math.cos(a)*x+Math.sin(a)*z, -Math.sin(a)*x+Math.cos(a)*z];
+const xformObs=(ob,psi,tx,tz)=>{ const f=r=>{ const o=rotYp(psi,r.o[0],r.o[2]), d=rotYp(psi,r.d[0],r.d[2]);
+  return {o:[o[0]+tx, r.o[1], o[1]+tz], d:[d[0], r.d[1], d[1]]}; }; return {...ob, ra:f(ob.ra), rb:f(ob.rb)}; };
+function groupsOf(obs,H){
+  const o={...SW, H}, P=prepSweep(obs,H,null,o); if(P.length<4) return [];
+  const A=assignWalls(P,1,3*Math.log(2*P.length),o,obs,H);
+  return A.walls.filter(w=>w.ids.length>=3 && w.u).map(w=>{
+    const cam=w.ids.reduce((s,k)=>[s[0]+P[k].cam[0]/w.ids.length, s[1]+P[k].cam[1]/w.ids.length],[0,0]);
+    let n=[-w.u[1], w.u[0]]; if(n[0]*(cam[0]-w.c[0])+n[1]*(cam[1]-w.c[1])<0) n=[-n[0],-n[1]];   // Normale zur Kamera
+    return {n, rho:n[0]*w.c[0]+n[1]*w.c[1], c:w.c, k:w.ids.length, ang:Math.atan2(n[1],n[0])}; });
+}
+function alignFrames(g0,g1,o={}){
+  const angTol=(o.angTol??4)*Math.PI/180, rhoTol=o.rhoTol??0.15, minCross=Math.sin(30*Math.PI/180), hyps=[];
+  for(let a=0;a<g1.length;a++) for(let b=a+1;b<g1.length;b++){
+    if(Math.abs(g1[a].n[0]*g1[b].n[1]-g1[a].n[1]*g1[b].n[0])<minCross) continue;
+    for(let i=0;i<g0.length;i++) for(let j=0;j<g0.length;j++){ if(i===j) continue;
+      const pa=wrapPi(g0[i].ang-g1[a].ang), pb=wrapPi(g0[j].ang-g1[b].ang);
+      if(Math.abs(wrapPi(pa-pb))>2*angTol) continue;
+      const psi=-wrapPi(pa+wrapPi(pb-pa)/2), N=[g0[i].n, g0[j].n], r=[g0[i].rho-g1[a].rho, g0[j].rho-g1[b].rho];
+      const det=N[0][0]*N[1][1]-N[0][1]*N[1][0]; if(Math.abs(det)<minCross) continue;
+      const t=[(r[0]*N[1][1]-N[0][1]*r[1])/det, (N[0][0]*r[1]-r[0]*N[1][0])/det];
+      if(Math.hypot(t[0],t[1])>(o.maxT??8)) continue;
+      let score=0;
+      for(const g of g1){ const n=rotYp(psi,g.n[0],g.n[1]), c=rotYp(psi,g.c[0],g.c[1]), cc=[c[0]+t[0],c[1]+t[1]];
+        if(g0.some(h=>Math.acos(Math.min(1,n[0]*h.n[0]+n[1]*h.n[1]))<angTol && Math.abs(h.n[0]*cc[0]+h.n[1]*cc[1]-h.rho)<rhoTol)) score+=g.k; }
+      hyps.push({psi,t,score}); } }
+  if(!hyps.length) return null;
+  hyps.sort((p,q)=>q.score-p.score); const b=hyps[0];
+  const rival=hyps.some(h=>(Math.hypot(h.t[0]-b.t[0],h.t[1]-b.t[1])>0.15 || Math.abs(wrapPi(h.psi-b.psi))>2*Math.PI/180) && h.score>=0.8*b.score);
+  return {...b, ambiguous:rival};
+}
+// Anschluss gegen den am Anker gemessenen Sprung pruefen (nur benachbarte Rahmen). J[b-1] = Rahmengrenze b:
+// {psi, t} = Lage von Rahmen b in Rahmen b-1 (vorzeichenrichtig, aus beiden Ankerposen), oder nur die Betraege
+// {dpsi, d} (so stehen sie in alten Protokollen). Protokoll 3: alignFrames schloss live mit 119,8°/2,1 m und
+// -22,3°/2,7 m an, gemessen waren 91,5°/3,5 m. Liefert den Grund der Ablehnung oder null.
+const jumpMismatch=(al,k,ref,J,o={})=>{
+  if(!J || Math.abs(k-ref)!==1) return null;
+  const m=J[Math.max(k,ref)-1]; if(!m) return null;
+  const tolP=(o.tolDeg??8)*Math.PI/180, tolT=o.tolT??0.5, d=Math.hypot(al.t[0],al.t[1]);
+  let ok, soll;
+  if(Number.isFinite(m.psi) && m.t){
+    const r=rotYp(-m.psi, m.t[0], m.t[1]), e=k>ref ? {psi:m.psi, t:m.t} : {psi:-m.psi, t:[-r[0],-r[1]]};
+    ok=Math.abs(wrapPi(al.psi-e.psi))<tolP && Math.hypot(al.t[0]-e.t[0], al.t[1]-e.t[1])<tolT;
+    soll=`${Math.round(e.psi*180/Math.PI)}°/${Math.hypot(e.t[0],e.t[1]).toFixed(2)} m`;
+  } else { ok=Math.abs(Math.abs(wrapPi(al.psi))-m.dpsi)<tolP && Math.abs(d-m.d)<tolT;
+    soll=`±${Math.round(m.dpsi*180/Math.PI)}°/${m.d.toFixed(2)} m`; }
+  return ok ? null : `${Math.round(al.psi*180/Math.PI)}°/${d.toFixed(2)} m, gemessen ${soll}`;
+};
+G.solveSweepAuto=(obs,opt={})=>{
+  const {breaks, frames, frameJumps, ...o0}=opt;
+  let use=obs, frameXf=null; const out=[], notes=[];
+  if(frames && frames.length){
+    const fs=[...frames].sort((a,b)=>a-b), fOf=t=>fs.filter(x=>x<=t).length, idx=new Map();
+    obs.forEach((ob,i)=>{ const k=fOf(ob.t??i); if(!idx.has(k)) idx.set(k,[]); idx.get(k).push(i); });
+    let ref=null; for(const [k,v] of idx) if(ref==null || v.length>idx.get(ref).length) ref=k;
+    // Je Rahmen k (0 = vor dem ersten Sprung): Lage im Modellrahmen, null = nicht angeschlossen.
+    frameXf={n:fs.length, ref, xf:Array.from({length:fs.length+1},(_,k)=>k===ref ? {psi:0, t:[0,0]} : null)};
+    const H=Number.isFinite(opt.H) && opt.H>0 ? opt.H : (opt.H0??2.5);
+    const g0=groupsOf(idx.get(ref).map(i=>obs[i]),H);
+    use=obs.slice();
+    for(const [k,v] of idx){ if(k===ref) continue;
+      const g1=groupsOf(v.map(i=>obs[i]),H), al=g0.length>=2 && g1.length>=2 ? alignFrames(g0,g1) : null;
+      const bad=al && !al.ambiguous ? jumpMismatch(al,k,ref,frameJumps) : null;
+      if(al && !al.ambiguous && !bad){ v.forEach(i=>{ use[i]=xformObs(obs[i],al.psi,al.t[0],al.t[1]); }); frameXf.xf[k]={psi:al.psi, t:al.t};
+        notes.push(`Teil nach einem Sprung des Bodenbezugs angeschlossen (${Math.round(al.psi*180/Math.PI)}°, ${Math.hypot(al.t[0],al.t[1]).toFixed(2)} m).`); }
+      else { v.forEach(i=>{ use[i]={...obs[i], skip:true}; out.push(i); });
+        notes.push(bad ? `Teil nach einem Sprung des Bodenbezugs (${v.length} Kanten): Anschluss ${bad} – nicht verwendet.`
+          : `Teil nach einem Sprung des Bodenbezugs (${v.length} Kanten) ließ sich nicht sicher anschließen – nicht verwendet.`); }
+    }
+  }
+  const r=G.solveSweep(use,o0);
+  if(frameXf) r.frameXf=frameXf;
+  if(out.length && r.labels) out.forEach(i=>{ r.labels[i]='verworfen: anderer Bezug (nicht angeschlossen)'; });
+  if(notes.length) r.warnings=[...notes, ...(r.warnings||[])];
+  return r;
+};
+
+// ------------------------------------------------------- Modell im Bild
+// Modellrahmen -> Rahmen der Kamera JETZT. Die Auswertung rechnet driftkorrigiert
+// (prepSweep: applyDrift(gehoben, driftAt(D,t))) und nach Bezugsspruengen im Rahmen mit
+// den meisten Erfassungen (solveSweepAuto: xformObs). Die Kamera liefert Posen im Rahmen
+// k (= Zahl der Spruenge bis jetzt) ohne beides. Umkehrung: erst die Drift (an t; nach
+// der letzten Erfassung bleibt sie stehen, knotAt klemmt), dann der Rahmen. Protokoll 3:
+// Drift am Ende 0,31 m und 1,9° - ohne Umkehrung laege das Modell so weit neben der
+// Kante. null: Rahmen k (noch) nicht angeschlossen oder Ergebnis aelter als der Sprung.
+G.modelToLive=(sol,t,k=0)=>{
+  const fx=sol && sol.frameXf; let xf=null;
+  if(fx){ if(k>fx.n) return null; xf=fx.xf[k]; if(!xf) return null; }
+  else if(k>0) return null;
+  const q=driftAt(sol.drift,t), c=Math.cos(q[2]), s=Math.sin(q[2]);
+  return p=>{ const x=p[0]-q[0], z=p[1]-q[1], r=[c*x+s*z, -s*x+c*z];
+    return xf ? rotYp(-xf.psi, r[0]-xf.t[0], r[1]-xf.t[1]) : r; };
+};
+// Overlay-Geometrie aus einem Ergebnis von solveSweep (Grundriss, Zielrahmen ueber map):
+// je Ringzeile j die Strecke corners[j] -> corners[j+1] (wie buildRoom), davon das
+// gesehene Stueck und die ungesehenen Luecken zur Ecke (Laenge wie in der
+// Abdeckungspruefung), dazu die Ecken fuer die Senkrechten. Wand k -> Zeile wie rowOf in
+// computeResult (ergaenzte Zeilen uebersprungen). Ohne Rueckkehr zur ersten Wand
+// (returned) ist corners[0] nur der Schnitt der letzten mit der ersten Wand: Zeile 0
+// beginnt dann am gesehenen Anfang, die letzte echte Zeile endet am gesehenen Ende,
+// ergaenzte Zeilen dahinter und ihre Ecken entfallen. Ohne Umriss: nur Gesehenes.
+G.overlayModel=(sol,map=p=>p,o={})=>{
+  const minGap=o.minGap??0.05, rows=[], verts=[];
+  const lines=sol.lines||[], virt=sol.virtual||[], C=sol.corners, n=lines.length;
+  if(!C || C.length!==n || n<3){
+    (sol.walls||[]).forEach((w,k)=>{ if(w.seen) rows.push({k, row:-1, virtual:false, sRho:w.line ? w.line.sRho : null,
+      span:w.seen.map(map), seen:w.seen.map(map), gaps:[]}); });
+    return {rows, verts};
+  }
+  const wallOf=[]; let kk=0; for(let j=0;j<n;j++) wallOf.push(virt[j] ? -1 : kk++);
+  let jl=n-1; while(jl>0 && virt[jl]) jl--;
+  const open=!sol.returned;
+  const far=(seen,g)=>Math.hypot(seen[0][0]-g[0],seen[0][1]-g[1])>Math.hypot(seen[1][0]-g[0],seen[1][1]-g[1]) ? seen[0] : seen[1];
+  for(let j=0;j<n;j++){
+    if(open && j>jl) continue;
+    const k=wallOf[j], w=k>=0 ? sol.walls[k] : null, seen=w && w.seen;
+    let a=C[j], b=C[(j+1)%n];
+    if(open && seen){ if(j===0) a=far(seen,b); if(j===jl) b=far(seen,a); }
+    const row={k, row:j, virtual:!!virt[j], sRho:w && w.line ? w.line.sRho : null, span:[map(a),map(b)], seen:null, gaps:[]};
+    const L=Math.hypot(b[0]-a[0], b[1]-a[1]);
+    if(seen && L>1e-6){
+      const e=[(b[0]-a[0])/L, (b[1]-a[1])/L], at=t=>map([a[0]+t*e[0], a[1]+t*e[1]]);
+      const t0=(seen[0][0]-a[0])*e[0]+(seen[0][1]-a[1])*e[1], t1=(seen[1][0]-a[0])*e[0]+(seen[1][1]-a[1])*e[1];
+      const lo=Math.max(0,Math.min(t0,t1)), hi=Math.min(L,Math.max(t0,t1));
+      if(hi>lo){ row.seen=[at(lo),at(hi)]; if(lo>minGap) row.gaps.push([at(0),at(lo),lo]); if(L-hi>minGap) row.gaps.push([at(hi),at(L),L-hi]); }
+      else row.gaps.push([at(0),at(L),L]);
+    }
+    rows.push(row);
+  }
+  for(let j=0;j<n;j++){ if(open && (j===0 || j>jl)) continue;
+    verts.push({p:map(C[j]), row:j, virtual:!!(virt[j] || virt[(j-1+n)%n])}); }
+  return {rows, verts};
+};
+// Strecke in NDC auf das Bild [-m, m]² kappen (Liang-Barsky). null: ganz draussen.
+G.clipNdc=(a,b,m=1)=>{
+  let t0=0, t1=1; const dx=b[0]-a[0], dy=b[1]-a[1];
+  for(const [p,q] of [[-dx,a[0]+m],[dx,m-a[0]],[-dy,a[1]+m],[dy,m-a[1]]]){
+    if(p===0){ if(q<0) return null; continue; }
+    const r=q/p;
+    if(p<0){ if(r>t1) return null; if(r>t0) t0=r; } else { if(r<t0) return null; if(r<t1) t1=r; }
+  }
+  return [[a[0]+t0*dx, a[1]+t0*dy], [a[0]+t1*dx, a[1]+t1*dy]];
+};
+
+globalThis.RAUMSKIZZE=G;
+})();
+</script>
+
+<script id="app">
+// Oberflaeche, Stufe 0 und die WebXR-Sitzung. Gerechnet wird im geo-Block;
+// hier wird gemessen, gezeichnet und protokolliert.
+(function(){
+'use strict';
+const G=globalThis.RAUMSKIZZE;
+const $=id=>document.getElementById(id);
+const Q=new URLSearchParams(location.search);
+// Ziel des Links und lange Seite des verkleinerten Kamerabilds, beides per
+// URL ueberschreibbar: ?app=https://…/&ds=480
+const APP_URL=(Q.get('app') || 'https://raumaufmass.irazari-te.ch/').replace(/#.*$/,'');
+const DS=Math.max(240, Math.min(1280, Number(Q.get('ds'))||640));
+
+const T0=performance.now();
+const now=()=>+((performance.now()-T0)/1000).toFixed(3);
+// Alles, was die Auswertung braucht: je Durchlauf Sitzung, Boden, Ereignisse
+// (mit Tipp-Zeiten), Erfassungen, Zeiten, Ebenen, Tracking, Ankerweg.
+const LOG={probe:'raumskizze-probe', started:new Date().toISOString(), url:location.href,
+  ua:navigator.userAgent, ds:DS, caps:{}, runs:[], ...freshRun()};
+const ev=(type,data={})=>LOG.events.push({t:now(), type, ...data});
+const median=a=>{ if(!a.length) return null; const s=[...a].sort((p,q)=>p-q); return s[s.length>>1]; };
+const ms=x=>x==null ? '–' : x.toFixed(1)+' ms';
+const el=(tag, text, cls)=>{ const e=document.createElement(tag); if(text!=null) e.textContent=text; if(cls) e.className=cls; return e; };
+
+// ------------------------------------------------ Stufe 0, ohne Sitzung
+function capRow(name, val, cls=''){
+  const tr=el('tr'), a=el('td', name, 'l'), b=el('td', val, cls);
+  tr.append(a,b); $('caps').appendChild(tr);
+  LOG.caps[name]=val;
+}
+async function stage0(){
+  let browser=navigator.userAgent;
+  try{
+    const h=navigator.userAgentData && await navigator.userAgentData.getHighEntropyValues(['fullVersionList','platformVersion','model']);
+    if(h){
+      const c=(h.fullVersionList||[]).find(b=>/Chrome|Chromium|Samsung/i.test(b.brand));
+      browser=[c ? `${c.brand} ${c.version}` : null,
+               h.platform ? `${h.platform} ${h.platformVersion||''}`.trim() : null,
+               h.model || null].filter(Boolean).join(' · ');
+    }
+  }catch(e){}
+  capRow('Browser', browser);
+  capRow('Sicherer Kontext', isSecureContext ? 'ja' : 'nein – https oder localhost nötig', isSecureContext ? 'ok' : 'bad');
+  const xr=!!navigator.xr;
+  capRow('WebXR', xr ? 'vorhanden' : 'fehlt', xr ? 'ok' : 'bad');
+  let ar=false;
+  if(xr){ try{ ar=await navigator.xr.isSessionSupported('immersive-ar'); }catch(e){ ar=false; } }
+  capRow('immersive-ar (ARCore)', ar ? 'unterstützt' : 'nicht unterstützt', ar ? 'ok' : 'bad');
+  try{
+    const c=document.createElement('canvas').getContext('webgl2');
+    capRow('WebGL2', c ? String(c.getParameter(c.RENDERER)) : 'fehlt', c ? 'ok' : 'bad');
+  }catch(e){ capRow('WebGL2', 'Fehler: '+e.message, 'bad'); }
+  try{
+    const ad=navigator.gpu && await navigator.gpu.requestAdapter();
+    const i=ad && ad.info;
+    capRow('WebGPU', ad ? ([i&&i.vendor, i&&i.architecture, i&&i.description].filter(Boolean).join(' · ') || 'vorhanden') : 'fehlt', ad ? 'ok' : 'warn');
+  }catch(e){ capRow('WebGPU', 'Fehler: '+e.message, 'warn'); }
+  capRow('Bildschirm', `${innerWidth}×${innerHeight} CSS-px · DPR ${devicePixelRatio}`);
+  capRow('Kamerabild verkleinert auf', `${DS} px lange Seite`);
+  const okStart=isSecureContext && ar;
+  $('start').disabled=!okStart;
+  $('startHint').textContent=okStart ? 'Bereit. Was die Sitzung kann, steht dann oben im Kamerabild.'
+    : !isSecureContext ? 'Seite über https oder localhost öffnen (USB-Weiterleitung über chrome://inspect).'
+    : 'Dieser Browser bietet hier kein immersive-ar.';
+}
+
+// ------------------------------------------------------------ Zustand
+const S={session:null, gl:null, binding:null, ref:null, hit:null, gpu:null,
+  phase:'boden', H:null, anchor:null, floorY:null, floorCand:null, floorReq:false,
+  capReq:false, flipY:false, walls:[[]], live:null, frame:0, camSize:null, small:null,
+  planes:null, depth:null, track:'–', trackLost:false, lastStats:0, fps:[], lastT:0,
+  ctx:null, warned:{}, Tlast:null, subst:false, anchorPrev:null, reanchorBusy:false, reanchorAt:0, breaks:[], frames:[], frameJumps:[], jumpHold:false, anchorT:0, prevCam:null, camV:0,
+  lastView:null, lastCamH:null, TlastOf:null, gap:null, substBad:false};
+
+// ---------------------------------------------------------- GPU-Lesen
+// Ein Vollbild-Viereck, das die Kameratextur in ein kleines Bild zeichnet.
+// Gelesen wird nur das kleine Bild - die volle Kameratextur kostet sonst
+// pro Bild mehrere MB Rueckweg. Zusaetzlich alle 30 Bilder ein 256²-Ausschnitt
+// direkt aus der Kameratextur: das ist die Stufe-0-Messung fuer readPixels.
+function makeGpu(gl){
+  const sh=(type,src)=>{
+    const s=gl.createShader(type); gl.shaderSource(s,src); gl.compileShader(s);
+    if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    return s;
+  };
+  const prog=gl.createProgram();
+  gl.attachShader(prog, sh(gl.VERTEX_SHADER, 'attribute vec2 p;varying vec2 uv;void main(){uv=p*0.5+0.5;gl_Position=vec4(p,0.0,1.0);}'));
+  gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, 'precision mediump float;uniform sampler2D t;varying vec2 uv;void main(){gl_FragColor=texture2D(t,uv);}'));
+  gl.linkProgram(prog);
+  if(!gl.getProgramParameter(prog,gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+  const buf=gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+  return {prog, buf, loc:gl.getAttribLocation(prog,'p'), uT:gl.getUniformLocation(prog,'t'),
+          fbo:gl.createFramebuffer(), tex:null, w:0, h:0, px:null, camFbo:gl.createFramebuffer(), roi:null};
+}
+function readSmall(gl, P, camTex, W, H){
+  const f=Math.min(1, DS/Math.max(W,H));
+  const w=Math.max(16, Math.round(W*f)), h=Math.max(16, Math.round(H*f));
+  if(!P.tex || P.w!==w || P.h!==h){
+    if(P.tex) gl.deleteTexture(P.tex);
+    P.tex=gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, P.tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, P.fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, P.tex, 0);
+    P.w=w; P.h=h; P.px=new Uint8Array(w*h*4);
+  }
+  gl.bindFramebuffer(gl.FRAMEBUFFER, P.fbo);
+  gl.viewport(0, 0, w, h);
+  gl.disable(gl.BLEND); gl.disable(gl.DEPTH_TEST); gl.disable(gl.SCISSOR_TEST); gl.disable(gl.CULL_FACE);
+  gl.useProgram(P.prog);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, camTex);
+  gl.uniform1i(P.uT, 0);
+  gl.bindBuffer(gl.ARRAY_BUFFER, P.buf);
+  gl.enableVertexAttribArray(P.loc);
+  gl.vertexAttribPointer(P.loc, 2, gl.FLOAT, false, 0, 0);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, P.px);
+  // Die Kameratextur gilt nur in diesem Bild - nicht gebunden liegen lassen.
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  return {w, h, px:P.px};
+}
+function readRoi(gl, P, camTex, W, H, size=256){
+  gl.bindFramebuffer(gl.FRAMEBUFFER, P.camFbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, camTex, 0);
+  const st=gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  let res={status:st};
+  if(st===gl.FRAMEBUFFER_COMPLETE){
+    const s=Math.min(size, W, H), x=Math.floor((W-s)/2), y=Math.floor((H-s)/2);
+    if(!P.roi || P.roi.length!==s*s*4) P.roi=new Uint8Array(s*s*4);
+    gl.readPixels(x, y, s, s, gl.RGBA, gl.UNSIGNED_BYTE, P.roi);
+    // Nur Farbkanaele: Alpha ist bei der Kamerakopie immer 255 und machte
+    // ein schwarzes Bild sonst "nicht leer".
+    let sum=0, max=0, n=0, alpha=0;
+    for(let i=0;i<P.roi.length;i+=4*97){
+      const l=0.299*P.roi[i]+0.587*P.roi[i+1]+0.114*P.roi[i+2];
+      sum+=l; if(l>max) max=l; n++; alpha=P.roi[i+3];
+    }
+    res={status:st, size:s, mean:n ? sum/n : 0, max, alpha, empty:max<4};
+  }
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, null, 0);
+  return res;
+}
+
+// -------------------------------------------------------- Kante finden
+// Einrasten in der Bildmitte (= Fadenkreuz = NDC 0,0) - der ganze Weg steht
+// in G.captureEdge, damit der Selbsttest genau ihn prueft.
+function snapCenter(img, view, camTo){
+  const g=G.luma(img.px, img.w*img.h);
+  const t0=performance.now();
+  const L=G.captureEdge(g, img.w, img.h, view.projectionMatrix, camTo, S.flipY);
+  LOG.timings.snap.push(+(performance.now()-t0).toFixed(2));
+  if(LOG.timings.snap.length>2000) LOG.timings.snap.shift();
+  return L;
+}
+
+function capture(view, camTo){
+  S.capReq=false;
+  const L=S.live, tap=S.capReqT;
+  if(!L){ hint('Keine Kante gefunden – Fadenkreuz näher an die Kante.', 'warn'); ev('erfassen-ohne-kante'); return; }
+  const proj=view.projectionMatrix;
+  // Endpunkte, die nicht auf Deckenhoehe zu heben sind, kuerzt obsFromNdc
+  // zum Fadenkreuz hin; abgelehnt wird nur, wenn schon dort nichts liegt.
+  const ob=G.obsFromNdc(proj, camTo, L.A, L.B, S.H, 12);
+  const lifted=ob && G.liftObs(ob, S.H);
+  if(!lifted){ hint('Diese Kante liegt nicht über Augenhöhe oder weiter als 12 m – höher zielen, auf die Decke.', 'warn'); ev('erfassen-unter-decke'); return; }
+  const len=Math.hypot(lifted[1][0]-lifted[0][0], lifted[1][1]-lifted[0][1]);
+  const mid=[(lifted[0][0]+lifted[1][0])/2, (lifted[0][1]+lifted[1][1])/2];
+  const dist=Math.hypot(mid[0]-camTo[12], mid[1]-camTo[14]);
+  Object.assign(ob, {wall:S.walls.length-1, t:now(), tTap:tap, z:+L.z.toFixed(1), n:L.n, frac:+L.frac.toFixed(2),
+    ndc:[L.A, L.B], cam:[camTo[12], camTo[13], camTo[14]], len:+len.toFixed(3), dist:+dist.toFixed(2),
+    good:L.good, flipY:S.flipY});
+  const cur=S.walls[S.walls.length-1];
+  cur.push(ob);
+  LOG.obs.push(ob);
+  if(navigator.vibrate) navigator.vibrate(25);
+  let msg=L.good ? `Kante erfasst: ${len.toFixed(2)} m sichtbar, ${dist.toFixed(1)} m entfernt.`
+                 : 'Kante erfasst, aber schwach – besser noch einmal aus anderem Abstand.';
+  let cls=L.good ? '' : 'warn';
+  // Dieselbe Wand als neue Wand erfasst? Dann gaebe es zwischen den beiden
+  // keine Ecke, und der ganze Raum waere nicht zu schliessen.
+  const n=S.walls.length;
+  if(n>=2 && S.walls[n-2].length){
+    const a=G.wallLine(S.walls[n-2], S.H), b=G.wallLine(cur, S.H);
+    if(a && b){
+      const ang=Math.acos(Math.min(1, Math.abs(a.u[0]*b.u[0]+a.u[1]*b.u[1])))*180/Math.PI;
+      const off=Math.abs(-(b.c[0]-a.c[0])*a.u[1]+(b.c[1]-a.c[1])*a.u[0]);
+      if(ang<10 && off<0.3){
+        msg=`Gleiche Wand wie Wand ${n-1}? Dann „Rückgängig“ und die Kante ohne „Nächste Wand“ erfassen.`;
+        cls='warn'; ev('gleiche-wand', {wand:n, ang:+ang.toFixed(1), off:+off.toFixed(2)});
+      }
+    }
+  }
+  hint(msg, cls);
+  saveLog();
+  updateWallInfo();
+}
+
+// ------------------------------------------------------- Schwenk-Modus
+// Jede sichere Kante (z >= 15) unter dem Fadenkreuz wird erfasst, wenn
+//  - sie im vorigen verarbeiteten Bild dieselbe Linie ergab (2 aus 2: ein
+//    einzelnes Flackern auf eine Leuchtenkante zaehlt nicht),
+//  - sich Kamera oder Blick seit der letzten Erfassung merklich bewegt haben
+//    (hoechstens viermal je Sekunde),
+//  - nicht zu schnell geschwenkt wird (verwischte Bilder, Pose unsicher) und
+//  - das Tracking nicht gerade erst zurueckgekehrt ist (0,6 s Beruhigung).
+// Ausgewertet wird im Hintergrund (solveSweep im Worker, derselbe geo-Code
+// wie im Selbsttest): Segmentierung, Ausgleichung mit Drift und Hoehe,
+// Abschluss. Die Raumhoehe vom Laser ist nur noch Vorwissen - ohne sie
+// kommt sie aus der Parallaxe.
+const AUTO_MAX_MOVE=0.5;   // m/s Kamera im Bezug: schneller gleitet eher die Pose als der Nutzer
+const AUTO_MIN_DT=0.25, AUTO_MIN_MOVE=0.05, AUTO_MIN_TURN=3, AUTO_MAX_SPEED=60, SETTLE=0.6, COUNTDOWN=5, COUNTDOWN_JOG=10;
+const camDir=m=>[-m[8], -m[9], -m[10]];
+// Hoehe fuer alles Live: Laser, sonst die letzte Schaetzung, sonst 2,55 m.
+// Ohne Laser nie unter Kamera + 0,3 m (camY = Kamerahoehe ueber dem Boden):
+// darunter trifft kein Strahl mehr die Decke, nichts wird erfasst - und ohne
+// Erfassung gibt es keine neue Schaetzung, die das wieder aufhebt.
+const Hnow=camY=>{
+  if(S.H) return S.H;
+  const h=S.sol && Number.isFinite(S.sol.H) ? S.sol.H : 2.55;
+  return camY!=null ? Math.max(h, camY+0.3) : h;
+};
+// Darf der Abschluss-Countdown laufen? Eine Regel fuer alle Stellen.
+const canArm=()=>S.auto && S.phase==='waende' && !S.paused && !S.closeDone && !S.breaks.length && !!(S.sol && S.sol.closed);
+// Darf jetzt erfasst werden? Liefert den Grund, wenn nicht - fuer die Farbe
+// der Live-Linie und den Hinweis.
+function autoBlock(){
+  if(S.paused) return 'Pause';
+  if(S.closeT!=null) return 'Abschluss';
+  if(S.speed>AUTO_MAX_SPEED) return 'zu schnell';
+  if(now()<(S.settleUntil||0)) return 'Tracking beruhigt sich';
+  if(S.camV>AUTO_MAX_MOVE) return 'Kamera gleitet';
+  return null;
+}
+function autoCapture(view, camTo){
+  const L=S.live, t=now();
+  S.liveConfirmed=false;
+  if(!L || !L.good){ S.prevLive=null; return; }
+  const H=Hnow(camTo[13]), proj=view.projectionMatrix;
+  if(!S.H && S.sol && Number.isFinite(S.sol.H) && S.sol.H<camTo[13]+0.3 && !S.warned.hClamp){
+    S.warned.hClamp=true; ev('höhe-geklemmt', {H:+S.sol.H.toFixed(3), camY:+camTo[13].toFixed(3)}); }
+  // Decke kaum ueber der Kamera: die Hebung verstaerkt jeden Fehler um d/Δ;
+  // unter 0,2 m nichts erfassen (und bei Δ <= 0 erreichte ein Strahl nach
+  // unten - Boden, Laminat - sonst die Ebene).
+  if(H-camTo[13]<0.2){ S.prevLive=null; if(!S.warned.deckeNah){ S.warned.deckeNah=true; ev('decke-zu-nah', {delta:+(H-camTo[13]).toFixed(2)}); } return; }
+  const ob=G.obsFromNdc(proj, camTo, L.A, L.B, H, 12);
+  const seg=ob && G.liftObs(ob, H);
+  if(!seg){ S.prevLive=null; return; }
+  // Schleifender Blick: liegt die gehobene Strecke fast in Blickrichtung,
+  // ist ihre Lage quer zur Wand unbestimmt (Protokoll 1, Erfassung 0 und 37:
+  // 6,9 bzw. 3,3 m lang, verworfen). Zugeordnete Kanten lagen ueber 26°.
+  { const mx=(seg[0][0]+seg[1][0])/2-camTo[12], mz=(seg[0][1]+seg[1][1])/2-camTo[14], ux=seg[1][0]-seg[0][0], uz=seg[1][1]-seg[0][1];
+    if(Math.abs(mx*uz-mz*ux)<Math.sin(20*Math.PI/180)*Math.hypot(mx,mz)*Math.hypot(ux,uz)){ S.prevLive=null; return; } }
+  // 2 aus 2: dieselbe Gerade wie im vorigen verarbeiteten Bild?
+  const pl=S.prevLive; S.prevLive={seg, t};
+  if(!pl || t-pl.t>0.5) return;
+  const u=[seg[1][0]-seg[0][0], seg[1][1]-seg[0][1]], ul=Math.hypot(u[0],u[1])||1;
+  const v=[pl.seg[1][0]-pl.seg[0][0], pl.seg[1][1]-pl.seg[0][1]], vl=Math.hypot(v[0],v[1])||1;
+  const ang=Math.acos(Math.min(1, Math.abs((u[0]*v[0]+u[1]*v[1])/(ul*vl))))*180/Math.PI;
+  const m=[(seg[0][0]+seg[1][0])/2, (seg[0][1]+seg[1][1])/2];
+  const off=Math.abs(((m[0]-pl.seg[0][0])*v[1]-(m[1]-pl.seg[0][1])*v[0])/vl);
+  const range=Math.hypot(m[0]-camTo[12], m[1]-camTo[14]);
+  if(ang>3 || off>0.05+0.02*range) return;
+  S.liveConfirmed=true;
+  if(autoBlock()) return;
+  const pos=[camTo[12], camTo[13], camTo[14]], dir=camDir(camTo), la=S.lastAuto;
+  let moved=Infinity, turn=Infinity;
+  if(la){
+    if(t-la.t<AUTO_MIN_DT) return;
+    moved=Math.hypot(pos[0]-la.pos[0], pos[1]-la.pos[1], pos[2]-la.pos[2]);
+    turn=Math.acos(Math.min(1, dir[0]*la.dir[0]+dir[1]*la.dir[1]+dir[2]*la.dir[2]))*180/Math.PI;
+    if(moved<AUTO_MIN_MOVE && turn<AUTO_MIN_TURN) return;
+  }
+  S.lastAuto={t, pos, dir};
+  Object.assign(ob, {auto:true, t, z:+L.z.toFixed(1), n:L.n, frac:+L.frac.toFixed(2), ndc:[L.A, L.B], cam:pos,
+    len:+Math.hypot(seg[1][0]-seg[0][0], seg[1][1]-seg[0][1]).toFixed(3), dist:+range.toFixed(2), good:true,
+    flipY:S.flipY, speed:+(S.speed||0).toFixed(0), moved:Number.isFinite(moved) ? +moved.toFixed(3) : null,
+    turn:Number.isFinite(turn) ? +turn.toFixed(1) : null, Hlive:+H.toFixed(3)});
+  S.pool.push(ob);
+  LOG.obs.push(ob);
+  if(navigator.vibrate) navigator.vibrate(8);
+  requestSolve();
+  if(S.pool.length%10===0) saveLog();
+  updateWallInfo();
+}
+
+// Auswertung im Hintergrund. Der Worker bekommt den Quelltext des
+// geo-Blocks - dieselbe Rechnung wie der Selbsttest. Laeuft gerade eine
+// Auswertung, wird nach ihrem Ende einmal neu gerechnet (nie zwei zugleich).
+// Bezugsbrueche gehen (noch) NICHT an die Auswertung: ungemessen kostet
+// die Marke bei kleinen Spruengen 2-4 Punkte Topologie und bringt zusaetzliche
+// falsche Abschluesse (Gegenpruefung Strang Anker, Messaufbau grid5/g7). Erst
+// mit gemessener Sprunggroesse (relokalisiert, yMin der neuen Bodenebene)
+// sinnvoll; bis dahin sperrt ein Bruch nur den Auto-Abschluss (canArm).
+// Echte Spruenge des Bodenankers gehen als Rahmengrenzen mit (opt.frames).
+function solveOpt(){ const o=S.H ? {H:S.H} : {H0:2.55, Hsigma:0.35}; if(S.frames && S.frames.length){ o.frames=S.frames.slice(); o.frameJumps=S.frameJumps.slice(); } return o; }
+function slim(ob){ return {ra:ob.ra, rb:ob.rb, t:ob.t}; }
+function makeSolver(){
+  try{
+    const src=$('geo').textContent+`
+onmessage=e=>{ const {id,obs,opt}=e.data; let r=null, err=null;
+  try{ r=RAUMSKIZZE.solveSweepAuto(obs,opt); }catch(x){ err=String(x && x.message || x); }
+  postMessage({id,r,err}); };`;
+    const w=new Worker(URL.createObjectURL(new Blob([src], {type:'text/javascript'})));
+    w.onmessage=e=>onSolved(e.data);
+    w.onerror=e=>{ ev('worker-fehler', {msg:String(e.message||e)}); S.worker=null; S.solveBusy=false; };
+    return w;
+  }catch(e){ ev('worker-fehlt', {msg:String(e && e.message || e)}); return null; }
+}
+function requestSolve(){
+  if(S.solveBusy){ S.solveDirty=true; return; }
+  S.solveBusy=true; S.solveDirty=false; S.solveId=(S.solveId||0)+1;
+  const msg={id:S.solveId, obs:S.pool.map(slim), opt:solveOpt(), n:S.pool.length};
+  S.solveSent=performance.now();
+  if(S.worker) S.worker.postMessage(msg);
+  else setTimeout(()=>{ let r=null, err=null; try{ r=G.solveSweepAuto(msg.obs, msg.opt); }catch(x){ err=String(x); } onSolved({id:msg.id, r, err}); }, 0);
+}
+function onSolved({id, r, err}){
+  // Antwort auf eine Anfrage eines frueheren Durchlaufs: nichts anfassen.
+  if(id!==S.solveId) return;
+  S.solveBusy=false;
+  if(err) ev('auswertung-fehler', {msg:err});
+  if(r){
+    const ms=performance.now()-S.solveSent;
+    LOG.timings.solve.push(+ms.toFixed(1)); if(LOG.timings.solve.length>2000) LOG.timings.solve.shift();
+    applySolution(r);
+  }
+  if(S.solveDirty) requestSolve();
+}
+function applySolution(r){
+  const wasClosed=S.sol && S.sol.closed;
+  S.sol=r;
+  S.walls=r.walls.map(w=>w.obs.map(i=>S.pool[i]).filter(Boolean));
+  if(!S.walls.length) S.walls=[[]];
+  // Abschluss nur auf der steigenden Flanke und nur einmal je Sitzung -
+  // "Noch nicht fertig" haelt ihn auf, weiter erfassen bleibt moeglich.
+  if(r.closed && !wasClosed && S.closeT==null && !S.closePending && canArm()){
+    S.closeT=now();
+    ev('raum-geschlossen-auto', {walls:r.walls.length, obs:S.pool.length, turn:r.turn});
+    if(navigator.vibrate) navigator.vibrate([40,60,40]);
+  }
+  if(!r.closed && (S.closeT!=null || S.closePending)){ S.closeT=null; S.closePending=false; ev('abschluss-zurückgenommen'); hint('Raum doch noch nicht geschlossen – weiter schwenken.'); }
+  // Selbstkorrektur: zurueck an Wand 1, aber zwischen zwei gegenueber-
+  // liegenden Waenden fehlt eine - dorthin schicken, statt still offen zu bleiben.
+  if(r.returned && !r.closed && S.phase==='waende'){
+    const miss=(r.warnings||[]).find(w=>/fehlt/.test(w));
+    // Gleicher Befund mit neuer Zahl (0,8 m -> 1,4 m -> 1,5 m) ist kein neuer Hinweis.
+    const mk=miss && miss.replace(/\d+([.,]\d+)?\s*m\b/g,'x m');
+    if(miss && S.lastMiss!==mk){ S.lastMiss=mk; ev('wand-fehlt', {msg:miss}); hint(miss, 'warn'); }
+  }
+  if(r.closed && S.breaks.length && !S.warned.closeManual){ S.warned.closeManual=true; ev('geschlossen-nach-bruch');
+    hint('Raum geschlossen – nach dem Tracking-Verlust aber bitte selbst prüfen und „Raum schließen“ tippen.', 'warn'); }
+  if(r.Hfixed && !S.H && S.pool.length>=30 && !S.warned.hFixed){
+    S.warned.hFixed=true; ev('höhe-unbestimmt');
+    hint('Raumhöhe lässt sich von hier nicht schätzen – ein paar Schritte weitergehen und weiterschwenken, oder die Laser-Höhe eintragen.', 'warn'); }
+  updateWallInfo();
+}
+// Sicherheit einer Wand fuer die Farbe: Standardabweichung ihres Abstands.
+const wallColor=l=>{ const s=l && l.sRho; return !Number.isFinite(s) ? '#9ca3af' : s<0.02 ? '#4ade80' : s<0.05 ? '#facc15' : '#f87171'; };
+// Mini-Grundriss unten rechts: Waende nach Sicherheit gefaerbt, ergaenzte
+// Versprunge gestrichelt, verworfene Erfassungen grau, Kamera mit Blick.
+function drawMiniMap(camTo){
+  const cv=$('miniMap'), c=cv.getContext('2d'), W=cv.width, Hh=cv.height;
+  c.clearRect(0, 0, W, Hh);
+  if(!S.auto || S.phase!=='waende') return;
+  const sol=S.sol, H=Hnow(camTo ? camTo[13] : null), pts=[], segs=[];
+  S.pool.forEach((ob,i)=>{ const s=G.liftObs(ob,H); if(!s) return;
+    const lab=sol && sol.labels ? sol.labels[i] : null;
+    segs.push([s, typeof lab==='number' ? lab : -1]); pts.push(...s); });
+  const C=sol && sol.corners;
+  if(C) pts.push(...C);
+  const cam=camTo ? [camTo[12], camTo[14]] : null;
+  if(cam) pts.push(cam);
+  if(pts.length<2) return;
+  const xs=pts.map(p=>p[0]), ys=pts.map(p=>p[1]);
+  const x0=Math.min(...xs), x1=Math.max(...xs), y0=Math.min(...ys), y1=Math.max(...ys);
+  const sc=0.82*Math.min(W/Math.max(x1-x0,1), Hh/Math.max(y1-y0,1));
+  const ox=W/2-sc*(x0+x1)/2, oy=Hh/2-sc*(y0+y1)/2, P=p=>[ox+sc*p[0], oy+sc*p[1]];
+  for(const [s,k] of segs){ const a=P(s[0]), b=P(s[1]);
+    c.strokeStyle=k<0 ? 'rgba(156,163,175,.5)' : wallColor(sol.walls[k] && sol.walls[k].line); c.lineWidth=k<0 ? 2 : 4;
+    c.beginPath(); c.moveTo(a[0],a[1]); c.lineTo(b[0],b[1]); c.stroke(); }
+  if(C){
+    for(let i=0;i<C.length;i++){
+      const a=P(C[i]), b=P(C[(i+1)%C.length]), virt=sol.virtual && sol.virtual[i], last=i===C.length-1;
+      if(last && !sol.closed) continue;
+      c.setLineDash(virt ? [5,4] : []); c.strokeStyle=virt ? '#f87171' : (sol.closed ? '#4ade80' : '#f97316'); c.lineWidth=2;
+      c.beginPath(); c.moveTo(a[0],a[1]); c.lineTo(b[0],b[1]); c.stroke();
+    }
+    c.setLineDash([]);
+  }
+  if(cam){
+    const q=P(cam), d=camDir(camTo), n=Math.hypot(d[0],d[2])||1;
+    c.fillStyle='#fff'; c.beginPath(); c.arc(q[0], q[1], 5, 0, 2*Math.PI); c.fill();
+    c.strokeStyle='#fff'; c.lineWidth=2; c.beginPath(); c.moveTo(q[0],q[1]); c.lineTo(q[0]+18*d[0]/n, q[1]+18*d[2]/n); c.stroke();
+  }
+}
+
+// Normale einer Hit-Test-Pose: Y-Achse ihrer Drehung.
+const quatUp=q=>[2*(q.x*q.y-q.w*q.z), 1-2*(q.x*q.x+q.z*q.z), 2*(q.y*q.z+q.w*q.x)];
+
+// Plausible Hoehe der Kamera ueber dem Boden, stehend mit dem Telefon in der
+// Hand. Liegt der Treffer hoeher, ist es eher Tisch oder Bett - jede Kante
+// waere dann um (H-h)/(H0-h) zu weit weg gehoben, alle Waende zu weit draussen.
+const CAM_H_MIN=0.9, CAM_H_MAX=2.2;
+
+function setFloor(frame, c){
+  S.phase='anker';
+  $('btnBoden').disabled=true;
+  hint('Anker wird gesetzt …');
+  LOG.floor={t:now(), tFound:S.floorFoundT, normalDeg:+c.ang.toFixed(2), camHeight:+c.camH.toFixed(3), pos:c.p};
+  ev('boden', {...LOG.floor});
+  const done=ok=>{
+    LOG.floor.anchor=ok;
+    S.phase='waende';
+    showButtons();
+    if(!ok) hint('Anker fehlgeschlagen – Bezug ohne Anker, das Ergebnis ist unsicher. Besser: Beenden und neu starten.', 'warn');
+    else hint(S.auto ? 'Fadenkreuz an die Kante zwischen Wand und Decke, langsam rundum schwenken. Grün = sichere Kante, jedes Ticken = erfasst.'
+            : !S.H ? 'Keine Raumhöhe eingetragen – von Hand nur Stufe 0. Die Messwerte laufen oben mit.'
+            : 'Wand 1: Fadenkreuz auf die Kante zwischen Wand und Decke, dann „Kante erfassen“.');
+    saveLog();
+  };
+  // Anker mit Drehung = Bezugsraum: bleibt schwerkraftausgerichtet, Boden bei y=0.
+  const without=e=>{ if(e) ev('anker-fehlgeschlagen', {msg:String(e && e.message || e)}); S.floorY=c.p[1]; done(false); };
+  try{
+    if(!frame.createAnchor) return without(null);
+    frame.createAnchor(new XRRigidTransform({x:c.p[0], y:c.p[1], z:c.p[2]}, {x:0, y:0, z:0, w:1}), S.ref)
+      .then(a=>{ S.anchor=a; S.anchorT=now(); done(true); }, without);
+  }catch(e){ without(e); }
+}
+
+// Ersatzbezug festmachen: neuer Anker an der letzten guten Ankerlage (T_last,
+// 4 Freiheitsgrade). Er haengt in der Karte, in der ARCore jetzt verfolgt, und
+// folgt deren Korrekturen. Der erste Anker bleibt: kommt er zurueck (ARCore hat
+// die alte Karte wiedererkannt), ist der Sprung messbar ('relokalisiert').
+function reanchor(frame){
+  if(S.reanchorBusy || !frame.createAnchor || now()<S.reanchorAt) return;
+  const T=S.Tlast, psi=Math.atan2(-T[2], T[0]);
+  S.reanchorBusy=true;
+  const fail=e=>{ S.reanchorBusy=false; S.reanchorAt=now()+1; ev('anker-neu-fehlgeschlagen', {msg:String(e && e.message || e)}); };
+  try{
+    frame.createAnchor(new XRRigidTransform({x:T[12], y:T[13], z:T[14]}, {x:0, y:Math.sin(psi/2), z:0, w:Math.cos(psi/2)}), S.ref)
+      .then(a=>{
+        S.reanchorBusy=false;
+        if(!S.subst){ a.delete(); return; }               // der alte kam inzwischen zurueck
+        if(!S.anchorPrev) S.anchorPrev=S.anchor; else S.anchor.delete();
+        S.anchor=a; S.anchorT=now(); S.jumpHold=false; S.prevCam=null; ev('anker-neu');
+      }, fail);
+  }catch(e){ fail(e); }
+}
+
+// Gleiten vor dem Verlust: laeuft die Pose weg, bevor das Tracking abbricht
+// (Protokoll 2: 8 Erfassungen, 54 cm in 2,1 s bei 0,16-0,36 m/s, Hoehe ±1 cm,
+// die gehobene Wand wandert mit), liegen die letzten Erfassungen auf der
+// weggeglittenen Pose. Ab SLIDE_N Erfassungen in Folge schneller als SLIDE_V
+// in den letzten SLIDE_T s: aus dem Pool (im Protokoll bleiben sie, markiert).
+const SLIDE_V=0.15, SLIDE_T=3, SLIDE_N=3;
+function slideBeforeLoss(tLoss){
+  const P=S.pool; if(P.length<2 || tLoss-P[P.length-1].t>0.5) return 0;
+  let k=P.length-1;
+  while(k>0 && tLoss-P[k].t<SLIDE_T){ const a=P[k-1], b=P[k];
+    if(!a.cam || !b.cam || Math.hypot(b.cam[0]-a.cam[0], b.cam[2]-a.cam[2])/Math.max(0.05, b.t-a.t)<SLIDE_V) break;
+    k--; }
+  const n=P.length-1-k;
+  if(n<SLIDE_N) return 0;
+  // Nur markieren: die Geschwindigkeit allein trennt Gehen nicht sicher vom
+  // Gleiten (Gegenpruefung: echte Wand-Erfassungen mit 0,15-0,23 m/s). Die
+  // Marke sammelt Daten fuer eine Signatur-Regel (Steigung rho gegen n·cam).
+  P.slice(k+1).forEach(o=>{ o.suspect='gleiten?'; });
+  return n;
+}
+// Senkrechter Sprung, ab dem der Ersatzbezug nicht mehr taugt (m): grober
+// als jede Handbewegung in einer Luecke von 1-3 s.
+const SUBST_DH=0.35;
+const yawOfM=m=>Math.atan2(m[8], m[10]);
+const psiOfT=T=>Math.atan2(-T[2], T[0]);
+const wrapPi=a=>Math.atan2(Math.sin(a), Math.cos(a));
+
+// ---------------------------------------------------------- Bild-Schleife
+function onFrame(t, frame){
+  const session=frame.session;
+  session.requestAnimationFrame(onFrame);
+  S.frame++;
+  if(S.lastT){ S.fps.push(1000/(t-S.lastT)); if(S.fps.length>60) S.fps.shift(); }
+  S.lastT=t;
+  const gl=S.gl, layer=session.renderState.baseLayer;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
+  gl.clearColor(0, 0, 0, 0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+
+  const pose=frame.getViewerPose(S.ref);
+  if(!pose){
+    LOG.tracking.lost++;
+    // Schwenk: Countdown und Geschwindigkeit ueber die Luecke nicht
+    // weitertragen. Der Abschluss wartet (closePending) - ein Tipp auf „Noch
+    // nicht fertig“ in der Luecke bricht ihn ab.
+    if(S.closeT!=null){ S.closeT=null; S.closePending=true; ev('countdown-unterbrochen'); hint('Tracking verloren – der Abschluss wartet.', 'warn'); }
+    if(!S.trackLost){ S.trackLost=true; S.gap={t:now(), v:S.lastView};
+      const sus=S.phase==='waende' ? slideBeforeLoss(now()) : 0;
+      ev('tracking-verloren', sus ? {gleiten:sus} : {}); updateWallInfo(); }
+    S.prevDir=null; S.prevT=null; S.prevLive=null; S.floorStable=null;
+    // Ein Tipp waehrend der Luecke loeste sonst spaeter aus - an dem, was dann
+    // zufaellig im Fadenkreuz liegt, mit der ersten, unsichersten Pose.
+    if(S.capReq || S.floorReq){
+      S.capReq=S.floorReq=false;
+      hint('Tracking verloren – nicht erfasst. Telefon kurz auf etwas mit Struktur halten, dann erneut zielen.', 'warn');
+      ev('anfrage-verworfen', {grund:'tracking'});
+    }
+    S.track='verloren'; S.live=null;
+    drawOverlay(null, null);
+    arState();
+    stats();
+    return;
+  }
+  if(S.trackLost){
+    S.trackLost=false;
+    // Sprung von local ueber die Luecke (letzte Pose davor -> erste danach,
+    // echte Bewegung in der Luecke eingeschlossen): zeigt, ob ARCore die Welt
+    // stetig fortsetzt. Davon haengt der Ersatzbezug ab.
+    const g=S.gap, m=pose.transform.matrix;
+    ev('tracking-zurück', g && g.v ? {luecke:+(now()-g.t).toFixed(2), dxz:+Math.hypot(m[12]-g.v.p[0], m[14]-g.v.p[2]).toFixed(3),
+      dy:+(m[13]-g.v.p[1]).toFixed(3), dGierDeg:+(wrapPi(yawOfM(m)-g.v.yaw)*180/Math.PI).toFixed(1)} : {});
+    S.settleUntil=now()+SETTLE;
+    if(S.closePending){ S.closePending=false; if(canArm()) S.closeT=now(); }
+    updateWallInfo();
+  }
+  if(pose.emulatedPosition){ LOG.tracking.emulated++; S.track='geschätzt'; }
+  else { LOG.tracking.ok++; S.track='ok'; }
+  const view=pose.views[0];
+  { const m=pose.transform.matrix; S.lastView={p:[m[12], m[13], m[14]], yaw:yawOfM(m)}; }
+
+  // Stichproben fuer Stufe 0: Ebenen und Tiefe.
+  if(S.frame%30===0){
+    if(frame.detectedPlanes){
+      // orientation null = Ebene pausiert (Chromium meldet nicht verfolgte
+      // Ebenen ohne Lage). Bisher zaehlten sie als waagerecht. yMin: tiefste
+      // verfolgte waagerechte Ebene in local - nach einem Verlust misst der
+      // neu erkannte Boden den senkrechten Sprung der Welt.
+      let hz=0, vt=0, ps=0, yMin=Infinity;
+      frame.detectedPlanes.forEach(p=>{
+        if(p.orientation==null){ ps++; return; }
+        if(p.orientation==='vertical'){ vt++; return; }
+        hz++; const pp=frame.getPose(p.planeSpace, S.ref); if(pp && pp.transform.position.y<yMin) yMin=pp.transform.position.y; });
+      S.planes={h:hz, v:vt, p:ps};
+      LOG.planes.push({t:now(), h:hz, v:vt, p:ps, yMin:Number.isFinite(yMin) ? +yMin.toFixed(4) : null});
+    }
+    if(frame.getDepthInformation && S.frame%150===0){
+      try{
+        const d=frame.getDepthInformation(view);
+        S.depth=d ? `${d.width}×${d.height}` : 'kein Bild';
+        if(d) LOG.depth={w:d.width, h:d.height, rawValueToMeters:d.rawValueToMeters};
+      }catch(e){ S.depth='–'; if(!LOG.depth) LOG.depth={error:String(e && e.message || e)}; }
+    }
+  }
+
+  // Bezug: Anker am Boden; ohne Anker der Bezugsraum mit gemerkter Bodenhoehe.
+  let camTo=null;
+  // Kamera im local-Raum, unabhaengig vom Anker. local ist bei ARCore die
+  // ARCore-Welt (kein reset-Ereignis): ob sie ueber einen Verlust stetig
+  // bleibt, zeigt nur dieser Weg.
+  { const v=view.transform.position;
+    if(S.frame%150===0 || S.logView){ S.logView=false;
+      LOG.viewPath.push({t:now(), p:[+v.x.toFixed(4), +v.y.toFixed(4), +v.z.toFixed(4)], anker:S.anchorLost ? 0 : 1}); } }
+  if(S.anchor){
+    // Gestoppte Anker fehlen in trackedAnchors, ihre Pose bleibt aber
+    // eingefroren stehen - die darf nicht weiterbenutzt werden. Pausierte
+    // (ARCore PAUSED) bleiben drin, getPose liefert null - fuer immer, wenn
+    // ARCore nach dem Verlust in einer neuen Karte weiterverfolgt.
+    const stopped=frame.trackedAnchors && !frame.trackedAnchors.has(S.anchor);
+    const ap=stopped ? null : frame.getPose(S.anchor.anchorSpace, S.ref);
+    if(stopped && !S.warned.anchorStopped){ S.warned.anchorStopped=true; ev('anker-gestoppt'); }
+    let T=null, apT=null;
+    if(ap){
+      // Bezug mit 4 Freiheitsgraden: Lage und Gier des Ankers, Roll und Nick
+      // verworfen. Eine Kartenkorrektur, die den Anker leicht kippt, kippt so
+      // nicht den ganzen Bodenbezug (und damit alle Hoehen).
+      const q=ap.transform.orientation, p0=ap.transform.position, psi=2*Math.atan2(q.y, q.w);
+      const c=Math.cos(psi), sn=Math.sin(psi);
+      apT=[c,0,-sn,0, 0,1,0,0, sn,0,c,0, p0.x,p0.y,p0.z,1];
+    }
+    // Grosser Sprung des Ankers (nach dem Einschwingen) oder Rueckkehr an eine
+    // andere Stelle: ihm NICHT folgen, sondern ihn wie verloren behandeln -
+    // Ersatzbezug mit der Lage davor, bis er dorthin zurueckkehrt. Protokoll 3:
+    // bei 164 s 3,5 m und 91° daneben, Anker und Kamera dazu 0,4 m hoeher; bei
+    // 190 s stand derselbe Anker wieder 5 cm neben der alten Stelle. Ein
+    // nachtraeglicher Anschluss ueber Waende drehte dagegen in 41 von 53
+    // Messaufbau-Faellen falsch.
+    if(apT && S.Tlast && S.TlastOf===S.anchor){
+      const dj=Math.hypot(apT[12]-S.Tlast[12], apT[13]-S.Tlast[13], apT[14]-S.Tlast[14]), dpsi=Math.abs(wrapPi(psiOfT(apT)-psiOfT(S.Tlast)));
+      const near=dj<=0.15 && dpsi<=2*Math.PI/180;
+      if(S.jumpHold || S.anchorLost){
+        if(near){ if(S.jumpHold){ S.jumpHold=false; ev('anker-zurück-nach-sprung', {d:+dj.toFixed(3)}); } }
+        else apT=null;
+      } else if(dj>0.03 || dpsi>0.5*Math.PI/180){
+        const b={t:now(), grund:'anker-sprung', d:+dj.toFixed(3), dpsiDeg:+(dpsi*180/Math.PI).toFixed(2)};
+        // Einschwingen in den ersten 3 s nach dem Setzen: nur Protokoll.
+        if(now()-(S.anchorT||0)>3 && !near){
+          b.grund='bezug-sprung'; S.jumpHold=true; apT=null; LOG.breaks.push(b); ev('bezug-sprung', b);
+          if(S.auto && S.phase==='waende') hint(`Der Bodenbezug ist gesprungen (${dj.toFixed(1)} m, ${Math.round(dpsi*180/Math.PI)}°) – weiter mit dem Bezug davor. Bitte eine schon erfasste Ecke noch einmal überstreichen.`, 'warn'); }
+        else { b.nurProtokoll=true; LOG.breaks.push(b); ev('anker-sprung', b); }
+        S.prevCam=null;
+      }
+    }
+    if(apT){
+      T=apT;
+      const p0=ap.transform.position;
+      const back=S.anchorLost && S.subst && S.anchor===S.TlastOf;   // der alte Anker selbst ist zurueck
+      S.Tlast=T; S.TlastOf=S.anchor;
+      // Erste gemeldete Ankerlage gegen den Bodentreffer, an dem er gesetzt
+      // wurde (Protokolle: 2,6 bzw. 3,3 cm Versatz, senkrecht -2,6 / +2,0 cm).
+      if(!S.anchorPrev && LOG.floor && LOG.floor.pos && !LOG.floor.ankerLage){
+        LOG.floor.ankerLage={t:now(), p:[+p0.x.toFixed(4), +p0.y.toFixed(4), +p0.z.toFixed(4)], dy:+(p0.y-LOG.floor.pos[1]).toFixed(4)};
+        ev('anker-lage', LOG.floor.ankerLage); }
+      if(S.anchorLost){ S.anchorLost=false; ev(S.subst && !back ? 'anker-ersetzt' : 'anker-zurück'); S.subst=false; S.substBad=false; S.prevCam=null;
+        // Kam der alte Anker zurueck, bevor im Ersatzbezug etwas erfasst wurde,
+        // gab es keinen Bruch im Erfassten: Marke weg, Auto-Abschluss wieder frei.
+        if(back){ const lb=S.breaks[S.breaks.length-1]; if(lb && !S.pool.some(o=>o.t>=lb.t)){ S.breaks.pop(); lb.aufgehoben=true; } }
+        if(S.warned.anchorHint){ S.warned.anchorHint=false; if(S.auto && S.phase==='waende') hint('Anker wieder da – weiter schwenken.'); } }
+      // Ankerlage im Bezugsraum: Spruenge zeigen Relokalisierungen.
+      if(S.frame%150===0){ const p=ap.transform.position; LOG.anchorPath.push({t:now(), p:[+p.x.toFixed(4), +p.y.toFixed(4), +p.z.toFixed(4)]}); }
+    } else {
+      LOG.tracking.anchorLost++;
+      S.track=stopped ? 'Anker gestoppt' : 'Anker verloren';
+      if(!S.anchorLost){ S.anchorLost=true; ev('anker-verloren'); }
+      if(S.Tlast){
+        // Ersatzbezug: die letzte gute Ankerlage im local-Raum weiter. Ab hier
+        // kann der Bezug um einen unbekannten Sprung versetzt sein - ein Bruch
+        // je Verlust, mit Zeit, fuer die Auswertung und das Protokoll.
+        T=S.Tlast; S.track+=' · Ersatzbezug';
+        if(!S.subst){ S.subst=true; S.logView=true; S.reanchorAt=now()+1; S.prevCam=null;
+          // Kamerahoehe im Ersatzbezug gegen die letzte mit Anker: ein
+          // senkrechter Sprung verschiebt jede gehobene Kante um d·dh/Δ und
+          // ist in der Auswertung nicht modelliert (Drift nur tx, tz, psi).
+          const h1=G.m4mul(G.m4inv(T), view.transform.matrix)[13], dh=S.lastCamH!=null ? h1-S.lastCamH : null;
+          const b={t:now(), grund:stopped ? 'gestoppt' : 'pausiert', h:+h1.toFixed(3), dh:dh!=null ? +dh.toFixed(3) : null};
+          S.substBad=(dh!=null && Math.abs(dh)>SUBST_DH) || h1<CAM_H_MIN || h1>CAM_H_MAX+0.2;
+          if(S.substBad) b.unsicher=true;
+          S.breaks.push(b); LOG.breaks.push(b);
+          ev(S.substBad ? 'bezug-unplausibel' : 'bezug-ersatz', b);
+          // Wortlaut und Eskalation: Strang ablauf (A1).
+          if(S.auto && S.phase==='waende') hint(S.substBad ? 'Tracking war weg, der Bezug passt nicht mehr – es wird nichts erfasst.'
+            : 'Tracking war weg – weiter mit Ersatzbezug. Die letzte Wand noch einmal langsam überstreichen, dann weiter.', 'warn'); }
+        if(S.substBad){ T=null; S.track=S.track.replace(' · Ersatzbezug', ' · Bezug unsicher'); S.live=null; S.liveConfirmed=false; S.prevLive=null; }
+        else if(S.phase==='waende') reanchor(frame);
+      } else {
+        // Ohne Bezug wird nichts erfasst - die letzte Live-Kante darf nicht
+        // gruen stehen bleiben, als liefe alles.
+        S.live=null; S.liveConfirmed=false; S.prevLive=null;
+        if(S.auto && S.phase==='waende' && !S.warned.anchorHint){ S.warned.anchorHint=true;
+          hint('Anker verloren – nichts wird erfasst. Telefon ruhig auf eine Fläche mit Struktur halten.', 'warn'); }
+      }
+    }
+    if(T){ camTo=G.m4mul(G.m4inv(T), view.transform.matrix); S.lastCamH=camTo[13]; }
+    // Erster Anker wieder da? Dann ist der Sprung gemessen: Lage des
+    // Ersatzbezugs im Bezug des ersten Ankers (C = To^-1 · T).
+    if(S.anchorPrev && T && !S.relocLogged){
+      const op=frame.getPose(S.anchorPrev.anchorSpace, S.ref);
+      if(op){ const q=op.transform.orientation, p0=op.transform.position, psi=2*Math.atan2(q.y, q.w), c=Math.cos(psi), sn=Math.sin(psi);
+        const C=G.m4mul(G.m4inv([c,0,-sn,0, 0,1,0,0, sn,0,c,0, p0.x,p0.y,p0.z,1]), T);
+        const m={dx:+C[12].toFixed(4), dy:+C[13].toFixed(4), dz:+C[14].toFixed(4), dpsiDeg:+(Math.atan2(-C[2], C[0])*180/Math.PI).toFixed(2)};
+        S.relocLogged=true; { const lb=[...LOG.breaks].reverse().find(b=>b.grund==='pausiert' || b.grund==='gestoppt'); if(lb) lb.gemessen=m; } ev('relokalisiert', m); }
+    }
+    // Pose-Sprung: Rueckschnapp der Kamera im Bezug (VIO-Korrektur) - die
+    // Erfassungen der 2 s davor lagen auf einer weggeglittenen Pose.
+    if(camTo){ const pc=[camTo[12], camTo[13], camTo[14]], pv=S.prevCam, tt=t/1000;
+      if(pv && tt-pv.t>0 && tt-pv.t<0.2){
+        const d=Math.hypot(pc[0]-pv.p[0], pc[1]-pv.p[1], pc[2]-pv.p[2]), v=d/(tt-pv.t);
+        S.camV=0.8*S.camV+0.2*v;
+        if(d>0.15 && v>1.5){ const t0=now()-2, sus=S.pool.filter(o=>o.t>=t0);
+          ev('pose-sprung', {d:+d.toFixed(3), verdaechtig:sus.length}); S.settleUntil=now()+SETTLE; S.camV=0;
+          if(sus.length){ sus.forEach(o=>{ o.suspect=true; }); S.pool=S.pool.filter(o=>!o.suspect); requestSolve(); } } }
+      S.prevCam={p:pc, t:tt}; }
+  } else if(S.floorY!==null){
+    camTo=Array.from(view.transform.matrix);
+    camTo[13]-=S.floorY;
+  }
+
+  if(S.phase==='boden'){
+    // Chromium liefert die Treffer naechste zuerst; ein Tisch ueber dem Boden
+    // waere hs[0]. Der Boden ist der tiefste nach oben zeigende Treffer.
+    S.floorCand=null;
+    const hs=S.hit ? frame.getHitTestResults(S.hit) : [];
+    for(const h of hs){
+      const hp=h.getPose(S.ref); if(!hp) continue;
+      const n=quatUp(hp.transform.orientation), p=hp.transform.position;
+      const ang=Math.acos(Math.max(-1, Math.min(1, n[1])))*180/Math.PI;
+      if(ang>=15) continue;
+      if(!S.floorCand || p.y<S.floorCand.p[1]) S.floorCand={p:[p.x, p.y, p.z], ang, camH:view.transform.position.y-p.y};
+    }
+    if(S.floorCand && S.floorFoundT==null){
+      S.floorFoundT=now();
+      ev('boden-gefunden', {camH:+S.floorCand.camH.toFixed(3), ang:+S.floorCand.ang.toFixed(1)});
+    }
+    const plaus=!!S.floorCand && S.floorCand.camH>=CAM_H_MIN && S.floorCand.camH<=CAM_H_MAX;
+    $('btnBoden').disabled=!plaus;
+    if(S.floorCand && !plaus){
+      if(!S.floorWarn) hint(`Treffer ${S.floorCand.camH.toFixed(2)} m unter der Kamera – Tisch oder Bett? Auf freien Boden zielen.`, 'warn');
+      S.floorWarn=true;
+    } else if(S.floorWarn){ S.floorWarn=false; hint(BODEN_HINT); }
+    // Automatisch: derselbe plausible Bodentreffer 20 Bilder lang (2/3 s).
+    // Automatisch nur bei klar stehender Hoehe: ein Couchtisch (Kamera
+    // ~1,05 m darueber) wird so nicht ungefragt zum Boden.
+    if(S.auto && plaus && S.floorCand.camH>=1.15){
+      const fs=S.floorStable, p=S.floorCand.p;
+      if(fs && Math.hypot(p[0]-fs.p[0], p[1]-fs.p[1], p[2]-fs.p[2])<0.03) fs.n++;
+      else S.floorStable={p, n:1};
+      if(S.floorStable.n>=20){ ev('boden-auto'); S.floorReq=true; }
+    } else S.floorStable=null;
+    if(S.floorReq && plaus) setFloor(frame, S.floorCand);
+    S.floorReq=false;
+  }
+
+  // Drehgeschwindigkeit der Blickrichtung (Grad/s) fuer den Schwenk-Modus.
+  {
+    const m=view.transform.matrix, d=[-m[8], -m[9], -m[10]];
+    if(S.prevDir && S.prevT){
+      const dt=(t-S.prevT)/1000, c=d[0]*S.prevDir[0]+d[1]*S.prevDir[1]+d[2]*S.prevDir[2];
+      if(dt>0) S.speed=0.7*(S.speed||0)+0.3*Math.acos(Math.min(1,c))*180/Math.PI/dt;
+    }
+    S.prevDir=d; S.prevT=t;
+  }
+  const want=S.binding && view.camera && (S.capReq || (S.phase==='waende' && S.frame%3===0) || S.frame%30===0);
+  if(S.capReq && !(S.binding && view.camera)){
+    S.capReq=false;
+    hint('Kein Kamerabild – die Sitzung hat keinen Kamerazugriff.', 'bad');
+    ev('erfassen-ohne-kamerabild');
+  }
+  if(want){
+    const tex=S.binding.getCameraImage(view.camera);
+    if(tex){
+      const W=view.camera.width, H=view.camera.height;
+      if(!S.camSize){
+        // Einmal je Sitzung die Abbildungsdaten: Liegt die Live-Linie neben
+        // der Kante, klaert das, ob Bild und Ansicht verschieden beschnitten
+        // sind - das kann der y-Spiegel nicht beheben.
+        const vp=layer.getViewport(view);
+        const ratio=(W/H)/(vp.width/vp.height);
+        LOG.session.geometry={camera:[W,H], viewport:[vp.width,vp.height], inner:[innerWidth,innerHeight],
+          dpr:devicePixelRatio, proj:Array.from(view.projectionMatrix), aspectRatio:+ratio.toFixed(4)};
+        ev('kamerabild', {w:W, h:H, viewport:[vp.width,vp.height], aspectRatio:+ratio.toFixed(4)});
+        if(Math.abs(ratio-1)>0.02){ S.aspectWarn=true; ev('seitenverhältnis-abweichung', {ratio:+ratio.toFixed(4)}); }
+      }
+      S.camSize=[W, H];
+      if(S.frame%30===0){
+        const t0=performance.now(), r=readRoi(gl, S.gpu, tex, W, H), dt=performance.now()-t0;
+        if(r.status===gl.FRAMEBUFFER_COMPLETE){
+          LOG.timings.roi.push(+dt.toFixed(2));
+          if(LOG.timings.roi.length>2000) LOG.timings.roi.shift();
+          if(LOG.roiLuma.length<400) LOG.roiLuma.push({t:now(), mean:+r.mean.toFixed(1), max:+r.max.toFixed(1), alpha:r.alpha});
+          if(r.empty && !S.warned.empty){ S.warned.empty=true; ev('kamerabild-leer', {alpha:r.alpha}); }
+        } else if(!S.warned.fbo){ S.warned.fbo=true; ev('fbo-unvollständig', {status:r.status}); }
+      }
+      if(S.phase==='waende' && camTo){
+        const t0=performance.now(), img=readSmall(gl, S.gpu, tex, W, H);
+        LOG.timings.small.push(+(performance.now()-t0).toFixed(2));
+        if(LOG.timings.small.length>2000) LOG.timings.small.shift();
+        S.small=[img.w, img.h];
+        S.live=snapCenter(img, view, camTo);
+        if(S.auto) autoCapture(view, camTo);
+        if(S.capReq){
+          if(S.H) capture(view, camTo);
+          else { S.capReq=false; hint('Ohne Raumhöhe kann die Kante nicht gehoben werden.', 'warn'); ev('erfassen-ohne-höhe'); }
+        }
+      }
+    } else if(!S.warned.tex){ S.warned.tex=true; ev('getCameraImage-null'); }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
+    const vp=layer.getViewport(view);
+    gl.viewport(vp.x, vp.y, vp.width, vp.height);
+  }
+  if(S.capReq && !camTo){ S.capReq=false; hint('Kein Bezug zum Boden – Anker verloren?', 'warn'); ev('erfassen-ohne-anker'); }
+  if(S.auto && S.phase==='waende'){
+    if(S.closeT!=null && S.paused){ S.closeT=null; ev('countdown-abgebrochen', {grund:'pause'}); updateWallInfo(); }
+    if(S.closeT!=null){
+      // Ergaenzte Versprunge sind die haeufigste Fehlerquelle (eine Leiste
+      // oder Schrankkante hinter der Wand sieht aus wie eine Nische): dann
+      // laenger warten und es sagen. Noch einmal hinschwenken loest es - die
+      // echte Deckenkante deckt die Scheinwand ab.
+      const nv=S.sol && S.sol.virtual ? S.sol.virtual.filter(Boolean).length : 0;
+      const left=(nv ? COUNTDOWN_JOG : COUNTDOWN)-(now()-S.closeT);
+      if(left<=0){
+        S.closeT=null;
+        // Vor dem Ende noch einmal nachsehen: gilt der Abschluss noch?
+        if(S.sol && S.sol.closed){ S.closeDone=true; S.closed=true; ev('raum-schließen-auto'); S.session.end().catch(()=>{}); }
+      } else hint(nv ? `Raum geschlossen – fertig in ${Math.ceil(left)} s. ${nv===1 ? 'Ein Versprung ist' : nv+' Versprünge sind'} ergänzt (rot gestrichelt) – echt? Sonst „Noch nicht fertig“ und dort noch einmal langsam schwenken.`
+        : `Raum geschlossen – fertig in ${Math.ceil(left)} s. „Noch nicht fertig“ = weiter erfassen.`, nv ? 'warn' : '');
+    } else if(camTo && S.speed>AUTO_MAX_SPEED){ if(!S.speedWarn){ S.speedWarn=true; hint('Langsamer schwenken – so wird nichts erfasst.', 'warn'); } }
+    else if(camTo && S.speedWarn && S.speed<45){ S.speedWarn=false; hint('Gut so – weiter schwenken.'); }
+    // Haltung: liegt die Decke weniger als 0,6 m ueber der Kamera, wird jeder
+    // Fehler beim Heben um d/Δ verstaerkt - eine Leiste 15 cm unter der
+    // Decke landet aus 2 m 1 m hinter der Wand (Protokolle 24.10.: Telefon
+    // 1,8-2,06 m hoch, Δ 0,35-0,65 m). Im Messaufbau, gleiche Raeume mit
+    // Kamera 1,3-1,5 statt 1,75-2,05 m: richtige Topologie 106 -> 192 von 300.
+    if(camTo && S.closeT==null){
+      const Hh=S.H || (S.sol && !S.sol.Hfixed && S.sol.sH<0.1 ? S.sol.H : null);
+      if(Hh){ const dl=Hh-camTo[13];
+        if(dl<0.6){ S.lowSince=S.lowSince ?? now();
+          if(now()-S.lowSince>2 && now()-(S.lowHintT ?? -1e9)>20){ S.lowHintT=now(); ev('haltung-hoch', {delta:+dl.toFixed(2)});
+            hint(`Telefon tiefer halten – Brusthöhe, nicht über Kopf. Die Decke ist nur ${Math.round(dl*100)} cm über der Kamera, das macht die Skizze ungenau.`, 'warn'); } }
+        else if(dl>0.7) S.lowSince=null; } }
+  }
+
+  arState();
+  { const t0=performance.now(); drawOverlay(view, camTo);
+    if(S.phase==='waende'){ LOG.timings.draw.push(+(performance.now()-t0).toFixed(2)); if(LOG.timings.draw.length>2000) LOG.timings.draw.shift(); } }
+  drawMiniMap(camTo);
+  stats();
+}
+// Zustandsbalken. Rot, solange nichts erfasst wird (Tracking weg, Bezug
+// unbrauchbar), gelb im Ersatzbezug. Nach 8 s Stillstand der Ausweg: was
+// bis hier erfasst ist, bleibt - „Beenden“ zeigt den Grundriss.
+function arState(){
+  let cls='', txt='';
+  if(S.phase==='waende'){
+    const sec=t0=>Math.max(0, Math.round(now()-t0));
+    if(S.trackLost) { cls='stop'; txt=`Erfassung steht – Tracking weg (${sec(S.gap ? S.gap.t : now())} s). Telefon ruhig halten, auf etwas mit Struktur.`; }
+    else if(S.anchorLost && (S.substBad || !S.Tlast)) { cls='stop'; txt='Erfassung steht – kein brauchbarer Bezug zum Boden.'; }
+    else if(S.subst) { cls='sub'; txt='Ersatzbezug: die letzte Wand noch einmal langsam überstreichen, dann weiter.'; }
+  }
+  if(cls==='stop'){
+    S.stopSince=S.stopSince ?? now();
+    if(now()-S.stopSince>8){ txt+=` Kommt es nicht zurück: „Beenden“ – die ${S.pool.length} Kanten bis hier bleiben.`;
+      if(!S.stopEsc){ S.stopEsc=true; ev('erfassung-steht-eskalation', {s:+(now()-S.stopSince).toFixed(1)}); } }
+  } else { S.stopSince=null; S.stopEsc=false; }
+  const key=cls+'|'+txt;
+  if(S.stateK===key) return;
+  S.stateK=key; const el=$('arState'); el.textContent=txt; el.className=cls || 'hidden';
+}
+
+// ----------------------------------------------------------- Overlay
+// Farben der Wand wie im Mini-Grundriss (wallColor): gleiche Wand, gleiche Farbe.
+const OV={piece:{color:'#60a5fa', w:4}, pieceLast:{color:'#facc15', w:4}, pieceOther:{color:'rgba(156,163,175,.8)', w:3}, fit:{color:'rgba(255,255,255,.4)', w:1.5},
+  under:{color:'rgba(0,0,0,.5)', w:5}, vert:{color:'rgba(255,255,255,.85)', w:1.5},
+  virt:{color:'#f87171', w:2.5, dash:[8,6]}, gapBig:{color:'#f97316', w:2.5, dash:[3,5]},
+  gapMax:0.8,     // wie gapMax der Abdeckungspruefung: laenger ungesehen haelt den Abschluss auf
+  hiMin:0.02,     // hervorheben erst ab gelb
+  hiPx:60,        // ... und nur, was mindestens so lang (CSS-px) im Bild liegt
+  wall:(()=>{ const m=new Map(); return s=>{ const col=wallColor({sRho:s}); if(!m.has(col)) m.set(col, {seen:{color:col, w:3}, gap:{color:col, w:1.5, dash:[6,6]}}); return m.get(col); }; })()};
+function liveModel(){
+  const sol=S.sol, k=S.frames.length;
+  if(!S.auto || !sol || !sol.walls || !sol.walls.length || !sol.drift) return null;
+  if(S.modelKey && S.modelKey.sol===sol && S.modelKey.k===k) return S.model;
+  const map=G.modelToLive(sol, now(), k);
+  S.modelKey={sol, k}; S.model=map ? G.overlayModel(sol, map) : null;
+  return S.model;
+}
+function drawOverlay(view, camTo){
+  const c=S.ctx, cv=c.canvas, cw=cv.width, ch=cv.height, dpr=devicePixelRatio||1;
+  c.clearRect(0, 0, cw, ch);
+  if(!view) return;
+  const proj=view.projectionMatrix;
+  const px=n=>[(n[0]+1)/2*cw, (1-n[1])/2*ch];
+  const line=(a,b,color,w)=>{ c.strokeStyle=color; c.lineWidth=w*dpr; c.beginPath(); c.moveTo(a[0],a[1]); c.lineTo(b[0],b[1]); c.stroke(); };
+  const dot=(n,color,r)=>{ const p=px(n); c.fillStyle=color; c.beginPath(); c.arc(p[0], p[1], r*dpr, 0, 2*Math.PI); c.fill(); };
+
+  if(S.phase==='boden' && S.floorCand){
+    const p=G.project(proj, view.transform.matrix, S.floorCand.p);
+    const ok=S.floorCand.camH>=CAM_H_MIN && S.floorCand.camH<=CAM_H_MAX;
+    if(p) dot(p, ok ? '#4ade80' : '#f87171', 7);
+  }
+  // Strecken je Stil sammeln und mit einem stroke() je Stil zeichnen (300 Stuecke =
+  // 300 Pfade waren es vorher).
+  const batch=new Map();
+  const seg3b=(st,A,B)=>{ const s=G.projectSegment(proj, camTo, A, B); if(!s) return;
+    let b=batch.get(st); if(!b) batch.set(st, b=[]); b.push(px(s[0]), px(s[1])); };
+  const flush=()=>{ for(const [st,pts] of batch){ c.strokeStyle=st.color; c.lineWidth=st.w*dpr; c.setLineDash(st.dash ? st.dash.map(x=>x*dpr) : []);
+      c.beginPath(); for(let i=0;i<pts.length;i+=2){ c.moveTo(pts[i][0],pts[i][1]); c.lineTo(pts[i+1][0],pts[i+1][1]); } c.stroke(); }
+    batch.clear(); c.setLineDash([]); };
+  if(camTo && (S.H || S.auto)){
+    const H=S.auto ? Hnow(camTo[13]) : S.H, last=S.walls.length-1;
+    // Erfasste Stuecke nur aus dem jetzigen Bezugsrahmen: nach einem Sprung des
+    // Bodenankers (Protokoll 3: 3,5 m, 91°) lagen die frueheren ganz woanders.
+    const tF=S.frames.length ? S.frames[S.frames.length-1] : -Infinity;
+    S.walls.forEach((obs,wi)=>{
+      for(const ob of obs){
+        if(ob.t<tF) continue;
+        const l=G.liftObs(ob, H);
+        if(l) seg3b(wi===last ? OV.pieceLast : OV.piece, [l[0][0],H,l[0][1]], [l[1][0],H,l[1][1]]);
+      }
+    });
+    if(!S.auto){
+      const lines=S.walls.map(obs=>obs.length ? G.wallLine(obs, H) : null);
+      for(const f of lines) if(f) seg3b(OV.fit, [f.c[0]-4*f.u[0],H,f.c[1]-4*f.u[1]], [f.c[0]+4*f.u[0],H,f.c[1]+4*f.u[1]]);
+      flush();
+      const corners=lines.slice(1).map((l,i)=>lines[i] && l ? G.intersect(lines[i], l) : null).filter(Boolean);
+      for(const p of corners){
+        const q=G.project(proj, camTo, [p[0], H, p[1]]);
+        if(q) dot(q, '#f97316', 6);
+      }
+    } else {
+      // Nach einem Sprung des Bodenankers, solange der neue Rahmen nicht angeschlossen ist,
+      // sind seine Erfassungen keiner Wand zugeordnet ('anderer Bezug') - grau zeigen, was
+      // seit dem Sprung erfasst ist, statt nichts.
+      if(S.frames.length && !liveModel()){ const lab=S.sol && S.sol.labels || [];
+        S.pool.forEach((ob,i)=>{ if(ob.t<tF || typeof lab[i]==='number') return; const l=G.liftObs(ob, H);
+          if(l) seg3b(OV.pieceOther, [l[0][0],H,l[0][1]], [l[1][0],H,l[1][1]]); }); }
+      flush();
+      // Das geschaetzte Modell, wie es JETZT im Bild liegen muss: jede Wand als Linie auf
+      // Deckenhoehe zwischen ihren Ecken, je Ecke eine Senkrechte vom Boden zur Decke.
+      // Liegt eine Linie neben der echten Kante, passt das Modell dort nicht. Naeher ran
+      // macht beides: die Abweichung sichtbar (ein Wandfehler δ erscheint unter δ·Δ/(d²+Δ²))
+      // und kleiner (Hebefehler je Kante (d²+Δ²)/Δ·σ_e, G.ptSigma).
+      const M=liveModel(), Hm=S.sol && S.sol.H, Y=(p,y)=>[p[0],y,p[1]];
+      if(M && Hm>0){
+        if(S.subst) c.globalAlpha=0.5;   // Ersatzbezug: Lage um einen unbekannten Sprung unsicher
+        for(const r of M.rows) if(r.seen) seg3b(OV.under, Y(r.seen[0],Hm), Y(r.seen[1],Hm));
+        for(const v of M.verts) seg3b(OV.under, Y(v.p,0), Y(v.p,Hm));
+        flush();
+        for(const r of M.rows){
+          if(r.virtual){ seg3b(OV.virt, Y(r.span[0],Hm), Y(r.span[1],Hm)); continue; }
+          const st=OV.wall(r.sRho);
+          if(r.seen) seg3b(st.seen, Y(r.seen[0],Hm), Y(r.seen[1],Hm));
+          for(const [a,b,len] of r.gaps) seg3b(len>OV.gapMax ? OV.gapBig : st.gap, Y(a,Hm), Y(b,Hm));
+        }
+        for(const v of M.verts) seg3b(v.virtual ? OV.virt : OV.vert, Y(v.p,0), Y(v.p,Hm));
+        flush();
+        // Unsicherste sichtbare Wand (ab gelb): dick nachziehen, „näher ran“. Haelt die
+        // bisherige, solange sie sichtbar und nicht deutlich (< 80 %) sicherer ist.
+        const vis=[];
+        for(const r of M.rows){
+          // Nicht die erste Wand vor der Rueckkehr: eine Wiederkehr dorthin setzt in der Auswertung 'returned'
+          // (assignWalls Schritt 3, hit===0). Messaufbau (gepaart, gleicher Lauf vor/nach der Wiederkehr): 'returned'
+          // in 60-88 % der Laeufe, 'geschlossen' mitten im Rundgang 9-14 %, davon mit falscher Topologie 3-8 % aller
+          // Laeufe - der Auto-Abschluss beendet dann nach 5 s mit falscher Skizze (pruef-overlay/t2_revisit.mjs, Variante c).
+          if(r.virtual || !(r.sRho>=OV.hiMin) || (r.k===0 && !S.sol.returned)) continue;
+          const s=G.projectSegment(proj, camTo, Y(r.span[0],Hm), Y(r.span[1],Hm)), q=s && G.clipNdc(s[0], s[1], 0.98);
+          if(!q) continue;
+          const a=px(q[0]), b=px(q[1]);
+          if(Math.hypot(b[0]-a[0], b[1]-a[1])>=OV.hiPx*dpr) vis.push({r, a, b});
+        }
+        // Wandnummern wechseln mit jeder Auswertung - die bisherige wird an ihrer Lage
+        // wiedererkannt (Modellrahmen: < 10° und < 0,2 m).
+        const lineOf=r=>S.sol.walls[r.k] && S.sol.walls[r.k].line, h=S.hiLine;
+        const same=l=>h && l && Math.abs(l.u[0]*h.u[0]+l.u[1]*h.u[1])>Math.cos(10*Math.PI/180)
+          && Math.abs(-h.u[1]*(l.c[0]-h.c[0])+h.u[0]*(l.c[1]-h.c[1]))<0.2;
+        let best=vis.length ? vis.reduce((p,x)=>x.r.sRho>p.r.sRho ? x : p) : null;
+        const keep=best && vis.find(v=>same(lineOf(v.r)));
+        if(keep && keep.r.sRho>=0.8*best.r.sRho) best=keep;
+        S.hiLine=best ? lineOf(best.r) : null;
+        if(best){
+          const col=wallColor(best.r), m=[(best.a[0]+best.b[0])/2, (best.a[1]+best.b[1])/2];
+          line(best.a, best.b, 'rgba(0,0,0,.6)', 9); line(best.a, best.b, col, 5);
+          const txt='näher ran';   // ohne Zahl: sRho unterschaetzt den wahren Fehler etwa 2- bis 3-fach (Monte-Carlo)
+          c.font=`600 ${15*dpr}px system-ui, sans-serif`; c.textAlign='center'; c.textBaseline='bottom';
+          c.lineWidth=4*dpr; c.strokeStyle='rgba(0,0,0,.8)'; c.strokeText(txt, m[0], m[1]-8*dpr);
+          c.fillStyle=col; c.fillText(txt, m[0], m[1]-8*dpr);
+        }
+        c.globalAlpha=1;
+      }
+    }
+  }
+  // Live-Kante doppelt gezogen: dunkler Rand, damit sie auch auf weisser
+  // Decke zu sehen ist.
+  if(S.phase==='waende' && S.live){
+    const a=px(S.live.A), b=px(S.live.B);
+    line(a, b, 'rgba(0,0,0,.75)', 5);
+    // Gruen nur, wenn jetzt wirklich erfasst wuerde.
+    const ok=S.auto ? (S.live.good && S.liveConfirmed && !autoBlock()) : S.live.good;
+    line(a, b, ok ? '#4ade80' : '#fbbf24', 2.5);
+  }
+}
+
+function stats(){
+  const t=performance.now();
+  if(t-S.lastStats<250) return;
+  S.lastStats=t;
+  const fps=S.fps.length ? S.fps.reduce((a,b)=>a+b, 0)/S.fps.length : 0;
+  const f=S.floorCand;
+  const parts=[
+    ['Tracking', S.track],
+    ['Boden', S.anchor ? 'Anker' : S.floorY!==null ? 'ohne Anker' : f ? `${f.camH.toFixed(2)} m unter Kamera (${f.ang.toFixed(1)}°)` : 'suche …'],
+    ['Bild', S.camSize ? `${S.camSize[0]}×${S.camSize[1]}` + (S.small ? `→${S.small[0]}×${S.small[1]}` : '')
+                         + (S.aspectWarn ? ' Seitenverh. weicht ab!' : '') : '–'],
+    ['ROI', ms(median(LOG.timings.roi.slice(-20)))],
+    ['klein', ms(median(LOG.timings.small.slice(-20)))],
+    ['Kante', ms(median(LOG.timings.snap.slice(-20)))],
+    ['Zeichnen', ms(median(LOG.timings.draw.slice(-20)))],
+    ['z', S.live ? S.live.z.toFixed(0) : '–'],
+    ...(S.auto ? [['Schwenk', (S.speed||0).toFixed(0)+'°/s']] : []),
+    ['fps', fps.toFixed(0)],
+    ['Ebenen', S.planes ? `${S.planes.h}h/${S.planes.v}v` : '–'],
+    ['Tiefe', S.depth || '–'],
+    ['y-Spiegel', S.flipY ? 'an' : 'aus'],
+  ];
+  $('arStats').replaceChildren(...parts.map(([k,v])=>el('span', `${k} ${v}`)));
+}
+
+const BODEN_HINT='Fadenkreuz auf ein freies Bodenstück, Telefon langsam bewegen. Sobald der grüne Punkt liegt: „Boden setzen“.';
+function hint(text, cls=''){ const h=$('arHint'); h.textContent=text; h.className=cls;
+  // Was der Nutzer sah, gehoert ins Protokoll - ohne die laufenden Sekunden
+  // des Countdowns, sonst schreibt jedes Bild einen Eintrag.
+  const k=text.replace(/\d+ s\b/g,'… s'); if(k!==S.lastHintK){ S.lastHintK=k; ev('hinweis', {text:k, cls}); } }
+function updateWallInfo(){
+  const n=S.walls.length, cur=S.walls[n-1].length, done=S.walls.filter(o=>o.length).length;
+  if(S.auto){
+    const sol=S.sol, rej=sol ? sol.labels.filter(l=>typeof l==='string' && l.startsWith('verworfen')).length : 0;
+    // Unsicherste Wand nennen - dort lohnt ein zweiter Blick aus anderem Abstand.
+    let weak='';
+    if(sol && sol.walls.length>=3){ let wi=-1, ws=0; sol.walls.forEach((w,k)=>{ const sr=w.line && w.line.sRho; if(sr>ws){ ws=sr; wi=k; } });
+      if(wi>=0 && ws>0.05) weak=` · unsicher: Wand ${wi+1}`; }
+    const h=sol && Number.isFinite(sol.H) ? ` · H ${S.H ? 'Laser' : sol.Hfixed ? 'unbestimmt' : '≈'+sol.H.toFixed(2)+' m'}` : '';
+    $('arWall').textContent=S.phase==='waende'
+      ? `Schwenk · ${done} Wände · ${S.pool.length} Kanten · ${rej} verworfen` + (sol && sol.closed ? ' · geschlossen' : '')
+        + weak + h + (S.paused ? ' · PAUSE' : '')
+      : '';
+    $('btnPause').textContent=S.closeT!=null || S.closePending ? 'Noch nicht fertig' : S.paused ? 'Weiter' : 'Pause';
+    $('btnUndo').textContent=S.pool.length ? 'Rückgängig' : 'Boden neu';
+    $('btnClose').disabled=done<3;
+    return;
+  }
+  $('btnUndo').textContent='Rückgängig';
+  $('arWall').textContent=S.phase==='waende'
+    ? `Wand ${n} · ${cur} Kante${cur===1 ? '' : 'n'} · ${done} Wände erfasst` + (S.H ? ` · Raumhöhe ${Math.round(S.H*1000)} mm` : ' · ohne Raumhöhe')
+    : '';
+  $('btnKante').disabled=!S.H || S.trackLost;
+  $('btnNext').disabled=!cur;
+  $('btnClose').disabled=done<3 || !S.H;
+}
+function showButtons(){
+  const b=S.phase==='boden';
+  $('arBtnsBoden').classList.toggle('hidden', !b);
+  $('arBtnsWand').classList.toggle('hidden', b);
+  $('arBtnsWand2').classList.toggle('hidden', b);
+  $('btnKante').classList.toggle('hidden', !!S.auto);
+  $('btnNext').classList.toggle('hidden', !!S.auto);
+  $('btnPause').classList.toggle('hidden', !S.auto);
+  $('btnBoden').textContent=S.auto ? 'Boden jetzt' : 'Boden setzen';
+  updateWallInfo();
+}
+
+// ------------------------------------------------------- Protokoll
+// Ein Durchlauf pro Sitzung; vorige Durchlaeufe wandern nach LOG.runs. Das
+// Protokoll liegt nach jeder Erfassung und am Sitzungsende auch im
+// localStorage - ein Neuladen oder ein Absturz der Seite verliert es nicht.
+const RUN_KEYS=['session','floor','events','obs','result','timings','planes','depth','tracking','roiLuma','anchorPath','viewPath','breaks','hLaserMm','hEingabe','mode'];
+function freshRun(){
+  return {session:{}, floor:null, events:[], obs:[], result:null, timings:{roi:[], small:[], snap:[], solve:[], draw:[]}, mode:null,
+          planes:[], depth:null, tracking:{ok:0, emulated:0, lost:0, anchorLost:0}, roiLuma:[], anchorPath:[], viewPath:[], breaks:[],
+          hLaserMm:null, hEingabe:null};
+}
+function newRun(){
+  if(LOG.events.length || LOG.obs.length){
+    const old={}; RUN_KEYS.forEach(k=>old[k]=LOG[k]);
+    LOG.runs.push(old);
+  }
+  Object.assign(LOG, freshRun());
+}
+const STORE_KEY='raumskizze-probe.protokoll';
+function saveLog(){ try{ localStorage.setItem(STORE_KEY, JSON.stringify(LOG)); }catch(e){} }
+
+// ------------------------------------------------------- Sitzung
+async function startAR(){
+  const raw=$('hoehe').value.trim(), hmm=parseFloat(raw.replace(',', '.'));
+  if(raw && !(hmm>=1500 && hmm<=6000)){
+    $('startHint').textContent=`Raumhöhe „${raw}“ ist ungültig – in mm eingeben (1500–6000), z. B. 2550. Leer lassen für nur Stufe 0.`;
+    return;
+  }
+  newRun();
+  S.H=raw ? hmm/1000 : null;
+  LOG.hLaserMm=S.H ? Math.round(S.H*1000) : null;
+  LOG.hEingabe=raw || null;
+  S.auto=$('auto').checked;
+  LOG.mode=S.auto ? 'automatisch' : 'von Hand';
+  Object.assign(S, {pool:[], sol:null, model:null, modelKey:null, hiLine:null, paused:false, closeT:null, closeDone:false, lastAuto:null,
+    floorStable:null, prevDir:null, prevT:null, speed:0, prevLive:null, liveConfirmed:false, settleUntil:0,
+    speedWarn:false, solveBusy:false, solveDirty:false, solveId:(S.solveId||0)+1, closePending:false, lastMiss:null});
+  if(S.auto && !S.worker) S.worker=makeSolver();
+  Object.assign(S, {phase:'boden', walls:[[]], anchor:null, anchorLost:false, floorY:null, floorCand:null,
+    stopSince:null, stopEsc:false, lowSince:null, lowHintT:null, lastHintK:null, closeArm:0, stateK:null,
+    Tlast:null, subst:false, anchorPrev:null, reanchorBusy:false, reanchorAt:0, breaks:[], frames:[], frameJumps:[], jumpHold:false, anchorT:0, relocLogged:false, prevCam:null, camV:0,
+    lastView:null, lastCamH:null, TlastOf:null, gap:null, substBad:false,
+    floorFoundT:null, floorWarn:false, floorReq:false, capReq:false, live:null, camSize:null, small:null,
+    planes:null, depth:null, trackLost:false, closed:false, endArm:0, fps:[], lastT:0, frame:0, warned:{},
+    aspectWarn:false});
+  const canvas=document.createElement('canvas');
+  const gl=canvas.getContext('webgl2', {xrCompatible:true, alpha:true, antialias:false});
+  if(!gl){ $('startHint').textContent='WebGL2 fehlt.'; return; }
+  let session;
+  try{
+    session=await navigator.xr.requestSession('immersive-ar', {
+      optionalFeatures:['local','hit-test','anchors','dom-overlay','camera-access','plane-detection','depth-sensing'],
+      domOverlay:{root:$('ar')},
+      depthSensing:{usagePreference:['cpu-optimized'], dataFormatPreference:['luminance-alpha','unsigned-short']},
+    });
+  }catch(e){
+    $('startHint').textContent='AR-Sitzung abgelehnt: '+(e && e.message || e);
+    ev('sitzung-abgelehnt', {msg:String(e && e.message || e)});
+    return;
+  }
+  // Ende sofort abonnieren: auch ein Abbruch waehrend der Vorbereitung muss
+  // das Overlay wieder einklappen und den Start freigeben.
+  session.addEventListener('end', onEnd);
+  S.session=session; S.gl=gl;
+  $('ar').classList.remove('hidden');
+  $('result').classList.add('hidden');
+  const cv=$('arCanvas');
+  S.resize=()=>{ cv.width=Math.round(innerWidth*devicePixelRatio); cv.height=Math.round(innerHeight*devicePixelRatio); };
+  S.resize(); addEventListener('resize', S.resize);
+  S.ctx=cv.getContext('2d');
+  try{
+    if(gl.makeXRCompatible) await gl.makeXRCompatible();
+    session.updateRenderState({baseLayer:new XRWebGLLayer(session, gl, {alpha:true, antialias:false})});
+    S.ref=await session.requestReferenceSpace('local');
+    S.gpu=makeGpu(gl);
+    S.binding=('XRWebGLBinding' in window) ? new XRWebGLBinding(session, gl) : null;
+  }catch(e){
+    ev('sitzung-fehler', {msg:String(e && e.message || e)});
+    S.prepError='Sitzung konnte nicht vorbereitet werden: '+(e && e.message || e);
+    session.end().catch(()=>{});
+    return;
+  }
+  try{
+    const viewer=await session.requestReferenceSpace('viewer');
+    S.hit=await session.requestHitTestSource({space:viewer});
+  }catch(e){ S.hit=null; ev('hit-test-fehlt', {msg:String(e && e.message || e)}); }
+  if(!S.session) return;
+  const feats=session.enabledFeatures ? Array.from(session.enabledFeatures) : null;
+  // depthUsage/depthDataFormat werfen, wenn Tiefe nicht gewaehrt wurde.
+  const tryGet=f=>{ try{ return f(); }catch(e){ return null; } };
+  LOG.session={
+    start:now(), chrome:LOG.caps.Browser || null, enabledFeatures:feats,
+    domOverlay:session.domOverlayState ? session.domOverlayState.type : null,
+    depthUsage:tryGet(()=>session.depthUsage), depthDataFormat:tryGet(()=>session.depthDataFormat),
+    blendMode:session.environmentBlendMode || null, hitTest:!!S.hit, binding:!!S.binding,
+  };
+  ev('sitzung-start', LOG.session);
+  showButtons();
+  if(!S.binding || (feats && !feats.includes('camera-access'))){
+    hint('Kein Kamerazugriff gewährt – Kanten lassen sich nicht erfassen, nur Stufe 0.', 'bad');
+    ev('kein-kamerazugriff');
+  } else if(!S.hit){
+    hint('Kein Hit-Test – der Boden lässt sich nicht setzen, nur Stufe 0.', 'bad');
+  } else hint(S.auto ? 'Kurz auf freien Boden halten – der Boden setzt sich von selbst.' : BODEN_HINT);
+  session.requestAnimationFrame(onFrame);
+}
+
+function onEnd(){
+  ev('sitzung-ende');
+  LOG.session.end=now();
+  $('ar').classList.add('hidden');
+  if(S.resize) removeEventListener('resize', S.resize);
+  S.session=null;
+  $('start').disabled=false;
+  if(S.prepError){ $('startHint').textContent=S.prepError; S.prepError=null; saveLog(); return; }
+  if(LOG.session.start==null){ $('startHint').textContent='Sitzung endete, bevor sie lief – noch einmal starten.'; saveLog(); return; }
+  $('startHint').textContent='Neuer Durchlauf möglich. Das Protokoll sammelt alle Durchläufe – am Ende sichern.';
+  try{ showResult(computeResult()); $('result').scrollIntoView({behavior:'smooth', block:'start'}); }
+  catch(e){ ev('ergebnis-fehler', {msg:String(e && e.message || e)}); $('startHint').textContent='Auswertung fehlgeschlagen – bitte das Protokoll sichern und schicken.'; }
+  finally{ saveLog(); }
+}
+
+// ----------------------------------------------------------- Ergebnis
+function computeResult(){
+  const H=S.H, W=S.walls.filter(o=>o.length);
+  const max=k=>LOG.planes.reduce((m,p)=>Math.max(m,p[k]), 0);
+  const res={H, wallsCaptured:W.length, closed:!!S.closed,
+    stage0:{camera:S.camSize, small:S.small, roiMs:median(LOG.timings.roi), smallMs:median(LOG.timings.small),
+            snapMs:median(LOG.timings.snap), tracking:{...LOG.tracking}, planesMax:{h:max('h'), v:max('v')},
+            depth:LOG.depth, enabledFeatures:LOG.session.enabledFeatures, floor:LOG.floor,
+            duration:LOG.session.end!=null && LOG.session.start!=null ? +(LOG.session.end-LOG.session.start).toFixed(1) : null}};
+  if(S.auto){
+    // Endgueltige Auswertung synchron ueber alle Erfassungen. Mit Laser-Hoehe
+    // zusaetzlich ohne sie (Kreuzprobe): weicht die Kamera-Hoehe deutlich ab,
+    // ist die eingetippte Hoehe verdaechtig.
+    const solve=(opt,wo)=>{ try{ return G.solveSweepAuto(S.pool.map(slim), opt); }
+      catch(e){ ev('auswertung-fehler', {msg:String(e && e.message || e), wo}); return null; } };
+    let sol=S.pool.length>=3 ? solve(solveOpt(), 'ende') : null;
+    if(!sol && S.sol && S.sol.walls) sol=S.sol;   // letzter Live-Stand
+    const free=S.H && S.pool.length>=3 ? solve({H0:2.55, Hsigma:0.35}, 'kreuzprobe') : null;
+    const why={}; let pend=0;
+    (sol ? sol.labels : []).forEach(l=>{ if(typeof l==='string'){ if(l.startsWith('verworfen')){ const k=l.replace('verworfen: ',''); why[k]=(why[k]||0)+1; } else pend++; } });
+    res.auto={obs:S.pool.length, walls:sol ? sol.walls.length : 0, closed:!!(sol && sol.closed), rejected:why, pending:pend,
+      H:sol ? sol.H : null, sH:sol ? sol.sH : null, laser:!!S.H, Hlaser:S.H||null, Hfixed:!!(sol && sol.Hfixed),
+      Hfree:free && !free.Hfixed ? free.H : null, sHfree:free && !free.Hfixed ? free.sH : null,
+      s0:sol ? sol.s0 : null, ortho:sol ? sol.ortho : null, turn:sol ? sol.turn : null, nSeg:sol ? sol.nSeg : null,
+      solveMs:median(LOG.timings.solve), drift:sol && sol.drift ? sol.drift.knots : null};
+    // Geschlossen heisst: die Auswertung hat den Rundgang geschlossen. Von
+    // Hand geschlossen bei offenem Ring ist etwas anderes - ehrlich zeigen.
+    res.closedManual=!!S.closed && !res.auto.closed;
+    res.closed=res.auto.closed;
+    res.H=sol ? sol.H : null;
+    if(sol && sol.corners){
+      // Wand k der Auswertung -> Zeile im Ergebnis (ergaenzte Versprunge sind
+      // eigene Zeilen), damit Protokoll und Tabelle dieselben Nummern tragen.
+      const rowOf=[]; let k=0; sol.lines.forEach((l,i)=>{ if(!sol.virtual[i]) rowOf[k++]=i; });
+      S.pool.forEach((o,i)=>{ const l=sol.labels[i]; o.final=typeof l==='number' ? 'Wand '+(rowOf[l]+1) : l; });
+      res.walls=sol.lines.map((l,i)=>{ if(sol.virtual[i]) return {n:0, sRhoMm:null, weak:0, virtual:true};
+        const w=sol.walls[rowOf.indexOf(i)]; return {n:w.n, weak:0, sRhoMm:Number.isFinite(w.line.sRho) ? Math.round(w.line.sRho*1000) : null}; });
+      res.room={corners:sol.corners, area:sol.area, warnings:sol.warnings};
+      res.name='Kamera-Skizze '+new Date().toLocaleString('de-DE', {dateStyle:'short', timeStyle:'short'});
+      // Nur eine Laser-Hoehe ist eine Messung; die Schaetzung misst der Laser spaeter.
+      res.data=G.toRoomData(sol.corners, S.H ? S.H*1000 : NaN);
+    }
+  } else if(H && W.length>=3){
+    const lines=W.map(o=>G.wallLine(o, H));
+    const missing=lines.map((l,i)=>l ? null : i+1).filter(Boolean);
+    const room=missing.length ? {corners:null, area:null, warnings:[`Wand ${missing.join(', ')} ohne auswertbare Kante.`]}
+                              : G.buildRoom(lines);
+    const ph=G.parallaxH(W);
+    res.walls=W.map((o,i)=>({n:o.length, rmsMm:lines[i] ? Math.round(lines[i].rms*1000) : null, weak:o.filter(x=>!x.good).length}));
+    res.room={corners:room.corners, area:room.area, warnings:room.warnings};
+    res.parallax={H:ph.H, used:ph.used, atEdge:ph.atEdge||false, spread:ph.spread||[], interval:ph.interval||null, reason:ph.reason||null};
+    if(room.corners){
+      res.name='Kamera-Skizze '+new Date().toLocaleString('de-DE', {dateStyle:'short', timeStyle:'short'});
+      res.data=G.toRoomData(room.corners, H*1000);
+    }
+  }
+  LOG.result=res;
+  return res;
+}
+
+function showResult(res){
+  $('result').classList.remove('hidden');
+  const box=$('resSummary'); box.replaceChildren();
+  const p=(t,cls)=>box.appendChild(el('div', t, cls));
+  const s0=res.stage0;
+  p(`Stufe 0: Kamerabild ${s0.camera ? s0.camera.join('×') : '–'}`
+    + (s0.small ? `, verkleinert ${s0.small.join('×')}` : '')
+    + ` · readPixels 256² ${ms(s0.roiMs)} · verkleinert ${ms(s0.smallMs)} · Kante ${ms(s0.snapMs)}`);
+  p(`Tracking: ${s0.tracking.ok} ok, ${s0.tracking.emulated} geschätzt, ${s0.tracking.lost} verloren, Anker ${s0.tracking.anchorLost||0} verloren · Ebenen max ${s0.planesMax.h}h/${s0.planesMax.v}v · Tiefe ${s0.depth && s0.depth.w ? s0.depth.w+'×'+s0.depth.h : '–'}`);
+  p(`Features: ${s0.enabledFeatures ? s0.enabledFeatures.join(', ') : 'nicht gemeldet'}`);
+  if(s0.floor) p(`Boden: Normale ${s0.floor.normalDeg}° von senkrecht, Kamera ${Math.round(s0.floor.camHeight*1000)} mm darüber, ${s0.floor.anchor ? 'mit Anker' : 'ohne Anker'}`
+    + (s0.floor.tFound!=null ? `, gefunden nach ${s0.floor.tFound.toFixed(1)} s` : ''), s0.floor.anchor ? '' : 'warn');
+  if(LOG.runs.length) p(`Durchlauf ${LOG.runs.length+1} – frühere Durchläufe stecken im Protokoll.`);
+  if(res.auto){
+    const rj=Object.entries(res.auto.rejected).map(([k,v])=>`${v}× ${k}`).join(', ');
+    p(`Schwenk: ${res.auto.obs} Kanten erfasst, ${res.auto.walls} Wände erkannt${res.auto.closed ? ', Raum geschlossen' : ', nicht geschlossen'}`
+      + (rj ? ` · verworfen: ${rj}` : ''), res.auto.closed ? '' : 'warn');
+  }
+  if(res.auto && res.auto.H!=null){
+    const A=res.auto, mm=x=>Math.round(x*1000);
+    if(A.laser){
+      // Gegen die eingetippte Hoehe, nicht gegen die ausgeglichene. Die
+      // Kamera-Hoehe ist ohne Laser leicht nach unten verzerrt und ihr σ zu
+      // klein - darum mindestens 15 cm, sonst schlaegt die Probe bei
+      // richtiger Laser-Hoehe zu oft an.
+      const d=A.Hfree!=null ? A.Hfree-A.Hlaser : null, lim=Math.max(0.15, 3*(A.sHfree||0));
+      p(`Raumhöhe: Laser ${mm(A.Hlaser)} mm · Kamera ${A.Hfree!=null ? mm(A.Hfree)+' ± '+mm(A.sHfree||0)+' mm' : 'nicht bestimmbar'}`, d!=null && Math.abs(d)>lim ? 'warn' : '');
+      if(d!=null && Math.abs(d)>lim) p(`Kamera und Laser weichen ${mm(Math.abs(d))} mm ab – eingetippte Raumhöhe prüfen.`, 'warn');
+    } else if(A.Hfixed) p(`Raumhöhe aus der Kamera nicht bestimmbar – mit ${mm(A.H)} mm gerechnet, der Maßstab der Skizze ist unsicher. Eine Laser-Strecke setzt ihn.`, 'warn');
+    else if((A.sH||0)>0.1){
+      // Ohne Basislinie (aus der Hand an einer Stelle gedreht) traegt fast nur
+      // das Vorwissen: die Form stimmt, der Massstab nicht genau.
+      const cam=median(S.pool.map(o=>o.cam ? o.cam[1] : NaN).filter(Number.isFinite)), dl=Number.isFinite(cam) ? A.H-cam : 1.1;
+      p(`Raumhöhe aus der Kamera nur ungefähr: ${mm(A.H)} ± ${mm(A.sH)} mm. Der Maßstab der Skizze ist damit auf etwa ±${Math.round(100*A.sH/Math.max(0.5,dl))} % unsicher – die Form stimmt, eine Laser-Strecke setzt den Maßstab. Genauer wird es, wenn du beim Schwenken ein paar Schritte gehst.`, 'warn');
+    } else p(`Raumhöhe aus der Kamera: ${mm(A.H)} ± ${mm(A.sH||0)} mm (geschätzt – der Laser misst sie später)`, (A.sH||0)>0.08 ? 'warn' : '');
+    p(`Auswertung: Varianzfaktor ${A.s0!=null ? A.s0.toFixed(1) : '–'} · ${A.ortho ? A.ortho.walls.length+' Wände rechtwinklig' : 'keine rechten Winkel angenommen'} · ${A.nSeg} Abschnitte · ${A.solveMs!=null ? A.solveMs.toFixed(0)+' ms je Auswertung' : ''}`);
+  }
+  if(!res.room){
+    p(res.auto ? `Zu wenig Wände (${res.auto.walls}) – mindestens drei.` : res.H ? `Zu wenig Wände (${res.wallsCaptured}) – mindestens drei.` : 'Ohne Raumhöhe nur Stufe 0.', 'warn');
+  } else {
+    if(!res.closed) p(res.auto ? (res.closedManual ? 'Von Hand geschlossen, der Rundgang war aber offen – die Ecke zwischen letzter und erster Wand ist geraten.' : 'Rundgang nicht geschlossen – die Ecke zwischen letzter und erster Wand ist geraten.') : 'Rundgang mit „Beenden“ abgebrochen – die Ecke zwischen letzter und erster Wand ist geraten.', 'warn');
+    const ph=res.parallax;
+    if(!ph){}
+    else if(ph.H!==null) p(`Raumhöhe: Laser ${Math.round(res.H*1000)} mm · Parallaxe ${Math.round(ph.H*1000)} mm (Δ ${Math.round((ph.H-res.H)*1000)} mm, ${ph.used} Wände)`, Math.abs(ph.H-res.H)<=0.1 ? 'ok' : 'warn');
+    else p(`Raumhöhe: Laser ${Math.round(res.H*1000)} mm · Parallaxe: ${ph.reason}`);
+    if(res.room.area!=null) p(`Fläche ${res.room.area.toFixed(2)} m² · ${res.room.corners ? res.room.corners.length : 0} Ecken`);
+    res.room.warnings.forEach(w=>p(w, 'warn'));
+  }
+  const tb=$('resWalls'); tb.replaceChildren();
+  if(res.walls){
+    const head=el('tr'); (res.auto ? ['Wand','Länge','Kanten','σ Lage'] : ['Wand','Länge','Kanten','schwach','Rest','Abst.-Spreizung']).forEach(h=>head.appendChild(el('th', h))); tb.appendChild(head);
+    const C=res.room.corners, used=[];
+    res.walls.forEach((w,i)=>{
+      const tr=el('tr');
+      const len=C ? Math.hypot(C[(i+1)%C.length][0]-C[i][0], C[(i+1)%C.length][1]-C[i][1]) : null;
+      const cells=[String(i+1), len!=null ? len.toFixed(2)+' m' : '–', w.virtual ? 'ergänzt' : String(w.n)];
+      if(res.auto) cells.push(w.sRhoMm!=null ? w.sRhoMm+' mm' : '–');
+      else { const sp=w.n>=2 ? res.parallax.spread[used.length] : null; if(w.n>=2) used.push(i);
+        cells.push(String(w.weak), w.rmsMm!=null ? w.rmsMm+' mm' : '–', sp!=null ? sp.toFixed(2)+' m' : '–'); }
+      cells.forEach(v=>tr.appendChild(el('td', v)));
+      tb.appendChild(tr);
+    });
+  }
+  drawPlan(res);
+  const has=!!res.data;
+  ['send','open','dlRoom'].forEach(id=>$(id).disabled=!has);
+  $('linkOut').textContent='';
+}
+
+function drawPlan(res){
+  const cv=$('plan'), c=cv.getContext('2d'), W=cv.width, Hc=cv.height;
+  c.clearRect(0, 0, W, Hc);
+  const H=res.H, pts=[];
+  const corners=res.room && res.room.corners;
+  if(corners) pts.push(...corners);
+  const live=LOG.obs.filter(o=>!o.undone && !(o.final||'').startsWith('verworfen'));
+  const segs=H ? live.map(o=>G.liftObs(o, H)).filter(Boolean) : [];
+  segs.forEach(s=>pts.push(...s));
+  const cams=live.map(o=>[o.cam[0], o.cam[2]]);
+  pts.push(...cams);
+  if(!pts.length){ c.fillStyle='#8b929c'; c.font='28px system-ui'; c.fillText('Keine Wände erfasst.', 30, 60); return; }
+  const xs=pts.map(p=>p[0]), ys=pts.map(p=>p[1]);
+  const x0=Math.min(...xs), x1=Math.max(...xs), y0=Math.min(...ys), y1=Math.max(...ys);
+  const s=0.86*Math.min(W/Math.max(x1-x0, 0.5), Hc/Math.max(y1-y0, 0.5));
+  const ox=W/2-s*(x0+x1)/2, oy=Hc/2-s*(y0+y1)/2;
+  // y = Z nach unten, wie in raumaufmass.html.
+  const P=p=>[ox+s*p[0], oy+s*p[1]];
+  c.strokeStyle='#22262d'; c.lineWidth=1;
+  for(let gx=Math.floor(x0)-1; gx<=x1+1; gx++){ const a=P([gx,y0-1]), b=P([gx,y1+1]); c.beginPath(); c.moveTo(a[0],a[1]); c.lineTo(b[0],b[1]); c.stroke(); }
+  for(let gy=Math.floor(y0)-1; gy<=y1+1; gy++){ const a=P([x0-1,gy]), b=P([x1+1,gy]); c.beginPath(); c.moveTo(a[0],a[1]); c.lineTo(b[0],b[1]); c.stroke(); }
+  if(corners){
+    c.strokeStyle='#f97316'; c.lineWidth=4; c.beginPath();
+    corners.forEach((p,i)=>{ const q=P(p); if(i) c.lineTo(q[0],q[1]); else c.moveTo(q[0],q[1]); });
+    c.closePath(); c.stroke();
+    c.fillStyle='#e6e8eb'; c.font='24px system-ui';
+    corners.forEach((p,i)=>{ const q=P(p); c.fillText(G.idOf(i), q[0]+6, q[1]-6); });
+    c.fillStyle='#fbbf24'; c.font='20px system-ui';
+    corners.forEach((p,i)=>{ const r=corners[(i+1)%corners.length], m=P([(p[0]+r[0])/2,(p[1]+r[1])/2]);
+      c.fillText(Math.hypot(r[0]-p[0], r[1]-p[1]).toFixed(2), m[0]+4, m[1]+18); });
+  }
+  c.strokeStyle='#60a5fa'; c.lineWidth=5;
+  segs.forEach(sg=>{ const a=P(sg[0]), b=P(sg[1]); c.beginPath(); c.moveTo(a[0],a[1]); c.lineTo(b[0],b[1]); c.stroke(); });
+  c.fillStyle='#8b929c';
+  cams.forEach(p=>{ const q=P(p); c.beginPath(); c.arc(q[0], q[1], 5, 0, 2*Math.PI); c.fill(); });
+}
+
+// ------------------------------------------------------------ Export
+function download(name, text){
+  const a=el('a'); a.href=URL.createObjectURL(new Blob([text], {type:'application/json'}));
+  a.download=name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
+}
+const slug=s=>s.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+function shareLink(){ const r=LOG.result; return r && r.data ? APP_URL+G.shareFragment(r.name, r.data) : null; }
+
+$('send').onclick=async()=>{
+  const link=shareLink(); if(!link) return;
+  $('linkOut').textContent=link;
+  try{
+    if(navigator.share){ await navigator.share({title:LOG.result.name, url:link}); return; }
+  }catch(e){ if(e && e.name==='AbortError') return; }
+  try{ await navigator.clipboard.writeText(link); $('linkOut').textContent='Link kopiert: '+link; }catch(e){}
+};
+$('open').onclick=()=>{ const link=shareLink(); if(link) window.open(link, '_blank'); };
+// Datei-Import der App erwartet die Raumdaten oben, mit optionalem name.
+$('dlRoom').onclick=()=>{ const r=LOG.result; if(r && r.data) download(slug(r.name)+'.json', JSON.stringify({name:r.name, ...r.data}, null, 1)); };
+$('dlLog').onclick=()=>download('raumskizze-protokoll-'+LOG.started.replace(/[:.]/g,'-')+'.json', JSON.stringify(LOG, null, 1));
+
+// --------------------------------------------------------- Knoepfe
+// Tipps auf Knoepfe sollen keine XR-select-Ereignisse ausloesen.
+$('arBottom').addEventListener('beforexrselect', e=>e.preventDefault());
+$('start').onclick=()=>{ $('start').disabled=true; startAR().finally(()=>{ if(!S.session) $('start').disabled=false; }); };
+$('btnBoden').onclick=()=>{ S.floorReq=true; ev('tap-boden'); };
+const flip=()=>{ S.flipY=!S.flipY; ev('y-spiegel', {an:S.flipY}); };
+$('btnFlip').onclick=flip; $('btnFlip2').onclick=flip;
+const end=()=>{ if(S.session) S.session.end().catch(()=>{}); };
+// Beenden mitten im Rundgang braucht einen zweiten Tipp: sonst entsteht ein
+// geschlossener Raum mit geratener letzter Ecke. "Raum schließen" ist der
+// regulaere Weg.
+const endTap=btn=>()=>{
+  if(S.phase==='waende' && S.walls.some(o=>o.length) && performance.now()-S.endArm>3000){
+    S.endArm=performance.now();
+    const old=btn.textContent; btn.textContent='Wirklich?';
+    setTimeout(()=>{ btn.textContent=old; }, 3000);
+    return;
+  }
+  ev('beenden'); end();
+};
+$('btnEnd').onclick=endTap($('btnEnd')); $('btnEnd2').onclick=endTap($('btnEnd2'));
+$('btnKante').onclick=()=>{ S.capReq=true; S.capReqT=now(); ev('tap-kante'); };
+$('btnNext').onclick=()=>{
+  if(!S.walls[S.walls.length-1].length) return;
+  S.walls.push([]); ev('nächste-wand', {wand:S.walls.length});
+  hint(`Wand ${S.walls.length}: die nächste Wand im Uhrzeigersinn oder dagegen – Hauptsache der Reihe nach.`);
+  updateWallInfo();
+};
+$('btnPause').onclick=()=>{
+  // Pause hebt auch den Abschluss-Countdown auf: weiter erfassen, dann
+  // selbst mit „Raum schließen“ beenden.
+  // „Noch nicht fertig“ gilt auch, wenn der Countdown gerade wegen
+  // Tracking-Verlust wartet. Die Pause bleibt, wie sie war.
+  if(S.closeT!=null || S.closePending){ S.closeT=null; S.closePending=false; S.closeDone=true; ev('countdown-abgebrochen'); hint('Weiter erfassen – zum Schluss „Raum schließen“.'); }
+  else { S.paused=!S.paused; ev(S.paused ? 'pause' : 'weiter');
+    hint(S.paused ? 'Pause – nichts wird erfasst. Zum Umstellen gehen, dann an derselben Stelle in derselben Richtung weiterschwenken.' : 'Weiter schwenken.');
+    // Waehrend der Pause geschlossen? Dann jetzt der Countdown.
+    if(!S.paused && S.closeT==null && canArm()){ S.closeT=now(); ev('raum-geschlossen-auto', {nachPause:true}); } }
+  updateWallInfo();
+};
+$('btnUndo').onclick=()=>{
+  // Ohne brauchbaren Bezug kann Rueckgaengig nichts ersetzen, nur loeschen
+  // (Protokoll 2: 18 Tipps, 18 gute Kanten weg).
+  if(S.auto && S.anchorLost && (S.substBad || !S.Tlast)){ hint('Ohne Bezug wird nichts erfasst – Rückgängig würde nur löschen. Das Erfasste bleibt; „Beenden“ zeigt den Grundriss.', 'warn'); return; }
+  if(S.auto){
+    // Vor der ersten Erfassung heisst der Knopf "Boden neu": zurueck in die
+    // Bodensuche (falscher Boden, z. B. Tisch).
+    if(!S.pool.length){
+      if(S.phase==='waende'){ S.anchor=null; S.Tlast=null; S.TlastOf=null; S.lastCamH=null; S.subst=false; S.substBad=false; S.anchorPrev=null; S.breaks=[]; S.floorY=null; S.floorFoundT=null; S.floorStable=null; S.phase='boden';
+        ev('boden-neu'); showButtons(); hint('Kurz auf freien Boden halten – der Boden setzt sich von selbst.'); }
+      return;
+    }
+    const ob=S.pool.pop();
+    ob.undone=true; ev('rückgängig'); requestSolve();
+    // Rueckgaengig im Countdown = „Noch nicht fertig“: der Nutzer korrigiert
+    // noch, also nicht von selbst beenden.
+    if(S.closeT!=null || S.closePending){ S.closeT=null; S.closePending=false; S.closeDone=true; ev('countdown-abgebrochen');
+      hint('Letzte Kante zurückgenommen – weiter erfassen, zum Schluss „Raum schließen“.'); }
+    saveLog(); updateWallInfo();
+    return;
+  }
+  const cur=S.walls[S.walls.length-1];
+  if(cur.length){ const ob=cur.pop(); ob.undone=true; ev('rückgängig'); }
+  else if(S.walls.length>1){ S.walls.pop(); ev('wand-zurück'); }
+  saveLog();
+  updateWallInfo();
+};
+// Bei offenem Rundgang erst nachfragen: sonst wird die letzte Ecke still
+// geraten und geht so in den Export.
+$('btnClose').onclick=()=>{
+  if(S.auto && S.sol && !S.sol.closed && performance.now()-(S.closeArm||0)>4000){
+    S.closeArm=performance.now(); const b=$('btnClose'), old=b.textContent; b.textContent='Trotzdem?';
+    hint('Der Rundgang ist noch offen – die Ecke zwischen letzter und erster Wand wird geraten. Nochmal tippen = trotzdem schließen.', 'warn');
+    setTimeout(()=>{ b.textContent=old; }, 4000); return; }
+  S.closed=true; ev('raum-schließen', S.sol && !S.sol.closed ? {offen:true} : {}); end(); };
+// Protokoll der letzten Seitensitzung, falls die Seite neu geladen wurde.
+{
+  let last=null; try{ last=localStorage.getItem(STORE_KEY); }catch(e){}
+  if(last){
+    $('dlLast').classList.remove('hidden');
+    $('dlLast').onclick=()=>download('raumskizze-protokoll-vorher.json', last);
+  }
+}
+// ?debug: Zustand fuer die Konsole (chrome://inspect am Telefon, oder
+// Ergebnisanzeige im Desktop-Browser mit eingespeisten Beobachtungen).
+if(Q.has('debug')) globalThis.PROBE={S, LOG, computeResult, showResult, requestSolve, applySolution, drawMiniMap, slim, solveOpt, makeSolver};
+$('start').disabled=true;
+stage0();
+})();
+</script>
