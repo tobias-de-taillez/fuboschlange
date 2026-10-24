@@ -38,11 +38,11 @@ console.log(`Tracking-Bilder: ok ${T.ok}, geschätzt ${T.emulated}, verloren ${T
 
 // Zeitlinie: Ausfaelle als Intervalle.
 const ev=R.events||[];
-const spans=(on,off)=>{ const out=[]; let a=null; for(const e of ev){ if(e.type===on && a==null) a=e.t; else if(e.type===off && a!=null){ out.push([a,e.t]); a=null; } }
+const spans=(on,off)=>{ const out=[], offs=[].concat(off); let a=null; for(const e of ev){ if(e.type===on && a==null) a=e.t; else if(offs.includes(e.type) && a!=null){ out.push([a,e.t]); a=null; } }
   if(a!=null) out.push([a, S.end ?? Infinity]); return out; };
-const tl=spans('tracking-verloren','tracking-zurück'), al=spans('anker-verloren','anker-zurück');
+const tl=spans('tracking-verloren','tracking-zurück'), al=spans('anker-verloren',['anker-zurück','anker-ersetzt']);
 console.log(`Tracking-Ausfälle: ${tl.map(([a,b])=>`${f2(a)}–${f2(b)} s (${f2(b-a)} s)`).join(', ') || 'keine'}`);
-console.log(`Anker ohne Pose:   ${al.map(([a,b])=>`${f2(a)}–${f2(b)} s (${f2(b-a)} s)`).join(', ') || 'keiner'}`);
+console.log(`Anker ohne Pose (bis zurück oder ersetzt):   ${al.map(([a,b])=>`${f2(a)}–${f2(b)} s (${f2(b-a)} s)`).join(', ') || 'keiner'}`);
 const other=ev.filter(e=>!/^(tracking-|anker-verloren|anker-zurück)/.test(e.type));
 const cnt={}; other.forEach(e=>cnt[e.type]=(cnt[e.type]||0)+1);
 console.log('Ereignisse: '+Object.entries(cnt).map(([k,v])=>v>1 ? `${k}×${v}` : k).join(', '));

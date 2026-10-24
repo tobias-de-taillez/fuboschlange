@@ -476,6 +476,20 @@ G.extendLine=(g,W,H,s,o={})=>{
           n:pts.length, frac:S.length ? pts.length/S.length : 0, z:z.z, zn:z.n};
 };
 
+// Stufenmass einer verlaengerten Linie (Median ueber Stuetzstellen alle 6 px):
+// (Mittel 3-6 px auf der einen Seite - Mittel auf der anderen) / Ableitung auf
+// der Linie. Stufe ~1, Linienprofil (Deckenfuge, Schiene) ~0, Rampe ~2.
+G.stepAlong=(g,W,H,e)=>{
+  const bl=(x,y)=>{ if(!(x>=0 && y>=0 && x<=W-1.001 && y<=H-1.001)) return NaN; const x0=x|0, y0=y|0, fx=x-x0, fy=y-y0, i=y0*W+x0;
+    return (g[i]*(1-fx)+g[i+1]*fx)*(1-fy)+(g[i+W]*(1-fx)+g[i+W+1]*fx)*fy; };
+  const t0=(e.x1-e.px)*e.dx+(e.y1-e.py)*e.dy, t1=(e.x2-e.px)*e.dx+(e.y2-e.py)*e.dy, v=[];
+  for(let t=Math.min(t0,t1); t<=Math.max(t0,t1); t+=6){ const bx=e.px+t*e.dx, by=e.py+t*e.dy;
+    const P=k=>(bl(bx+k*e.nx-e.dx,by+k*e.ny-e.dy)+bl(bx+k*e.nx,by+k*e.ny)+bl(bx+k*e.nx+e.dx,by+k*e.ny+e.dy))/3;
+    const D=(P(1)+P(2)-P(-1)-P(-2))/2, s=((P(3)+P(4)+P(5)+P(6))-(P(-6)+P(-5)+P(-4)+P(-3)))/4/D;
+    if(Number.isFinite(s) && Math.abs(D)>0.8) v.push(s); }
+  if(v.length<3) return NaN; v.sort((a,b)=>a-b); return v[v.length>>1];
+};
+
 // Kante am Fadenkreuz: Kandidaten sammeln, jeden verlaengern und am z-Wert
 // pruefen, dann waehlen. Gewinner ist der am besten bewertete gueltige
 // Kandidat. Mit up (Bildrichtung von +Y) gewinnt unter seinen Parallelen
@@ -497,7 +511,11 @@ G.snapLine=(g,W,H,cx,cy,o={})=>{
     const par=V.filter(v=>v===pick || (Math.abs(((v.c.theta-t0)%180+270)%180-90)<=(o.upParDeg??15) && Math.abs(v.c.rho)<=2*sig));
     const rawMax=Math.max(...par.map(v=>v.c.raw));
     let best=-Infinity;
-    for(const v of par){
+    // Eine Linie (Deckenfuge, Schiene) darf eine Stufe darunter nicht verdraengen;
+    // gibt es keine Stufe, bleibt alles waehlbar (Schattenfuge an der Kante).
+    let cand=par;
+    if(o.stepTie!==false){ const st=par.filter(v=>G.stepAlong(g,W,H,v.e)>=0.5); if(st.length) cand=st; }
+    for(const v of cand){
       if(v.c.raw<(o.upFrac??0.2)*rawMax) continue;
       const upc=v.c.rho*(v.c.nx*ux+v.c.ny*uy);
       if(upc>best){ best=upc; pick=v; }
@@ -2434,8 +2452,16 @@ function onFrame(t, frame){
         if(S.sol && S.sol.closed){ S.closeDone=true; S.closed=true; ev('raum-schließen-auto'); S.session.end().catch(()=>{}); }
       } else hint(nv ? `Raum geschlossen – fertig in ${Math.ceil(left)} s. ${nv===1 ? 'Ein Versprung ist' : nv+' Versprünge sind'} ergänzt (rot gestrichelt) – echt? Sonst „Noch nicht fertig“ und dort noch einmal langsam schwenken.`
         : `Raum geschlossen – fertig in ${Math.ceil(left)} s. „Noch nicht fertig“ = weiter erfassen.`, nv ? 'warn' : '');
-    } else if(camTo && S.speed>AUTO_MAX_SPEED){ if(!S.speedWarn){ S.speedWarn=true; hint('Langsamer schwenken – so wird nichts erfasst.', 'warn'); } }
-    else if(camTo && S.speedWarn && S.speed<45){ S.speedWarn=false; hint('Gut so – weiter schwenken.'); }
+    } else if(camTo && S.speed>AUTO_MAX_SPEED){ S.fastSince=S.fastSince ?? now(); S.slowSince=null;
+      if(!S.speedWarn && now()-S.fastSince>0.4){ S.speedWarn=true; S.speedWarnT=now(); hint('Langsamer schwenken – so wird nichts erfasst.', 'warn'); } }
+    else if(camTo){ S.fastSince=null;
+      // Protokoll 4: 53 Hinweise, "Langsamer" und "Gut so" im Wechsel alle
+      // 0,2-1 s. Jetzt erst nach 0,4 s zu schnell warnen, erst nach 1 s ruhig
+      // (fruehestens 2 s nach der Warnung) zurueck - ohne Lob, das Ticken
+      // zeigt schon, dass wieder erfasst wird.
+      if(S.speedWarn && S.speed<45){ S.slowSince=S.slowSince ?? now();
+        if(now()-S.slowSince>1 && now()-S.speedWarnT>2){ S.speedWarn=false; S.slowSince=null; hint('Weiter langsam schwenken, Fadenkreuz auf der Kante.'); } }
+      else S.slowSince=null; }
     // Haltung: liegt die Decke weniger als 0,6 m ueber der Kamera, wird jeder
     // Fehler beim Heben um d/Δ verstaerkt - eine Leiste 15 cm unter der
     // Decke landet aus 2 m 1 m hinter der Wand (Protokolle 24.10.: Telefon
@@ -2713,7 +2739,7 @@ async function startAR(){
   LOG.mode=S.auto ? 'automatisch' : 'von Hand';
   Object.assign(S, {pool:[], sol:null, model:null, modelKey:null, hiLine:null, paused:false, closeT:null, closeDone:false, lastAuto:null,
     floorStable:null, prevDir:null, prevT:null, speed:0, prevLive:null, liveConfirmed:false, settleUntil:0,
-    speedWarn:false, solveBusy:false, solveDirty:false, solveId:(S.solveId||0)+1, closePending:false, lastMiss:null});
+    speedWarn:false, speedWarnT:0, fastSince:null, slowSince:null, solveBusy:false, solveDirty:false, solveId:(S.solveId||0)+1, closePending:false, lastMiss:null});
   if(S.auto && !S.worker) S.worker=makeSolver();
   Object.assign(S, {phase:'boden', walls:[[]], anchor:null, anchorLost:false, floorY:null, floorCand:null,
     stopSince:null, stopEsc:false, lowSince:null, lowHintT:null, lastHintK:null, closeArm:0, stateK:null,

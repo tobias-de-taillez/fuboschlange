@@ -143,7 +143,7 @@ const inward=i=>{
 // flip: Zeile 0 ist oben statt unten - wie eine andersherum liegende
 // Kameratextur, fuer den y-Spiegel der App.
 const SHELF={x0:3.4, x1:4.4, z0:0, z1:0.45, y1:HT};
-const render=(cam,seed,noise=2,flip=false)=>{
+const render=(cam,seed,noise=2,flip=false,band=null)=>{
   const R=rng(seed), g=new Float32Array(IW*IH);
   for(let r=0;r<IH;r++) for(let u=0;u<IW;u++){
     const [x,y]=G.pixToNdc(u,r,IW,IH,flip);
@@ -151,6 +151,10 @@ const render=(cam,seed,noise=2,flip=false)=>{
     let tBest=Infinity, val=60;
     const c=G.hitY(ray,HT,50);
     if(c && inRoom(c[0],c[2])){ tBest=Math.hypot(...sub(c,ray.o)); val=204; }
+    // band: heller Streifen an der Decke vor Wand band.i (Gardinenschiene),
+    // d0..d1 Meter von der Wand - eine Linie, keine Stufe.
+    if(band && val===204){ const [a,b]=[ROOM[band.i],ROOM[(band.i+1)%NW]], L=Math.hypot(b[0]-a[0],b[1]-a[1]);
+      const dw=Math.abs((c[0]-a[0])*(b[1]-a[1])-(c[2]-a[1])*(b[0]-a[0]))/L; if(dw>=band.d0 && dw<=band.d1) val+=band.dv; }
     for(let i=0;i<NW;i++){
       const [a,b]=[ROOM[i],ROOM[(i+1)%NW]];
       const ex=b[0]-a[0], ez=b[1]-a[1];
@@ -160,7 +164,7 @@ const render=(cam,seed,noise=2,flip=false)=>{
       const px=ray.o[0]+t*ray.d[0], py=ray.o[1]+t*ray.d[1], pz=ray.o[2]+t*ray.d[2];
       const s=((px-a[0])*ex+(pz-a[1])*ez)/(ex*ex+ez*ez);
       if(s<0 || s>1 || py<0 || py>HT) continue;
-      tBest=t; val=198+(i%3)*2;
+      tBest=t; val=band && band.i===i && band.wall!=null ? band.wall : 198+(i%3)*2;
       if(i===1 && py>1.9 && py<2.45 && s>0.2 && s<0.55) val=150;
     }
     // Regal als Quader (nur die dem Raum zugewandte Front und Seiten zaehlen).
@@ -293,6 +297,23 @@ chk('gerendert: Fläche ±2 %', areaErr<=0.02, f3(areaErr*100)+' %');
   const ob=capture(cam, render(cam, 558));
   const e=ob ? obsErr(ob,4) : null;
   chk('gerollt 25°: ±1° / ±3 cm', !!e && e.ang<=1 && e.off<=0.03, e ? f3(e.ang)+'° '+f3(e.off)+' m' : 'nichts gefunden');
+}
+{
+  // Gardinenschiene: heller Streifen 12-15 cm vor der Wand an der Decke. Im
+  // Bild liegt er ueber der Kante; die 'oben'-Regel nahm ihn (Messaufbau
+  // pruef6_k4: 29 von 33 falsch). Eine Linie verdraengt die Stufe nicht mehr.
+  // Wand 190: 14 Stufen unter der Decke wie im Messaufbau (glatt), Schiene +20.
+  const band={i:1, d0:0.12, d1:0.15, dv:20, wall:190};
+  let ok=0, n=0, worst='';
+  // Haltung des Nutzers: Kamera auf Kopfhoehe 1,82 m, 2,4-3 m vor der Wand,
+  // dort liegt die Schiene im Bild nur wenige Pixel ueber der Kante.
+  // Wand 1 hinter dem Bilderrahmen (s > 0,6), fern vom Regal.
+  const [a,b]=[ROOM[1],ROOM[2]], nn=inward(1), cams=[];
+  for(const [s,d,below] of [[0.7,2.4,0],[0.8,2.7,0.03],[0.75,3.0,0],[0.85,2.9,-0.03]]){ const m=[a[0]+s*(b[0]-a[0]), a[1]+s*(b[1]-a[1])];
+    cams.push(lookAt([m[0]+d*nn[0],1.82,m[1]+d*nn[1]],[m[0],HT-below,m[1]])); }
+  for(const [k,cam] of cams.entries()){ const ob=capture(cam, render(cam, 560+k, 2, false, band)); const e=ob ? obsErr(ob,1) : null; n++;
+    if(e && e.ang<=1 && e.off<=0.03) ok++; else worst=e ? f3(e.ang)+'° '+f3(e.off)+' m' : 'nichts gefunden'; }
+  chk('Gardinenschiene an der Decke: Deckenkante, nicht die Schiene', ok===n, ok+'/'+n+' '+worst);
 }
 {
   // Bilderrahmen 15 cm unter der Decke, 6 cm zu tief gezielt: die Decke gewinnt.
