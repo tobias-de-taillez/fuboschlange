@@ -95,6 +95,10 @@
   /* Mini-Grundriss: was der Schwenk bisher ergeben hat. */
   #ar #miniMap { inset: auto; right: 10px; bottom: 150px; width: 136px; height: 136px;
                  background: rgba(0,0,0,.65); border-radius: 8px; }
+  /* Aufnahme laeuft: sichtbar, solange das Bild mitgeschnitten wird. */
+  #arRec { position: absolute; right: 10px; bottom: 292px; padding: 3px 8px; border-radius: 6px;
+           background: rgba(0,0,0,.65); color: #f87171; font: 700 12px/1.4 system-ui, sans-serif;
+           font-variant-numeric: tabular-nums; pointer-events: none; }
 </style>
 
 <h1>Raumskizze per Kamera</h1>
@@ -110,12 +114,14 @@
   <input id="hoehe" type="number" step="1" min="1500" max="6000" placeholder="z. B. 2550" inputmode="numeric">
   <div class="hint" style="margin-top:8px">Automatisch geht es auch ohne: Die Höhe kommt dann aus der Parallaxe – zwischendurch ein paar Schritte gehen hilft. Mit Laser-Wert wird sie zur Kreuzprobe. Von Hand ist sie nötig.</div>
   <label class="chk"><input type="checkbox" id="auto" checked> <span>Automatisch: Boden und Kanten von selbst – einfach mit dem Fadenkreuz die Deckenkante entlangschwenken</span></label>
+  <label class="chk"><input type="checkbox" id="rec"> <span>Video mitschneiden (10 Bilder/s, mit Tiefe) – für Tests am Rechner. Bleibt auf dem Telefon, bis du „Aufnahme sichern“ tippst.</span></label>
 </div>
 
 <div class="card">
   <button id="start" disabled>AR starten</button>
   <div class="hint" id="startHint" style="margin-top:8px">Prüfe das Gerät …</div>
   <button id="dlLast" class="ghost hidden" style="margin-top:8px">Protokoll vom letzten Seitenaufruf (JSON)</button>
+  <button id="dlRecLast" class="ghost hidden" style="margin-top:8px">Letzte Aufnahme sichern</button>
   <div class="hint" style="margin-top:8px">Automatisch: (1) Kurz auf freien Boden halten – der Boden setzt sich selbst. (2) Fadenkreuz langsam an der Kante zwischen Wand und Decke entlangführen, einmal rundum, ruhig auch hinter Schränken weiter. Zwischendurch ein paar Schritte gehen hilft. (3) Zurück an der ersten Wand schließt sich der Raum.</div>
   <div class="hint" style="margin-top:8px">Von Hand: „Boden setzen“, je Wand „Kante erfassen“ (am besten zweimal aus verschiedenem Abstand), „Nächste Wand“ der Reihe nach, zum Schluss „Raum schließen“.</div>
 </div>
@@ -133,12 +139,14 @@
     <button id="dlRoom" class="ghost">Skizze (JSON)</button>
     <button id="dlLog" class="ghost">Protokoll (JSON)</button>
   </div>
+  <button id="dlRec" class="ghost hidden" style="margin-top:8px">Aufnahme sichern</button>
   <div id="linkOut" style="margin-top:8px"></div>
 </div>
 
 <div id="ar" class="hidden">
   <canvas id="arCanvas"></canvas>
   <canvas id="miniMap" width="272" height="272"></canvas>
+  <div id="arRec" class="hidden"></div>
   <div id="cross"></div>
   <div id="arTop">
     <div id="arStats"></div>
@@ -2223,7 +2231,7 @@ function onFrame(t, frame){
   }
 
   // Bezug: Anker am Boden; ohne Anker der Bezugsraum mit gemerkter Bodenhoehe.
-  let camTo=null;
+  let camTo=null; S.Tcur=null;
   // Kamera im local-Raum, unabhaengig vom Anker. local ist bei ARCore die
   // ARCore-Welt (kein reset-Ereignis): ob sie ueber einen Verlust stetig
   // bleibt, zeigt nur dieser Weg.
@@ -2319,7 +2327,7 @@ function onFrame(t, frame){
           hint('Anker verloren – nichts wird erfasst. Telefon ruhig auf eine Fläche mit Struktur halten.', 'warn'); }
       }
     }
-    if(T){ camTo=G.m4mul(G.m4inv(T), view.transform.matrix); S.lastCamH=camTo[13]; }
+    if(T){ camTo=G.m4mul(G.m4inv(T), view.transform.matrix); S.lastCamH=camTo[13]; S.Tcur=T; }
     // Erster Anker wieder da? Dann ist der Sprung gemessen: Lage des
     // Ersatzbezugs im Bezug des ersten Ankers (C = To^-1 · T).
     if(S.anchorPrev && T && !S.relocLogged){
@@ -2342,6 +2350,7 @@ function onFrame(t, frame){
   } else if(S.floorY!==null){
     camTo=Array.from(view.transform.matrix);
     camTo[13]-=S.floorY;
+    S.Tcur=[1,0,0,0, 0,1,0,0, 0,0,1,0, 0,S.floorY,0,1];
   }
 
   if(S.phase==='boden'){
@@ -2430,6 +2439,7 @@ function onFrame(t, frame){
           if(S.H) capture(view, camTo);
           else { S.capReq=false; hint('Ohne Raumhöhe kann die Kante nicht gehoben werden.', 'warn'); ev('erfassen-ohne-höhe'); }
         }
+        recFrame(frame, view, pose, camTo, img);
       }
     } else if(!S.warned.tex){ S.warned.tex=true; ev('getCameraImage-null'); }
     gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
@@ -2651,6 +2661,7 @@ function stats(){
     ['klein', ms(median(LOG.timings.small.slice(-20)))],
     ['Kante', ms(median(LOG.timings.snap.slice(-20)))],
     ['Zeichnen', ms(median(LOG.timings.draw.slice(-20)))],
+    ...(REC.vN || REC.video ? [['Aufnahme', `${REC.vN} B, ${REC.vDrop} aus, ${(REC.vBytes/1e6).toFixed(1)} MB, ${ms(median(LOG.timings.rec.slice(-20)))}`]] : []),
     ['z', S.live ? S.live.z.toFixed(0) : '–'],
     ...(S.auto ? [['Schwenk', (S.speed||0).toFixed(0)+'°/s']] : []),
     ['fps', fps.toFixed(0)],
@@ -2710,7 +2721,7 @@ function showButtons(){
 // localStorage - ein Neuladen oder ein Absturz der Seite verliert es nicht.
 const RUN_KEYS=['session','floor','events','obs','result','timings','planes','depth','tracking','roiLuma','anchorPath','viewPath','breaks','hLaserMm','hEingabe','mode'];
 function freshRun(){
-  return {session:{}, floor:null, events:[], obs:[], result:null, timings:{roi:[], small:[], snap:[], solve:[], draw:[]}, mode:null,
+  return {session:{}, floor:null, events:[], obs:[], result:null, timings:{roi:[], small:[], snap:[], solve:[], draw:[], rec:[]}, mode:null,
           planes:[], depth:null, tracking:{ok:0, emulated:0, lost:0, anchorLost:0}, roiLuma:[], anchorPath:[], viewPath:[], breaks:[],
           hLaserMm:null, hEingabe:null};
 }
@@ -2723,6 +2734,218 @@ function newRun(){
 }
 const STORE_KEY='raumskizze-probe.protokoll';
 function saveLog(){ try{ localStorage.setItem(STORE_KEY, JSON.stringify(LOG)); }catch(e){} }
+
+// ------------------------------------------------------- Aufnahme
+// Fuer Nachrechnen am Rechner und spaeter eine Trainingsdatenbank. Zwei Teile:
+// (1) Zustand je ausgewertetem Bild, immer (im Schwenk ~20/s): Kamerapose in
+//     local, benutzter Bodenbezug T, Bezugs-Flags, Schwenktempo und was der
+//     Detektor am Fadenkreuz fand. Die 5-s-Stichproben (viewPath/anchorPath)
+//     reichten nicht, um die Bezugsspruenge in Protokoll 4 (152,8 s und
+//     171-177 s) nachzuvollziehen.
+// (2) Nur mit Haken „Video mitschneiden“: das Bild, das captureEdge sieht
+//     (RGBA aus readSmall, Zeile 0 = unten wie readPixels, auf gerade Groesse
+//     gepolstert) als H.264 mit 10 Bildern/s, dazu je Bild die ARCore-Tiefe.
+// Alles liegt nur im Speicher dieser Seite (OPFS), in 10-s-Stuecken - ein
+// Absturz verliert hoechstens das letzte Stueck. Weitergegeben wird erst mit
+// „Aufnahme sichern“ (TAR). Nichts geht auf einen Server.
+const REC_FPS=10, REC_CHUNK=10, REC_KEEP={video:3, zustand:5}, REC_PREF='raumskizze-probe.video';
+const REC_COLS=['t','px','py','pz','qx','qy','qz','qw','Tpsi','Tx','Ty','Tz','flags','tempo','live','v','tiefe'];
+const REC_FLAGS={geschaetzt:1, ankerVerloren:2, ersatz:4, ersatzSchlecht:8, sprungHalt:16, pause:32, ohneBezug:64, erfasst:128};
+const REC={st:[], name:null, lauf:0, dir:null, video:false, enc:null, encCfg:null, encBusy:false, err:null,
+  vN:0, vDrop:0, vBytes:0, flushing:Promise.resolve()};
+function recReset(){
+  Object.assign(REC, {st:[], stOut:0, dir:null, video:false, enc:null, encCfg:null, encBusy:false, err:null,
+    vBuf:[], vN:0, vOut:0, vDrop:0, vBytes:0, lastV:-1, dBuf:[], dN:0, dBytes:0, part:0, flushT:now(),
+    flushing:Promise.resolve(), img:null, pad:null, obsN:LOG.obs.length, badgeT:0,
+    bitrate:Number(Q.get('vbr'))||1.5e6, name:'aufnahme-'+LOG.started.replace(/[:.]/g,'-')+'-lauf'+LOG.runs.length, lauf:LOG.runs.length});
+}
+function recFail(msg){
+  if(!REC.err){ REC.err=msg; ev('aufnahme-fehler', {msg}); }
+  REC.video=false;
+  try{ if(REC.enc && REC.enc.state!=='closed') REC.enc.close(); }catch(e){}
+  REC.enc=null;
+}
+async function recStart(){
+  recReset();
+  const want=!!($('rec') && $('rec').checked);
+  if(want) REC.name+='-video';
+  if(!(navigator.storage && navigator.storage.getDirectory)){ if(want) recFail('kein Ursprungs-Speicher (OPFS)'); return; }
+  try{
+    const root=await navigator.storage.getDirectory(), top=await root.getDirectoryHandle('aufnahmen', {create:true});
+    // Nur die neuesten behalten - Videoaufnahmen getrennt, damit Sitzungen ohne
+    // Video keine ungesicherte Aufnahme verdraengen (Namen sortieren zeitlich).
+    const old={video:[], zustand:[]};
+    for await (const [n,h] of top.entries()) if(h.kind==='directory' && n!==REC.name) old[n.endsWith('-video') ? 'video' : 'zustand'].push(n);
+    for(const k of ['video', 'zustand']){ old[k].sort(); const keep=REC_KEEP[k]-(want===(k==='video') ? 1 : 0);
+      for(const n of old[k].slice(0, Math.max(0, old[k].length-keep))) await top.removeEntry(n, {recursive:true}); }
+    REC.dir=await top.getDirectoryHandle(REC.name, {create:true});
+  }catch(e){ recFail('Speicher: '+(e && e.message || e)); return; }
+  REC.video=want && 'VideoEncoder' in window;
+  if(want && !REC.video) recFail('VideoEncoder fehlt');
+  ev('aufnahme-start', {name:REC.name, video:REC.video, bitrate:REC.bitrate});
+}
+// Kodierer erst mit der ersten Bildgroesse; isConfigSupported ist asynchron,
+// bis dahin wird kein Bild aufgenommen.
+function recEncoder(w, h){
+  if(REC.encBusy || REC.enc || !REC.video) return;
+  REC.encBusy=true;
+  const base={width:w, height:h, bitrate:REC.bitrate, framerate:REC_FPS, avc:{format:'annexb'}};
+  (async()=>{
+    for(const codec of ['avc1.42E01F','avc1.4D401F','avc1.640028']){
+      let sup=null; try{ sup=await VideoEncoder.isConfigSupported({...base, codec}); }catch(e){}
+      if(!sup || !sup.supported) continue;
+      try{
+        const enc=new VideoEncoder({output:recChunk, error:e=>recFail('Kodierer: '+(e && e.message || e))});
+        enc.configure(sup.config); REC.enc=enc; REC.encCfg={codec, width:w, height:h, bitrate:REC.bitrate};
+        ev('aufnahme-kodierer', REC.encCfg); return;
+      }catch(e){}
+    }
+    recFail('kein H.264-Kodierer');
+  })().finally(()=>{ REC.encBusy=false; });
+}
+function recChunk(chunk){
+  const b=new Uint8Array(chunk.byteLength); chunk.copyTo(b);
+  REC.vBuf.push(b); REC.vBytes+=b.length; REC.vOut++;
+}
+function recDepth(vi, tt, d){
+  const src=new Uint8Array(d.data), m=d.normDepthBufferFromNormView ? d.normDepthBufferFromNormView.matrix : null;
+  const head=new ArrayBuffer(80), dv=new DataView(head);
+  dv.setUint32(0, vi, true); dv.setFloat32(4, tt, true); dv.setUint16(8, d.width, true); dv.setUint16(10, d.height, true);
+  dv.setFloat32(12, d.rawValueToMeters, true);
+  for(let k=0;k<16;k++) dv.setFloat32(16+4*k, m ? m[k] : (k%5===0 ? 1 : 0), true);
+  REC.dBuf.push(new Uint8Array(head), src.slice()); REC.dBytes+=80+src.length; REC.dN++;
+}
+function recFrame(frame, view, pose, camTo, img){
+  if(!REC.name) return;
+  const t0=performance.now(), tt=now(), tf=view.transform, p=tf.position, q=tf.orientation || {x:0, y:0, z:0, w:1}, T=S.Tcur;
+  const r4=x=>+x.toFixed(4), r5=x=>+x.toFixed(5);
+  let f=(pose && pose.emulatedPosition ? 1 : 0)|(S.anchorLost ? 2 : 0)|(S.subst ? 4 : 0)|(S.substBad ? 8 : 0)
+       |(S.jumpHold ? 16 : 0)|(S.paused ? 32 : 0)|(camTo ? 0 : 64);
+  if(LOG.obs.length!==REC.obsN){ REC.obsN=LOG.obs.length; f|=128; }
+  const L=S.live, live=L ? [r4(L.A[0]), r4(L.A[1]), r4(L.B[0]), r4(L.B[1]), +L.z.toFixed(1), L.good ? 1 : 0] : 0;
+  let vi=-1, di=0;
+  if(REC.video && tt-REC.lastV>=1/REC_FPS-0.01){
+    const w2=img.w+(img.w&1), h2=img.h+(img.h&1);
+    if(!REC.enc) recEncoder(w2, h2);
+    else if(REC.enc.encodeQueueSize>6) REC.vDrop++;
+    else {
+      if(!REC.pad || REC.pad.length!==w2*h2*4) REC.pad=new Uint8Array(w2*h2*4);
+      const src=img.px, dst=REC.pad, rs=img.w*4, rd=w2*4;
+      for(let y=0;y<img.h;y++){ dst.set(src.subarray(y*rs, y*rs+rs), y*rd); if(w2>img.w) dst.copyWithin(y*rd+rs, y*rd+rs-4, y*rd+rs); }
+      if(h2>img.h) dst.copyWithin(img.h*rd, (img.h-1)*rd, img.h*rd);
+      try{
+        const vf=new VideoFrame(dst, {format:'RGBA', codedWidth:w2, codedHeight:h2, timestamp:Math.round(tt*1e6)});
+        REC.enc.encode(vf, {keyFrame:REC.vN%(2*REC_FPS)===0}); vf.close();
+        vi=REC.vN++; REC.lastV=tt; REC.img=[img.w, img.h, w2, h2];
+      }catch(e){ recFail('Bild: '+(e && e.message || e)); }
+    }
+    if(vi>=0 && frame.getDepthInformation){ try{ const d=frame.getDepthInformation(view); if(d && d.data){ recDepth(vi, tt, d); di=1; } }catch(e){} }
+  }
+  REC.st.push([tt, r4(p.x), r4(p.y), r4(p.z), r5(q.x), r5(q.y), r5(q.z), r5(q.w),
+    T ? r5(psiOfT(T)) : 0, T ? r4(T[12]) : 0, T ? r4(T[13]) : 0, T ? r4(T[14]) : 0, f, Math.round(S.speed||0), live, vi, di]);
+  if(tt-REC.flushT>=REC_CHUNK) recFlush();
+  LOG.timings.rec.push(+(performance.now()-t0).toFixed(2));
+  if(LOG.timings.rec.length>2000) LOG.timings.rec.shift();
+  if(tt-REC.badgeT>=1){ REC.badgeT=tt; const b=$('arRec');
+    if(b){ b.classList.toggle('hidden', !REC.vN && !REC.err); b.textContent=REC.vN ? `● REC ${(REC.vBytes/1e6).toFixed(0)} MB` : (REC.err ? 'REC aus' : ''); } }
+}
+async function recPut(dir, name, parts){
+  const fh=await dir.getFileHandle(name, {create:true}), w=await fh.createWritable();
+  for(const x of parts) await w.write(x);
+  await w.close();
+}
+// Ein 10-s-Stueck je Art schreiben. Was der Kodierer noch haelt, kommt ins naechste.
+function recFlush(){
+  REC.flushT=now();
+  const part=String(REC.part++).padStart(4, '0'), st=REC.st.slice(REC.stOut), v=REC.vBuf, dd=REC.dBuf, dir=REC.dir;
+  REC.stOut=REC.st.length; REC.vBuf=[]; REC.dBuf=[];
+  if(!dir) return REC.flushing;
+  REC.flushing=REC.flushing.then(async()=>{
+    if(st.length) await recPut(dir, `zustand-${part}.jsonl`, [st.map(r=>JSON.stringify(r)).join('\n')+'\n']);
+    if(v.length) await recPut(dir, `video-${part}.h264`, v);
+    if(dd.length){ const gz=await new Response(new Blob(dd).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
+      await recPut(dir, `tiefe-${part}.bin.gz`, [gz]); }
+  }).catch(e=>recFail('Schreiben: '+(e && e.message || e)));
+  return REC.flushing;
+}
+function recManifest(){
+  const geo=LOG.session && LOG.session.geometry || null;
+  return {format:'raumskizze-aufnahme', version:1, name:REC.name, sitzung:LOG.started, lauf:REC.lauf,
+    geraet:LOG.caps && LOG.caps.Browser || null, geometrie:geo, fehler:REC.err,
+    bild:REC.img ? {breite:REC.img[0], hoehe:REC.img[1], gepolstert:[REC.img[2], REC.img[3]],
+      zeilen:'wie readPixels: Zeile 0 = unten', flipY:!!S.flipY, luma:'0.299 R + 0.587 G + 0.114 B',
+      quelle:'Kameratextur verkleinert (readSmall), genau das Bild von captureEdge'} : null,
+    video:REC.encCfg ? {...REC.encCfg, datei:'video.h264', format:'H.264 Annex B, Bild k = k-tes v ≥ 0 im Zustand',
+      fps:REC_FPS, bilder:REC.vN, ausgegeben:REC.vOut, ausgelassen:REC.vDrop, bytes:REC.vBytes} : null,
+    tiefe:REC.dN ? {datei:'tiefe.bin.gz', bilder:REC.dN, bytes:REC.dBytes, format:LOG.session && LOG.session.depthDataFormat || null,
+      satz:'u32 Videobild, f32 t, u16 w, u16 h, f32 rawValueToMeters, 16 × f32 normDepthBufferFromNormView (spaltenweise), dann w·h Werte'} : null,
+    zustand:{datei:'zustand.jsonl', zeilen:REC.st.length, spalten:REC_COLS, flags:REC_FLAGS,
+      live:'[Ax, Ay, Bx, By, z, sicher] in NDC oder 0', T:'Bodenbezug: Gier Tpsi und Lage Tx/Ty/Tz in local; camTo = T⁻¹ · Pose',
+      v:'Videobild oder -1', zeit:'t wie obs.t im Protokoll'},
+    einwilligung:'Die Aufnahme liegt nur auf diesem Gerät; weitergegeben wird sie erst mit „Aufnahme sichern“.',
+    raum:{name:null, wahrheit:null}};
+}
+async function recStop(){
+  if(!REC.name) return;
+  try{ if(REC.enc && REC.enc.state==='configured') await REC.enc.flush(); }catch(e){}
+  try{ if(REC.enc && REC.enc.state!=='closed') REC.enc.close(); }catch(e){}
+  REC.enc=null; REC.video=false;
+  await recFlush();
+  if(REC.dir){ try{ await recPut(REC.dir, 'manifest.json', [JSON.stringify(recManifest(), null, 1)]); }catch(e){ recFail('Manifest: '+(e && e.message || e)); } }
+  ev('aufnahme-ende', {bilder:REC.vN, ausgelassen:REC.vDrop, mb:+(REC.vBytes/1e6).toFixed(1), tiefe:REC.dN, zustand:REC.st.length});
+  const b=$('arRec'); if(b) b.classList.add('hidden');
+  if(REC.dir && REC.vN){ $('dlRec').classList.remove('hidden'); $('dlRec').textContent=`Aufnahme sichern (${((REC.vBytes+REC.dBytes/3)/1e6).toFixed(0)} MB, ${REC.vN} Bilder)`; }
+  saveLog();
+}
+// TAR (ustar): Kopf je Datei, die OPFS-Dateien selbst als Blob-Teile - nichts
+// wird in den Speicher kopiert.
+function tarHead(name, size){
+  const h=new Uint8Array(512), te=new TextEncoder(), put=(s,o)=>h.set(te.encode(s), o), oct=(v,n)=>v.toString(8).padStart(n-1, '0')+'\0';
+  put(name.slice(0, 99), 0); put(oct(0o644, 8), 100); put(oct(0, 8), 108); put(oct(0, 8), 116);
+  put(oct(size, 12), 124); put(oct(Math.floor(Date.now()/1000), 12), 136);
+  put('        ', 148); h[156]=48; put('ustar\0', 257); put('00', 263);
+  let sum=0; for(const b of h) sum+=b;
+  put(sum.toString(8).padStart(6, '0')+'\0 ', 148);
+  return h;
+}
+async function recTar(dirName, protoText){
+  const root=await navigator.storage.getDirectory(), top=await root.getDirectoryHandle('aufnahmen'), dir=await top.getDirectoryHandle(dirName);
+  const files={}; for await (const [n,h] of dir.entries()) if(h.kind==='file') files[n]=await h.getFile();
+  const parts=[];
+  const add=(name, blobs)=>{ const size=blobs.reduce((a,b)=>a+b.size, 0);
+    parts.push(tarHead(dirName+'/'+name, size), ...blobs); if(size%512) parts.push(new Uint8Array(512-size%512)); };
+  for(const [name,re] of [['manifest.json',/^manifest\.json$/], ['zustand.jsonl',/^zustand-\d+\.jsonl$/], ['video.h264',/^video-\d+\.h264$/], ['tiefe.bin.gz',/^tiefe-\d+\.bin\.gz$/]]){
+    const bl=Object.keys(files).filter(n=>re.test(n)).sort().map(n=>files[n]); if(bl.length) add(name, bl); }
+  if(protoText) add('protokoll.json', [new Blob([protoText])]);
+  parts.push(new Uint8Array(1024));
+  return new Blob(parts, {type:'application/x-tar'});
+}
+async function recSave(dirName, protoText, btn){
+  const old=btn && btn.textContent;
+  if(btn){ btn.disabled=true; btn.textContent='Packe …'; }
+  try{
+    await REC.flushing;
+    const blob=await recTar(dirName, protoText ?? JSON.stringify(LOG));
+    const a=el('a'); a.href=URL.createObjectURL(blob); a.download=dirName+'.tar';
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href), 120000);
+    ev('aufnahme-gesichert', {name:dirName, mb:+(blob.size/1e6).toFixed(1)});
+  }catch(e){ ev('aufnahme-fehler', {msg:'Sichern: '+(e && e.message || e)}); if(btn){ btn.disabled=false; btn.textContent='Sichern fehlgeschlagen'; } return; }
+  if(btn){ btn.disabled=false; btn.textContent=old; }
+}
+// Aufnahme eines frueheren Seitenaufrufs anbieten (die neueste).
+async function recListLast(){
+  if(!(navigator.storage && navigator.storage.getDirectory)) return;
+  try{
+    const root=await navigator.storage.getDirectory(), top=await root.getDirectoryHandle('aufnahmen', {create:true});
+    const names=[]; for await (const [n,h] of top.entries()) if(h.kind==='directory') names.push(n);
+    if(!names.length) return;
+    names.sort(); const vid=names.filter(n=>n.endsWith('-video')), last=(vid.length ? vid : names)[(vid.length ? vid : names).length-1];
+    let proto=null; try{ proto=localStorage.getItem(STORE_KEY); }catch(e){}
+    const b=$('dlRecLast'); b.classList.remove('hidden');
+    b.textContent=vid.length ? `Letzte Videoaufnahme sichern (${vid.length} auf diesem Gerät)` : 'Letzten Zustandsmitschnitt sichern';
+    b.onclick=()=>recSave(last, proto, b);
+  }catch(e){}
+}
 
 // ------------------------------------------------------- Sitzung
 async function startAR(){
@@ -2807,12 +3030,14 @@ async function startAR(){
   } else if(!S.hit){
     hint('Kein Hit-Test – der Boden lässt sich nicht setzen, nur Stufe 0.', 'bad');
   } else hint(S.auto ? 'Kurz auf freien Boden halten – der Boden setzt sich von selbst.' : BODEN_HINT);
+  recStart();
   session.requestAnimationFrame(onFrame);
 }
 
 function onEnd(){
   ev('sitzung-ende');
   LOG.session.end=now();
+  recStop();
   $('ar').classList.add('hidden');
   if(S.resize) removeEventListener('resize', S.resize);
   S.session=null;
@@ -3011,7 +3236,18 @@ $('send').onclick=async()=>{
 $('open').onclick=()=>{ const link=shareLink(); if(link) window.open(link, '_blank'); };
 // Datei-Import der App erwartet die Raumdaten oben, mit optionalem name.
 $('dlRoom').onclick=()=>{ const r=LOG.result; if(r && r.data) download(slug(r.name)+'.json', JSON.stringify({name:r.name, ...r.data}, null, 1)); };
-$('dlLog').onclick=()=>download('raumskizze-protokoll-'+LOG.started.replace(/[:.]/g,'-')+'.json', JSON.stringify(LOG, null, 1));
+$('dlLog').onclick=()=>{
+  let txt=JSON.stringify(LOG, null, 1);
+  // Zustand je Bild (letzter Durchlauf) kompakt anhaengen - eingerueckt waeren
+  // es 50 000 Zeilen. Nie in localStorage (Kontingent, Bildzeit beim Sichern).
+  if(REC.st.length) txt=txt.replace(/\n}$/, ',\n "zustand": '+JSON.stringify({lauf:REC.lauf, spalten:REC_COLS, flags:REC_FLAGS, zeilen:REC.st})+'\n}');
+  download('raumskizze-protokoll-'+LOG.started.replace(/[:.]/g,'-')+'.json', txt);
+};
+$('rec').checked=(()=>{ try{ return localStorage.getItem(REC_PREF)==='1'; }catch(e){ return false; } })();
+$('rec').onchange=()=>{ try{ localStorage.setItem(REC_PREF, $('rec').checked ? '1' : '0'); }catch(e){} };
+if(!('VideoEncoder' in window)){ $('rec').checked=false; $('rec').disabled=true; }
+$('dlRec').onclick=()=>recSave(REC.name, null, $('dlRec'));
+recListLast();
 
 // --------------------------------------------------------- Knoepfe
 // Tipps auf Knoepfe sollen keine XR-select-Ereignisse ausloesen.
@@ -3098,7 +3334,8 @@ $('btnClose').onclick=()=>{
 }
 // ?debug: Zustand fuer die Konsole (chrome://inspect am Telefon, oder
 // Ergebnisanzeige im Desktop-Browser mit eingespeisten Beobachtungen).
-if(Q.has('debug')) globalThis.PROBE={S, LOG, computeResult, showResult, requestSolve, applySolution, drawMiniMap, slim, solveOpt, makeSolver};
+if(Q.has('debug')) globalThis.PROBE={S, LOG, computeResult, showResult, requestSolve, applySolution, drawMiniMap, slim, solveOpt, makeSolver,
+  REC, recStart, recFrame, recStop, recTar};
 $('start').disabled=true;
 stage0();
 })();
