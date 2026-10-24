@@ -2173,10 +2173,14 @@ function applySolution(r){
     const miss=(r.warnings||[]).find(w=>/fehlt/.test(w));
     // Gleicher Befund mit neuer Zahl (0,8 m -> 1,4 m -> 1,5 m) ist kein neuer Hinweis.
     const mk=miss && miss.replace(/\d+([.,]\d+)?\s*m\b/g,'x m');
-    if(miss && S.lastMiss!==mk){ S.lastMiss=mk; ev('wand-fehlt', {msg:miss}); hint(miss, 'warn'); }
+    // Im AR-Bild stehen keine Wandnummern - sagen, wo es zu sehen ist (Overlay:
+    // ergaenzte Wand rot gestrichelt, lange ungesehene Luecke orange gestrichelt).
+    if(miss && S.lastMiss!==mk){ S.lastMiss=mk; ev('wand-fehlt', {msg:miss});
+      hint(/zwischen \d+ und \d+ fehlt/.test(miss) ? 'Hier fehlt noch eine Wand – im Bild rot gestrichelt. Dorthin schwenken.'
+        : /ungesehen/.test(miss) ? 'Ein Stück Wand bis zur Ecke ist noch ungesehen – im Bild orange gestrichelt. Dorthin schwenken.' : miss, 'warn'); }
   }
   if(r.closed && S.breaks.length && !S.warned.closeManual){ S.warned.closeManual=true; ev('geschlossen-nach-bruch');
-    hint('Raum geschlossen – nach dem Tracking-Verlust aber bitte selbst prüfen und „Raum schließen“ tippen.', 'warn'); }
+    hint('Raum geschlossen – nach der Ortungslücke aber bitte selbst prüfen und „Raum schließen“ tippen.', 'warn'); }
   if(r.Hfixed && !S.H && S.pool.length>=30 && !S.warned.hFixed){
     S.warned.hFixed=true; ev('höhe-unbestimmt');
     hint('Raumhöhe lässt sich von hier nicht schätzen – ein paar Schritte weitergehen und weiterschwenken, oder die Laser-Höhe eintragen.', 'warn'); }
@@ -2233,14 +2237,14 @@ const CAM_H_MIN=0.9, CAM_H_MAX=2.2;
 function setFloor(frame, c){
   S.phase='anker';
   $('btnBoden').disabled=true;
-  hint('Anker wird gesetzt …');
+  hint('Boden wird festgehalten …');
   LOG.floor={t:now(), tFound:S.floorFoundT, normalDeg:+c.ang.toFixed(2), camHeight:+c.camH.toFixed(3), pos:c.p};
   ev('boden', {...LOG.floor});
   const done=ok=>{
     LOG.floor.anchor=ok;
     S.phase='waende';
     showButtons();
-    if(!ok) hint('Anker fehlgeschlagen – Bezug ohne Anker, das Ergebnis ist unsicher. Besser: Beenden und neu starten.', 'warn');
+    if(!ok) hint('Boden ließ sich nicht festhalten – das Ergebnis wird unsicher. Besser: Beenden und neu starten.', 'warn');
     else hint(S.auto ? 'Fadenkreuz an die Kante zwischen Wand und Decke, langsam rundum schwenken. Grün = sichere Kante, jedes Ticken = erfasst.'
             : !S.H ? 'Keine Raumhöhe eingetragen – von Hand nur Stufe 0. Die Messwerte laufen oben mit.'
             : 'Wand 1: Fadenkreuz auf die Kante zwischen Wand und Decke, dann „Kante erfassen“.');
@@ -2320,7 +2324,7 @@ function onFrame(t, frame){
     // Schwenk: Countdown und Geschwindigkeit ueber die Luecke nicht
     // weitertragen. Der Abschluss wartet (closePending) - ein Tipp auf „Noch
     // nicht fertig“ in der Luecke bricht ihn ab.
-    if(S.closeT!=null){ S.closeT=null; S.closePending=true; ev('countdown-unterbrochen'); hint('Tracking verloren – der Abschluss wartet.', 'warn'); }
+    if(S.closeT!=null){ S.closeT=null; S.closePending=true; ev('countdown-unterbrochen'); hint('Ortung verloren – der Abschluss wartet.', 'warn'); }
     if(!S.trackLost){ S.trackLost=true; S.gap={t:now(), v:S.lastView};
       const sus=S.phase==='waende' ? slideBeforeLoss(now()) : 0;
       ev('tracking-verloren', sus ? {gleiten:sus} : {}); updateWallInfo(); }
@@ -2329,7 +2333,7 @@ function onFrame(t, frame){
     // zufaellig im Fadenkreuz liegt, mit der ersten, unsichersten Pose.
     if(S.capReq || S.floorReq){
       S.capReq=S.floorReq=false;
-      hint('Tracking verloren – nicht erfasst. Telefon kurz auf etwas mit Struktur halten, dann erneut zielen.', 'warn');
+      hint('Ortung verloren – nicht erfasst. Telefon kurz auf etwas mit Struktur richten, dann erneut zielen.', 'warn');
       ev('anfrage-verworfen', {grund:'tracking'});
     }
     S.track='verloren'; S.live=null;
@@ -2422,7 +2426,7 @@ function onFrame(t, frame){
         // Einschwingen in den ersten 3 s nach dem Setzen: nur Protokoll.
         if(now()-(S.anchorT||0)>3 && !near){
           b.grund='bezug-sprung'; S.jumpHold=true; apT=null; LOG.breaks.push(b); ev('bezug-sprung', b);
-          if(S.auto && S.phase==='waende') hint(`Der Bodenbezug ist gesprungen (${dj.toFixed(1)} m, ${Math.round(dpsi*180/Math.PI)}°) – weiter mit dem Bezug davor. Bitte eine schon erfasste Ecke noch einmal überstreichen.`, 'warn'); }
+          if(S.auto && S.phase==='waende') hint(`Die Ortung ist um ${dj.toFixed(1)} m gesprungen – die Skizze bleibt beim Stand davor. Bitte eine schon erfasste Ecke noch einmal überstreichen.`, 'warn'); }
         else { b.nurProtokoll=true; LOG.breaks.push(b); ev('anker-sprung', b); }
         S.prevCam=null;
       }
@@ -2441,7 +2445,7 @@ function onFrame(t, frame){
         // Kam der alte Anker zurueck, bevor im Ersatzbezug etwas erfasst wurde,
         // gab es keinen Bruch im Erfassten: Marke weg, Auto-Abschluss wieder frei.
         if(back){ const lb=S.breaks[S.breaks.length-1]; if(lb && !S.pool.some(o=>o.t>=lb.t)){ S.breaks.pop(); lb.aufgehoben=true; } }
-        if(S.warned.anchorHint){ S.warned.anchorHint=false; if(S.auto && S.phase==='waende') hint('Anker wieder da – weiter schwenken.'); } }
+        if(S.warned.anchorHint){ S.warned.anchorHint=false; if(S.auto && S.phase==='waende') hint('Ortung wieder da – weiter schwenken.'); } }
       // Ankerlage im Bezugsraum: Spruenge zeigen Relokalisierungen.
       if(S.frame%150===0){ const p=ap.transform.position; LOG.anchorPath.push({t:now(), p:[+p.x.toFixed(4), +p.y.toFixed(4), +p.z.toFixed(4)]}); }
     } else {
@@ -2464,8 +2468,8 @@ function onFrame(t, frame){
           S.breaks.push(b); LOG.breaks.push(b);
           ev(S.substBad ? 'bezug-unplausibel' : 'bezug-ersatz', b);
           // Wortlaut und Eskalation: Strang ablauf (A1).
-          if(S.auto && S.phase==='waende') hint(S.substBad ? 'Tracking war weg, der Bezug passt nicht mehr – es wird nichts erfasst.'
-            : 'Tracking war weg – weiter mit Ersatzbezug. Die letzte Wand noch einmal langsam überstreichen, dann weiter.', 'warn'); }
+          if(S.auto && S.phase==='waende') hint(S.substBad ? 'Die Ortung war weg und passt nicht mehr zum Erfassten – es wird nichts erfasst.'
+            : 'Die Ortung war kurz weg. Die letzte Wand noch einmal langsam überstreichen, dann weiter.', 'warn'); }
         if(S.substBad){ T=null; S.track=S.track.replace(' · Ersatzbezug', ' · Bezug unsicher'); S.live=null; S.liveConfirmed=false; S.prevLive=null; }
         else if(S.phase==='waende') reanchor(frame);
       } else {
@@ -2473,7 +2477,7 @@ function onFrame(t, frame){
         // gruen stehen bleiben, als liefe alles.
         S.live=null; S.liveConfirmed=false; S.prevLive=null;
         if(S.auto && S.phase==='waende' && !S.warned.anchorHint){ S.warned.anchorHint=true;
-          hint('Anker verloren – nichts wird erfasst. Telefon ruhig auf eine Fläche mit Struktur halten.', 'warn'); }
+          hint('Ortung verloren – nichts wird erfasst. Telefon ruhig auf eine Fläche mit Struktur richten.', 'warn'); }
       }
     }
     if(T){ camTo=G.m4mul(G.m4inv(T), view.transform.matrix); S.lastCamH=camTo[13]; S.Tcur=T; }
@@ -2595,7 +2599,7 @@ function onFrame(t, frame){
     const vp=layer.getViewport(view);
     gl.viewport(vp.x, vp.y, vp.width, vp.height);
   }
-  if(S.capReq && !camTo){ S.capReq=false; hint('Kein Bezug zum Boden – Anker verloren?', 'warn'); ev('erfassen-ohne-anker'); }
+  if(S.capReq && !camTo){ S.capReq=false; hint('Keine Ortung – nicht erfasst.', 'warn'); ev('erfassen-ohne-anker'); }
   if(S.auto && S.phase==='waende'){
     if(S.closeT!=null && S.paused){ S.closeT=null; ev('countdown-abgebrochen', {grund:'pause'}); updateWallInfo(); }
     if(S.closeT!=null){
@@ -2648,9 +2652,9 @@ function arState(){
   let cls='', txt='';
   if(S.phase==='waende'){
     const sec=t0=>Math.max(0, Math.round(now()-t0));
-    if(S.trackLost) { cls='stop'; txt=`Erfassung steht – Tracking weg (${sec(S.gap ? S.gap.t : now())} s). Telefon ruhig halten, auf etwas mit Struktur.`; }
-    else if(S.anchorLost && (S.substBad || !S.Tlast)) { cls='stop'; txt='Erfassung steht – kein brauchbarer Bezug zum Boden.'; }
-    else if(S.subst) { cls='sub'; txt='Ersatzbezug: die letzte Wand noch einmal langsam überstreichen, dann weiter.'; }
+    if(S.trackLost) { cls='stop'; txt=`Erfassung steht – Ortung weg (${sec(S.gap ? S.gap.t : now())} s). Telefon ruhig halten, auf etwas mit Struktur richten.`; }
+    else if(S.anchorLost && (S.substBad || !S.Tlast)) { cls='stop'; txt='Erfassung steht – die Ortung passt nicht mehr zum Erfassten.'; }
+    else if(S.subst) { cls='sub'; txt='Ortung wieder da – die Lage wird noch abgeglichen.'; }
   }
   if(cls==='stop'){
     S.stopSince=S.stopSince ?? now();
@@ -2659,7 +2663,7 @@ function arState(){
   } else { S.stopSince=null; S.stopEsc=false; }
   const key=cls+'|'+txt;
   if(S.stateK===key) return;
-  S.stateK=key; const el=$('arState'); el.textContent=txt; el.className=cls || 'hidden';
+  S.stateK=key; const el=$('arState'); el.textContent=deNum(txt); el.className=cls || 'hidden';
 }
 
 // ----------------------------------------------------------- Overlay
@@ -2823,7 +2827,9 @@ function stats(){
 }
 
 const BODEN_HINT='Fadenkreuz auf ein freies Bodenstück, Telefon langsam bewegen. Sobald der grüne Punkt liegt: „Boden setzen“.';
-function hint(text, cls=''){ const h=$('arHint'); h.textContent=text; h.className=cls;
+// Was der Nutzer liest, mit Dezimalkomma ("0,5 m"); das Protokoll behaelt den Rohtext.
+const deNum=t=>String(t).replace(/(\d)\.(\d)/g, '$1,$2');
+function hint(text, cls=''){ const h=$('arHint'); h.textContent=deNum(text); h.className=cls;
   // Was der Nutzer sah, gehoert ins Protokoll - ohne die laufenden Sekunden
   // des Countdowns, sonst schreibt jedes Bild einen Eintrag.
   const k=text.replace(/\d+ s\b/g,'… s'); if(k!==S.lastHintK){ S.lastHintK=k; ev('hinweis', {text:k, cls}); } }
@@ -2831,14 +2837,10 @@ function updateWallInfo(){
   const n=S.walls.length, cur=S.walls[n-1].length, done=S.walls.filter(o=>o.length).length;
   if(S.auto){
     const sol=S.sol, rej=sol ? sol.labels.filter(l=>typeof l==='string' && l.startsWith('verworfen')).length : 0;
-    // Unsicherste Wand nennen - dort lohnt ein zweiter Blick aus anderem Abstand.
-    let weak='';
-    if(sol && sol.walls.length>=3){ let wi=-1, ws=0; sol.walls.forEach((w,k)=>{ const sr=w.line && w.line.sRho; if(sr>ws){ ws=sr; wi=k; } });
-      if(wi>=0 && ws>0.05) weak=` · unsicher: Wand ${wi+1}`; }
     const h=sol && Number.isFinite(sol.H) ? ` · H ${S.H ? 'Laser' : sol.Hfixed ? 'unbestimmt' : '≈'+sol.H.toFixed(2)+' m'}` : '';
     $('arWall').textContent=S.phase==='waende'
-      ? `Schwenk · ${done} Wände · ${S.pool.length} Kanten · ${rej} verworfen` + (sol && sol.closed ? ' · geschlossen' : '')
-        + weak + h + (S.paused ? ' · PAUSE' : '')
+      ? deNum(`Schwenk · ${done} Wände · ${S.pool.length} Kanten · ${rej} verworfen` + (sol && sol.closed ? ' · geschlossen' : '')
+        + h + (S.paused ? ' · PAUSE' : ''))
       : '';
     $('btnPause').textContent=S.closeT!=null || S.closePending ? 'Noch nicht fertig' : S.paused ? 'Weiter' : 'Pause';
     $('btnUndo').textContent=S.pool.length ? 'Rückgängig' : 'Boden neu';
@@ -3446,7 +3448,7 @@ $('btnPause').onclick=()=>{
 $('btnUndo').onclick=()=>{
   // Ohne brauchbaren Bezug kann Rueckgaengig nichts ersetzen, nur loeschen
   // (Protokoll 2: 18 Tipps, 18 gute Kanten weg).
-  if(S.auto && S.anchorLost && (S.substBad || !S.Tlast)){ hint('Ohne Bezug wird nichts erfasst – Rückgängig würde nur löschen. Das Erfasste bleibt; „Beenden“ zeigt den Grundriss.', 'warn'); return; }
+  if(S.auto && S.anchorLost && (S.substBad || !S.Tlast)){ hint('Ohne Ortung wird nichts erfasst – Rückgängig würde nur löschen. Das Erfasste bleibt; „Beenden“ zeigt den Grundriss.', 'warn'); return; }
   if(S.auto){
     // Vor der ersten Erfassung heisst der Knopf "Boden neu": zurueck in die
     // Bodensuche (falscher Boden, z. B. Tisch).
