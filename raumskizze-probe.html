@@ -1390,7 +1390,123 @@ function fixExcursions(obs,o){
 const seenOf=(P,ids,l)=>{ let lo=Infinity, hi=-Infinity;
   for(const id of ids) for(const p of [P[id].a,P[id].b]){ const t=(p[0]-l.c[0])*l.u[0]+(p[1]-l.c[1])*l.u[1]; if(t<lo) lo=t; if(t>hi) hi=t; }
   return Number.isFinite(lo) ? [[l.c[0]+lo*l.u[0], l.c[1]+lo*l.u[1]], [l.c[0]+hi*l.u[0], l.c[1]+hi*l.u[1]]] : null; };
-G._sweep={fixExcursions, prepSweep, segmentDP, groupHeight, assignWalls, adjust, orthoTest, ringOf, SW};
+
+// =================== Ring aus den Wandenden (Stufe 1, ohne Bild)
+// ringOf verbindet die Waende in der Zeitfolge von assignWalls. Erfasst der
+// Nutzer sie ausser der Reihe (Protokoll 3: er ging durch den Raum, 'Wand 2
+// kreuzt Wand 17'), kreuzt sich dieser Ring. Dann die Reihenfolge aus den
+// Wandenden. Ohne Bild ist ein Versprung nicht bestaetigbar und eine Ecke nur
+// gesehen oder nicht; die Peilungen auf Senkrechte (Stufe 2) fehlen hier.
+const RE={
+  inTol:1.0,      // Ecke darf so weit im gesehenen Stueck liegen (m; doppelt bestraft). Protokoll 3: mit 0,3 fielen
+                  // 9 von 14 Waenden aus dem Ring (Ueberstand der gehobenen Stuecke an Ecken)
+  maxGap:7,       // so weit darf eine Wand ungesehen bis zur Ecke laufen (m)
+  stepOpen:0.6,   // Versprung zwischen parallelen Nachbarn gleicher Richtung kostet (m), dazu Versatz und Luecke
+  skipAdd:0.5,    // Wand auslassen kostet ihre gesehene Laenge + so viel (m)
+  seenTol:0.4,    // Ecke gesehen, wenn beide Waende bis auf so viel an sie heranreichen (m)
+  budget:200000,  // Knoten der Tiefensuche (laeuft im Worker)
+};
+// Jede Wand bekommt eine Laufrichtung mit dem Raum (den Kameras) zur Linken;
+// gesucht ist die Folge, in der das Ende jeder Wand an den Anfang der naechsten
+// stoesst. Kosten einer Ecke = ungesehene Laenge bis zum Schnittpunkt
+// (Wand-Evidenz wie Cabral & Furukawa 2014); parallele Nachbarn gleicher
+// Richtung = Versprung (oder dieselbe Wand: 'weiter'), gegenlaeufige =
+// unmoeglich (dazwischen fehlt eine Wand). Wand auslassen kostet ihre gesehene
+// Laenge + 0,5 m (Leiste, Schrank, Fehlgriff fallen so weg, echte Waende
+// meist nicht). Loesung: Tiefensuche mit Schranke ueber die endlichen
+// Uebergaenge (wenige je Wandende), Start an der Wand mit den meisten
+// Erfassungen (wird nie ausgelassen).
+function ringOrder(P,walls,lines,o){
+  const K=walls.length; if(K<3) return null;
+  const minS=Math.sin((o.minDeg??10)*Math.PI/180), tol=o.inTol??RE.inTol, mg=o.maxGap??RE.maxGap;
+  const W=walls.map((w,k)=>{ const l=lines[k], n0=w.ids.length;
+    const cam=w.ids.reduce((s,id)=>[s[0]+P[id].cam[0]/n0, s[1]+P[id].cam[1]/n0],[0,0]);
+    let u=l.u; if(-u[1]*(cam[0]-l.c[0])+u[0]*(cam[1]-l.c[1])<0) u=[-u[0],-u[1]];
+    const [lo,hi]=extentOf(P,w.ids,u); return {k, c:l.c, u, n:[-u[1],u[0]], lo, hi, N:n0, len:hi-lo}; });
+  const C=Array.from({length:K},()=>new Array(K).fill(null));
+  for(let i=0;i<K;i++) for(let j=0;j<K;j++){ if(i===j) continue;
+    const a=W[i], b=W[j], cr=a.u[0]*b.u[1]-a.u[1]*b.u[0], dot=a.u[0]*b.u[0]+a.u[1]*b.u[1];
+    if(Math.abs(cr)<minS){
+      if(dot<0) continue;
+      const off=(b.c[0]-a.c[0])*a.n[0]+(b.c[1]-a.c[1])*a.n[1], gap=b.lo-a.hi;
+      if(gap<-tol || gap>mg) continue;
+      if(Math.abs(off)<0.06){ C[i][j]={cost:0.5*Math.max(0,gap), kind:'weiter'}; continue; }
+      C[i][j]={cost:(o.stepOpen??RE.stepOpen)+Math.abs(off)+Math.max(0,gap), kind:'stufe'};
+      continue; }
+    const X=G.intersect({c:a.c,u:a.u},{c:b.c,u:b.u},0.5); if(!X) continue;
+    const gi=X[0]*a.u[0]+X[1]*a.u[1]-a.hi, gj=b.lo-(X[0]*b.u[0]+X[1]*b.u[1]);
+    if(gi<-tol || gj<-tol || gi>mg || gj>mg) continue;
+    C[i][j]={cost:Math.max(0,gi)+Math.max(0,gj)+2*(Math.max(0,-gi)+Math.max(0,-gj)), kind:'ecke', X};
+  }
+  const skip=W.map(w=>w.len+RE.skipAdd);
+  let s0=0; W.forEach((w,k)=>{ if(w.N>W[s0].N) s0=k; });
+  const minIn=W.map((_,j)=>{ let m=Infinity; for(let i=0;i<K;i++) if(C[i][j]) m=Math.min(m,C[i][j].cost); return m; });
+  let best=null, bestCost=Infinity, nodes=0; const budget=o.ringBudget??RE.budget;
+  const vis=new Uint8Array(K); vis[s0]=1;
+  const path=[s0];
+  const dfs=(cur,cost)=>{
+    if(++nodes>budget) return;
+    // Untere Schranke: jede offene Wand kostet mindestens min(auslassen, billigster Eingang).
+    let lb=cost; for(let k=0;k<K;k++) if(!vis[k]) lb+=Math.min(skip[k], minIn[k]);
+    if(lb>=bestCost) return;
+    if(path.length>=3 && C[cur][s0]){
+      let c=cost+C[cur][s0].cost; for(let k=0;k<K;k++) if(!vis[k]) c+=skip[k];
+      if(c<bestCost){ bestCost=c; best=path.slice(); } }
+    const nx=[]; for(let j=0;j<K;j++) if(!vis[j] && C[cur][j]) nx.push(j);
+    nx.sort((p,q)=>C[cur][p].cost-C[cur][q].cost);
+    for(const j of nx){ vis[j]=1; path.push(j); dfs(j,cost+C[cur][j].cost); path.pop(); vis[j]=0; }
+  };
+  dfs(s0,0);
+  if(!best) return null;
+  return {order:best, cost:bestCost, skipped:W.map((_,k)=>k).filter(k=>!best.includes(k)), links:best.map((k,i)=>C[k][best[(i+1)%best.length]]),
+    exhausted:nodes>budget};
+}
+// Nach der Ausgleichung: traegt der Zeitring nicht (kreuzt, 'fehlt', Drehsumme
+// nicht ±360°), die Reihenfolge aus den Wandenden; kollineare Nachbarn
+// ('weiter') werden eine Wand, dann Ausgleichung und ringOf neu. Uebernommen
+// nur, wenn der neue Ring traegt. Dann je Ecke 'gesehen' (beide Waende reichen
+// bis auf seenTol heran) fuer den Abschluss ohne Rueckkehr. ctx: {Hpri, ortho}.
+// Rueckgabe ersetzt res/ring/ortho, aendert A.walls/A.outliers. first = Wand,
+// in der die erste Wand der Zeitfolge aufgeht (-1: ausgelassen).
+function ringByEnds(obs,P,A,res,ring,o,ctx){
+  let ortho=ctx.ortho, byEnds=false, ord=null, first=0; const notes=[], corners=[];
+  const turnOf=C=>{ let t=0; const n=C.length; for(let i=0;i<n;i++){ const a=C[i], b=C[(i+1)%n], c=C[(i+2)%n];
+    t+=Math.atan2((b[0]-a[0])*(c[1]-b[1])-(b[1]-a[1])*(c[0]-b[0]), (b[0]-a[0])*(c[0]-b[0])+(b[1]-a[1])*(c[1]-b[1])); } return t*180/Math.PI; };
+  const bad=r=>!r.corners || r.warnings.some(w=>/kreuzt|fehlt/.test(w)) || Math.abs(Math.abs(turnOf(r.corners))-360)>45;
+  if(A.walls.length>=3 && (bad(ring) || o.ringByEnds==='immer')){
+    const ro=ringOrder(P,A.walls,res.lines,o);
+    if(ro && ro.order.length>=3){
+      const nw=[]; ro.order.forEach((k,i)=>{ const w=A.walls[k], prev=i>0 ? ro.links[i-1] : null;
+        if(prev && prev.kind==='weiter'){ const last=nw[nw.length-1], ids=[...last.ids, ...w.ids]; nw[nw.length-1]={ids, ...groupLine(P,ids)}; }
+        else nw.push({ids:w.ids.slice(), ...groupLine(P,w.ids)}); });
+      if(ro.links[ro.links.length-1].kind==='weiter' && nw.length>1){ const f=nw.shift(), l=nw.pop(), ids=[...l.ids, ...f.ids]; nw.unshift({ids, ...groupLine(P,ids)}); }
+      let fit=null;
+      if(nw.length>=3){ let rn=adjust(obs,P,nw,o,res.H,ctx.Hpri,res.D,null);
+        if(rn){ let on=null;
+          if(o.manhattan!==false){ on=orthoTest(rn.lines,o); if(on){ const r2=adjust(obs,P,nw,o,rn.H,ctx.Hpri,rn.D,on); if(r2) rn=r2; } }
+          fit={res:rn, ortho:on}; } }
+      if(fit){ const r2=ringOf(P,nw,fit.res.lines,o);
+        if(!bad(r2)){ const out=[], A0=A.walls, id0=Math.min(...A0[0].ids);
+          ro.skipped.forEach(k=>A0[k].ids.forEach(x=>out.push({k:x, why:'nicht im Umriss (Reihenfolge aus den Wandenden)'})));
+          A.walls=nw; A.outliers=[...A.outliers, ...out]; res=fit.res; ortho=fit.ortho; ring=r2; byEnds=true;
+          first=nw.findIndex(w=>w.ids.includes(id0));
+          ord={cost:+ro.cost.toFixed(2), skipped:ro.skipped.length, skippedBig:ro.skipped.some(k=>A0[k].ids.length>=3), exhausted:ro.exhausted};
+          notes.push('Reihenfolge der Wände aus ihren Enden bestimmt (nicht aus der Zeitfolge).');
+          // Ausgelassene Gruppe mit mindestens 3 Erfassungen: kann eine echte Wand sein, und sie
+          // verhindert den Abschluss (skippedBig) - sagen, statt still offen zu bleiben. Kein
+          // 'fehlt'/'kreuzt' im Text: applySolution und bad() suchen danach.
+          const big=ro.skipped.filter(k=>A0[k].ids.length>=3).map(k=>A0[k].ids.length);
+          if(big.length) notes.push(`${big.length===1 ? `Eine Gruppe mit ${big[0]} Erfassungen liegt` : `${big.length} Gruppen mit ${big.join(', ')} Erfassungen liegen`} nicht im Umriss aus den Wandenden (grau) – Leiste, Schrank oder eine echte Wand? Im Bild prüfen, dort noch einmal langsam schwenken.`); } } }
+  }
+  if(byEnds && ring.corners){ const C=ring.corners, n=C.length, wallOfLine=[], tol=o.seenTol??RE.seenTol; let k=-1;
+    for(let j=0;j<n;j++){ if(!ring.virtual[j]) k++; wallOfLine.push(ring.virtual[j] ? -1 : k); }
+    const reach=(wk,X)=>{ const w=A.walls[wk]; if(!w) return Infinity; const u=res.lines[wk].u, [lo,hi]=extentOf(P,w.ids,u), t=X[0]*u[0]+X[1]*u[1];
+      return Math.max(0, lo-t, t-hi); };
+    for(let j=0;j<n;j++){ const X=C[j], k1=wallOfLine[(j-1+n)%n], k2=wallOfLine[j];
+      corners.push({j, virtual:k1<0 || k2<0, gesehen:k1>=0 && k2>=0 && reach(k1,X)<=tol && reach(k2,X)<=tol}); } }
+  return {res, ring, ortho, byEnds, ord, first, notes, corners};
+}
+G._sweep={fixExcursions, prepSweep, segmentDP, groupHeight, assignWalls, adjust, orthoTest, ringOf, ringOrder, ringByEnds, SW};
 G.solveSweep=(obs,opt={})=>{
   const o={...SW, ...opt};
   const EX=o.fixExc===false ? {obs, fixes:[], drop:new Set()} : fixExcursions(obs,o);
@@ -1458,11 +1574,19 @@ G.solveSweep=(obs,opt={})=>{
   if(!res || !A) return {corners:null, closed:false, walls:[], warnings:['Zu wenig Erfassungen.'], H, labels:obs.map(()=>null)};
   if(Hstuck){ res.sH=Hprior.s;
     A.warnings=[...(A.warnings||[]), `Raumhöhe aus der Kamera nicht bestimmbar – mit ${Hprior.H.toFixed(2)} m gerechnet, der Maßstab ist unsicher. Laser-Höhe eintragen oder von einem zweiten Standpunkt weiterschwenken.`]; }
-  const ring=ringOf(P,A.walls,res.lines,o);
+  let ring=ringOf(P,A.walls,res.lines,o);
+  // Traegt der Zeitring nicht, die Reihenfolge aus den Wandenden (ringByEnds:false = aus).
+  const VX=o.ringByEnds!==false ? ringByEnds(obs,P,A,res,ring,o,{Hpri, ortho}) : null;
+  if(VX){ res=VX.res; ring=VX.ring; ortho=VX.ortho; }
   // Geschlossen heisst: Rueckkehr zur ersten Wand UND ein einfacher Umriss,
   // der sich einmal ganz dreht (Summe der Aussenwinkel ±360°). Eine einzelne
   // Erfassung auf der Verlaengerung von Wand 1 schliesst so nichts.
-  let turn=null, closed=A.closed;
+  // Ring aus den Wandenden (keine Rueckkehr): geschlossen nur, wenn jede Ecke
+  // gesehen ist (beide Waende reichen heran - ein ergaenzter Versprung ist das
+  // nie), jede Wand mindestens 3 Erfassungen hat und keine ausgelassene Gruppe
+  // mit mindestens 3 Erfassungen unerklaert bleibt. Die App beendet damit nicht
+  // selbst (canArm), der Nutzer prueft und schliesst.
+  let turn=null, closed=VX && VX.byEnds ? VX.corners.length>=3 && VX.corners.every(c=>c.gesehen) && A.walls.every(w=>w.ids.length>=3) && !VX.ord.skippedBig : A.closed;
   if(ring.corners){
     const C=ring.corners, n=C.length; turn=0;
     for(let i=0;i<n;i++){ const a=C[i], b=C[(i+1)%n], c=C[(i+2)%n];
@@ -1482,6 +1606,13 @@ G.solveSweep=(obs,opt={})=>{
         const gap=Math.max(lo, L-hi);
         if(gap>(o.gapMax??0.8)){ closed=false; ring.warnings.push(`Wand ${k}: zur Ecke hin ${gap.toFixed(1)} m ungesehen – fehlt dort ein Stück? Dorthin schwenken.`); } } }
   } else closed=false;
+  // Ring aus den Wandenden: auch in der Mitte einer Wand darf nicht mehr als
+  // innerGap ungesehen sein - dort kann eine Nische fehlen, die der Ring nicht kennt.
+  if(closed && o.innerGap!==false && VX && VX.byEnds){ const ig=o.innerGap??0.5;
+    A.walls.forEach((w,k)=>{ if(!closed) return; const l=res.lines[k]; if(!l) return; const u=l.u;
+      const iv=w.ids.map(id=>{ const a=P[id].a[0]*u[0]+P[id].a[1]*u[1], b=P[id].b[0]*u[0]+P[id].b[1]*u[1]; return a<b ? [a,b] : [b,a]; }).sort((p,q)=>p[0]-q[0]);
+      let reach=iv[0][1], gap=0; for(const [a,b] of iv){ if(a>reach) gap=Math.max(gap,a-reach); reach=Math.max(reach,b); }
+      if(gap>ig){ closed=false; ring.warnings.push(`Wand ${k+1}: in der Mitte ${gap.toFixed(1)} m ungesehen – Nische? Dorthin schwenken.`); } }); }
   // Unbestimmte Hoehe: nicht von selbst abschliessen - der Nutzer soll die
   // Warnung sehen, bevor die Sitzung endet.
   if(Hstuck) closed=false;
@@ -1490,7 +1621,9 @@ G.solveSweep=(obs,opt={})=>{
   A.walls.forEach((w,k)=>w.ids.forEach(id=>{ labels[P[id].i]=k; }));
   A.outliers.forEach(x=>{ labels[P[x.k].i]='verworfen: '+x.why; });
   EX.drop.forEach(i=>{ labels[i]='verworfen: Scheinbewegung vor Relokalisierung'; });
-  return {corners:ring.corners, area:ring.area, closed, turn, warnings:[...(A.warnings||[]), ...ring.warnings], virtual:ring.virtual,
+  // senk: Ring aus den Wandenden (Name wie in Stufe 2, dort kommen die Peilungen auf Senkrechte dazu).
+  return {corners:ring.corners, area:ring.area, closed, turn, warnings:[...(A.warnings||[]), ...(VX ? VX.notes : []), ...ring.warnings], virtual:ring.virtual,
+    ...(VX ? {senk:{byEnds:VX.byEnds, ord:VX.ord, first:VX.first, corners:VX.corners}} : {}),
     walls:A.walls.map((w,k)=>({n:w.ids.length, obs:w.ids.map(id=>P[id].i), line:res.lines[k], seen:seenOf(P,w.ids,res.lines[k])})),
     lines:ring.lines, labels, H:res.H, sH:res.sH, Hfixed:Hstuck, returned:!!A.closed, laser, s0:res.s0, drift:res.D,
     ortho:ortho ? {phi0:ortho.phi0, walls:ortho.walls.map(w=>w[0])} : null, nSeg:A.nSeg};
@@ -1622,7 +1755,10 @@ G.modelToLive=(sol,t,k=0)=>{
 // computeResult (ergaenzte Zeilen uebersprungen). Ohne Rueckkehr zur ersten Wand
 // (returned) ist corners[0] nur der Schnitt der letzten mit der ersten Wand: Zeile 0
 // beginnt dann am gesehenen Anfang, die letzte echte Zeile endet am gesehenen Ende,
-// ergaenzte Zeilen dahinter und ihre Ecken entfallen. Ohne Umriss: nur Gesehenes.
+// ergaenzte Zeilen dahinter und ihre Ecken entfallen. Ein Ring aus den Wandenden
+// (senk.byEnds) ist geschlossen gewaehlt - jede Ecke ist ein bewerteter Uebergang,
+// auch corners[0]; Zeile 0 ist dort die Wand mit den meisten Erfassungen, nicht
+// die erste. Ohne Umriss: nur Gesehenes.
 G.overlayModel=(sol,map=p=>p,o={})=>{
   const minGap=o.minGap??0.05, rows=[], verts=[];
   const lines=sol.lines||[], virt=sol.virtual||[], C=sol.corners, n=lines.length;
@@ -1633,7 +1769,7 @@ G.overlayModel=(sol,map=p=>p,o={})=>{
   }
   const wallOf=[]; let kk=0; for(let j=0;j<n;j++) wallOf.push(virt[j] ? -1 : kk++);
   let jl=n-1; while(jl>0 && virt[jl]) jl--;
-  const open=!sol.returned;
+  const open=!sol.returned && !(sol.senk && sol.senk.byEnds);
   const far=(seen,g)=>Math.hypot(seen[0][0]-g[0],seen[0][1]-g[1])>Math.hypot(seen[1][0]-g[0],seen[1][1]-g[1]) ? seen[0] : seen[1];
   for(let j=0;j<n;j++){
     if(open && j>jl) continue;
@@ -1898,8 +2034,13 @@ const Hnow=camY=>{
   const h=S.sol && Number.isFinite(S.sol.H) ? S.sol.H : 2.55;
   return camY!=null ? Math.max(h, camY+0.3) : h;
 };
+// Schliesst dieses Ergebnis von selbst ab? Ein Abschluss aus dem Ring der
+// Wandenden (Waende ausser der Reihe, keine Rueckkehr) nie: dort war die
+// Topologie im Messaufbau (App nachgespielt, n=100 je Klasse) in 9 von 99
+// Faellen falsch, je Szenario 8-13 % - der Nutzer prueft und tippt selbst.
+const autoClosed=sol=>!!(sol && sol.closed && !(sol.senk && sol.senk.byEnds));
 // Darf der Abschluss-Countdown laufen? Eine Regel fuer alle Stellen.
-const canArm=()=>S.auto && S.phase==='waende' && !S.paused && !S.closeDone && !S.breaks.length && !!(S.sol && S.sol.closed);
+const canArm=()=>S.auto && S.phase==='waende' && !S.paused && !S.closeDone && !S.breaks.length && autoClosed(S.sol);
 // Darf jetzt erfasst werden? Liefert den Grund, wenn nicht - fuer die Farbe
 // der Live-Linie und den Hinweis.
 function autoBlock(){
@@ -2006,18 +2147,26 @@ function onSolved({id, r, err}){
   if(S.solveDirty) requestSolve();
 }
 function applySolution(r){
-  const wasClosed=S.sol && S.sol.closed;
+  const wasClosed=autoClosed(S.sol);
   S.sol=r;
   S.walls=r.walls.map(w=>w.obs.map(i=>S.pool[i]).filter(Boolean));
   if(!S.walls.length) S.walls=[[]];
   // Abschluss nur auf der steigenden Flanke und nur einmal je Sitzung -
   // "Noch nicht fertig" haelt ihn auf, weiter erfassen bleibt moeglich.
-  if(r.closed && !wasClosed && S.closeT==null && !S.closePending && canArm()){
+  // Flanke und Ruecknahme zaehlen nur Abschluesse, die von selbst enden duerfen
+  // (autoClosed): einer aus den Wandenden startet keinen Countdown und nimmt
+  // einen laufenden zurueck.
+  if(autoClosed(r) && !wasClosed && S.closeT==null && !S.closePending && canArm()){
     S.closeT=now();
     ev('raum-geschlossen-auto', {walls:r.walls.length, obs:S.pool.length, turn:r.turn});
     if(navigator.vibrate) navigator.vibrate([40,60,40]);
   }
-  if(!r.closed && (S.closeT!=null || S.closePending)){ S.closeT=null; S.closePending=false; ev('abschluss-zurückgenommen'); hint('Raum doch noch nicht geschlossen – weiter schwenken.'); }
+  let withdrawn=false;
+  if(!autoClosed(r) && (S.closeT!=null || S.closePending)){ S.closeT=null; S.closePending=false; withdrawn=true; ev('abschluss-zurückgenommen');
+    if(!r.closed) hint('Raum doch noch nicht geschlossen – weiter schwenken.'); }
+  // Abschluss aus dem Ring der Wandenden: kein Countdown, der Nutzer prueft und schliesst selbst.
+  if(r.closed && !autoClosed(r) && (withdrawn || !S.warned.closeEnds)){ S.warned.closeEnds=true; ev('geschlossen-aus-wandenden', {walls:r.walls.length, obs:S.pool.length});
+    hint('Umriss aus den Wandenden zusammengesetzt – Nischen, Vorsprünge und Ecken im Bild prüfen, dann „Raum schließen“.', 'warn'); }
   // Selbstkorrektur: zurueck an Wand 1, aber zwischen zwei gegenueber-
   // liegenden Waenden fehlt eine - dorthin schicken, statt still offen zu bleiben.
   if(r.returned && !r.closed && S.phase==='waende'){
@@ -2060,7 +2209,7 @@ function drawMiniMap(camTo){
   if(C){
     for(let i=0;i<C.length;i++){
       const a=P(C[i]), b=P(C[(i+1)%C.length]), virt=sol.virtual && sol.virtual[i], last=i===C.length-1;
-      if(last && !sol.closed) continue;
+      if(last && !sol.closed && !(sol.senk && sol.senk.byEnds)) continue;   // Ring aus den Wandenden: letzte Ecke gewaehlt, nicht geraten (wie overlayModel)
       c.setLineDash(virt ? [5,4] : []); c.strokeStyle=virt ? '#f87171' : (sol.closed ? '#4ade80' : '#f97316'); c.lineWidth=2;
       c.beginPath(); c.moveTo(a[0],a[1]); c.lineTo(b[0],b[1]); c.stroke();
     }
@@ -2459,7 +2608,7 @@ function onFrame(t, frame){
       if(left<=0){
         S.closeT=null;
         // Vor dem Ende noch einmal nachsehen: gilt der Abschluss noch?
-        if(S.sol && S.sol.closed){ S.closeDone=true; S.closed=true; ev('raum-schließen-auto'); S.session.end().catch(()=>{}); }
+        if(autoClosed(S.sol)){ S.closeDone=true; S.closed=true; ev('raum-schließen-auto'); S.session.end().catch(()=>{}); }
       } else hint(nv ? `Raum geschlossen – fertig in ${Math.ceil(left)} s. ${nv===1 ? 'Ein Versprung ist' : nv+' Versprünge sind'} ergänzt (rot gestrichelt) – echt? Sonst „Noch nicht fertig“ und dort noch einmal langsam schwenken.`
         : `Raum geschlossen – fertig in ${Math.ceil(left)} s. „Noch nicht fertig“ = weiter erfassen.`, nv ? 'warn' : '');
     } else if(camTo && S.speed>AUTO_MAX_SPEED){ S.fastSince=S.fastSince ?? now(); S.slowSince=null;
@@ -2608,7 +2757,8 @@ function drawOverlay(view, camTo){
           // (assignWalls Schritt 3, hit===0). Messaufbau (gepaart, gleicher Lauf vor/nach der Wiederkehr): 'returned'
           // in 60-88 % der Laeufe, 'geschlossen' mitten im Rundgang 9-14 %, davon mit falscher Topologie 3-8 % aller
           // Laeufe - der Auto-Abschluss beendet dann nach 5 s mit falscher Skizze (pruef-overlay/t2_revisit.mjs, Variante c).
-          if(r.virtual || !(r.sRho>=OV.hiMin) || (r.k===0 && !S.sol.returned)) continue;
+          // Im Ring aus den Wandenden steht die erste Wand der Zeitfolge an Stelle senk.first.
+          if(r.virtual || !(r.sRho>=OV.hiMin) || (r.k===(S.sol.senk && S.sol.senk.byEnds ? S.sol.senk.first : 0) && !S.sol.returned)) continue;
           const s=G.projectSegment(proj, camTo, Y(r.span[0],Hm), Y(r.span[1],Hm)), q=s && G.clipNdc(s[0], s[1], 0.98);
           if(!q) continue;
           const a=px(q[0]), b=px(q[1]);
@@ -3074,7 +3224,7 @@ function computeResult(){
       H:sol ? sol.H : null, sH:sol ? sol.sH : null, laser:!!S.H, Hlaser:S.H||null, Hfixed:!!(sol && sol.Hfixed),
       Hfree:free && !free.Hfixed ? free.H : null, sHfree:free && !free.Hfixed ? free.sH : null,
       s0:sol ? sol.s0 : null, ortho:sol ? sol.ortho : null, turn:sol ? sol.turn : null, nSeg:sol ? sol.nSeg : null,
-      solveMs:median(LOG.timings.solve), drift:sol && sol.drift ? sol.drift.knots : null};
+      solveMs:median(LOG.timings.solve), drift:sol && sol.drift ? sol.drift.knots : null, byEnds:!!(sol && sol.senk && sol.senk.byEnds)};
     // Geschlossen heisst: die Auswertung hat den Rundgang geschlossen. Von
     // Hand geschlossen bei offenem Ring ist etwas anderes - ehrlich zeigen.
     res.closedManual=!!S.closed && !res.auto.closed;
@@ -3150,7 +3300,11 @@ function showResult(res){
   if(!res.room){
     p(res.auto ? `Zu wenig Wände (${res.auto.walls}) – mindestens drei.` : res.H ? `Zu wenig Wände (${res.wallsCaptured}) – mindestens drei.` : 'Ohne Raumhöhe nur Stufe 0.', 'warn');
   } else {
-    if(!res.closed) p(res.auto ? (res.closedManual ? 'Von Hand geschlossen, der Rundgang war aber offen – die Ecke zwischen letzter und erster Wand ist geraten.' : 'Rundgang nicht geschlossen – die Ecke zwischen letzter und erster Wand ist geraten.') : 'Rundgang mit „Beenden“ abgebrochen – die Ecke zwischen letzter und erster Wand ist geraten.', 'warn');
+    // Ring aus den Wandenden: es gibt keine letzte/erste Wand und keine geratene Schlussecke -
+    // offen heisst dort: nicht jede Ecke gesehen oder Erfassungen ausserhalb des Umrisses.
+    if(!res.closed) p(res.auto ? (res.auto.byEnds ? (res.closedManual ? 'Von Hand geschlossen – der Umriss aus den Wandenden ist nicht bestätigt (nicht jede Ecke gesehen oder Erfassungen außerhalb des Umrisses, siehe unten).'
+        : 'Nicht geschlossen – Umriss aus den Wandenden, nicht bestätigt (nicht jede Ecke gesehen oder Erfassungen außerhalb des Umrisses, siehe unten).')
+      : res.closedManual ? 'Von Hand geschlossen, der Rundgang war aber offen – die Ecke zwischen letzter und erster Wand ist geraten.' : 'Rundgang nicht geschlossen – die Ecke zwischen letzter und erster Wand ist geraten.') : 'Rundgang mit „Beenden“ abgebrochen – die Ecke zwischen letzter und erster Wand ist geraten.', 'warn');
     const ph=res.parallax;
     if(!ph){}
     else if(ph.H!==null) p(`Raumhöhe: Laser ${Math.round(res.H*1000)} mm · Parallaxe ${Math.round(ph.H*1000)} mm (Δ ${Math.round((ph.H-res.H)*1000)} mm, ${ph.used} Wände)`, Math.abs(ph.H-res.H)<=0.1 ? 'ok' : 'warn');
@@ -3321,7 +3475,8 @@ $('btnUndo').onclick=()=>{
 $('btnClose').onclick=()=>{
   if(S.auto && S.sol && !S.sol.closed && performance.now()-(S.closeArm||0)>4000){
     S.closeArm=performance.now(); const b=$('btnClose'), old=b.textContent; b.textContent='Trotzdem?';
-    hint('Der Rundgang ist noch offen – die Ecke zwischen letzter und erster Wand wird geraten. Nochmal tippen = trotzdem schließen.', 'warn');
+    hint(S.sol.senk && S.sol.senk.byEnds ? 'Umriss aus den Wandenden, nicht bestätigt – nicht jede Ecke gesehen oder Erfassungen außerhalb (grau). Nochmal tippen = trotzdem so schließen.'
+      : 'Der Rundgang ist noch offen – die Ecke zwischen letzter und erster Wand wird geraten. Nochmal tippen = trotzdem schließen.', 'warn');
     setTimeout(()=>{ b.textContent=old; }, 4000); return; }
   S.closed=true; ev('raum-schließen', S.sol && !S.sol.closed ? {offen:true} : {}); end(); };
 // Protokoll der letzten Seitensitzung, falls die Seite neu geladen wurde.

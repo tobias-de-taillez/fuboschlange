@@ -668,6 +668,31 @@ if(G.overlayModel){
   chk('Overlay: Kappen aufs Bild (Liang-Barsky)', c2[0][0]===-1 && c2[1][0]===1 && G.clipNdc([1.5,0],[2,1])===null && G.clipNdc([0,0],[0.5,0.2])[1][1]===0.2);
 }
 
+// Schaetzer: Waende in beliebiger Reihenfolge (Protokoll 3: Nutzer geht durch
+// den Raum). Der Zeitring kreuzt sich; der Ring aus den Wandenden nicht.
+{
+  const per=ROOM.map((_,i)=>sweepObs(ROOM,81+i,{skip:ROOM.map((_,k)=>k).filter(k=>k!==i), back:0}));
+  const ord=[3,0,4,1,5,2], shuffled=stamp(ord.flatMap(i=>per[i]));
+  const s=G.solveSweep(shuffled,{H:HT}), e=cornerErr(s.corners,ROOM);
+  chk('Schätzer: Wände in beliebiger Reihenfolge – Ring aus den Wandenden, 6 Ecken ±8 cm', s.corners && s.corners.length===6 && e<=0.08 && !(s.warnings||[]).some(w=>/kreuzt/.test(w)),
+      (s.corners ? s.corners.length : 0)+' Ecken '+f3(e)+' m '+(s.warnings||[]).join(' | '));
+  const s0=G.solveSweep(shuffled,{H:HT, ringByEnds:false});
+  chk('Schätzer: …ohne Ring aus den Wandenden kreuzt der Zeitring (Gegenprobe)', !s0.corners || (s0.warnings||[]).some(w=>/kreuzt/.test(w)) || cornerErr(s0.corners,ROOM)>0.4,
+      (s0.corners ? s0.corners.length : 0)+' Ecken '+(s0.warnings||[]).join(' | '));
+  // Live-Overlay mit diesem Ring: Wand k auf ihrer Zeile (wie rowOf in computeResult). Der Ring
+  // aus den Wandenden ist geschlossen gewaehlt - alle Zeilen, eine Senkrechte je Ecke, obwohl
+  // der Nutzer nicht zur ersten Wand zurueckkam. senk.first = erste Wand der Zeitfolge.
+  if(G.overlayModel){
+    const M=s.corners ? G.overlayModel(s) : {rows:[], verts:[]}, off=(l,p)=>Math.abs(-l.u[1]*(p[0]-l.c[0])+l.u[0]*(p[1]-l.c[1]));
+    const onRow=!!s.corners && M.rows.length===s.lines.length && M.rows.every(r=>r.virtual ? r.k===-1 : (!!s.walls[r.k] && s.walls[r.k].line===s.lines[r.row]
+      && r.sRho===s.walls[r.k].line.sRho && [...r.span, ...(r.seen||[])].every(p=>off(s.lines[r.row],p)<1e-9)));
+    const t0=Math.min(...s0.walls[0].obs), sk=s.senk||{};
+    chk('Overlay: Ring aus den Wandenden – Wand k auf ihrer Zeile, je Ecke eine Senkrechte, erste Wand der Zeitfolge an senk.first',
+      !!sk.byEnds && onRow && M.verts.length===(s.corners||[]).length && sk.first>=0 && s.walls[sk.first].obs.includes(t0),
+      `${M.rows.length} Zeilen, ${M.verts.length} Senkrechte, returned ${s.returned}, first ${sk.first}`);
+  }
+}
+
 // ------------------------------------ Uebergabe an raumaufmass.html
 {
   const W0=synthWalls(1,0.01,3);
