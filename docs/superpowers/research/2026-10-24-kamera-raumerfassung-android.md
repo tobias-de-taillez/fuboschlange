@@ -308,6 +308,57 @@ Mit dem alten Wechselmodell der Fehlgriffe (`verschachtelt`) kommt der neue Stan
 3. **Lagerauschen je Erfassung als Unbekannte** in der Ausgleichung: Das beseitigt die H-Verzerrung in beiden Richtungen und macht σ_H ehrlich.
 4. **Fehlende Wand zwischen nicht parallelen Nachbarn:** über eine Lücke in der Azimut-Abdeckung des Rundgangs.
 
+## 10. Nachtschicht 24./25.10.: Prüfstränge, Protokoll 4, Aufnahme
+
+### 10.1 Was die fünf Prüfstränge ergaben (je Strang ein Prototyp und eine unabhängige Gegenprüfung)
+
+| Strang | Ergebnis der Gegenprüfung | Übernommen |
+|---|---|---|
+| Overlay (Modell im AR-Bild) | Rahmenfehler des alten Overlays bestätigt (Median 112 → 14 px in Protokoll 3) | ja, vor der Nacht (ee3ffec) |
+| Kantensuche im ganzen Bild (Stufe 2) | Zahlen stimmen, Verallgemeinerung nicht. Nachprüfung der Fadenkreuz-Kante bricht bei schmalem Deckenprofil und Schattenfuge ein. Einspeisen in die Auswertung bringt ≈ 0. | Nur der Teil „Stufe vor Linie“ in snapLine (K4-Gegenvorschlag). Die Verfolgung zunächst nur als Anzeige, sobald echte Bilder vorliegen. |
+| Senkrechte Raumecken | Ring aus den Wandenden (S1) bestätigt. Peilungen (S2) wirken nur über vClose, Leistenregel (S3) und Kreuzprobe H (S6) unsicher, das Overlay der Lote (S5) war im falschen Rahmen. | S1 wird auf den aktuellen Stand gesetzt (eigener Workflow). S2–S6 erst protokollieren, dann mit Geräteprotokollen entscheiden. |
+| Bodenkanten | Heutige Haltung sieht den Boden kaum (beide Kanten in einem Bild erst ab 1,65 m Abstand und 12–16° nach unten). Die Oberkanten-Regel nimmt am Boden zu 74 % die Leiste. Bodenerfassungen dürfen nicht in die Segmentierung. Ein Nutzen zeigt sich nur bei senkrechter Drift ≳ 5 cm. | Noch nichts. Erst messen (Ablage-Test für die senkrechte Drift, Leistenrate an echten Böden). |
+| Literatur (RAPiD, Drummond/Cipolla, Comport, Vacchetti, Smith 2006, MonoSLAM) | Quellen stimmen, Live-Passung als Vorschlag widerlegt. Bodenkante und Senkrechte an Störern gerendert bis 43 % falsch. Ecke 0 bei offenem Ring bestätigt, im Overlay schon behoben. | Smith et al. 2006 als Vorbild für Stufe 2: je Linie eine zusammengefasste Messung, 2/3-Regel, Gatter aus der Kovarianz |
+
+Gemeinsamer Befund aller Stränge: Sämtliche Bildzahlen stammen aus gerenderten Räumen. Jeder Strang verlangt echte Bilder vom Gerät, bevor eine Bildregel scharf geschaltet wird.
+
+### 10.2 Protokoll 4 (Pixel 9 Pro, 23:43, Fassung 55aa0a6c)
+
+- Die Haltung hat gewirkt: Kamera im Median 1,31 m statt 1,8 m, Δ ≈ 1,2 m.
+- Bei 152,8 s springt der Bodenbezug um 0,54 m / 1,6°. jumpHold hält den alten Bezug, der Anker pausiert sofort, der neue Anker wandert in den ersten 3 s um 5–8 cm. Die Erfassungen der nächsten 25 s fallen fast alle als „hinter Wand“ heraus.
+- 171–177 s: 6 s ohne Tracking, kurz davor ein leeres Kamerabild. Danach liegen die Wände 2,5–4,7° verdreht und bis 0,4 m versetzt. Eine einzige starre Transformation erklärt das nicht (Rest 0,136 m gegen 0,031 m vor dem Bruch). Ein nachträglicher Anschluss hätte also nicht geholfen.
+- Die Brüche als lose Stützstellen in die Ausgleichung zu geben, ist nicht stabil. Je nach angenommenem σ springen Fläche (4,5–13,5 m²) und H (2,24–2,74 m). Der Bruch bei 177 s wird zu 14–18° „erklärt“. Darum bleiben die Brüche weiter aus der Auswertung.
+- Hinweis-Flattern: 53 Hinweise, „Langsamer schwenken“ und „Gut so“ im Wechsel alle 0,2–1 s. Behoben: Warnung erst nach 0,4 s zu schnell, Rücknahme erst nach 1 s ruhig und ohne Lob.
+
+### 10.3 Stufe vor Linie am Fadenkreuz
+
+Unter parallelen Kandidaten gewinnen jetzt Stufen (Stufenmaß G.stepAlong ≥ 0,5, also Helligkeitssprung statt Linienprofil). Gibt es keine Stufe, bleibt alles wählbar.
+
+Messaufbau des Prüfers (33 gezielte Bilder je Szene): Gardinenschiene richtig 4 → 24, falsch 29 → 8; Schattenfuge 33 → 32 richtig; alle anderen Szenen gleich. Rechenzeit unverändert (Verhältnis 0,99).
+
+Selbsttest mit Schiene trennt alt und neu (0/4 → 4/4). Grenze: In einem sehr weißen Raum (Kontrast Wand/Decke 2–6 Stufen) gewinnt eine kräftige Schiene weiter, weil die echte Kante unter der Stärkeschwelle liegt.
+
+### 10.4 Aufnahme: Zustand je Bild und Video (Idee von Tobias)
+
+**Zustand je ausgewertetem Bild (immer):** Pose in local, Bodenbezug T, Flags (geschätzt, Anker verloren, Ersatz, Sprung-Halt, Pause, ohne Bezug, erfasst), Tempo und das Detektorergebnis am Fadenkreuz. Das schließt die Lücke aus Protokoll 4: Die 5-s-Stichproben reichten nicht, um die Bezugssprünge nachzuvollziehen.
+
+**Video (Haken „Video mitschneiden“):**
+- genau das Bild von captureEdge (RGBA 287×640, auf 288 gepolstert)
+- H.264 per WebCodecs mit 10 Bildern/s und 1,5 Mbit/s, dazu je Bild die ARCore-Tiefe
+- im OPFS in 10-s-Stücken
+- „Aufnahme sichern“ packt ein TAR, ohne Kopie im Speicher
+
+`raumskizze-aufnahme.mjs` spielt captureEdge auf den dekodierten Bildern nach und vergleicht Bild für Bild mit dem Gerät. Die Pose-Kette prüft es an obs.cam.
+
+Ende-zu-Ende ohne Telefon:
+- gerenderter Raum, Bezug gedreht und verschoben, libx264: 60/60 gleich, Median 0,03 px
+- falsches Tpsi fällt nur in der Pose-Kette auf (0 → 900 mm), weil captureEdge aus der Pose nur „oben“ braucht
+- Desktop-Chromium (WebCodecs H.264): 6-Graustufen-Kante und Mittelwerte bleiben exakt erhalten
+
+Am Telefon ist das noch nicht geprüft. Die erste Aufnahme muss zeigen, dass Gerät und Nachspiel übereinstimmen. Erst dann taugt das Video als Prüfstand für die Bildregeln aus 10.1.
+
+**Weg zur Trainingsdatenbank:** Jede Aufnahme braucht die Laser-Wahrheit des Raums (Raumaufmaß-Export) und ein Manifest (Format v1: Gerät, Intrinsik, Sitzung, Einwilligung). Gespeichert wird später auf dem eigenen Server, erst nach Freigabe. Bis dahin bleibt alles auf dem Telefon.
+
 ## Quellen
 
 Plattform:
