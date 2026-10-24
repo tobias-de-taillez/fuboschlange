@@ -359,6 +359,41 @@ Am Telefon ist das noch nicht geprüft. Die erste Aufnahme muss zeigen, dass Ger
 
 **Weg zur Trainingsdatenbank:** Jede Aufnahme braucht die Laser-Wahrheit des Raums (Raumaufmaß-Export) und ein Manifest (Format v1: Gerät, Intrinsik, Sitzung, Einwilligung). Gespeichert wird später auf dem eigenen Server, erst nach Freigabe. Bis dahin bleibt alles auf dem Telefon.
 
+### 10.5 Ring aus den Wandenden (Stufe 1 der Senkrechten, ohne Bild)
+
+Kreuzt der Ring aus der Zeitfolge oder fehlt eine Ecke, setzt `ringByEnds` die Reihenfolge der Wände aus ihren Enden zusammen. Das ist eine Suche mit Kosten für ungesehene Längen und Stufen, Gruppen dürfen ausgelassen werden. Ein Abschluss aus diesem Ring beendet die Sitzung nie von selbst. Der Nutzer bekommt einen Hinweis und schließt von Hand.
+
+Gepaart gemessen (gleiche Seeds, node 24, n = 100):
+
+| Szenario | Rechteck | L | Nische | Kamin | schräg |
+|---|---|---|---|---|---|
+| basis | 68 → 77 | 46 → 63 | 34 → 47 | 31 → 38 | 60 → 72 |
+| eckstart | 67 → 78 | 46 → 63 | 29 → 46 | 35 → 44 | 58 → 74 |
+| Wände außer der Reihe | 30 → 90 | 0 → 78 | 0 → 31 | 0 → 30 | 7 → 74 |
+
+Werte: Topologie richtig in %.
+
+- Selbst beendete Sitzungen ändern sich in allen 20 Klassen nicht (+0/−0).
+- Mit `ringByEnds:false` rechnet alles bitgleich zu vorher (111 210 Aufrufe).
+- Verluste: je −1 Lauf in basis Nische, eckstart Kamin und pause Nische, dazu verdeckt Nische 30 → 25 % (n = 40).
+- Protokoll 4: 6 Ecken ohne Kreuzung statt 8 mit drei Kreuzungen.
+- Protokoll 3 bleibt kreuzend, weil dort zwei Bezugsrahmen gemischt sind.
+
+Ausgelassene Gruppen mit mindestens 3 Erfassungen werden genannt. Sie können echte Wände sein, in Protokoll 4 eine Gruppe mit 11 Erfassungen.
+
+### 10.6 Messanleitung für die nächsten Sitzungen am Telefon
+
+1. **Mit Video:** Haken „Video mitschneiden“ setzen, normaler Rundgang an der Deckenkante, danach „Aufnahme sichern“. Die erste Aufnahme klärt, ob das Nachspiel am Mac mit dem Gerät übereinstimmt (`node raumskizze-aufnahme.mjs <tar>`).
+2. **Bodendurchgang (Prüfstrang Boden):**
+   - erst nach dem Deckenrundgang;
+   - aus 2–4 m Abstand, Telefon deutlich nach unten (mehr als 10°);
+   - Fadenkreuz auf die Fuge zwischen Boden und Sockelleiste;
+   - langsam die Wand entlang, Möbelfronten auslassen.
+
+   Am Video wird ausgezählt, wie oft die Kontaktlinie kommt statt Leistenoberkante oder Fuge (gerendert: 83 / 13 / 4 %).
+3. **Ablage-Test für die senkrechte Drift:** Das Telefon zu Beginn und am Ende je mindestens 10 s an dieselbe feste Stelle legen, aufrecht angelehnt, Kamera frei. Die Differenz der beiden Ruhephasen im Zustand je Bild (Pose gegen Bezug) ist die senkrechte Drift der Sitzung. Lohnt der Boden in der Auswertung? Das hängt genau davon ab: bei ≳ 5 cm ja, bei 2–3 cm nicht.
+4. **Wahrheit:** Den Raum danach in Raumaufmaß mit dem Laser aufnehmen und den Export zur Aufnahme legen. Erst damit werden Aufnahmen zu Trainings- und Prüfdaten.
+
 ## Quellen
 
 Plattform:
