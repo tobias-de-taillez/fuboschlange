@@ -133,7 +133,7 @@
   <div class="hint" id="startHint" style="margin-top:8px">Prüfe das Gerät …</div>
   <button id="dlLast" class="ghost hidden" style="margin-top:8px">Protokoll vom letzten Seitenaufruf (JSON)</button>
   <button id="dlRecLast" class="ghost hidden" style="margin-top:8px">Letzte Aufnahme sichern</button>
-  <div class="hint" style="margin-top:8px">Automatisch: (1) Kurz auf freien Boden halten – der Boden setzt sich selbst. (2) Fadenkreuz langsam an der Kante zwischen Wand und Decke entlangführen, einmal rundum, ruhig auch hinter Schränken weiter. Die Reihenfolge ist egal, ein paar Schritte zwischendurch helfen. Telefon auf Brusthöhe. (3) Zurück an der ersten Wand schließt sich der Raum. Steht oben blau „Umriss aus den Wandenden“, endet es nicht von selbst: Ecken prüfen, dann „Raum schließen“. Im Bild: grün unterlegt heißt „die Kante liegt, wo die Skizze sie erwartet“, orange unterlegt „hier weicht sie ab – dort noch einmal entlang“. Senkrechte Linien sind erkannte Kanten, die bis zur Decke reichen (Möbel, Türen und Fenster enden darunter und erscheinen meist nicht): grün bestätigt eine Ecke der Skizze, hell gepunktet hat die Skizze dort keine Ecke (eine noch fehlende Ecke oder ein deckenhohes Möbel). An der noch unsichersten Wand steht „näher ran“ – dort näher herangehen. Rot gestrichelt fehlt noch etwas.</div>
+  <div class="hint" style="margin-top:8px">Automatisch: (1) Kurz auf freien Boden halten – der Boden setzt sich selbst. (2) Fadenkreuz langsam an der Kante zwischen Wand und Decke entlangführen, einmal rundum, ruhig auch hinter Schränken weiter. Die Reihenfolge ist egal, ein paar Schritte zwischendurch helfen. Telefon auf Brusthöhe. (3) Zurück an der ersten Wand schließt sich der Raum. Steht oben blau „Umriss aus den Wandenden“, endet es nicht von selbst: Ecken prüfen, dann „Raum schließen“. Im Bild: grün unterlegt heißt „die Kante liegt, wo die Skizze sie erwartet“, orange unterlegt „hier weicht sie ab – dort noch einmal entlang“. Grüne senkrechte Linien sind erkannte Kanten bis zur Decke, die eine Ecke der Skizze bestätigen. An der noch unsichersten Wand steht „näher ran“ – dort näher herangehen. Rot gestrichelt fehlt noch etwas.</div>
   <div class="hint" style="margin-top:8px">Von Hand: „Boden setzen“, je Wand „Kante erfassen“ (am besten zweimal aus verschiedenem Abstand), „Nächste Wand“ der Reihe nach, zum Schluss „Raum schließen“.</div>
 </div>
 
@@ -3691,7 +3691,11 @@ function trkSeg(st, t){
 // Pause, Ersatzbezug, Anker oder Tracking weg). Nichts davon geht in die Auswertung.
 // ?senk=0 schaltet ab, ?senkdecke=0 zeigt auch Kanten, die unter der Decke enden (Moebel,
 // Tueren, Fenster, Bilder - zum Vergleich am Geraet), ?senkdecke=0.6 setzt die Schwelle.
-const SENK=Q.get('senk')!=='0';
+// Gezeichnet werden nur die gruenen (an einer Modellecke); ?senkhell=1 zeigt auch die hellen.
+// Aufnahme 6 (Stand 3): 94 % der gezeigten waren hell, gesichtet je ein Drittel Kabel,
+// echte Ecken ohne Modellecke und nichts Erkennbares - als Anzeige mehr Unruhe als Hilfe.
+// Gerechnet wird weiter wie vorher (Gruen braucht dieselben Laeufe, LOG.timings.senk bleibt vergleichbar).
+const SENK=Q.get('senk')!=='0', SENK_HELL=Q.get('senkhell')==='1';
 const SENK_EVERY=2, SENK_STALE=1, SENK_DECKE=Q.get('senkdecke')!=null && Number.isFinite(parseFloat(Q.get('senkdecke'))) ? parseFloat(Q.get('senkdecke')) : 0.75;
 function senkFrame(){
   if(!SENK || !S.auto || S.phase!=='waende') return;
@@ -3849,10 +3853,12 @@ function drawOverlay(view, camTo){
         // o.H): Moebel, Tueren, Fenster und Bilder enden darunter und werden meist nicht als Lot
         // vom Boden zur Decke gezeichnet (bleiben: deckenhohe Moebel, Dinge nah vor der Kamera,
         // Bilder mit einem Modell weit neben der Wand). Das Modell-Lot ohne erkannte Senkrechte bleibt weiss.
-        if(S.senk && S.senk.shown.length && now()-S.senk.t<=SENK_STALE){
-          for(const v of S.senk.shown) seg3b(v.ecke>=0 ? OV.senkEckeUnter : OV.senkFreiUnter, Y(v.P,0), Y(v.P,Hm));
+        // Die hellen nur mit ?senkhell=1 (siehe SENK_HELL).
+        const sv=S.senk && now()-S.senk.t<=SENK_STALE ? S.senk.shown.filter(v=>v.ecke>=0 || SENK_HELL) : [];
+        if(sv.length){
+          for(const v of sv) seg3b(v.ecke>=0 ? OV.senkEckeUnter : OV.senkFreiUnter, Y(v.P,0), Y(v.P,Hm));
           flush();
-          for(const v of S.senk.shown) seg3b(v.ecke>=0 ? OV.senkEcke : OV.senkFrei, Y(v.P,0), Y(v.P,Hm));
+          for(const v of sv) seg3b(v.ecke>=0 ? OV.senkEcke : OV.senkFrei, Y(v.P,0), Y(v.P,Hm));
           flush();
         }
         // Unsicherste sichtbare Wand (ab gelb): dick nachziehen, „näher ran“. Haelt die
