@@ -2152,7 +2152,7 @@ const DS=Math.max(240, Math.min(1280, Number(Q.get('ds'))||640));
 const FARBEN_KLAR=Q.get('farben')==='klar';
 // Stand der Seite: Nummer und Zeitpunkt des Hochladens. Setzt
 // scripts/raumskizze-deploy.sh - nicht von Hand aendern.
-const STAND={nr:0, zeit:'2026-10-25T11:00:00+01:00'};
+const STAND={nr:1, zeit:'2026-10-25T10:42:58+01:00'};
 const standText=()=>`Stand ${STAND.nr} · ${new Date(STAND.zeit).toLocaleString('de-DE', {day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit'})}`;
 
 const T0=performance.now();
