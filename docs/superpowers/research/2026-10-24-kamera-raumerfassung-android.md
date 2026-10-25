@@ -463,6 +463,23 @@ Gemessen gepaart an der Renderer-Wahrheit, mit getrennten Übungs- und Prüfmeng
 
 Die Treffer an konkaven Ecken verallgemeinern nicht (gepoolt −4 Prozentpunkte). Ecken an Wandstücken ≤ 0,5 m werden nie „ecke“, Außenecken absichtlich nie. Für eine spätere Eckenstütze zählen wenige Fehlpeilungen mehr, und sie muss einseitige Peilungen über mehrere Bilder zulassen. Ans Gerät erst nach echten Aufnahmen.
 
+### 10.11 Gesamtreview der Nacht
+
+Jeder Baustein der Nacht war einzeln gegengeprüft, ihr Zusammenspiel nicht. Ein Review in drei Richtungen (Bildschleife, Daten und Speicher, Bedienung) fand 22 Fehler. Jeder wurde unabhängig nachgestellt, alle waren echt.
+
+Die Korrekturen sind zu einem Patch zusammengeführt (6d9afb8) und doppelt gegengeprüft, auf Regression und auf Behebung je Fund. Die zweite Prüfung fand dabei eine neue, blockierende Regression: Ein einmal geworfenes recStop sperrte jeden Neustart. Sie ist behoben.
+
+Die wichtigsten Korrekturen:
+- vorläufiges Manifest je 10-s-Stück, damit Absturz und Neuladen auswertbar bleiben;
+- „Aufnahme sichern“ ist an den eigenen Durchlauf gebunden;
+- Zustandszeilen werden auch ohne Bezug geschrieben;
+- der Sprung-Hinweis wird nicht mehr überschrieben;
+- keine Tempo-Hinweise in der Pause;
+- der Abschluss aus den Wandenden ist im Balken sichtbar;
+- Textreste bereinigt.
+
+Der Schätzer ist unverändert, der Messaufbau bitgleich. Ende-zu-Ende geprüft mit einer synthetischen 2-Runden-Aufnahme aus dem App-Code: Stufe 2 stimmt zu 95 % mit dem Gerät überein, die Pose-Kette ist exakt, nichts auffällig.
+
 ## Quellen
 
 Plattform:
