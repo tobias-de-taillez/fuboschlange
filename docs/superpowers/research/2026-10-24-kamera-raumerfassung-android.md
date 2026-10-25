@@ -433,6 +433,18 @@ Synthetisch belegt mit 5-min-Aufnahmen, die der App-Code selbst im Harness erzeu
 
 Der Senkrechten-Finder liegt im Störer-Raum bei 195 von 219 „ecke“-Urteilen falsch. Er bleibt vorerst im Werkzeug.
 
+### 10.9 Anker-Netz: Bezugssprünge messen statt raten
+
+Offene Frage aus den Protokollen 3 und 4: Ist ein Sprung des Bodenankers eine Kartenkorrektur von ARCore oder ein Ausreißer dieses einen Ankers?
+- Bei einer Kartenkorrektur bewegen sich alle Anker gemeinsam gegenüber local. Der Versatz ist dann gemessen, und die Erfassungen davor ließen sich exakt umrechnen.
+- Bei einem Ausreißer muss man halten (jumpHold).
+
+Ein Anschluss über Wände drehte im Messaufbau 41 von 53 Mal falsch. Messen ist darum besser als Raten.
+
+Das Netz setzt alle 12 s einen Messanker unter der Kamera, höchstens 8. Es protokolliert die Lagen aller Anker 2-mal je Sekunde und bei jedem Anlass. Daraus ordnet es ein: gemeinsam, nur Bezugsanker, nur Netz, gemischt, alle pausiert oder wieder gemeinsam, mit Nachprüfung nach 1 s.
+
+Bezug, Erfassung und Auswertung bleiben unverändert. Das zeigt ein A/B-Vergleich gegen den Stand davor, Bild für Bild in 28 Szenarien. Auswertung mit `node raumskizze-anker.mjs <tar|protokoll.json>`. Erst wenn echte Sitzungen den Fall klären, ändert sich die Steuerung, also folgen oder halten und Umrechnen mit dem gemessenen Versatz.
+
 ## Quellen
 
 Plattform:
