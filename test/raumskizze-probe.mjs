@@ -707,6 +707,25 @@ if(G.overlayModel){
       `${M.rows.length} Zeilen, ${M.verts.length} Senkrechte, returned ${s.returned}, first ${sk.first}`);
   }
 }
+// ringOrder nimmt nur einfache Ringe, die einmal herumlaufen (Aufnahme 6: eine billigere
+// Folge lief zweimal herum und kreuzte sich). Rechteck 4x4 m, dazu vier parallele Gruppen
+// 0,3 m innen ueber die ganze Laenge (Regale): zweimal herum kostet weniger als sie auszulassen.
+{
+  const SW=G._sweep, P=[], walls=[], lines=[], cam=[2,2], d=0.3;
+  const wall=(a,b)=>{ const ids=[]; for(let i=0;i<6;i++){ const t0=i/6, t1=(i+1)/6;
+      P.push({a:[a[0]+(b[0]-a[0])*t0, a[1]+(b[1]-a[1])*t0], b:[a[0]+(b[0]-a[0])*t1, a[1]+(b[1]-a[1])*t1], cam}); ids.push(P.length-1); }
+    const L=Math.hypot(b[0]-a[0],b[1]-a[1]); walls.push({ids}); lines.push({c:[(a[0]+b[0])/2,(a[1]+b[1])/2], u:[(b[0]-a[0])/L,(b[1]-a[1])/L]}); };
+  wall([0,4],[4,4]); wall([4,4],[4,0]); wall([4,0],[0,0]); wall([0,0],[0,4]);
+  wall([d,4-d],[4-d,4-d]); wall([4-d,4-d],[4-d,d]); wall([4-d,d],[d,d]); wall([d,d],[d,4-d]);
+  const ring=rv=>{ const ro=SW.ringOrder(P,walls,lines,{...SW.SW, ringValid:rv}), r=ro && SW.ringOf(P,ro.order.map(k=>walls[k]),ro.order.map(k=>lines[k]),SW.SW); return {ro, r}; };
+  const a=ring(true), b=ring(false);
+  chk('ringOrder: nur einfache Ringe – Rechteck statt Doppelschleife (vier innere Gruppen ausgelassen)',
+    !!a.ro && a.ro.order.length===4 && a.ro.order.every(k=>k<4) && !!a.r.corners && a.r.corners.length===4 && !a.r.warnings.some(w=>/kreuzt|fehlt/.test(w)),
+    a.ro ? a.ro.order.join(',')+' Kosten '+f3(a.ro.cost) : 'kein Ring');
+  chk('ringOrder: …ohne Prüfung (ringValid:false) gewinnt die Doppelschleife (Gegenprobe)',
+    !!b.ro && b.ro.order.length===8 && !!b.r && b.r.warnings.some(w=>/kreuzt/.test(w)),
+    b.ro ? b.ro.order.join(',')+' Kosten '+f3(b.ro.cost) : 'kein Ring');
+}
 
 // ------------------------- Stufe 2: Modellkanten im Bild verfolgen (nur Anzeige)
 // G.trackModelEdges sucht jede Modellwand im Bild, G.trackJudge urteilt wie die App.

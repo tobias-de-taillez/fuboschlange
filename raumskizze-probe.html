@@ -98,6 +98,7 @@
               padding-bottom: max(12px, env(safe-area-inset-bottom));
               background: rgba(0,0,0,.8); }
   #arBottom .row { grid-template-columns: 1fr 1fr 1fr; }
+  #arBottom #arBtnsWand2 { grid-template-columns: 1fr 1fr 1fr 1fr; }
   #arBottom button { padding: 14px 6px; font-size: 15px; }
   #arWall { font-size: 13px; margin-bottom: 6px; font-variant-numeric: tabular-nums; }
   /* Mini-Grundriss: was der Schwenk bisher ergeben hat. Steht in #arBottom und
@@ -179,6 +180,7 @@
     </div>
     <div class="row hidden" id="arBtnsWand2">
       <button id="btnClose">Raum schließen</button>
+      <button id="btnAnsicht" class="ghost">Ansicht: Kamera</button>
       <button id="btnFlip2" class="ghost">Bild y-Spiegel</button>
       <button id="btnEnd2" class="ghost">Beenden</button>
     </div>
@@ -1474,6 +1476,16 @@ function ringOrder(P,walls,lines,o){
   let best=null, bestCost=Infinity, nodes=0; const budget=o.ringBudget??RE.budget;
   const vis=new Uint8Array(K); vis[s0]=1;
   const path=[s0];
+  // Nur einfache Ringe, die sich einmal ganz drehen (wie bad() in ringByEnds; Cabral &
+  // Furukawa 2014: der Grundriss laeuft genau einmal um den Freiraum). Sonst gewinnt eine
+  // billigere Folge, die zweimal herumlaeuft und sich kreuzt - Aufnahme 6 ohne 4 von 153
+  // Erfassungen: 10 Waende, 720°, verworfen, zurueck kam der kreuzende Zeitring (17 statt 6
+  // Ecken). Geprueft wird nur ein Zyklus, der der beste wuerde; die Schranke bleibt gueltig.
+  // ringValid:false = altes Verhalten.
+  const turnOf=C=>{ let t=0; const n=C.length; for(let i=0;i<n;i++){ const a=C[i], b=C[(i+1)%n], c=C[(i+2)%n];
+    t+=Math.atan2((b[0]-a[0])*(c[1]-b[1])-(b[1]-a[1])*(c[0]-b[0]), (b[0]-a[0])*(c[0]-b[0])+(b[1]-a[1])*(c[1]-b[1])); } return t*180/Math.PI; };
+  const validRing=path=>{ const r=ringOf(P,path.map(k=>walls[k]),path.map(k=>lines[k]),o);
+    return !!r.corners && !r.warnings.some(w=>/kreuzt|fehlt/.test(w)) && Math.abs(Math.abs(turnOf(r.corners))-360)<=45; };
   const dfs=(cur,cost)=>{
     if(++nodes>budget) return;
     // Untere Schranke: jede offene Wand kostet mindestens min(auslassen, billigster Eingang).
@@ -1481,7 +1493,7 @@ function ringOrder(P,walls,lines,o){
     if(lb>=bestCost) return;
     if(path.length>=3 && C[cur][s0]){
       let c=cost+C[cur][s0].cost; for(let k=0;k<K;k++) if(!vis[k]) c+=skip[k];
-      if(c<bestCost){ bestCost=c; best=path.slice(); } }
+      if(c<bestCost && (o.ringValid===false || validRing(path))){ bestCost=c; best=path.slice(); } }
     const nx=[]; for(let j=0;j<K;j++) if(!vis[j] && C[cur][j]) nx.push(j);
     nx.sort((p,q)=>C[cur][p].cost-C[cur][q].cost);
     for(const j of nx){ vis[j]=1; path.push(j); dfs(j,cost+C[cur][j].cost); path.pop(); vis[j]=0; }
@@ -3753,10 +3765,38 @@ function liveModel(){
   S.modelKey={sol, k}; S.model=map ? G.overlayModel(sol, map) : null;
   return S.model;
 }
+// Ansicht (Knopf in der Wandphase): statt des Kamerabilds das, was die Auswertung sieht -
+// 'luma' das verkleinerte Graustufenbild von captureEdge und den Senkrechten (S.lumaImg,
+// bei ?ds=640 287x640), 'gradient' den Sobel-Betrag darauf, auf dem ganzen Bild
+// (Wurzel-Skala, damit schwache Deckenkanten sichtbar bleiben). Unverschmiert gezeichnet:
+// man sieht die echte Aufloesung. Die Overlay-Linien liegen darueber. Gerechnet wird nur,
+// wenn die Ansicht an ist und ein neues Bild da ist (bei ?ds=1920 einige 10 ms je Bild).
+const ANSICHTEN=['kamera','luma','gradient'], ANSICHT_NAME={kamera:'Kamera', luma:'Luma', gradient:'Gradient'};
+function drawAnsicht(c, cw, ch){
+  const img=S.lumaImg; if(!img) return;
+  if(S.ansichtFor!==img || S.ansichtFuer!==S.ansicht){
+    const {g, w, h}=img; let cv=S.ansichtCv;
+    if(!cv || cv.width!==w || cv.height!==h){ cv=S.ansichtCv=document.createElement('canvas'); cv.width=w; cv.height=h; S.ansichtData=cv.getContext('2d').createImageData(w, h); }
+    const d=S.ansichtData.data;
+    for(let y=0;y<h;y++) for(let x=0;x<w;x++){ const i=y*w+x; let v;
+      if(S.ansicht==='luma') v=g[i];
+      else if(x<1 || y<1 || x>w-2 || y>h-2) v=0;
+      else { const [gx,gy]=G.sobel(g,w,x,y); v=Math.min(255, 16*Math.sqrt(Math.hypot(gx,gy))); }
+      d[4*i]=d[4*i+1]=d[4*i+2]=v; d[4*i+3]=255; }
+    cv.getContext('2d').putImageData(S.ansichtData, 0, 0);
+    S.ansichtFor=img; S.ansichtFuer=S.ansicht;
+  }
+  // Zeile 0 liegt unten (readPixels), ausser mit y-Spiegel (G.pixToNdc).
+  c.save(); c.imageSmoothingEnabled=false;
+  if(!img.flipY){ c.translate(0, ch); c.scale(1, -1); }
+  c.drawImage(S.ansichtCv, 0, 0, cw, ch); c.restore();
+}
+
 function drawOverlay(view, camTo){
   const c=S.ctx, cv=c.canvas, cw=cv.width, ch=cv.height, dpr=devicePixelRatio||1;
   c.clearRect(0, 0, cw, ch);
   if(!view) return;
+  if(S.ansicht && S.ansicht!=='kamera') drawAnsicht(c, cw, ch);
   const proj=view.projectionMatrix;
   const px=n=>[(n[0]+1)/2*cw, (1-n[1])/2*ch];
   const line=(a,b,color,w)=>{ c.strokeStyle=color; c.lineWidth=w*dpr; c.beginPath(); c.moveTo(a[0],a[1]); c.lineTo(b[0],b[1]); c.stroke(); };
@@ -4604,6 +4644,8 @@ $('start').onclick=()=>{ $('start').disabled=true; startAR().finally(()=>{ if(!S
 $('btnBoden').onclick=()=>{ S.floorReq=true; ev('tap-boden'); };
 const flip=()=>{ S.flipY=!S.flipY; ev('y-spiegel', {an:S.flipY}); };
 $('btnFlip').onclick=flip; $('btnFlip2').onclick=flip;
+$('btnAnsicht').onclick=()=>{ S.ansicht=ANSICHTEN[(ANSICHTEN.indexOf(S.ansicht||'kamera')+1)%ANSICHTEN.length];
+  $('btnAnsicht').textContent='Ansicht: '+ANSICHT_NAME[S.ansicht]; ev('ansicht', {modus:S.ansicht}); };
 const end=()=>{ if(S.session) S.session.end().catch(()=>{}); };
 // Beenden mitten im Rundgang braucht einen zweiten Tipp: sonst entsteht ein
 // geschlossener Raum mit geratener letzter Ecke. "Raum schließen" ist der
