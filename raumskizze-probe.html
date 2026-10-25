@@ -70,8 +70,10 @@
   /* AR-Overlay: liegt per dom-overlay über dem Kamerabild. */
   #ar { position: fixed; inset: 0; color: #fff; font: 14px/1.4 system-ui, sans-serif; }
   #ar canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  /* Im AR-Overlay meldet Chrome keinen Sicherheitsabstand (env() = 0), die
+     Statusleiste mit Kameraloch liegt aber darueber - fester Mindestabstand. */
   #arTop { position: absolute; top: 0; left: 0; right: 0; padding: 10px 12px;
-           padding-top: max(10px, env(safe-area-inset-top));
+           padding-top: max(48px, env(safe-area-inset-top));
            background: rgba(0,0,0,.8); font-size: 12px; font-variant-numeric: tabular-nums; }
   #arTop span { margin-right: 10px; white-space: nowrap; }
   #arHint { margin-top: 6px; font-size: 15px; font-weight: 600; color: #fff; }
@@ -499,10 +501,14 @@ G.extendLine=(g,W,H,s,o={})=>{
 G.stepAlong=(g,W,H,e)=>{
   const bl=(x,y)=>{ if(!(x>=0 && y>=0 && x<=W-1.001 && y<=H-1.001)) return NaN; const x0=x|0, y0=y|0, fx=x-x0, fy=y-y0, i=y0*W+x0;
     return (g[i]*(1-fx)+g[i+1]*fx)*(1-fy)+(g[i+W]*(1-fx)+g[i+W+1]*fx)*fy; };
+  // Die Fenster 3-6 px gelten fuer die Vorgabe (kurze Seite 287 px); bei groesserem
+  // Bild (?ds) mitwachsen, sonst sieht ein 3-cm-Band (Gardinenschiene) bei voller
+  // Aufloesung wie zwei Stufen aus. Bei 287 px unveraendert (sc = 1).
+  const sc=Math.max(1, Math.min(W,H)/288);
   const t0=(e.x1-e.px)*e.dx+(e.y1-e.py)*e.dy, t1=(e.x2-e.px)*e.dx+(e.y2-e.py)*e.dy, v=[];
-  for(let t=Math.min(t0,t1); t<=Math.max(t0,t1); t+=6){ const bx=e.px+t*e.dx, by=e.py+t*e.dy;
+  for(let t=Math.min(t0,t1); t<=Math.max(t0,t1); t+=6*sc){ const bx=e.px+t*e.dx, by=e.py+t*e.dy;
     const P=k=>(bl(bx+k*e.nx-e.dx,by+k*e.ny-e.dy)+bl(bx+k*e.nx,by+k*e.ny)+bl(bx+k*e.nx+e.dx,by+k*e.ny+e.dy))/3;
-    const D=(P(1)+P(2)-P(-1)-P(-2))/2, s=((P(3)+P(4)+P(5)+P(6))-(P(-6)+P(-5)+P(-4)+P(-3)))/4/D;
+    const D=(P(1)+P(2)-P(-1)-P(-2))/2, s=((P(3*sc)+P(4*sc)+P(5*sc)+P(6*sc))-(P(-6*sc)+P(-5*sc)+P(-4*sc)+P(-3*sc)))/4/D;
     if(Number.isFinite(s) && Math.abs(D)>0.8) v.push(s); }
   if(v.length<3) return NaN; v.sort((a,b)=>a-b); return v[v.length>>1];
 };
