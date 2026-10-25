@@ -56,6 +56,10 @@
   td.l { text-align: left; word-break: break-word; }
   #resWalls th, #resWalls td { white-space: nowrap; }
   .ok { color: #4ade80; } .warn { color: #fbbf24; } .bad { color: #f87171; }
+  #resSummary .head { font-size: 18px; font-weight: 700; margin-bottom: 6px; }
+  #resSummary > div { margin-bottom: 4px; }
+  #resSummary details { margin-top: 10px; color: #9aa2ad; font-size: 13px; }
+  #resSummary summary { cursor: pointer; color: #c7ccd3; }
   .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
   #plan { width: 100%; aspect-ratio: 1; background: #101216; border-radius: 8px; display: block; }
   #linkOut { font-size: 12px; word-break: break-all; color: #9aa2ad; }
@@ -3728,20 +3732,23 @@ function computeResult(){
 function showResult(res){
   $('result').classList.remove('hidden');
   const box=$('resSummary'); box.replaceChildren();
-  const p=(t,cls)=>box.appendChild(el('div', t, cls));
+  // Zuerst, was ein Mensch wissen will (Flaeche, Ecken, Hoehe, was zu pruefen ist), die
+  // Technik fuer die Fehlersuche aufklappbar darunter. Zahlen mit Dezimalkomma.
+  const main=[], tech=[]; let head=null;
+  const p=(t,cls)=>main.push([t,cls]), pt=(t,cls)=>tech.push([t,cls]);
   const s0=res.stage0;
-  p(`Stufe 0: Kamerabild ${s0.camera ? s0.camera.join('×') : '–'}`
+  pt(`Stufe 0: Kamerabild ${s0.camera ? s0.camera.join('×') : '–'}`
     + (s0.small ? `, verkleinert ${s0.small.join('×')}` : '')
     + ` · readPixels 256² ${ms(s0.roiMs)} · verkleinert ${ms(s0.smallMs)} · Kante ${ms(s0.snapMs)}`);
-  p(`Tracking: ${s0.tracking.ok} ok, ${s0.tracking.emulated} geschätzt, ${s0.tracking.lost} verloren, Anker ${s0.tracking.anchorLost||0} verloren · Ebenen max ${s0.planesMax.h}h/${s0.planesMax.v}v · Tiefe ${s0.depth && s0.depth.w ? s0.depth.w+'×'+s0.depth.h : '–'}`);
-  p(`Features: ${s0.enabledFeatures ? s0.enabledFeatures.join(', ') : 'nicht gemeldet'}`);
-  if(s0.floor) p(`Boden: Normale ${s0.floor.normalDeg}° von senkrecht, Kamera ${Math.round(s0.floor.camHeight*1000)} mm darüber, ${s0.floor.anchor ? 'mit Anker' : 'ohne Anker'}`
+  pt(`Tracking: ${s0.tracking.ok} ok, ${s0.tracking.emulated} geschätzt, ${s0.tracking.lost} verloren, Anker ${s0.tracking.anchorLost||0} verloren · Ebenen max ${s0.planesMax.h}h/${s0.planesMax.v}v · Tiefe ${s0.depth && s0.depth.w ? s0.depth.w+'×'+s0.depth.h : '–'}`);
+  pt(`Features: ${s0.enabledFeatures ? s0.enabledFeatures.join(', ') : 'nicht gemeldet'}`);
+  if(s0.floor) pt(`Boden: Normale ${s0.floor.normalDeg}° von senkrecht, Kamera ${Math.round(s0.floor.camHeight*1000)} mm darüber, ${s0.floor.anchor ? 'mit Anker' : 'ohne Anker'}`
     + (s0.floor.tFound!=null ? `, gefunden nach ${s0.floor.tFound.toFixed(1)} s` : ''), s0.floor.anchor ? '' : 'warn');
   if(LOG.runs.length) p(`Durchlauf ${LOG.runs.length+1} – frühere Durchläufe stecken im Protokoll.`);
   if(res.auto){
     const rj=Object.entries(res.auto.rejected).map(([k,v])=>`${v}× ${k}`).join(', ');
-    p(`Schwenk: ${res.auto.obs} Kanten erfasst, ${res.auto.walls} Wände erkannt${res.auto.closed ? ', Raum geschlossen' : ', nicht geschlossen'}`
-      + (rj ? ` · verworfen: ${rj}` : ''), res.auto.closed ? '' : 'warn');
+    pt(`Schwenk: ${res.auto.obs} Kanten erfasst, ${res.auto.walls} Wände erkannt${res.auto.closed ? ', Raum geschlossen' : ', nicht geschlossen'}`
+      + (rj ? ` · verworfen: ${rj}` : ''));
   }
   if(res.auto && res.auto.H!=null){
     const A=res.auto, mm=x=>Math.round(x*1000);
@@ -3759,8 +3766,8 @@ function showResult(res){
       // das Vorwissen: die Form stimmt, der Massstab nicht genau.
       const cam=median(S.pool.map(o=>o.cam ? o.cam[1] : NaN).filter(Number.isFinite)), dl=Number.isFinite(cam) ? A.H-cam : 1.1;
       p(`Raumhöhe aus der Kamera nur ungefähr: ${mm(A.H)} ± ${mm(A.sH)} mm. Der Maßstab der Skizze ist damit auf etwa ±${Math.round(100*A.sH/Math.max(0.5,dl))} % unsicher – die Form stimmt, eine Laser-Strecke setzt den Maßstab. Genauer wird es, wenn du beim Schwenken ein paar Schritte gehst.`, 'warn');
-    } else p(`Raumhöhe aus der Kamera: ${mm(A.H)} ± ${mm(A.sH||0)} mm (geschätzt – der Laser misst sie später)`, (A.sH||0)>0.08 ? 'warn' : '');
-    p(`Auswertung: Varianzfaktor ${A.s0!=null ? A.s0.toFixed(1) : '–'} · ${A.ortho ? A.ortho.walls.length+' Wände rechtwinklig' : 'keine rechten Winkel angenommen'} · ${A.nSeg} Abschnitte · ${A.solveMs!=null ? A.solveMs.toFixed(0)+' ms je Auswertung' : ''}`);
+    } else ((A.sH||0)>0.08 ? p : pt)(`Raumhöhe aus der Kamera: ${mm(A.H)} ± ${mm(A.sH||0)} mm (geschätzt – der Laser misst sie später)`, (A.sH||0)>0.08 ? 'warn' : '');
+    pt(`Auswertung: Varianzfaktor ${A.s0!=null ? A.s0.toFixed(1) : '–'} · ${A.ortho ? A.ortho.walls.length+' Wände rechtwinklig' : 'keine rechten Winkel angenommen'} · ${A.nSeg} Abschnitte · ${A.solveMs!=null ? A.solveMs.toFixed(0)+' ms je Auswertung' : ''}`);
   }
   if(!res.room){
     p(res.auto ? `Zu wenig Wände (${res.auto.walls}) – mindestens drei.` : res.H ? `Zu wenig Wände (${res.wallsCaptured}) – mindestens drei.` : 'Ohne Raumhöhe nur Stufe 0.', 'warn');
@@ -3774,9 +3781,16 @@ function showResult(res){
     if(!ph){}
     else if(ph.H!==null) p(`Raumhöhe: Laser ${Math.round(res.H*1000)} mm · Parallaxe ${Math.round(ph.H*1000)} mm (Δ ${Math.round((ph.H-res.H)*1000)} mm, ${ph.used} Wände)`, Math.abs(ph.H-res.H)<=0.1 ? 'ok' : 'warn');
     else p(`Raumhöhe: Laser ${Math.round(res.H*1000)} mm · Parallaxe: ${ph.reason}`);
-    if(res.room.area!=null) p(`Fläche ${res.room.area.toFixed(2)} m² · ${res.room.corners ? res.room.corners.length : 0} Ecken`);
-    res.room.warnings.forEach(w=>p(w, 'warn'));
+    if(res.room.area!=null) head=`Fläche ${res.room.area.toFixed(2)} m² · ${res.room.corners ? res.room.corners.length : 0} Ecken`
+      + (res.auto && res.auto.H!=null && !res.auto.laser ? ` · Höhe ≈ ${res.auto.H.toFixed(2)} m` : res.H ? ` · Höhe ${res.H.toFixed(2)} m` : '');
+    // Interna der Auswertung gehoeren zur Technik, nicht zu den Hinweisen.
+    res.room.warnings.forEach(w=>/^Reihenfolge der Wände aus ihren Enden/.test(w) ? pt(w) : p(w, 'warn'));
   }
+  if(head) box.appendChild(el('div', deNum(head), 'head'));
+  for(const [t,cls] of main) box.appendChild(el('div', deNum(t), cls));
+  if(tech.length){ const d=el('details'); d.appendChild(el('summary', 'Technik (für die Fehlersuche)'));
+    for(const [t,cls] of tech) d.appendChild(el('div', deNum(t), cls));
+    box.appendChild(d); }
   const tb=$('resWalls'); tb.replaceChildren();
   if(res.walls){
     const head=el('tr'); (res.auto ? ['Wand','Länge','Kanten','σ Lage'] : ['Wand','Länge','Kanten','schwach','Rest','Abst.-Spreizung']).forEach(h=>head.appendChild(el('th', h))); tb.appendChild(head);
@@ -3784,7 +3798,7 @@ function showResult(res){
     res.walls.forEach((w,i)=>{
       const tr=el('tr');
       const len=C ? Math.hypot(C[(i+1)%C.length][0]-C[i][0], C[(i+1)%C.length][1]-C[i][1]) : null;
-      const cells=[String(i+1), len!=null ? len.toFixed(2)+' m' : '–', w.virtual ? 'ergänzt' : String(w.n)];
+      const cells=[C ? `${i+1} · ${G.idOf(i)}–${G.idOf((i+1)%C.length)}` : String(i+1), len!=null ? deNum(len.toFixed(2))+' m' : '–', w.virtual ? 'ergänzt' : String(w.n)];
       if(res.auto) cells.push(w.sRhoMm!=null ? w.sRhoMm+' mm' : '–');
       else { const sp=w.n>=2 ? res.parallax.spread[used.length] : null; if(w.n>=2) used.push(i);
         cells.push(String(w.weak), w.rmsMm!=null ? w.rmsMm+' mm' : '–', sp!=null ? sp.toFixed(2)+' m' : '–'); }
