@@ -7,13 +7,25 @@
 // Gradienten quer zu dieser Geraden ab (wie edgeCandidates: entlang einer
 // echten Kante addiert sich das Signal linear, Rauschen mit der Wurzel).
 // Danach je Spitze: Stuetze entlang der Geraden (z wie lineSupport), oberes
-// Ende T, und am oberen Ende die Probe auf die Deckenkante: Strahlen ab T.
-//   - Raumecke: an T endet die Senkrechte, und es gehen eine oder zwei
-//     Deckenkanten ab, die NICHT auf einer Geraden liegen (Knick).
-//   - Fensterlaibung/Tuerzarge bis zur Decke: die Deckenkante laeuft gerade
-//     durch T hindurch (zwei Strahlen, 180° auseinander) -> 'durch'.
-//   - Tuerzarge, Bilderrahmen, Schrankseite: oben keine Deckenkante -> 'unten'.
-//   - Geht die Senkrechte ueber T hinaus weiter, ist T kein Ende -> 'weiter'.
+// Ende T, und am oberen Ende die Probe auf die Deckenkanten (junctionAt):
+//   - Raumecke (konkav, von innen gesehen): an T gehen ZWEI Deckenkanten ab,
+//     im Grundriss 30-150° auseinander, und die Kamera steht im Keil zwischen
+//     ihnen (der Raum liegt zwischen den Waenden, die Kamera im Raum) -> 'ecke'
+//     (konkav:true). Nur dann 'ecke'.
+//   - Vorspringende Kante (Quaderoberkante, deckenhohes Regal, Aussenecke):
+//     die Kamera steht ausserhalb des Keils. Aus einem Bild nicht zu trennen
+//     -> 'unten' mit grund 'konvex' (konkav:false); die Peilung bleibt fuers
+//     Modell. (o.konvexEcke: altes Verhalten, 'ecke' wenn ueber T nichts liegt.)
+//   - Fensterlaibung/Tuerzarge/Schlagschatten bis zur Decke: die Deckenkante
+//     laeuft durch T hindurch (zwei Richtungen mehr als 150° auseinander)
+//     -> 'durch'.
+//   - Nur eine waagerechte Kante an T (Tuerzarge, Bilderrahmen, Fenster,
+//     Fuge Schrank-Wand, Ecke mit kaum sichtbarer zweiter Deckenkante) oder
+//     keine -> 'unten' (grund 'eine-seite' / 'keine-seite').
+//   - Geht die Senkrechte ueber T hinaus weiter, oder liegt T so nah am
+//     Bildrand, dass die Probe nicht passt -> 'weiter' (grund 'weiter'/'rand').
+// Zusatzfelder je Fund: grund, konkav (true/false/null), nSeiten, seiten
+// (die zwei gewerteten Deckenkanten: Grundrissrichtung psiDeg und z).
 // Die Peilung (Azimut im Grundriss) haengt weder von H noch von der
 // Kamerahoehe ab: alle Punkte einer Senkrechten haben von der Kamera aus
 // denselben Azimut (physik.mjs).
@@ -55,14 +67,25 @@ G.verticalEdges=(g,W,H,proj,camTo,flipY,o={})=>{
     // Stuetze entlang der Geraden (±1 px quer), Rauschboden 6 px daneben.
     const S=[]; let tmin=Infinity, tmax=-Infinity;
     for(let t=-H;t<=H;t++){ const bx=L.px+t*L.dx, by=L.py+t*L.dy; if(bx<1||by<1||bx>W-2||by>H-2) continue;
-      let bv=-Infinity; for(const k of [-1,0,1]){ const v=resp(bx+k*L.nx, by+k*L.ny, L); if(v!==null && v>bv) bv=v; }
-      const n1=resp(bx+6*L.nx,by+6*L.ny,L), n2=resp(bx-6*L.nx,by-6*L.ny,L);
-      S.push({t, v:bv, nz:Math.max(Math.abs(n1??0),Math.abs(n2??0))}); tmin=Math.min(tmin,t); tmax=Math.max(tmax,t); }
+      let bv=-Infinity; const rk=[-1,0,1].map(k=>resp(bx+k*L.nx, by+k*L.ny, L)??0); for(const v of rk) if(v>bv) bv=v;
+      const n1=resp(bx+6*L.nx,by+6*L.ny,L)??0, n2=resp(bx-6*L.nx,by-6*L.ny,L)??0;
+      S.push({t, v:bv, rk, n1, n2, nz:Math.max(Math.abs(n1),Math.abs(n2))}); tmin=Math.min(tmin,t); tmax=Math.max(tmax,t); }
     if(S.length<20) continue;
-    const nz=S.map(s=>s.nz).sort((a,b)=>a-b), noise=nz[nz.length>>1]||0;
-    const inBand=S.filter(s=>{ const y=L.py+s.t*L.dy; return y>=ya && y<=yb; }).map(s=>s.v).sort((a,b)=>a-b);
+    // Stuetze entscheiden auf dem gleitenden Mittel entlang der Geraden
+    // (±sw px): die Senkrechte ist gerade, ihr Signal bleibt, Rauschen sinkt
+    // mit der Wurzel. Einzelpixel zerrissen schwache Ecken (4-6 Stufen
+    // Wand/Wand bei Rauschen 2) in Stuecke unter 40 px. Maximum ueber die
+    // Querlage ±1 px erst NACH dem Mitteln, Rauschboden genauso gemittelt.
+    const sw=o.glatt??3;
+    if(sw>0){ const n=S.length, P=[0,1,2,3,4].map(()=>new Float64Array(n+1));
+      for(let i=0;i<n;i++){ const s=S[i]; P[0][i+1]=P[0][i]+s.rk[0]; P[1][i+1]=P[1][i]+s.rk[1]; P[2][i+1]=P[2][i]+s.rk[2]; P[3][i+1]=P[3][i]+s.n1; P[4][i+1]=P[4][i]+s.n2; }
+      for(let i=0;i<n;i++){ const a=Math.max(0,i-sw), b=Math.min(n,i+sw+1), m=j=>(P[j][b]-P[j][a])/(b-a);
+        S[i].vs=Math.max(m(0),m(1),m(2)); S[i].nzs=Math.max(Math.abs(m(3)),Math.abs(m(4))); } }
+    else for(const s of S){ s.vs=s.v; s.nzs=s.nz; }
+    const nz=S.map(s=>s.nzs).sort((a,b)=>a-b), noise=nz[nz.length>>1]||0;
+    const inBand=S.filter(s=>{ const y=L.py+s.t*L.dy; return y>=ya && y<=yb; }).map(s=>s.vs).sort((a,b)=>a-b);
     const ref=inBand.length ? inBand[Math.floor(0.75*inBand.length)] : 0; if(!(ref>0)) continue;
-    const thr=Math.max(0.3*ref, 2.5*noise), sup=S.filter(s=>s.v>=thr).map(s=>s.t);
+    const thr=Math.max(0.3*ref, 2.5*noise), sup=S.filter(s=>s.vs>=thr).map(s=>s.t);
     if(sup.length<12) continue;
     // Zusammenhaengendes Stueck um die dichteste Stelle im Band (Luecken bis 6 px).
     let best=null;
@@ -79,67 +102,112 @@ G.verticalEdges=(g,W,H,proj,camTo,flipY,o={})=>{
     let cs=0, csMax=-Infinity, tTop=best.hi;
     for(const sm of S){ if(sm.t<best.lo) continue; cs+=sm.v-mu0; if(cs>csMax){ csMax=cs; tTop=sm.t; } }
     const T=[L.px+tTop*L.dx, L.py+tTop*L.dy], Bt=[L.px+best.lo*L.dx, L.py+best.lo*L.dy];
-    const J=junctionAt(g,W,H,T,L,{...o, proj, camTo, flipY});
+    // Laeuft die Kante ueber T weiter? Signierte Stuetze genau auf der Geraden
+    // 4-30 px ueber T gegen 4-30 px darunter (z wie lineSupport). Auf der
+    // Geraden selbst gemessen, nicht in Sektoren um T: eine duenne Linie
+    // (Deckenfuge) hat quer gemittelt kein Signal, auf ihrer Flanke schon.
+    const zAlong=(t0,t1)=>{ let n=0,s=0,s2=0; for(let t=t0;t<=t1;t++){ const v=resp(L.px+t*L.dx, L.py+t*L.dy, L); if(v===null) continue; n++; s+=v; s2+=v*v; }
+      if(n<8) return {z:0, n}; const m=s/n, sd=Math.sqrt(Math.max(1e-9,(s2-n*m*m)/(n-1))); return {z:m/(sd/Math.sqrt(n)), n}; };
+    const zUp=zAlong(tTop+4, tTop+30), zDn=zAlong(tTop-30, tTop-4);
+    const J=junctionAt(g,W,H,T,L,{...o, proj, camTo, flipY, zUp, zDn});
     const Tn=G.pixToNdc(T[0],T[1],W,H,flipY), Bn=G.pixToNdc(Bt[0],Bt[1],W,H,flipY);
-    out.push({top:Tn, bottom:Bn, z, len:tTop-best.lo, kind:J.kind, rays:J.rays, side:J.side, xr, sign:L.sign,
+    out.push({top:Tn, bottom:Bn, z, len:tTop-best.lo, kind:J.kind, grund:J.grund, konkav:J.konkav, nSeiten:J.nSeiten, seiten:J.seiten, rays:J.rays, side:J.side, xr, sign:L.sign, extra:J.extra,
       ray:G.ray(proj,camTo,Tn[0],Tn[1])});
   }
   return out;
 };
-// Strahlen ab T: je 6°-Sektor das mittlere signierte Signal quer zum Strahl,
-// mit Standardfehler (z). Die Senkrechte nach unten ist bekannt, nach oben
-// darf nichts weitergehen.
+// Probe am oberen Ende T: welche waagerechten Kanten gehen von T ab?
+// Eine waagerechte Kante durch den 3D-Punkt X_T mit Grundrissrichtung psi hat
+// als Bild die Gerade durch T und den Fluchtpunkt von psi (auf dem Horizont,
+// aus der Pose) - unabhaengig davon, wie hoch und wie weit X_T liegt. Darum
+// wird nicht in Bildsektoren um T gesucht, sondern je Grundrissrichtung psi
+// (2°-Schritte) die Halbgerade ab T im Bild abgetastet (8-120 px, signierter
+// Gradient quer, z = Mittel/Standardfehler; Deckenkanten sind lang, z waechst
+// mit der Wurzel der Laenge). Spitzen ueber psi sind die Deckenkanten (bzw.
+// Quaderkanten) an T, ihre psi direkt die Grundrissrichtung. Schwelle zSide 7:
+// an kantenfreien Stellen bleibt das Maximum ueber alle psi in 99 % darunter
+// (gemessen an gerenderten Bildern, Rauschen 1,5-3; vorher z 4 bzw. 5 liess in
+// gut der Haelfte solcher Stellen eine Schein-Deckenkante durch).
+// Richtungen, deren Bild weniger als 20° von der Senkrechten abweicht, zaehlen
+// nicht: dort liegt die Senkrechte selbst (und jede parallele Nachbarkante,
+// Zarge, Rahmen) - die Kante ist 2-3 px breit, die Halbgerade muss ab ~10 px
+// mehr als 3 px neben ihr liegen (sin 20° · 10 px = 3,4 px). Eine Wand, deren
+// Deckenkante im Bild so steil liegt, sieht man fast von der Kante: deren
+// Ecke wird nicht bestaetigt (S4: beide Deckenkanten messen).
+const D2R=Math.PI/180;
 function junctionAt(g,W,H,T,L,o){
-  const R=o.junctionR??14, NS=60, sum=new Float64Array(NS), sq=new Float64Array(NS), n=new Int32Array(NS);
-  for(let y=Math.max(1,Math.floor(T[1]-R)); y<=Math.min(H-2,Math.ceil(T[1]+R)); y++)
-    for(let x=Math.max(1,Math.floor(T[0]-R)); x<=Math.min(W-2,Math.ceil(T[0]+R)); x++){
-      const dx=x-T[0], dy=y-T[1], r=Math.hypot(dx,dy); if(r<3 || r>R) continue;
-      const [gx,gy]=sobel(g,W,x,y), ux=dx/r, uy=dy/r, s=-gx*uy+gy*ux, p=gx*ux+gy*uy;
-      if(p*p>0.5*s*s) continue;
-      let a=Math.atan2(dy,dx); if(a<0) a+=2*Math.PI; const k=Math.min(NS-1,Math.floor(a/(2*Math.PI)*NS));
-      sum[k]+=s; sq[k]+=s*s; n[k]++; }
-  const zOf=k=>{ if(n[k]<4) return 0; const m=sum[k]/n[k], sd=Math.sqrt(Math.max(1e-9,(sq[k]-n[k]*m*m)/Math.max(1,n[k]-1))); return Math.abs(m)/(sd/Math.sqrt(n[k])); };
-  const angOf=k=>(k+0.5)*2*Math.PI/NS, upA=Math.atan2(L.dy,L.dx), dn=a=>Math.abs(Math.atan2(Math.sin(a),Math.cos(a)));
-  const rays=[];
-  for(let k=0;k<NS;k++){ const z=zOf(k), zl=zOf((k+NS-1)%NS), zr=zOf((k+1)%NS); if(z<(o.rayZ??4) || z<zl || z<zr) continue;
-    rays.push({a:angOf(k), z}); }
-  const VT=o.vertTol??0.12, down=rays.filter(r=>dn(r.a-upA-Math.PI)<VT), zDown=Math.max(0,...down.map(r=>r.z));
-  // Weiter nach oben nur, wenn dort eine Kante aehnlicher Staerke laeuft (Rauschen erreicht z 4-5).
-  const up=rays.filter(r=>dn(r.a-upA)<VT && r.z>=Math.max(6, 0.35*zDown));
-  // Seitenstrahlen in den Grundriss heben: ein Punkt 10 px den Strahl entlang
-  // und T selbst, beide auf eine waagerechte Ebene ueber der Kamera. Die
-  // Richtung im Grundriss haengt nicht von der Hoehe dieser Ebene ab (beide
-  // Punkte werden um die Kamera gleich gestreckt) - also auch nicht von H.
+  const dn=a=>Math.abs(Math.atan2(Math.sin(a),Math.cos(a)));
   const lift=(px,py)=>{ const n=G.pixToNdc(px,py,W,H,o.flipY), r=G.ray(o.proj,o.camTo,n[0],n[1]); return r ? G.hitY(r, o.camTo[13]+1, 40) : null; };
-  const T3=lift(T[0],T[1]);
-  const side=[];
-  for(const r of rays){ if(dn(r.a-upA)<VT || dn(r.a-upA-Math.PI)<VT) continue;
-    const Q=T3 && lift(T[0]+10*Math.cos(r.a), T[1]+10*Math.sin(r.a)); if(!Q) continue;   // unter dem Horizont: keine Deckenkante
-    side.push({...r, psi:Math.atan2(Q[2]-T3[2], Q[0]-T3[0])}); }
+  const R=o.junctionR??14;
+  const rand=Math.min(T[0],T[1],W-1-T[0],H-1-T[1])<R;
+  const T3=lift(T[0],T[1]), C=[o.camTo[12], o.camTo[14]];
+  const az=T3 ? Math.atan2(T3[2]-C[1], T3[0]-C[0]) : null, cBack=az!==null ? az+Math.PI : null;
+  // Weiter nach oben nur, wenn dort eine Kante aehnlicher Staerke laeuft (Rauschen erreicht z 4-5).
+  const weiter=o.zUp.n>=8 && o.zUp.z>=Math.max(6, 0.35*o.zDn.z);
+  // Halbgeraden je Grundrissrichtung
+  const NP=180, prof=new Array(NP).fill(null), cosV=Math.cos((o.vertExcl??20)*D2R);
+  if(T3){ const dist=Math.hypot(T3[0]-C[0], T3[2]-C[1]), eps=0.05*dist;
+    for(let k=0;k<NP;k++){ const psi=k*2*Math.PI/NP, q=G.project(o.proj,o.camTo,[T3[0]+eps*Math.cos(psi), T3[1], T3[2]+eps*Math.sin(psi)]); if(!q) continue;
+      const pp=G.ndcToPix(q[0],q[1],W,H,o.flipY); let ux=pp[0]-T[0], uy=pp[1]-T[1]; const ul=Math.hypot(ux,uy); if(!(ul>1e-9)) continue; ux/=ul; uy/=ul;
+      if(Math.abs(ux*L.dx+uy*L.dy)>cosV) continue;
+      const nx=-uy, ny=ux; let n=0, s=0, s2=0;
+      for(let t=(o.arm0??8);t<=(o.arm1??120);t++){ const xi=Math.round(T[0]+t*ux), yi=Math.round(T[1]+t*uy); if(xi<1||yi<1||xi>W-2||yi>H-2) break;
+        const [gx,gy]=sobel(g,W,xi,yi), v=gx*nx+gy*ny; n++; s+=v; s2+=v*v; }
+      if(n<10) continue;
+      const m=s/n, sd=Math.sqrt(Math.max(1e-9,(s2-n*m*m)/(n-1)));
+      prof[k]={psi, z:Math.abs(m)/(sd/Math.sqrt(n)), n, ux, uy}; } }
+  // Spitzen ueber psi (±6°), z >= zSide und mindestens ein Viertel der staerksten.
+  let peaks=[];
+  for(let k=0;k<NP;k++){ const p=prof[k]; if(!p || p.z<(o.zSide??7)) continue; let ok=true;
+    for(let j=-3;j<=3 && ok;j++){ const q=prof[(k+j+NP)%NP]; if(j && q && q.z>p.z) ok=false; } if(ok) peaks.push(p); }
+  const zMax=Math.max(0,...peaks.map(p=>p.z)); peaks=peaks.filter(p=>p.z>=0.25*zMax).sort((p,q)=>q.z-p.z);
   // Liegt ueber T noch eine waagerechte Kante (die Deckenkante 10-120 px
   // hoeher), endet die Senkrechte UNTER der Decke: Bilderrahmen, Tuersturz,
   // Schrank. Profil des Gradienten entlang "oben" (quer gemittelt ueber 5 px)
-  // gegen seinen eigenen Rauschboden (MAD).
-  const prof=[];
+  // gegen seinen eigenen Rauschboden (MAD). Nur noch Auskunft (grund
+  // 'darueber') und fuer o.konvexEcke / o.konkavAbove: als Veto bei konkaven
+  // Ecken kostet es echte Ecken, denn Deckenschiene, Fugen, Baender und Lampe
+  // liegen auch ueber einer echten Ecke (Messung: 48 echte gegen 16 falsche).
+  const prof2=[];
   for(let t=4;t<=(o.aboveMax??220);t++){ let sm=0, nn=0;
     for(let k=-2;k<=2;k++){ const x=Math.round(T[0]+t*L.dx+k*L.nx), y=Math.round(T[1]+t*L.dy+k*L.ny); if(x<1||y<1||x>W-2||y>H-2) continue;
       const [gx,gy]=sobel(g,W,x,y); sm+=gx*L.dx+gy*L.dy; nn++; }
-    if(nn) prof.push(Math.abs(sm/nn)); }
+    if(nn) prof2.push(Math.abs(sm/nn)); }
   let above=false;
-  if(prof.length>=10){ const srt=[...prof].sort((p,q)=>p-q), mad=srt[srt.length>>1]*1.48+1e-6, mx=Math.max(...prof.slice(6));
+  if(prof2.length>=10){ const srt=[...prof2].sort((p,q)=>p-q), mad=srt[srt.length>>1]*1.48+1e-6, mx=Math.max(...prof2.slice(6));
     above=mx>=Math.max(o.aboveAbs??6, (o.aboveK??5)*mad); }
-  let kind;
-  if(up.length) kind='weiter';
-  else if(above) kind='unten';
-  else if(!side.length) kind='unten';
+  // Die zwei Seiten: die staerkste, dazu die staerkste mindestens 30° davon
+  // (zwei Deckenkanten einer Ecke liegen im Grundriss nie enger).
+  const imgSep=(p,q)=>Math.acos(Math.max(-1,Math.min(1,p.ux*q.ux+p.uy*q.uy)));
+  const p1=peaks[0], p2=p1 && peaks.find(p=>dn(p.psi-p1.psi)>=(o.minSep??30)*D2R && imgSep(p,p1)>=(o.vertExcl??20)*D2R);
+  let kind, grund, konkav=null;
+  if(rand && o.randRegel!==false){ kind='weiter'; grund='rand'; }
+  else if(weiter){ kind='weiter'; grund='weiter'; }
+  else if(!T3){ kind='unten'; grund='unter-horizont'; }
+  else if(!p1){ kind='unten'; grund=above ? 'darueber' : 'keine-seite'; }
+  else if(!p2){ kind='unten'; grund='eine-seite'; }
   else {
-    // Zwei Seitenstrahlen im Grundriss gegenlaeufig: die Deckenkante laeuft gerade durch (Fenster, Zarge).
-    // Zwei mit 30-150° Unterschied: zwei Waende treffen sich (Ecke).
-    // Nur die zwei staerksten Seitenstrahlen, und nur, was mindestens ein
-    // Viertel des staerksten erreicht (schwache Strahlen sind meist Rauschen).
-    const zs=Math.max(...side.map(r=>r.z)), top2=side.filter(r=>r.z>=0.25*zs).sort((p,q)=>q.z-p.z).slice(0,2);
-    const d=top2.length===2 ? dn(top2[0].psi-top2[1].psi) : null;
-    kind=d!==null && d>Math.PI-(o.straightTol??0.2) ? 'durch' : 'ecke';
+    const d12=dn(p1.psi-p2.psi);
+    // Raumecken haben Innenwinkel von 30-150°; was gerader ist, ist eine
+    // durchlaufende Deckenkante (psi auf 2° gerastert, T auf 1-2 px genau -
+    // das kippt eine gerade Kante im Grundriss um bis zu ~15°).
+    if(d12>Math.PI-(o.straightTol??Math.PI/6)){ kind='durch'; grund='durch'; }
+    else {
+      // Keil: liegt die Richtung von T zur Kamera zwischen den beiden Seiten
+      // (kuerzerer Bogen)? Dann ist die Ecke von innen gesehen (konkav).
+      const a1=dn(cBack-p1.psi), a2=dn(cBack-p2.psi); konkav=Math.abs(a1+a2-d12)<1e-6;
+      if(konkav){ kind=(o.konkavAbove && above) ? 'unten' : 'ecke'; grund=kind==='ecke' ? 'konkav' : 'konkav-darueber'; }
+      // Vorspringend (Kamera ausserhalb des Keils): Quaderoberkante,
+      // deckenhohes Regal oder Aussenecke des Raums. Aus einem Bild nicht zu
+      // trennen - liegt die Deckenkante hinter dem Schrank im Bild kaum
+      // sichtbar ueber T, sieht seine Oberkante aus wie eine Aussenecke, und
+      // ein deckenhohes Regal IST oertlich eine. Darum nie 'ecke'; die
+      // Peilung bleibt (konkav:false, grund 'konvex') fuer das Modell.
+      else if(!o.konvexEcke){ kind='unten'; grund='konvex'; }
+      else { kind=above ? 'unten' : 'ecke'; grund=above ? 'konvex-darueber' : 'konvex'; }
+    }
   }
-  return {kind, rays:rays.map(r=>({deg:Math.round(r.a*180/Math.PI), z:+r.z.toFixed(1)})), side:side.map(r=>({psiDeg:Math.round(r.psi*180/Math.PI), z:+r.z.toFixed(1)})), down:down.length};
+  const seiten=[p1,p2].filter(Boolean).map(p=>({psiDeg:Math.round(p.psi/D2R), z:+p.z.toFixed(1)}));
+  return {kind, grund, konkav, nSeiten:peaks.length, seiten, rays:[], side:peaks.map(p=>({psiDeg:Math.round(p.psi/D2R), z:+p.z.toFixed(1)})),
+    extra:{above, zUp:+o.zUp.z.toFixed(1), zDn:+o.zDn.z.toFixed(1), rand, az:az!==null ? +(az/D2R).toFixed(2) : null}};
 }

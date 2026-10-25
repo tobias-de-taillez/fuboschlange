@@ -346,7 +346,9 @@ function extra(k, r, g, camTo, fy){
   // nach dem Durchlauf (gegen den Endstand des Modells, s. u.).
   if(SENK_N && G.verticalEdges && k%SENK_N===0 && !(r[C.flags]&64)){
     const ta=performance.now(), vs=G.verticalEdges(g, w, h, proj, camTo, fy); tm.senk.push(performance.now()-ta);
-    const found=vs.map(x=>({az:Math.atan2(x.ray.d[2], x.ray.d[0]), kind:x.kind, z:x.z, top:x.top, bottom:x.bottom, fehl:false}));
+    // grund/konkav (neuer Finder): 'unten' mit grund 'konvex' oder 'eine-seite' ist eine Peilung auf eine
+    // moegliche Ecke, die erst ueber mehrere Bilder und eine Modellecke zaehlen darf - mitgeben, nicht verwerfen.
+    const found=vs.map(x=>({az:Math.atan2(x.ray.d[2], x.ray.d[0]), kind:x.kind, grund:x.grund, konkav:x.konkav, z:x.z, top:x.top, bottom:x.bottom, fehl:false}));
     senk.set(k, {t, camTo, found, live:live && H>0 ? live : null, H});
     if(o) o.sk=found;
   }
@@ -540,7 +542,9 @@ else if(!senk.size) console.log(`\nSenkrechte: kein Bild ausgewertet${proj ? '' 
 else {
   const all=[...senk.values()], fs=all.flatMap(x=>x.found), byK={};
   fs.forEach(f=>{ byK[f.kind]=(byK[f.kind]||0)+1; });
+  const byG={}; fs.forEach(f=>{ if(f.grund) byG[f.kind+'/'+f.grund]=(byG[f.kind+'/'+f.grund]||0)+1; });
   console.log(`\nSenkrechte (G.verticalEdges aus ${senkQuelle==='Seite' ? 'der Seite' : senkQuelle.split('/').pop()}) auf ${all.length} Bildern (jedes ${SENK_N}.): ${fs.length} gefunden (${Object.entries(byK).map(([k,n])=>`${k} ${n}`).join(', ')}) · Zeit je Bild Median ${f2(q(tm.senk,0.5))} ms, 90 % ${f2(q(tm.senk,0.9))} ms, max ${f2(Math.max(...tm.senk))} ms`);
+  if(Object.keys(byG).length) console.log(`  nach Grund: ${Object.entries(byG).sort((a,b)=>b[1]-a[1]).map(([k,n])=>`${k} ${n}`).join(', ')}`);
   if(!finalSol || !finalSol.drift || !(finalSol.H>0)) console.log('  ohne Modell (keine Auswertung im Nachspiel) – keine Peilung gegen Ecken.');
   else {
     const per=new Map(), dAz=[], fehl=[], bias=[]; let eck=0, liveHit=0, liveN=0, liveFehl=0, liveEck=0;
@@ -718,7 +722,7 @@ if(flag('json')){
       return {k, t:r[C.t], cam:ct && ct.map(r5), H:a ? a.H : null,
         s2:a ? a.ws.map(x=>({k:x.k, id:x.id, v:x.v, s:x.s, z:x.z!=null ? +x.z.toFixed(1) : null, A:nd(x.A), B:nd(x.B), pA:nd(x.pA), pB:nd(x.pB), dRho:r5(x.dRho),
           dev:x.dev ? x.dev.map(d=>({px:+d.px.toFixed(2), m:r5(d.m)})) : null, span:x.span && x.span.map(nd), sRho:r5(x.sRho)})) : null,
-        senk:b ? {found:b.found.map(f=>({az:r5(f.az), kind:f.kind, z:+f.z.toFixed(1), fehl:f.fehl, top:nd(f.top), bottom:nd(f.bottom)}))} : null}; })};
+        senk:b ? {found:b.found.map(f=>({az:r5(f.az), kind:f.kind, grund:f.grund, konkav:f.konkav, z:+f.z.toFixed(1), fehl:f.fehl, top:nd(f.top), bottom:nd(f.bottom)}))} : null}; })};
   writeFileSync(flag('json'), JSON.stringify(out));
   console.log(`JSON: ${flag('json')}`);
 }
