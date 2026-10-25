@@ -77,7 +77,10 @@ const P=files['protokoll.json'] ? JSON.parse(files['protokoll.json']) : null;
 // Protokoll einer anderen Seitensitzung (obs.t, LOG.trk und Ereignisse zaehlen ab
 // einem anderen Seitenstart): gar nicht verwenden - das Nachspiel waere Unsinn.
 const fremd=!!(P && M.sitzung && P.started && P.started!==M.sitzung);
-const R=P && !fremd && (Array.isArray(P.runs) && M.lauf!=null && P.runs.length>M.lauf ? {...P, ...P.runs[M.lauf]} : P);
+// Protokoll aelter als die Aufnahme (am Geraet passte es nicht mehr in den
+// localStorage): der oberste Durchlauf ist ein frueherer - ebenfalls nicht verwenden.
+const alt=!!(P && !fremd && Array.isArray(P.runs) && M.lauf!=null && P.runs.length<M.lauf);
+const R=P && !fremd && !alt && (Array.isArray(P.runs) && M.lauf!=null && P.runs.length>M.lauf ? {...P, ...P.runs[M.lauf]} : P);
 const C=Object.fromEntries(M.zustand.spalten.map((k,i)=>[k,i]));
 const f2=x=>Number.isFinite(x) ? x.toFixed(2) : '–';
 const q=(a,p)=>{ if(!a.length) return NaN; const s=[...a].sort((x,y)=>x-y); return s[Math.min(s.length-1, Math.floor(p*s.length))]; };
@@ -86,8 +89,15 @@ const auff=[];   // Auffaelliges fuer die Zusammenfassung am Ende
 
 console.log(`Aufnahme ${M.name} · ${M.geraet||'–'} · Format ${M.format} v${M.version}`);
 if(M.fehler) console.log(`  Fehler am Gerät: ${M.fehler}`);
+// Vorlaeufiges Manifest (mit jedem 10-s-Stueck geschrieben): die Sitzung endete nicht
+// regulaer (Absturz, Neuladen) - im Strom stehen die bis dahin ausgegebenen Bilder.
+if(M.vorlaeufig){ console.log('  Manifest vorläufig: die Sitzung endete nicht regulär (Absturz oder Neuladen) – das letzte Stück (bis 10 s) fehlt.'); auff.push('Sitzung nicht regulär beendet (vorläufiges Manifest) – das letzte Stück fehlt'); }
 if(fremd){ console.log(`  Protokoll aus einer anderen Seitensitzung (${P.started}, Aufnahme ${M.sitzung}) – Erfassungen und Stichproben passen nicht zur Aufnahme, Protokoll nicht verwendet.`); auff.push('Protokoll gehört zu einer anderen Seitensitzung – ohne Protokoll ausgewertet (kein Stufe-2-Nachspiel)'); }
+if(alt){ console.log(`  Protokoll endet bei Durchlauf ${P.runs.length}, die Aufnahme ist Durchlauf ${M.lauf} – Protokoll älter als die Aufnahme, nicht verwendet.`); auff.push('Protokoll älter als die Aufnahme – ohne Protokoll ausgewertet (kein Stufe-2-Nachspiel)'); }
 if(R && R!==P) console.log(`  Protokoll: Durchlauf ${M.lauf} aus runs (das Protokoll hat ${P.runs.length+1} Durchläufe)`);
+// Regulaeres Manifest, aber der Durchlauf im Protokoll hat kein Sitzungsende: zuletzt gespeichert
+// vor dem Ende der Aufnahme (am Geraet passte es nicht mehr in den localStorage) - gekuerzt.
+if(R && !M.vorlaeufig && R.session && R.session.start!=null && R.session.end==null){ console.log('  Protokoll ohne Sitzungsende, die Aufnahme endete regulär – zuletzt vor dem Ende gespeichert (Gerätespeicher voll?), Erfassungen und Ereignisse danach fehlen.'); auff.push('Protokoll endet vor der Aufnahme (kein Sitzungsende) – Stufe-2-Nachspiel nur bis dahin'); }
 const t0=rows.length ? rows[0][C.t] : NaN, t1=rows.length ? rows[rows.length-1][C.t] : NaN;
 console.log(`Zustand: ${rows.length} Zeilen, ${f2(t0)}–${f2(t1)} s`);
 if(M.video) console.log(`Video: ${M.video.codec} ${M.video.width}×${M.video.height}, ${M.video.bilder} Bilder (${M.video.ausgelassen} ausgelassen), ${(M.video.bytes/1e6).toFixed(1)} MB, ${M.video.bitrate/1e6} Mbit/s`);
@@ -105,10 +115,12 @@ for(const [k,bit] of Object.entries(M.zustand.flags)){
   if(a!=null) sp.push([a, t1]);
   if(sp.length) console.log(`  ${k}: ${bit===128 ? sp.length+'×' : sp.map(([x,y])=>`${f2(x)}–${f2(y)}`).join(', ')}`);
 }
-// Bezugsspruenge: T aendert sich.
-const jumps=[]; for(let i=1;i<rows.length;i++){ const a=rows[i-1], b=rows[i];
-  const d=Math.hypot(b[C.Tx]-a[C.Tx], b[C.Ty]-a[C.Ty], b[C.Tz]-a[C.Tz]), dp=Math.abs(b[C.Tpsi]-a[C.Tpsi])*180/Math.PI;
-  if(d>0.01 || dp>0.2) jumps.push(`${f2(b[C.t])} s: ${(d*100).toFixed(1)} cm, ${dp.toFixed(1)}°`); }
+// Bezugsspruenge: T aendert sich. Zeilen ohne Bezug (Flag 64) tragen T=0 als
+// Platzhalter - verglichen wird mit der letzten Zeile mit Bezug.
+const jumps=[]; let a=null; for(const b of rows){ if(b[C.flags]&64) continue;
+  if(a){ const d=Math.hypot(b[C.Tx]-a[C.Tx], b[C.Ty]-a[C.Ty], b[C.Tz]-a[C.Tz]), dp=Math.abs(b[C.Tpsi]-a[C.Tpsi])*180/Math.PI;
+    if(d>0.01 || dp>0.2) jumps.push(`${f2(b[C.t])} s: ${(d*100).toFixed(1)} cm, ${dp.toFixed(1)}°`); }
+  a=b; }
 if(jumps.length) console.log(`Bezug geändert: ${jumps.join(' · ')}`);
 
 // Kamera im Bezug: camTo = T^-1 · Pose (wie onFrame).
@@ -309,9 +321,15 @@ await new Promise((res, rej)=>{
 tm.dec=performance.now()-tDec;
 // Bilder: das Geraet zaehlt kodierte (bilder) und vom Kodierer zurueckgegebene
 // (ausgegeben). Fehlt eins im Strom, ist ab dort jedes Bild einem falschen Zustand
-// zugeordnet - captureEdge zeigt dann, ab wann.
-if(nDec!==M.video.bilder || rest){ console.log(`Video: ${nDec} Bilder dekodiert, Gerät: ${M.video.bilder} kodiert, ${M.video.ausgegeben ?? '–'} ausgegeben${rest ? `, ${rest} Byte Rest (Bildgröße?)` : ''}`);
-  auff.push(`Video: ${nDec} Bilder dekodiert statt ${M.video.bilder}${M.video.ausgegeben!=null && M.video.ausgegeben!==M.video.bilder ? ` (Kodierer gab ${M.video.ausgegeben} aus)` : ''}${rest ? `, ${rest} Byte Rest` : ''} – ab dem ersten fehlenden Bild gehört Bild k nicht mehr zum Zustand k, alle Bildvergleiche danach sind wertlos`); }
+// zugeordnet - captureEdge zeigt dann, ab wann. Im vorlaeufigen Manifest stehen im
+// Strom nur die ausgegebenen (die letzten kodierten fehlen am Ende, Zuordnung bleibt).
+// Es steht erst am Ende jeder Schreibkette: endet die Seite zwischen Video- und
+// Manifestdatei, stehen im Strom MEHR Bilder, als es nennt - deren Zustandszeilen
+// liegen schon (Zustand vor Video in der Kette), die Zuordnung bleibt.
+const nSoll=M.vorlaeufig && M.video.ausgegeben!=null ? M.video.ausgegeben : M.video.bilder;
+if(M.vorlaeufig && nDec>nSoll && !rest) console.log(`Video: ${nDec} Bilder im Strom, das vorläufige Manifest nennt ${nSoll} (ein Stück älter als die Daten) – Zuordnung unverändert.`);
+else if(nDec!==nSoll || rest){ console.log(`Video: ${nDec} Bilder dekodiert, Gerät: ${M.video.bilder} kodiert, ${M.video.ausgegeben ?? '–'} ausgegeben${rest ? `, ${rest} Byte Rest (Bildgröße?)` : ''}`);
+  auff.push(`Video: ${nDec} Bilder dekodiert statt ${nSoll}${M.video.ausgegeben!=null && M.video.ausgegeben!==M.video.bilder ? ` (Kodierer gab ${M.video.ausgegeben} aus)` : ''}${rest ? `, ${rest} Byte Rest` : ''} – ab dem ersten fehlenden Bild gehört Bild k nicht mehr zum Zustand k, alle Bildvergleiche danach sind wertlos`); }
 // Je Videobild k: Stufe 2 und Senkrechte (Ergebnisse in s2/senk), fuer den
 // Pruefstand die Zeichnung (ov).
 function extra(k, r, g, camTo, fy){

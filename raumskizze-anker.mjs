@@ -33,10 +33,19 @@ else {
   }
 }
 const M=files['manifest.json'] ? JSON.parse(files['manifest.json']) : null;
-const P=files['protokoll.json'] ? JSON.parse(files['protokoll.json']) : null;
+const P0=files['protokoll.json'] ? JSON.parse(files['protokoll.json']) : null;
+// Der Durchlauf der Aufnahme (wie raumskizze-aufnahme.mjs): das Protokoll sammelt alle
+// Durchlaeufe der Seitensitzung, fruehere in P.runs, der laufende oben. „Letzte Aufnahme
+// sichern“ nimmt das Protokoll aus dem localStorage - darin koennen spaetere Durchlaeufe
+// stehen; nach einem abgelehnten Start steht oben ein leerer. Ein Protokoll einer anderen
+// Seitensitzung oder ohne diesen Durchlauf (gespeichert vor der Aufnahme) gar nicht verwenden.
+const lauf=M ? M.lauf : P0 ? (P0.anker || P0.zustand || {}).lauf : null;
+const runs=P0 && Array.isArray(P0.runs) ? P0.runs : [];
+const fremd=!!(P0 && M && M.sitzung && P0.started && P0.started!==M.sitzung), fehlt=!!(P0 && !fremd && lauf!=null && lauf>runs.length);
+const P=!P0 || fremd || fehlt ? null : lauf!=null && lauf<runs.length ? {...P0, ...runs[lauf]} : P0;
 let rows=[], cols=null, meta=[];
 if(files['anker.jsonl']){ rows=files['anker.jsonl'].toString('utf8').split('\n').filter(Boolean).map(l=>JSON.parse(l)); cols=M && M.anker ? M.anker.spalten : null; meta=M && M.anker ? M.anker.netz || [] : []; }
-else if(P && P.anker){ rows=P.anker.zeilen; cols=P.anker.spalten; meta=P.anker.netz || []; }
+else if(P0 && P0.anker){ rows=P0.anker.zeilen; cols=P0.anker.spalten; meta=P0.anker.netz || []; }
 cols=cols || ['t','anlass','kx','ky','kz','kpsi','bezug','vorher','anker'];
 const C=Object.fromEntries(cols.map((k,i)=>[k,i]));
 const events=P ? (P.events||[]) : [];
@@ -53,6 +62,9 @@ const R=rows.map(r=>({t:r[C.t], anlass:r[C.anlass], cam:[r[C.kx], r[C.ky], r[C.k
 // --- Ueberblick
 const t0=R.length ? R[0].t : NaN, t1=R.length ? R[R.length-1].t : NaN;
 console.log(`Anker-Netz: ${R.length} Zeilen, ${f1(t0)}–${f1(t1)} s${M ? ` · Aufnahme ${M.name}` : ''}${P && P.started ? ` · Sitzung ${P.started}` : ''}`);
+if(fremd) console.log(`Protokoll aus einer anderen Seitensitzung (${P0.started}, Aufnahme ${M.sitzung}) – Befunde, Zähler und Rechenzeiten daraus nicht verwendet.`);
+if(fehlt) console.log(`Protokoll ohne Durchlauf ${lauf} (es hat ${runs.length+1} Durchläufe, gespeichert vor der Aufnahme) – Befunde, Zähler und Rechenzeiten daraus nicht verwendet.`);
+if(P && P!==P0) console.log(`Protokoll: Durchlauf ${lauf} aus runs (das Protokoll hat ${runs.length+1} Durchläufe)`);
 const Z=(M && M.anker && M.anker.zahlen) || (P && P.netz) || null;
 if(Z) console.log(`Zähler: Messanker gesetzt ${Z.gesetzt}, gelöscht ${Z.geloescht}, fehlgeschlagen ${Z.fehl}, höchstens ${Z.max} Anker gleichzeitig, ${Z.takte} Aufnahmen, getPose ${Z.getPose} (je Aufnahme höchstens ${Z.getPoseMax}), Befunde ${JSON.stringify(Z.befunde)}${Z.unterdrueckt ? `, ${Z.unterdrueckt} unterdrückt` : ''}`);
 if(P && P.timings && P.timings.netz && P.timings.netz.length){ const s=[...P.timings.netz].sort((a,b)=>a-b); console.log(`Rechenzeit je Aufnahme am Gerät: Median ${s[s.length>>1]} ms, 90 % ${s[Math.floor(0.9*s.length)]} ms, max ${s[s.length-1]} ms (${s.length} Werte)`); }
@@ -94,6 +106,7 @@ if(befunde.length){
     if(R.length && (ALLE || !ruhig) && e.nachpruefung==null) verlauf(e.anlass==='wieder' ? e.t : e.t);
   }
 } else if(P) console.log('\nKeine Befunde im Protokoll.');
+else if(P0) console.log('\nKeine Befunde: das Protokoll gehört nicht zu dieser Aufnahme (siehe oben).');
 else console.log('\n(Kein Protokoll in der Quelle - Befunde stehen als Ereignisse netz im Protokoll; hier nur die Zeilen.)');
 
 // --- Spruenge, wie die Zeilen selbst sie zeigen (unabhaengig von den Befunden)

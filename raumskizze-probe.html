@@ -54,7 +54,7 @@
   th:first-child, td:first-child { text-align: left; }
   th { color: #8b929c; font-weight: 500; }
   td.l { text-align: left; word-break: break-word; }
-  #resWalls th, #resWalls td { white-space: nowrap; }
+  #resWalls td { white-space: nowrap; }
   .ok { color: #4ade80; } .warn { color: #fbbf24; } .bad { color: #f87171; }
   #resSummary .head { font-size: 18px; font-weight: 700; margin-bottom: 6px; }
   #resSummary > div { margin-bottom: 4px; }
@@ -80,10 +80,12 @@
   #arHint.warn, #arHint.bad { border-left: 4px solid #fbbf24; padding-left: 8px; color: #fff; }
   #arHint.bad { border-left-color: #f87171; }
   /* Zustandsbalken: steht die Erfassung, steht es hier - kein Hinweis
-     ueberschreibt ihn. Rot = nichts wird erfasst, gelb = Ersatzbezug. */
+     ueberschreibt ihn. Rot = nichts wird erfasst, gelb = Ersatzbezug,
+     blau = Umriss aus den Wandenden, kein Auto-Ende - der Nutzer schliesst. */
   #arState { margin-top: 6px; padding: 6px 8px; border-radius: 6px; font-size: 15px; font-weight: 700; }
   #arState.stop { background: #b91c1c; }
   #arState.sub { background: #a16207; }
+  #arState.ends { background: #1d4ed8; }
   #cross { position: absolute; left: 50%; top: 50%; width: 44px; height: 44px;
            margin: -22px 0 0 -22px; pointer-events: none; }
   #cross::before, #cross::after { content: ""; position: absolute; background: #fff;
@@ -96,11 +98,13 @@
   #arBottom .row { grid-template-columns: 1fr 1fr 1fr; }
   #arBottom button { padding: 14px 6px; font-size: 15px; }
   #arWall { font-size: 13px; margin-bottom: 6px; font-variant-numeric: tabular-nums; }
-  /* Mini-Grundriss: was der Schwenk bisher ergeben hat. */
-  #ar #miniMap { inset: auto; right: 10px; bottom: 150px; width: 136px; height: 136px;
+  /* Mini-Grundriss: was der Schwenk bisher ergeben hat. Steht in #arBottom und
+     sitzt ueber dessen Oberkante - die Leiste waechst mit (zweizeilige #arWall,
+     umbrechende Knoepfe, safe-area), der Grundriss rutscht mit statt darunter. */
+  #ar #miniMap { inset: auto; right: 10px; bottom: calc(100% + 8px); width: 136px; height: 136px;
                  background: rgba(0,0,0,.65); border-radius: 8px; }
-  /* Aufnahme laeuft: sichtbar, solange das Bild mitgeschnitten wird. */
-  #arRec { position: absolute; right: 10px; bottom: 292px; padding: 3px 8px; border-radius: 6px;
+  /* Aufnahme laeuft: sichtbar, solange das Bild mitgeschnitten wird (ueber dem Grundriss). */
+  #arRec { position: absolute; right: 10px; bottom: calc(100% + 150px); padding: 3px 8px; border-radius: 6px;
            background: rgba(0,0,0,.65); color: #f87171; font: 700 12px/1.4 system-ui, sans-serif;
            font-variant-numeric: tabular-nums; pointer-events: none; }
 </style>
@@ -126,7 +130,7 @@
   <div class="hint" id="startHint" style="margin-top:8px">Prüfe das Gerät …</div>
   <button id="dlLast" class="ghost hidden" style="margin-top:8px">Protokoll vom letzten Seitenaufruf (JSON)</button>
   <button id="dlRecLast" class="ghost hidden" style="margin-top:8px">Letzte Aufnahme sichern</button>
-  <div class="hint" style="margin-top:8px">Automatisch: (1) Kurz auf freien Boden halten – der Boden setzt sich selbst. (2) Fadenkreuz langsam an der Kante zwischen Wand und Decke entlangführen, einmal rundum, ruhig auch hinter Schränken weiter. Die Reihenfolge ist egal, ein paar Schritte zwischendurch helfen. Telefon auf Brusthöhe. (3) Zurück an der ersten Wand schließt sich der Raum. Im Bild: eine grüne Marke heißt „diese Wand passt“, eine orange „hier weicht sie ab – näher ran“, rot gestrichelt fehlt noch etwas.</div>
+  <div class="hint" style="margin-top:8px">Automatisch: (1) Kurz auf freien Boden halten – der Boden setzt sich selbst. (2) Fadenkreuz langsam an der Kante zwischen Wand und Decke entlangführen, einmal rundum, ruhig auch hinter Schränken weiter. Die Reihenfolge ist egal, ein paar Schritte zwischendurch helfen. Telefon auf Brusthöhe. (3) Zurück an der ersten Wand schließt sich der Raum. Steht oben blau „Umriss aus den Wandenden“, endet es nicht von selbst: Ecken prüfen, dann „Raum schließen“. Im Bild: eine grüne Marke heißt „die Kante liegt, wo die Skizze sie erwartet“, eine orange „hier weicht sie ab – dort noch einmal entlang“. An der noch unsichersten Wand steht „näher ran“ – dort näher herangehen. Rot gestrichelt fehlt noch etwas.</div>
   <div class="hint" style="margin-top:8px">Von Hand: „Boden setzen“, je Wand „Kante erfassen“ (am besten zweimal aus verschiedenem Abstand), „Nächste Wand“ der Reihe nach, zum Schluss „Raum schließen“.</div>
 </div>
 
@@ -134,7 +138,7 @@
   <h2>Ergebnis</h2>
   <canvas id="plan" width="800" height="800"></canvas>
   <div id="resSummary" style="margin-top:10px"></div>
-  <table id="resWalls" style="margin-top:10px"></table>
+  <div style="margin-top:10px; overflow-x:auto"><table id="resWalls"></table></div>
   <div class="row">
     <button id="send">An Raumaufmaß</button>
     <button id="open" class="ghost">Hier öffnen</button>
@@ -149,8 +153,6 @@
 
 <div id="ar" class="hidden">
   <canvas id="arCanvas"></canvas>
-  <canvas id="miniMap" width="272" height="272"></canvas>
-  <div id="arRec" class="hidden"></div>
   <div id="cross"></div>
   <div id="arTop">
     <div id="arStats"></div>
@@ -158,6 +160,8 @@
     <div id="arHint"></div>
   </div>
   <div id="arBottom">
+    <canvas id="miniMap" width="272" height="272"></canvas>
+    <div id="arRec" class="hidden"></div>
     <div id="arWall"></div>
     <div class="row" id="arBtnsBoden">
       <button id="btnBoden" disabled>Boden setzen</button>
@@ -1346,8 +1350,10 @@ function ringOf(P,walls,lines,o){
     }
     const ta=a.c[0]*u[0]+a.c[1]*u[1];
     out.push({c:[a.c[0]+(t-ta)*u[0], a.c[1]+(t-ta)*u[1]], u:[-u[1],u[0]]}); virtual.push(true);
-    warnings.push(facing ? `Wand zwischen ${i+1} und ${j+1} fehlt (gegenüberliegende Wände) – dort weiter schwenken.`
-      : `Versprung zwischen Wand ${i+1} und ${j+1} ergänzt`+(sure ? '.' : ' – Lage unsicher.'));
+    // Nummern wie die Zeilen der Ergebnistabelle (ergaenzte Zeilen mitgezaehlt, wie buildRoom).
+    const ri=out.length-1, rj=j===0 ? 1 : out.length+1;
+    warnings.push(facing ? `Wand zwischen ${ri} und ${rj} fehlt (gegenüberliegende Wände) – dort weiter schwenken.`
+      : `Versprung zwischen Wand ${ri} und ${rj} ergänzt`+(sure ? '.' : ' – Lage unsicher.'));
   }
   // Mit flachem Knick darf buildRoom auch fast parallele Nachbarn schneiden.
   const room=out.length>=3 ? G.buildRoom(out,bend ? {...o, minDeg:0.5} : o) : {corners:null, warnings:['Weniger als drei Wände erkannt.']};
@@ -1608,15 +1614,15 @@ G.solveSweep=(obs,opt={})=>{
         const u=[(b[0]-a[0])/L,(b[1]-a[1])/L]; let lo=Infinity, hi=-Infinity;
         for(const id of w.ids) for(const p of [P[id].a,P[id].b]){ const t=(p[0]-a[0])*u[0]+(p[1]-a[1])*u[1]; if(t<lo) lo=t; if(t>hi) hi=t; }
         const gap=Math.max(lo, L-hi);
-        if(gap>(o.gapMax??0.8)){ closed=false; ring.warnings.push(`Wand ${k}: zur Ecke hin ${gap.toFixed(1)} m ungesehen – fehlt dort ein Stück? Dorthin schwenken.`); } } }
+        if(gap>(o.gapMax??0.8)){ closed=false; ring.warnings.push(`Wand ${j+1}: zur Ecke hin ${gap.toFixed(1)} m ungesehen – fehlt dort ein Stück? Dorthin schwenken.`); } } }
   } else closed=false;
   // Ring aus den Wandenden: auch in der Mitte einer Wand darf nicht mehr als
   // innerGap ungesehen sein - dort kann eine Nische fehlen, die der Ring nicht kennt.
-  if(closed && o.innerGap!==false && VX && VX.byEnds){ const ig=o.innerGap??0.5;
+  if(closed && o.innerGap!==false && VX && VX.byEnds){ const ig=o.innerGap??0.5, rowOf=[]; ring.virtual.forEach((v,j)=>{ if(!v) rowOf.push(j); });
     A.walls.forEach((w,k)=>{ if(!closed) return; const l=res.lines[k]; if(!l) return; const u=l.u;
       const iv=w.ids.map(id=>{ const a=P[id].a[0]*u[0]+P[id].a[1]*u[1], b=P[id].b[0]*u[0]+P[id].b[1]*u[1]; return a<b ? [a,b] : [b,a]; }).sort((p,q)=>p[0]-q[0]);
       let reach=iv[0][1], gap=0; for(const [a,b] of iv){ if(a>reach) gap=Math.max(gap,a-reach); reach=Math.max(reach,b); }
-      if(gap>ig){ closed=false; ring.warnings.push(`Wand ${k+1}: in der Mitte ${gap.toFixed(1)} m ungesehen – Nische? Dorthin schwenken.`); } }); }
+      if(gap>ig){ closed=false; ring.warnings.push(`Wand ${(rowOf[k]??k)+1}: in der Mitte ${gap.toFixed(1)} m ungesehen – Nische? Dorthin schwenken.`); } }); }
   // Unbestimmte Hoehe: nicht von selbst abschliessen - der Nutzer soll die
   // Warnung sehen, bevor die Sitzung endet.
   if(Hstuck) closed=false;
@@ -2500,10 +2506,10 @@ function applySolution(r){
     // Gleicher Befund mit neuer Zahl (0,8 m -> 1,4 m -> 1,5 m) ist kein neuer Hinweis.
     const mk=miss && miss.replace(/\d+([.,]\d+)?\s*m\b/g,'x m');
     // Im AR-Bild stehen keine Wandnummern - sagen, wo es zu sehen ist (Overlay:
-    // ergaenzte Wand rot gestrichelt, lange ungesehene Luecke orange gestrichelt).
+    // ergaenzte Wand rot gestrichelt, lange ungesehene Luecke orange gestrichelt, bei ?farben=klar rot).
     if(miss && S.lastMiss!==mk){ S.lastMiss=mk; ev('wand-fehlt', {msg:miss});
       hint(/zwischen \d+ und \d+ fehlt/.test(miss) ? 'Hier fehlt noch eine Wand – im Bild rot gestrichelt. Dorthin schwenken.'
-        : /ungesehen/.test(miss) ? 'Ein Stück Wand bis zur Ecke ist noch ungesehen – im Bild orange gestrichelt. Dorthin schwenken.' : miss, 'warn'); }
+        : /ungesehen/.test(miss) ? `Ein Stück Wand bis zur Ecke ist noch ungesehen – im Bild ${FARBEN_KLAR ? 'rot' : 'orange'} gestrichelt. Dorthin schwenken.` : miss, 'warn'); }
   }
   if(r.closed && S.breaks.length && !S.warned.closeManual){ S.warned.closeManual=true; ev('geschlossen-nach-bruch');
     hint('Raum geschlossen – nach der Ortungslücke aber bitte selbst prüfen und „Raum schließen“ tippen.', 'warn'); }
@@ -2876,6 +2882,7 @@ function onFrame(t, frame){
       const sus=S.phase==='waende' ? slideBeforeLoss(now()) : 0;
       ev('tracking-verloren', sus ? {gleiten:sus} : {}); updateWallInfo(); }
     S.prevDir=null; S.prevT=null; S.prevLive=null; S.floorStable=null;
+    S.speed=0; S.fastSince=null; S.slowSince=null;
     // Ein Tipp waehrend der Luecke loeste sonst spaeter aus - an dem, was dann
     // zufaellig im Fadenkreuz liegt, mit der ersten, unsichersten Pose.
     if(S.capReq || S.floorReq){
@@ -2973,7 +2980,9 @@ function onFrame(t, frame){
         // Einschwingen in den ersten 3 s nach dem Setzen: nur Protokoll.
         if(now()-(S.anchorT||0)>3 && !near){
           b.grund='bezug-sprung'; S.jumpHold=true; apT=null; LOG.breaks.push(b); ev('bezug-sprung', b);
-          if(S.auto && S.phase==='waende') hint(`Die Ortung ist um ${dj.toFixed(1)} m gesprungen – die Skizze bleibt beim Stand davor. Bitte eine schon erfasste Ecke noch einmal überstreichen.`, 'warn'); }
+          // Ab 0,05 m die Strecke, ab 1° die Drehung (ein Sprung ist dj > 0,15 m oder dpsi > 2°).
+          const sj=[dj>=0.05 ? `${dj.toFixed(1)} m` : '', dpsi>=Math.PI/180 ? `${Math.round(dpsi*180/Math.PI)}°` : ''].filter(Boolean).join(' und ');
+          if(S.auto && S.phase==='waende') hint(`Die Ortung ist um ${sj} gesprungen – die Skizze bleibt beim Stand davor. Bitte eine schon erfasste Ecke noch einmal überstreichen.`, 'warn'); }
         else { b.nurProtokoll=true; LOG.breaks.push(b); ev('anker-sprung', b); }
         S.prevCam=null;
       }
@@ -3009,13 +3018,15 @@ function onFrame(t, frame){
           // senkrechter Sprung verschiebt jede gehobene Kante um d·dh/Δ und
           // ist in der Auswertung nicht modelliert (Drift nur tx, tz, psi).
           const h1=G.m4mul(G.m4inv(T), view.transform.matrix)[13], dh=S.lastCamH!=null ? h1-S.lastCamH : null;
-          const b={t:now(), grund:stopped ? 'gestoppt' : 'pausiert', h:+h1.toFixed(3), dh:dh!=null ? +dh.toFixed(3) : null};
+          const b={t:now(), grund:S.jumpHold ? 'sprung' : stopped ? 'gestoppt' : 'pausiert', h:+h1.toFixed(3), dh:dh!=null ? +dh.toFixed(3) : null};
           S.substBad=(dh!=null && Math.abs(dh)>SUBST_DH) || h1<CAM_H_MIN || h1>CAM_H_MAX+0.2;
           if(S.substBad) b.unsicher=true;
           S.breaks.push(b); LOG.breaks.push(b);
           ev(S.substBad ? 'bezug-unplausibel' : 'bezug-ersatz', b);
-          // Wortlaut und Eskalation: Strang ablauf (A1).
-          if(S.auto && S.phase==='waende') hint(S.substBad ? 'Die Ortung war weg und passt nicht mehr zum Erfassten – es wird nichts erfasst.'
+          // Wortlaut und Eskalation: Strang ablauf (A1). Nach einem Bezugssprung (jumpHold,
+          // im selben Bild gesetzt) steht dessen Hinweis schon - die Ortung war nicht weg;
+          // nur „nichts wird erfasst“ geht vor.
+          if(S.auto && S.phase==='waende' && (S.substBad || !S.jumpHold)) hint(S.substBad ? 'Die Ortung war weg und passt nicht mehr zum Erfassten – es wird nichts erfasst.'
             : 'Die Ortung war kurz weg. Die letzte Wand noch einmal langsam überstreichen, dann weiter.', 'warn'); }
         if(S.substBad){ T=null; S.track=S.track.replace(' · Ersatzbezug', ' · Bezug unsicher'); S.live=null; S.liveConfirmed=false; S.prevLive=null; }
         else if(S.phase==='waende') reanchor(frame);
@@ -3035,7 +3046,7 @@ function onFrame(t, frame){
       if(op){ const q=op.transform.orientation, p0=op.transform.position, psi=2*Math.atan2(q.y, q.w), c=Math.cos(psi), sn=Math.sin(psi);
         const C=G.m4mul(G.m4inv([c,0,-sn,0, 0,1,0,0, sn,0,c,0, p0.x,p0.y,p0.z,1]), T);
         const m={dx:+C[12].toFixed(4), dy:+C[13].toFixed(4), dz:+C[14].toFixed(4), dpsiDeg:+(Math.atan2(-C[2], C[0])*180/Math.PI).toFixed(2)};
-        S.relocLogged=true; { const lb=[...LOG.breaks].reverse().find(b=>b.grund==='pausiert' || b.grund==='gestoppt'); if(lb) lb.gemessen=m; } ev('relokalisiert', m); }
+        S.relocLogged=true; { const lb=[...LOG.breaks].reverse().find(b=>b.grund==='pausiert' || b.grund==='gestoppt' || b.grund==='sprung'); if(lb) lb.gemessen=m; } ev('relokalisiert', m); }
     }
     // Pose-Sprung: Rueckschnapp der Kamera im Bezug (VIO-Korrektur) - die
     // Erfassungen der 2 s davor lagen auf einer weggeglittenen Pose.
@@ -3076,7 +3087,7 @@ function onFrame(t, frame){
     if(S.floorCand && !plaus){
       if(!S.floorWarn) hint(`Treffer ${S.floorCand.camH.toFixed(2)} m unter der Kamera – Tisch oder Bett? Auf freien Boden zielen.`, 'warn');
       S.floorWarn=true;
-    } else if(S.floorWarn){ S.floorWarn=false; hint(BODEN_HINT); }
+    } else if(S.floorWarn){ S.floorWarn=false; hint(S.auto ? BODEN_HINT_AUTO : BODEN_HINT); }
     // Automatisch: derselbe plausible Bodentreffer 20 Bilder lang (2/3 s).
     // Automatisch nur bei klar stehender Hoehe: ein Couchtisch (Kamera
     // ~1,05 m darueber) wird so nicht ungefragt zum Boden.
@@ -3130,19 +3141,25 @@ function onFrame(t, frame){
           if(r.empty && !S.warned.empty){ S.warned.empty=true; ev('kamerabild-leer', {alpha:r.alpha}); }
         } else if(!S.warned.fbo){ S.warned.fbo=true; ev('fbo-unvollständig', {status:r.status}); }
       }
-      if(S.phase==='waende' && camTo){
+      if(S.phase==='waende'){
         const t0=performance.now(), img=readSmall(gl, S.gpu, tex, W, H);
         LOG.timings.small.push(+(performance.now()-t0).toFixed(2));
         if(LOG.timings.small.length>2000) LOG.timings.small.shift();
         S.small=[img.w, img.h];
-        S.live=snapCenter(img, view, camTo);
-        if(S.auto) autoCapture(view, camTo);
-        if(S.capReq){
-          if(S.H) capture(view, camTo);
-          else { S.capReq=false; hint('Ohne Raumhöhe kann die Kante nicht gehoben werden.', 'warn'); ev('erfassen-ohne-höhe'); }
+        if(camTo){
+          S.live=snapCenter(img, view, camTo);
+          if(S.auto) autoCapture(view, camTo);
+          if(S.capReq){
+            if(S.H) capture(view, camTo);
+            else { S.capReq=false; hint('Ohne Raumhöhe kann die Kante nicht gehoben werden.', 'warn'); ev('erfassen-ohne-höhe'); }
+          }
         }
-        recFrame(frame, view, pose, camTo, img);
-        trackFrame(view, camTo);
+        // Auch ohne Bezug (Ersatz unplausibel, Anker verloren ohne Tlast): Zeile mit
+        // Flag 64 bzw. 8 und Videobild - genau diese Abschnitte soll die Aufnahme zeigen.
+        // Aufnahme und Stufe 2 sind Beiwerk: ein Fehler darin nimmt weder das andere noch den
+        // Rest des Bilds (Countdown, Zustand, Overlay) mit - wie bei netzFrame.
+        try{ recFrame(frame, view, pose, camTo, img); }catch(e){ recFail('Zustand: '+(e && e.message || e)); }
+        try{ trackFrame(view, camTo); }catch(e){ if(!S.warned.trk){ S.warned.trk=true; ev('verfolgen-fehler', {msg:String(e && e.message || e)}); } }
       }
     } else if(!S.warned.tex){ S.warned.tex=true; ev('getCameraImage-null'); }
     gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
@@ -3165,9 +3182,9 @@ function onFrame(t, frame){
         if(autoClosed(S.sol)){ S.closeDone=true; S.closed=true; ev('raum-schließen-auto'); S.session.end().catch(()=>{}); }
       } else hint(nv ? `Raum geschlossen – fertig in ${Math.ceil(left)} s. ${nv===1 ? 'Ein Versprung ist' : nv+' Versprünge sind'} ergänzt (rot gestrichelt) – echt? Sonst „Noch nicht fertig“ und dort noch einmal langsam schwenken.`
         : `Raum geschlossen – fertig in ${Math.ceil(left)} s. „Noch nicht fertig“ = weiter erfassen.`, nv ? 'warn' : '');
-    } else if(camTo && S.speed>AUTO_MAX_SPEED){ S.fastSince=S.fastSince ?? now(); S.slowSince=null;
+    } else if(camTo && !S.paused && S.speed>AUTO_MAX_SPEED){ S.fastSince=S.fastSince ?? now(); S.slowSince=null;
       if(!S.speedWarn && now()-S.fastSince>0.4){ S.speedWarn=true; S.speedWarnT=now(); hint('Langsamer schwenken – so wird nichts erfasst.', 'warn'); } }
-    else if(camTo){ S.fastSince=null;
+    else if(camTo && !S.paused){ S.fastSince=null;
       // Protokoll 4: 53 Hinweise, "Langsamer" und "Gut so" im Wechsel alle
       // 0,2-1 s. Jetzt erst nach 0,4 s zu schnell warnen, erst nach 1 s ruhig
       // (fruehestens 2 s nach der Warnung) zurueck - ohne Lob, das Ticken
@@ -3180,7 +3197,7 @@ function onFrame(t, frame){
     // Decke landet aus 2 m 1 m hinter der Wand (Protokolle 24.10.: Telefon
     // 1,8-2,06 m hoch, Δ 0,35-0,65 m). Im Messaufbau, gleiche Raeume mit
     // Kamera 1,3-1,5 statt 1,75-2,05 m: richtige Topologie 106 -> 192 von 300.
-    if(camTo && S.closeT==null){
+    if(camTo && S.closeT==null && !S.paused){
       const Hh=S.H || (S.sol && !S.sol.Hfixed && S.sol.sH<0.1 ? S.sol.H : null);
       if(Hh){ const dl=Hh-camTo[13];
         if(dl<0.6){ S.lowSince=S.lowSince ?? now();
@@ -3204,11 +3221,14 @@ function arState(){
     const sec=t0=>Math.max(0, Math.round(now()-t0));
     if(S.trackLost) { cls='stop'; txt=`Erfassung steht – Ortung weg (${sec(S.gap ? S.gap.t : now())} s). Telefon ruhig halten, auf etwas mit Struktur richten.`; }
     else if(S.anchorLost && (S.substBad || !S.Tlast)) { cls='stop'; txt='Erfassung steht – die Ortung passt nicht mehr zum Erfassten.'; }
-    else if(S.subst) { cls='sub'; txt='Ortung wieder da – die Lage wird noch abgeglichen.'; }
+    else if(S.subst) { cls='sub'; txt=S.jumpHold ? 'Ortung gesprungen – die Lage wird noch abgeglichen.' : 'Ortung wieder da – die Lage wird noch abgeglichen.'; }
+    // Abschluss aus den Wandenden: kein Countdown, der einmalige Hinweis wird von
+    // Tempo-/Haltungs-Hinweisen ueberschrieben - hier steht es, solange es gilt.
+    else if(S.auto && S.sol && S.sol.closed && !autoClosed(S.sol)) { cls='ends'; txt='Umriss aus den Wandenden – endet nicht von selbst. Ecken im Bild prüfen, dann „Raum schließen“ tippen.'; }
   }
   if(cls==='stop'){
     S.stopSince=S.stopSince ?? now();
-    if(now()-S.stopSince>8){ txt+=` Kommt es nicht zurück: „Beenden“ – die ${S.pool.length} Kanten bis hier bleiben.`;
+    if(now()-S.stopSince>8){ txt+=` Kommt es nicht zurück: „Beenden“ – die ${S.auto ? S.pool.length : S.walls.flat().length} Kanten bis hier bleiben.`;
       if(!S.stopEsc){ S.stopEsc=true; ev('erfassung-steht-eskalation', {s:+(now()-S.stopSince).toFixed(1)}); } }
   } else { S.stopSince=null; S.stopEsc=false; }
   const key=cls+'|'+txt;
@@ -3512,10 +3532,12 @@ function stats(){
     ['Tiefe', S.depth || '–'],
     ['y-Spiegel', S.flipY ? 'an' : 'aus'],
   ];
-  $('arStats').replaceChildren(...parts.map(([k,v])=>el('span', `${k} ${v}`)));
+  $('arStats').replaceChildren(...parts.map(([k,v])=>el('span', deNum(`${k} ${v}`))));
 }
 
 const BODEN_HINT='Fadenkreuz auf ein freies Bodenstück, Telefon langsam bewegen. Sobald der grüne Punkt liegt: „Boden setzen“.';
+// Schwenk: der Knopf heisst „Boden jetzt“; von selbst setzt sich der Boden nur ab 1,15 m Kamerahoehe.
+const BODEN_HINT_AUTO='Kurz auf freien Boden halten – der Boden setzt sich von selbst, sonst „Boden jetzt“.';
 // Was der Nutzer liest, mit Dezimalkomma ("0,5 m"); das Protokoll behaelt den Rohtext.
 const deNum=t=>String(t).replace(/(\d)\.(\d)/g, '$1,$2');
 function hint(text, cls=''){ const h=$('arHint'); h.textContent=deNum(text); h.className=cls;
@@ -3528,7 +3550,7 @@ function updateWallInfo(){
     const sol=S.sol, rej=sol ? sol.labels.filter(l=>typeof l==='string' && l.startsWith('verworfen')).length : 0;
     const h=sol && Number.isFinite(sol.H) ? ` · H ${S.H ? 'Laser' : sol.Hfixed ? 'unbestimmt' : '≈'+sol.H.toFixed(2)+' m'}` : '';
     $('arWall').textContent=S.phase==='waende'
-      ? deNum(`Schwenk · ${done} Wände · ${S.pool.length} Kanten · ${rej} verworfen` + (sol && sol.closed ? ' · geschlossen' : '')
+      ? deNum(`Schwenk · ${done} Wände · ${S.pool.length} Kanten · ${rej} verworfen` + (sol && sol.closed ? (autoClosed(sol) ? ' · geschlossen' : ' · Umriss aus Wandenden') : '')
         + h + (S.paused ? ' · PAUSE' : ''))
       : '';
     $('btnPause').textContent=S.closeT!=null || S.closePending ? 'Noch nicht fertig' : S.paused ? 'Weiter' : 'Pause';
@@ -3574,13 +3596,25 @@ function newRun(){
     LOG.runs.push(old);
   }
   Object.assign(LOG, freshRun());
+  logVoll=false;
 }
 const STORE_KEY='raumskizze-probe.protokoll';
-function saveLog(){ try{ localStorage.setItem(STORE_KEY, JSON.stringify(LOG)); }catch(e){} }
+// Das Protokoll waechst mit jedem Durchlauf der Seitensitzung; passt es nicht
+// mehr in den localStorage (Kontingent), bleibt dort ein aelterer Stand. Dann
+// einmal je Durchlauf ein Ereignis und nach dem Ende ein sichtbarer Hinweis.
+let logVoll=false;
+function saveLog(){
+  try{ localStorage.setItem(STORE_KEY, JSON.stringify(LOG)); }
+  catch(e){
+    if(!logVoll){ logVoll=true; ev('protokoll-speicher-voll', {msg:String(e && e.name || e), laeufe:LOG.runs.length+1}); }
+    if(!S.session){ const h=$('startHint'), m='Das Protokoll passt nicht mehr in den Gerätespeicher – ein Neuladen verliert es. Jetzt „Protokoll (JSON)“ sichern.';
+      if(!h.textContent.includes(m)) h.textContent+=' '+m; }
+  }
+}
 
 // ------------------------------------------------------- Aufnahme
 // Fuer Nachrechnen am Rechner und spaeter eine Trainingsdatenbank. Zwei Teile:
-// (1) Zustand je ausgewertetem Bild, immer (im Schwenk ~20/s): Kamerapose in
+// (1) Zustand je ausgewertetem Bild, immer (jedes 3. XR-Bild, bei 30 Hz ~10/s): Kamerapose in
 //     local, benutzter Bodenbezug T, Bezugs-Flags, Schwenktempo und was der
 //     Detektor am Fadenkreuz fand. Die 5-s-Stichproben (viewPath/anchorPath)
 //     reichten nicht, um die Bezugsspruenge in Protokoll 4 (152,8 s und
@@ -3588,18 +3622,20 @@ function saveLog(){ try{ localStorage.setItem(STORE_KEY, JSON.stringify(LOG)); }
 // (2) Nur mit Haken „Video mitschneiden“: das Bild, das captureEdge sieht
 //     (RGBA aus readSmall, Zeile 0 = unten wie readPixels, auf gerade Groesse
 //     gepolstert) als H.264 mit 10 Bildern/s, dazu je Bild die ARCore-Tiefe.
-// Alles liegt nur im Speicher dieser Seite (OPFS), in 10-s-Stuecken - ein
-// Absturz verliert hoechstens das letzte Stueck. Weitergegeben wird erst mit
-// „Aufnahme sichern“ (TAR). Nichts geht auf einen Server.
+// Alles liegt nur im Speicher dieser Seite (OPFS), in 10-s-Stuecken, das
+// Manifest mit jedem Stueck erneuert (vorlaeufig, die Endfassung schreibt
+// recStop) - ein Absturz verliert hoechstens das letzte Stueck. Weitergegeben
+// wird erst mit „Aufnahme sichern“ (TAR). Nichts geht auf einen Server.
 const REC_FPS=10, REC_CHUNK=10, REC_KEEP={video:3, zustand:5}, REC_PREF='raumskizze-probe.video';
 const REC_COLS=['t','px','py','pz','qx','qy','qz','qw','Tpsi','Tx','Ty','Tz','flags','tempo','live','v','tiefe'];
 const REC_FLAGS={geschaetzt:1, ankerVerloren:2, ersatz:4, ersatzSchlecht:8, sprungHalt:16, pause:32, ohneBezug:64, erfasst:128};
 // Dazu, wenn das Anker-Netz laeuft: REC.an (anker-NNNN.jsonl, gleiche Stuecke) - Lage
 // aller Anker in local, 2/s und bei jedem Sprung oder Verlust (siehe netzFrame).
 const REC={st:[], an:[], anOut:0, name:null, lauf:0, dir:null, video:false, enc:null, encCfg:null, encBusy:false, err:null,
-  vN:0, vDrop:0, vBytes:0, flushing:Promise.resolve()};
+  vN:0, vDrop:0, vBytes:0, flushing:Promise.resolve(), on:false, stopping:Promise.resolve()};
 function recReset(){
-  Object.assign(REC, {st:[], stOut:0, an:[], anOut:0, dir:null, video:false, enc:null, encCfg:null, encBusy:false, err:null,
+  // on: diese Sitzung hat recStart aufgerufen - nur dann schliesst recStop die Aufnahme ab.
+  Object.assign(REC, {on:true, st:[], stOut:0, an:[], anOut:0, dir:null, video:false, enc:null, encCfg:null, encBusy:false, err:null,
     vBuf:[], vN:0, vOut:0, vDrop:0, vBytes:0, lastV:-1, dBuf:[], dN:0, dBytes:0, part:0, flushT:now(),
     flushing:Promise.resolve(), img:null, pad:null, obsN:LOG.obs.length, badgeT:0,
     bitrate:Number(Q.get('vbr'))||1.5e6, name:'aufnahme-'+LOG.started.replace(/[:.]/g,'-')+'-lauf'+LOG.runs.length, lauf:LOG.runs.length});
@@ -3610,6 +3646,16 @@ function recFail(msg){
   try{ if(REC.enc && REC.enc.state!=='closed') REC.enc.close(); }catch(e){}
   REC.enc=null;
 }
+// Ordnernamen zeitlich ordnen: Sitzung (ISO-Zeit), dann Lauf als Zahl - als Text kaeme lauf10 vor lauf2.
+const recKey=n=>n.replace(/-lauf(\d+)/, (m,d)=>'-lauf'+d.padStart(6, '0'));
+function recSort(a){ return a.sort((x,y)=>{ const p=recKey(x), q=recKey(y); return p<q ? -1 : p>q ? 1 : 0; }); }
+// Videoaufnahme ist nur ein Ordner mit Video: ein Lauf mit Haken, der vor dem Boden
+// endet (oder ohne Kamerabild/Kodierer), hinterlaesst nur manifest.json.
+async function recHasVideo(n, h){
+  if(!n.endsWith('-video')) return false;
+  for await (const [f] of h.entries()) if(/^video-\d+\.h264$/.test(f)) return true;
+  return false;
+}
 async function recStart(){
   recReset();
   const want=!!($('rec') && $('rec').checked);
@@ -3618,10 +3664,11 @@ async function recStart(){
   try{
     const root=await navigator.storage.getDirectory(), top=await root.getDirectoryHandle('aufnahmen', {create:true});
     // Nur die neuesten behalten - Videoaufnahmen getrennt, damit Sitzungen ohne
-    // Video keine ungesicherte Aufnahme verdraengen (Namen sortieren zeitlich).
-    const old={video:[], zustand:[]};
-    for await (const [n,h] of top.entries()) if(h.kind==='directory' && n!==REC.name) old[n.endsWith('-video') ? 'video' : 'zustand'].push(n);
-    for(const k of ['video', 'zustand']){ old[k].sort(); const keep=REC_KEEP[k]-(want===(k==='video') ? 1 : 0);
+    // Video keine ungesicherte Aufnahme verdraengen (recSort ordnet zeitlich).
+    const old={video:[], zustand:[]}, dirs=[];
+    for await (const [n,h] of top.entries()) if(h.kind==='directory' && n!==REC.name) dirs.push([n, h]);
+    for(const [n,h] of dirs) old[await recHasVideo(n, h) ? 'video' : 'zustand'].push(n);
+    for(const k of ['video', 'zustand']){ recSort(old[k]); const keep=REC_KEEP[k]-(want===(k==='video') ? 1 : 0);
       for(const n of old[k].slice(0, Math.max(0, old[k].length-keep))) await top.removeEntry(n, {recursive:true}); }
     REC.dir=await top.getDirectoryHandle(REC.name, {create:true});
   }catch(e){ recFail('Speicher: '+(e && e.message || e)); return; }
@@ -3692,7 +3739,7 @@ function recFrame(frame, view, pose, camTo, img){
   LOG.timings.rec.push(+(performance.now()-t0).toFixed(2));
   if(LOG.timings.rec.length>2000) LOG.timings.rec.shift();
   if(tt-REC.badgeT>=1){ REC.badgeT=tt; const b=$('arRec');
-    if(b){ b.classList.toggle('hidden', !REC.vN && !REC.err); b.textContent=REC.vN ? `● REC ${(REC.vBytes/1e6).toFixed(0)} MB` : (REC.err ? 'REC aus' : ''); } }
+    if(b){ b.classList.toggle('hidden', !REC.vN && !REC.err); b.textContent=REC.err ? 'REC aus' : REC.vN ? `● REC ${(REC.vBytes/1e6).toFixed(0)} MB` : ''; } }
 }
 async function recPut(dir, name, parts){
   const fh=await dir.getFileHandle(name, {create:true}), w=await fh.createWritable();
@@ -3705,12 +3752,16 @@ function recFlush(){
   const part=String(REC.part++).padStart(4, '0'), st=REC.st.slice(REC.stOut), an=REC.an.slice(REC.anOut), v=REC.vBuf, dd=REC.dBuf, dir=REC.dir;
   REC.stOut=REC.st.length; REC.anOut=REC.an.length; REC.vBuf=[]; REC.dBuf=[];
   if(!dir) return REC.flushing;
+  // Manifest mit dem Stand genau dieser Stuecke (Zeilen = was in den Dateien steht):
+  // ohne regulaeres Ende (Absturz, Neuladen) bleibt die Aufnahme so auswertbar.
+  let man=null; try{ man=JSON.stringify({...recManifest(), vorlaeufig:true}, null, 1); }catch(e){}
   REC.flushing=REC.flushing.then(async()=>{
     if(st.length) await recPut(dir, `zustand-${part}.jsonl`, [st.map(r=>JSON.stringify(r)).join('\n')+'\n']);
     if(an.length) await recPut(dir, `anker-${part}.jsonl`, [an.map(r=>JSON.stringify(r)).join('\n')+'\n']);
     if(v.length) await recPut(dir, `video-${part}.h264`, v);
     if(dd.length){ const gz=await new Response(new Blob(dd).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
       await recPut(dir, `tiefe-${part}.bin.gz`, [gz]); }
+    if(man) await recPut(dir, 'manifest.json', [man]);
   }).catch(e=>recFail('Schreiben: '+(e && e.message || e)));
   return REC.flushing;
 }
@@ -3739,7 +3790,11 @@ function recManifest(){
     raum:{name:null, wahrheit:null}};
 }
 async function recStop(){
-  if(!REC.name) return;
+  // Endet eine Sitzung vor recStart (Vorbereitung gescheitert), steht in REC noch
+  // die fertige Aufnahme des vorigen Laufs - deren Manifest bleibt, wie es ist.
+  if(!REC.name || !REC.on) return;
+  REC.on=false;
+  const n=REC.name;   // Ordner dieses Durchlaufs - ein naechster Start setzt REC.name neu
   try{ if(REC.enc && REC.enc.state==='configured') await REC.enc.flush(); }catch(e){}
   try{ if(REC.enc && REC.enc.state!=='closed') REC.enc.close(); }catch(e){}
   REC.enc=null; REC.video=false;
@@ -3747,7 +3802,8 @@ async function recStop(){
   if(REC.dir){ try{ await recPut(REC.dir, 'manifest.json', [JSON.stringify(recManifest(), null, 1)]); }catch(e){ recFail('Manifest: '+(e && e.message || e)); } }
   ev('aufnahme-ende', {bilder:REC.vN, ausgelassen:REC.vDrop, mb:+(REC.vBytes/1e6).toFixed(1), tiefe:REC.dN, zustand:REC.st.length});
   const b=$('arRec'); if(b) b.classList.add('hidden');
-  if(REC.dir && REC.vN){ $('dlRec').classList.remove('hidden'); $('dlRec').textContent=`Aufnahme sichern (${((REC.vBytes+REC.dBytes/3)/1e6).toFixed(0)} MB, ${REC.vN} Bilder)`; }
+  if(REC.dir && REC.vN){ $('dlRec').classList.remove('hidden'); $('dlRec').textContent=`Aufnahme sichern (${((REC.vBytes+REC.dBytes/3)/1e6).toFixed(0)} MB, ${REC.vN} Bilder)`;
+    $('dlRec').onclick=()=>recSave(n, null, $('dlRec')); }
   saveLog();
 }
 // TAR (ustar): Kopf je Datei, die OPFS-Dateien selbst als Blob-Teile - nichts
@@ -3790,13 +3846,21 @@ async function recListLast(){
   if(!(navigator.storage && navigator.storage.getDirectory)) return;
   try{
     const root=await navigator.storage.getDirectory(), top=await root.getDirectoryHandle('aufnahmen', {create:true});
-    const names=[]; for await (const [n,h] of top.entries()) if(h.kind==='directory') names.push(n);
-    if(!names.length) return;
-    names.sort(); const vid=names.filter(n=>n.endsWith('-video')), last=(vid.length ? vid : names)[(vid.length ? vid : names).length-1];
+    const dirs=[]; for await (const [n,h] of top.entries()) if(h.kind==='directory') dirs.push([n, h]);
+    if(!dirs.length) return;
+    const names=recSort(dirs.map(d=>d[0])), vid=[];
+    for(const [n,h] of dirs) if(await recHasVideo(n, h)) vid.push(n);
+    recSort(vid); const last=(vid.length ? vid : names)[(vid.length ? vid : names).length-1];
     let proto=null; try{ proto=localStorage.getItem(STORE_KEY); }catch(e){}
+    // Gespeicherter Stand aelter als die Aufnahme (Speichern scheiterte am
+    // Kontingent): nicht beilegen - der oberste Durchlauf waere ein frueherer.
+    let alt=false; try{ const P=proto && JSON.parse(proto), m=last.match(/-lauf(\d+)/);
+      alt=!!(P && m && Array.isArray(P.runs) && last.startsWith('aufnahme-'+String(P.started).replace(/[:.]/g,'-')+'-lauf') && P.runs.length<+m[1]); }catch(e){}
     const b=$('dlRecLast'); b.classList.remove('hidden');
-    b.textContent=vid.length ? `Letzte Videoaufnahme sichern (${vid.length} auf diesem Gerät)` : 'Letzten Zustandsmitschnitt sichern';
-    b.onclick=()=>recSave(last, proto, b);
+    b.textContent=(vid.length ? `Letzte Videoaufnahme sichern (${vid.length} auf diesem Gerät)` : 'Letzten Zustandsmitschnitt sichern')+(alt ? ' – ohne Protokoll, das gespeicherte ist älter' : '');
+    // Ohne (passendes) gespeichertes Protokoll keins beilegen: null hiesse in recSave
+    // „LOG dieser Seite“ - das gehoert zu einer anderen Seitensitzung als die Aufnahme.
+    b.onclick=()=>recSave(last, alt ? '' : proto || '', b);
   }catch(e){}
 }
 
@@ -3807,17 +3871,16 @@ async function startAR(){
     $('startHint').textContent=`Raumhöhe „${raw}“ ist ungültig – in mm eingeben (1500–6000), z. B. 2550. Leer lassen für nur Stufe 0.`;
     return;
   }
-  newRun();
+  // recStop des vorigen Laufs erst fertig schreiben lassen (hoechstens 2 s, unter der Frist
+  // der Nutzergeste fuer requestSession): newRun, netzNeu und recReset tauschen LOG, S.netz
+  // und REC aus, recManifest liest sie aber erst nach seinen awaits.
+  await Promise.race([REC.stopping, new Promise(r=>setTimeout(r, 2000))]);
   S.H=raw ? hmm/1000 : null;
-  LOG.hLaserMm=S.H ? Math.round(S.H*1000) : null;
-  LOG.hEingabe=raw || null;
   S.auto=$('auto').checked;
-  LOG.mode=S.auto ? 'automatisch' : 'von Hand';
   Object.assign(S, {pool:[], sol:null, model:null, modelKey:null, hiLine:null, paused:false, closeT:null, closeDone:false, lastAuto:null,
     floorStable:null, prevDir:null, prevT:null, speed:0, prevLive:null, liveConfirmed:false, settleUntil:0,
     speedWarn:false, speedWarnT:0, fastSince:null, slowSince:null, solveBusy:false, solveDirty:false, solveId:(S.solveId||0)+1, closePending:false, lastMiss:null});
   Object.assign(S, {lumaImg:null, trkW:[], trkK:0, trkTick:0, trkSeq:0, trkStride:1});
-  if(S.auto && !S.worker) S.worker=makeSolver();
   Object.assign(S, {phase:'boden', walls:[[]], anchor:null, anchorLost:false, floorY:null, floorCand:null,
     stopSince:null, stopEsc:false, lowSince:null, lowHintT:null, lastHintK:null, closeArm:0, stateK:null,
     Tlast:null, subst:false, anchorPrev:null, reanchorBusy:false, reanchorAt:0, breaks:[], frames:[], frameJumps:[], jumpHold:false, anchorT:0, relocLogged:false, prevCam:null, camV:0,
@@ -3825,7 +3888,6 @@ async function startAR(){
     floorFoundT:null, floorWarn:false, floorReq:false, capReq:false, live:null, camSize:null, small:null,
     planes:null, depth:null, trackLost:false, closed:false, endArm:0, fps:[], lastT:0, frame:0, warned:{},
     aspectWarn:false});
-  S.netz=netzNeu();   // Messanker einer frueheren Sitzung gibt es nicht mehr
   const canvas=document.createElement('canvas');
   const gl=canvas.getContext('webgl2', {xrCompatible:true, alpha:true, antialias:false});
   if(!gl){ $('startHint').textContent='WebGL2 fehlt.'; return; }
@@ -3841,12 +3903,22 @@ async function startAR(){
     ev('sitzung-abgelehnt', {msg:String(e && e.message || e)});
     return;
   }
+  // Neuer Durchlauf erst mit Sitzung: ein abgelehnter Start laesst das noch
+  // sichtbare Ergebnis (LOG.result, Export-Knoepfe) und das Netz unangetastet.
+  newRun();
+  LOG.hLaserMm=S.H ? Math.round(S.H*1000) : null;
+  LOG.hEingabe=raw || null;
+  LOG.mode=S.auto ? 'automatisch' : 'von Hand';
+  S.netz=netzNeu();   // nach newRun (evI); Messanker einer frueheren Sitzung gibt es nicht mehr
+  if(S.auto && !S.worker) S.worker=makeSolver();
   // Ende sofort abonnieren: auch ein Abbruch waehrend der Vorbereitung muss
   // das Overlay wieder einklappen und den Start freigeben.
   session.addEventListener('end', onEnd);
   S.session=session; S.gl=gl;
   $('ar').classList.remove('hidden');
   $('result').classList.add('hidden');
+  // dlRec gehoert zum vorigen Durchlauf; recStop zeigt ihn wieder, wenn dieser ein Video hat.
+  $('dlRec').classList.add('hidden');
   const cv=$('arCanvas');
   S.resize=()=>{ cv.width=Math.round(innerWidth*devicePixelRatio); cv.height=Math.round(innerHeight*devicePixelRatio); };
   S.resize(); addEventListener('resize', S.resize);
@@ -3892,7 +3964,8 @@ async function startAR(){
 function onEnd(){
   ev('sitzung-ende');
   LOG.session.end=now();
-  recStop();
+  // startAR wartet darauf: ein Fehler in recStop darf den naechsten Start nicht dauerhaft sperren.
+  REC.stopping=recStop().catch(e=>{ try{ ev('aufnahme-fehler', {msg:'Abschluss: '+String(e && e.message || e)}); }catch(_){} });
   $('ar').classList.add('hidden');
   if(S.resize) removeEventListener('resize', S.resize);
   S.session=null;
@@ -4037,7 +4110,7 @@ function showResult(res){
       const cells=[C ? `${i+1} · ${G.idOf(i)}–${G.idOf((i+1)%C.length)}` : String(i+1), len!=null ? deNum(len.toFixed(2))+' m' : '–', w.virtual ? 'ergänzt' : String(w.n)];
       if(res.auto) cells.push(w.sRhoMm!=null ? w.sRhoMm+' mm' : '–');
       else { const sp=w.n>=2 ? res.parallax.spread[used.length] : null; if(w.n>=2) used.push(i);
-        cells.push(String(w.weak), w.rmsMm!=null ? w.rmsMm+' mm' : '–', sp!=null ? sp.toFixed(2)+' m' : '–'); }
+        cells.push(String(w.weak), w.rmsMm!=null ? w.rmsMm+' mm' : '–', sp!=null ? deNum(sp.toFixed(2))+' m' : '–'); }
       cells.forEach(v=>tr.appendChild(el('td', v)));
       tb.appendChild(tr);
     });
@@ -4077,7 +4150,7 @@ function drawPlan(res){
     corners.forEach((p,i)=>{ const q=P(p); c.fillText(G.idOf(i), q[0]+6, q[1]-6); });
     c.fillStyle='#fbbf24'; c.font='20px system-ui';
     corners.forEach((p,i)=>{ const r=corners[(i+1)%corners.length], m=P([(p[0]+r[0])/2,(p[1]+r[1])/2]);
-      c.fillText(Math.hypot(r[0]-p[0], r[1]-p[1]).toFixed(2), m[0]+4, m[1]+18); });
+      c.fillText(deNum(Math.hypot(r[0]-p[0], r[1]-p[1]).toFixed(2)), m[0]+4, m[1]+18); });
   }
   c.strokeStyle='#60a5fa'; c.lineWidth=5;
   segs.forEach(sg=>{ const a=P(sg[0]), b=P(sg[1]); c.beginPath(); c.moveTo(a[0],a[1]); c.lineTo(b[0],b[1]); c.stroke(); });
@@ -4117,7 +4190,6 @@ $('dlLog').onclick=()=>{
 $('rec').checked=(()=>{ try{ return localStorage.getItem(REC_PREF)==='1'; }catch(e){ return false; } })();
 $('rec').onchange=()=>{ try{ localStorage.setItem(REC_PREF, $('rec').checked ? '1' : '0'); }catch(e){} };
 if(!('VideoEncoder' in window)){ $('rec').checked=false; $('rec').disabled=true; }
-$('dlRec').onclick=()=>recSave(REC.name, null, $('dlRec'));
 recListLast();
 
 // --------------------------------------------------------- Knoepfe
@@ -4154,7 +4226,9 @@ $('btnPause').onclick=()=>{
   // „Noch nicht fertig“ gilt auch, wenn der Countdown gerade wegen
   // Tracking-Verlust wartet. Die Pause bleibt, wie sie war.
   if(S.closeT!=null || S.closePending){ S.closeT=null; S.closePending=false; S.closeDone=true; ev('countdown-abgebrochen'); hint('Weiter erfassen – zum Schluss „Raum schließen“.'); }
-  else { S.paused=!S.paused; ev(S.paused ? 'pause' : 'weiter');
+  // In der Pause geht der Nutzer umstellen: Tempo- und Haltungshinweis ruhen
+  // (sonst ueberschreiben sie den Pause-Hinweis), danach wird neu gezaehlt.
+  else { S.paused=!S.paused; S.speedWarn=false; S.fastSince=S.slowSince=S.lowSince=null; ev(S.paused ? 'pause' : 'weiter');
     hint(S.paused ? 'Pause – nichts wird erfasst. Zum Umstellen gehen, dann an derselben Stelle in derselben Richtung weiterschwenken.' : 'Weiter schwenken.');
     // Waehrend der Pause geschlossen? Dann jetzt der Countdown.
     if(!S.paused && S.closeT==null && canArm()){ S.closeT=now(); ev('raum-geschlossen-auto', {nachPause:true}); } }
