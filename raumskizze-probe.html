@@ -2138,6 +2138,7 @@ const Q=new URLSearchParams(location.search);
 // URL ueberschreibbar: ?app=https://…/&ds=480
 const APP_URL=(Q.get('app') || 'https://raumaufmass.irazari-te.ch/').replace(/#.*$/,'');
 const DS=Math.max(240, Math.min(1280, Number(Q.get('ds'))||640));
+const FARBEN_KLAR=Q.get('farben')==='klar';
 
 const T0=performance.now();
 const now=()=>+((performance.now()-T0)/1000).toFixed(3);
@@ -2566,7 +2567,7 @@ function setFloor(frame, c){
     S.phase='waende';
     showButtons();
     if(!ok) hint('Boden ließ sich nicht festhalten – das Ergebnis wird unsicher. Besser: Beenden und neu starten.', 'warn');
-    else hint(S.auto ? 'Fadenkreuz an die Kante zwischen Wand und Decke, langsam rundum schwenken. Grün = sichere Kante, jedes Ticken = erfasst.'
+    else hint(S.auto ? `Fadenkreuz an die Kante zwischen Wand und Decke, langsam rundum schwenken. ${FARBEN_KLAR ? 'Türkis' : 'Grün'} = sichere Kante, jedes Ticken = erfasst.`
             : !S.H ? 'Keine Raumhöhe eingetragen – von Hand nur Stufe 0. Die Messwerte laufen oben mit.'
             : 'Wand 1: Fadenkreuz auf die Kante zwischen Wand und Decke, dann „Kante erfassen“.');
     saveLog();
@@ -3085,6 +3086,19 @@ const OV={piece:{color:'#60a5fa', w:4}, pieceLast:{color:'#facc15', w:4}, pieceO
   // Enden - so heben sie sich von den Modelllinien (duenn, gleiche Gruentoene) ab.
   trkOk:{color:'#4ade80', w:5, half:22}, trkOff:{color:'#fb923c', w:4, half:55}, trkDrift:3,
   wall:(()=>{ const m=new Map(); return s=>{ const col=wallColor({sRho:s}); if(!m.has(col)) m.set(col, {seen:{color:col, w:3}, gap:{color:col, w:1.5, dash:[6,6]}}); return m.get(col); }; })()};
+// ?farben=klar: Farbe nur fuer Urteile - gruen passt, orange weicht ab, rot fehlt oder
+// ungesehen. Das Modell weiss, seine Unsicherheit als Strichelung (sicher durchgezogen,
+// mittel lang, unsicher kurz gestrichelt); die Live-Kante am Fadenkreuz tuerkis; erfasste
+// Stuecke dezent. In der Vorgabe tragen gruen/gelb/orange je zwei Bedeutungen (Modell
+// nach sRho und Urteil, letzte Wand, lange Luecke) - die gruene Passt-Marke verschwindet
+// auf der gruenen Modelllinie. Zum Vergleich am Geraet, die Vorgabe bleibt bis dahin.
+if(FARBEN_KLAR) Object.assign(OV, {
+  piece:{color:'rgba(147,197,253,.5)', w:2}, pieceLast:{color:'rgba(147,197,253,.8)', w:2},
+  gapBig:{color:'#f87171', w:2.5, dash:[3,5]},
+  wall:(()=>{ const m=new Map(); return s=>{ const k=!Number.isFinite(s) ? 3 : s<0.02 ? 0 : s<0.05 ? 1 : 2;
+    if(!m.has(k)) m.set(k, {seen:{color:'rgba(255,255,255,.95)', w:k===0 ? 3 : 2.5, dash:[null, [12,6], [4,6], [2,6]][k] || undefined},
+      gap:{color:'rgba(255,255,255,.5)', w:1.5, dash:[6,6]}});
+    return m.get(k); }; })()});
 function liveModel(){
   const sol=S.sol, k=S.frames.length;
   if(!S.auto || !sol || !sol.walls || !sol.walls.length || !sol.drift) return null;
@@ -3188,7 +3202,7 @@ function drawOverlay(view, camTo){
         if(keep && keep.r.sRho>=0.8*best.r.sRho) best=keep;
         S.hiLine=best ? lineOf(best.r) : null;
         if(best){
-          const col=wallColor(best.r), m=[(best.a[0]+best.b[0])/2, (best.a[1]+best.b[1])/2];
+          const col=FARBEN_KLAR ? '#ffffff' : wallColor(best.r), m=[(best.a[0]+best.b[0])/2, (best.a[1]+best.b[1])/2];
           line(best.a, best.b, 'rgba(0,0,0,.6)', 9); line(best.a, best.b, col, 5);
           const txt='näher ran';   // ohne Zahl: sRho unterschaetzt den wahren Fehler etwa 2- bis 3-fach (Monte-Carlo)
           c.font=`600 ${15*dpr}px system-ui, sans-serif`; c.textAlign='center'; c.textBaseline='bottom';
@@ -3237,7 +3251,8 @@ function drawOverlay(view, camTo){
     line(a, b, 'rgba(0,0,0,.75)', 5);
     // Gruen nur, wenn jetzt wirklich erfasst wuerde.
     const ok=S.auto ? (S.live.good && S.liveConfirmed && !autoBlock()) : S.live.good;
-    line(a, b, ok ? '#4ade80' : '#fbbf24', 2.5);
+    if(FARBEN_KLAR){ if(!ok) c.setLineDash([6*dpr, 5*dpr]); line(a, b, '#22d3ee', ok ? 2.5 : 2); c.setLineDash([]); }
+    else line(a, b, ok ? '#4ade80' : '#fbbf24', 2.5);
   }
   // Stufe 2: Marken der verfolgten Waende zuletzt - ueber der Live-Kante, sonst deckte deren
   // dunkler Rand die Marke an der Wand unter dem Fadenkreuz zu.
