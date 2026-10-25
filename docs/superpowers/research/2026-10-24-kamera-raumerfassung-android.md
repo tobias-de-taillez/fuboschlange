@@ -686,6 +686,39 @@ Der Messaufbau erzeugt diesen Fehlerfall praktisch nie. Er zeigt also nur, dass 
 
 Knopf „Ansicht“ in der Wandphase. Er schaltet durch: Kamera, Luma (das verkleinerte Graustufenbild, das `captureEdge` und die Senkrechten bekommen, unverschmiert in echter Auflösung) und Gradient (Sobel-Betrag auf dem ganzen Bild, Wurzel-Skala). Die Overlay-Linien bleiben darüber. Jeder Wechsel steht als Ereignis `ansicht` im Protokoll. Gerechnet wird nur bei aktiver Ansicht und neuem Bild.
 
+### 10.17 Aufnahme 7: Wohnküche mit Laser-Wahrheit (Stand 5, 17:00)
+
+**Wahrheit:** Raumaufmaß „Hesterkamp Wohnküche“, 81 Lasermaße, σ̂ 5,6 mm. Außenring mit 14 Ecken, 65,9 m², 9,35 × 7,86 m, dazu ein Pfeiler (0,15 m²) und ein Wandvorsprung (0,40 m²). Keine Raumhöhe in der Datei. Abgelegt als `wahrheit-hesterkamp-wohnkueche-2026-10-25.json` (nicht eingecheckt).
+
+**Sitzung:**
+- Wieder `ds=640`, keine Laser-Höhe, Ansichten nicht benutzt.
+- 215 s, 283 Erfassungen. Tracking 3-mal weg (bis 7,8 s), 2 Bezugssprünge, 10 Brüche.
+- Rechenzeiten wie in Aufnahme 6: Kante 13,9 ms, Senkrechte 11,3 ms, Schätzer 53 ms (Median).
+
+**Ergebnis ohne Laser:** 7 Ecken, 42,7 m², H 2,44 m.
+
+**Raumhöhe laut Laser: 2,416 m** (Tobias). Das ist dieselbe Wohnküche wie in Aufnahme 6, die Wahrheit gilt also für beide Aufnahmen. Die Parallaxe in Aufnahme 7 (2,44 m) lag nur 2,6 cm daneben. Ein erstes Durchprobieren der Höhe hatte 2,65 m als besten Wert gezeigt; das war ein Scheintreffer einer mehrdeutigen Passung.
+
+**Vergleich** mit dem neuen Werkzeug `raumskizze-wahrheit.mjs`. Es passt die Erfassungen robust auf die Wahrheit (Drehung, Spiegelung, Verschiebung, optional Maßstab) und misst den Abstand jedes Punkts zur nächsten echten Wand. Mit `--abschnitte` passt es jeden Bezugsabschnitt zwischen zwei Brüchen einzeln (Suche ±20°, ±1,5 m um die Gesamtpassung). Alle Werte mit H = 2,416 m:
+
+| | Aufnahme 6 | Aufnahme 7 |
+|---|---|---|
+| Ergebnis des Schätzers | 6 Ecken, 22,9 m² | 21 Ecken, 25,2 m² (mit Parallaxe: 7 Ecken, 42,7 m²) |
+| Erfassungen an Wänden, Gesamtpassung | Median 5,6 cm, 63 % unter 10 cm | Median 45,6 cm, 20 % unter 10 cm |
+| Bester Abschnitt, eigene Passung | 122–146 s, 52 Erf.: Median 3,6 cm, 86 % unter 10 cm | 10–16 s, 19 Erf.: Median 7,2 cm, 62 % unter 10 cm |
+| Übrige Abschnitte, eigene Passung | Median 14–68 cm | Median 16–44 cm |
+| Versatz der Abschnitte gegen die Gesamtpassung | 40–170 cm, 6–20° | 40–185 cm, 4–20° |
+
+Geschätzte Wände in Aufnahme 6: LM 8,2 cm / 0,3°, MN 5,3 und 3,2 cm, GZ 5,6 cm / 3,4°, eine Wand 85 cm daneben (NO). Zwei Ecken 7 und 12 cm neben der echten.
+
+**Folgerung:**
+- Innerhalb eines sauberen Bezugsabschnitts ist die Erfassung brauchbar genau: Median 3,6 cm.
+- Die großen Fehler kommen aus den Brüchen zwischen den Abschnitten. Nach Relokalisierung oder Ankerwechsel liegt der Rahmen bis über 1 m und bis 20° daneben.
+- Ein Versatz am Suchrand (±20°, ±1,5 m) kann größer sein. In einem Abschnitt, der nur eine Wandrichtung sieht, ist die Verschiebung längs der Wand unbestimmt, und die Versatzzahl kann dadurch zu groß erscheinen. Der Median nach eigener Passung ist davon unberührt.
+- In Aufnahme 7 sind auch die Abschnitte selbst schlechter: großer Raum, Küchenzeile, lange Abschnitte mit möglicher Drift. Das ist noch nicht getrennt.
+- Wichtigster Hebel ist damit Punkt 7 (Erfassungen an den nächsten Anker binden) bzw. in 11.4 der 4-DoF-Versatz je Tracking-Abschnitt in der Ausgleichung, noch vor besseren Kanten.
+- Mit Laser-Höhe springt der Schätzer in Aufnahme 7 auf 21 Ecken; auch das ist die Instabilität aus 10.15.
+
 ## 11. Umbau: Kanten als Landmarken (Recherche 25.10. nachmittags)
 
 Anlass war Tobias' Vorgabe:
@@ -735,6 +768,38 @@ Drei Recherchen, Paper liegen in `paper/`. [V] heißt im Volltext gelesen; der R
 - C: Bodenkanten über die gemeinsame Gerade und h_f.
 - D: Umriss nach Cabral.
 - Wahrheit: den Raum von Aufnahme 6 in Raumaufmaß mit dem Laser aufnehmen. Ohne Wahrheit lässt sich nur Stabilität messen, nicht Richtigkeit.
+
+**11.6 Nachtrag 25.10. abends: ELSED-Port fertig.** `raumskizze-elsed.js` (720 Zeilen, Apache-2.0-Hinweis im Kopf) ist bitgleich zum C++-Original (mit `-ffp-contract=off` gebaut), geprüft auf 118 Bildern: Demo, synthetisch, 30 echte Kamerabilder, Hochskalierungen bis 861×1920. Laufzeit am Mac (Node) über alle Bilder von A6–A8 bei 287×640: Median 2,4–3,0 ms, 33–68 Segmente je Bild; bei 861×1920 hochskaliert 14,5 ms. Am Pixel nicht gemessen. `raumskizze-aufnahme.mjs --elsed` zeichnet die Segmente im Prüfstand.
+
+## 12. Vier große Projekte und SLAM (25.10. abends)
+
+Tobias hat alle vier Vorschläge beauftragt (ein Bezugsrahmen, Kanten als Landmarken, Umriss global, Tiefe), mit der Pflicht, **Inseln** (Pfeiler, freistehende Wandteile bis zur Decke) als eigene Ringe zu erfassen und zu exportieren. Seine Leitidee: „Wenn SLAM sauber gelöst ist, ist das Wände-Auslesen der leichte Teil.“
+
+**12.1 Entwurfs-Workflow** (fünf Teilentwürfe mit Messungen an A6–A8 gegen die Wahrheit, Synthese, zwei Kritiker, Überarbeitung). Entwürfe und Skripte im Scratchpad unter `design/`. Die wichtigsten Messungen:
+- *Bezugsrahmen:* Versatz je Tracking-Abschnitt plus Registrierung über Wände und Kamerastetigkeit senkt den Median aller Erfassungen zur echten Wand von 58,6 / 48,6 / 15,7 cm auf 20,3 / 34,7 / 8,3 cm (A6 / A7 / A8). Nur über Wände: A8 5,8 cm. Es gibt mehr Rahmenwechsel als gemeldete Brüche (A8: 81 cm ohne Meldung, als ein Anker zurückkam). Anker als feste Bindung verschlechtern (A6 20,3 → 32,0 cm).
+- *Landmarken:* Bodenkanten liegen in diesen Aufnahmen praktisch nie auf echten Wänden (Kamera nach oben, Kartons, Küche). Gier je Segment auf echter Wand: Median 2–3°.
+- *Umriss mit Inseln:* In der Simulation der Wohnküche mit Kanten aus dem ganzen Bild kommen beide Inseln in 100 % der Läufe mit richtiger Eckenzahl heraus (Eckenfehler außen Median 1,2 cm). Mit Erfassung nur am Fadenkreuz in keinem Lauf exakt.
+- *Tiefe:* Die aufgezeichnete ARCore-Tiefe ist auf weißen Wänden und an der Decke unbrauchbar (Median 80–139 cm daneben; 56–98 % der Deckenpunkte liegen hinter der Decke), brauchbar nur auf dem Parkett in 1–2 m (2–9 cm). Vorerst nur Freiraum am Boden.
+
+**12.2 SLAM-Recherche** (fünf Suchrichtungen, 30 Kernaussagen im PDF gegengeprüft: 12 bestätigt, 18 teilweise, keine falsch; Bericht `slam/BERICHT.md`, 21 neue Paper in `paper/`):
+- ARCore bleibt Ortung und Relokalisierung. Eine eigene visuell-inertiale Ortung im Browser scheidet aus (IMU nur 60 Hz im Hauptfaden, kein Belichtungszeitpunkt).
+- Darüber ein eigener 4-DoF-Faktorgraph im Worker: Abschnittsposen (mit Stützstellen gegen Drift), Wandlinien, Decken- und Bodenhöhe, Laserpunkte. Brüche sind Abschnittsgrenzen mit Max-Mixture-Brückenkante (Olson 2012), Folgekanten aus ARCore ohne Robustkern (VINS-Mono, COVINS-G), Wand-Zuordnung robust mit GNC.
+- Löser in Stufen wie LAGO: erst Gier, dann linear, dann wenige Gauss-Newton-Schritte; eigener dünnbesetzter LDLᵀ-Löser in JS (für GTSAM/g2o gibt es keinen WASM-Build).
+- Die Wände sind nicht der leichte Teil nach dem SLAM, sondern seine wichtigste Messung: Strukturlinien machen die Gier beobachtbar (StructVIO: Drift 0,96 → 0,29 % des Wegs) und verbinden die Abschnitte.
+- Mehrbild-Triangulation einer Deckenkante entartet bei Bewegung längs der Wand (LIMAP §3.1.1); die Höhe bleibt deshalb global.
+- Veröffentlichte Grundrisse vom Handy ohne LiDAR: 3–5 % Flächenfehler (GRIHA, magicplan), kein Paper mit Eckenfehlern im einstelligen Zentimeterbereich.
+
+**12.3 Architektur „Karte“** (Scratchpad `design/ARCHITEKTUR.md`, Version 3): Module M0 Grundlagen, M3 Segmente (Bild-Worker), M4 Abschnitte, M5 Landmarken (Atlas mit lokalen Karten je Abschnitt), M6 Ausgleich (einziger gemeinsamer Ausgleich im Bild-Fehlermaß), M7 Umriss (Min-Cut mit Inselhypothesen), M8 Ringe und Export, M9 Tiefe, M10 Kartenlauf (live und offline gleich), dazu T1 Offline-Treiber `raumskizze-karte.mjs`, T2 Metrik `raumskizze-metrik.mjs`, T3 Simulation `raumskizze-sim.mjs` und die App als Stand 6 mit Messmodus `?mess=1`. Neu gemessen in v3: Chrome liefert senkrechte ARCore-Ebenen.
+
+**Von Tobias bestätigte Festlegungen (25.10.):**
+1. Anker nur zum Einordnen eines Bruchs, keine Rahmenbindung (gemessen schlechter).
+2. Umriss per Zerlegung und Min-Cut mit Inselhypothesen statt Cabrals kürzestem Weg (Cabral kann keine Löcher).
+3. Deckenhohe Schrankzeile: Außenring auf der Front, Hinweis „Wand dahinter mit Laser messen“.
+4. `raumaufmass.html` bleibt unverändert; ungesehene Wände stehen im Raumnamen und in der Ergebnisliste.
+
+Offen: Spiegelprobe. Alle drei Aufnahmen passen nur gespiegelt auf die Raumaufmaß-Datei; ein Foto von Ecke A auf Nische N-O-P-Q und Pfeiler klärt, ob der Plan die Draufsicht oder ihr Spiegelbild ist.
+
+**12.4 Umsetzung:** läuft als Workflow (Phase 0 Grundlagen, Phase 1 neun Module parallel mit unabhängiger Abnahme, Zusammenführen und Messung an A6–A8 gegen die Wahrheit).
 
 ## Quellen
 

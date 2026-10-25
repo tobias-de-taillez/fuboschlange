@@ -34,6 +34,9 @@
 // --senk-js=datei setzt einen anderen Stand des Finders ein (auch wenn die Seite ihn hat).
 // --live-opt=k:v,... reicht Optionen an G.senkLive (z. B. aus:3, unten:false, tolDeg:1,
 // decke:0 = auch Kanten, die unter der Decke enden, wie die Seite mit ?senkdecke=0).
+// --elsed[=datei] laesst G.elsed (raumskizze-elsed.js, oder die Seite, wenn sie es traegt und
+// keine Datei genannt ist) auf jedes dekodierte Bild laufen: Segmente je Bild und Laufzeit,
+// im Pruefstand als eigene Ebene.
 import {readFileSync, writeFileSync, statSync, readdirSync, mkdirSync, existsSync} from 'node:fs';
 import {spawn, spawnSync} from 'node:child_process';
 import {resolve, join} from 'node:path';
@@ -59,6 +62,14 @@ if(flag('senk-js') || !hatSenk){
   if(existsSync(sj) && at>=0){ geo=geo.slice(0, at)+'{\n'+readFileSync(sj, 'utf8')+'\n}\n'+geo.slice(at); senkQuelle=String(sj).replace(/^file:\/\//, ''); }
   else if(!hatSenk) senkQuelle=null;
   else console.log(`--senk-js: ${flag('senk-js')} nicht gefunden – Senkrechte aus der Seite.`);
+}
+const ELSED=argv.some(a=>a==='--elsed' || a.startsWith('--elsed='));
+let elsedQuelle=null;
+if(ELSED){
+  if(/G\.elsed=/.test(geo) && !flag('elsed')) elsedQuelle='Seite';
+  else { const ej=flag('elsed') ? resolve(flag('elsed')) : new URL('./raumskizze-elsed.js', import.meta.url), mark='globalThis.RAUMSKIZZE=G;', at=geo.lastIndexOf(mark);
+    if(existsSync(ej) && at>=0){ geo=geo.slice(0, at)+'{\n'+readFileSync(ej, 'utf8')+'\n}\n'+geo.slice(at); elsedQuelle=String(ej).replace(/^file:\/\//, ''); }
+    else console.log(`--elsed: ${flag('elsed')||'raumskizze-elsed.js'} nicht gefunden – keine Segmente.`); }
 }
 new Function(pick('vendor')+'\n'+geo)();
 const G=globalThis.RAUMSKIZZE;
@@ -290,6 +301,7 @@ const VCODE={passt:'p', abweichend:'a', schwach:'s', leiste:'l', keine:'k'}, KCO
 
 // Dekodieren als Graustufen und Bild fuer Bild nachspielen.
 const stat={n:0, gleichKeine:0, gleich:0, abweichend:0, nurGeraet:0, nurNach:0, dPx:[], ms:[]}, nach=new Map();
+const el={ms:[], n:[]};
 const s2=new Map(), senk=new Map(), ov=new Map(), tm={s2:[], senk:[], dec:0};
 const lineAt0=(A,B)=>Math.abs(B[0]-A[0])<1e-9 ? NaN : A[1]+(B[1]-A[1])*(0-A[0])/(B[0]-A[0]);
 const angOf=(A,B)=>Math.atan2((B[1]-A[1])*h, (B[0]-A[0])*w)*180/Math.PI;
@@ -391,6 +403,8 @@ function extra(k, r, g, camTo, fy){
     if(o) o.sk=found;
   }
   if(LIVE && G.senkLive && G.verticalEdges) liveStep(k, r, g, camTo, fy, live, H, o);
+  if(ELSED && G.elsed){ const ta=performance.now(), segs=G.elsed(g, w, h); el.ms.push(performance.now()-ta); el.n.push(segs.length);
+    if(o) o.el=segs.map(s=>[...toPx(G.pixToNdc(s.x1, s.y1, w, h, fy)), ...toPx(G.pixToNdc(s.x2, s.y2, w, h, fy))]); }
   if(o) ov.set(k, o);
 }
 // --live: Senkrechte wie die App (senkFrame). Ausserhalb von Pause, Ersatzbezug und
@@ -734,6 +748,7 @@ const BERICHT_HTML=`<!doctype html>
   <label><input type="checkbox" data-l="s2" checked><i style="background:var(--passt);height:5px"></i>Stufe 2 passt <i style="background:var(--weicht);height:5px"></i>weicht ab <i style="background:var(--schwach)"></i>schwach/Leiste (je Bild, ohne die 3-aus-4-Glättung der App)</label>
   <label><input type="checkbox" data-l="s2g" checked><i style="background:repeating-linear-gradient(90deg,#fff 0 2px,transparent 2px 5px)"></i>Stufe 2 am Telefon (LOG.trk, Farbe = Urteil)</label>
   <label><input type="checkbox" data-l="lv" checked><i style="background:var(--passt)"></i>Senkrechte wie die App (--live): an Modellecke <i style="background:repeating-linear-gradient(90deg,#fff 0 2px,transparent 2px 6px)"></i>ohne</label>
+  <label><input type="checkbox" data-l="el" checked><i style="background:#22d3ee"></i>ELSED-Segmente (--elsed)</label>
   <label><input type="checkbox" data-l="senk" checked><i style="background:var(--s-ecke)"></i>Senkrechte ecke <i style="background:var(--s-durch)"></i>durch <i style="background:var(--s-unten)"></i>unten <i style="background:var(--s-weiter)"></i>weiter, <i style="background:var(--fehl)"></i>Fehlpeilung</label>
 </div>
 <main><div id="wrap"><img id="img" alt=""><canvas id="cv"></canvas></div></main>
@@ -769,6 +784,7 @@ function zeige(n){ i=Math.max(0, Math.min(F.length-1, n)); const f=F[i];
   g.moveTo(cv.width/2, cv.height/2-12*dpr); g.lineTo(cv.width/2, cv.height/2+12*dpr); g.stroke();
   const ln=(a,color,wd,dash=[],halo=0)=>{ if(!a) return; if(halo){ g.setLineDash([]); g.strokeStyle='rgba(0,0,0,.6)'; g.lineWidth=(wd+halo)*dpr; g.beginPath(); g.moveTo(a[0]*sx,a[1]*sy); g.lineTo(a[2]*sx,a[3]*sy); g.stroke(); }
     g.setLineDash(dash.map(x=>x*dpr)); g.strokeStyle=color; g.lineWidth=wd*dpr; g.beginPath(); g.moveTo(a[0]*sx,a[1]*sy); g.lineTo(a[2]*sx,a[3]*sy); g.stroke(); g.setLineDash([]); };
+  if(on.el) for(const s of f.el||[]) ln(s, '#22d3ee', 1.2);
   if(on.modell) for(const m of f.m||[]) ln(m, [col('--modell'), col('--luecke'), col('--ergaenzt'), 'rgba(255,255,255,.6)'][m[4]], m[4]===3 ? 1.2 : 1.8, m[4]===1 ? [6,5] : m[4]===2 ? [8,6] : []);
   if(on.senk) for(const s of f.sk||[]){ const k={e:'--s-ecke', d:'--s-durch', u:'--s-unten', w:'--s-weiter'}[s[4]]||'--s-unten';
     ln(s, s[6] ? col('--fehl') : col(k), 2, [], 2); g.fillStyle=s[6] ? col('--fehl') : col(k); g.font=\`\${11*dpr}px system-ui\`; g.fillText((KN[s[4]]||'?')+' z'+s[5], s[0]*sx+4*dpr, s[1]*sy-4*dpr); }
@@ -803,7 +819,7 @@ if(bericht){
     const frames=[];
     for(let k=0, i=1; byV.size && k<=Math.max(...byV.keys()); k+=every, i++){ const r=byV.get(k); if(!r) continue;
       const fr={i, k, t:r[C.t], f:r[C.flags], tempo:r[C.tempo], geraet:px(r[C.live]), nach:px(nach.get(k) ?? 0)}, o=ov.get(k);
-      if(o){ if(o.m.length) fr.m=o.m; if(o.s2.length) fr.s2=o.s2; if(o.sk && o.sk.length) fr.sk=o.sk.map(f=>[...toPx(f.top), ...toPx(f.bottom), KCODE[f.kind]||'?', Math.round(f.z), f.fehl ? 1 : 0]); if(o.lv) fr.lv=o.lv; }
+      if(o){ if(o.m.length) fr.m=o.m; if(o.s2.length) fr.s2=o.s2; if(o.sk && o.sk.length) fr.sk=o.sk.map(f=>[...toPx(f.top), ...toPx(f.bottom), KCODE[f.kind]||'?', Math.round(f.z), f.fehl ? 1 : 0]); if(o.lv) fr.lv=o.lv; if(o.el) fr.el=o.el; }
       const r2=s2.get(k); if(r2 && r2.ws.length) fr.s2v=r2.ws.map(x=>`W${x.id||'?'} ${x.v}${x.A && x.dev ? ' '+(100*Math.max(...x.dev.map(d=>Math.abs(d.m??0)))).toFixed(1)+' cm' : ''}`).join(', ');
       const gm=gOf.get(k); if(gm){ fr.g=[];
         for(const x of gm){ const y=R.trk[x.ti]; if(y.A) fr.g.push([...toPx(y.A), ...toPx(y.B), VCODE[y.v]||'k', x.same && x.vNach!==y.v ? 1 : 0]);
@@ -832,4 +848,6 @@ if(flag('json')){
 }
 console.log(auff.length ? `\nAuffällig:\n${auff.map(x=>'  - '+x).join('\n')}` : '\nAuffällig: nichts.');
 const sum=a=>a.reduce((x,y)=>x+y, 0)/1000;
+if(ELSED) console.log(el.n.length ? `ELSED (${elsedQuelle}) auf ${el.n.length} Bildern ${w}×${h}: Segmente je Bild Median ${q(el.n,0.5)}, 10–90 % ${q(el.n,0.1)}–${q(el.n,0.9)} · Zeit Median ${f2(q(el.ms,0.5))} ms, 90 % ${f2(q(el.ms,0.9))} ms, max ${f2(Math.max(...el.ms))} ms`
+  : `ELSED: nicht gelaufen (${elsedQuelle ? 'G.elsed fehlt' : 'keine Quelle'}).`);
 console.log(`Laufzeit: ${((performance.now()-tStart)/1000).toFixed(1)} s (Dekodieren und Nachspiel ${(tm.dec/1000).toFixed(1)} s: captureEdge ${sum(stat.ms).toFixed(1)} s, Schätzer ${Rp ? sum(Rp.ms).toFixed(1) : 0} s in ${Rp ? Rp.ms.length : 0} Läufen, Stufe 2 ${sum(tm.s2).toFixed(1)} s, Senkrechte ${sum(tm.senk).toFixed(1)} s${LIVE ? `, Senkrechte wie die App ${sum(lv.ms).toFixed(1)} s` : ''}${bericht ? `; Prüfstand ${((performance.now()-tB)/1000).toFixed(1)} s` : ''})`);
