@@ -480,6 +480,62 @@ Die wichtigsten Korrekturen:
 
 Der Schätzer ist unverändert, der Messaufbau bitgleich. Ende-zu-Ende geprüft mit einer synthetischen 2-Runden-Aufnahme aus dem App-Code: Stufe 2 stimmt zu 95 % mit dem Gerät überein, die Pose-Kette ist exakt, nichts auffällig.
 
+### 10.12 Vormittag 25.10.: Stand-Marker, volle Auflösung, alle Kanten live (Stand 3)
+
+Anlass war Tobias' Rückmeldung zur Aufnahme 5. Er wollte nicht nur die Kante am Fadenkreuz sehen, sondern alle erkannten Kanten auf einmal, auch die Senkrechten zwischen Boden und Decke. Dazu „lieber weniger fps, dafür bessere Erkennung“.
+
+**Stand-Marker.** Die Seite zeigt „Stand N · Datum, Uhrzeit“ unter dem Titel und in der AR-Statuszeile. Derselbe Wert steht im Protokoll (`LOG.stand`) und im Aufnahme-Manifest. `scripts/raumskizze-deploy.sh` zählt N hoch, prüft vorher den Selbsttest, committet, lädt per FTPS hoch und vergleicht den Hash dreifach (lokal, FTP-Rücklesen, HTTPS).
+- Stand 1: 10:42
+- Stand 2: 11:45, mit ?ds bis 1920 und Kopfzeile unter der Statusleiste
+- Stand 3: 12:35, alle Kanten live
+
+**Volle Auflösung.** Chrome liefert in der AR-Sitzung höchstens 861×1920. Das ist der ARCore-Kamerastrom (1920×1080), beschnitten aufs Bildschirmformat; 4K ist in WebXR nicht zugänglich. Mit `?ds=1920` arbeitet die Kantenerfassung am Fadenkreuz auf dem vollen Bild.
+- Die Fenster der Stufen-Regel wachsen mit (`sc = kurze Seite / 288`). Ohne das brach die Gardinenschiene bei 3× Auflösung in 3 von 4 Fällen.
+- Die Vorgabe bleibt 640, bis die Rechenzeit auf dem Pixel gemessen ist.
+
+**Alle Kanten live (Stand 3).**
+- *Stufe 2:* Jede gemessene Wand-Decke-Kante wird als Band unter der Modelllinie gezeichnet, grün wenn sie passt, orange wenn sie abweicht.
+- *Senkrechte:* `senkFrame` lässt den Finder aus 10.10 auf jedem 2. Bild laufen. `G.senkLive` zeigt eine Senkrechte erst, wenn sie in 3 von 5 Läufen an derselben Grundriss-Peilung auftaucht, und nur, wenn sie bis zur Decke reicht (mindestens 0,75 der Raumhöhe des Modells).
+- *Anzeige der Senkrechten:* grün an einer Modellecke, sonst hell gepunktet. Zurückgesetzt wird bei Ortungslücken und nach mehr als 1 s ohne Lauf.
+- *Schalter:* `?senk=0` schaltet ab. `?senkdecke=0` zeigt zum Vergleich auch Kanten, die unter der Decke enden.
+- *Verkleinern:* Bei `?ds` > 640 rechnet der Finder auf dem verkleinerten Bild (`G.lumaKlein`, Kastenmittel mit ganzem Faktor, 861×1920 → 287×640). Seine Pixelmaße sind auf 640 abgestimmt, und die Rechenzeit bleibt so wie bei 640. Die volle Auflösung hilft also dem Fadenkreuz und Stufe 2, den Senkrechten noch nicht.
+
+**Warum der Deckenfilter.** Ohne ihn lagen auf Aufnahme 5 rund 95 % der gezeigten Senkrechten auf Möbeln, und sie wurden von Boden bis Decke gezeichnet. Das war irreführend.
+
+| Messung | ohne Filter | mit Filter |
+|---|---|---|
+| Aufnahme 5: gezeigte Senkrechte je Bild | 2,99 | 0,10 |
+
+Was mit Filter bleibt, ist ehrlich, aber spärlich:
+- In 92 % der Bilder steht keine Senkrechte.
+- Von den gezeigten sind 87 % hell, also ohne Modellecke.
+- Gegen den Endstand sind 9 % (±1,5°) bzw. 36 % (±3°) der grünen an einer echten Ecke.
+- Finder und Filter brauchen am Mac im Median 3,5 ms je Lauf.
+
+Smoke-Test der ganzen Bildschleife, DOM-frei mit gerenderten Bildern, alle Läufe ohne Ausnahme:
+
+| Szene | gezeigt je Bild | grün | davon an wahrer Ecke | hell | davon an wahrer Ecke |
+|---|---|---|---|---|---|
+| Nische | 0,45 | 304 | 304 | 84 | 84 |
+| Nische, Wand 10 cm versetzt | 0,58 | 570 | 570 | 84 | 84 |
+| Wohnraum | 0,28 | 18 | 0 | 216 | 138 |
+
+- Im Wohnraum ist Grün an einer Modellecke, die keine echte Ecke ist; das Modell ist dort noch offen. Grün heißt also „liegt an einer Ecke des aktuellen Modells“, nicht „echte Ecke“.
+- In der versetzten Szene erkennt Stufe 2 die Abweichung: 288 Bilder „abweichend“, alle Marken ≤ 1 px neben der wahren Kante.
+
+Gegenprüfungen:
+- Messaufbau bitgleich bis auf die Zeitspalte.
+- Selbsttest grün, mit Check der Abbildung durch `lumaKlein`.
+- Selbsttest bei 3× Renderauflösung grün bis auf zwei Aufbau-Artefakte der Kopie. Die gerenderte Raumecke wird dort über f=3 gefunden (Anteil Deckenhöhe 1,00).
+
+**Offen, nach Wirkung:**
+1. Rechenzeit von Finder und Stufe 2 bei `?ds=1920` auf dem Pixel messen (`LOG.timings`). Danach entscheiden, ob 1920 die Vorgabe wird.
+2. Finder für die volle Auflösung abstimmen, statt zu verkleinern.
+3. ARCore-Vertikalebenen (bis 9 erkannt, ungenutzt) als Wandmessung.
+4. Fliesenspiegel an Wand und Boden: Fluchtpunkte und Ebenen-Homographie aus dem Fugengitter, als Offline-Prototyp an einer Küchenaufnahme.
+5. Erfassungen an den nächsten Anker binden, weil die ARCore-Korrekturen örtlich sind.
+6. Luma-Bereich im Werkzeug angleichen (Video gegen Gerät, Steigung 1,16).
+
 ## Quellen
 
 Plattform:
