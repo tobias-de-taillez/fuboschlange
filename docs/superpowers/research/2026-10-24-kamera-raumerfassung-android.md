@@ -536,6 +536,82 @@ Gegenprüfungen:
 5. Erfassungen an den nächsten Anker binden, weil die ARCore-Korrekturen örtlich sind.
 6. Luma-Bereich im Werkzeug angleichen (Video gegen Gerät, Steigung 1,16).
 
+### 10.13 Aufnahme 6 (Pixel 9 Pro, 15:17, Stand 3)
+
+Die Sitzung lief ohne Parameter, also mit `ds=640`. Punkt 1 aus 10.12 (Rechenzeit bei 1920) ist damit **nicht** beantwortet.
+
+Die Aufnahme im Überblick:
+- Raum im Ausbau: graue Putzwände, Kabel hängen von der Decke.
+- 118 s, 153 Erfassungen.
+- 5 Wände, nicht geschlossen; von Hand trotzdem abgeschlossen (22,5 m²).
+- Laser-Höhe 2416 mm.
+
+**Rechenzeit am Gerät bei 640.** Das ist die erste Messung auf dem Pixel und die Messlatte für 1920.
+
+| Stufe (`LOG.timings`) | Median | 90 % | max |
+|---|---|---|---|
+| Verkleinern (`small`) | 4,3 ms | 6,3 ms | 15,5 ms |
+| Kante am Fadenkreuz (`snap`) | 13,8 ms | 19,3 ms | 59,4 ms |
+| Stufe 2 (`track`) | 1,5 ms | 2,8 ms | 12,3 ms |
+| Senkrechte, Finder und Filter (`senk`) | 10,1 ms | 14,8 ms | 53,9 ms |
+| Schätzer im Worker (`solve`) | 34 ms | 69 ms | 113 ms |
+
+- Ausgewertet wird jedes 3. XR-Bild (alle 100 ms), und zwar synchron in `onFrame`. Bei 30 Bildern/s hat dieses Bild 33 ms.
+- Im Median braucht es zusammen etwa 25 ms (Senkrechte nur jedes 2. Mal). Die 90-%-Werte summieren sich aber schon auf rund 40 ms.
+- Direkt vergleichbare Kennzahl für 1920 ist die gelieferte Bildrate: (3289 ok + 241 verloren) / 118 s = 29,9 Bilder/s.
+- Der Finder ist auf dem Pixel 2,8× langsamer als am Mac (3,6 ms).
+
+**Senkrechte live.**
+- 0,73 gezeigt je Bild, davon 94 % hell; Flackern 0,86 Wechsel/s.
+- Aufnahme 5 hatte 0,10 je Bild, war aber ein anderer Raum ohne hängende Kabel. Ein Rückschritt des Deckenfilters lässt sich daraus nicht ablesen.
+
+Was unter den hellen Senkrechten liegt: 24 zufällig gezogene Bilder mit hellen Senkrechten, 44 Linien, von Hand im Prüfstand eingeordnet.
+
+| Was darunter liegt | Linien |
+|---|---|
+| hängendes Kabel | 16 Linien (36 %) an 2–3 Kabeln |
+| echte Raumecke oder Pfeilerkante, im Live-Modell fehlend oder versetzt | 15 Linien (34 %) an 4–5 Ecken und 1 Pfeilerkante |
+| im 288×640-Bild keine Kante zu sehen, meist neben einem Kabel oder einer Ecke | 13 Linien (30 %) |
+
+Die Bilder liegen oft dicht beieinander und zeigen dieselben Gegenstände. Die Anteile zählen Linien, nicht Gegenstände, und sind darum grob.
+
+Folgerungen:
+- *Hell heißt hier nicht Möbel.* Ein Drittel der Linien liegt an echten Ecken, die dem offenen Modell fehlen (5 Wände, 2 Ecken ergänzt) oder einige Pixel neben der Modellecke liegen. Die Kennzahl „hell an einer Ecke des Endstands“ (15 % / 32 %) ist nur eine Untergrenze, weil der Endstand selbst offen ist.
+- *Kabel sind eine eigene Fehlerklasse.* Ein Kabel ist eine dünne dunkle Linie mit zwei Gegenkanten dicht nebeneinander, leicht gewellt. Es reicht bis zur Decke und kommt so durch den Deckenfilter.
+- *Linien neben dem Kabel sind wahrscheinlich das Kabel selbst.* `G.senkLive` setzt jede Senkrechte auf die erste Modellwand entlang des Strahls. Ein Kabel vor der Wand landet so an der falschen Stelle und erscheint aus einem anderen Blickwinkel versetzt. Ein Teil der Linien ohne sichtbare Kante gehört also vermutlich auch zu den Kabeln.
+- *Für eine Kabel-Regel reicht 10.3 nicht.* Das Stufenmaß dort (`G.stepAlong`) zieht Stufen nur vor; gibt es keine Stufe, bleibt eine Linie wählbar. Für Senkrechte müsste ein Linienprofil verworfen werden.
+- *Grün ohne Ecke:* Zweimal stand Grün auf glatter Wand oder neben der echten Ecke. Das Modell hat dort eine Ecke, die Wand nicht.
+
+**Bezugssprünge.**
+- Zwei große Sprünge: 75,1 s mit 98 cm / 17,5° und 121,9 s mit 96 cm / 6,9°.
+- Das Netz konnte beide nicht einordnen (Messanker zu jung).
+- Den Abstand in Stufe 2 erklären sie nicht. Der Abstand Kante–Modell (sichere Stichproben am Gerät) liegt in den drei Abschnitten bei 9,2 / 9,5 / 7,9 cm (Median, n = 8 / 6 / 20), also schon vor dem ersten Sprung so hoch. Bei n = 8 ist das ein Hinweis, kein Beleg.
+- Die Kamerahöhe über dem Bezug läuft über die Sprünge fast stetig weiter. Die Stufen sind klein: höchstens 5 cm bei 75 s, 2,4 cm beim Höhensprung des Bezugs bei 103 s (Ty −1,283 → −1,387), keine bei 122 s.
+- Stufe 2 insgesamt: Abstand Median 8,5 cm, 90 % 23,6 cm, bei tolM = 3 cm. Daher kaum „passt“: 11 von 607 Wandurteilen im Nachspiel, 2 von 384 Bildern am Gerät.
+
+**Höhe.**
+- Laser 2,416 m, Parallaxe 2,288 ± 0,016 m, Unterschied 12,8 cm.
+- Das liegt unter der Schwelle der Kreuzprobe (15 cm), darum kam in der App kein Hinweis.
+
+Zwei Erklärungen sind möglich, die Daten trennen sie nicht:
+- Der Laser wurde an anderer Stelle gemessen oder falsch eingetippt.
+- Der Bodenbezug sitzt falsch: Die erste ARCore-Bodenebene lag 14 cm unter dem Anker (38,0 s: −1,395 gegen −1,254). Bei 44–50 s stimmen Ebene und Anker aber überein (−1,26); danach meldet ARCore kaum noch eine Bodenebene. Weil die Bezugsstufen klein sind (siehe oben), müsste ein solcher Versatz von Anfang an bestehen.
+
+**Gerät gegen Nachspiel.**
+- Stufe-2-Urteil gleich in 94 % (304 Stichproben im selben Bild).
+- Kante am Fadenkreuz gleich in 65 % aller Bilder, 77 % der sicheren.
+- Luma-Steigung wieder 1,17 (Punkt 6).
+
+**Offen, nach Wirkung (ersetzt die Liste in 10.12):**
+1. Sitzung mit `?ds=1920` aufnehmen (`https://raumaufmass.irazari-te.ch/raumskizze-probe.html?ds=1920`). Messlatte sind die Tabelle oben und die 29,9 Bilder/s.
+2. Kabel-Regel für Senkrechte (ein Linienprofil mit zwei Gegenkanten verwerfen), am Prüfstand dieser Aufnahme messen.
+3. Prüfen, ob helle Senkrechte an echten Ecken dem Schätzer als Eckenhinweis dienen können (heute nur Anzeige).
+4. Finder für die volle Auflösung abstimmen, statt zu verkleinern.
+5. ARCore-Vertikalebenen als Wandmessung.
+6. Fliesenspiegel als Offline-Prototyp an einer Küchenaufnahme.
+7. Erfassungen an den nächsten Anker binden. Diese Aufnahme hat zwei Sprünge von etwa 1 m, die das Netz nicht einordnen konnte.
+8. Luma-Bereich im Werkzeug angleichen.
+
 ## Quellen
 
 Plattform:
