@@ -111,6 +111,7 @@
 
 <h1>Raumskizze per Kamera</h1>
 <div class="sub">Probe: Wände aus der Wand-Decke-Kante, Ecken als Linienschnitt. Ergebnis geht als Skizze an Raumaufmaß.</div>
+<div class="sub" id="stand"></div>
 
 <div class="card">
   <h2>Stufe 0 · Gerät</h2>
@@ -2149,12 +2150,16 @@ const Q=new URLSearchParams(location.search);
 const APP_URL=(Q.get('app') || 'https://raumaufmass.irazari-te.ch/').replace(/#.*$/,'');
 const DS=Math.max(240, Math.min(1280, Number(Q.get('ds'))||640));
 const FARBEN_KLAR=Q.get('farben')==='klar';
+// Stand der Seite: Nummer und Zeitpunkt des Hochladens. Setzt
+// scripts/raumskizze-deploy.sh - nicht von Hand aendern.
+const STAND={nr:0, zeit:'2026-10-25T11:00:00+01:00'};
+const standText=()=>`Stand ${STAND.nr} · ${new Date(STAND.zeit).toLocaleString('de-DE', {day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit'})}`;
 
 const T0=performance.now();
 const now=()=>+((performance.now()-T0)/1000).toFixed(3);
 // Alles, was die Auswertung braucht: je Durchlauf Sitzung, Boden, Ereignisse
 // (mit Tipp-Zeiten), Erfassungen, Zeiten, Ebenen, Tracking, Ankerweg.
-const LOG={probe:'raumskizze-probe', started:new Date().toISOString(), url:location.href,
+const LOG={probe:'raumskizze-probe', stand:STAND, started:new Date().toISOString(), url:location.href,
   ua:navigator.userAgent, ds:DS, caps:{}, runs:[], ...freshRun()};
 const ev=(type,data={})=>LOG.events.push({t:now(), type, ...data});
 const median=a=>{ if(!a.length) return null; const s=[...a].sort((p,q)=>p-q); return s[s.length>>1]; };
@@ -3515,6 +3520,7 @@ function stats(){
   const fps=S.fps.length ? S.fps.reduce((a,b)=>a+b, 0)/S.fps.length : 0;
   const f=S.floorCand;
   const parts=[
+    ['Stand', String(STAND.nr)],
     ['Tracking', S.track],
     ['Boden', S.anchor ? 'Anker' : S.floorY!==null ? 'ohne Anker' : f ? `${f.camH.toFixed(2)} m unter Kamera (${f.ang.toFixed(1)}°)` : 'suche …'],
     ['Bild', S.camSize ? `${S.camSize[0]}×${S.camSize[1]}` + (S.small ? `→${S.small[0]}×${S.small[1]}` : '')
@@ -3767,7 +3773,7 @@ function recFlush(){
 }
 function recManifest(){
   const geo=LOG.session && LOG.session.geometry || null;
-  return {format:'raumskizze-aufnahme', version:1, name:REC.name, sitzung:LOG.started, lauf:REC.lauf,
+  return {format:'raumskizze-aufnahme', version:1, stand:STAND, name:REC.name, sitzung:LOG.started, lauf:REC.lauf,
     geraet:LOG.caps && LOG.caps.Browser || null, geometrie:geo, fehler:REC.err,
     bild:REC.img ? {breite:REC.img[0], hoehe:REC.img[1], gepolstert:[REC.img[2], REC.img[3]],
       zeilen:'wie readPixels: Zeile 0 = unten', flipY:!!S.flipY, luma:'0.299 R + 0.587 G + 0.114 B',
@@ -4046,6 +4052,7 @@ function showResult(res){
   const main=[], tech=[]; let head=null;
   const p=(t,cls)=>main.push([t,cls]), pt=(t,cls)=>tech.push([t,cls]);
   const s0=res.stage0;
+  pt(`Seite: ${standText()}`);
   pt(`Stufe 0: Kamerabild ${s0.camera ? s0.camera.join('×') : '–'}`
     + (s0.small ? `, verkleinert ${s0.small.join('×')}` : '')
     + ` · readPixels 256² ${ms(s0.roiMs)} · verkleinert ${ms(s0.smallMs)} · Kante ${ms(s0.snapMs)}`);
@@ -4283,6 +4290,7 @@ $('btnClose').onclick=()=>{
 if(Q.has('debug')) globalThis.PROBE={S, LOG, computeResult, showResult, requestSolve, applySolution, drawMiniMap, slim, solveOpt, makeSolver,
   REC, recStart, recFrame, recStop, recTar, trackFrame, trkSeg};
 $('start').disabled=true;
+$('stand').textContent=standText();
 stage0();
 })();
 </script>
