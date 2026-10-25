@@ -585,6 +585,12 @@ Folgerungen:
 **Bezugssprünge.**
 - Zwei große Sprünge: 75,1 s mit 98 cm / 17,5° und 121,9 s mit 96 cm / 6,9°.
 - Das Netz konnte beide nicht einordnen (Messanker zu jung).
+- Beide kamen 2,8 s bzw. 2,5 s nach dem Setzen eines Ersatzankers, also im Einschwing-Fenster (3 s). Die App ist ihnen gefolgt (nur Protokoll).
+- *Das Folgen war richtig.* Es war eine Relokalisierung von ARCore: Die Kamera drehte sich in local im selben Bild um −17,5° bzw. +8,3°. Ihre Blickrichtung im Bezug blieb stetig (76,1° → 76,0°; bei 122 s 1,5° in 0,1 s wie davor). Die Halte-Regel ab 3 s hätte hier einen Gierfehler von 17,5° eingebaut.
+- Übrig bleibt ein Lagesprung der Kamera im Bezug: 38,7 cm in 0,1 s bei 75,1 s (sonst etwa 5 cm), 10,2 cm bei 121,9 s. Die Korrektur von ARCore ist dort also nicht starr.
+- Den Lagesprung bei 75,1 s hätte der Pose-Sprung-Detektor gefunden (> 15 cm und > 1,5 m/s). Er prüft aber nach jedem Ankersprung nicht, weil der Zweig `S.prevCam` zurücksetzt.
+- *Fix gemessen und verworfen.* Der Detektor hätte die 4 Erfassungen der 2 s davor verworfen. Ohne sie rechnet der Schätzer 17 statt 6 Ecken und 14,8 statt 22,9 m². Das ist eher schlechter, vor allem aber kippt das Ergebnis schon, wenn 4 von 153 Erfassungen fehlen. Darum nicht in Stand 4.
+- Kriterium für später: Nicht das Alter des Ankers trennt Folgen von Halten, sondern ob die Kamera im neuen Bezug stetig bleibt (Gier und Lage). Hier war Folgen richtig, in Protokoll 3 Halten (dort sprang der Anker, die Kamera nicht).
 - Den Abstand in Stufe 2 erklären sie nicht. Der Abstand Kante–Modell (sichere Stichproben am Gerät) liegt in den drei Abschnitten bei 9,2 / 9,5 / 7,9 cm (Median, n = 8 / 6 / 20), also schon vor dem ersten Sprung so hoch. Bei n = 8 ist das ein Hinweis, kein Beleg.
 - Die Kamerahöhe über dem Bezug läuft über die Sprünge fast stetig weiter. Die Stufen sind klein: höchstens 5 cm bei 75 s, 2,4 cm beim Höhensprung des Bezugs bei 103 s (Ty −1,283 → −1,387), keine bei 122 s.
 - Stufe 2 insgesamt: Abstand Median 8,5 cm, 90 % 23,6 cm, bei tolM = 3 cm. Daher kaum „passt“: 11 von 607 Wandurteilen im Nachspiel, 2 von 384 Bildern am Gerät.
@@ -593,8 +599,8 @@ Folgerungen:
 - Laser 2,416 m, Parallaxe 2,288 ± 0,016 m, Unterschied 12,8 cm.
 - Das liegt unter der Schwelle der Kreuzprobe (15 cm), darum kam in der App kein Hinweis.
 
-Zwei Erklärungen sind möglich, die Daten trennen sie nicht:
-- Der Laser wurde an anderer Stelle gemessen oder falsch eingetippt.
+Tobias hat bestätigt, dass die 2416 mm in genau diesem Raum gemessen sind. Der Fehler liegt also auf der Seite der Kamera. Zwei Erklärungen sind möglich, die Daten trennen sie noch nicht:
+- Die Parallaxe ist verzerrt. Der Messaufbau zeigt ohne Laser 90 % der Fehler unter 12–15 cm; 12,8 cm liegt am Rand. Mit Laser bleibt der Schätzer bei 2,377 m, 3,9 cm neben einer Vorgabe von 5 mm. Die Erfassungen widersprechen der Höhe also deutlich.
 - Der Bodenbezug sitzt falsch: Die erste ARCore-Bodenebene lag 14 cm unter dem Anker (38,0 s: −1,395 gegen −1,254). Bei 44–50 s stimmen Ebene und Anker aber überein (−1,26); danach meldet ARCore kaum noch eine Bodenebene. Weil die Bezugsstufen klein sind (siehe oben), müsste ein solcher Versatz von Anfang an bestehen.
 
 **Gerät gegen Nachspiel.**
@@ -609,8 +615,25 @@ Zwei Erklärungen sind möglich, die Daten trennen sie nicht:
 4. Finder für die volle Auflösung abstimmen, statt zu verkleinern.
 5. ARCore-Vertikalebenen als Wandmessung.
 6. Fliesenspiegel als Offline-Prototyp an einer Küchenaufnahme.
-7. Erfassungen an den nächsten Anker binden. Diese Aufnahme hat zwei Sprünge von etwa 1 m, die das Netz nicht einordnen konnte.
+7. Erfassungen an den nächsten Anker binden. Diese Aufnahme hat einen Lagesprung von 39 cm nach einer Relokalisierung, die die App sonst richtig übernommen hat.
 8. Luma-Bereich im Werkzeug angleichen.
+
+### 10.14 Stand 4 (25.10., 16:21)
+
+**Inhalt:** Helle Senkrechte werden standardmäßig nicht mehr gezeichnet, nur noch grüne an einer Modellecke. Mit `?senkhell=1` erscheinen sie wieder.
+- Gerechnet wird unverändert: `senkFrame`, `G.senkLive` und `LOG.timings.senk` laufen wie in Stand 3. So bleiben die Zeiten am Pixel und das Nachspiel mit `--live` vergleichbar mit Aufnahme 6.
+- Auf Aufnahme 6 heißt das: statt 0,73 Senkrechten je Bild noch etwa 0,04 (nur die 6 % grünen).
+- Der Hilfetext auf der Startseite nennt nur noch die grünen.
+
+**Nicht enthalten:** der Sprung-Fix. Der zuerst geplante Fix (große Sprünge im Einschwing-Fenster halten statt folgen) beruhte auf einem Vorzeichenfehler in der Auswertung. Er hätte bei 75 s 17,5° Gierfehler eingebaut. Der engere Fix (Pose-Sprung-Prüfung nach einem übernommenen Sprung) ist gemessen und verworfen, siehe 10.13.
+
+**Prüfungen:**
+- Selbsttest grün.
+- Nachspiel von Aufnahme 6 unverändert.
+- Seite lokal ohne Konsolenfehler.
+- Live per Deploy-Skript: Hash dreifach gleich (sha256 0527ab90), Stand 4 auf der Seite.
+
+**Neuer Befund aus der Prüfung:** Das Ergebnis des Schätzers kippt bei kleinen Änderungen am Pool. Fehlen in Aufnahme 6 nur 4 von 153 Erfassungen, werden aus 6 Ecken (22,9 m²) 17 Ecken (14,8 m²). Das gehört nach oben auf die Liste: Eine Skizze, die an 4 Erfassungen hängt, ist nicht verlässlich.
 
 ## Quellen
 
