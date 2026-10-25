@@ -417,6 +417,22 @@ Grenzen (synthetisch):
 
 **Ergebnisansicht:** Fläche, Ecken und Höhe stehen jetzt zuerst, danach nur die Hinweise, Technik aufklappbar. Die Wandtabelle trägt die Eckbuchstaben des Plans, alle Zahlen haben Dezimalkomma.
 
+### 10.8 Prüfstand für Aufnahmen (offline)
+
+`node raumskizze-aufnahme.mjs <aufnahme.tar> --bericht=<ordner>` spielt die Sitzung am Mac nach:
+- den Schätzer wie der Worker (Pool, Takt aus den Laufzeiten);
+- je Bild das Live-Modell mit der Pose des Bildes;
+- Stufe 2, `captureEdge` und den Senkrechten-Finder (Prototyp, nur im Werkzeug) auf den dekodierten Bildern.
+
+Er vergleicht mit dem, was das Gerät fand, und schreibt alles Unstimmige unter „Auffällig“: Pose-Kette, Bildzahl, Stromgröße, Luma-Pegel, Zuordnung Bild ↔ Zustand und fremdes Protokoll.
+
+Synthetisch belegt mit 5-min-Aufnahmen, die der App-Code selbst im Harness erzeugt:
+- Verlustfrei kodiert ist das Nachspiel exakt (`captureEdge` 480/480, Stufe 2 218/218).
+- Mit H.264 1,5 Mbit/s stimmen Stufe 2 zu 95–98 % und `captureEdge` zu 87–94 % mit dem Gerät überein, im Störer-Raum nur zu etwa 70–89 %.
+- Ob die Videoqualität für Detektor-Tests reicht, zeigt die erste echte Aufnahme. Sonst Bitrate erhöhen (`?vbr=`) oder verlustfreie Luma-Bilder bei Erfassungen mitschreiben.
+
+Der Senkrechten-Finder liegt im Störer-Raum bei 195 von 219 „ecke“-Urteilen falsch. Er bleibt vorerst im Werkzeug.
+
 ## Quellen
 
 Plattform:
