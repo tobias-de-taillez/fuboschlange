@@ -445,6 +445,24 @@ Das Netz setzt alle 12 s einen Messanker unter der Kamera, höchstens 8. Es prot
 
 Bezug, Erfassung und Auswertung bleiben unverändert. Das zeigt ein A/B-Vergleich gegen den Stand davor, Bild für Bild in 28 Szenarien. Auswertung mit `node raumskizze-anker.mjs <tar|protokoll.json>`. Erst wenn echte Sitzungen den Fall klären, ändert sich die Steuerung, also folgen oder halten und Umrechnen mit dem gemessenen Versatz.
 
+### 10.10 Senkrechten-Finder (nur im Werkzeug)
+
+Der Prototyp lag im Störer-Raum bei 71 % Fehlpeilungen. Die Überarbeitung hat vier Teile:
+- Deckenprobe je Grundrissrichtung.
+- Schwelle aus der Nullverteilung.
+- „ecke“ nur mit zwei Seiten und konkavem Keil.
+- Stütze auf gleitendem Mittel.
+
+Gemessen gepaart an der Renderer-Wahrheit, mit getrennten Übungs- und Prüfmengen und eigenen Stressräumen der Gegenprüfung (Kamin, Nische, Erker, Hängeschränke, Altbau, Seitenlicht):
+
+| Menge | Fehlpeilungen |
+|---|---|
+| Prüfmenge | 59 → 12 % |
+| Stressräume | 65 → 19 % und 70 → 32 % (gepoolt 26 %) |
+| 5-min-Aufnahme | 71 → 20 % |
+
+Die Treffer an konkaven Ecken verallgemeinern nicht (gepoolt −4 Prozentpunkte). Ecken an Wandstücken ≤ 0,5 m werden nie „ecke“, Außenecken absichtlich nie. Für eine spätere Eckenstütze zählen wenige Fehlpeilungen mehr, und sie muss einseitige Peilungen über mehrere Bilder zulassen. Ans Gerät erst nach echten Aufnahmen.
+
 ## Quellen
 
 Plattform:
