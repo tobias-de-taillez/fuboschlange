@@ -394,6 +394,29 @@ Ausgelassene Gruppen mit mindestens 3 Erfassungen werden genannt. Sie können ec
 3. **Ablage-Test für die senkrechte Drift:** Das Telefon zu Beginn und am Ende je mindestens 10 s an dieselbe feste Stelle legen, aufrecht angelehnt, Kamera frei. Die Differenz der beiden Ruhephasen im Zustand je Bild (Pose gegen Bezug) ist die senkrechte Drift der Sitzung. Lohnt der Boden in der Auswertung? Das hängt genau davon ab: bei ≳ 5 cm ja, bei 2–3 cm nicht.
 4. **Wahrheit:** Den Raum danach in Raumaufmaß mit dem Laser aufnehmen und den Export zur Aufnahme legen. Erst damit werden Aufnahmen zu Trainings- und Prüfdaten.
 
+### 10.7 Stufe 2: jede Modellwand live im Bild gemessen (nur Anzeige)
+
+`G.trackModelEdges` sucht jede Modellwand quer zur Vorhersage im 288×640-Bild:
+- Grundlage ist dasselbe liveModel wie für die Modelllinie.
+- Gesucht werden 1D-Stufen, dazu eine Hough-Suche über Versatz und Neigung.
+- Verworfen werden Linienprofile und Leistenoberkanten.
+
+Das Vorbild ist RAPiD mit vertauschten Rollen: Die Pose kommt von ARCore, gesucht sind die Wände (Harris & Stennett 1990; Drummond & Cipolla 1999; je Linie eine zusammengefasste Messung nach Smith et al. 2006).
+
+`G.trackJudge` liefert passt, weicht ab, schwach, Leiste oder keine. „Passt“ heißt höchstens 3 cm oder 2 px bei z ≥ 15. „Weicht ab“ gilt nur, wenn es eindeutig ist: keine sichere Linie darüber und keine andere tragende Gerade auf der Vorhersage.
+
+Angezeigt wird je Wand eine kurze grüne oder orange Marke, mit Hysterese 3 von 4. Die Auswertung bleibt unberührt (Schätzer-Hash, Protokolle, Messaufbau gleich). Die Rechenzeit liegt bei 0,04–0,13 × captureEdge.
+
+Die Gegenprüfung fand ein Orange auf einer Gardinenschiene bei richtigem Modell. Die Korrektur senkt das von 9 auf 0, insgesamt fällt „orange auf falscher Kante“ von 131 auf 89.
+
+Grenzen (synthetisch):
+- Grün bestätigt auch eine Regalfront oder Leiste, wenn das Modell dort liegt.
+- Der Anteil Orange hängt am Posenrauschen: 18/76 bei 1 cm/0,2°, 0 bei 3 mm/0,1°. `tolM` am Gerät mit `LOG.trk` abstimmen.
+
+**Farbsprache:** In der Vorgabe tragen Grün, Gelb und Orange je zwei Bedeutungen. `?farben=klar` färbt nur Urteile: grün passt, orange weicht ab, rot fehlt. Das Modell ist weiß und gestrichelt nach Unsicherheit, die Live-Kante türkis. Vergleichsbild: `2026-10-25-farben-vergleich.png` (oben passt, unten weicht ab; links Vorgabe, rechts klar). Die Entscheidung fällt am Gerät.
+
+**Ergebnisansicht:** Fläche, Ecken und Höhe stehen jetzt zuerst, danach nur die Hinweise, Technik aufklappbar. Die Wandtabelle trägt die Eckbuchstaben des Plans, alle Zahlen haben Dezimalkomma.
+
 ## Quellen
 
 Plattform:
