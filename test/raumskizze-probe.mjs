@@ -142,8 +142,10 @@ const inward=i=>{
 // ein Bild haengt an Wand 1 mit der Oberkante 15 cm unter der Decke.
 // flip: Zeile 0 ist oben statt unten - wie eine andersherum liegende
 // Kameratextur, fuer den y-Spiegel der App.
+// strip: Streifen an allen Waenden drop..drop+h unter der Decke, Helligkeit val oder
+// Wand+dv (Leiste, Schattenfuge); ceil/wall ueberschreiben Decke bzw. Waende.
 const SHELF={x0:3.4, x1:4.4, z0:0, z1:0.45, y1:HT};
-const render=(cam,seed,noise=2,flip=false,band=null)=>{
+const render=(cam,seed,noise=2,flip=false,band=null,strip=null)=>{
   const R=rng(seed), g=new Float32Array(IW*IH);
   for(let r=0;r<IH;r++) for(let u=0;u<IW;u++){
     const [x,y]=G.pixToNdc(u,r,IW,IH,flip);
@@ -155,6 +157,11 @@ const render=(cam,seed,noise=2,flip=false,band=null)=>{
     // d0..d1 Meter von der Wand - eine Linie, keine Stufe.
     if(band && val===204){ const [a,b]=[ROOM[band.i],ROOM[(band.i+1)%NW]], L=Math.hypot(b[0]-a[0],b[1]-a[1]);
       const dw=Math.abs((c[0]-a[0])*(b[1]-a[1])-(c[2]-a[1])*(b[0]-a[0]))/L; if(dw>=band.d0 && dw<=band.d1) val+=band.dv; }
+    if(strip && strip.ceil!=null && val===204) val=strip.ceil;
+    // ao: weicher Eckschatten (Rampe) an der Decke, h Meter breit, dvCeil Stufen an der Wand.
+    if(strip && strip.ao && tBest<Infinity){ let dm=Infinity; for(let i=0;i<NW;i++){ const [a,b]=[ROOM[i],ROOM[(i+1)%NW]], ex=b[0]-a[0], ez=b[1]-a[1];
+      const s=Math.max(0,Math.min(1,((c[0]-a[0])*ex+(c[2]-a[1])*ez)/(ex*ex+ez*ez))); dm=Math.min(dm, Math.hypot(c[0]-a[0]-s*ex, c[2]-a[1]-s*ez)); }
+      if(dm<strip.ao.h) val+=strip.ao.dvCeil*(1-dm/strip.ao.h); }
     for(let i=0;i<NW;i++){
       const [a,b]=[ROOM[i],ROOM[(i+1)%NW]];
       const ex=b[0]-a[0], ez=b[1]-a[1];
@@ -166,6 +173,9 @@ const render=(cam,seed,noise=2,flip=false,band=null)=>{
       if(s<0 || s>1 || py<0 || py>HT) continue;
       tBest=t; val=band && band.i===i && band.wall!=null ? band.wall : 198+(i%3)*2;
       if(i===1 && py>1.9 && py<2.45 && s>0.2 && s<0.55) val=150;
+      if(strip){ if(strip.wall!=null && val!==150) val=strip.wall;
+        if(py>HT-strip.drop-strip.h && py<=HT-strip.drop) val=strip.val ?? val+strip.dv;
+        if(strip.ao && HT-py<strip.ao.h) val+=strip.ao.dvWall*(1-(HT-py)/strip.ao.h); }
     }
     // Regal als Quader (nur die dem Raum zugewandte Front und Seiten zaehlen).
     for(const [axis,pos,lo1,hi1] of [['z',SHELF.z1,SHELF.x0,SHELF.x1],['x',SHELF.x0,SHELF.z0,SHELF.z1],['x',SHELF.x1,SHELF.z0,SHELF.z1]]){
@@ -176,6 +186,11 @@ const render=(cam,seed,noise=2,flip=false,band=null)=>{
     }
     g[r*IW+u]=val+(R()*2-1)*noise;
   }
+  // sharpen: unscharfe Maske wie in der Kamera-Pipeline (Ueberschwinger an Kanten).
+  if(strip && strip.sharpen){ const b=new Float32Array(g.length);
+    for(let r=1;r<IH-1;r++) for(let u=1;u<IW-1;u++){ let s=0; for(let dr=-1;dr<=1;dr++) for(let du=-1;du<=1;du++) s+=g[(r+dr)*IW+u+du]*(2-Math.abs(dr))*(2-Math.abs(du)); b[r*IW+u]=s/16; }
+    for(let r=1;r<IH-1;r++) for(let u=1;u<IW-1;u++){ const i=r*IW+u; b[i]=g[i]+strip.sharpen*(g[i]-b[i]); }
+    for(let r=1;r<IH-1;r++) for(let u=1;u<IW-1;u++) g[r*IW+u]=b[r*IW+u]; }
   return g;
 };
 // Eine Erfassung genau wie in der App: G.captureEdge mit dem ausgelieferten
@@ -690,6 +705,107 @@ if(G.overlayModel){
     chk('Overlay: Ring aus den Wandenden – Wand k auf ihrer Zeile, je Ecke eine Senkrechte, erste Wand der Zeitfolge an senk.first',
       !!sk.byEnds && onRow && M.verts.length===(s.corners||[]).length && sk.first>=0 && s.walls[sk.first].obs.includes(t0),
       `${M.rows.length} Zeilen, ${M.verts.length} Senkrechte, returned ${s.returned}, first ${sk.first}`);
+  }
+}
+
+// ------------------------- Stufe 2: Modellkanten im Bild verfolgen (nur Anzeige)
+// G.trackModelEdges sucht jede Modellwand im Bild, G.trackJudge urteilt wie die App.
+// Modell = wahre Waende (Ecke zu Ecke), wahlweise um dRho in den Raum (+) verschoben.
+if(G.trackModelEdges){
+  const modelTrue=(dRho=0, sRho=0.03)=>({H:HT, walls:ROOM.map((a,i)=>{ const b=ROOM[(i+1)%NW], n=inward(i);
+    return {k:i, key:[i], A:[a[0]+dRho*n[0], a[1]+dRho*n[1]], B:[b[0]+dRho*n[0], b[1]+dRho*n[1]], nIn:n, sRho, sTheta:0.5*Math.PI/180}; })});
+  // Gemessene Kante gegen die wahre Wand i (auf HT gehoben): Winkel und Abstand der Wandmitte.
+  const measErr=(cam,w,i)=>{ const ob=w && w.A ? G.obsFromNdc(PROJ,cam,w.A,w.B,HT,12) : null; return ob ? obsErr(ob,i) : {ang:Infinity, off:Infinity}; };
+  const fine=e=>e.ang<=1 && e.off<=0.03;
+  const tally=a=>{ const t={}; a.forEach(x=>t[x]=(t[x]||0)+1); return Object.entries(t).map(([k,v])=>k+' '+v).join(', '); };
+  // Je Wand die zwei Blicke des Rundgangs oben (4 cm unter die Kante gezielt der zweite).
+  const views=[]; for(let i=0;i<NW;i++) viewsFor(i).forEach((cam,j)=>views.push({i, cam, seed:9100+10*i+j}));
+  const run=(walls, model, strip, seed0, want)=>{ const J=[]; let wrong=0, n=0;
+    for(const v of views){ if(!walls.includes(v.i)) continue; n++;
+      const g=render(v.cam, seed0+v.seed, 2, false, null, strip), r=G.trackModelEdges(g,IW,IH,PROJ,v.cam,typeof model==='function' ? model(v) : model);
+      const w=r.walls.find(x=>x.k===v.i), j=G.trackJudge(w); J.push(j);
+      // Eine gemeldete Kante (passt / weicht ab) muss die Deckenkante sein - nie Leiste oder Fuge.
+      if((j==='passt' || j==='abweichend') && !fine(measErr(v.cam,w,v.i))) wrong++; }
+    return {n, J, hit:J.filter(j=>j===want).length, wrong}; };
+  const ALL=[0,1,2,3,4,5], FREE=[2,3,4,5];   // FREE: ohne Regal (Wand 0) und Bild (Wand 1)
+
+  // 1. Richtiges Modell: die Wand im Blick passt, keine Wand im Bild weicht ab.
+  { const a=run(ALL, modelTrue(), null, 0, 'passt');
+    let off=0; for(const v of views){ const r=G.trackModelEdges(render(v.cam, v.seed),IW,IH,PROJ,v.cam,modelTrue());
+      for(const w of r.walls) if(G.trackJudge(w)==='abweichend') off++; }
+    chk(`Verfolgung, richtiges Modell: Wand im Blick „passt“ (${a.n} Bilder)`, a.hit>=a.n-1 && a.wrong===0, tally(a.J)+(a.wrong ? ', '+a.wrong+' falsche Kante' : ''));
+    chk('Verfolgung, richtiges Modell: keine Wand im Bild „weicht ab“', off===0, off+' abweichend'); }
+  // 2. Modell 10 cm daneben (in den Raum und hinter die Wand), Unsicherheit 3 cm: weicht ab,
+  //    und die gemessene Kante ist die wahre. Das Gatter allein liesse das als 'ok' durch.
+  { const res=[0.10,-0.10].map(d=>run(FREE, modelTrue(d,0.03), null, 200, 'abweichend'));
+    chk('Verfolgung, Modell 10 cm daneben: „weicht ab“, gemessen die wahre Kante ±1° / ±3 cm',
+      res.every(a=>a.hit>=a.n-1 && a.wrong===0), res.map((a,k)=>(k ? 'hinter: ' : 'davor: ')+tally(a.J)+(a.wrong ? ', '+a.wrong+' falsch' : '')).join(' | ')); }
+  // 3. Leiste 10 cm unter der Decke (3 cm hoch, deutlich dunkler). Unsicheres Modell
+  //    (5 cm), damit sie im Suchstreifen liegt.
+  { const L={drop:0.10, h:0.03, val:160};
+    const a=run(FREE, modelTrue(0,0.05), L, 400, 'passt');
+    chk('Verfolgung, Leiste darunter: Deckenkante „passt“, nie die Leiste', a.hit>=a.n-1 && a.wrong===0, tally(a.J)+(a.wrong ? ', '+a.wrong+' falsch' : ''));
+    // Modell genau auf der gehobenen Leiste (als haette das Fadenkreuz sie erfasst):
+    // nie „passt“; gemeldet wird hoechstens die Deckenkante darueber.
+    const onLeiste=v=>{ const n=inward(v.i), [a0,b0]=[ROOM[v.i],ROOM[(v.i+1)%NW]], L0=Math.hypot(b0[0]-a0[0],b0[1]-a0[1]);
+      const d=Math.abs((v.cam[12]-a0[0])*(b0[1]-a0[1])-(v.cam[14]-a0[1])*(b0[0]-a0[0]))/L0, D=HT-v.cam[13], back=d*(L.drop)/(D-L.drop);
+      return modelTrue(-back,0.05); };
+    const b=run(FREE, onLeiste, L, 500, 'passt');
+    chk('Verfolgung, Modell auf der Leiste: nie „passt“, gemeldet höchstens die Deckenkante', b.hit===0 && b.wrong===0, tally(b.J)+(b.wrong ? ', '+b.wrong+' falsch' : ''));
+    // Decke so hell wie die Wand: die Deckenkante ist nicht zu sehen, nur die Leiste.
+    const c=run(FREE, modelTrue(0,0.05), {...L, ceil:200, wall:200}, 600, 'leiste');
+    chk('Verfolgung, Deckenkante unsichtbar, Leiste darunter: als Leiste erkannt, nichts gemeldet', c.hit>=c.n-1 && c.wrong===0, tally(c.J)+(c.wrong ? ', '+c.wrong+' falsch' : '')); }
+  // 4. Schattenfuge: 1,5 cm dunkle Fuge direkt unter der Decke. Ihre Unterkante liegt
+  //    keine 2 cm unter der Deckenkante - keine Leiste, die Deckenkante gilt. Wand
+  //    dunkler als die Decke: die Oberkante ist eine Stufe. (Mit der Leistenregel des
+  //    Prototyps - Gegenkante ab 1,5 px - fallen hier die fernen Blicke als Leiste aus.)
+  { const a=run(ALL, modelTrue(0,0.03), {drop:0, h:0.015, val:150, ceil:220, wall:185}, 700, 'passt');
+    chk('Verfolgung, Schattenfuge: Deckenkante „passt“, nie als Leiste verworfen', a.hit>=a.n-1 && a.wrong===0 && !a.J.includes('leiste'), tally(a.J)+(a.wrong ? ', '+a.wrong+' falsch' : ''));
+    // Decke und Wand gleich hell: die Fuge ist ein Linienprofil, keine Stufe - nichts zu
+    // messen. Darunter das Bild an Wand 1 darf dann nicht als „weicht ab“ gelten.
+    const b=run(ALL, modelTrue(0,0.03), {drop:0, h:0.015, dv:-45}, 800, 'passt');
+    chk('Verfolgung, Schattenfuge, Decke und Wand gleich hell: keine Leiste, keine falsche Kante', b.wrong===0 && !b.J.includes('leiste') && !b.J.includes('abweichend'),
+      tally(b.J)+(b.wrong ? ', '+b.wrong+' falsch' : '')); }
+  // 5. Weicher Eckschatten an Decke und Wand (10 cm), Bild geschaerft wie in der
+  //    Kamera-Pipeline: die Rampe ueber der Kante (Stufenmass ~2) ist keine Kante.
+  //    (Ohne die Grenze Stufenmass <= 1,7 nimmt die Verfolgung aus 2,1 m die Rampe,
+  //    6-8 cm daneben, oder wirft die Kante als Leiste weg.)
+  { const a=run(ALL, modelTrue(0,0.05), {drop:0, h:0, dv:0, ao:{h:0.10, dvWall:-14, dvCeil:-10}, sharpen:1, ceil:212, wall:198}, 900, 'passt');
+    chk('Verfolgung, weicher Eckschatten, geschärft: Deckenkante „passt“, nicht die Rampe', a.hit>=a.n-1 && a.wrong===0 && !a.J.includes('leiste'), tally(a.J)+(a.wrong ? ', '+a.wrong+' falsch' : '')); }
+  // 6. Rahmen: Verfolgungsmodell aus der Auswertung mit Drift (G.modelToLive, G.overlayModel,
+  //    G.trackModel). Die Vorhersage muss auf der Wandgeraden der Auswertung liegen, in den
+  //    Kamerarahmen abgebildet - und nicht auf der unabgebildeten. nIn zeigt in den Raum.
+  if(G.trackModel){
+    const RECT=[[0,0],[5,0],[5,4],[0,4]], base=stamp(sweepObs(RECT,41,{back:2})), T1=base[base.length-1].t;
+    const rotYp=(a,x,z)=>[Math.cos(a)*x+Math.sin(a)*z, -Math.sin(a)*x+Math.cos(a)*z];
+    const drift=ob=>{ const f=ob.t/T1, ps=2*Math.PI/180*f, tx=0.3*f, tz=-0.2*f, mv=r=>{ const o=rotYp(ps,r.o[0],r.o[2]), d=rotYp(ps,r.d[0],r.d[2]);
+      return {o:[o[0]+tx, r.o[1], o[1]+tz], d:[d[0], r.d[1], d[1]]}; }; return {...ob, ra:mv(ob.ra), rb:mv(ob.rb)}; };
+    const s=G.solveSweep(base.map(drift),{H:HT}), map=G.modelToLive(s,T1,0), M=G.overlayModel(s,map);
+    const cen=M.rows.reduce((q,r)=>[q[0]+r.span[0][0]/M.rows.length, q[1]+r.span[0][1]/M.rows.length],[0,0]);
+    const model=G.trackModel(s,M,cen), flat=new Float32Array(IW*IH).fill(200);
+    const lineDist=(cam,P,Q,pts)=>{ const sg=G.projectSegment(PROJ,cam,[P[0],s.H,P[1]],[Q[0],s.H,Q[1]]); if(!sg) return Infinity;
+      const a=G.ndcToPix(sg[0][0],sg[0][1],IW,IH,false), b=G.ndcToPix(sg[1][0],sg[1][1],IW,IH,false), d=[b[0]-a[0],b[1]-a[1]], L=Math.hypot(d[0],d[1]);
+      return Math.max(...pts.map(p=>{ const q=G.ndcToPix(p[0],p[1],IW,IH,false); return Math.abs((q[0]-a[0])*d[1]-(q[1]-a[1])*d[0])/L; })); };
+    let worst=0, raw=0, nW=0, side=0;
+    for(const w of model.walls){ const m=[(w.A[0]+w.B[0])/2,(w.A[1]+w.B[1])/2];
+      if((cen[0]-m[0])*w.nIn[0]+(cen[1]-m[1])*w.nIn[1]>0) side++;
+      const cam=lookAt([cen[0]+0.3*(m[0]-cen[0]),1.4,cen[1]+0.3*(m[1]-cen[1])],[m[0],HT,m[1]]);
+      const x=G.trackModelEdges(flat,IW,IH,PROJ,cam,model).walls.find(q=>q.k===w.k); if(!x) continue; nW++;
+      const l=s.walls[w.k].line, pts=[x.pred.A,x.pred.B];
+      worst=Math.max(worst, lineDist(cam, map(l.c), map([l.c[0]+l.u[0],l.c[1]+l.u[1]]), pts));
+      raw=Math.max(raw, lineDist(cam, l.c, [l.c[0]+l.u[0],l.c[1]+l.u[1]], pts)); }
+    chk('Verfolgung: Vorhersage im Kamerarahmen (Drift umgekehrt) auf der Wandgeraden, nIn in den Raum',
+      nW===model.walls.length && nW>=4 && worst<0.5 && raw>3 && side===nW, `${nW} Wände, ${f3(worst)} px (ohne Umkehrung ${f3(raw)} px), nIn ${side}/${model.walls.length}`);
+    // 7. Ring aus den Wandenden (nur wenn die Seite ihn hat): Waende in beliebiger Reihenfolge
+    //    erfasst - der Umlaufsinn des Rings ist dann nicht die Zeitfolge; nIn muss trotzdem
+    //    in den Raum zeigen (L-Raum, auch an der einspringenden Ecke).
+    const per=ROOM.map((_,i)=>sweepObs(ROOM,81+i,{skip:ROOM.map((_,k)=>k).filter(k=>k!==i), back:0}));
+    const sr=G.solveSweep(stamp([3,0,4,1,5,2].flatMap(i=>per[i])),{H:HT});
+    if(sr.senk && sr.senk.byEnds && sr.corners){
+      const mr=G.trackModel(sr, G.overlayModel(sr), [1,1]);
+      const inn=mr.walls.filter(w=>{ const m=[(w.A[0]+w.B[0])/2,(w.A[1]+w.B[1])/2]; return inRoom(m[0]+0.1*w.nIn[0], m[1]+0.1*w.nIn[1]) && !inRoom(m[0]-0.1*w.nIn[0], m[1]-0.1*w.nIn[1]); }).length;
+      chk('Verfolgung: Ring aus den Wandenden (Wände durcheinander erfasst) – nIn zeigt in den Raum', mr.walls.length===NW && inn===NW, `${inn}/${mr.walls.length}`);
+    }
   }
 }
 

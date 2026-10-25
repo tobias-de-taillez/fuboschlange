@@ -1802,6 +1802,326 @@ G.clipNdc=(a,b,m=1)=>{
   return [[a[0]+t0*dx, a[1]+t0*dy], [a[0]+t1*dx, a[1]+t1*dy]];
 };
 
+// ------------------------------- Stufe 2: Modellkanten im ganzen Bild verfolgen
+// Nur fuer die Anzeige (Gegenpruefung kantensuche: Einspeisen in die Auswertung brachte
+// ~0). Statt nur am Fadenkreuz wird jede Modellwand gesucht, die im Bild liegt (RAPiD,
+// Harris 1992; Drummond & Cipolla 2002; je Linie eine zusammengefasste Messung wie Smith
+// et al. 2006): ihre Deckenkante projizieren, an Stuetzstellen quer zur Linie das
+// Helligkeitsprofil nach Kanten absuchen (1D, Streifen aus der Unsicherheit der Wand),
+// aus den Treffern Geraden bilden (Hough ueber Versatz und Neigung), unter den tragenden
+// die oberste nehmen (wie snapLine), Linienprofile (Fugen) und Rampen (weicher
+// Eckschatten, Stufenmass > 1,7) verwerfen, die Oberkante eines schmalen Bands (Leiste,
+// Gegenkante 2-5 cm darunter) nicht melden - eine Schattenfuge (< 2 cm) bleibt Kante -,
+// Guete mit dem z-Test wie lineSupport, Gatter gegen die Vorhersage aus der Kovarianz.
+// Kosten je Wand ~ Stuetzstellen x Streifenbreite.
+const segCross=(p1,p2,p3,p4)=>{
+  const d=(a,b,c)=>(b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]);
+  const d1=d(p3,p4,p1), d2=d(p3,p4,p2), d3=d(p1,p2,p3), d4=d(p1,p2,p4);
+  return ((d1>0&&d2<0)||(d1<0&&d2>0)) && ((d3>0&&d4<0)||(d3<0&&d4>0));
+};
+// Helligkeit bilinear; NaN ausserhalb.
+const bilin=(g,W,Hh,x,y)=>{
+  if(!(x>=0 && y>=0 && x<=W-1.001 && y<=Hh-1.001)) return NaN;
+  const x0=x|0, y0=y|0, fx=x-x0, fy=y-y0, i=y0*W+x0;
+  return (g[i]*(1-fx)+g[i+1]*fx)*(1-fy)+(g[i+W]*(1-fx)+g[i+W+1]*fx)*fy;
+};
+
+// g: Helligkeit W x Hh (Zeilen wie readPixels, flipY wie captureEdge).
+// model: {H, walls:[{k, key, A, B, nIn, sRho, sTheta}]} im Rahmen von camTo (G.trackModel).
+// Ergebnis: je sichtbarer Wand ein Eintrag mit pred (Vorhersage in NDC), band (Leiste
+// erkannt) und status 'ok' (im Gatter, z >= zGood), 'schwach', 'abweichend' (sichere
+// Kante ausserhalb des Gatters - "passt noch nicht"), 'keine' (nichts Tragfaehiges im
+// Streifen); mit Kante dazu A, B (NDC), z, chi2, offPx, dRho (m, + = Wand naeher an der
+// Kamera als das Modell) und dev (Abstand zur Vorhersage an Enden und Mitte, px und m).
+G.trackModelEdges=(g,W,Hh,proj,camTo,model,o={})=>{
+  const t0=performance.now();
+  if(!model || !model.walls) return {walls:[], ms:0};
+  const H=model.H, yP=o.yPlane??H, flip=!!o.flipY;
+  const inv=G.m4inv(camTo); if(!inv) return {walls:[], ms:0};
+  const PV=G.m4mul(proj, inv);
+  const toPix=P=>{ const x=PV[0]*P[0]+PV[4]*P[1]+PV[8]*P[2]+PV[12], y=PV[1]*P[0]+PV[5]*P[1]+PV[9]*P[2]+PV[13],
+    w=PV[3]*P[0]+PV[7]*P[1]+PV[11]*P[2]+PV[15]; if(!(w>0.05)) return null;
+    return G.ndcToPix(x/w, y/w, W, Hh, flip); };
+  const pixToNdc=p=>G.pixToNdc(p[0],p[1],W,Hh,flip);
+  const cam=[camTo[12],camTo[13],camTo[14]], camXZ=[cam[0],cam[2]];
+  const Rmax=o.Rmax??G.snapRadius(W,Hh), Rmin=o.Rmin??5, kR=o.kR??3, sig0=o.sigPx??1.5;
+  const upExtraM=o.upExtra??0.15, nMax=o.stations??32, gap=o.spacing??6, edgeM=o.edgeMargin??4;
+  const zMin=o.zMin??8, zGood=o.zGood??15, stepMin=o.stepMin??0.5, fracMin=o.fracMin??0.4, upFrac=o.upFrac??0.2;
+  const gateChi2=o.gate??13.8;
+  const segs=model.walls.map(w=>[w.A,w.B]);
+  const out=[];
+  for(let wi=0; wi<model.walls.length; wi++){
+    const w=model.walls[wi], A=w.A, B=w.B, L=Math.hypot(B[0]-A[0],B[1]-A[1]); if(!(L>0.2)) continue;
+    const u=[(B[0]-A[0])/L,(B[1]-A[1])/L], nIn=w.nIn;
+    // Rueckseite / Kamera zu nah an der Wand
+    if((camXZ[0]-A[0])*nIn[0]+(camXZ[1]-A[1])*nIn[1]<0.2) continue;
+    // 1. Sichtbares Stueck: fein abtasten, projizieren, im Bild und nicht verdeckt.
+    const M=Math.min(96, Math.max(16, Math.ceil(L/0.05)));
+    const vis=[];
+    for(let i=0;i<=M;i++){
+      const s=(0.03+0.94*i/M)*L, X=[A[0]+s*u[0], A[1]+s*u[1]];
+      const p=toPix([X[0],yP,X[1]]);
+      let ok=!!p && p[0]>=edgeM && p[1]>=edgeM && p[0]<=W-1-edgeM && p[1]<=Hh-1-edgeM;
+      if(ok){ const Xi=[X[0]+0.02*nIn[0], X[1]+0.02*nIn[1]];
+        for(let j=0;j<segs.length && ok;j++){ if(j===wi) continue; if(segCross(camXZ,Xi,segs[j][0],segs[j][1])) ok=false; } }
+      vis.push(ok ? {s,p} : null);
+    }
+    // laengster zusammenhaengender Lauf
+    let best=null, cur=null;
+    for(const v of vis){ if(v){ if(!cur) cur=[v]; else cur.push(v); } else if(cur){ if(!best || cur.length>best.length) best=cur; cur=null; } }
+    if(cur && (!best || cur.length>best.length)) best=cur;
+    if(!best || best.length<2) continue;
+    const arc=[0]; for(let i=1;i<best.length;i++) arc.push(arc[i-1]+Math.hypot(best[i].p[0]-best[i-1].p[0], best[i].p[1]-best[i-1].p[1]));
+    const len=arc[arc.length-1]; if(len<(o.minLenPx??40)) continue;
+    // schleifender Blick (wie autoCapture: unter 20° ist die Lage quer zur Wand unbestimmt)
+    { const sm=(best[0].s+best[best.length-1].s)/2, X=[A[0]+sm*u[0]-camXZ[0], A[1]+sm*u[1]-camXZ[1]], dn=Math.hypot(X[0],X[1]);
+      if(Math.abs(X[0]*u[1]-X[1]*u[0])<Math.sin((o.grazeDeg??20)*Math.PI/180)*dn) continue; }
+    // 2. Stuetzstellen gleichabstaendig in Bildlaenge
+    const ns=Math.max(4, Math.min(nMax, Math.floor(len/gap)+1));
+    const sAt=a=>{ let i=1; while(i<arc.length-1 && arc[i]<a) i++; const f=(a-arc[i-1])/Math.max(1e-9,arc[i]-arc[i-1]); return best[i-1].s+f*(best[i].s-best[i-1].s); };
+    const sMid=(best[0].s+best[best.length-1].s)/2;
+    const ST=[];
+    for(let k=0;k<ns;k++){
+      const a=len*(k+0.5)/ns, s=sAt(a), X=[A[0]+s*u[0], A[1]+s*u[1]];
+      const p=toPix([X[0],yP,X[1]]), pa=toPix([X[0]-0.02*u[0],yP,X[1]-0.02*u[1]]), pb=toPix([X[0]+0.02*u[0],yP,X[1]+0.02*u[1]]);
+      if(!p || !pa || !pb) continue;
+      let tx=pb[0]-pa[0], ty=pb[1]-pa[1]; const tl=Math.hypot(tx,ty)||1; tx/=tl; ty/=tl;
+      let nx=-ty, ny=tx;
+      // +n zeigt zur Deckenseite: dorthin wandert die Kante, wenn die Wand naeher kommt.
+      const pr=toPix([X[0]+0.01*nIn[0],yP,X[1]+0.01*nIn[1]]); if(!pr) continue;
+      let jr=((pr[0]-p[0])*nx+(pr[1]-p[1])*ny)/0.01;
+      if(jr<0){ nx=-nx; ny=-ny; jr=-jr; }
+      // eine Leiste dy unter der Kante (auf der Wandebene) liegt um jd px tiefer
+      const pd=toPix([X[0],yP-0.01,X[1]]); const jd=pd ? Math.abs((pd[0]-p[0])*nx+(pd[1]-p[1])*ny)/0.01 : 0;
+      const jt=jr*(s-sMid);                             // Drehung um die Mitte (rad -> px)
+      // Suchstreifen aus der aufgeblasenen Unsicherheit (o.rInflate, Vorgabe 2):
+      // die Auswertung ist zu sicher (Messaufbau: |H-Fehler|/sH im Median 2,1-3,6
+      // statt 0,67). Das Gatter rechnet mit der angegebenen Unsicherheit - eine
+      // sichere Kante dazwischen heisst "abweichend", nicht "ok".
+      const inf=o.rInflate??2;
+      const sg=Math.sqrt((jr*w.sRho*inf)**2+(jt*w.sTheta*inf)**2+sig0*sig0);
+      const down=Math.round(Math.max(Rmin, Math.min(Rmax, kR*sg)));
+      const up=Math.round(Math.max(Rmin, Math.min(Rmax+jd*upExtraM, kR*sg+jd*upExtraM)));
+      // Unterhalb des Streifens noch so weit, wie eine Leiste von 5 cm reicht:
+      // dort liegt die Gegenkante, an der eine Leiste zu erkennen ist.
+      const ext=Math.ceil(jd*(o.bandMax??0.05))+3;
+      ST.push({s, p, tx, ty, nx, ny, jr, jt, jd, sg, up, down, ext, lam:a-len/2});
+    }
+    if(ST.length<4) continue;
+    // 3. Profil je Stuetzstelle: Mittel ueber 3 px quer, Ableitung [-1,-1,0,1,1]/2,
+    //    Spitzen mit Stufen-Mass (Linienprofil einer Fuge: Seiten gleich hell).
+    let nPk=0;
+    for(const st of ST){
+      const K0=-st.down-st.ext-7, K1=st.up+7, n=K1-K0+1, P=new Float32Array(n);
+      let bad=0;
+      for(let i=0;i<n;i++){ const k=K0+i, bx=st.p[0]+k*st.nx, by=st.p[1]+k*st.ny;
+        const v=(bilin(g,W,Hh,bx-st.tx,by-st.ty)+bilin(g,W,Hh,bx,by)+bilin(g,W,Hh,bx+st.tx,by+st.ty))/3;
+        if(Number.isNaN(v)){ P[i]=NaN; bad++; } else P[i]=v; }
+      const D=new Float32Array(n).fill(NaN);
+      for(let i=2;i<n-2;i++) D[i]=(P[i+1]+P[i+2]-P[i-1]-P[i-2])/2;
+      st.K0=K0; st.D=D; st.P=P;
+      // Rauschboden: Median |D| im Streifen
+      const ad=[]; for(let i=7;i<n-7;i++) if(D[i]===D[i]) ad.push(Math.abs(D[i]));
+      if(ad.length<5){ st.pk=[]; continue; }
+      ad.sort((x,y)=>x-y); const noise=ad[ad.length>>1];
+      const thr=Math.max(o.minAmp??0.8, 2.5*1.4826*noise);   // 2,5 sigma, sigma aus dem Median
+      const pk=[];
+      for(let i=7;i<n-7;i++){ const a=Math.abs(D[i]); if(!(a>=thr)) continue;
+        if(!(a>=Math.abs(D[i-1]) && a>Math.abs(D[i+1]))) continue;
+        const am=Math.abs(D[i-1]), ap=Math.abs(D[i+1]), den=am-2*a+ap, f=den<0 ? Math.max(-0.5,Math.min(0.5,0.5*(am-ap)/den)) : 0;
+        const Lm=(P[i-6]+P[i-5]+P[i-4]+P[i-3])/4, Rm=(P[i+3]+P[i+4]+P[i+5]+P[i+6])/4;
+        const step=(Rm-Lm)/D[i];                         // ~1 Stufe, ~0 Linie
+        if(!(step===step)) continue;
+        pk.push({off:K0+i+f, amp:D[i], step}); }
+      pk.sort((x,y)=>Math.abs(y.amp)-Math.abs(x.amp));
+      st.pkAll=pk.slice(0,(o.peaks??4)+2);
+      st.pk=pk.filter(x=>x.off>=-st.down-0.5).slice(0,o.peaks??4); nPk+=st.pk.length;
+    }
+    // 4. Geraden: Hough ueber (Versatz in der Mitte, Neigung) je Vorzeichen.
+    const lamMax=Math.max(...ST.map(st=>Math.abs(st.lam)))||1;
+    const tiltPx=Math.round(Math.max(4, Math.min(24, kR*Math.sqrt((Math.max(...ST.map(st=>Math.abs(st.jt)))*w.sTheta)**2+1)+3)));
+    const aLo=Math.min(...ST.map(st=>-st.down))-1, aHi=Math.max(...ST.map(st=>st.up))+1, nA=aHi-aLo+1, nB=2*tiltPx+1;
+    const hyps=[];
+    for(const sgn of [1,-1]){
+      const acc=new Float32Array(nA*nB);
+      ST.forEach(st=>{ for(const pk of st.pk){ if(Math.sign(pk.amp)!==sgn) continue;
+        for(let b=0;b<nB;b++){ const slope=(b-tiltPx)/lamMax, a=pk.off-slope*st.lam, ai=Math.round(a-aLo);
+          if(ai>=0 && ai<nA) acc[b*nA+ai]+=1; } } });
+      // 3er-Summe in a (Versatz zwischen zwei Faechern)
+      const sm=new Float32Array(nA*nB);
+      for(let b=0;b<nB;b++) for(let a=0;a<nA;a++){ let v=acc[b*nA+a]; if(a>0) v+=0.5*acc[b*nA+a-1]; if(a<nA-1) v+=0.5*acc[b*nA+a+1]; sm[b*nA+a]=v; }
+      const minSup=Math.max(4, (o.minSupFrac??0.3)*ST.length);
+      const cand=[];
+      for(let b=0;b<nB;b++) for(let a=0;a<nA;a++){ const v=sm[b*nA+a]; if(v<minSup) continue;
+        let mx=true; for(let db=-2;db<=2 && mx;db++) for(let da=-2;da<=2;da++){ if(!db && !da) continue; const bb=b+db, aa=a+da;
+          if(bb<0||bb>=nB||aa<0||aa>=nA) continue; const vv=sm[bb*nA+aa]; if(vv>v || (vv===v && (db<0 || (db===0 && da<0)))){ mx=false; break; } }
+        if(mx) cand.push({a:a+aLo, slope:(b-tiltPx)/lamMax, v}); }
+      cand.sort((x,y)=>y.v-x.v);
+      for(const c of cand.slice(0,4)) hyps.push({...c, sign:sgn});
+    }
+    // 5. Jede Hypothese verfeinern: Treffer im Abstand <= 1,5 px, gewichtete
+    //    Geradenanpassung (zweimal), dann Guete.
+    const evalH=h=>{
+      let a=h.a, b=h.slope, inl=[];
+      for(let it=0;it<3;it++){
+        inl=[];
+        for(const st of ST){ let bp=null, bd=it<2 ? 1.5 : 1.2;
+          for(const pk of st.pk){ if(Math.sign(pk.amp)!==h.sign) continue; const d=Math.abs(pk.off-(a+b*st.lam)); if(d<=bd){ bd=d; bp=pk; } }
+          if(bp) inl.push({st, pk:bp}); }
+        if(inl.length<3) return null;
+        let sw=0, sl=0, so=0, sll=0, slo=0;
+        for(const x of inl){ const ww=1; sw+=ww; sl+=ww*x.st.lam; so+=ww*x.pk.off; sll+=ww*x.st.lam*x.st.lam; slo+=ww*x.st.lam*x.pk.off; }
+        const den=sw*sll-sl*sl; if(Math.abs(den)<1e-9) return null;
+        b=(sw*slo-sl*so)/den; a=(so-b*sl)/sw;
+      }
+      // z wie lineSupport: Antwort GENAU auf der Geraden an ALLEN Stuetzstellen
+      let n=0, s1=0, s2=0;
+      for(const st of ST){ const x=a+b*st.lam-st.K0, i=Math.floor(x), f=x-i; if(i<2 || i+1>=st.D.length-2) continue;
+        const v=(st.D[i]*(1-f)+st.D[i+1]*f)*h.sign; if(v!==v) continue; n++; s1+=v; s2+=v*v; }
+      const m=n ? s1/n : 0, sd=n>1 ? Math.sqrt(Math.max(1e-12,(s2-n*m*m)/(n-1))) : 1, z=n>=4 ? m/(sd/Math.sqrt(n)) : 0;
+      const amp=inl.reduce((q,x)=>q+Math.abs(x.pk.amp),0)/inl.length;
+      const step=inl.map(x=>x.pk.step).sort((p,q)=>p-q)[inl.length>>1];
+      const res=Math.sqrt(inl.reduce((q,x)=>q+(x.pk.off-(a+b*x.st.lam))**2,0)/inl.length);
+      return {a, b, sign:h.sign, inl, n:inl.length, frac:inl.length/ST.length, z, amp, step, rms:res};
+    };
+    const HY=[];
+    for(const h of hyps){ const e=evalH(h); if(!e) continue;
+      if(HY.some(x=>x.sign===e.sign && Math.abs(x.a-e.a)<1.5 && Math.abs((x.b-e.b)*lamMax)<1.5)) continue;
+      HY.push(e); }
+    // Rampen (weicher Eckschatten, Lichtverlauf) haben Stufenmass ~2, echte Stufen ~1 (Gegenpruefung pruef2).
+    const valid=HY.filter(e=>e.z>=zMin && e.frac>=fracMin && e.step>=stepMin && e.step<=(o.stepMax??1.7));
+    // 6. Wahl: unter den tragenden die oberste (Deckenseite = +a), sofern sie
+    //    mindestens upFrac der staerksten hat - eine Leiste, ein Schrank, ein
+    //    Sturz liegen darunter; Fugen sind Linien und schon aussortiert.
+    // Staerke wie in snapLine als Wurzel (dort raw = sqrt|Summe|): eine weisse
+    // Deckenkante mit 5 Stufen gegen eine Holzleiste mit 40 Stufen hat linear
+    // ein Achtel, als Wurzel ein Drittel - sie bleibt waehlbar.
+    let pick=null;
+    if(valid.length){
+      const str=e=>Math.sqrt(e.amp*e.n), sMax=Math.max(...valid.map(str));
+      for(const e of valid){ if(str(e)<upFrac*sMax) continue; if(!pick || e.a>pick.a) pick=e; }
+    }
+    // Ueber der Wahl eine sichere Linie oder Rampe (nur am Stufenmass gescheitert): dort
+    // kann die Deckenkante liegen (Schattenfuge bei gleich heller Decke und Wand, weicher
+    // Eckschatten) - die gewaehlte tiefere Stufe (Bild, Schrank) ist dann kein sicheres
+    // "weicht ab". Nur fuer das Urteil (G.trackJudge), die Wahl bleibt.
+    const lineAbove=!!pick && HY.some(e=>e!==pick && (e.step<stepMin || e.step>(o.stepMax??1.7)) && e.z>=zGood && e.frac>=fracMin && e.a>pick.a+2);
+    // Leistenregel: Ist die gewaehlte Kante die Oberkante eines schmalen
+    // Bands (Leiste, Zarge, Bilderrahmen) - Gegenkante mit umgekehrtem
+    // Vorzeichen und aehnlicher Staerke hoechstens 5 cm darunter, an der
+    // Mehrzahl der Stuetzstellen -, dann ist sie nicht die Deckenkante; die
+    // liegt darueber und ist hier nicht zu sehen. Nichts melden.
+    const bandOf=e=>{ let pair=0;
+      for(const x of e.inl){ const st=x.st, off=e.a+e.b*st.lam, amp=Math.abs(x.pk.amp), wmax=st.jd*(o.bandMax??0.05)+2;
+        if(st.pkAll.some(q=>Math.sign(q.amp)===-e.sign && q.off<off-Math.max(1.5, st.jd*(o.bandMin??0.02)) && q.off>=off-wmax && Math.abs(q.amp)>=0.5*amp && Math.abs(q.amp)<=2*amp)) pair++; }
+      return pair>=0.5*e.inl.length; };
+    let band=false;
+    if(pick && bandOf(pick)){ band=true; pick=null; }
+    // Vorhersage (Versatz 0) ueber das sichtbare Stueck, fuer die Anzeige
+    const s0=ST[0], s1=ST[ST.length-1];
+    const pred={A:pixToNdc(s0.p), B:pixToNdc(s1.p)};
+    const sMid0=ST[ST.length>>1];
+    const rec={key:w.key, k:w.k, status:'keine', band, lineAbove, pred, N:ST.length, hyps:HY.length, nPk,
+      mid:{p:sMid0.p, n:[sMid0.nx,sMid0.ny], up:sMid0.up, down:sMid0.down},
+      up:Math.max(...ST.map(st=>st.up)), down:Math.max(...ST.map(st=>st.down)),
+      alt:valid.filter(e=>e!==pick).map(e=>({a:+e.a.toFixed(1), z:+e.z.toFixed(1), amp:+e.amp.toFixed(1), step:+e.step.toFixed(2)}))};
+    if(o.debug) rec.HY=HY.map(e=>({a:+e.a.toFixed(1), sign:e.sign, z:+e.z.toFixed(1), amp:+e.amp.toFixed(1), step:+e.step.toFixed(2), frac:+e.frac.toFixed(2), n:e.n}));
+    if(pick){
+      const lo=Math.min(...pick.inl.map(x=>x.st.lam)), hi=Math.max(...pick.inl.map(x=>x.st.lam));
+      const stOf=lam=>ST.reduce((q,st)=>Math.abs(st.lam-lam)<Math.abs(q.lam-lam) ? st : q, ST[0]);
+      const at=lam=>{ const st=stOf(lam), off=pick.a+pick.b*lam, dl=lam-st.lam;
+        return [st.p[0]+dl*st.tx+off*st.nx, st.p[1]+dl*st.ty+off*st.ny]; };
+      const pa=at(lo), pb=at(hi);
+      // Gatter: Versatz in der Mitte und Neigung gegen die Vorhersage. Die
+      // Unsicherheit der Mitte enthaelt rho, die der Enden zusaetzlich theta.
+      const sm=stOf(0), se=Math.abs(s0.lam)>Math.abs(s1.lam) ? s0 : s1;
+      const sMidPx=Math.sqrt((sm.jr*w.sRho)**2+sig0*sig0), sTilt=Math.sqrt((se.jt*w.sTheta)**2+sig0*sig0);
+      const chi2=(pick.a/sMidPx)**2+((pick.b*se.lam)/sTilt)**2;
+      Object.assign(rec, {A:pixToNdc(pa), B:pixToNdc(pb), z:pick.z, n:pick.n, frac:pick.frac, amp:pick.amp, step:pick.step, rms:pick.rms,
+        offPx:pick.a, tiltPx:pick.b*se.lam, sigPx:sMidPx, chi2, sign:pick.sign,
+        // Hoehe der Kante, wenn sie auf der Wandebene laege: Versatz / jd
+        dropM:sm.jd>0 ? -pick.a/sm.jd : null,
+        // Wandversatz in der Mitte (m) und Abstand zur Vorhersage an beiden Enden und in
+        // der Mitte des getragenen Stuecks (px, m) - fuer G.trackJudge.
+        dRho:sm.jr>0 ? pick.a/sm.jr : null,
+        dev:[lo, Math.max(lo, Math.min(hi, 0)), hi].map(lam=>{ const st=stOf(lam), off=pick.a+pick.b*lam; return {px:off, m:st.jr>0 ? off/st.jr : null}; }),
+        // Andere tragende Kanten, mindestens so stark wie die gewaehlte und keine
+        // Band-Oberkante: ihr Versatz in der Mitte (px, m). Liegt eine davon auf der
+        // Vorhersage, ist "weicht ab" nicht eindeutig (die oberste kann eine Rampe sein).
+        rival:valid.filter(e=>e!==pick && Math.sqrt(e.amp*e.n)>=Math.sqrt(pick.amp*pick.n) && !bandOf(e)).map(e=>({px:e.a, m:sm.jr>0 ? e.a/sm.jr : null})),
+        // Alle anderen tragenden Geraden (z >= zMin, gleich welcher Staerke, auch die nur am
+        // Stufenmass gescheiterten: Rampe, Linie), ohne Band-Oberkanten: ihr Versatz in der
+        // Mitte (px, m). Liegt eine davon auf der Vorhersage, kann dort die Deckenkante
+        // liegen und die oberste ist ein Stoerer darueber (Gardinenschiene; Deckenfuge, die
+        // unter senkrechter Bewegungsunschaerfe als zwei Stufen durchgeht) - auch dann ist
+        // "weicht ab" nicht eindeutig (G.trackJudge). Gegenpruefung Stufe 2, synthetisch:
+        // orange auf falscher Kante bei genauem Modell 131 -> 89 (Schiene 9 -> 0), orange
+        // auf der wahren Kante bei 10 cm falschem Modell unveraendert (1599).
+        other:HY.filter(e=>e!==pick && e.z>=zMin && e.frac>=fracMin && !bandOf(e)).map(e=>({px:e.a, m:sm.jr>0 ? e.a/sm.jr : null}))});
+      rec.status=chi2>gateChi2 ? 'abweichend' : pick.z>=zGood ? 'ok' : 'schwach';
+    }
+    out.push(rec);
+  }
+  return {walls:out, ms:performance.now()-t0};
+};
+
+
+// Verfolgungsmodell aus dem Overlay-Modell (G.overlayModel mit der Abbildung aus
+// G.modelToLive, also im Rahmen der Kamera JETZT - genau die Linien, die das Overlay
+// zeichnet): je echter Ringzeile die Wand von Ecke zu Ecke (span), die Unsicherheit aus
+// der Auswertung (sRho der Zeile, sTheta der Wandgeraden) und die Raumseite nIn. Mit
+// Umriss kommt nIn aus dem Umlaufsinn des Rings (Vorzeichen der Flaeche; auch im L-Raum
+// liegt der Raum fuer jede Wand auf derselben Seite, offener Ring ueber die Sehne
+// geschlossen), ohne Umriss aus der Seite der Kamera (sie steht im Raum). Ein
+// verkehrtes nIn kehrte 'oben' um - dann gewaenne die Leiste statt der Deckenkante.
+// cam: [x, z] der Kamera im selben Rahmen.
+G.trackModel=(sol,M,cam)=>{
+  if(!sol || !M || !M.rows || !(sol.H>0)) return null;
+  const ring=M.rows.length>=3 && M.rows.every(r=>r.row>=0);
+  let area=0;
+  if(ring){ const P=M.rows.map(r=>r.span[0]); P.push(M.rows[M.rows.length-1].span[1]);
+    for(let i=0;i<P.length;i++){ const a=P[i], b=P[(i+1)%P.length]; area+=a[0]*b[1]-b[0]*a[1]; } }
+  const walls=[];
+  for(const r of M.rows){
+    if(r.virtual || !(r.k>=0)) continue;
+    const l=sol.walls[r.k] && sol.walls[r.k].line; if(!l) continue;
+    const [A,B]=r.span, L=Math.hypot(B[0]-A[0], B[1]-A[1]); if(!(L>0.2)) continue;
+    const u=[(B[0]-A[0])/L, (B[1]-A[1])/L];
+    let nIn=[-u[1], u[0]];
+    if(ring && area) { if(area<0) nIn=[u[1], -u[0]]; }
+    else if((cam[0]-A[0])*nIn[0]+(cam[1]-A[1])*nIn[1]<0) nIn=[u[1], -u[0]];
+    walls.push({k:r.k, key:[r.k], A, B, nIn, sRho:Number.isFinite(r.sRho) ? r.sRho : 0.05, sTheta:Number.isFinite(l.sTheta) ? l.sTheta : Math.PI/180});
+  }
+  return {H:sol.H, walls};
+};
+// Urteil fuer die Anzeige je verfolgter Wand. Das Gatter von trackModelEdges rechnet mit
+// der Unsicherheit der Auswertung - bei einer unsicheren Wand liesse es 10 cm als 'ok'
+// durch, und die gruen markierte Kante laege sichtbar neben der Modelllinie. Darum
+// zaehlt fuer 'passt', ob die Kante an beiden Enden und in der Mitte des getragenen
+// Stuecks hoechstens tolM von der Modellwand liegt (oder tolPx im Bild, fuer ferne
+// Waende), und sicher ist (z >= zGood). 'abweichend': ausserhalb davon, sicher oder
+// ausserhalb des Gatters - und eindeutig: keine sichere Linie darueber (lineAbove, z. B.
+// Schattenfuge bei gleich heller Decke und Wand ueber einem Bild) und keine mindestens
+// so starke andere Kante auf der Vorhersage (rival, z. B. die echte Kante unter einer
+// Eckschatten-Rampe, die nur knapp unter Stufenmass 1,7 blieb) und auch sonst keine
+// tragende Gerade auf der Vorhersage (other, z. B. die schwaechere Deckenkante unter einer
+// Gardinenschiene). 'schwach': eine Kante,
+// aber nicht sicher genug fuer ein Urteil.
+// 'leiste': Oberkante eines schmalen Bands, die Deckenkante dort nicht zu sehen.
+// 'keine': nichts Tragfaehiges im Streifen.
+G.trackJudge=(w,o={})=>{
+  if(!w) return 'keine';
+  if(w.band) return 'leiste';
+  if(!w.A || !w.dev) return 'keine';
+  const tolM=o.tolM??0.03, tolPx=o.tolPx??2, zGood=o.zGood??15;
+  const inTol=d=>Math.abs(d.px)<=tolPx || (d.m!=null && Math.abs(d.m)<=tolM);
+  if(w.dev.every(inTol)) return w.z>=zGood ? 'passt' : 'schwach';
+  // Sichere Linie ueber der gewaehlten Kante, oder eine andere tragende Gerade auf der
+  // Vorhersage: die Deckenkante kann dort liegen - kein eindeutiges "weicht ab".
+  if(w.lineAbove || (w.rival && w.rival.some(inTol)) || (w.other && w.other.some(inTol))) return 'schwach';
+  return w.z>=zGood || w.status==='abweichend' ? 'abweichend' : 'schwach';
+};
+
 globalThis.RAUMSKIZZE=G;
 })();
 </script>
@@ -1965,6 +2285,7 @@ function snapCenter(img, view, camTo){
   const L=G.captureEdge(g, img.w, img.h, view.projectionMatrix, camTo, S.flipY);
   LOG.timings.snap.push(+(performance.now()-t0).toFixed(2));
   if(LOG.timings.snap.length>2000) LOG.timings.snap.shift();
+  S.lumaImg={g, w:img.w, h:img.h};
   return L;
 }
 
@@ -2593,6 +2914,7 @@ function onFrame(t, frame){
           else { S.capReq=false; hint('Ohne Raumhöhe kann die Kante nicht gehoben werden.', 'warn'); ev('erfassen-ohne-höhe'); }
         }
         recFrame(frame, view, pose, camTo, img);
+        trackFrame(view, camTo);
       }
     } else if(!S.warned.tex){ S.warned.tex=true; ev('getCameraImage-null'); }
     gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
@@ -2666,6 +2988,90 @@ function arState(){
   S.stateK=key; const el=$('arState'); el.textContent=deNum(txt); el.className=cls || 'hidden';
 }
 
+// ------------------------------- Stufe 2: Modellkanten im Bild (nur Anzeige)
+// Jede Wand des Modells, die im Bild liegt, wird im Kamerabild gesucht
+// (G.trackModelEdges) und beurteilt (G.trackJudge): passt, weicht ab, schwach, Leiste.
+// Nichts davon geht in die Auswertung (Gegenpruefung: Einspeisen bringt ~0). Die
+// Vorhersage kommt aus liveModel() - derselbe Rahmen (G.modelToLive) wie die gezeichnete
+// Modelllinie. Die gemessene Kante wird auf Deckenhoehe gehoben und im Kamerarahmen
+// gehalten: so bleibt sie beim Schwenken auf der Kante liegen, auch wenn ihr Bild ein
+// paar Bilder alt ist. Je Wand (wiedererkannt an der Lage wie S.hiLine - die Nummern
+// wechseln mit jeder Auswertung - und am gesehenen Stueck, damit zwei Wandstuecke in
+// einer Flucht, etwa beiderseits einer Nische, nicht einen Zustand teilen; je Lauf
+// hoechstens eine Wand je Zustand) wechselt die Anzeige erst bei TRK_K gleichen Urteilen
+// aus den letzten TRK_N und verschwindet erst, wenn keines davon mehr dafuer spricht;
+// gezeichnet wird nur eine frische Messung (TRK_FRESH), der Zustand haelt TRK_STALE.
+// Gerechnet wird jedes TRK_EVERY-te ausgewertete Bild (ausgewertet wird jedes 3.).
+// ?verfolgen=0 schaltet ab.
+const TRK=Q.get('verfolgen')!=='0';
+const TRK_EVERY=2, TRK_N=4, TRK_K=3, TRK_STALE=1.5, TRK_FRESH=0.5, TRK_LOG=600;
+// Dieselbe Wand wie Zustand st? Gerade wie S.hiLine (< 10°, < 0,2 m), dazu ueberlappen
+// die gesehenen Stuecke entlang der Geraden (bis 10 cm Luecke) - beides Modellrahmen.
+const trkSame=(st,l,seen)=>{ const h=st && st.line; if(!h || !l) return false;
+  if(!(Math.abs(l.u[0]*h.u[0]+l.u[1]*h.u[1])>Math.cos(10*Math.PI/180) && Math.abs(-h.u[1]*(l.c[0]-h.c[0])+h.u[0]*(l.c[1]-h.c[1]))<0.2)) return false;
+  if(!seen || !st.seen) return true;
+  const iv=sg=>{ const a=sg[0][0]*h.u[0]+sg[0][1]*h.u[1], b=sg[1][0]*h.u[0]+sg[1][1]*h.u[1]; return a<b ? [a,b] : [b,a]; };
+  const [a0,a1]=iv(st.seen), [b0,b1]=iv(seen); return Math.min(a1,b1)-Math.max(a0,b0)>-0.1; };
+const trkR4=x=>Math.round(x*1e4)/1e4;
+function trackFrame(view, camTo){
+  if(!TRK || !S.auto || S.phase!=='waende' || !camTo || !S.lumaImg) return;
+  // Neuer Bodenbezug: die gehobenen Kanten liegen im alten Rahmen.
+  if(S.trkK!==S.frames.length){ S.trkW=[]; S.trkK=S.frames.length; }
+  if(S.paused || S.subst || S.anchorLost || S.trackLost){ S.trkW=[]; return; }
+  if(++S.trkTick%TRK_EVERY) return;
+  const sol=S.sol, M=liveModel(), H=sol && sol.H;
+  if(!M || !(H>0)) return;
+  const model=G.trackModel(sol, M, [camTo[12], camTo[14]]);
+  if(!model || !model.walls.length) return;
+  const proj=view.projectionMatrix, t0=performance.now();
+  const r=G.trackModelEdges(S.lumaImg.g, S.lumaImg.w, S.lumaImg.h, proj, camTo, model, {flipY:S.flipY});
+  LOG.timings.track.push(+(performance.now()-t0).toFixed(2)); if(LOG.timings.track.length>2000) LOG.timings.track.shift();
+  const t=now(), seq=++S.trkSeq, smp=seq%S.trkStride===0;
+  LOG.trkN.bilder=(LOG.trkN.bilder||0)+1;
+  const used=new Set();
+  for(const w of r.walls){
+    const v=G.trackJudge(w), W=sol.walls[w.k], mw=model.walls.find(x=>x.k===w.k);
+    LOG.trkN[v]=(LOG.trkN[v]||0)+1;
+    const ob=w.A ? G.obsFromNdc(proj, camTo, w.A, w.B, H, 12) : null, seg=ob && G.liftObs(ob, H);
+    let st=S.trkW.find(x=>!used.has(x) && trkSame(x, W.line, W.seen));
+    if(!st) S.trkW.push(st={hist:[], shown:null});
+    used.add(st);
+    // line/seen (Modellrahmen) zum Wiedererkennen, span (Kamerarahmen) fuer die Anzeige.
+    st.line=W.line; st.seen=W.seen; st.span=[mw.A, mw.B]; st.t=t;
+    st.hist.push({v, seg, t}); if(st.hist.length>TRK_N) st.hist.shift();
+    const nOf=x=>st.hist.filter(h=>h.v===x).length;
+    if(st.shown!=='passt' && nOf('passt')>=TRK_K) st.shown='passt';
+    else if(st.shown!=='abweichend' && nOf('abweichend')>=TRK_K) st.shown='abweichend';
+    else if(st.shown && !nOf(st.shown)) st.shown=null;
+    // Stichprobe zum Nachrechnen: Urteil, Guete, Abstand, Kante und Vorhersage (NDC).
+    // Pose und Bezug je Bild stehen in der Aufnahme (REC.st) und in viewPath.
+    if(smp) LOG.trk.push(w.A ? {i:seq, t, k:w.k, v, s:w.status, z:+w.z.toFixed(1), n:w.n, N:w.N, off:+w.offPx.toFixed(1),
+        dRho:w.dRho!=null ? +w.dRho.toFixed(3) : null, dev:+Math.max(...w.dev.map(d=>d.m!=null ? Math.abs(d.m) : 0)).toFixed(3), chi2:+w.chi2.toFixed(1),
+        sR:+mw.sRho.toFixed(3), A:w.A.map(trkR4), B:w.B.map(trkR4), pA:w.pred.A.map(trkR4), pB:w.pred.B.map(trkR4)}
+      : {i:seq, t, k:w.k, v, s:w.status, N:w.N, pA:w.pred.A.map(trkR4), pB:w.pred.B.map(trkR4)});
+  }
+  // Gedeckelt: jede zweite Stichprobe faellt, danach wird nur noch jedes doppelt so
+  // vielte Bild genommen - die Stichproben bleiben ueber die ganze Sitzung verteilt.
+  if(LOG.trk.length>TRK_LOG){ LOG.trk=LOG.trk.filter(x=>x.i%(2*S.trkStride)===0); S.trkStride*=2; }
+  S.trkW=S.trkW.filter(x=>t-x.t<=TRK_STALE);
+}
+// Angezeigte Lage einer Wand: die Gerade der juengsten Messung, die die Anzeige traegt,
+// solange sie frisch ist (TRK_FRESH s), ueber die ganze Modellwand (span) - nicht ueber
+// das in diesem Bild getragene Stueck: das ist im Bild verankert, beim Schwenken wanderte
+// die Marke damit im Takt der Messungen hin und zurueck (Messaufbau: Sprung je neuer
+// Messung p90 18 px). Nicht ueber Bilder gemittelt: die gehobene Lage haengt bei falscher
+// Raumhoehe vom Standpunkt ab, ein Mittel ueber Standpunkte laege neben der Kante
+// (Messaufbau, Hoehe 10 cm daneben: 11-50 px). Ruhig ist sie auch so - eine Messung auf
+// der Kante streut im Bild unter 1 px. Grundriss (x, z) auf Deckenhoehe, Kamerarahmen.
+function trkSeg(st, t){
+  let g=null;
+  for(let i=st.hist.length-1;i>=0;i--){ const h=st.hist[i]; if(h.v===st.shown && h.seg){ if(t-h.t<=TRK_FRESH) g=h.seg; break; } }
+  if(!g || !st.span) return g;
+  const d=[g[1][0]-g[0][0], g[1][1]-g[0][1]], L=Math.hypot(d[0], d[1]); if(!(L>1e-6)) return null;
+  const u=[d[0]/L, d[1]/L], at=p=>{ const s=(p[0]-g[0][0])*u[0]+(p[1]-g[0][1])*u[1]; return [g[0][0]+s*u[0], g[0][1]+s*u[1]]; };
+  return [at(st.span[0]), at(st.span[1])];
+}
+
 // ----------------------------------------------------------- Overlay
 // Farben der Wand wie im Mini-Grundriss (wallColor): gleiche Wand, gleiche Farbe.
 const OV={piece:{color:'#60a5fa', w:4}, pieceLast:{color:'#facc15', w:4}, pieceOther:{color:'rgba(156,163,175,.8)', w:3}, fit:{color:'rgba(255,255,255,.4)', w:1.5},
@@ -2674,6 +3080,10 @@ const OV={piece:{color:'#60a5fa', w:4}, pieceLast:{color:'#facc15', w:4}, pieceO
   gapMax:0.8,     // wie gapMax der Abdeckungspruefung: laenger ungesehen haelt den Abschluss auf
   hiMin:0.02,     // hervorheben erst ab gelb
   hiPx:60,        // ... und nur, was mindestens so lang (CSS-px) im Bild liegt
+  // Stufe 2, gemessene Kante: kurze Marken (2 x half CSS-px) auf der gemessenen Geraden -
+  // passt gruen und dick, weicht ab orange und laenger. Beide mit dunklem Rand und runden
+  // Enden - so heben sie sich von den Modelllinien (duenn, gleiche Gruentoene) ab.
+  trkOk:{color:'#4ade80', w:5, half:22}, trkOff:{color:'#fb923c', w:4, half:55}, trkDrift:3,
   wall:(()=>{ const m=new Map(); return s=>{ const col=wallColor({sRho:s}); if(!m.has(col)) m.set(col, {seen:{color:col, w:3}, gap:{color:col, w:1.5, dash:[6,6]}}); return m.get(col); }; })()};
 function liveModel(){
   const sol=S.sol, k=S.frames.length;
@@ -2699,7 +3109,7 @@ function drawOverlay(view, camTo){
   }
   // Strecken je Stil sammeln und mit einem stroke() je Stil zeichnen (300 Stuecke =
   // 300 Pfade waren es vorher).
-  const batch=new Map();
+  const batch=new Map(), trkMarks=[];
   const seg3b=(st,A,B)=>{ const s=G.projectSegment(proj, camTo, A, B); if(!s) return;
     let b=batch.get(st); if(!b) batch.set(st, b=[]); b.push(px(s[0]), px(s[1])); };
   const flush=()=>{ for(const [st,pts] of batch){ c.strokeStyle=st.color; c.lineWidth=st.w*dpr; c.setLineDash(st.dash ? st.dash.map(x=>x*dpr) : []);
@@ -2785,6 +3195,37 @@ function drawOverlay(view, camTo){
           c.lineWidth=4*dpr; c.strokeStyle='rgba(0,0,0,.8)'; c.strokeText(txt, m[0], m[1]-8*dpr);
           c.fillStyle=col; c.fillText(txt, m[0], m[1]-8*dpr);
         }
+        // Stufe 2: die gemessene Kante je verfolgter Wand (trackFrame) als kurze Marke auf der
+        // gemessenen Geraden - gruen = passt, orange (laenger) = weicht ab, die echte Kante
+        // liegt dort. Gezeichnet wird sie erst nach der Live-Kante (trkMarks). Schwach, Leiste
+        // und nichts gefunden zeigen nichts. Nicht an der ersten Wand vor der Rueckkehr - aus
+        // demselben Grund wie „näher ran“ (eine Wiederkehr dorthin setzt 'returned'; im Ring
+        // aus den Wandenden steht sie an Stelle senk.first).
+        // Lage wie ein Aufkleber an einem Punkt der Kante (st.anchor, Grundriss): er gleitet
+        // beim Schwenken mit dem Bild, eine neue Messung verschiebt ihn nur quer zur Kante,
+        // eine neue Auswertung gar nicht; je Bild rueckt er hoechstens trkDrift CSS-px zur
+        // Mitte des sichtbaren Stuecks der Modellwand - so bleibt er im Bild, ohne zu springen.
+        // (Mitte je Bild neu gerechnet sprang mit jeder Messung oder Auswertung: Messaufbau
+        // p90 18-20 px; neu Setzen am Bildrand bis 120 px.)
+        if(S.trkW && S.trkW.length){
+          const k0=S.sol.senk && S.sol.senk.byEnds ? S.sol.senk.first : 0;
+          const w0=!S.sol.returned && S.sol.walls[k0], tNow=now();
+          for(const st of S.trkW){
+            if(!st.shown || (w0 && trkSame(st, w0.line, w0.seen))) continue;
+            const g=trkSeg(st, tNow), s=g && G.projectSegment(proj, camTo, Y(g[0],Hm), Y(g[1],Hm)), q=s && G.clipNdc(s[0], s[1], 0.98);
+            if(!q) continue;
+            const a=px(q[0]), b=px(q[1]), l=Math.hypot(b[0]-a[0], b[1]-a[1]); if(!(l>0)) continue;
+            const sty=st.shown==='passt' ? OV.trkOk : OV.trkOff, h=Math.min(l/2, sty.half*dpr);
+            const d=[(b[0]-a[0])/l, (b[1]-a[1])/l], along=p=>(p[0]-a[0])*d[0]+(p[1]-a[1])*d[1];
+            const sm=G.projectSegment(proj, camTo, Y(st.span[0],Hm), Y(st.span[1],Hm)), qm=sm && G.clipNdc(sm[0], sm[1], 0.98);
+            const tm=qm ? along(px([(qm[0][0]+qm[1][0])/2, (qm[0][1]+qm[1][1])/2])) : l/2;
+            const n=st.anchor && G.project(proj, camTo, Y(st.anchor,Hm)), t1=n ? along(px(n)) : null, dr=OV.trkDrift*dpr;
+            const t0=Math.max(h, Math.min(l-h, t1==null ? tm : t1+Math.max(-dr, Math.min(dr, tm-t1))));
+            const m=[a[0]+t0*d[0], a[1]+t0*d[1]], hit=G.hitY(G.ray(proj, camTo, m[0]/cw*2-1, 1-m[1]/ch*2), Hm);
+            st.anchor=hit ? [hit[0], hit[2]] : null;
+            trkMarks.push({a:[m[0]-h*d[0], m[1]-h*d[1]], b:[m[0]+h*d[0], m[1]+h*d[1]], sty});
+          }
+        }
         c.globalAlpha=1;
       }
     }
@@ -2798,6 +3239,11 @@ function drawOverlay(view, camTo){
     const ok=S.auto ? (S.live.good && S.liveConfirmed && !autoBlock()) : S.live.good;
     line(a, b, ok ? '#4ade80' : '#fbbf24', 2.5);
   }
+  // Stufe 2: Marken der verfolgten Waende zuletzt - ueber der Live-Kante, sonst deckte deren
+  // dunkler Rand die Marke an der Wand unter dem Fadenkreuz zu.
+  if(trkMarks.length){ c.lineCap='round';
+    for(const k of trkMarks){ line(k.a, k.b, 'rgba(0,0,0,.7)', k.sty.w+3); line(k.a, k.b, k.sty.color, k.sty.w); }
+    c.lineCap='butt'; }
 }
 
 function stats(){
@@ -2814,6 +3260,7 @@ function stats(){
     ['ROI', ms(median(LOG.timings.roi.slice(-20)))],
     ['klein', ms(median(LOG.timings.small.slice(-20)))],
     ['Kante', ms(median(LOG.timings.snap.slice(-20)))],
+    ...(TRK && S.auto ? [['Verfolgung', ms(median(LOG.timings.track.slice(-20)))]] : []),
     ['Zeichnen', ms(median(LOG.timings.draw.slice(-20)))],
     ...(REC.vN || REC.video ? [['Aufnahme', `${REC.vN} B, ${REC.vDrop} aus, ${(REC.vBytes/1e6).toFixed(1)} MB, ${ms(median(LOG.timings.rec.slice(-20)))}`]] : []),
     ['z', S.live ? S.live.z.toFixed(0) : '–'],
@@ -2871,9 +3318,9 @@ function showButtons(){
 // Ein Durchlauf pro Sitzung; vorige Durchlaeufe wandern nach LOG.runs. Das
 // Protokoll liegt nach jeder Erfassung und am Sitzungsende auch im
 // localStorage - ein Neuladen oder ein Absturz der Seite verliert es nicht.
-const RUN_KEYS=['session','floor','events','obs','result','timings','planes','depth','tracking','roiLuma','anchorPath','viewPath','breaks','hLaserMm','hEingabe','mode'];
+const RUN_KEYS=['session','floor','events','obs','trk','trkN','result','timings','planes','depth','tracking','roiLuma','anchorPath','viewPath','breaks','hLaserMm','hEingabe','mode'];
 function freshRun(){
-  return {session:{}, floor:null, events:[], obs:[], result:null, timings:{roi:[], small:[], snap:[], solve:[], draw:[], rec:[]}, mode:null,
+  return {session:{}, floor:null, events:[], obs:[], trk:[], trkN:{}, result:null, timings:{roi:[], small:[], snap:[], solve:[], draw:[], rec:[], track:[]}, mode:null,
           planes:[], depth:null, tracking:{ok:0, emulated:0, lost:0, anchorLost:0}, roiLuma:[], anchorPath:[], viewPath:[], breaks:[],
           hLaserMm:null, hEingabe:null};
 }
@@ -3115,6 +3562,7 @@ async function startAR(){
   Object.assign(S, {pool:[], sol:null, model:null, modelKey:null, hiLine:null, paused:false, closeT:null, closeDone:false, lastAuto:null,
     floorStable:null, prevDir:null, prevT:null, speed:0, prevLive:null, liveConfirmed:false, settleUntil:0,
     speedWarn:false, speedWarnT:0, fastSince:null, slowSince:null, solveBusy:false, solveDirty:false, solveId:(S.solveId||0)+1, closePending:false, lastMiss:null});
+  Object.assign(S, {lumaImg:null, trkW:[], trkK:0, trkTick:0, trkSeq:0, trkStride:1});
   if(S.auto && !S.worker) S.worker=makeSolver();
   Object.assign(S, {phase:'boden', walls:[[]], anchor:null, anchorLost:false, floorY:null, floorCand:null,
     stopSince:null, stopEsc:false, lowSince:null, lowHintT:null, lastHintK:null, closeArm:0, stateK:null,
@@ -3492,7 +3940,7 @@ $('btnClose').onclick=()=>{
 // ?debug: Zustand fuer die Konsole (chrome://inspect am Telefon, oder
 // Ergebnisanzeige im Desktop-Browser mit eingespeisten Beobachtungen).
 if(Q.has('debug')) globalThis.PROBE={S, LOG, computeResult, showResult, requestSolve, applySolution, drawMiniMap, slim, solveOpt, makeSolver,
-  REC, recStart, recFrame, recStop, recTar};
+  REC, recStart, recFrame, recStop, recTar, trackFrame, trkSeg};
 $('start').disabled=true;
 stage0();
 })();
