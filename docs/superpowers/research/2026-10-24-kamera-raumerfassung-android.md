@@ -635,6 +635,107 @@ Tobias hat bestätigt, dass die 2416 mm in genau diesem Raum gemessen sind. Der 
 
 **Neuer Befund aus der Prüfung:** Das Ergebnis des Schätzers kippt bei kleinen Änderungen am Pool. Fehlen in Aufnahme 6 nur 4 von 153 Erfassungen, werden aus 6 Ecken (22,9 m²) 17 Ecken (14,8 m²). Das gehört nach oben auf die Liste: Eine Skizze, die an 4 Erfassungen hängt, ist nicht verlässlich.
 
+### 10.15 Warum der Schätzer kippt (Aufnahme 6, 4 Erfassungen weniger)
+
+**Ablauf in `solveSweep`:** Zuerst entsteht der Ring in Zeitfolge. Ist er schlecht (Wände kreuzen sich, eine Wand fehlt, oder die Winkel summieren sich nicht auf ±360° ±45°), sucht `ringOrder` die Reihenfolge aus den Wandenden. Ist auch deren Ring schlecht, bleibt der Zeitring.
+
+**Was in Aufnahme 6 passiert:**
+- Der Zeitring ist in beiden Fällen schlecht: 15 bzw. 17 Ecken, mehrere Kreuzungen.
+- Mit allen Erfassungen findet `ringOrder` eine Folge aus 5 Wänden (Kosten 32,595, 8 Gruppen ausgelassen). Ihr Ring ist gut: 6 Ecken, 360°.
+- Ohne die 4 Erfassungen gewinnt eine Folge aus 10 Wänden (Kosten 32,588) gegen die 5er-Folge (jetzt 33,370). Ihr Ring läuft zweimal herum (720°) und kreuzt sich. Er wird verworfen, und zurück kommt der ebenfalls kreuzende Zeitring mit 17 Ecken.
+- Dass beide Male rund 32,59 herauskommt, ist Zufall, kein Gleichstand. Mit allen Erfassungen ist die 10er-Folge gar nicht zulässig.
+
+**Das gekippte Tor:** Der Übergang Gruppe 3 → 5 verbindet zwei parallele Wände gleicher Richtung (Versprung). Erlaubt ist er nur, solange sich ihre gesehenen Stücke um höchstens `inTol` = 1,0 m überlappen.
+- Mit allen Erfassungen überlappen sie sich um 1,38 m, der Übergang ist gesperrt.
+- Die 4 Erfassungen lagen am Anfang von Gruppe 5. Ohne sie schrumpft der Überlapp auf 0,59 m, der Übergang wird zulässig (Kosten 1,72), und damit die ganze 10er-Folge.
+- Dazu kommt: Die Segmentierung hängt am ganzen Pool. `nSeg` geht von 30 auf 29, und bei 150 s entsteht eine neue Gruppe mit 3 Erfassungen, die die 5er-Folge um 1,62 verteuert. Vermutlich wirken `beta` (hängt von der Zahl der Punkte ab) und `s0`; nicht weiter verfolgt.
+
+**Drei Ursachen:**
+1. `ringOrder` sucht nur nach Kosten. Ob der Ring geometrisch geht (einfach, einmal herum), prüft erst `ringByEnds` danach. Gewinnt eine ungültige Folge, wird die nächstbeste gültige nicht mehr versucht.
+2. Harte Tore (`inTol`, `maxGap`) schalten Übergänge sprunghaft zu oder ab. Kleine Änderungen am Pool kippen so die ganze Reihenfolge.
+3. Scheitern beide Ringe, gibt `solveSweep` den bekannt schlechten Zeitring als Skizze zurück, mit Kreuzungen.
+
+**Literatur:** Cabral & Furukawa (2014) erzwingen, dass der Grundriss genau einmal um den freien Raum läuft (Start-/Endlinie, kürzester Weg). Floor-SP (1908.06702) setzt die Raumtopologie als einfache Schleife an. MonteFloor (2103.11161) verlangt nicht kreuzende Polygone und nennt kreuzende Grundrisse als Fehlerbild von Floor-SP.
+
+**Prototyp (nur Kopie der Seite, nicht im Repo):** `ringOrder` übernimmt einen Zyklus nur noch dann als besten, wenn sein Ring nach `ringOf` gut ist (kein „kreuzt“, kein „fehlt“, Drehsumme ±360° ±45°). Die Schranke der Suche bleibt gültig, `bad()` danach bleibt als Absicherung. Abschaltbar mit der Option `ringValid:false`.
+
+| Prüfung | heute | Prototyp |
+|---|---|---|
+| Aufnahme 6, alle Erfassungen | 6 Ecken, 22,9 m² | gleich |
+| Aufnahme 6, ohne 73,1–75,1 s | 17 Ecken, kreuzend | 6 Ecken, 22,9 m² |
+| Aufnahme 6, je eine Erfassung weglassen (153×) | 149 gleich, 1× 16 Ecken (Zeitring), 3× 4 Ecken | 150 gleich, 3× 4 Ecken |
+| Aufnahme 5, je eine weglassen (308×, ohne Laser, Vorwissen 2,5 ± 0,3 m) | Basis 14 Ecken (Zeitring), 255 gleich (83 %) | Basis 10 Ecken (Wandenden), 264 gleich (86 %), alle Varianten aus den Wandenden |
+| Protokoll 3 (ohne Laser) | 19 Ecken, 40,5 m², kreuzend | 10 Ecken, 29,3 m², nicht kreuzend, 6 Gruppen außerhalb |
+| Protokolle 1, 2, 4 und Aufnahme 5 im Protokoll-Werkzeug (Vorwissen 2,55 ± 0,35 m) | – | unverändert |
+| Messaufbau: 200 Räume × 5 Klassen × 6 Szenarien, Seed 7 | – | mit Laser (dp) 1 von 6 000 Läufen geändert (Schrankwand, einmal weniger falsch geschlossen); ohne Laser (dpH) alle Tabellenwerte gleich bis auf die Rechenzeit |
+| Suchbudget (200 000 Knoten) und Rechenzeit je `solveSweep`, alle Weglass-Läufe von Aufnahme 6 und 5 | nie erschöpft; Median 10,6 / 26,6 ms | nie erschöpft; Median 10,4 / 25,7 ms |
+
+Der Messaufbau erzeugt diesen Fehlerfall praktisch nie. Er zeigt also nur, dass nichts schlechter wird, nicht dass der Fix hilft. Die Wirkung zeigt sich nur an echten Aufnahmen, und dort gibt es keine Wahrheit.
+- Belegt ist: In allen gemessenen Fällen kam mit dem Prototyp ein Ring aus den Wandenden heraus, keiner kreuzte sich. Ursache 3 bleibt aber bestehen: Findet `ringOrder` keinen gültigen Zyklus oder ist der Ring nach der Neuausgleichung schlecht, kommt weiter der kreuzende Zeitring zurück.
+- Richtig sind die Ergebnisse damit nicht automatisch; für Protokoll 3 und Aufnahme 5 fehlt die Wahrheit.
+- Der Prototyp behebt eine von drei Ursachen. Beim Weglassen einzelner Erfassungen kippt Aufnahme 6 weiter in 3 von 153 Fällen, Aufnahme 5 in 44 von 308 (14 %). Diese übrige Instabilität kommt aus den harten Toren und der Segmentierung.
+- Der Selbsttest lief mit der Kopie nicht; für Stand 5 ist er Pflicht.
+
+**Offen:**
+- Prototyp als Stand 5 übernehmen, Selbsttest um einen Fall mit Doppelschleife ergänzen.
+- Den Messaufbau um Szenarien mit Rückwegen und wiederholten Wänden erweitern. Aus solchen Schwenks entstehen die vielen Gruppen und die Doppelschleife.
+- Harte Tore durch stetige Kosten ersetzen (Ursache 2).
+- Ursache 3: Statt eines kreuzenden Zeitrings „kein gültiger Umriss“ melden.
+
+### 10.16 Ansichten im AR-Modus (gebaut, noch nicht live)
+
+Knopf „Ansicht“ in der Wandphase. Er schaltet durch: Kamera, Luma (das verkleinerte Graustufenbild, das `captureEdge` und die Senkrechten bekommen, unverschmiert in echter Auflösung) und Gradient (Sobel-Betrag auf dem ganzen Bild, Wurzel-Skala). Die Overlay-Linien bleiben darüber. Jeder Wechsel steht als Ereignis `ansicht` im Protokoll. Gerechnet wird nur bei aktiver Ansicht und neuem Bild.
+
+## 11. Umbau: Kanten als Landmarken (Recherche 25.10. nachmittags)
+
+Anlass war Tobias' Vorgabe:
+- Kanten im ganzen Bild erkennen, nicht nur am Fadenkreuz.
+- Bodenkanten mitnutzen, wenn sie sichtbar sind.
+- Jede Kante ist zunächst unendlich lang. Neue Beobachtungen werden ihr zugeordnet, der Fehler wird über alle neu ausgeglichen, die Länge ergibt sich an den Ecken.
+
+Drei Recherchen, Paper liegen in `paper/`. [V] heißt im Volltext gelesen; der Rest stammt aus Abstract oder Sekundärquelle.
+
+**11.1 Linien über viele Bilder (SLAM/SfM)**
+- Allgemeine 3D-Linien führt man in Plücker-Koordinaten bzw. der orthonormalen Form mit 4 Freiheitsgraden (LIMAP Supp. A.2, PL-VINS III-C [V]).
+- Bei bekannter Schwerkraft und Richtung bleiben 2 Parameter je Linie, die Ausdehnung wird getrennt geführt (StructVIO §III [V]). Waagerechte Linien bekannter Richtung machen die Gier beobachtbar (Kottas & Roumeliotis 2013 [V]).
+- Für die unendliche Landmarke ist das passende Fehlermaß der Abstand der beobachteten Segmentenden zur projizierten Linie (StructVIO Gl. 18, LIMAP Gl. 8 [V]). Robust mit Huber (PL-VINS) oder Cauchy (LIMAP).
+- Ausgleich je Linie mit Gauss-Newton über alle Sichten, alte Messungen als Prior verdichtet (StructVIO Gl. 32–33 [V]). Zuordnung durch Projektion mit der vorhergesagten Pose, Filter nach Lage und Winkel, Prüfung im Bild (StructVIO V-A [V]). Doppelte Landmarken werden über einen Graphen oder einen χ²-Test zusammengeführt (LIMAP 3.2, Pfister Gl. 30 [V]).
+- Endpunkte: alle Beobachtungsenden auf die Linie projizieren, je Seite den drittäußersten (LIMAP Supp. [V]).
+- Teuer ist die Detektion, nicht der Ausgleich: PL-VINS LSD 62–70 ms, Tracking 12–15 ms, Desktop-C++ (Tab. IV [V]).
+- Folgerung für uns: Eine Wand ist eine 2D-Gerade (θ, ρ) im Grundriss, dazu kommen die gemeinsamen Höhen h_c (Decke) und h_f (Boden). Decken- und Bodenkante derselben Wand teilen sich (θ, ρ). Beim Verlängern wächst das Fehlerband linear mit dem Abstand vom Schwerpunkt der Beobachtungen; das ist genau der Fall „nur 23 % der Wand gesehen“.
+
+**11.2 Raumlayout aus Decken- und Bodenkanten**
+- Jede Bildspalte trifft genau eine Wand. Decken- und Bodenlinie hängen über eine Homologie zusammen. Eine Unbekannte je Spalte genügt, und die Bodenlinie folgt auch dort, wo sie verdeckt ist (Flint 2010 §3.2, Flint 2011 §3 [V]). Feste Reihenfolge Decke/Wand/Boden je Spalte (Cabral 2014 §6 [V]).
+- Die Boden-Wand-Grenze ist in den meisten Räumen teils oder ganz verdeckt (Hedau 2009 [V]), im ST-PIO-Beispiel zu über 50 %. DuLa-Net nutzt deshalb die Deckenansicht [V].
+- Möbel: Verfahren ohne Modell für Störobjekte legen Wände gern auf Möbelflächen (Lee 2010 §1.1 [V]). Störobjekte als Quader im Raum schieben die Wand nach hinten (Lee 2010 §4.3, Pixelfehler 18,6 → 16,2 %).
+- Fusion über viele Bilder: Cabral 2014 rechnet ein Raster in der Draufsicht mit Wand-Evidenz und Freiraum-Evidenz entlang der Sichtstrahlen. Der Grundriss ist der kürzeste geschlossene Weg um den Kern-Freiraum, mit Kosten je Kante (§4–5 [V]). Das erzwingt einen einfachen Ring, der einmal herumläuft; genau das fehlt heute (10.15). Flints dynamische Programmierung läuft über die Spalten **eines** Bilds, nicht über die Wandfolge.
+- Lernverfahren (RoomNet, HorizonNet, Layout Anything, PixCuboid) sind nur auf Desktop-GPUs gemessen. Brauchbar sind ihre Ideen, nicht die Netze.
+- RoomPlan (nur Webseite): Draufsicht-Pseudobilder aus LiDAR, ein Netz für Ecken und Kanten, Heben mit geschätzter Wandhöhe. magicplan: Ecken markiert der Nutzer; GRIHA misst dafür 3,7–5,5 % Flächenfehler [V].
+
+**11.3 Kanten im ganzen Bild**
+- Laufzeit nativ C++, 640×480, Snapdragon 855 (ELSED Tab. 4 [V]): LSD 58,7 ms, EDLines 13,8 ms, ELSED 10,2 ms.
+- Genauigkeit (F-Score YorkUrban): LSD 0,34, EDLines 0,36, ELSED 0,41. Lagefehler quer zur Linie: LSD 0,79 px, ELSED 0,85, DeepLSD 0,82 (DeepLSD Tab. 1 [V]). Gelernte Detektoren sind nicht lagegenauer, aber viel langsamer.
+- Unser Ansatz für die Senkrechten (1D-Hough über den Fluchtpunkt aus der Pose) ist Flints Verfahren (Flint 2010 [V]). Er bleibt.
+- Browser: opencv.js 4.13 enthält Canny, Hough, Sobel, CLAHE, aber keinen nutzbaren LineSegmentDetector. Lizenzen: ELSED Apache-2.0, ED_Lib MIT, IPOL-LSD AGPL (meiden).
+- Vorverarbeitung: Kein Paper misst einen Nutzen von CLAHE oder Gamma für Liniendetektoren. Die Paper glätten mit Gauß (σ = 1).
+- Subpixel: LSD und ELSED sind schon subpixelgenau. Feinlage längs gefundener Segmente in voller Auflösung mit Devernay-Parabel (0,04–0,15 px [V]).
+
+**11.4 Vorschlag: Ablauf je ausgewertetem Bild**
+1. *Erkennen:* ELSED auf dem ganzen Bild (287×640) als WASM im Worker. Erwartet 4–10 ms am Pixel (hochgerechnet, nicht gemessen). Bei 861×1920 eher 30–60 ms, darum Feinlage in voller Auflösung nur längs der Segmente.
+2. *Einteilen:* Segmente über die Fluchtpunkte aus der Pose in senkrecht und waagerecht einteilen. Die waagerechten Fluchtpunkte liegen auf dem Horizont; die Raumrichtung ist eine 1D-Suche über die Gier.
+3. *Heben:* Waagerechte Segmente auf Decken- und Bodenhöhe heben. Über mindestens zwei Posen die Höhe einordnen: Decke, Boden, Leiste oder Störer. Je Richtung gewinnt die fernste Kante auf Deckenhöhe, am Boden die unterste.
+4. *Zuordnen:* Bekannte Wandgeraden mit der aktuellen Pose ins Bild projizieren. Zuordnen bei passendem Winkel, χ²-Abstand und Überlapp mit dem Stützintervall; mehrdeutige Treffer nicht zuordnen. Sonst entsteht eine neue unendliche Gerade.
+5. *Ausgleichen:* Gauss-Newton mit Huber über alle Beobachtungen. Unbekannte sind (θ, ρ) je Wand, h_c, h_f, später ein 4-DoF-Versatz je Tracking-Abschnitt gegen Lagesprünge. Fehlermaß sind die Segmentenden gegen die projizierte Linie im Bild.
+6. *Umriss:* Draufsicht-Raster mit Wand- und Freiraum-Evidenz; der Umriss ist der kürzeste geschlossene Weg um den Freiraum mit Strafe je Ecke (Cabral 2014). Das ersetzt Zeitring und `ringOrder`.
+7. *Anzeige:* Jede Wandgerade läuft über das ganze Bild. Ihr Fehlerband wächst mit dem Abstand vom gesehenen Stück und zieht sich mit jeder neuen Beobachtung zusammen. Weitere Ansichten: Segmente nach Fluchtpunkt-Klasse gefärbt, Kantenketten, Fluchtpunkt-Zuordnung je Pixel.
+
+**11.5 Reihenfolge (jeder Schritt zuerst am Prüfstand mit Aufnahme 5 und 6, dann am Gerät)**
+- A: ELSED-Port mit Laufzeit bei 640/960/1920 px auf den Aufnahmen und am Pixel, dazu die Ansicht „Segmente“.
+- B: Landmarken-Schicht (Schritte 4–5) offline gegen die heutige Auswertung.
+- C: Bodenkanten über die gemeinsame Gerade und h_f.
+- D: Umriss nach Cabral.
+- Wahrheit: den Raum von Aufnahme 6 in Raumaufmaß mit dem Laser aufnehmen. Ohne Wahrheit lässt sich nur Stabilität messen, nicht Richtigkeit.
+
 ## Quellen
 
 Plattform:
