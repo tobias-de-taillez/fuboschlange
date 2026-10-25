@@ -2148,7 +2148,11 @@ const Q=new URLSearchParams(location.search);
 // Ziel des Links und lange Seite des verkleinerten Kamerabilds, beides per
 // URL ueberschreibbar: ?app=https://…/&ds=480
 const APP_URL=(Q.get('app') || 'https://raumaufmass.irazari-te.ch/').replace(/#.*$/,'');
-const DS=Math.max(240, Math.min(1280, Number(Q.get('ds'))||640));
+// Laenge der langen Bildseite, auf der die Erkennung arbeitet (Vorgabe 640).
+// Chrome liefert in der AR-Sitzung hoechstens 861x1920 (ARCore-Kamerastrom,
+// aufs Bildschirmformat beschnitten); ?ds=1920 nimmt das volle Bild -
+// langsamer, aber feinere Kanten.
+const DS=Math.max(240, Math.min(1920, Number(Q.get('ds'))||640));
 const FARBEN_KLAR=Q.get('farben')==='klar';
 // Stand der Seite: Nummer und Zeitpunkt des Hochladens. Setzt
 // scripts/raumskizze-deploy.sh - nicht von Hand aendern.
@@ -3644,7 +3648,8 @@ function recReset(){
   Object.assign(REC, {on:true, st:[], stOut:0, an:[], anOut:0, dir:null, video:false, enc:null, encCfg:null, encBusy:false, err:null,
     vBuf:[], vN:0, vOut:0, vDrop:0, vBytes:0, lastV:-1, dBuf:[], dN:0, dBytes:0, part:0, flushT:now(),
     flushing:Promise.resolve(), img:null, pad:null, obsN:LOG.obs.length, badgeT:0,
-    bitrate:Number(Q.get('vbr'))||1.5e6, name:'aufnahme-'+LOG.started.replace(/[:.]/g,'-')+'-lauf'+LOG.runs.length, lauf:LOG.runs.length});
+    // Bitrate mit der Bildflaeche (1,5 Mbit/s bei 640), hoechstens 8 Mbit/s.
+    bitrate:Number(Q.get('vbr'))||Math.min(8e6, 1.5e6*(DS/640)**2), name:'aufnahme-'+LOG.started.replace(/[:.]/g,'-')+'-lauf'+LOG.runs.length, lauf:LOG.runs.length});
 }
 function recFail(msg){
   if(!REC.err){ REC.err=msg; ev('aufnahme-fehler', {msg}); }
@@ -3689,7 +3694,8 @@ function recEncoder(w, h){
   REC.encBusy=true;
   const base={width:w, height:h, bitrate:REC.bitrate, framerate:REC_FPS, avc:{format:'annexb'}};
   (async()=>{
-    for(const codec of ['avc1.42E01F','avc1.4D401F','avc1.640028']){
+    // Level 3.1 traegt bis 1280x720; groessere Bilder (?ds) brauchen Level 4.
+    for(const codec of ['avc1.42E01F','avc1.4D401F','avc1.420028','avc1.4D4028','avc1.640028']){
       let sup=null; try{ sup=await VideoEncoder.isConfigSupported({...base, codec}); }catch(e){}
       if(!sup || !sup.supported) continue;
       try{
