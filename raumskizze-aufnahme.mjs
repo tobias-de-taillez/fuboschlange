@@ -9,12 +9,17 @@
 //    mit der Pose des Bildes, G.trackModelEdges + G.trackJudge auf dem
 //    dekodierten Bild; Vergleich mit den Stichproben des Geräts (LOG.trk) und
 //    die Verteilung des Abstands Kante–Modell gegen tolM.
-//  - Senkrechte: G.verticalEdges (Strang „senkrechte“, raumskizze-senkrechte.js,
-//    solange die Seite sie nicht hat) auf jedes n-te Bild, Peilung gegen die
-//    Ecken des nachgespielten Modells.
+//  - Senkrechte: G.verticalEdges (aus der Seite; aeltere Seiten ohne sie bekommen
+//    raumskizze-senkrechte.js) auf jedes n-te Bild, Peilung gegen die Ecken des
+//    nachgespielten Modells.
+//  - --live: die Senkrechten so, wie die App sie zeigt (senkFrame): jedes 2.
+//    ausgewertete Bild, G.senkLive (3 von 5 Laeufen an derselben Grundriss-Peilung, nur
+//    Kanten bis zur Decke des Live-Modells, Zuordnung zu den Ecken des Live-Modells) - je Bild, was die App zeichnen wuerde,
+//    mit Kennzahlen (gezeigt je Bild, an Modellecken, ohne Modellecke, Flackern).
 //
 //   node raumskizze-aufnahme.mjs aufnahme.tar|ordner [--html=seite] [--png=ordner] [--bericht=ordner] [--jede=n]
 //        [--senk=n] [--stufe2=0] [--senk-js=datei] [--senk-tol=grad] [--takt=s] [--json=datei] [--spiegeln=1]
+//        [--live] [--live-opt=k:v,...]
 //
 // --html rechnet mit einem anderen Stand der Seite nach. --png legt die Bilder
 // aufrecht (Zeile 0 = oben) als PNG ab, --jede=n nur jedes n-te. --bericht
@@ -26,6 +31,9 @@
 // --takt=s Auswertungen hoechstens alle s Sekunden (schneller, weicht dann vom
 // Geraet ab; Vorgabe 0 = wie der Worker), --json schreibt die Ergebnisse je Bild,
 // --spiegeln=1 prueft den flipY-Weg (Zeilen gespiegelt, Ergebnisse muessen gleich bleiben).
+// --senk-js=datei setzt einen anderen Stand des Finders ein (auch wenn die Seite ihn hat).
+// --live-opt=k:v,... reicht Optionen an G.senkLive (z. B. aus:3, unten:false, tolDeg:1,
+// decke:0 = auch Kanten, die unter der Decke enden, wie die Seite mit ?senkdecke=0).
 import {readFileSync, writeFileSync, statSync, readdirSync, mkdirSync, existsSync} from 'node:fs';
 import {spawn, spawnSync} from 'node:child_process';
 import {resolve, join} from 'node:path';
@@ -35,18 +43,22 @@ const tStart=performance.now();
 const argv=process.argv.slice(2);
 const flag=n=>argv.find(a=>a.startsWith('--'+n+'='))?.split('=')[1];
 const src=argv.find(a=>!a.startsWith('--'));
-if(!src){ console.error('Aufruf: node raumskizze-aufnahme.mjs aufnahme.tar|ordner [--html=seite] [--png=ordner] [--bericht=ordner] [--jede=n] [--senk=n] [--stufe2=0] [--senk-js=datei] [--senk-tol=grad] [--takt=s] [--json=datei] [--spiegeln=1]'); process.exit(1); }
+if(!src){ console.error('Aufruf: node raumskizze-aufnahme.mjs aufnahme.tar|ordner [--html=seite] [--png=ordner] [--bericht=ordner] [--jede=n] [--senk=n] [--stufe2=0] [--senk-js=datei] [--senk-tol=grad] [--takt=s] [--json=datei] [--spiegeln=1] [--live] [--live-opt=k:v,...]'); process.exit(1); }
 const HTML=flag('html') ? resolve(flag('html')) : new URL('./raumskizze-probe.html', import.meta.url);
 const html=readFileSync(HTML, 'utf8');
 const pick=id=>{ const m=html.match(new RegExp(`<script id="${id}">([\\s\\S]*?)</script>`)); if(!m) throw new Error(id); return m[1]; };
 // Senkrechte: G.verticalEdges braucht Helfer aus dem Inneren des geo-Blocks
-// (sobel) - darum wird raumskizze-senkrechte.js in den geo-Block eingefuegt,
-// nur hier im Werkzeug und nur, solange die Seite die Funktion nicht selbst hat.
+// (sobel). Die Seite traegt sie selbst (Kopie von raumskizze-senkrechte.js); fuer
+// aeltere Seiten ohne sie - und mit --senk-js fuer einen anderen Stand des Finders -
+// wird die Datei in den geo-Block eingefuegt, in einem eigenen Block (ihre Helfer
+// kollidieren so nicht mit denen der Seite; die spaetere Zuweisung gilt).
 let geo=pick('geo'), senkQuelle='Seite';
-if(!/G\.verticalEdges=/.test(geo)){
+const hatSenk=/G\.verticalEdges=/.test(geo);
+if(flag('senk-js') || !hatSenk){
   const sj=flag('senk-js') ? resolve(flag('senk-js')) : new URL('./raumskizze-senkrechte.js', import.meta.url), mark='globalThis.RAUMSKIZZE=G;', at=geo.lastIndexOf(mark);
-  if(existsSync(sj) && at>=0){ geo=geo.slice(0, at)+readFileSync(sj, 'utf8')+'\n'+geo.slice(at); senkQuelle=String(sj).replace(/^file:\/\//, ''); }
-  else senkQuelle=null;
+  if(existsSync(sj) && at>=0){ geo=geo.slice(0, at)+'{\n'+readFileSync(sj, 'utf8')+'\n}\n'+geo.slice(at); senkQuelle=String(sj).replace(/^file:\/\//, ''); }
+  else if(!hatSenk) senkQuelle=null;
+  else console.log(`--senk-js: ${flag('senk-js')} nicht gefunden – Senkrechte aus der Seite.`);
 }
 new Function(pick('vendor')+'\n'+geo)();
 const G=globalThis.RAUMSKIZZE;
@@ -194,6 +206,14 @@ if(png){ const e=exportFrames(png, 'bild-%05d.png'); console.log(e ? 'PNG fehlge
 // die Seite schickt keine Rahmen mit).
 const S2ON=flag('stufe2')!=='0', SENK_N=flag('senk')!=null ? Math.max(0, Number(flag('senk'))||0) : 3, SENK_TOL=(Number(flag('senk-tol'))||1.5)*Math.PI/180;
 const TAKT=Math.max(0, Number(flag('takt'))||0);
+// --live: Senkrechte wie die App (liveStep); --live-opt=k:v,... an G.senkLive.
+const LIVE=argv.includes('--live') || flag('live')==='1';
+const LIVE_OPT=Object.fromEntries((flag('live-opt')||'').split(',').filter(Boolean).map(kv=>{ const [a,b]=kv.split(':');
+  return [a, b==='false' ? false : b==='true' ? true : Number(b)]; }));
+// Zustand des Nachspiels (liveStep), vor dem Dekodieren angelegt.
+const lv={st:null, tick:0, ms:[], fr:new Map(), runs:[], prevT:null, prevCam:null, cam:null, camT:null, rowT:null};
+// Ortungsverluste (ohne Zustandszeile in der Luecke): die App verwirft dort die Laeufe.
+const EV_LOST=(R && R.events || []).filter(e=>e.type==='tracking-verloren').map(e=>e.t);
 const slim=ob=>({ra:ob.ra, rb:ob.rb, t:ob.t});
 const Rp=(()=>{
   const obs=R && (R.obs||[]).filter(o=>o.auto && o.ra && o.rb) || [];
@@ -363,14 +383,45 @@ function extra(k, r, g, camTo, fy){
   // Senkrechte auf jedes n-te Bild; die Peilung gegen die Modellecken kommt
   // nach dem Durchlauf (gegen den Endstand des Modells, s. u.).
   if(SENK_N && G.verticalEdges && k%SENK_N===0 && !(r[C.flags]&64)){
-    const ta=performance.now(), vs=G.verticalEdges(g, w, h, proj, camTo, fy); tm.senk.push(performance.now()-ta);
+    const ta=performance.now(), kl=G.lumaKlein ? G.lumaKlein(g, w, h) : {g, w, h}, vs=G.verticalEdges(kl.g, kl.w, kl.h, proj, camTo, fy); tm.senk.push(performance.now()-ta);
     // grund/konkav (neuer Finder): 'unten' mit grund 'konvex' oder 'eine-seite' ist eine Peilung auf eine
     // moegliche Ecke, die erst ueber mehrere Bilder und eine Modellecke zaehlen darf - mitgeben, nicht verwerfen.
     const found=vs.map(x=>({az:Math.atan2(x.ray.d[2], x.ray.d[0]), kind:x.kind, grund:x.grund, konkav:x.konkav, z:x.z, top:x.top, bottom:x.bottom, fehl:false}));
     senk.set(k, {t, camTo, found, live:live && H>0 ? live : null, H});
     if(o) o.sk=found;
   }
+  if(LIVE && G.senkLive && G.verticalEdges) liveStep(k, r, g, camTo, fy, live, H, o);
   if(o) ov.set(k, o);
+}
+// --live: Senkrechte wie die App (senkFrame). Ausserhalb von Pause, Ersatzbezug und
+// Ankerverlust (dort setzt die App zurueck) jedes 2. Bild G.verticalEdges mit der Pose
+// DIESES Bilds, gefiltert mit G.senkLive gegen das Live-Modell des Nachspiels. Je Bild
+// das, was die App dann zeichnet: die Lote des letzten Laufs (hoechstens 1 s alt).
+// Flackern je Lauf gegen den vorigen (vom jetzigen Standpunkt gepeilt, ±senk-tol):
+// erscheinen, verschwinden, Farbe (Modellecke ja/nein) gewechselt. Erscheinen zaehlt nur,
+// wenn die Stelle schon im vorigen Bild im Suchband lag, Verschwinden nur, wenn sie noch
+// im Bild liegt - was beim Schwenken ins Bild kommt oder es verlaesst, flackert nicht.
+function liveStep(k, r, g, camTo, fy, live, H, o){
+  const t=r[C.t], cam=[camTo[12], camTo[14]];
+  const v=lv.cam && t-lv.camT>0 && t-lv.camT<0.5 ? Math.hypot(cam[0]-lv.cam[0], cam[1]-lv.cam[1])/(t-lv.camT) : null; lv.cam=cam; lv.camT=t;
+  // Wie die App: Ortung seit der vorigen Zeile verloren, oder laenger als 1 s kein Lauf - neu.
+  if(lv.st && (t-lv.st.t>1 || EV_LOST.some(x=>lv.rowT!=null && x>lv.rowT && x<=t))){ lv.st=null; lv.prevT=null; }
+  lv.rowT=t;
+  if(r[C.flags]&(2|4|8|32)){ lv.st=null; lv.prevT=null; }
+  else if(++lv.tick%2===0 && live && H>0){
+    const ta=performance.now(), kl=G.lumaKlein ? G.lumaKlein(g, w, h) : {g, w, h}, vs=G.verticalEdges(kl.g, kl.w, kl.h, proj, camTo, fy), nx=G.senkLive(lv.st, vs, camTo, live, {H, ...LIVE_OPT}); lv.ms.push(performance.now()-ta);
+    const e={t, v, auf:0, ab:0, farbe:0, rand:0, dt:lv.prevT!=null ? t-lv.prevT : 0};
+    if(lv.st && lv.prevT!=null){ const az=P=>Math.atan2(P[1]-cam[1], P[0]-cam[0]), same=(a,b)=>Math.abs(wrap(az(a.P)-az(b.P)))<=SENK_TOL, prev=lv.st.shown;
+      const inView=(P,ct)=>{ const s=G.projectSegment(proj, ct, [P[0],0,P[1]], [P[0],H,P[1]]); return !!s && !!G.clipNdc([s[0][0]/0.98, s[0][1]/0.64], [s[1][0]/0.98, s[1][1]/0.64], 1); };
+      for(const s of nx.shown){ const p=prev.find(q=>same(q,s)); if(!p){ if(inView(s.P, lv.prevCam)) e.auf++; else e.rand++; } else if((p.ecke>=0)!==(s.ecke>=0)) e.farbe++; }
+      for(const p of prev) if(!nx.shown.some(s=>same(p,s))){ if(inView(p.P, camTo)) e.ab++; else e.rand++; } }
+    lv.runs.push(e); lv.st={...nx, t}; lv.prevT=t; lv.prevCam=camTo;
+  }
+  // Gezaehlt wird, was die App sichtbar zeichnet: das Lot vom Boden zur Decke schneidet das Bild.
+  const alle=lv.st && t-lv.st.t<=1 && live && H>0 ? lv.st.shown : [];
+  const shown=alle.filter(s=>{ const sg=G.projectSegment(proj, camTo, [s.P[0],0,s.P[1]], [s.P[0],H,s.P[1]]); return !!sg && !!G.clipNdc(sg[0], sg[1], 1); });
+  lv.fr.set(k, {t, v, cam, camTo, shown, alle, H:live && H>0 ? H : null});
+  if(o && live && H>0){ const ls=shown.map(s=>{ const sg=segPx([s.P[0],0,s.P[1]], [s.P[0],H,s.P[1]]); return sg ? [...sg, s.ecke>=0 ? 1 : 0] : null; }).filter(Boolean); if(ls.length) o.lv=ls; }
 }
 if(!proj) console.log('Keine Projektion im Manifest/Protokoll – kein Nachspiel des Detektors.');
 else {
@@ -599,6 +650,38 @@ else {
     Object.assign(sksum, {per, fehl, dAz});
   }
 }
+// ------------------------------------------------ Senkrechte wie die App (--live)
+// Gezeigt je Bild (nur Bilder mit Live-Modell), gruen = an einer Ecke des Live-Modells,
+// hell = ohne Modellecke (Moebel oder eine dem Modell noch fehlende Ecke). Gegen den
+// Endstand (vollstaendiger als das Live-Modell, Peilung ±senk-tol): wie viele der gezeigten
+// an einer Ecke des Endstands stehen, und wie oft eine Ecke des Endstands im Bild eine
+// gezeigte Senkrechte traegt.
+if(LIVE){
+  if(!G.senkLive || !G.verticalEdges) console.log('\nSenkrechte wie die App: G.senkLive oder G.verticalEdges fehlt in der Seite.');
+  else if(!Rp || !AUTO) console.log('\nSenkrechte wie die App: kein Nachspiel des Modells.');
+  else {
+    const Fr=[...lv.fr.values()].filter(x=>x.H), nF=Fr.length, pc=(a,b)=>b ? (100*a/b).toFixed(0)+' %' : '–';
+    const nS=Fr.reduce((a,x)=>a+x.shown.length, 0), nG=Fr.reduce((a,x)=>a+x.shown.filter(s=>s.ecke>=0).length, 0);
+    const hist=[0,0,0,0]; Fr.forEach(x=>hist[Math.min(3, x.shown.length)]++);
+    let endG=0, endH=0, endG3=0, endH3=0, cv=0, cvHit=0, unter=0;
+    for(const x of Fr){ unter+=x.shown.filter(s=>s.unter).length;
+      const map=finalSol && finalSol.drift ? G.modelToLive(finalSol, x.t, 0) : null, L=map && G.overlayModel(finalSol, map); if(!L) continue;
+      const az=P=>Math.atan2(P[1]-x.cam[1], P[0]-x.cam[0]), vis=L.verts.map(v=>cornerView(v.p, finalSol.H, x.camTo, L)).filter(Boolean);
+      for(const s of x.shown){ const d=Math.min(Infinity, ...vis.map(c=>Math.abs(wrap(c.az-az(s.P)))));
+        if(d<=SENK_TOL){ if(s.ecke>=0) endG++; else endH++; } if(d<=2*SENK_TOL){ if(s.ecke>=0) endG3++; else endH3++; } }
+      for(const c of vis){ cv++; if(x.shown.some(s=>Math.abs(wrap(c.az-az(s.P)))<=SENK_TOL)) cvHit++; } }
+    const R1=lv.runs.filter(e=>e.dt>0), T=R1.reduce((a,e)=>a+e.dt, 0), ch=e=>e.auf+e.ab+e.farbe, sumE=k=>R1.reduce((a,e)=>a+e[k], 0);
+    const opt=Object.keys(LIVE_OPT).length ? ', Optionen '+Object.entries(LIVE_OPT).map(([k,v])=>k+':'+v).join(',') : '';
+    console.log(`\nSenkrechte wie die App (--live, G.senkLive${opt}): ${lv.runs.length} Läufe (jedes 2. Bild außerhalb Pause/Ersatzbezug, mit Live-Modell) · Finder + Filter je Lauf Median ${f2(q(lv.ms,0.5))} ms, 90 % ${f2(q(lv.ms,0.9))} ms, max ${f2(Math.max(0,...lv.ms))} ms`);
+    console.log(`  gezeigt je Bild (im Bild sichtbar, ${nF} Bilder mit Live-Modell): Mittel ${nF ? (nS/nF).toFixed(2) : '–'} · keine ${pc(hist[0],nF)}, 1: ${pc(hist[1],nF)}, 2: ${pc(hist[2],nF)}, 3 und mehr: ${pc(hist[3],nF)}`);
+    console.log(`  davon grün (an einer Ecke des Live-Modells) ${pc(nG,nS)}, hell (ohne Modellecke – Möbel oder fehlende Ecke) ${pc(nS-nG,nS)} · nur unter dem Horizont gefunden ${pc(unter,nS)}`);
+    if(finalSol) console.log(`  gegen den Endstand (±${deg(SENK_TOL).toFixed(1)}° / ±${deg(2*SENK_TOL).toFixed(1)}°): grün an einer Ecke des Endstands ${pc(endG,nG)} / ${pc(endG3,nG)} (von ${nG}), hell an einer Ecke des Endstands ${pc(endH,nS-nG)} / ${pc(endH3,nS-nG)} (von ${nS-nG}); Ecken des Endstands im Bild ${cv}×, davon mit gezeigter Senkrechter (±${deg(SENK_TOL).toFixed(1)}°) ${pc(cvHit,cv)}`);
+    console.log(`  Flackern (im Bild): ${T>0 ? (R1.reduce((a,e)=>a+ch(e),0)/T).toFixed(2) : '–'} Wechsel/s (erscheinen ${sumE('auf')}, verschwinden ${sumE('ab')}, Farbe ${sumE('farbe')} in ${T.toFixed(0)} s), je gezeigter Senkrechter ${T>0 && nS ? (R1.reduce((a,e)=>a+ch(e),0)/T/(nS/nF)).toFixed(2) : '–'}/s · am Bildrand (Schwenk) ${sumE('rand')}`);
+    const bins=[[0,0.1,'< 0,1'],[0.1,0.3,'0,1–0,3'],[0.3,Infinity,'≥ 0,3']];
+    console.log(`  nach Kameratempo (m/s): ${bins.map(([a,b,l])=>{ const fb=Fr.filter(x=>x.v!=null && x.v>=a && x.v<b), rb=R1.filter(e=>e.v!=null && e.v>=a && e.v<b), tb=rb.reduce((s,e)=>s+e.dt,0);
+      return `${l}: ${fb.length} Bilder, gezeigt ${fb.length ? (fb.reduce((s,x)=>s+x.shown.length,0)/fb.length).toFixed(2) : '–'}/Bild, grün ${pc(fb.reduce((s,x)=>s+x.shown.filter(y=>y.ecke>=0).length,0), fb.reduce((s,x)=>s+x.shown.length,0))}, ${tb>0 ? (rb.reduce((s,e)=>s+ch(e),0)/tb).toFixed(2) : '–'} Wechsel/s`; }).join(' · ')}`);
+  }
+}
 // Hoehe: mit welcher Hoehe hob die App die Erfassungen (ob.Hlive), gegen
 // Laser bzw. Nachspiel; Endergebnis des Geraets gegen den Endstand.
 if(obs && obs.length){
@@ -650,6 +733,7 @@ const BERICHT_HTML=`<!doctype html>
   <label><input type="checkbox" data-l="modell" checked><i style="background:var(--modell)"></i>Modell (gesehen</label><span><i style="background:repeating-linear-gradient(90deg,var(--luecke) 0 4px,transparent 4px 8px)"></i>ungesehen, <i style="background:repeating-linear-gradient(90deg,var(--ergaenzt) 0 4px,transparent 4px 8px)"></i>ergänzt, Ecken als Lote)</span>
   <label><input type="checkbox" data-l="s2" checked><i style="background:var(--passt);height:5px"></i>Stufe 2 passt <i style="background:var(--weicht);height:5px"></i>weicht ab <i style="background:var(--schwach)"></i>schwach/Leiste (je Bild, ohne die 3-aus-4-Glättung der App)</label>
   <label><input type="checkbox" data-l="s2g" checked><i style="background:repeating-linear-gradient(90deg,#fff 0 2px,transparent 2px 5px)"></i>Stufe 2 am Telefon (LOG.trk, Farbe = Urteil)</label>
+  <label><input type="checkbox" data-l="lv" checked><i style="background:var(--passt)"></i>Senkrechte wie die App (--live): an Modellecke <i style="background:repeating-linear-gradient(90deg,#fff 0 2px,transparent 2px 6px)"></i>ohne</label>
   <label><input type="checkbox" data-l="senk" checked><i style="background:var(--s-ecke)"></i>Senkrechte ecke <i style="background:var(--s-durch)"></i>durch <i style="background:var(--s-unten)"></i>unten <i style="background:var(--s-weiter)"></i>weiter, <i style="background:var(--fehl)"></i>Fehlpeilung</label>
 </div>
 <main><div id="wrap"><img id="img" alt=""><canvas id="cv"></canvas></div></main>
@@ -688,6 +772,7 @@ function zeige(n){ i=Math.max(0, Math.min(F.length-1, n)); const f=F[i];
   if(on.modell) for(const m of f.m||[]) ln(m, [col('--modell'), col('--luecke'), col('--ergaenzt'), 'rgba(255,255,255,.6)'][m[4]], m[4]===3 ? 1.2 : 1.8, m[4]===1 ? [6,5] : m[4]===2 ? [8,6] : []);
   if(on.senk) for(const s of f.sk||[]){ const k={e:'--s-ecke', d:'--s-durch', u:'--s-unten', w:'--s-weiter'}[s[4]]||'--s-unten';
     ln(s, s[6] ? col('--fehl') : col(k), 2, [], 2); g.fillStyle=s[6] ? col('--fehl') : col(k); g.font=\`\${11*dpr}px system-ui\`; g.fillText((KN[s[4]]||'?')+' z'+s[5], s[0]*sx+4*dpr, s[1]*sy-4*dpr); }
+  if(on.lv) for(const s of f.lv||[]){ if(s[4]) ln(s, col('--passt'), 2.5, [], 3); else ln(s, 'rgba(255,255,255,.9)', 1.5, [2,4], 2); }
   if(on.s2) for(const s of f.s2||[]) ln(s, s[4]==='p' ? col('--passt') : s[4]==='a' ? col('--weicht') : col('--schwach'), s[4]==='p'||s[4]==='a' ? 4 : 2, [], 2);
   if(on.s2g) for(const s of f.g||[]) ln(s, s[4]==='p' ? col('--passt') : s[4]==='a' ? col('--weicht') : col('--schwach'), 1.5, [2,3]);
   if(on.geraet) ln(f.geraet, col('--geraet'), 2.5); if(on.nach) ln(f.nach, col('--nach'), 2.5, [6,4]);
@@ -718,7 +803,7 @@ if(bericht){
     const frames=[];
     for(let k=0, i=1; byV.size && k<=Math.max(...byV.keys()); k+=every, i++){ const r=byV.get(k); if(!r) continue;
       const fr={i, k, t:r[C.t], f:r[C.flags], tempo:r[C.tempo], geraet:px(r[C.live]), nach:px(nach.get(k) ?? 0)}, o=ov.get(k);
-      if(o){ if(o.m.length) fr.m=o.m; if(o.s2.length) fr.s2=o.s2; if(o.sk && o.sk.length) fr.sk=o.sk.map(f=>[...toPx(f.top), ...toPx(f.bottom), KCODE[f.kind]||'?', Math.round(f.z), f.fehl ? 1 : 0]); }
+      if(o){ if(o.m.length) fr.m=o.m; if(o.s2.length) fr.s2=o.s2; if(o.sk && o.sk.length) fr.sk=o.sk.map(f=>[...toPx(f.top), ...toPx(f.bottom), KCODE[f.kind]||'?', Math.round(f.z), f.fehl ? 1 : 0]); if(o.lv) fr.lv=o.lv; }
       const r2=s2.get(k); if(r2 && r2.ws.length) fr.s2v=r2.ws.map(x=>`W${x.id||'?'} ${x.v}${x.A && x.dev ? ' '+(100*Math.max(...x.dev.map(d=>Math.abs(d.m??0)))).toFixed(1)+' cm' : ''}`).join(', ');
       const gm=gOf.get(k); if(gm){ fr.g=[];
         for(const x of gm){ const y=R.trk[x.ti]; if(y.A) fr.g.push([...toPx(y.A), ...toPx(y.B), VCODE[y.v]||'k', x.same && x.vNach!==y.v ? 1 : 0]);
@@ -736,14 +821,15 @@ if(flag('json')){
   const out={name:M.name, w, h, proj, flipY, tolM:0.03, senkTol:deg(SENK_TOL),
     final:finalSol ? {H:finalSol.H, walls:finalSol.walls.map(W=>({line:W.line, seen:W.seen})), verts:finalLive ? finalLive.verts : null} : null,
     solves:Rp ? Rp.solves : [], match:s2sum.match||[],
-    frames:[...byV.keys()].sort((a,b)=>a-b).filter(k=>s2.has(k) || senk.has(k)).map(k=>{ const r=byV.get(k), ct=camToOf(r), a=s2.get(k), b=senk.get(k);
+    frames:[...byV.keys()].sort((a,b)=>a-b).filter(k=>s2.has(k) || senk.has(k) || lv.fr.has(k)).map(k=>{ const r=byV.get(k), ct=camToOf(r), a=s2.get(k), b=senk.get(k), lf=lv.fr.get(k);
       return {k, t:r[C.t], cam:ct && ct.map(r5), H:a ? a.H : null,
         s2:a ? a.ws.map(x=>({k:x.k, id:x.id, v:x.v, s:x.s, z:x.z!=null ? +x.z.toFixed(1) : null, A:nd(x.A), B:nd(x.B), pA:nd(x.pA), pB:nd(x.pB), dRho:r5(x.dRho),
           dev:x.dev ? x.dev.map(d=>({px:+d.px.toFixed(2), m:r5(d.m)})) : null, span:x.span && x.span.map(nd), sRho:r5(x.sRho)})) : null,
-        senk:b ? {found:b.found.map(f=>({az:r5(f.az), kind:f.kind, grund:f.grund, konkav:f.konkav, z:+f.z.toFixed(1), fehl:f.fehl, top:nd(f.top), bottom:nd(f.bottom)}))} : null}; })};
+        senk:b ? {found:b.found.map(f=>({az:r5(f.az), kind:f.kind, grund:f.grund, konkav:f.konkav, z:+f.z.toFixed(1), fehl:f.fehl, top:nd(f.top), bottom:nd(f.bottom)}))} : null,
+        ...(LIVE ? {live:lf && lf.H ? {H:lf.H, shown:lf.alle.map(s=>({P:nd(s.P), az:r5(s.az), cam:nd(s.cam), ecke:s.ecke, n:s.n, unter:s.unter, im:lf.shown.includes(s) ? 1 : 0}))} : null} : {})}; })};
   writeFileSync(flag('json'), JSON.stringify(out));
   console.log(`JSON: ${flag('json')}`);
 }
 console.log(auff.length ? `\nAuffällig:\n${auff.map(x=>'  - '+x).join('\n')}` : '\nAuffällig: nichts.');
 const sum=a=>a.reduce((x,y)=>x+y, 0)/1000;
-console.log(`Laufzeit: ${((performance.now()-tStart)/1000).toFixed(1)} s (Dekodieren und Nachspiel ${(tm.dec/1000).toFixed(1)} s: captureEdge ${sum(stat.ms).toFixed(1)} s, Schätzer ${Rp ? sum(Rp.ms).toFixed(1) : 0} s in ${Rp ? Rp.ms.length : 0} Läufen, Stufe 2 ${sum(tm.s2).toFixed(1)} s, Senkrechte ${sum(tm.senk).toFixed(1)} s${bericht ? `; Prüfstand ${((performance.now()-tB)/1000).toFixed(1)} s` : ''})`);
+console.log(`Laufzeit: ${((performance.now()-tStart)/1000).toFixed(1)} s (Dekodieren und Nachspiel ${(tm.dec/1000).toFixed(1)} s: captureEdge ${sum(stat.ms).toFixed(1)} s, Schätzer ${Rp ? sum(Rp.ms).toFixed(1) : 0} s in ${Rp ? Rp.ms.length : 0} Läufen, Stufe 2 ${sum(tm.s2).toFixed(1)} s, Senkrechte ${sum(tm.senk).toFixed(1)} s${LIVE ? `, Senkrechte wie die App ${sum(lv.ms).toFixed(1)} s` : ''}${bericht ? `; Prüfstand ${((performance.now()-tB)/1000).toFixed(1)} s` : ''})`);

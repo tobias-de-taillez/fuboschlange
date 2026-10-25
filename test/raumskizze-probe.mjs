@@ -841,6 +841,100 @@ if(G.trackModelEdges){
   chk('App: solve() läuft aus der Kamera-Skizze zur Wahrheit (±1 mm)', fit.converged && worst<1, f3(worst)+' mm');
 }
 
+// Senkrechte live (nur Anzeige): der Finder steht wortgleich in der Seite, G.senkLive
+// zeigt eine Senkrechte erst ab 3 von 5 Laeufen an derselben Grundriss-Peilung - ueber
+// die Modellwand gehoben, damit die wandernde Kamera sie nicht zerreisst -, gruen nur an
+// einer sichtbaren Modellecke, und haelt sie (Hysterese) nur, solange die Kamera nah bleibt.
+{
+  let sj=null; try{ sj=read('raumskizze-senkrechte.js'); }catch(e){}
+  chk('Senkrechte: der geo-Block traegt raumskizze-senkrechte.js wortgleich (das Werkzeug nimmt die Seite)',
+    !!sj && pick(probe,'geo').includes('{\n'+sj+'}\n') && typeof G.verticalEdges==='function' && typeof G.senkLive==='function');
+  const V=[[0,0],[4,0],[4,3],[0,3]], Mrect={rows:V.map((p,i)=>({span:[p, V[(i+1)%4]]})), verts:V.map(p=>({p}))};
+  const camAt=(x,z)=>[1,0,0,0, 0,1,0,0, 0,0,1,0, x,1.5,z,1];
+  const fund=(cam,X,grund='unten')=>({ray:{o:[cam[12],cam[13],cam[14]], d:[X[0]-cam[12], 0, X[1]-cam[14]].map((v,_,a)=>v/Math.hypot(a[0],a[2]))}, grund});
+  const azOf=(cam,X)=>Math.atan2(X[1]-cam[14], X[0]-cam[12]);
+  // a) Raumecke (4,3), Kamera quer zur Blickrichtung 6 cm je Lauf: die rohe Peilung dreht je Lauf ~1,4°.
+  { let st=null; const res=[], cams=[0,1,2].map(i=>camAt(2-0.06*i*0.6, 1.5+0.06*i*0.8));
+    for(const c of cams){ st=G.senkLive(st, [fund(c,[4,3])], c, Mrect); res.push(st.shown); }
+    const s=res[2][0], dRaw=Math.abs(azOf(cams[2],[4,3])-azOf(cams[0],[4,3]))*180/Math.PI;
+    chk('senkLive: Raumecke erst im 3. Lauf gezeigt, gruen an Modellecke 3, Lot auf der Ecke (Kamera wandert, roh 2,7°)',
+      !res[0].length && !res[1].length && res[2].length===1 && s.ecke===2 && s.n===3 && Math.hypot(s.P[0]-4, s.P[1]-3)<0.01 && dRaw>1.4,
+      s ? `ecke ${s.ecke}, P ${s.P.map(f3).join(',')}, roh ${dRaw.toFixed(2)}°` : 'nichts'); }
+  // b) Moebelkante vor der Wand (1, 2,6), ohne o.H (die App gibt H immer mit - dort zeigt g):
+  //    ohne Modellecke, Lot auf der Modellwand z = 3 dahinter.
+  { let st=null; const c=camAt(2,1.5); for(let i=0;i<3;i++) st=G.senkLive(st, [fund(c,[1,2.6])], c, Mrect);
+    const s=st.shown[0];
+    chk('senkLive ohne Raumhoehe (Deckenfilter aus): Moebelkante hell (keine Modellecke), Grundrisspunkt auf der Modellwand dahinter', st.shown.length===1 && s.ecke===-1 && Math.abs(s.P[1]-3)<1e-9
+      && Math.abs(azOf(c, s.P)-azOf(c,[1,2.6]))<1e-9, s ? `P ${s.P.map(f3).join(',')}` : 'nichts'); }
+  // c) Einzelfund, 2 von 5, zwei Funde je Lauf, ohne Modell: nie gezeigt.
+  { const c=camAt(2,1.5); let a=null, b=null, d=null, e=null, maxA=0, maxB=0;
+    for(let i=0;i<5;i++){ a=G.senkLive(a, i===0 ? [fund(c,[4,1])] : [], c, Mrect); maxA=Math.max(maxA, a.shown.length);
+      b=G.senkLive(b, i===0 || i===2 ? [fund(c,[4,1])] : [], c, Mrect); maxB=Math.max(maxB, b.shown.length); }
+    for(let i=0;i<2;i++) d=G.senkLive(d, [fund(c,[4,1]), fund(c,[4,1])], c, Mrect);
+    for(let i=0;i<4;i++) e=G.senkLive(e, [fund(c,[4,1])], c, null);
+    chk('senkLive: Einzelfund und 2 von 5 nie gezeigt, zwei Funde in einem Lauf zaehlen einmal, ohne Modell nichts',
+      maxA===0 && maxB===0 && d.shown.length===0 && e.shown.length===0 && e.runs.length===4); }
+  // d) Hysterese: gezeigt ab Lauf 3, haelt bis kein Lauf im Fenster mehr dafuer spricht; mit aus:3 nicht;
+  //    und nicht, wenn die Kamera seit dem juengsten Fund mehr als 0,15 m gegangen ist.
+  { const c=camAt(2,1.5), far=camAt(2.2,1.5), run=(o,moved)=>{ let st=null; const n=[];
+      for(let i=0;i<8;i++){ const cc=moved && i>=3 ? far : c; st=G.senkLive(st, i<3 ? [fund(cc,[4,1])] : [], cc, Mrect, o); n.push(st.shown.length); } return n.join(''); };
+    const h1=run({}, false), h3=run({aus:3}, false), hw=run({}, true);
+    chk('senkLive: Hysterese – gezeigt bis zum 7. Lauf (1 von 5), mit aus:3 bis zum 5., nach 0,2 m Weg nur solange 3 von 5',
+      h1==='00111110' && h3==='00111000' && hw==='00111000', `${h1} / ${h3} / ${hw}`); }
+  // e) Modellecke hinter einer Modellwand: nicht gruen, Lot auf der Wand davor.
+  { const Mz={rows:[...Mrect.rows, {span:[[3,2],[3,4]]}], verts:Mrect.verts}; let st=null; const c=camAt(2,1.5);
+    for(let i=0;i<3;i++) st=G.senkLive(st, [fund(c,[4,3])], c, Mz); const s=st.shown[0];
+    chk('senkLive: verdeckte Modellecke nicht gruen, Grundrisspunkt auf der Wand davor', !!s && s.ecke===-1 && Math.abs(s.P[0]-3)<1e-9, s ? `P ${s.P.map(f3).join(',')}` : 'nichts'); }
+  // f) Gerendert (L-Raum, weiss, Kontrast 4 Stufen): Kamera geht 5 cm je Lauf quer, Blick in die Ecke (0,0).
+  { const Mroom={rows:ROOM.map((p,i)=>({span:[p, ROOM[(i+1)%NW]]})), verts:ROOM.map(p=>({p}))};
+    let st=null, sH=null, raw=[]; const n=[];
+    for(let i=0;i<3;i++){ const C=[2.0+0.05*i*0.781, 1.6, 2.5-0.05*i*0.625], cam=lookAt(C,[0,2.2,0]), g=render(cam, 900+i);
+      const k=G.lumaKlein(g, IW, IH), f=G.verticalEdges(k.g, k.w, k.h, PROJ, cam, false); raw.push(f.map(x=>Math.atan2(x.ray.d[2], x.ray.d[0])));
+      st=G.senkLive(st, f, cam, Mroom); sH=G.senkLive(sH, f, cam, Mroom, {H:HT}); n.push(st.shown.length); }
+    const s=st.shown.find(x=>x.ecke===0), sh=sH.shown.find(x=>x.ecke===0);
+    chk('senkLive gerendert: Raumecke (0,0) nach 3 Laeufen gruen, Lot auf der Ecke (±5 cm)', n[0]===0 && n[1]===0 && !!s && Math.hypot(s.P[0], s.P[1])<0.05,
+      `gezeigt je Lauf ${n.join('/')}, Funde ${raw.map(r=>r.length).join('/')}${s ? ', P '+s.P.map(f3).join(',') : ''}`);
+    chk('senkLive gerendert, mit Raumhoehe: die Raumecke reicht bis zur Decke (Anteil 0,9-1,1) und bleibt gruen', !!sh && sh.decke>=0.9 && sh.decke<=1.1 && Math.hypot(sh.P[0], sh.P[1])<0.05,
+      sh ? `Anteil ${f3(sh.decke)}, P ${sh.P.map(f3).join(',')}` : `nichts (${sH.shown.length} gezeigt)`); }
+  // f2) Verkleinern fuer den Finder (?ds bis 1920): ein 3fach vergroessertes Bild (jedes Pixel
+  //     3x3) ergibt nach G.lumaKlein wieder genau das Bild, und der Finder findet dieselben
+  //     Senkrechten an denselben Stellen (NDC) - die Pixel-/NDC-Abbildung stimmt.
+  { const cam=lookAt([2.0,1.6,2.5],[0,2.2,0]), g=render(cam, 900), W3=3*IW, H3=3*IH, g3=new Float32Array(W3*H3);
+    for(let y=0;y<H3;y++) for(let x=0;x<W3;x++) g3[y*W3+x]=g[Math.floor(y/3)*IW+Math.floor(x/3)];
+    const k=G.lumaKlein(g3, W3, H3), k1=G.lumaKlein(g, IW, IH), a=G.verticalEdges(g, IW, IH, PROJ, cam, false), b=G.verticalEdges(k.g, k.w, k.h, PROJ, cam, false);
+    let dmax=0; for(let i=0;i<g.length;i++) dmax=Math.max(dmax, Math.abs(k.g[i]-g[i]));
+    const same=a.length>0 && a.length===b.length && a.every((x,i)=>Math.hypot(x.top[0]-b[i].top[0], x.top[1]-b[i].top[1])<1e-9);
+    chk('lumaKlein: 864x1920 -> 288x640 (f=3) gibt das Bild zurueck, Finder gleich; bei 640 unveraendert',
+      k.f===3 && k.w===IW && k.h===IH && dmax<1e-3 && same && k1.f===1 && k1.g===g, `f ${k.f}, ${k.w}x${k.h}, max ${f3(dmax)}, Funde ${a.length}/${b.length}`); }
+  // g) Nur Kanten bis zur Decke (o.H): Strahl zum oberen Ende. Raumhoehe 2,5, Kamera 1,5 m hoch.
+  //    Raumecke (4,3) bis zur Decke: gruen. Schrankkante (1, 2,6) endet auf 1,9 m - am
+  //    Grundrisspunkt (Wand z = 3 dahinter) erreicht sie 0,55 der Hoehe Kamera->Decke: nicht
+  //    gezeigt, mit decke:0 hell wie ohne o.H. Deckenhohe Kante ohne Modellecke (4, 1): hell.
+  { const fundT=(cam,X,y)=>{ const d=[X[0]-cam[12], y-cam[13], X[1]-cam[14]], l=Math.hypot(...d); return {ray:{o:[cam[12],cam[13],cam[14]], d:d.map(v=>v/l)}, grund:'unten'}; };
+    const c=camAt(2,1.5), run=(o, fs)=>{ let st=null; for(let i=0;i<3;i++) st=G.senkLive(st, fs, c, Mrect, o); return st.shown; };
+    const ecke=run({H:2.5}, [fundT(c,[4,3],2.5)]), schrank=run({H:2.5}, [fundT(c,[1,2.6],1.9)]), schrank0=run({H:2.5, decke:0}, [fundT(c,[1,2.6],1.9)]), frei=run({H:2.5}, [fundT(c,[4,1],2.5)]);
+    chk('senkLive mit Raumhoehe: Raumecke bis zur Decke gruen, Schrankkante (endet 0,6 m darunter) nicht gezeigt, mit decke:0 doch, deckenhohe Kante ohne Modellecke hell',
+      ecke.length===1 && ecke[0].ecke===2 && Math.abs(ecke[0].decke-1)<1e-9 && schrank.length===0 && schrank0.length===1 && schrank0[0].ecke===-1 && Math.abs(schrank0[0].decke-0.5455)<1e-3
+      && frei.length===1 && frei[0].ecke===-1 && Math.abs(frei[0].decke-1)<1e-9,
+      `Ecke ${ecke.map(s=>s.ecke+'/'+f3(s.decke))} Schrank ${schrank.length}, decke:0 ${schrank0.map(s=>s.ecke+'/'+f3(s.decke))}, frei ${frei.map(s=>s.ecke+'/'+f3(s.decke))}`); }
+  // h) Zwei Gruppen an derselben Modellecke (juengste Funde 1° auseinander, beide ±1,5° an der
+  //    Ecke): ein Lot.
+  { const c=camAt(2,1.5), a0=Math.atan2(1.5, 2), at=da=>[2+2.5*Math.cos(a0+da*Math.PI/180), 1.5+2.5*Math.sin(a0+da*Math.PI/180)];
+    let st=null; for(let i=0;i<3;i++) st=G.senkLive(st, [fund(c, at(0.5)), fund(c, at(-0.5))], c, Mrect);
+    // ohne Modellecke (Wand x = 4 bei z = 1): zwei helle Gruppen 1° auseinander, die mit mehr Laeufen bleibt
+    const b0=Math.atan2(-0.5, 2), bt=da=>[2+2.0616*Math.cos(b0+da*Math.PI/180), 1.5+2.0616*Math.sin(b0+da*Math.PI/180)];
+    let sh=null; for(let i=0;i<4;i++) sh=G.senkLive(sh, i<3 ? [fund(c, bt(0.5)), fund(c, bt(-0.5))] : [fund(c, bt(-0.5))], c, Mrect);
+    chk('senkLive: zwei Gruppen an derselben Stelle - ein Lot (an der Modellecke gruen; ohne Ecke das mit mehr Laeufen)',
+      st.shown.length===1 && st.shown[0].ecke===2 && sh.shown.length===1 && sh.shown[0].ecke===-1 && sh.shown[0].n===4 && Math.abs(sh.shown[0].az-(b0-0.5*Math.PI/180))<1e-9,
+      `Ecke: ${st.shown.map(s=>s.ecke+'/n'+s.n).join(' ')} · ohne: ${sh.shown.map(s=>s.ecke+'/n'+s.n).join(' ')}`);
+    // Die beim Zusammenlegen weggelassene Gruppe A (+0,5°) bleibt fuer die Hysterese im Zustand:
+    // Laeufe A+B, A+B, A+B, B, -, -, A - im letzten traegt A nur noch 2 Laeufe (per Hysterese) und wird gezeigt.
+    const seq=[[1,1],[1,1],[1,1],[0,1],[0,0],[0,0],[1,0]]; let sz=null;
+    for(const [a,b] of seq) sz=G.senkLive(sz, [...(a ? [fund(c, bt(0.5))] : []), ...(b ? [fund(c, bt(-0.5))] : [])], c, Mrect);
+    chk('senkLive: zusammengelegte Gruppe haelt die Hysterese (Zustand all) - kehrt ihr Fund zurueck, steht ihr Lot wieder',
+      sz.shown.length===1 && sz.shown[0].n===2 && Math.abs(sz.shown[0].az-(b0+0.5*Math.PI/180))<1e-9, `gezeigt ${sz.shown.map(s=>(s.az*180/Math.PI).toFixed(2)+'°/n'+s.n).join(' ')}`); }
+}
+
 // Die lz-string-Zeile muss byte-gleich zur App bleiben.
 {
   const line=s=>s.split('\n').find(l=>l.startsWith('var LZString=function()'));
