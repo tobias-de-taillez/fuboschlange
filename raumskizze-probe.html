@@ -2632,6 +2632,227 @@ const yawOfM=m=>Math.atan2(m[8], m[10]);
 const psiOfT=T=>Math.atan2(-T[2], T[0]);
 const wrapPi=a=>Math.atan2(Math.sin(a), Math.cos(a));
 
+// ------------------------------------------- Anker-Netz (nur Protokoll)
+// Offen aus den Protokollen 3 und 4: ist ein Ankersprung eine Kartenkorrektur
+// von ARCore (dann bewegen sich alle Anker gemeinsam gegen local, und der
+// Versatz ist messbar) oder ein Ausreisser des einen Ankers? Davon haengt ab,
+// ob der Bezug folgen oder halten muss und ob sich die Erfassungen vor dem
+// Sprung mit dem gemessenen Versatz umrechnen lassen. Dazu im Schwenk bei
+// guter Ortung alle NETZ_DT s ein Messanker am Boden unter der Kamera
+// (hoechstens NETZ_MAX, der aelteste geht), alle NETZ_TAKT s und bei jedem
+// Sprung oder Verlust sofort die Lage aller Anker in local (REC.an ->
+// anker-NNNN.jsonl, nie localStorage), und je Sprung, Luecke, Rueckkehr oder
+// Netzbewegung ein Befund als Ereignis 'netz'. Nichts davon wirkt auf Bezug,
+// Erfassung oder Auswertung. ?netz=0 schaltet ab.
+const NETZ=Q.get('netz')!=='0';
+const NETZ_DT=12, NETZ_MAX=8, NETZ_TAKT=0.5, NETZ_JUNG=4, NETZ_NACH=1, NETZ_D=0.03, NETZ_PSI=0.5*Math.PI/180, NETZ_EVMAX=40;
+const NETZ_COLS=['t','anlass','kx','ky','kz','kpsi','bezug','vorher','anker'];
+// Momentaufnahme bei diesen Ereignissen; ein Befund bei Spruengen und Luecken.
+const NETZ_SNAP=new Set(['anker-sprung','bezug-sprung','anker-zurück-nach-sprung','tracking-zurück','anker-neu','anker-ersetzt','anker-zurück','anker-verloren','anker-gestoppt','relokalisiert']);
+const NETZ_SPRUNG=new Set(['anker-sprung','bezug-sprung','anker-zurück-nach-sprung']);
+function netzNeu(){
+  return {ids:new WeakMap(), nId:0, meta:[], net:[], alter:new Map(), busy:false, tReq:-1e9, tTakt:-1e9, evI:LOG.events.length,
+    last:null, lastP:new Map(), nach:[], vorNetz:null, aus:false, tEv:{}, nSpontan:0, nPose:0};
+}
+const netzR=(x,n)=>+x.toFixed(n);
+const netzLen=x=>x==null ? '–' : x>=0.5 ? x.toFixed(2)+' m' : (x*100).toFixed(1)+' cm';
+const netzDeg=x=>x==null ? '–' : (Math.abs(x)*180/Math.PI).toFixed(1)+'°';
+const netzDist=(a,b)=>Math.hypot(a[0]-b[0], a[1]-b[1], a[2]-b[2]);
+// Lage von r im Rahmen von i (Ti⁻¹ · Tr, 4 FG wie der Bezug). Eine gemeinsame
+// Kartenkorrektur X (jeder Anker T' = X · T) laesst sie unveraendert - auch mit
+// Drehung, bei der Anker in verschiedener Entfernung verschieden weit wandern.
+const netzRel=(Pi, Pr)=>{ const dx=Pr[0]-Pi[0], dz=Pr[2]-Pi[2], c=Math.cos(Pi[3]), s=Math.sin(Pi[3]);
+  return [c*dx-s*dz, Pr[1]-Pi[1], s*dx+c*dz, wrapPi(Pr[3]-Pi[3])]; };
+function netzId(a, rolle, extra={}){
+  const N=S.netz; let id=N.ids.get(a);
+  if(!id){ id=++N.nId; N.ids.set(a, id); N.meta.push({id, rolle, t:now(), ...extra}); }
+  return id;
+}
+// [x, y, z, psi] in local, 0 = pausiert (getPose null), -1 = gestoppt (fehlt in
+// trackedAnchors - seine eingefrorene Lage saehe sonst aus wie "nicht bewegt").
+function netzLage(frame, a){
+  try{
+    if(frame.trackedAnchors && !frame.trackedAnchors.has(a)) return -1;
+    const p=frame.getPose(a.anchorSpace, S.ref); LOG.netz.getPose++; S.netz.nPose++;
+    if(!p) return 0;
+    const o=p.transform.position, q=p.transform.orientation;
+    return [o.x, o.y, o.z, wrapPi(2*Math.atan2(q.y, q.w))];
+  }catch(e){ return -1; }
+}
+function netzAufnahme(frame, pose, t, anlass){
+  const N=S.netz, A=new Map(), m=pose.transform.matrix;
+  N.nPose=0;
+  const B=S.anchor ? netzId(S.anchor, 'bezug') : 0, V=S.anchorPrev ? netzId(S.anchorPrev, 'bezug') : 0;
+  if(S.anchor) A.set(B, netzLage(frame, S.anchor));
+  if(V && V!==B) A.set(V, netzLage(frame, S.anchorPrev));
+  for(const e of N.net) A.set(e.id, netzLage(frame, e.a));
+  LOG.netz.getPoseMax=Math.max(LOG.netz.getPoseMax, N.nPose);
+  return {t, B, V, A, cam:[m[12], m[13], m[14], yawOfM(m)], anlass};
+}
+function netzZeile(s){
+  if(!REC.name) return;
+  const r4=x=>netzR(x, 4), an=[];
+  for(const [id,P] of s.A) an.push(Array.isArray(P) ? [id, r4(P[0]), r4(P[1]), r4(P[2]), netzR(P[3], 5)] : [id, P]);
+  REC.an.push([s.t, s.anlass, r4(s.cam[0]), r4(s.cam[1]), r4(s.cam[2]), netzR(s.cam[3], 5), s.B, s.V, an]);
+  // Die Stuecke schneidet recFrame wie bisher; nur ohne Kamerabild (recFrame steht) hier, nach 2 Stuecklaengen.
+  if(s.t-REC.flushT>=2*REC_CHUNK) recFlush();
+}
+// Befund: before = Id -> {t, P} (letzte verfolgte Lage vor dem Anlass), s = Momentaufnahme
+// danach, refId = Bezugsanker vor dem Anlass, tA = Zeit des Anlasses. Je weiterem Anker (Messanker,
+// auch ein frueherer Bezugsanker) zwei
+// Fragen: hat er sich in local bewegt, und blieb seine Lage zum Bezugsanker gleich (dann
+// ist er mit ihm gesprungen)?
+function netzBefund(anlass, before, s, refId, tA){
+  const N=S.netz, rb=before.get(refId), ra=s.A.get(refId);
+  const refZ=ra===undefined ? 'fehlt' : ra===0 ? 'pausiert' : ra===-1 ? 'gestoppt' : rb ? 'verfolgt' : 'ohne-vorher';
+  let dRef=0, pRef=0, C=null;
+  if(rb && Array.isArray(ra)){ dRef=netzDist(ra, rb.P); pRef=wrapPi(ra[3]-rb.P[3]); C=netzRel(rb.P, ra); }
+  const refBewegt=dRef>NETZ_D || Math.abs(pRef)>NETZ_PSI;
+  const tolD=Math.max(NETZ_D, 0.1*dRef), tolP=Math.max(NETZ_PSI, 0.1*Math.abs(pRef));
+  const je=[], D=[], Ps=[], Df=[], Pf=[], E=[];
+  let m=0, n=0, k=0, amb=0, jung=0, pausiert=0, gestoppt=0;
+  for(const [id,Pa] of s.A){
+    if(id===refId) continue;
+    const b=before.get(id), t0=N.alter.get(id);
+    if(!b) continue;                                         // vorher nie verfolgt
+    if(t0!=null && b.t-t0<NETZ_JUNG){ jung++; continue; }    // schwingt noch ein (5-8 cm)
+    if(anlass!=='luecke' && tA-(b.tv ?? b.t)>1.5) continue;   // war schon davor nicht verfolgt
+    if(Pa===0){ pausiert++; continue; }
+    if(Pa===-1){ gestoppt++; continue; }
+    m++;
+    const d=netzDist(Pa, b.P), dp=wrapPi(Pa[3]-b.P[3]), mv=d>NETZ_D || Math.abs(dp)>NETZ_PSI;
+    let e=null, fit=false;
+    if(C){ const r0=netzRel(b.P, rb.P), r1=netzRel(Pa, ra); e=netzDist(r0, r1); fit=e<=tolD && Math.abs(wrapPi(r1[3]-r0[3]))<=tolP; }
+    if(mv) n++;
+    if(mv && fit){ k++; Df.push(d); Pf.push(Math.abs(dp)); E.push(e); }
+    if(!mv && fit) amb++;
+    D.push(d); Ps.push(Math.abs(dp));
+    je.push([id, netzR(d, 3), netzR(dp*180/Math.PI, 2), e!=null ? netzR(e, 3) : null]);
+  }
+  const nicht=pausiert+gestoppt, V=(d,p)=>`${netzLen(median(d))} / ${netzDeg(median(p))}`;
+  const bez=C ? `Bezugsanker ${netzLen(dRef)} / ${netzDeg(pRef)}` : `Bezugsanker ${refZ}`;
+  let befund, text;
+  if(!C){
+    // Bezugsanker ohne Vergleich (nach einer Luecke pausiert/gestoppt): was das Netz misst.
+    if(!m){ befund=nicht ? 'alle-pausiert' : 'ohne-netz';
+      text=`${bez}, ${nicht ? `alle ${nicht} weiteren Anker nicht verfolgt (${pausiert} pausiert, ${gestoppt} gestoppt)` : 'kein weiterer Anker zum Vergleich'+(jung ? ` (${jung} zu jung)` : '')} – Versatz nicht messbar`; }
+    else { befund='bezug-'+refZ; text=`${bez}, ${m} von ${m+nicht} weiteren Ankern verfolgt, ${n} bewegt, Median-Versatz ${V(D, Ps)}`; }
+  } else if(!m){ befund='ohne-netz';
+    text=`kein Vergleich (${[jung ? jung+' Messanker zu jung' : '', nicht ? nicht+' nicht verfolgt' : ''].filter(Boolean).join(', ') || 'noch kein Messanker'}) – ${bez}`; }
+  else if(!refBewegt){ befund=n ? 'nur-netz' : 'stetig';
+    text=n ? `nur weitere Anker bewegt (${n} von ${m}, Median-Versatz ${V(D, Ps)}) – Bezugsanker still` : `alle still (${m} weitere Anker) – ${bez}`; }
+  else if(2*k>m){ befund='gemeinsam'; text=`gemeinsam (${k} von ${m} Ankern, Median-Versatz ${V(Df, Pf)}, Rest ${netzLen(median(E))}) – ${bez}`; }
+  else if(!n && !amb){ befund='nur-bezug'; text=`nur Bezugsanker (0 von ${m} weiteren Ankern bewegt, höchstens ${netzLen(Math.max(...D))}) – ${bez}`; }
+  else if(!n){ befund='unklar'; text=`unklar – Sprung im Rauschen (${amb} von ${m} passen zu beidem) – ${bez}`; }
+  else { befund='gemischt'; text=`gemischt (${n} von ${m} bewegt, ${k} davon wie der Bezugsanker, Median-Versatz ${V(D, Ps)}) – ${bez}`; }
+  if(nicht && C) text+=`, ${nicht} weitere Anker nicht verfolgt`;
+  return {anlass, befund, text:deNum('netz: '+text), m, n, k, jung, pausiert, gestoppt,
+    bezug:{id:refId, z:refZ, d:netzR(dRef, 3), dpsiDeg:netzR(pRef*180/Math.PI, 2), C:C ? [netzR(C[0], 4), netzR(C[1], 4), netzR(C[2], 4), netzR(C[3]*180/Math.PI, 2)] : null},
+    versatz:D.length ? {d:netzR(median(D), 3), dpsiDeg:netzR(median(Ps)*180/Math.PI, 2)} : null, rest:E.length ? netzR(median(E), 3) : null, je};
+}
+// Wieder verfolgt (vorher pausiert): Versatz gegen die letzte verfolgte Lage. Gemeinsam,
+// wenn die Lagen der zurueckgekehrten Anker zueinander gleich blieben.
+function netzWieder(W, s){
+  const N=S.netz, piv=W[0], bp=N.lastP.get(piv).P, ap=s.A.get(piv), je=[], D=[], Ps=[], dt=[];
+  let fit=1;
+  for(const id of W){ const b=N.lastP.get(id), Pa=s.A.get(id), d=netzDist(Pa, b.P), dp=wrapPi(Pa[3]-b.P[3]);
+    let e=null;
+    if(id!==piv){ const r0=netzRel(b.P, bp), r1=netzRel(Pa, ap); e=netzDist(r0, r1);
+      if(e<=Math.max(NETZ_D, 0.1*d) && Math.abs(wrapPi(r1[3]-r0[3]))<=Math.max(NETZ_PSI, 0.1*Math.abs(dp))) fit++; }
+    D.push(d); Ps.push(Math.abs(dp)); dt.push(s.t-b.t);
+    je.push([id, netzR(d, 3), netzR(dp*180/Math.PI, 2), e!=null ? netzR(e, 3) : null]); }
+  const k=W.length, befund=k===1 ? 'wieder-einzeln' : fit===k ? 'wieder-gemeinsam' : 'wieder-gemischt';
+  const text=`${k} Anker wieder verfolgt nach ${median(dt).toFixed(1)} s${k>1 ? (fit===k ? ', gemeinsam' : `, gemischt (${fit} von ${k} passen)`) : ''}, Median-Versatz ${netzLen(median(D))} / ${netzDeg(median(Ps))}${W.includes(s.B) || W.includes(s.V) ? ' (mit Bezugsanker)' : ''}`;
+  return {anlass:'wieder', befund, text:deNum('netz: '+text), m:k, k:fit, ids:W,
+    versatz:{d:netzR(median(D), 3), dpsiDeg:netzR(median(Ps)*180/Math.PI, 2)}, je};
+}
+function netzMelden(b, extra={}, spontan=false){
+  const N=S.netz, t=now();
+  if(spontan){ if(t-(N.tEv[b.anlass] ?? -1e9)<2 || N.nSpontan>=NETZ_EVMAX){ LOG.netz.unterdrueckt++; return; } N.tEv[b.anlass]=t; N.nSpontan++; }
+  LOG.netz.befunde[b.befund]=(LOG.netz.befunde[b.befund]||0)+1;
+  ev('netz', {...b, ...extra});
+}
+function netzAuswerten(s, anl, nach){
+  const N=S.netz, last=N.last;
+  // Sprung oder Luecke: Befund sofort gegen die letzte Aufnahme davor, nach
+  // NETZ_NACH s noch einmal (Anker, die erst spaeter nachgefuehrt werden).
+  const sprung=anl.some(x=>NETZ_SPRUNG.has(x)), luecke=anl.includes('tracking-zurück');
+  if((sprung || luecke) && last){
+    const anlass=sprung ? 'sprung' : 'luecke', refId=sprung ? s.B : last.B, before=new Map(N.lastP), ereignis=anl.join(',');
+    // Umgekehrter Verzug: sprangen die Messanker bis NETZ_NACH s VOR dem Bezugsanker (spontan als
+    // 'nur-netz' erkannt, lastP traegt schon ihre neue Lage), gilt fuer sie die Lage davor.
+    const vn=N.vorNetz && s.t-N.vorNetz.t<=NETZ_NACH ? N.vorNetz : null; N.vorNetz=null;
+    if(vn) for(const [id,v] of vn.before) if(id!==refId && before.has(id)) before.set(id, {...v, tv:before.get(id).t});
+    const b=netzBefund(anlass, before, s, refId, s.t);
+    if(vn) b.text+=deNum(`, weitere Anker schon ${(s.t-vn.t).toFixed(2)} s vorher bewegt`);
+    netzMelden(b, vn ? {ereignis, vorlauf:netzR(s.t-vn.t, 2)} : {ereignis});
+    N.nach.push({t:s.t+NETZ_NACH, anlass, before, refId, tA:s.t, befund:b.befund, ereignis});
+  }
+  for(const r of nach){ const b=netzBefund(r.anlass, r.before, s, r.refId, r.tA);
+    if(b.befund!==r.befund) netzMelden(b, {ereignis:r.ereignis, nachpruefung:netzR(s.t-r.tA, 2), vorher:r.befund}); }
+  if(!last) return;
+  const W=[]; for(const [id,P] of s.A) if(Array.isArray(P) && last.A.has(id) && !Array.isArray(last.A.get(id)) && N.lastP.has(id)) W.push(id);
+  if(W.length) netzMelden(netzWieder(W, s), {}, true);
+  // Messanker bewegt, ohne dass der Bezugsanker es meldete (er haelt, ist pausiert oder blieb).
+  // Nicht, solange eine Nachpruefung aussteht: werden die Messanker ein paar Bilder nach dem
+  // Bezugsanker nachgefuehrt, saehe das hier wie 'nur Messanker bewegt' aus - die Nachpruefung
+  // vergleicht dagegen mit der Lage vor dem Sprung.
+  if(!sprung && !luecke && !nach.length && !N.nach.length){ const b=netzBefund('netz', N.lastP, s, s.B, s.t);
+    // Lage davor merken: folgt der Bezugsanker binnen NETZ_NACH s, vergleicht der Sprung-Befund damit.
+    if(b.befund==='nur-netz' && !(N.vorNetz && s.t-N.vorNetz.t<=NETZ_NACH)) N.vorNetz={t:s.t, before:new Map(N.lastP)};
+    if(b.n>0) netzMelden(b, {}, true); }
+}
+function netzSetzen(frame, pose, t){
+  const N=S.netz;
+  if(N.busy || t-N.tReq<NETZ_DT || !frame.createAnchor || !S.anchor || !S.Tcur) return;
+  if(S.track!=='ok' || S.anchorLost || S.subst || S.substBad || S.jumpHold || S.trackLost || t<(S.settleUntil||0)) return;
+  const m=pose.transform.matrix, soll=[m[12], S.Tcur[13], m[14]];
+  N.busy=true; N.tReq=t;
+  // Den aeltesten vorher loeschen: ARCore haelt so nie mehr als NETZ_MAX Messanker.
+  // Erst aus der Liste, dann delete() - danach wirft anchorSpace.
+  const drop=max=>{ while(N.net.length>max){ const o=N.net.shift(), mo=N.meta.find(x=>x.id===o.id); if(mo) mo.weg=now();
+    try{ o.a.delete(); }catch(e){} LOG.netz.geloescht++; } };
+  drop(NETZ_MAX-1);
+  const fail=e=>{ if(S.netz===N) N.busy=false; LOG.netz.fehl++; if(LOG.netz.fehl<=3) ev('netz-anker-fehlgeschlagen', {msg:String(e && e.message || e)}); };
+  try{
+    frame.createAnchor(new XRRigidTransform({x:soll[0], y:soll[1], z:soll[2]}, {x:0, y:0, z:0, w:1}), S.ref).then(a=>{
+      if(S.netz!==N || !S.session){ try{ a.delete(); }catch(e){} return; }
+      N.busy=false;
+      const id=netzId(a, 'netz', {soll:soll.map(x=>netzR(x, 4)), tAnfrage:t});
+      N.alter.set(id, now()); N.net.push({a, id}); LOG.netz.gesetzt++;
+      drop(NETZ_MAX);   // nur falls eine verspaetete Zusage dazukam
+      LOG.netz.max=Math.max(LOG.netz.max, N.net.length+(S.anchor ? 1 : 0)+(S.anchorPrev && S.anchorPrev!==S.anchor ? 1 : 0));
+    }, fail);
+  }catch(e){ fail(e); }
+}
+// Je Bild mit Pose, nach dem Bezug: Ereignisse dieses Bilds lesen, im Takt oder
+// bei einem Anlass aufnehmen und befinden, dann ggf. einen Messanker setzen.
+function netzFrame(frame, pose){
+  const N=S.netz;
+  if(!NETZ || !N || N.aus || S.phase!=='waende') return;
+  const t0=performance.now(); let did=false;
+  try{
+    const t=now(), anl=[];
+    for(let i=N.evI;i<LOG.events.length;i++){ const ty=LOG.events[i].type; if(NETZ_SNAP.has(ty) && !anl.includes(ty)) anl.push(ty); }
+    N.evI=LOG.events.length;
+    if(N.busy && t-N.tReq>5) N.busy=false;   // Zusage kam nicht (Chromium verwirft Anfragen nach 3 s)
+    const nach=N.nach.filter(r=>t>=r.t);
+    if(anl.length || nach.length || t-N.tTakt>=NETZ_TAKT){
+      N.tTakt=t; N.nach=N.nach.filter(r=>t<r.t);
+      if(S.anchor || S.anchorPrev || N.net.length){
+        did=true;
+        const s=netzAufnahme(frame, pose, t, anl.length ? anl.join(',') : nach.length ? 'pruefung' : 0);
+        netzAuswerten(s, anl, nach);
+        netzZeile(s);
+        for(const [id,P] of s.A) if(Array.isArray(P)) N.lastP.set(id, {t, P});
+        N.last=s; LOG.netz.takte++;
+      }
+    }
+    netzSetzen(frame, pose, t);
+  }catch(e){ N.aus=true; ev('netz-fehler', {msg:String(e && e.message || e)}); }
+  if(did){ LOG.timings.netz.push(+(performance.now()-t0).toFixed(2)); if(LOG.timings.netz.length>2000) LOG.timings.netz.shift(); }
+}
+
 // ---------------------------------------------------------- Bild-Schleife
 function onFrame(t, frame){
   const session=frame.session;
@@ -2831,6 +3052,8 @@ function onFrame(t, frame){
     camTo[13]-=S.floorY;
     S.Tcur=[1,0,0,0, 0,1,0,0, 0,0,1,0, 0,S.floorY,0,1];
   }
+  // Anker-Netz: nur Protokoll, nach dem Bezug dieses Bilds (seine Ereignisse stehen schon im Log).
+  netzFrame(frame, pose);
 
   if(S.phase==='boden'){
     // Chromium liefert die Treffer naechste zuerst; ein Tisch ueber dem Boden
@@ -3337,11 +3560,13 @@ function showButtons(){
 // Ein Durchlauf pro Sitzung; vorige Durchlaeufe wandern nach LOG.runs. Das
 // Protokoll liegt nach jeder Erfassung und am Sitzungsende auch im
 // localStorage - ein Neuladen oder ein Absturz der Seite verliert es nicht.
-const RUN_KEYS=['session','floor','events','obs','trk','trkN','result','timings','planes','depth','tracking','roiLuma','anchorPath','viewPath','breaks','hLaserMm','hEingabe','mode'];
+const RUN_KEYS=['session','floor','events','obs','trk','trkN','result','timings','planes','depth','tracking','roiLuma','anchorPath','viewPath','breaks','hLaserMm','hEingabe','mode','netz'];
 function freshRun(){
-  return {session:{}, floor:null, events:[], obs:[], trk:[], trkN:{}, result:null, timings:{roi:[], small:[], snap:[], solve:[], draw:[], rec:[], track:[]}, mode:null,
+  return {session:{}, floor:null, events:[], obs:[], trk:[], trkN:{}, result:null, timings:{roi:[], small:[], snap:[], solve:[], draw:[], rec:[], track:[], netz:[]}, mode:null,
           planes:[], depth:null, tracking:{ok:0, emulated:0, lost:0, anchorLost:0}, roiLuma:[], anchorPath:[], viewPath:[], breaks:[],
-          hLaserMm:null, hEingabe:null};
+          hLaserMm:null, hEingabe:null,
+          // Anker-Netz: Zaehler fuer die Kosten (Lagen je Takt, gleichzeitige Anker); die Lagen selbst nur in REC.an.
+          netz:{gesetzt:0, geloescht:0, fehl:0, max:0, takte:0, getPose:0, getPoseMax:0, befunde:{}, unterdrueckt:0}};
 }
 function newRun(){
   if(LOG.events.length || LOG.obs.length){
@@ -3369,10 +3594,12 @@ function saveLog(){ try{ localStorage.setItem(STORE_KEY, JSON.stringify(LOG)); }
 const REC_FPS=10, REC_CHUNK=10, REC_KEEP={video:3, zustand:5}, REC_PREF='raumskizze-probe.video';
 const REC_COLS=['t','px','py','pz','qx','qy','qz','qw','Tpsi','Tx','Ty','Tz','flags','tempo','live','v','tiefe'];
 const REC_FLAGS={geschaetzt:1, ankerVerloren:2, ersatz:4, ersatzSchlecht:8, sprungHalt:16, pause:32, ohneBezug:64, erfasst:128};
-const REC={st:[], name:null, lauf:0, dir:null, video:false, enc:null, encCfg:null, encBusy:false, err:null,
+// Dazu, wenn das Anker-Netz laeuft: REC.an (anker-NNNN.jsonl, gleiche Stuecke) - Lage
+// aller Anker in local, 2/s und bei jedem Sprung oder Verlust (siehe netzFrame).
+const REC={st:[], an:[], anOut:0, name:null, lauf:0, dir:null, video:false, enc:null, encCfg:null, encBusy:false, err:null,
   vN:0, vDrop:0, vBytes:0, flushing:Promise.resolve()};
 function recReset(){
-  Object.assign(REC, {st:[], stOut:0, dir:null, video:false, enc:null, encCfg:null, encBusy:false, err:null,
+  Object.assign(REC, {st:[], stOut:0, an:[], anOut:0, dir:null, video:false, enc:null, encCfg:null, encBusy:false, err:null,
     vBuf:[], vN:0, vOut:0, vDrop:0, vBytes:0, lastV:-1, dBuf:[], dN:0, dBytes:0, part:0, flushT:now(),
     flushing:Promise.resolve(), img:null, pad:null, obsN:LOG.obs.length, badgeT:0,
     bitrate:Number(Q.get('vbr'))||1.5e6, name:'aufnahme-'+LOG.started.replace(/[:.]/g,'-')+'-lauf'+LOG.runs.length, lauf:LOG.runs.length});
@@ -3475,11 +3702,12 @@ async function recPut(dir, name, parts){
 // Ein 10-s-Stueck je Art schreiben. Was der Kodierer noch haelt, kommt ins naechste.
 function recFlush(){
   REC.flushT=now();
-  const part=String(REC.part++).padStart(4, '0'), st=REC.st.slice(REC.stOut), v=REC.vBuf, dd=REC.dBuf, dir=REC.dir;
-  REC.stOut=REC.st.length; REC.vBuf=[]; REC.dBuf=[];
+  const part=String(REC.part++).padStart(4, '0'), st=REC.st.slice(REC.stOut), an=REC.an.slice(REC.anOut), v=REC.vBuf, dd=REC.dBuf, dir=REC.dir;
+  REC.stOut=REC.st.length; REC.anOut=REC.an.length; REC.vBuf=[]; REC.dBuf=[];
   if(!dir) return REC.flushing;
   REC.flushing=REC.flushing.then(async()=>{
     if(st.length) await recPut(dir, `zustand-${part}.jsonl`, [st.map(r=>JSON.stringify(r)).join('\n')+'\n']);
+    if(an.length) await recPut(dir, `anker-${part}.jsonl`, [an.map(r=>JSON.stringify(r)).join('\n')+'\n']);
     if(v.length) await recPut(dir, `video-${part}.h264`, v);
     if(dd.length){ const gz=await new Response(new Blob(dd).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
       await recPut(dir, `tiefe-${part}.bin.gz`, [gz]); }
@@ -3500,6 +3728,13 @@ function recManifest(){
     zustand:{datei:'zustand.jsonl', zeilen:REC.st.length, spalten:REC_COLS, flags:REC_FLAGS,
       live:'[Ax, Ay, Bx, By, z, sicher] in NDC oder 0', T:'Bodenbezug: Gier Tpsi und Lage Tx/Ty/Tz in local; camTo = T⁻¹ · Pose',
       v:'Videobild oder -1', zeit:'t wie obs.t im Protokoll'},
+    // Optional (fehlt ohne Anker-Netz): Lage aller Anker, Befunde als Ereignisse 'netz' im Protokoll.
+    ...(REC.an.length ? {anker:{datei:'anker.jsonl', zeilen:REC.an.length, spalten:NETZ_COLS,
+      anker:'je Anker [id, x, y, z, psi] in local (psi = Gier wie Tpsi), [id, 0] = pausiert (getPose null), [id, -1] = gestoppt (fehlt in trackedAnchors)',
+      anlass:'0 = Takt (alle 0,5 s), sonst die Ereignisse dieses Bilds (Momentaufnahme) oder pruefung (Nachprüfung 1 s nach Sprung/Lücke)',
+      bezug:'Id des Bezugsankers S.anchor (0 = keiner)', vorher:'Id des ersten Bezugsankers nach einem Ersatz (S.anchorPrev) oder 0; alle übrigen Ids sind Messanker',
+      kamera:'kx/ky/kz Kamera in local, kpsi Gier der Blickrichtung', zeit:'t wie im Zustand',
+      netz:S.netz ? S.netz.meta : [], zahlen:LOG.netz}} : {}),
     einwilligung:'Die Aufnahme liegt nur auf diesem Gerät; weitergegeben wird sie erst mit „Aufnahme sichern“.',
     raum:{name:null, wahrheit:null}};
 }
@@ -3532,7 +3767,7 @@ async function recTar(dirName, protoText){
   const parts=[];
   const add=(name, blobs)=>{ const size=blobs.reduce((a,b)=>a+b.size, 0);
     parts.push(tarHead(dirName+'/'+name, size), ...blobs); if(size%512) parts.push(new Uint8Array(512-size%512)); };
-  for(const [name,re] of [['manifest.json',/^manifest\.json$/], ['zustand.jsonl',/^zustand-\d+\.jsonl$/], ['video.h264',/^video-\d+\.h264$/], ['tiefe.bin.gz',/^tiefe-\d+\.bin\.gz$/]]){
+  for(const [name,re] of [['manifest.json',/^manifest\.json$/], ['zustand.jsonl',/^zustand-\d+\.jsonl$/], ['anker.jsonl',/^anker-\d+\.jsonl$/], ['video.h264',/^video-\d+\.h264$/], ['tiefe.bin.gz',/^tiefe-\d+\.bin\.gz$/]]){
     const bl=Object.keys(files).filter(n=>re.test(n)).sort().map(n=>files[n]); if(bl.length) add(name, bl); }
   if(protoText) add('protokoll.json', [new Blob([protoText])]);
   parts.push(new Uint8Array(1024));
@@ -3590,6 +3825,7 @@ async function startAR(){
     floorFoundT:null, floorWarn:false, floorReq:false, capReq:false, live:null, camSize:null, small:null,
     planes:null, depth:null, trackLost:false, closed:false, endArm:0, fps:[], lastT:0, frame:0, warned:{},
     aspectWarn:false});
+  S.netz=netzNeu();   // Messanker einer frueheren Sitzung gibt es nicht mehr
   const canvas=document.createElement('canvas');
   const gl=canvas.getContext('webgl2', {xrCompatible:true, alpha:true, antialias:false});
   if(!gl){ $('startHint').textContent='WebGL2 fehlt.'; return; }
@@ -3874,6 +4110,8 @@ $('dlLog').onclick=()=>{
   // Zustand je Bild (letzter Durchlauf) kompakt anhaengen - eingerueckt waeren
   // es 50 000 Zeilen. Nie in localStorage (Kontingent, Bildzeit beim Sichern).
   if(REC.st.length) txt=txt.replace(/\n}$/, ',\n "zustand": '+JSON.stringify({lauf:REC.lauf, spalten:REC_COLS, flags:REC_FLAGS, zeilen:REC.st})+'\n}');
+  // Anker-Netz ebenso (Befunde stehen als Ereignisse 'netz' oben).
+  if(REC.an.length) txt=txt.replace(/\n}$/, ',\n "anker": '+JSON.stringify({lauf:REC.lauf, spalten:NETZ_COLS, netz:S.netz ? S.netz.meta : [], zeilen:REC.an})+'\n}');
   download('raumskizze-protokoll-'+LOG.started.replace(/[:.]/g,'-')+'.json', txt);
 };
 $('rec').checked=(()=>{ try{ return localStorage.getItem(REC_PREF)==='1'; }catch(e){ return false; } })();
