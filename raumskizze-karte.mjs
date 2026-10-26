@@ -585,24 +585,30 @@ export function optionenAus(a){
     orakelRahmen:!!a['orakel-rahmen'] || !!a['orakel-landmarken'], orakelLandmarken:!!a['orakel-landmarken'], erfassungen:a.erfassungen || DEF.erfassungen,
     metrik:a.metrik || DEF.metrik, spiegel:a.spiegel || DEF.spiegel, H:a.ohneH ? null : a.H!=null ? +a.H : undefined, uhr:a.uhr!=null ? +a.uhr : null,
     rundenArbeit:!!a['runden-arbeit'], mitWahr:!!a['mit-wahr'] || !!a['orakel-rahmen'] || !!a['orakel-landmarken'],
-    sichtfeld:a.sichtfeld!=null ? +a.sichtfeld : DEF.sichtfeld, sichtfeldErf:a['sichtfeld-erf'] || DEF.sichtfeldErf};
+    sichtfeld:a.sichtfeld!=null ? +a.sichtfeld : DEF.sichtfeld, sichtfeldErf:a['sichtfeld-erf'] || DEF.sichtfeldErf,
+    // --karte '{"abReg":{"gierRaster":true}}': Optionen fuer G.karteNeu (M10), z. B. fuer den Pruefstand
+    ...(a.karte!=null && a.karte!==true ? {karte:JSON.parse(String(a.karte))} : {})};
 }
 // Orakel (5.1): --orakel-rahmen setzt g je Abschnitt aus der Wahrheit (Sitzung: wahr.g zur Bildzeit) und legt
 // F0 in den Rahmen der Wahrheit; --orakel-landmarken setzt zusaetzlich die Wahrheitswaende als feste Landmarken.
-// Fuer Aufnahmen ohne Beilage: je Abschnitt (Brueche wie F2) eine Einzelpassung der gehobenen Erfassungen (T2,
-// --spiegel legt die Lage fest, weil g nicht spiegeln kann); Abschnitte mit < 12 Erfassungen bleiben ohne Orakel.
+// Fuer Aufnahmen ohne Beilage: je Abschnitt (Brueche wie F2) eine Einzelpassung der gehobenen Erfassungen (T2);
+// Abschnitte mit < 12 Erfassungen bleiben ohne Orakel. --spiegel ja passt gegen die gespiegelt geladene Wahrheit
+// ohne Spiegel (g kann nicht spiegeln; frueher fiel T.m weg, die Relativlage war dann in der Gier um 2(r_a - r_b)
+// falsch), F0 und --orakel-landmarken liegen dann im gespiegelten Rahmen. out.verh = Mehrdeutigkeit je Abschnitt.
+// Vorsicht (12.8): Die Einzelpassungen sind in der Wohnkueche fast alle mehrdeutig (verh 1,00-1,14, Haelften desselben
+// Abschnitts 88-179 Grad auseinander) und taugen nicht als Wahrheit fuer die Relativlage zweier Abschnitte.
 export function orakelAus(G, A, o, wahrheit){
-  const out={};
+  const out={}, sp=o.spiegel==='ja';
   if(A.art==='sitzung'){ const gs=A.bilder.map(x=>({t:x.bildErg.t, g:x.wahr && x.wahr.g})).filter(x=>x.g);
     out.gAt=t=>{ let b=gs[0]; for(const x of gs){ if(x.t<=t) b=x; else break; } return b ? {...b.g} : null; }; }
   else { const posen=posenAus(G, A), erf=erfassungenAus(A, posen, o.erfassungen), H=Number.isFinite(o.H) ? o.H : A.hLaserMm ? A.hLaserMm/1000 : 2.416;
-    const S=G.sessionCuts(posen, A.breaks, A.events, {}, null), ab=(t,e)=>G.sectionOf(S, t, e), W=T2.wahrheitLaden(wahrheit), proS=new Map();
+    const S=G.sessionCuts(posen, A.breaks, A.events, {}, null), ab=(t,e)=>G.sectionOf(S, t, e), W=T2.wahrheitLaden(wahrheit, {spiegel:sp}), proS=new Map();
     for(const e of erf){ const k=ab(e.t, e.ep); if(!proS.has(k)) proS.set(k, []); const h=(r,y)=>{ const t=(y-r.o[1])/r.d[1]; return t>0 && t<25 ? [r.o[0]+t*r.d[0], r.o[2]+t*r.d[2]] : null; };
       const a=h(e.ra, H), b=h(e.rb, H); if(a && b) proS.get(k).push([a, b]); }
-    const tab={}; for(const [k, segs] of proS){ if(segs.length<12) continue; const pts=segs.flatMap(s=>[s[0], s[1], [(s[0][0]+s[1][0])/2, (s[0][1]+s[1][1])/2]]);
-      const pa=T2.passung(pts, segs, W, {spiegel:o.spiegel==='ja' ? 'ja' : 'nein'}); tab[k]={psi:pa.T.r, tx:pa.T.tx, ty:0, tz:pa.T.ty}; }
-    out.g=tab; }
-  if(o.orakelLandmarken){ const W=T2.wahrheitLaden(wahrheit); out.waende=W.waende.map(w=>({id:'T:'+w.ids, phi:w.phi, rho:w.rho, iv:[{s0:w.s0, s1:w.s1, n:0, bilder:0, t0:0, t1:0, beidseits:false, ring:w.ring}]})); }
+    const tab={}, verh={}; for(const [k, segs] of proS){ if(segs.length<12) continue; const pts=segs.flatMap(s=>[s[0], s[1], [(s[0][0]+s[1][0])/2, (s[0][1]+s[1][1])/2]]);
+      const pa=T2.passung(pts, segs, W, {spiegel:'nein'}); tab[k]={psi:pa.T.r, tx:pa.T.tx, ty:0, tz:pa.T.ty}; verh[k]=pa.verhaeltnis; }
+    out.g=tab; out.verh=verh; }
+  if(o.orakelLandmarken){ const W=T2.wahrheitLaden(wahrheit, {spiegel:sp}); out.waende=W.waende.map(w=>({id:'T:'+w.ids, phi:w.phi, rho:w.rho, iv:[{s0:w.s0, s1:w.s1, n:0, bilder:0, t0:0, t1:0, beidseits:false, ring:w.ring}]})); }
   return out;
 }
 async function main(){

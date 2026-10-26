@@ -96,7 +96,13 @@ const ML_DEF={H:null, quelle:'segmente', arbeit:{iter:3, lin:2, relin:20000, reg
   // Kettenabschnitte spaeterer Runden erneut, wenn die Referenz gewachsen ist (nach dem Einbinden, darum Vorgabe aus).
   abReg:{an:true, minErf:4, gierDeg:15, versatz:1.5, rasterGierDeg:5, rasterVersatz:0.25, paar:0.4, nah:0.15, anteilNah:0.5, restFaktor:0.7,
     richtDeg:60, richtTol:10, minRicht:3, marge:1.5, margeLage:0.30, margeGierDeg:5, kostenMin:0.01, kandidaten:5, iter:15, schrittDeg:5, schrittM:0.25,
-    ref:'kern', wieder:false, logMax:2000},
+    ref:'kern', wieder:false, logMax:2000,
+    // Gier-Raster (Doku 12.8): vor der Suche dreht M10 einen Kettenabschnitt, dessen Schnitt davor die Gier nur grob kennt
+    // (bindung.sY > rasterSYDeg, also Pausen), um die Kamera am Anfang des Abschnitts auf die Raumrichtung der Referenz
+    // (Erfassungen mod 90°, Kreismittel von 4θ nach Laenge). Nur bei Raumrichtung beiderseits (Laenge >= rasterMinL m,
+    // Buendelung R >= rasterMinR); einmal je Abschnitt (A.gierRaster). Pruefstand: die Gier der Kette liegt nach einer Pause
+    // im Median 15-20° daneben, Z13 sucht nur +-gierDeg.
+    gierRaster:false, rasterSYDeg:5, rasterMinL:1.5, rasterMinR:0.7},
   // Registrierung erneut, wenn die globale Karte um >= 10 % (mindestens 1) nicht-kandidat Waende gewachsen ist
   // oder sich die Menge der verbundenen/lockeren Abschnitte geaendert hat [S]; neue Hypothese: neben allen alten
   // um > rivalLage / rivalWinkel wie G.registriere (4)
@@ -463,6 +469,22 @@ const mlAbRegEins=(N, segs, o)=>{
   const co=Math.cos(best.k.psi), si=Math.sin(best.k.psi);
   erg.delta={psi:best.k.psi, tx:c[0]+best.k.tx-(co*c[0]-si*c[1]), ty:0, tz:c[1]+best.k.tz-(si*c[0]+co*c[1])};
   return erg; };
+// Raumrichtung von Segmenten [a, b] (Plan): phi mod 90° aus dem Kreismittel von 4θ, nach Laenge gewichtet; R = Buendelung (0..1)
+const mlManhattan=segs=>{ let C=0, S=0, L=0;
+  for(const [a,b] of segs){ const dx=b[0]-a[0], dz=b[1]-a[1], l=Math.hypot(dx, dz); if(!(l>1e-6)) continue; const t=4*Math.atan2(dz, dx); C+=l*Math.cos(t); S+=l*Math.sin(t); L+=l; }
+  return L>0 ? {phi:Math.atan2(S, C)/4, R:Math.hypot(C, S)/L, L} : null; };
+const mlWrap90=a=>{ const v=Math.PI/2; let d=((a%v)+v)%v; return d>v/2 ? d-v : d; };   // (-45°, 45°]
+// Gier-Raster (Schalter abReg.gierRaster): Drehung delta (F0 -> F0) des Abschnitts ab um seine Anfangskamera auf die
+// Raumrichtung ref (mlManhattan der Referenz), oder null mit grund.
+const mlGierRaster=(KZ, ab, segs, ref, o)=>{
+  const s=KZ.schnitte[ab-1], sY=s && s.bindung ? s.bindung.sY : null, B=KZ.abschnitte[ab];
+  if(!(sY>o.rasterSYDeg*ML_D2R)) return {angewandt:false, grund:'kette-genau', sY};
+  const m=mlManhattan(segs);
+  if(!m || !ref || m.L<o.rasterMinL || m.R<o.rasterMinR || ref.R<o.rasterMinR) return {angewandt:false, grund:'schwach', L:m ? m.L : 0, R:m ? m.R : 0, rRef:ref ? ref.R : 0};
+  let z=null; for(const p of KZ.posen){ if(p.t<B.t0) continue; if(p.cam && G.sectionOf(KZ.schnitte, p.t, p.ep)===ab){ z=p; break; } if(p.t>B.t1) break; }
+  const g=z ? G.gBei(B, z.t) : null; if(!g) return {angewandt:false, grund:'ohne-kamera'};
+  const d=mlWrap90(ref.phi-m.phi), c=G.gPlan(g, [z.cam[0], z.cam[2]]), co=Math.cos(d), si=Math.sin(d);
+  return {angewandt:true, grund:null, dpsi:d, R:m.R, L:m.L, rRef:ref.R, sY, delta:{psi:d, tx:c[0]-(co*c[0]-si*c[1]), ty:0, tz:c[1]-(si*c[0]+co*c[1])}}; };
 // Schritt fuer die neuen Kettenabschnitte dieser Runde (mit abReg.wieder auch fruehere abgelehnte, wenn die Referenz gewachsen
 // ist). Ein Kettenabschnitt geht mit den Abschnitten, die in derselben Runde ueber (a) an ihm haengen (Bindung nurT/zurueck,
 // auch ueber mehrere), als starre Gruppe: ihre Erfassungen zaehlen mit, und eine Annahme verschiebt alle (sonst risse die enge
@@ -488,11 +510,14 @@ const mlAbReg=(KZ, neu, neuB, kopf)=>{
   const inRef=(B, tiefe=0)=>!!(B && B.g && !ausRef.has(B.ab) && (B.ab===K || angen(B) || o.ref==='verbunden' && B.stufe==='verbunden' && B.quelle!=='kette'
     || B.quelle==='bindung' && B.stufe==='verbunden' && B.bindungAn!=null && B.bindungAn!==B.ab && tiefe<64 && inRef(A[B.bindungAn], tiefe+1)));
   const segsVon=ids=>{ const out=[]; for(const ab of ids) out.push(...mlErfF0(A[ab], je.get(ab), hcM)); return out; };
-  const refBau=()=>{ const ids=A.filter(B=>inRef(B)).map(B=>B.ab), segs=segsVon(ids); return {N:mlNetz(segs, o.paar), n:segs.length, stempel:ids.join(',')+':'+segs.length}; };
+  const refBau=()=>{ const ids=A.filter(B=>inRef(B)).map(B=>B.ab), segs=segsVon(ids);
+    return {N:mlNetz(segs, o.paar), n:segs.length, stempel:ids.join(',')+':'+segs.length, man:o.gierRaster ? mlManhattan(segs) : null}; };
   const neuAn=[]; let R=refBau(), weiter=true;
   while(weiter){ weiter=false;
     for(const ab of offen){ const B=A[ab]; if(angen(B) || !R.n) continue; if(B.abReg && B.abReg.stempel===R.stempel) continue;
-      const grp=gruppe(ab), segs=segsVon(grp); if(segs.length<o.minErf) continue;
+      const grp=gruppe(ab); let segs=segsVon(grp); if(segs.length<o.minErf) continue;
+      if(o.gierRaster && !B.gierRaster){ const gr=mlGierRaster(KZ, ab, segs, R.man, o); B.gierRaster=gr;
+        if(gr.angewandt){ for(const x of grp) A[x].g=G.gKomp(gr.delta, A[x].g); segs=segsVon(grp); } }
       const r=mlAbRegEins(R.N, segs, o);
       B.abReg={angenommen:r.angenommen, grund:r.grund, dpsi:r.dpsi, dt:r.dt, r0:r.r0, r1:r.r1, nah:r.nah, richtW:r.richtW, marge:r.marge, nErf:segs.length, gruppe:grp,
         versuche:((B.abReg && B.abReg.versuche)||0)+1, stempel:R.stempel, runde:KZ.runde, gVor:{...B.g}};

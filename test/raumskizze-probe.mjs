@@ -1303,6 +1303,8 @@ if(alt){
   const kurz={cache, dauer:8, klicks:ANSICHT, rausch:0.5, query:'karte=1', video:true};
   const rf1=await geraet(probe, {...kurz, bild:'wirftAussen'}), rf2=await geraet(probe, {...kurz, bild:'schweigt'}), rf3=await geraet(probe, {...kurz, bild:'wirftInnen'}), rl=await geraet(probe, {...kurz, bildMs:400});
   const kb=await geraet(probe, {...kurz, query:'karte=1&quelle=beide'});
+  // ri - karte=1&imu=1 (Doku 12.8): Sensoren wie im Messmodus, ohne Mess-Worker
+  const ri=await geraet(probe, {...kurz, query:'karte=1&imu=1', imu:true, gyro:true});
   const kf1=await geraet(probe, {...kurz, karte:'wirftAussen'}), kf2=await geraet(probe, {...kurz, karte:'schweigt'}), kf3=await geraet(probe, {...kurz, karte:'wirftInnen'});
   // Nachbesserung: rz - Video und Tiefe kosten Zeit (die Uhr laeuft in encode und getDepthInformation weiter, wie am
   // Pixel); rg - die Seite ist schon 50 s offen, die Sitzung laeuft ueber die Minutengrenze (zwei volle Lesungen),
@@ -1315,7 +1317,7 @@ if(alt){
   const J=x=>JSON.stringify(x), ohne=(o,k)=>{ const c={...o}; for(const x of k) delete c[x]; return c; };
   const obsJ=(r, an=false)=>J(r.P.LOG.obs.map(o=>an ? ohne(o, ['an']) : o));
   // Ereignisse ohne die neuen Typen; sitzung-start nur mit den Feldern von Stand 5
-  const NEU=new Set(['ref-reset', 'emuliert', 'tiefe']), SITZ6=['depthType', 'depthActive', 'depthTypeRequest', 'karte', 'mess'];
+  const NEU=new Set(['ref-reset', 'emuliert', 'tiefe']), SITZ6=['depthType', 'depthActive', 'depthTypeRequest', 'karte', 'mess', 'imu'];
   // aufnahme-ende ohne t: recStop endet nach echtem asynchronem Schreiben (gzip im Thread-Pool), nicht nach der Uhr der Attrappe
   const evJ=(r, weg=NEU)=>J(r.P.LOG.events.filter(e=>!weg.has(e.type)).map(e=>e.type==='sitzung-start' ? ohne(e, SITZ6) : e.type==='aufnahme-ende' ? ohne(e, ['t']) : e));
   const rpJ=(r, nurAlt=false)=>J(r.stat.readPixels.filter(x=>!nurAlt || (x.w===IW && x.h===IH) || (x.w===256 && x.h===256)));
@@ -1492,6 +1494,16 @@ if(alt){
   const mk=Lm.events.filter(e=>e.type==='marke');
   chk('mess=1: Knopf Marke - ohne Bodentreffer Hinweis, sonst Ereignis marke {id, p (local, Boden), an, pAn}', (Tm['marke-ohne-treffer']||0)===1 && mk.length===1 && Math.abs(mk[0].p[1]+1.45)<1e-3
     && Array.isArray(mk[0].an) && Array.isArray(mk[0].pAn) && mk[0].pAn.length===4, mk.length ? J(mk[0]) : '');
+  // --- karte=1&imu=1 (Doku 12.8): devicemotion und Gyroscope wie mess=1, ohne Mess-Worker, Messanker und messung.jsonl
+  { const Mi=man(ri), imuI=jsonl(ri, 'imu'), dmI=imuI.filter(x=>!x.q), gyI=imuI.filter(x=>x.q==='gyro');
+    chk('karte=1&imu=1: devicemotion und Gyroscope in imu.jsonl (t wie im Zustand), Hoerer danach entfernt, kein Mess-Worker',
+      dmI.length>=300 && gyI.length>=300 && dmI.every(x=>Math.abs(x.t-(x.ts-1000)/1000)<1e-3 && x.rr.length===3) && !(ri.stat.hoerer.devicemotion||[]).length && ri.stat.gyro===1
+      && J(ri.stat.worker)===J(['schaetzer','bild','karte']), `${dmI.length} devicemotion, ${gyI.length} Gyroscope, Worker ${ri.stat.worker.join(',')}`);
+    chk('karte=1&imu=1: Manifest mit schalter.imu, imu.jsonl (gyro ja), ohne messung.jsonl; mess false; karte=1 allein ohne imu.jsonl',
+      Mi && Mi.schalter.imu===true && Mi.mess===false && Mi.dateien.includes('imu.jsonl') && !Mi.dateien.includes('messung.jsonl') && Mi.imu && Mi.imu.zeilen===imuI.length && Mi.imu.gyro==='ja' && !Mi.messung
+      && !Object.keys(ri.dateien).some(n=>/^messung-/.test(n)) && man(rk).schalter.imu===false && !man(rk).dateien.includes('imu.jsonl') && !man(rk).imu, `${Mi ? Mi.imu.zeilen : '–'} Zeilen`);
+    // gleiche Dauer und Klicks wie rf2 nicht (andere Bild-Attrappe), darum nur: Sitzung meldet den Schalter, es gibt Erfassungen
+    chk('karte=1&imu=1: LOG.session.imu gesetzt (karte=1 allein false), Erfassungen da', ri.P.LOG.obs.length>0 && ri.P.LOG.session.imu===true && rk.P.LOG.session.imu===false, `${ri.P.LOG.obs.length} Erfassungen`); }
   chk('mess=1: Manifest v2 mit mess true, imu.jsonl und messung.jsonl; kein Bild-Worker', Mm && Mm.mess===true && Mm.dateien.includes('imu.jsonl') && Mm.dateien.includes('messung.jsonl') && !rm.stat.worker.includes('bild'));
   // --- Nachbesserung 1: Auftrag, bild.jsonl und segmente.bin tragen das t der Zeile, nicht die Zeit beim Senden
   // (die Uhr der Attrappe steht in rz nicht still: je Tiefe-Abfrage 3 ms, je Videobild 2 ms).
