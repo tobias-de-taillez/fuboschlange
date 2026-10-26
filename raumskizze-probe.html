@@ -9339,8 +9339,9 @@ function senkAusBild(found, a){
 //    'insel-entscheid', wie T1); was vor dem Start kam, gesammelt beim Start,
 //  - danach die Erfassungen dieses Bilds mit ep und camTo der Zeile (sie entstehen im Bild vor recFrame),
 //  - Bild-Ergebnisse nur mit ?quelle=segmente|beide (dann traegt der Bild-Worker das volle BildErgebnis).
-// Nicht live (Stand 9): Tiefe und AR-Ebenen. Abweichung zu T1: eine Erfassung, die die App spaeter als verdaechtig
-// markiert (suspect), ist schon eingespeist; Rueckgaengig nimmt sie als Ereignis 'rueckgaengig' zurueck (T1: nie eingespeist).
+// Nicht live (Stand 9): Tiefe und AR-Ebenen. Abweichung zu T1: eine Erfassung, die die App spaeter als verdaechtig markiert
+// (suspect, pose-sprung) oder zuruecknimmt, ist schon eingespeist; beides nimmt das Ereignis 'rueckgaengig' wieder heraus
+// (T1: nie eingespeist). Ab einer solchen Stelle kann das Nachspiel mit --runden vom Geraet abweichen.
 // Takt 'rechne' je KARTE_TAKT s Sitzungszeit ab der ersten Zeile, vor dem ersten Eingang danach (kwVor, wie vorEingang in
 // T1). Laeuft die vorige Runde noch, faellt der Takt aus (in karte.jsonl gezaehlt): Takte stauen sich nie hinter einer
 // langsamen Runde am Pixel.
@@ -9508,6 +9509,8 @@ const KOV={kandidat:{color:'rgba(255,255,255,.75)', w:1.5, dash:[4,6]}, boden:{c
 // Je XR-Bild: die vorberechnete Anzeige projizieren (Budget drawKarte p99 <= 1,5 ms, 9.6). true, wenn gezeichnet.
 function drawKarte(c, proj, camTo, px, dpr){
   const D=KW.letzt; if(!D || D.ep!==S.ep || !camTo) return false;
+  // Leere Karte (vor dem Kern, gleich nach einem Bruch): nichts zeichnen, das Modell der alten Pipeline bleibt sichtbar.
+  if(!D.waende.length && !D.ecken.length) return false;
   const t0=performance.now(), batch=new Map(), Y=(p,y)=>[p[0], y, p[1]];
   const seg=(st,A,B)=>{ const s=G.projectSegment(proj, camTo, A, B); if(!s) return; let b=batch.get(st); if(!b) batch.set(st, b=[]); b.push(px(s[0]), px(s[1])); };
   const a0=c.globalAlpha; if(D.lokal) c.globalAlpha=0.5;
@@ -10341,7 +10344,7 @@ function onFrame(t, frame){
         S.camV=0.8*S.camV+0.2*v;
         if(d>0.15 && v>1.5){ const t0=now()-2, sus=S.pool.filter(o=>o.t>=t0);
           ev('pose-sprung', {d:+d.toFixed(3), verdaechtig:sus.length}); S.settleUntil=now()+SETTLE; S.camV=0; S.poseSprungN++;
-          if(sus.length){ sus.forEach(o=>{ o.suspect=true; }); S.pool=S.pool.filter(o=>!o.suspect); requestSolve(); } } }
+          if(sus.length){ sus.forEach(o=>{ o.suspect=true; kwRueckgaengig(o); }); S.pool=S.pool.filter(o=>!o.suspect); requestSolve(); } } }
       S.prevCam={p:pc, t:tt}; }
   } else if(S.floorY!==null){
     camTo=Array.from(view.transform.matrix);
@@ -10819,7 +10822,8 @@ function drawOverlay(view, camTo){
       // und kleiner (Hebefehler je Kante (d²+Δ²)/Δ·σ_e, G.ptSigma).
       // Stand 7, ?karte=1: steht eine Karte fuer diese Epoche, zeigt sie die Waende statt des Modells der alten Pipeline
       // (deren Erfassungen, Fadenkreuz und Ergebnis bleiben); fehlt sie oder ist sie ausgefallen, das Modell wie bisher.
-      const karteZeigt=KARTE && drawKarte(c, proj, camTo, px, dpr);
+      // Im Countdown zeigt das Modell, was exportiert wird (auch die ergaenzten Versprunge, nach denen der Hinweis fragt).
+      const karteZeigt=KARTE && S.closeT==null && !S.closePending && drawKarte(c, proj, camTo, px, dpr);
       const M=liveModel(), Hm=S.sol && S.sol.H, Y=(p,y)=>[p[0],y,p[1]];
       if(M && Hm>0 && !karteZeigt){
         if(S.subst) c.globalAlpha=0.5;   // Ersatzbezug: Lage um einen unbekannten Sprung unsicher
