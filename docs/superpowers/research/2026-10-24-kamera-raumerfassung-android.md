@@ -799,7 +799,26 @@ Tobias hat alle vier Vorschläge beauftragt (ein Bezugsrahmen, Kanten als Landma
 
 Offen: Spiegelprobe. Alle drei Aufnahmen passen nur gespiegelt auf die Raumaufmaß-Datei; ein Foto von Ecke A auf Nische N-O-P-Q und Pfeiler klärt, ob der Plan die Draufsicht oder ihr Spiegelbild ist.
 
-**12.4 Umsetzung:** läuft als Workflow (Phase 0 Grundlagen, Phase 1 neun Module parallel mit unabhängiger Abnahme, Zusammenführen und Messung an A6–A8 gegen die Wahrheit).
+**12.4 Umsetzung (Nacht 25./26.10.):** Phase 0 (M0, T2, T3) und alle neun Module gebaut, je mit unabhängiger Abnahme. Abgenommen wurden nur M8 Ringe und M3 Segmente (nach Entscheid zur Gerätekante); die übrigen sind mit offenen Befunden committet (`27d610d`). Stand 6 (Bild-Worker, Messmodus `?mess=1`, Links für die Messsitzungen) ist live.
+
+**12.5 Zusammenführen und Reparatur (26.10.):** Auf A6–A8 trug die neue Pipeline zunächst gar nicht (kein Kern, kein Export, A7 ein falscher 0,6-m²-Splitter). Diagnose, gemessen:
+- M5 bestätigte nur ~5 Landmarken je Aufnahme. Häufigste Sperre (45 % der echten Wände): Bei einer Basis quer zur Linie unter 0,3 m bleibt die Höhe einer Kante unbeobachtbar (Schwenken auf der Stelle, LIMAP §3.1.1). Zweithäufigste: die ungemessene Unterzug-Regel.
+- Die Fadenkreuz-Erfassungen hatten keinen eigenen Weg und verfielen zu 40–57 % in zu kurzen Spuren.
+- Die lokale Deckenhöhe je Abschnitt lief frei (1,95–3,61 m); der einzige Kern in A7 hing an 3,01 m.
+- Für den Außenring gab es keine Plausibilitätsregel.
+
+Reparatur in drei Runden: Erfassungsweg in M5, Höhe an Laser-H und Boden gebunden, Außenring-Tor (Kamerabahn, Freiraum, Fläche), Rückfall auf die alte Pipeline im Offline-Treiber, Verbindung über die Kette. Ergebnis Runde 3 gegen die Wahrheit (Grundlinie = alte Pipeline):
+
+| | neu (Quelle Erfassungen) | alt |
+|---|---|---|
+| A6 | Export, 12 Ecken, IoU 0,62, 42,1 m², Median 33,1 cm | 4 Ecken, IoU 0,35, 23,7 m², Median 33–37 cm |
+| A7 | Export, 33 Ecken, IoU 0,43, 76,7 m², Median 47,5 cm | 7 Ecken, IoU 0,77, 65,7 m², Median 47–49 cm |
+| A8 | Export, 4 Ecken, IoU 0,10, 6,8 m², Median 6,6 cm (Passung mehrdeutig, 1,11) | 8 Ecken, IoU 0,09, 6,1 m², Median 14–18 cm |
+
+- Inseln: 0 von 2 in allen Läufen; falsche Inseln 0. Kein falscher Export mehr (Tor).
+- Erfolgskriterium (besser als die alte Pipeline auf 2 von 3, kein falscher Export) verfehlt. Die Gegenprüfung hat alle Zahlen reproduziert.
+- Hauptrestproblem: die Lage der Abschnitte zueinander. Mit Lage und Höhe je Abschnitt aus der Wahrheit (Orakel) läge der Median bei 2,3 cm (A6) bzw. 5,8 cm (A7). Die Kanten selbst sind also gut; es fehlt die Verbindung der Abschnitte nach ARCore-Brüchen. Die Abschnitte teilen in diesen Aufnahmen kaum Wände (0–8 %), darum ist die Verbindung über Wände kaum beobachtbar.
+- Modultests: alle 11 grün (der Segmente-Test vergleicht jetzt gegen F1 ohne Verschmelzen).
 
 ## Quellen
 
