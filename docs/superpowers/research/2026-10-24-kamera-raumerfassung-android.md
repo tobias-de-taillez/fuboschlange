@@ -849,6 +849,21 @@ Reparatur in drei Runden: Erfassungsweg in M5, Höhe an Laser-H und Boden gebund
   - (b) Sitzung im Querformat starten: 69,6° quer, gemessen werden muss es.
   - (c) Relokalisierung auf dem Hauptstrom, offline auf den vorhandenen Aufnahmen. Bild und Pose sind dort synchron, und das trifft das Hauptproblem (Abschnitte nach Brüchen verbinden) direkt.
   - (d) Ablation: das Bild offline auf 80/60/40 % des Sichtfelds beschneiden und messen, wie stark die Karte vom Sichtfeld abhängt.
+- **Messseite (live):** https://raumaufmass.irazari-te.ch/kamera-messung.html (`kamera-messung.html`, Selbsttest `test/kamera-messung.mjs` mit 153 Prüfungen, Upload `scripts/seite-hochladen.sh`). Die Teile:
+  - A: Kameras ohne AR;
+  - B: AR zuerst, dann getUserMedia; eingeordnet wird, ob getUserMedia AR verdrängt, scheitert oder beide laufen;
+  - C: getUserMedia zuerst, dann AR;
+  - D: Start quer bzw. hochkant, dann drehen.
+
+  Das Protokoll lässt sich als JSON sichern. Am Gerät ist die Seite noch nicht gelaufen.
+- **Ablation Sichtfeld (26.10., `raumskizze-ablation.mjs`, T1 `--sichtfeld f`):** A6–A8, H 2,416; Faktoren 1/0,8/0,6/0,4 (34,6/27,9/21,3/14,2° quer, gleiche Brennweite in px); Quellen segmente/beide/erfassungen, Erfassungen gelassen bzw. geschnitten; ohne Tiefe und Ebenen. 54 Läufe, 18 min.
+  - **Ergebnis:** Die Verbindung der Abschnitte hängt im gemessenen Bereich nicht vom Sichtfeld ab.
+    - Der Anteil geteilter Wände (globale Wände mit Beob aus ≥ 2 Abschnitten) ändert sich je 10° um −0,035 bis +0,017.
+    - Die Stufen der Abschnitte sind über alle Faktoren gleich (A6 beide 4/13/0/0, A7 4/10/0/0 bzw. 5/9/0/0, A8 6/13/0/0).
+    - Mehr Sichtfeld bringt proportional mehr Segmente (A7: 19 166 → 42 181), aber keinen höheren Anteil gemeinsam gesehener Wände.
+  - Die Genauigkeit ist nicht ablesbar, weil die T2-Passung in allen Läufen mehrdeutig ist (1,00–1,11, bei A8 schneiden 0,6 einmal 1,21).
+  - Nebenbefund: Mit der Quelle segmente allein bilden A6 und A8 keinen Kern (alle Abschnitte lokal), A7 schon.
+  - **Folgerung:** Ein weiteres Sichtfeld (43–55° unbeschnitten, ~112° Ultraweitwinkel) ist nach dieser Messung nicht der Hebel für die Verbindung der Abschnitte; die Extrapolation nach oben bleibt unsicher. Der Hebel liegt bei der Verbindung selbst (12.5). Tabelle: Scratchpad `ablation/ablation.md`, nicht im Repo.
 - **Nur messbar:** Kamera-IDs, Ströme und Texturgröße (`dumpsys media.camera` per USB), getUserMedia neben immersive-ar (Testseite: enumerateDevices, Capabilities, AR zuerst bzw. getUserMedia zuerst) und das Querformat. Nativ, als möglicher Companion: Ultraweitwinkel als Physical-Stream der logischen Kamera mit `setPhysicalCameraId` und Sensor-Sync. Neben ARCore lief das nur in einem Nutzerbericht, mit Verzögerungs-Workaround (ARCore-Issue #1664).
 
 ## Quellen
