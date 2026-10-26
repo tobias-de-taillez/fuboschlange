@@ -1,0 +1,1074 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Kamera-Messung</title>
+<!--
+  Messseite zu Doku 12.7 („Nur messbar“): Was zeigt Chrome per getUserMedia an Kameras und was koennen sie,
+  was passiert mit einer laufenden immersive-ar-Sitzung, wenn die Seite zusaetzlich eine Rueckkamera oeffnet
+  (und umgekehrt), und liefert eine im Querformat gestartete Sitzung 1920x861 mit ~69,6 Grad quer?
+  Die Erwartungen aus der Recherche stehen nur im Protokoll (ERWARTUNG), die Seite misst und ordnet ein.
+
+  Teil A: Kameras ohne AR (holt auch die Berechtigung, damit in AR kein Dialog kommt).
+  Teil B: AR zuerst, nach 8 s und ruhiger Ortung getUserMedia (facingMode, dann jede Rueckkamera aus Teil A);
+          nur mit erteilter Kameraberechtigung, sonst kaeme der Dialog mitten in AR.
+  Teil C: getUserMedia zuerst, dann AR (zweiter Tipp, siehe teilC).
+  Teil D: Sitzung quer bzw. hochkant starten, waehrend der Sitzung drehen.
+
+  Live: https://raumaufmass.irazari-te.ch/kamera-messung.html (hochladen mit scripts/seite-hochladen.sh
+  kamera-messung.html). Das Protokoll liegt in localStorage, ueberlebt Neuladen; „Protokoll sichern“ laedt es
+  als JSON herunter. Selbsttest: node test/kamera-messung.mjs (Attrappen fuer Kameras, WebXR, WebGL2, DOM).
+  Kein fremder Server, keine externen Skripte.
+-->
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { padding: 16px; font: 16px/1.5 system-ui, sans-serif;
+         background: #14161a; color: #e6e8eb; -webkit-text-size-adjust: 100%; }
+  h1 { font-size: 19px; margin: 0 0 4px; }
+  h2 { font-size: 16px; margin: 0 0 8px; }
+  .sub { color: #8b929c; font-size: 13px; margin-bottom: 16px; }
+  .card { background: #1c1f25; border: 1px solid #2a2e36; border-radius: 12px;
+          padding: 14px; margin-bottom: 12px; }
+  .hint { color: #9aa2ad; font-size: 14px; }
+  .erw { color: #8b929c; font-size: 12px; margin: 6px 0 8px; }
+  button { width: 100%; padding: 16px; font-size: 17px; font-weight: 600; margin-top: 8px;
+           border: 0; border-radius: 10px; background: #3b82f6; color: #fff; }
+  button:disabled { background: #333840; color: #6b7280; }
+  button.ghost { background: #2a2e36; color: #e6e8eb; font-size: 15px; padding: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px;
+          font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 5px 4px; border-bottom: 1px solid #262a31;
+           vertical-align: top; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: #8b929c; font-weight: 500; }
+  td.l { text-align: left; word-break: break-word; }
+  .scroll { overflow-x: auto; margin-top: 8px; }
+  .ok { color: #4ade80; } .warn { color: #fbbf24; } .bad { color: #f87171; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .vid { margin-top: 8px; }
+  .vid video { width: 100%; max-height: 240px; background: #000; border-radius: 8px; display: block; }
+  #status { font-size: 15px; }
+  .hidden { display: none !important; }
+
+  /* AR-Overlay: liegt per dom-overlay ueber dem Kamerabild, nur dieser Baum ist in der Sitzung sichtbar. */
+  #ar { position: fixed; inset: 0; color: #fff; font: 14px/1.4 system-ui, sans-serif; }
+  /* Chrome meldet im Overlay keinen Sicherheitsabstand (env() = 0), die Statusleiste liegt aber darueber. */
+  #arTop { position: absolute; top: 0; left: 0; right: 0; padding: 10px 12px;
+           padding-top: max(48px, env(safe-area-inset-top));
+           background: rgba(0,0,0,.8); font-size: 12px; font-variant-numeric: tabular-nums; }
+  #arHint { margin-top: 6px; font-size: 15px; font-weight: 600; }
+  /* Das Video muss im Overlay liegen und sichtbar sein: ausserhalb rendert Chrome es in der Sitzung nicht,
+     requestVideoFrameCallback kaeme dann nie und saehe aus wie „getUserMedia liefert keine Bilder“. */
+  #arVid { position: absolute; right: 10px; top: 160px; width: 108px; height: 144px;
+           border-radius: 8px; overflow: hidden; background: rgba(0,0,0,.5); }
+  #arVid video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  #arBottom { position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 12px;
+              padding-bottom: max(12px, env(safe-area-inset-bottom)); background: rgba(0,0,0,.8); }
+  #arBottom button { padding: 14px 6px; font-size: 15px; }
+</style>
+
+<h1>Kamera-Messung</h1>
+<div class="sub">Was Chrome hier mit den Kameras kann – ohne AR, neben AR und im Querformat (Doku 12.7). Teile der Reihe nach, am Ende „Protokoll sichern“.</div>
+
+<div class="card">
+  <h2>Gerät</h2>
+  <table id="kopf"><tr><th>Prüfung</th><th>Ergebnis</th></tr></table>
+</div>
+
+<div class="card">
+  <div id="status" class="hint">Prüfe das Gerät …</div>
+  <button id="btnAbbruch" class="ghost hidden">Abbrechen</button>
+</div>
+
+<div class="card">
+  <h2>Teil A · Kameras ohne AR</h2>
+  <div class="hint">Zuerst ausführen: holt die Kameraberechtigung (zweimal erlauben, falls gefragt) und merkt sich die Rückkameras für Teil B. Jede Kamera öffnet sich einmal kurz.</div>
+  <div class="erw" id="erwA"></div>
+  <div id="vidA" class="vid hidden"></div>
+  <button id="btnA" disabled>Kameras prüfen</button>
+</div>
+
+<div class="card">
+  <h2>Teil B · AR zuerst, dann getUserMedia</h2>
+  <div class="hint">Erst Teil A (Kameraberechtigung). AR startet. Nach 8 s, sobald die Ortung ruhig läuft, öffnet die Seite zusätzlich die Rückkamera – erst per facingMode, dann jede Rückkamera aus Teil A –, beobachtet je 10 s, schließt sie und beobachtet 8 s weiter. Telefon dabei langsam bewegen, nicht auf eine leere Wand oder in eine Lampe halten.</div>
+  <div class="erw" id="erwB"></div>
+  <div class="erw" id="rechtB"></div>
+  <button id="btnB" disabled>AR starten</button>
+</div>
+
+<div class="card">
+  <h2>Teil C · getUserMedia zuerst, dann AR</h2>
+  <div class="hint">Erst läuft die Rückkamera hier im Bild. Nach 3 s erscheint „AR jetzt starten“ – tippen (Chrome verlangt für AR einen frischen Tipp). Sobald die Ortung ruhig läuft (höchstens 10 s), wird 10 s beobachtet; danach endet die Sitzung und 8 s lang wird geprüft, ob das Kamerabild zurückkommt.</div>
+  <div class="erw" id="erwC"></div>
+  <div id="vidC" class="vid hidden"></div>
+  <button id="btnC" disabled>Kamera starten</button>
+  <button id="btnC2" class="hidden">AR jetzt starten</button>
+</div>
+
+<div class="card">
+  <h2>Teil D · Querformat</h2>
+  <div class="hint">„Automatisch drehen“ einschalten, Telefon quer halten, dann „Start quer“. Nach 10 s einmal ins Hochformat drehen; nach 25 s endet die Sitzung. Zum Vergleich danach hochkant „Start hochkant“ (nach 10 s quer drehen).</div>
+  <div class="erw" id="erwD"></div>
+  <div class="row">
+    <button id="btnDq" disabled>Start quer</button>
+    <button id="btnDh" class="ghost" disabled>Start hochkant</button>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Ergebnis</h2>
+  <div id="erg" class="hint">Noch keine Läufe.</div>
+  <div class="row">
+    <button id="btnSichern" disabled>Protokoll sichern</button>
+    <button id="btnTeilen" class="ghost" disabled>Teilen</button>
+  </div>
+  <button id="btnLeeren" class="ghost" disabled>Protokoll leeren</button>
+</div>
+
+<div id="vidLager" class="hidden"><video id="vid" muted playsinline autoplay></video></div>
+
+<div id="ar" class="hidden">
+  <div id="arTop">
+    <div id="arStatus"></div>
+    <div id="arHint"></div>
+  </div>
+  <div id="arVid" class="hidden"></div>
+  <div id="arBottom">
+    <div class="row">
+      <button id="btnGum" class="hidden">getUserMedia jetzt</button>
+      <button id="btnArEnde" class="ghost">Ende</button>
+    </div>
+  </div>
+</div>
+
+<script id="messung">
+// Messung am Geraet nach Doku 12.7: Kameras per getUserMedia, getUserMedia neben immersive-ar (beide
+// Reihenfolgen), Querformat. Rechnung (Sichtfeld, Kachel-Hash, Einordnung) liegt in reinen Funktionen,
+// die test/kamera-messung.mjs ueber globalThis.KAMERA_MESSUNG gegen Attrappen mit bekannter Wahrheit prueft.
+(function(){
+'use strict';
+// Version des Protokolls: steigt, wenn sich Felder aendern, damit die Auswertung alte Laeufe erkennt.
+// 2: Zeit je Zustand im Takt (zt), Fenster ab Aufruf, gUM-Zaehler unabhaengig vom Zeichnen, Kameraberechtigung.
+const VERSION=2;
+const $=id=>document.getElementById(id);
+const T0=performance.now();
+const seit=()=>(performance.now()-T0)/1000;
+const rund=(x, n=1)=>x==null || !Number.isFinite(+x) ? null : +(+x).toFixed(n);
+const el=(tag, text, cls)=>{ const e=document.createElement(tag); if(text!=null) e.textContent=text; if(cls) e.className=cls; return e; };
+const warte=ms=>new Promise(r=>setTimeout(r, ms));
+const LS='kamera-messung.protokoll', LS_RUECK='kamera-messung.rueck';
+// Kachel K x K in der Bildmitte: genug Pixel, dass Sensorrauschen jedes echte Bild anders hasht, und
+// billig genug fuer jedes XR-Bild (768 Byte readPixels).
+const K=16;
+// Ein XR-Bild zaehlt als „steht“, wenn seine Kachel die dritte (oder spaetere) gleiche in Folge ist. Einzelne
+// Doppel sind normal, wenn Chrome schneller zeichnet, als ARCore Kamerabilder liefert, und zaehlen nicht.
+const STEHT_AB=2;
+// Kachel gilt als schwarz, wenn die hellste Stelle darunter liegt (wie empty:max<4 in raumskizze-probe), als
+// hell, wenn die dunkelste darueber liegt (Lampe, Fenster): beide hashen immer gleich, sagen ueber Stillstand nichts.
+const SCHWARZ=4, HELL=250;
+// Abstand zweier XR-Bilder ueber dieser Grenze (ms) zaehlt als „aus“ (unter 4 Hz liefert ARCore nichts Brauchbares).
+const LUECKE=250;
+// Gestoert ist ein Fenster ab so vielen Sekunden Stoerung (aus, ohne Pose, Bild steht, schwarz, ohne Bild), auch
+// wenn sie nicht ueberwiegt; kuerzere Haenger (0,5 s Standbild) stehen nur als Zahl im Fenster.
+const STOER_MIN=1;
+// getUserMedia „liefert“ erst ab dieser Rate (B/s) in der zweiten Fensterhaelfte, nicht schon mit einem Bild.
+const GUM_MIN=10;
+// Vor jedem Versuch in Teil B so lange (ms) auf eine ruhige Ortung warten (letzte 3 s „laeuft“), sonst Versuch
+// trotzdem, aber als ar-lief-vorher-nicht eingeordnet - getUserMedia bekommt keine Schuld an fehlendem Tracking.
+const ARSTABIL_MS=20000;
+// Erwartungen aus der Recherche (Doku 12.7) - nur zum Vergleich protokolliert, nichts haengt davon ab.
+const ERWARTUNG={
+  A:'zoom.min = 1 (Chrome klemmt den Zoom auf mindestens 1,0); nur „camera 0, facing back“ und „camera 1, facing front“, Ultraweitwinkel nicht sichtbar.',
+  B:'getUserMedia verdrängt vermutlich ARCore: XR-Bilder bleiben aus oder das Kamerabild friert ein, die Sitzung endet nicht. Oder Timeout-Pfad mit ~15 Hz und eingefrorenem Bild.',
+  C:'Abgeleitet, nicht gemessen: öffnet ARCore dieselbe Kamera, verliert der erste Nutzer sie – der getUserMedia-Strom wird stumm oder endet.',
+  D:'Abgeleitet, nicht gemessen: quer gestartet 1920×861 mit ~69,6° horizontal (34,6° hoch); Drehen während der Sitzung ändert nichts (Ausrichtung beim Start gesperrt).'};
+
+// ---------------------------------------------------------------- reine Rechnung
+// Sichtfeld aus XRView.projectionMatrix (spaltenweise). Bei z=-1 liegt der rechte Rand bei x=(1+p8)/p0, der
+// linke bei (p8-1)/p0; die Summe der beiden Winkel gilt auch fuer ein schiefes Frustum und ist mittig 2*atan(1/p0).
+function sichtfeld(p){
+  if(!p || !(p[0]>0) || !(p[5]>0)) return null;
+  const R=180/Math.PI, a=p[8]||0, b=p[9]||0;
+  return {h:rund((Math.atan((1+a)/p[0])+Math.atan((1-a)/p[0]))*R, 2), v:rund((Math.atan((1+b)/p[5])+Math.atan((1-b)/p[5]))*R, 2),
+    p8:rund(a, 4), p9:rund(b, 4)};
+}
+// FNV-1a ueber die Farbkanaele; Alpha ist bei der Kamerakopie immer 255 und zaehlt nicht.
+function kachelHash(px){
+  let h=0x811c9dc5;
+  for(let i=0;i<px.length;i++){ if((i&3)===3) continue; h^=px[i]; h=Math.imul(h, 0x01000193); }
+  return h>>>0;
+}
+function kachelLuma(px){
+  let s=0, mx=0, mn=255, n=0;
+  for(let i=0;i<px.length;i+=4){ const l=0.299*px[i]+0.587*px[i+1]+0.114*px[i+2]; s+=l; if(l>mx) mx=l; if(l<mn) mn=l; n++; }
+  return {mittel:n ? rund(s/n, 1) : null, max:rund(mx, 1), min:n ? rund(mn, 1) : null};
+}
+// Zeit je Zustand im Takt (Sekunden, zt): aus = Luecken zwischen XR-Bildern ueber LUECKE, sonst die Zeit seit dem
+// letzten Bild beim Zustand dieses Bilds (ohnePose, emul, ohneBild, schwarz, hell, steht, live).
+const ZT=['aus', 'ohnePose', 'emul', 'ohneBild', 'schwarz', 'hell', 'steht', 'live'];
+// Davon zaehlen als Stoerung der AR-Seite; hell ist nur „Kachel blind“, kein Urteil ueber Stillstand.
+const STOERUNG=['aus', 'ohnePose', 'emul', 'ohneBild', 'schwarz', 'steht'];
+// Zustand der XR-Seite in einem Fenster (fenster). Ueberwiegt eine Stoerung (>= halbe Zeit), heisst das Fenster
+// danach; sonst „unterbrochen“ ab STOER_MIN Sekunden Stoerung; dann langsam, laeuft. Luecken stecken in zt.aus,
+// auf das Fenster zugeschnitten (dtMax nicht: der erste Bildabstand nach dem Fensterbeginn reicht davor zurueck).
+// Frueher entschied der laengste Lauf gleicher Kacheln und je >50 % der Bilder: ein 0,6-s-Haenger hiess
+// „eingefroren“, 4 s ohne Bilder in 10 s hiessen „laeuft“ (Gegenpruefung, Befunde 1 und 2).
+function xrZustand(f){
+  if(!f || !f.sek) return 'ohne-sitzung';
+  const zt=f.zt || {}, halb=x=>(zt[x] || 0)>=0.5*f.sek;
+  if(!(f.fps>=2) || halb('aus')) return 'aus';
+  if(halb('ohnePose')) return 'ohne-pose';
+  if(halb('emul')) return 'emuliert';
+  if(halb('steht')) return 'eingefroren';
+  if(halb('schwarz')) return 'schwarz';
+  if(halb('ohneBild')) return 'ohne-bild';
+  if(halb('hell')) return 'hell';
+  if(f.stoer>=STOER_MIN) return 'unterbrochen';
+  if(f.fps<20) return 'langsam';
+  return 'laeuft';
+}
+// Stufe je Zustand: ok, teils (langsam/unterbrochen - nie gruen, Befund 1b), weg, unklar (Kachel blind, keine Sitzung).
+const STUFE={laeuft:'ok', langsam:'teils', unterbrochen:'teils', aus:'weg', 'ohne-pose':'weg', emuliert:'weg', eingefroren:'weg',
+  schwarz:'weg', 'ohne-bild':'weg', hell:'unklar', 'ohne-sitzung':'unklar'};
+const stufe=z=>STUFE[z] || 'unklar';
+// Fenster (a, b] in Sekunden ab Laufbeginn ueber die Takte von L.xr verdichten.
+function fenster(L, a, b){
+  const ks=(L.xr || []).filter(k=>k.t>a+1e-6 && k.t<=b+1e-6), xr=ks.filter(k=>k.xr);
+  const sum=(arr, f)=>arr.reduce((s, k)=>s+(k[f] || 0), 0), max=(arr, f)=>arr.reduce((m, k)=>Math.max(m, k[f] || 0), 0);
+  const d=sum(xr, 'd'), n=sum(xr, 'n'), zt={};
+  for(const x of ZT) zt[x]=rund(xr.reduce((s, k)=>s+(k.zt && k.zt[x] || 0), 0), 2);
+  const f={von:rund(a, 2), bis:rund(b, 2), sek:rund(d, 2), n, fps:d>0 ? rund(n/d, 1) : null, zt,
+    stoer:rund(STOERUNG.reduce((s, x)=>s+zt[x], 0), 2), dtMax:max(xr, 'dtMax'), ohnePose:sum(xr, 'ohnePose'),
+    ohneBild:sum(xr, 'ohneBild'), schwarz:sum(xr, 'schwarz'), hell:sum(xr, 'hell'), emul:sum(xr, 'emul'), gleich:sum(xr, 'gleich'),
+    laufMax:max(xr, 'laufMax'), leseMax:max(xr, 'leseMax')};
+  // gUM-Zaehler: rVFC (nur wenn das Video gezeichnet wird), track.stats.totalFrames (was die Quelle erzeugt) und
+  // getVideoPlaybackQuality (ob ohne Zeichnen gezaehlt wird, ist ungeprueft). Die Rate nimmt den staerksten (Befund 3);
+  // „keine Bilder“ belegt aber nur track.stats - Qualitaet gibt es in Chrome immer, sie koennte wie rVFC am Zeichnen haengen.
+  const gumSek=sum(ks, 'd'), zz={rvfc:sum(ks, 'gum'), stats:sum(ks, 'gumS'), qualitaet:sum(ks, 'gumQ')};
+  const best=Object.keys(zz).reduce((a, b2)=>zz[b2]>zz[a] ? b2 : a, 'rvfc');
+  Object.assign(f, {gum:zz.rvfc, gumS:zz.stats, gumQ:zz.qualitaet, gumSek:rund(gumSek, 2), gumRate:gumSek>0 ? rund(zz[best]/gumSek, 1) : null,
+    gumQuelle:best, gumUnabh:ks.some(k=>k.gumS!=null)});
+  if(f.stoer>0 && f.stoer<STOER_MIN) f.kurzerHaenger=true;
+  f.zustand=xrZustand(f);
+  const letzt=[...xr].reverse().find(k=>k.cam);
+  if(letzt){ f.cam=letzt.cam; f.fov=letzt.fov; f.vp=letzt.vp; }
+  return f;
+}
+// Liefert getUserMedia in diesem Fenster (zweite Haelfte)? true ab GUM_MIN B/s, gleich welcher Zaehler. Darunter
+// heisst es nur dann false, wenn track.stats mitzaehlte oder die Spur stumm/zu ist; sonst (nur rVFC/Qualitaet, die am
+// Zeichnen des Overlay-Videos haengen koennten, Spur lebt ungestummt) null = kein Urteil.
+function gumLiefert(h, spur){
+  if(!h || !h.gumSek) return null;
+  if(h.gumRate>=GUM_MIN) return true;
+  if(!h.gumUnabh && spur && spur.readyState==='live' && !spur.muted) return null;
+  return false;
+}
+// Teil B: ein getUserMedia-Versuch waehrend der Sitzung. v.waehrend ab dem Aufruf (nicht ab der Antwort, Befund 1c),
+// v.gumHalb = zweite Haelfte der 10 s nach der Antwort, v.danachEnde = letzte 4 s nach dem Stoppen.
+function einordnen(v){
+  const z=v.waehrend ? v.waehrend.zustand : 'ohne-sitzung', st=stufe(z), gl=gumLiefert(v.gumHalb, v.gum);
+  let klasse;
+  if(v.ergebnis==='ok'){
+    if(st==='unklar' || gl==null) klasse='kein-urteil';
+    else if(st==='ok') klasse=gl ? 'beide-laufen' : 'gum-ohne-bild-ar-laeuft';
+    else if(st==='teils') klasse=gl ? 'gum-stoert-ar' : 'beide-gestoert';
+    else klasse=gl ? 'gum-verdraengt-ar' : 'beide-gestoert';
+  } else klasse=st==='unklar' ? 'kein-urteil' : (v.ergebnis==='zeit' ? 'gum-haengt' : 'gum-scheitert')+(st==='ok' ? '-ar-laeuft' : '-ar-gestoert');
+  const r={klasse, ar:z, gumLiefert:gl, erholt:v.danachEnde ? v.danachEnde.zustand==='laeuft' : null};
+  // Lief AR schon vor dem Aufruf nicht, liegt eine Stoerung nicht an getUserMedia (Befund 2); die Einordnung
+  // ohne diese Bedingung bleibt als ohneVorher stehen.
+  if(v.sitzungEnde!=null) r.klasse='ar-endet';
+  else if(!v.vorher || v.vorher.zustand!=='laeuft'){ r.ohneVorher=klasse; r.klasse='ar-lief-vorher-nicht'; }
+  return r;
+}
+// Teil C: getUserMedia lief schon, dann AR. Gleiche Regeln wie Teil B, die Rollen getauscht.
+function einordnenC(L){
+  const zurueck=L.danachHalb ? gumLiefert(L.danachHalb, L.spurDanach) : null;
+  if(!L.gumOk) return {klasse:'gum-scheitert', ar:null, gumZurueck:null};
+  if(!L.sitzungOk) return {klasse:'ar-scheitert', ar:null, gumZurueck:zurueck};
+  if(gumLiefert(L.vorAR, L.spurVorAR)!==true) return {klasse:'gum-lief-vorher-nicht', ar:null, gumZurueck:zurueck};
+  const z=L.waehrend ? L.waehrend.zustand : 'ohne-sitzung', st=stufe(z), gl=gumLiefert(L.waehrendHalb, L.spurWaehrend);
+  let klasse;
+  if(st==='unklar' || gl==null) klasse='kein-urteil';
+  else if(st==='ok') klasse=gl ? 'beide-laufen' : 'ar-verdraengt-gum';
+  else if(st==='teils') klasse=gl ? 'gum-stoert-ar' : 'beide-gestoert';
+  else klasse=gl ? 'gum-verdraengt-ar' : 'beide-gestoert';
+  return {klasse, ar:z, gumLiefert:gl, gumZurueck:zurueck};
+}
+// Rollwinkel des Telefons um die Blickachse (Grad) aus der Viewer-Pose: x-Achse des Geraets gegen die y-Achse,
+// beide in local (y = oben). ~0 so gehalten wie beim Start, ±90 einmal gedreht - unabhaengig vom Bildschirm.
+const rollen=m=>m && Number.isFinite(m[1]) && Number.isFinite(m[5]) && Math.hypot(m[1], m[5])>0.3 ? rund(Math.atan2(m[1], m[5])*180/Math.PI, 1) : null;
+// Dasselbe unabhaengig von der Viewer-Pose aus devicemotion (accelerationIncludingGravity, Geraeteachsen, aufrecht
+// hochkant y = +9,8): dreht Chrome die Ansicht doch mit dem Bildschirm, bliebe der Pose-Rollwinkel bei 0.
+const rollenSchwere=g=>g && Number.isFinite(g[0]) && Number.isFinite(g[1]) && Math.hypot(g[0], g[1])>3 ? rund(Math.atan2(g[0], g[1])*180/Math.PI, 1) : null;
+const winkelAb=(a, b)=>((a-b+540)%360)-180;
+// Teil D: Proben (alle 2 s) -> Start, Drehung, ob Kamerabild, Viewport oder Sichtfeld folgten. drehung heisst: der
+// Bildschirm hat gedreht (screen.orientation); physischGedreht: das Telefon hat gedreht (Rollwinkel > 45° vom Start).
+// Sperrt Chrome die Ausrichtung beim Start (Doku 12.7), ist das zweite wahr und das erste falsch.
+function ausrichtungAuswerten(pr){
+  if(!pr || !pr.length) return null;
+  const s=pr[0], e=pr[pr.length-1], j=x=>x ? x.join('×') : null, mit=pr.filter(p=>p.cam);
+  const spanne=f=>{ const r=pr.filter(p=>p[f]!=null); return r.length ? Math.max(...r.map(p=>Math.abs(winkelAb(p[f], r[0][f])))) : null; };
+  const r=pr.filter(p=>p.roll!=null), r0=r.length ? r[0].roll : null, rollMax=spanne('roll'), rollGMax=spanne('rollG');
+  const verschieden=f=>new Set(mit.map(f)).size>1;
+  // fov je Probe als [h, v] in Grad
+  const fovSpanne=i=>{ const w=mit.filter(p=>p.fov).map(p=>p.fov[i]); return w.length ? Math.max(...w)-Math.min(...w) : 0; };
+  return {start:{typ:s.typ, cam:s.cam, vp:s.vp, fov:s.fov, inner:s.inner}, ende:{typ:e.typ, cam:e.cam, vp:e.vp, fov:e.fov, inner:e.inner},
+    typen:[...new Set(pr.map(p=>p.typ))], drehung:new Set(pr.map(p=>p.typ)).size>1, kameraWechsel:verschieden(p=>j(p.cam)),
+    viewportWechsel:verschieden(p=>j(p.vp)), sichtfeldWechsel:fovSpanne(0)>0.5 || fovSpanne(1)>0.5, proben:pr.length,
+    rollStart:r0, rollMax:rund(rollMax, 1), physischGedreht:rollMax==null ? null : rollMax>45,
+    rollGMax:rund(rollGMax, 1), gedrehtSchwere:rollGMax==null ? null : rollGMax>45};
+}
+// Jedes Promise bekommt eine Zeitgrenze (nie haengen bleiben). Kommt die Antwort nach der Frist, raeumt
+// spaet() sie weg: ein spaet gelieferter Kamerastrom oder eine spaete Sitzung bliebe sonst offen.
+function frist(f, ms, was, spaet){
+  let p; try{ p=Promise.resolve(typeof f==='function' ? f() : f); }catch(e){ p=Promise.reject(e); }
+  let tid=null, um=false;
+  const zeit=new Promise((_, nein)=>{ tid=setTimeout(()=>{ um=true;
+    nein(Object.assign(new Error(`${was}: keine Antwort nach ${ms} ms`), {name:'Zeitgrenze'})); }, ms); });
+  p.then(x=>{ if(um && spaet){ try{ spaet(x); }catch(e){} } }, ()=>{});
+  return Promise.race([p, zeit]).finally(()=>clearTimeout(tid));
+}
+// Wartet ms oder bis halt() wahr wird - in Schritten von 200 ms, damit „Ende“ und ein Sitzungsende sofort greifen.
+async function warteBis(ms, halt){
+  const bis=performance.now()+ms;
+  for(;;){ if(halt && halt()) return true; const rest=bis-performance.now(); if(rest<=0) return false; await warte(Math.min(200, rest)); }
+}
+const fehlerText=e=>{ const r={name:e && e.name || 'Error', message:String(e && e.message || e)};
+  if(e && e.constraint) r.constraint=e.constraint; return r; };
+// MediaTrackCapabilities, PhotoCapabilities, Bereiche: teils Woerterbuch, teils Schnittstelle mit Gettern auf
+// dem Prototyp - for-in erfasst beides, JSON.stringify nur das Woerterbuch.
+function kopie(o, tiefe=4){
+  if(o==null || typeof o!=='object') return typeof o==='function' ? undefined : (typeof o==='number' && !Number.isFinite(o) ? String(o) : o);
+  if(tiefe<=0) return String(o);
+  if(Array.isArray(o) || ArrayBuffer.isView(o)) return Array.from(o, x=>kopie(x, tiefe-1));
+  const r={};
+  for(const k in o){ let v; try{ v=o[k]; }catch(e){ continue; } if(typeof v==='function') continue; r[k]=kopie(v, tiefe-1); }
+  return r;
+}
+const stopp=s=>{ if(s && s.getTracks) for(const t of s.getTracks()){ try{ t.stop(); }catch(e){} } };
+
+// ---------------------------------------------------------------- Protokoll
+const KOPF={};
+function laden(){
+  try{ const s=localStorage.getItem(LS), p=s && JSON.parse(s); if(p && p.werkzeug==='kamera-messung' && Array.isArray(p.laeufe)) return p; }catch(e){}
+  return null;
+}
+const P=laden() || {werkzeug:'kamera-messung', erstellt:new Date().toISOString(), aufrufe:[], laeufe:[]};
+// Ein Lauf, der beim letzten Aufruf nicht fertig wurde (Absturz, Neuladen), bleibt mit seinem Stand stehen.
+for(const L of P.laeufe) if(!L.fertig && !L.abgebrochen) L.abgebrochen='Seite neu geladen, bevor der Lauf fertig war';
+Object.assign(P, {version:VERSION, url:location.href, erwartung:ERWARTUNG});
+P.aufrufe=(P.aufrufe || []).concat([{zeit:new Date().toISOString(), url:location.href}]);
+let SPEICHERFEHLER=null;
+function speichern(){
+  try{ localStorage.setItem(LS, JSON.stringify(P)); SPEICHERFEHLER=null; return true; }
+  catch(e){ SPEICHERFEHLER=fehlerText(e); return false; }
+}
+let LAEUFT=null;
+const rel=L=>rund(seit()-L.t0, 3);
+// typ zuletzt: ein Feld typ in d darf den Ereignistyp nicht ueberschreiben.
+function ereignis(L, typ, d={}){ if(!L) return; if(L.ereignisse.length<3000) L.ereignisse.push({t:rel(L), ...d, typ}); }
+function jetztKopf(){
+  const sc=globalThis.screen, so=sc && sc.orientation;
+  return {ausrichtung:so ? so.type : null, winkel:so ? so.angle : null, inner:[innerWidth, innerHeight],
+    bildschirm:sc ? [sc.width, sc.height] : null, dpr:globalThis.devicePixelRatio ?? null, sichtbar:document.visibilityState ?? null};
+}
+function neuerLauf(teil){
+  const L={teil, nr:P.laeufe.filter(l=>l.teil===teil).length+1, zeit:new Date().toISOString(), t0:rund(seit(), 3),
+    kopf:jetztKopf(), fertig:false, ereignisse:[], fehler:[], xr:[]};
+  P.laeufe.push(L); speichern(); return L;
+}
+
+// ---------------------------------------------------------------- Anzeige
+function status(text, cls=''){ const s=$('status'); s.textContent=text; s.className=cls || 'hint'; if(S && !S.ende) $('arHint').textContent=text; }
+function kopfZeile(name, wert, cls=''){ const tr=el('tr'); tr.append(el('td', name, 'l'), el('td', wert, cls)); $('kopf').appendChild(tr); }
+function knoepfe(){
+  const frei=!LAEUFT, md=!!KOPF.mediaDevices, ar=!!KOPF.ar;
+  $('btnA').disabled=!frei || !md;
+  // Teil B nur mit erteilter Kameraberechtigung: sonst kaeme der Dialog mitten in AR und saehe aus wie ein
+  // Kamerakonflikt (Befund 4). Ohne Permissions-API („unbekannt“) frei, steht dann im Protokoll.
+  const recht=rechtOk();
+  $('btnB').disabled=!frei || !ar || !md || !recht;
+  $('rechtB').textContent=KOPF.kameraRecht==null ? '' : `Kameraberechtigung: ${KOPF.kameraRecht}`+(recht ? '' : ' – erst Teil A ausführen und erlauben.');
+  $('rechtB').className=recht ? 'erw' : 'erw warn';
+  $('btnC').disabled=!frei || !ar || !md;
+  $('btnDq').disabled=!frei || !ar; $('btnDh').disabled=!frei || !ar;
+  const hat=P.laeufe.length>0;
+  $('btnSichern').disabled=!hat; $('btnTeilen').disabled=!hat; $('btnLeeren').disabled=!frei || !hat;
+  $('btnAbbruch').classList.toggle('hidden', frei);
+}
+const j=x=>x ? x.join('×') : '–';
+const grad=f=>f ? `${f.h}° × ${f.v}°` : '–';
+const zahl=x=>x==null ? '–' : String(x);
+function tabelle(kopf, zeilen){
+  const box=el('div', null, 'scroll'), t=el('table'), tr=el('tr');
+  kopf.forEach(h=>tr.append(el('th', h))); t.append(tr);
+  for(const z of zeilen){ const r=el('tr'); z.forEach(c=>{ const [txt, cls]=Array.isArray(c) ? c : [c, '']; r.append(el('td', txt==null ? '–' : String(txt), ('l '+cls).trim())); }); t.append(r); }
+  box.append(t); return box;
+}
+// Farbe je Klasse als feste Tabelle (kein Praefix-Muster: eine neue Klasse wie „beide-laufen-…“ wuerde sonst still
+// gruen). Gruen heisst „AR blieb ungestoert“, rot „AR bzw. gUM gestoert“; alles andere (kein Urteil, lief vorher
+// nicht, gUM ohne Bild) gelb.
+const FARBE={'beide-laufen':'ok', 'gum-scheitert-ar-laeuft':'ok', 'gum-haengt-ar-laeuft':'ok',
+  'gum-verdraengt-ar':'bad', 'gum-stoert-ar':'bad', 'beide-gestoert':'bad', 'gum-haengt-ar-gestoert':'bad', 'gum-scheitert-ar-gestoert':'bad',
+  'ar-endet':'bad', 'ar-verdraengt-gum':'bad'};
+const klasseFarbe=k=>!k ? '' : FARBE[k] || 'warn';
+function zeigen(){
+  const erg=$('erg'); erg.replaceChildren();
+  if(!P.laeufe.length){ erg.textContent='Noch keine Läufe.'; knoepfe(); return; }
+  const je=t=>P.laeufe.filter(L=>L.teil===t);
+  const kopfText=L=>`${L.teil}${L.nr}${L.abgebrochen ? ' (abgebrochen)' : ''}${L.fehler.length ? ' · Fehler: '+L.fehler.map(f=>f.name).join(', ') : ''}`;
+  const A=je('A');
+  if(A.length){
+    erg.append(el('h2', 'Teil A · Kameras'), el('div', 'Erwartung: '+ERWARTUNG.A, 'erw'));
+    const zz=[];
+    for(const L of A) for(const k of L.kameras || []){
+      const m=k.mitZoom && k.mitZoom.ok ? k.mitZoom : k.ohneZoom && k.ohneZoom.ok ? k.ohneZoom : null, c=m && m.capabilities || {}, s=m && m.settings || {};
+      const z=k.mitZoom && k.mitZoom.capabilities && k.mitZoom.capabilities.zoom || k.ohneZoom && k.ohneZoom.capabilities && k.ohneZoom.capabilities.zoom;
+      const fehl=[k.mitZoom, k.ohneZoom].filter(x=>x && x.fehler).map(x=>x.fehler.name+(x.fehler.constraint ? ' ('+x.fehler.constraint+')' : ''));
+      zz.push([kopfText(L)+' · '+(k.label || k.deviceId.slice(0, 8)), s.facingMode || (c.facingMode || []).join('/') || '–',
+        c.width ? `${c.width.max}×${c.height && c.height.max}` : '–', s.width ? `${s.width}×${s.height} (${rund(s.aspectRatio, 3)})` : '–',
+        [z ? `${z.min}–${z.max}` : 'kein zoom', z ? (z.min>=1 ? 'warn' : 'ok') : 'warn'],
+        m && m.zoom05 ? zahl(m.zoom05.zoom)+(m.zoom05.fehler ? ' ('+m.zoom05.fehler.name+')' : '') : '–',
+        m && m.erstesBild && m.erstesBild.ms!=null ? m.erstesBild.ms+' ms'+(m.erstesBild.meta && m.erstesBild.meta.hatCaptureTime ? ' · captureTime' : '') : '–',
+        [fehl.join(', ') || '–', fehl.length ? 'bad' : '']]);
+    }
+    erg.append(tabelle(['Lauf · Kamera', 'Richtung', 'max', 'Einstellung', 'Zoom', 'nach 0,5', '1. Bild', 'Fehler'], zz));
+  }
+  const B=je('B');
+  if(B.length){
+    erg.append(el('h2', 'Teil B · AR, dann getUserMedia'), el('div', 'Erwartung: '+ERWARTUNG.B, 'erw'));
+    const zz=[];
+    for(const L of B){
+      if(!(L.versuche || []).length) zz.push([kopfText(L), L.sitzungOk===false ? 'AR abgelehnt: '+(L.sitzungFehler && L.sitzungFehler.name) : 'kein Versuch', '–', '–', '–', '–']);
+      for(const v of L.versuche || []){ const e=v.einordnung || {};
+        zz.push([kopfText(L)+' · '+(v.art==='deviceId' ? (v.label || 'deviceId') : 'facingMode'),
+          v.ergebnis==='ok' ? `ok, ${v.ms} ms` : `${v.fehler ? v.fehler.name : v.ergebnis}, ${v.ms} ms`,
+          v.vorher ? `${v.vorher.zustand}, ${zahl(v.vorher.fps)} B/s` : '–',
+          v.waehrend ? `${v.waehrend.zustand}, ${zahl(v.waehrend.fps)} B/s, gestört ${v.waehrend.stoer} s (aus ${v.waehrend.zt.aus}, ohne Pose ${v.waehrend.zt.ohnePose}, steht ${v.waehrend.zt.steht})` : '–',
+          v.gumHalb ? `${zahl(v.gumHalb.gumRate)} B/s (${v.gumHalb.gumQuelle})` : '–', v.danachEnde ? `${v.danachEnde.zustand}, ${zahl(v.danachEnde.fps)} B/s` : '–',
+          [e.klasse+(e.ohneVorher ? ' ('+e.ohneVorher+')' : ''), klasseFarbe(e.klasse)]]); }
+    }
+    erg.append(tabelle(['Lauf · Versuch', 'getUserMedia', 'AR vorher', 'AR ab Aufruf', 'gUM', 'AR danach', 'Einordnung'], zz));
+  }
+  const C=je('C');
+  if(C.length){
+    erg.append(el('h2', 'Teil C · getUserMedia, dann AR'), el('div', 'Erwartung: '+ERWARTUNG.C, 'erw'));
+    // Anlauf bis zur ruhigen Ortung steht eigens: ein langer Anlauf ohne Pose wegen getUserMedia faellt nicht in die Einordnung.
+    erg.append(tabelle(['Lauf', 'AR-Start', 'Anlauf', 'AR während', 'gUM während', 'gUM danach', 'Einordnung'], C.map(L=>{ const e=L.einordnung || {};
+      return [kopfText(L), L.sitzungOk ? `ok, ${zahl(L.sitzungMs)} ms` : L.sitzungFehler ? L.sitzungFehler.name : L.gumOk===false ? 'gUM scheiterte' : '–',
+        L.arAnlauf ? `${L.arAnlauf.sek} s, ${L.arStabil ? 'ruhig' : 'nicht ruhig'} (ohne Pose ${L.arAnlauf.zt.ohnePose} s)` : '–',
+        L.waehrend ? `${L.waehrend.zustand}, ${zahl(L.waehrend.fps)} B/s, gestört ${L.waehrend.stoer} s` : '–',
+        L.waehrendHalb ? `${zahl(L.waehrendHalb.gumRate)} B/s (${L.waehrendHalb.gumQuelle})` : '–',
+        L.danachHalb ? `${zahl(L.danachHalb.gumRate)} B/s` : '–', [e.klasse, klasseFarbe(e.klasse)]]; })));
+  }
+  const D=je('D');
+  if(D.length){
+    erg.append(el('h2', 'Teil D · Ausrichtung'), el('div', 'Erwartung: '+ERWARTUNG.D, 'erw'));
+    const jn=x=>x==null ? '?' : x ? 'ja' : 'nein';
+    erg.append(tabelle(['Lauf', 'Start', 'Kamera · Sichtfeld', 'Telefon gedreht · Bildschirm folgte', 'geändert'], D.map(L=>{ const a=L.ergebnis || {}, s=a.start || {};
+      return [kopfText(L)+' · '+(L.variante || ''), s.typ || '–', `${j(s.cam)} · ${s.fov ? s.fov.join('° × ')+'°' : '–'}`,
+        a.start ? `${jn(a.physischGedreht)}${a.rollMax!=null ? ' ('+a.rollMax+'°)' : ''}${a.rollGMax!=null ? ', Schwere '+a.rollGMax+'°' : ''} · ${a.drehung ? 'ja: '+(a.typen || []).join(' → ') : 'nein'}` : '–',
+        a.start ? [['Kamera', a.kameraWechsel], ['Viewport', a.viewportWechsel], ['Sichtfeld', a.sichtfeldWechsel]].filter(x=>x[1]).map(x=>x[0]).join(', ') || 'nichts' : '–']; })));
+  }
+  if(SPEICHERFEHLER) erg.append(el('div', 'Protokoll nicht gespeichert: '+SPEICHERFEHLER.message, 'bad'));
+  knoepfe();
+}
+
+// ---------------------------------------------------------------- Takt
+// Ein Takt je Sekunde verdichtet die Zaehler der XR-Bilder und des Videos. Er laeuft am Zeitgeber, nicht
+// am XR-Bild: bleiben die XR-Bilder aus, entsteht trotzdem ein Takt mit n=0 (Zustand „aus“).
+const TAKT={L:null, id:null, t:0, k:0};
+// p0: Beginn des Takts (performance.now); die Zeit je Zustand (zt, ms) zaehlt nur ab p0, damit eine Luecke ueber
+// eine Taktgrenze nicht doppelt zaehlt.
+const zaehlerNeu=()=>({p0:performance.now(), n:0, dt:[], lese:[], ohnePose:0, emul:0, ohneBild:0, schwarz:0, hell:0, gleich:0, laufMax:0, luma:null,
+  zt:Object.fromEntries(ZT.map(x=>[x, 0]))});
+// Zaehlerstand eines Videozaehlers als Zuwachs seit dem letzten Takt; faellt er (neue Quelle), zaehlt er von 0.
+const zuwachs=(neu, alt)=>neu==null ? null : alt==null || neu<alt ? neu : neu-alt;
+function gumZaehler(){
+  const v=$('vid'), tr=V.tr; let q=null, s=null, ct=null;
+  try{ if(v.getVideoPlaybackQuality) q=v.getVideoPlaybackQuality().totalVideoFrames; }catch(e){}
+  try{ const st=tr && tr.stats; if(st && typeof st.totalFrames==='number') s=st.totalFrames; }catch(e){}
+  try{ if(typeof v.currentTime==='number') ct=v.currentTime; }catch(e){}
+  return {q, s, ct};
+}
+function taktAn(L){
+  if(TAKT.L===L) return;
+  taktAus(); TAKT.L=L; TAKT.t=rel(L); TAKT.k=0;
+  const tick=()=>{ if(TAKT.L!==L) return; taktEins(L); TAKT.id=setTimeout(tick, 1000); };
+  TAKT.id=setTimeout(tick, 1000);
+}
+function taktAus(){ const L=TAKT.L; if(!L) return; clearTimeout(TAKT.id); taktEins(L); TAKT.L=null; TAKT.id=null; }
+function taktEins(L){
+  const t=rel(L), d=t-TAKT.t;
+  if(d<0.05) return;
+  TAKT.t=t;
+  const k={t:rund(t, 2), d:rund(d, 2), gum:V.n-V.nTakt, xr:0};
+  V.nTakt=V.n;
+  // Zaehler, die nicht vom Zeichnen des Videos abhaengen (Befund 3): rVFC allein saehe ein nicht gezeichnetes
+  // Overlay-Video wie „keine Bilder“. Ob Chrome 155 track.stats hat und Qualitaet ohne Zeichnen zaehlt, ist ungeprueft.
+  if(V.stream){ const g=gumZaehler(); k.gumQ=zuwachs(g.q, V.q); k.gumS=zuwachs(g.s, V.s); k.gumZeit=g.ct==null || V.ct==null ? null : rund(g.ct-V.ct, 2);
+    V.q=g.q; V.s=g.s; V.ct=g.ct; }
+  const z=S && S.L===L && S.rafAn ? S : null;
+  if(z && (!z.ende || z.z.n)){
+    const c=z.z, dt=[...c.dt].sort((a, b)=>a-b), le=[...c.lese].sort((a, b)=>a-b), jetzt=performance.now();
+    // Rest des Takts seit dem letzten Bild: ueber LUECKE (oder noch nie ein Bild) „aus“, sonst beim Zustand des
+    // letzten Bilds - so summiert sich zt je Takt auf d, und eine Luecke ueber die Taktgrenze zaehlt einmal.
+    if(!z.ende){ const rest=jetzt-Math.max(z.pLetzt ?? c.p0, c.p0); c.zt[rest>LUECKE || z.zsLetzt==null ? 'aus' : z.zsLetzt]+=rest; }
+    z.z=zaehlerNeu();
+    Object.assign(k, {xr:1, n:c.n, dtMed:dt.length ? rund(dt[dt.length>>1], 1) : null, dtMax:dt.length ? rund(dt[dt.length-1], 1) : null,
+      ohnePose:c.ohnePose, emul:c.emul, ohneBild:c.ohneBild, schwarz:c.schwarz, hell:c.hell, gleich:c.gleich, laufMax:c.laufMax, luma:c.luma,
+      zt:Object.fromEntries(ZT.map(x=>[x, rund(c.zt[x]/1000, 3)])),
+      // Kosten der Kachel (getCameraImage + readPixels) je Bild, ms: drueckt die Rueckleselast die Bildrate? (Befund 6)
+      leseMed:le.length ? rund(le[le.length>>1], 2) : null, leseMax:le.length ? rund(le[le.length-1], 2) : null,
+      cam:z.letzt ? z.letzt.cam : null, vp:z.letzt ? z.letzt.vp : null, fov:z.letzt ? z.letzt.fov : null});
+  }
+  if(L.xr.length<4000) L.xr.push(k);
+  if(++TAKT.k%5===0) speichern();
+  if(z && !z.ende){
+    const fz=k.n ? (k.zt.steht>0.5*k.d ? 'steht' : k.zt.schwarz>0.5*k.d ? 'schwarz' : k.zt.hell>0.5*k.d ? 'hell' : 'live') : 'keine XR-Bilder';
+    $('arStatus').textContent=`Teil ${L.teil}${L.nr} · ${Math.round(t)} s · ${k.n} B/s · Bild ${fz} · Kamera ${j(k.cam)} · Sichtfeld ${grad(k.fov)}`
+      +(V.stream ? ` · gUM ${Math.max(k.gum, k.gumS || 0, k.gumQ || 0)} B/s` : '')+` · ${(jetztKopf().ausrichtung || '').replace('-primary', '')}`;
+  }
+}
+
+// ---------------------------------------------------------------- Video (getUserMedia)
+// Ein Videoelement, das umzieht: Karte A/C vor und nach der Sitzung, #arVid im Overlay waehrend der Sitzung.
+const V={stream:null, tr:null, n:0, nTakt:0, erstes:null, tAn:0, ohneRvfc:false, q:null, s:null, ct:null};
+function metaKurz(m){
+  if(!m) return null;
+  const r={felder:[]};
+  for(const k in m) r.felder.push(k);
+  for(const k of ['presentationTime', 'expectedDisplayTime', 'receiveTime', 'mediaTime', 'processingDuration', 'width', 'height', 'presentedFrames'])
+    if(typeof m[k]==='number') r[k]=rund(m[k], 3);
+  r.hatCaptureTime=typeof m.captureTime==='number';
+  r.captureTime=r.hatCaptureTime ? rund(m.captureTime, 3) : null;
+  // Abstand Aufnahme -> Anzeige: die einzige Zeitbasis, die getUserMedia ausserhalb von WebRTC liefert (Doku 12.7).
+  r.captureVorAnzeige=r.hatCaptureTime && typeof m.presentationTime==='number' ? rund(m.presentationTime-m.captureTime, 2) : null;
+  return r;
+}
+function abspielen(v){ try{ const p=v.play && v.play(); if(p && p.catch) p.catch(()=>{}); }catch(e){} }
+function videoAn(stream, ort){
+  const v=$('vid');
+  Object.assign(V, {stream, tr:stream.getVideoTracks ? stream.getVideoTracks()[0] || null : null, n:0, nTakt:0, erstes:null, tAn:performance.now(),
+    ohneRvfc:typeof v.requestVideoFrameCallback!=='function'});
+  ort.appendChild(v); ort.classList.remove('hidden');
+  v.muted=true; v.playsInline=true; v.srcObject=stream; abspielen(v);
+  const g=gumZaehler(); V.q=g.q; V.s=g.s; V.ct=g.ct;
+  if(!V.ohneRvfc){
+    const ruf=(_, m)=>{ if(V.stream!==stream) return; V.n++;
+      if(!V.erstes) V.erstes={ms:Math.round(performance.now()-V.tAn), meta:metaKurz(m)};
+      v.requestVideoFrameCallback(ruf); };
+    v.requestVideoFrameCallback(ruf);
+  } else v.addEventListener('loadeddata', ()=>{ if(V.stream===stream && !V.erstes) V.erstes={ms:Math.round(performance.now()-V.tAn), meta:null, ohneRvfc:true}; });
+}
+function videoUmziehen(ort){ if(!V.stream) return; const v=$('vid'), alt=v.parentNode; ort.appendChild(v); ort.classList.remove('hidden');
+  if(alt && alt!==ort && alt.id!=='vidLager') alt.classList.add('hidden'); abspielen(v); }
+function videoAus(){
+  const s=V.stream, v=$('vid'), alt=v.parentNode; V.stream=null; V.tr=null; stopp(s);
+  try{ v.srcObject=null; }catch(e){}
+  $('vidLager').appendChild(v); if(alt && alt.id!=='vidLager') alt.classList.add('hidden');
+}
+function spurHoeren(L, tr, ziel){
+  ziel.spur=[];
+  for(const typ of ['mute', 'unmute', 'ended']) tr.addEventListener(typ, ()=>{ ziel.spur.push({t:rel(L), typ}); ereignis(L, 'spur-'+typ, {label:tr.label}); });
+}
+const spurStand=tr=>tr ? {readyState:tr.readyState, muted:!!tr.muted} : null;
+function rueckListe(){ try{ const a=JSON.parse(localStorage.getItem(LS_RUECK) || '[]'); return Array.isArray(a) ? a.filter(r=>r && r.id) : []; }catch(e){ return []; } }
+// Kameraberechtigung (Befund 4): beim Laden per permissions.query, danach per change-Ereignis und nach jedem Teil
+// nachgefuehrt. „unbekannt“, wenn die Seite es nicht erfahren kann (Teil B ist dann frei, das steht im Protokoll).
+async function rechtAbfragen(ptz){
+  const p=navigator.permissions;
+  if(!p || !p.query) return 'unbekannt';
+  try{ const s=await frist(()=>p.query(ptz ? {name:'camera', panTiltZoom:true} : {name:'camera'}), 2000, 'permissions.query'); return s && s.state || 'unbekannt'; }
+  catch(e){ return 'unbekannt'; }
+}
+const rechtOk=()=>KOPF.kameraRecht==='granted' || KOPF.kameraRecht==='unbekannt';
+// Frist fuer getUserMedia: steht ein Dialog an (nicht 'granted'), liest der Mensch ihn - 60 s statt 8 s, sonst
+// liefe die Zeitgrenze in den Dialog und Teil A saehe ohne Berechtigung aus.
+const gumFrist=recht=>recht==='granted' ? 8000 : 60000;
+
+// ---------------------------------------------------------------- XR-Sitzung (Teile B, C, D)
+let S=null;
+// Dieselben Features wie raumskizze-probe.html (startAR): mit Tiefe, Ebenen und Ankern laeuft ARCore so wie in der App.
+const arInit=()=>({optionalFeatures:['local', 'hit-test', 'anchors', 'dom-overlay', 'camera-access', 'plane-detection', 'depth-sensing'],
+  domOverlay:{root:$('ar')}, depthSensing:{usagePreference:['cpu-optimized'], dataFormatPreference:['luminance-alpha', 'unsigned-short']}});
+// Muss synchron im Klick laufen: requestSession braucht die Nutzergeste.
+function arAnfragen(){
+  const t=performance.now();
+  let gl=null; try{ gl=document.createElement('canvas').getContext('webgl2', {xrCompatible:true, alpha:true, antialias:false}); }catch(e){}
+  let p;
+  if(!navigator.xr) p=Promise.reject(Object.assign(new Error('navigator.xr fehlt'), {name:'NotSupportedError'}));
+  else if(!gl) p=Promise.reject(Object.assign(new Error('WebGL2 fehlt'), {name:'NotSupportedError'}));
+  else { try{ p=Promise.resolve(navigator.xr.requestSession('immersive-ar', arInit())); }catch(e){ p=Promise.reject(e); } }
+  p.catch(()=>{});
+  return {gl, p, t};
+}
+async function arEinrichten(L, anf){
+  const init=arInit(); L.anfrage={optionalFeatures:init.optionalFeatures, depthSensing:init.depthSensing};
+  let s;
+  try{ s=await frist(anf.p, 30000, 'requestSession', x=>{ try{ x.end(); }catch(e){} ereignis(L, 'sitzung-spaet-beendet'); }); }
+  catch(e){ L.sitzungOk=false; L.sitzungFehler=fehlerText(e); ereignis(L, 'sitzung-abgelehnt', L.sitzungFehler); return null; }
+  L.sitzungOk=true; L.sitzungMs=Math.round(performance.now()-anf.t);
+  const z=S={session:s, gl:anf.gl, L, ende:false, endeT:null, layer:null, ref:null, binding:null, fbo:null, kachel:new Uint8Array(K*K*4),
+    z:zaehlerNeu(), tLetzt:null, hash:null, lauf:0, letzt:null, jetzt:false, warn:{}};
+  s.addEventListener('end', ()=>{ z.ende=true; z.endeT=rel(L); ereignis(L, 'sitzung-ende');
+    if(S===z){ $('ar').classList.add('hidden'); if(V.stream && $('vid').parentNode && $('vid').parentNode.id==='arVid') videoUmziehen($(L.teil==='C' ? 'vidC' : 'vidA')); } });
+  $('arStatus').textContent=`Teil ${L.teil}${L.nr} · Sitzung startet …`; $('arHint').textContent='';
+  $('btnGum').classList.toggle('hidden', L.teil!=='B');
+  $('ar').classList.remove('hidden');
+  try{
+    if(anf.gl.makeXRCompatible) await frist(()=>anf.gl.makeXRCompatible(), 5000, 'makeXRCompatible');
+    z.layer=new XRWebGLLayer(s, anf.gl, {alpha:true, antialias:false});
+    s.updateRenderState({baseLayer:z.layer});
+    try{ z.ref=await frist(()=>s.requestReferenceSpace('local'), 5000, 'requestReferenceSpace(local)'); }
+    catch(e){ ereignis(L, 'local-fehlt', fehlerText(e)); z.ref=await frist(()=>s.requestReferenceSpace('viewer'), 5000, 'requestReferenceSpace(viewer)'); }
+    z.binding=typeof XRWebGLBinding==='function' ? new XRWebGLBinding(s, anf.gl) : null;
+    z.fbo=anf.gl.createFramebuffer();
+  }catch(e){ L.fehler.push(fehlerText(e)); ereignis(L, 'sitzung-fehler', fehlerText(e)); await arBeenden(L); return null; }
+  // Hit-Test wie in der App, damit ARCore dieselbe Last hat; fehlt er, ist das nur ein Eintrag.
+  try{ const v=await frist(()=>s.requestReferenceSpace('viewer'), 3000, 'viewer'); z.hit=await frist(()=>s.requestHitTestSource({space:v}), 3000, 'requestHitTestSource'); }
+  catch(e){ ereignis(L, 'hit-test-fehlt', fehlerText(e)); }
+  const tg=f=>{ try{ return f(); }catch(e){ return null; } };
+  L.sitzung={features:s.enabledFeatures ? Array.from(s.enabledFeatures) : null, domOverlay:s.domOverlayState ? s.domOverlayState.type : null,
+    blend:s.environmentBlendMode || null, depthUsage:tg(()=>s.depthUsage), depthFormat:tg(()=>s.depthDataFormat), binding:!!z.binding, hitTest:!!z.hit,
+    kamerazugriff:!!(z.binding && (!s.enabledFeatures || Array.from(s.enabledFeatures).includes('camera-access')))};
+  ereignis(L, 'sitzung-start', L.sitzung);
+  if(z.ende) return null;
+  // Takte zaehlen erst ab hier als XR-Takte (vorher liefe die Einrichtung als „aus“ mit), der Zaehler beginnt jetzt.
+  if(TAKT.L===L) taktEins(L);
+  z.z=zaehlerNeu(); z.rafAn=true;
+  s.requestAnimationFrame(xrBild);
+  taktAn(L);
+  return s;
+}
+async function arBeenden(L){
+  const z=S; if(!z || z.ende) return;
+  try{ await frist(()=>z.session.end(), 3000, 'session.end'); }catch(e){ ereignis(L, 'ende-fehler', fehlerText(e)); }
+  await warteBis(3000, ()=>z.ende);
+  if(!z.ende){ z.ende=true; z.endeT=rel(L); ereignis(L, 'ende-ohne-ereignis'); $('ar').classList.add('hidden'); }
+}
+// Die Kameratextur gilt nur in diesem XR-Bild: anhaengen, lesen, abhaengen im selben Aufruf (readRoi in raumskizze-probe).
+function kachelLesen(z, cam){
+  const gl=z.gl; let tex=null;
+  try{ tex=z.binding.getCameraImage(cam); }catch(e){ if(!z.warn.tex){ z.warn.tex=true; ereignis(z.L, 'getCameraImage-fehler', fehlerText(e)); } }
+  if(!tex) return null;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, z.fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  const ok=gl.checkFramebufferStatus(gl.FRAMEBUFFER)===gl.FRAMEBUFFER_COMPLETE;
+  if(ok) gl.readPixels(Math.max(0, (cam.width-K)>>1), Math.max(0, (cam.height-K)>>1), K, K, gl.RGBA, gl.UNSIGNED_BYTE, z.kachel);
+  else if(!z.warn.fbo){ z.warn.fbo=true; ereignis(z.L, 'fbo-unvollstaendig'); }
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, null, 0);
+  return ok ? z.kachel : null;
+}
+function xrBild(t, frame){
+  const z=S; if(!z || z.ende || frame.session!==z.session) return;
+  z.session.requestAnimationFrame(xrBild);
+  const c=z.z; c.n++;
+  if(z.tLetzt!=null) c.dt.push(t-z.tLetzt);
+  z.tLetzt=t;
+  // Zeit seit dem letzten Bild (ab Taktbeginn) geht an den Zustand dieses Bilds, eine Luecke an „aus“.
+  // Vor dem ersten Bild der Sitzung gilt der Taktbeginn als letztes Bild (die Wartezeit ist eine Luecke, wenn lang).
+  const jetzt=performance.now(), ref=z.pLetzt ?? c.p0, seit=jetzt-Math.max(ref, c.p0), luecke=jetzt-ref>LUECKE;
+  z.pLetzt=jetzt;
+  let zs='live';
+  try{
+    const pose=frame.getViewerPose(z.ref);
+    if(!pose){ c.ohnePose++; zs='ohnePose'; return; }
+    if(pose.emulatedPosition){ c.emul++; zs='emul'; }
+    const view=pose.views[0], gl=z.gl, vp=z.layer.getViewport(view), cam=view.camera;
+    z.letzt={cam:cam ? [cam.width, cam.height] : null, vp:vp ? [vp.width, vp.height] : null, fov:sichtfeld(view.projectionMatrix),
+      roll:rollen(pose.transform && pose.transform.matrix)};
+    const tk=performance.now(), px=cam && z.binding ? kachelLesen(z, cam) : null;
+    if(px) c.lese.push(performance.now()-tk);
+    if(!px){ c.ohneBild++; if(zs==='live') zs='ohneBild'; }
+    else {
+      const lu=kachelLuma(px); c.luma=lu;
+      if(lu.max<SCHWARZ){ c.schwarz++; z.hash=null; z.lauf=0; if(zs==='live') zs='schwarz'; }
+      else if(lu.min>HELL){ c.hell++; z.hash=null; z.lauf=0; if(zs==='live') zs='hell'; }
+      else { const h=kachelHash(px); if(h===z.hash){ z.lauf++; c.gleich++; } else z.lauf=0; z.hash=h; if(z.lauf>c.laufMax) c.laufMax=z.lauf;
+        if(z.lauf>=STEHT_AB && zs==='live') zs='steht'; }
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, z.layer.framebuffer);
+    if(vp) gl.viewport(vp.x, vp.y, vp.width, vp.height);
+    gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+  }catch(e){ if(!z.warn.bild){ z.warn.bild=true; ereignis(z.L, 'xr-bild-fehler', fehlerText(e)); } }
+  finally{ c.zt[luecke ? 'aus' : zs]+=seit; z.zsLetzt=zs; }
+}
+const erstesXrBild=async L=>{ const z=S; const da=await warteBis(5000, ()=>!z || z.ende || z.letzt || z.z.n>0 || L.abbruch); ereignis(L, 'erstes-xr-bild', {da:!!(z && (z.letzt || z.z.n))}); return da; };
+// Wartet, bis die Ortung ruhig laeuft: die zuletzt abgeschlossenen Takte ueber 3 s im Zustand „laeuft“ (Posen da,
+// Kachel wechselt, keine Luecken). Hoechstens ms; z.jetzt (Knopf) bricht ab. Befund 2: vorher zaehlte nur das
+// erste XR-Bild, ein nie getracktes ARCore haette getUserMedia die Schuld gegeben.
+async function arStabil(L, z, ms){
+  const bis=performance.now()+ms;
+  for(;;){
+    const t=rel(L), f=fenster(L, t-3.2, t);
+    if(f.zustand==='laeuft' && f.sek>=2.5) return true;
+    if(z.ende || z.jetzt || L.abbruch || performance.now()>=bis) return false;
+    await warte(250);
+  }
+}
+
+// ---------------------------------------------------------------- Teil A
+async function kameraVariante(L, d, mitZoom, fr=8000){
+  const md=navigator.mediaDevices, c={video:{deviceId:{exact:d.deviceId}, width:{ideal:4000}, height:{ideal:3000}, ...(mitZoom ? {zoom:true} : {})}};
+  const r={anfrage:kopie(c), ok:false, frist:fr}, t0=performance.now();
+  let stream=null;
+  try{ stream=await frist(()=>md.getUserMedia(c), fr, 'getUserMedia', stopp); r.ok=true; }
+  catch(e){ r.fehler=fehlerText(e); }
+  // Android gibt die Kamera nach stop() verzoegert frei; ein NotReadableError gleich danach muss nicht an der
+  // Kamera liegen. Einmal nach 1,5 s wiederholen und beides protokollieren.
+  if(!stream && r.fehler.name==='NotReadableError' && !L.abbruch){
+    await warte(1500); r.wiederholt={fehler:r.fehler};
+    try{ stream=await frist(()=>md.getUserMedia(c), 8000, 'getUserMedia', stopp); r.ok=true; delete r.fehler; }
+    catch(e){ r.fehler=fehlerText(e); }
+  }
+  r.ms=Math.round(performance.now()-t0);
+  if(!stream) return r;
+  try{
+    const tr=stream.getVideoTracks()[0];
+    r.label=tr.label;
+    r.settings=kopie(tr.getSettings ? tr.getSettings() : null);
+    r.capabilities=kopie(tr.getCapabilities ? tr.getCapabilities() : null);
+    videoAn(stream, $('vidA'));
+    await warteBis(5000, ()=>V.erstes || L.abbruch);
+    r.erstesBild=V.erstes ? {ms:V.erstes.ms+r.ms, abStrom:V.erstes.ms, meta:V.erstes.meta} : {ms:null, fehlt:'kein Bild nach 5 s'};
+    if(typeof ImageCapture==='function'){
+      let ic=null; try{ ic=new ImageCapture(tr); }catch(e){ r.imageCaptureFehler=fehlerText(e); }
+      if(ic){
+        try{ r.photoCapabilities=kopie(await frist(()=>ic.getPhotoCapabilities(), 3000, 'getPhotoCapabilities')); }catch(e){ r.photoCapabilitiesFehler=fehlerText(e); }
+        try{ r.photoSettings=kopie(await frist(()=>ic.getPhotoSettings(), 3000, 'getPhotoSettings')); }catch(e){ r.photoSettingsFehler=fehlerText(e); }
+      }
+    } else r.imageCapture='fehlt';
+    // Weitwinkel ueber Zoom unter 1? Chrome klemmt laut Quelle auf 1 - hier das gemeldete zoom danach.
+    const zm=()=>{ try{ const s=tr.getSettings(); return s && s.zoom!=null ? s.zoom : null; }catch(e){ return null; } };
+    r.zoom05={vorher:zm()};
+    try{ await frist(()=>tr.applyConstraints({advanced:[{zoom:0.5}]}), 3000, 'applyConstraints'); r.zoom05.ok=true; }catch(e){ r.zoom05.fehler=fehlerText(e); }
+    r.zoom05.zoom=zm();
+    r.settingsDanach=kopie(tr.getSettings ? tr.getSettings() : null);
+  }catch(e){ r.fehlerDanach=fehlerText(e); }
+  finally{ videoAus(); }
+  return r;
+}
+async function teilA(L){
+  const md=navigator.mediaDevices;
+  if(!md || !md.getUserMedia) throw Object.assign(new Error('navigator.mediaDevices.getUserMedia fehlt'), {name:'NotSupportedError'});
+  L.rechtVorher=await rechtAbfragen(false);
+  status(L.rechtVorher==='granted' ? 'Teil A: Kamera …' : 'Teil A: Kameraberechtigung – bitte erlauben …', L.rechtVorher==='granted' ? '' : 'warn');
+  let s0=null;
+  try{ s0=await frist(()=>md.getUserMedia({video:true}), gumFrist(L.rechtVorher), 'getUserMedia', stopp); const tr=s0.getVideoTracks()[0];
+    L.erst={label:tr && tr.label, settings:kopie(tr && tr.getSettings ? tr.getSettings() : null)}; }
+  catch(e){ L.erst={fehler:fehlerText(e)}; }
+  finally{ stopp(s0); }
+  L.rechtNachher=KOPF.kameraRecht=await rechtAbfragen(false);
+  // zoom:true kann einen zweiten Dialog (Schwenken/Zoomen) ausloesen: die erste solche Anfrage bekommt dieselbe lange Frist.
+  L.rechtZoom=await rechtAbfragen(true);
+  let zoomFrist=gumFrist(L.rechtZoom);
+  // Nach jedem stop() kurz warten, bevor die naechste Kamera aufgeht (Freigabe unter Android verzoegert).
+  const FREIGABE=800;
+  if(s0) await warte(FREIGABE);
+  let devs=[];
+  try{ devs=Array.from(await frist(()=>md.enumerateDevices(), 3000, 'enumerateDevices')).filter(x=>x.kind==='videoinput'); }
+  catch(e){ L.fehler.push(fehlerText(e)); }
+  L.geraete=devs.map(x=>({deviceId:x.deviceId, groupId:x.groupId, label:x.label}));
+  ereignis(L, 'geraete', {n:devs.length});
+  L.kameras=[];
+  for(const [i, d] of devs.entries()){
+    if(L.abbruch) break;
+    const k={deviceId:d.deviceId, label:d.label};
+    L.kameras.push(k);
+    if(!d.deviceId){ k.fehler={name:'OhneId', message:'enumerateDevices ohne deviceId (keine Berechtigung?)'}; continue; }
+    // Einmal mit zoom:true (Chrome zeigt zoom in getCapabilities womoeglich nur mit dieser Anfrage), einmal ohne.
+    for(const mitZoom of [true, false]){
+      if(L.abbruch) break;
+      status(`Teil A: Kamera ${i+1}/${devs.length} „${d.label || d.deviceId.slice(0, 8)}“ ${mitZoom ? 'mit' : 'ohne'} zoom …`);
+      const r=k[mitZoom ? 'mitZoom' : 'ohneZoom']=await kameraVariante(L, d, mitZoom, mitZoom ? zoomFrist : 8000);
+      if(mitZoom) zoomFrist=8000;
+      speichern();
+      if(r.ok) await warte(FREIGABE);
+    }
+    const m=[k.mitZoom, k.ohneZoom].find(x=>x && x.ok);
+    if(m){ k.label=m.label || k.label; const f=m.settings && m.settings.facingMode, cf=m.capabilities && m.capabilities.facingMode;
+      k.facing=f || (Array.isArray(cf) ? cf[0] : null) || null; }
+    k.rueck=k.facing==='environment' || (!k.facing && /back|rück|rear|environment/i.test(k.label || ''));
+  }
+  const rueck=L.kameras.filter(k=>k.rueck && k.deviceId).map(k=>({id:k.deviceId, label:k.label}));
+  // Nur mit mindestens einer deviceId ueberschreiben: ohne Berechtigung liefert enumerateDevices leere ids, und eine
+  // gute Liste aus einem frueheren Lauf ginge still verloren (Teil B machte dann nur facingMode, Befund 4).
+  if(L.kameras.some(k=>k.deviceId)){ try{ localStorage.setItem(LS_RUECK, JSON.stringify(rueck)); }catch(e){ L.fehler.push(fehlerText(e)); } }
+  else ereignis(L, 'rueck-unveraendert', {grund:'keine deviceId'});
+  const zooms=L.kameras.map(k=>{ const z=[k.mitZoom, k.ohneZoom].map(x=>x && x.capabilities && x.capabilities.zoom).find(Boolean); return z ? z.min : null; });
+  L.ergebnis={kameras:L.kameras.length, rueck:rueck.length, labels:L.kameras.map(k=>k.label), zoomMin:zooms,
+    zoomNach05:L.kameras.map(k=>{ const m=[k.mitZoom, k.ohneZoom].find(x=>x && x.zoom05 && x.zoom05.zoom!=null); return m ? m.zoom05.zoom : null; })};
+  status(`Teil A fertig: ${L.kameras.length} Kameras, ${rueck.length} hinten.`, 'ok');
+}
+
+// ---------------------------------------------------------------- Teil B
+async function gumVersuch(L, p, nr, von, stabil){
+  const z=S, recht=await rechtAbfragen(false);
+  taktEins(L);
+  const v={art:p.art, label:p.label || null, anfrage:kopie(p.c), t:rel(L), recht, arStabil:stabil};
+  v.vorher=fenster(L, v.t-5, v.t);
+  status(`Teil B: Versuch ${nr}/${von} – getUserMedia (${p.art==='deviceId' ? p.label || 'deviceId' : 'facingMode'}) …`);
+  const t0=performance.now();
+  let stream=null, tr=null;
+  try{ stream=await frist(()=>navigator.mediaDevices.getUserMedia(p.c), 8000, 'getUserMedia',
+    x=>{ stopp(x); ereignis(L, 'gum-spaet', {art:p.art, nach:Math.round(performance.now()-t0)}); }); v.ergebnis='ok'; }
+  catch(e){ v.ergebnis=e && e.name==='Zeitgrenze' ? 'zeit' : 'fehler'; v.fehler=fehlerText(e); }
+  v.ms=Math.round(performance.now()-t0);
+  ereignis(L, 'gum-'+v.ergebnis, {art:p.art, ms:v.ms, ...(v.fehler ? {fehler:v.fehler.name} : {})});
+  taktEins(L); const ta=rel(L); v.ta=ta;
+  // Zwischen Aufruf und Antwort eigens: steht AR, solange getUserMedia aussteht, zaehlt das mit (Befund 1c).
+  v.warten=fenster(L, v.t, ta);
+  if(stream){ tr=stream.getVideoTracks()[0]; v.label=tr ? tr.label : v.label; v.settings=kopie(tr && tr.getSettings ? tr.getSettings() : null);
+    spurHoeren(L, tr, v); videoAn(stream, $('arVid')); }
+  status(`Teil B: Versuch ${nr}/${von} – ${v.ergebnis==='ok' ? 'Kamera offen' : v.fehler.name}, 10 s beobachten …`);
+  // 10 s in zwei Haelften: ob getUserMedia liefert, zaehlt erst in der zweiten (Anlauf und ein paar Bilder vor
+  // dem Verdraengen sind kein „liefert“, Befund 1d).
+  await warteBis(5000, ()=>z.ende || L.abbruch);
+  taktEins(L); const th=rel(L);
+  await warteBis(5000, ()=>z.ende || L.abbruch);
+  taktEins(L); const tb=rel(L);
+  v.waehrend=fenster(L, v.t, tb); v.nachAntwort=fenster(L, ta, tb); v.gumHalb=fenster(L, th, tb);
+  v.gum={erstesBild:V.stream===stream && V.erstes ? V.erstes : null, ...spurStand(tr)};
+  if(stream){ videoAus(); v.gestoppt=rel(L); ereignis(L, 'gum-gestoppt', {art:p.art}); }
+  if(z.ende) v.sitzungEnde=z.endeT;
+  else {
+    // Erholt sich AR? Geurteilt ueber die letzten 4 s; ein Ruckler gleich nach dem Schliessen zaehlt nicht dagegen.
+    status(`Teil B: Versuch ${nr}/${von} – Kamera zu, 8 s beobachten …`);
+    await warteBis(4000, ()=>z.ende || L.abbruch);
+    taktEins(L); const tc=rel(L);
+    await warteBis(4000, ()=>z.ende || L.abbruch);
+    taktEins(L); v.danach=fenster(L, tb, rel(L)); v.danachEnde=fenster(L, tc, rel(L));
+    if(z.ende) v.sitzungEndeDanach=z.endeT;
+  }
+  // Seite verdeckt (Kamera-App, Systemdialog)? Die Wechsel im Fenster dieses Versuchs stehen hier, alle im Lauf.
+  v.sichtbarkeit=L.ereignisse.filter(e=>e.typ==='sichtbarkeit' && e.t>=v.t).map(e=>({t:e.t, zustand:e.zustand}));
+  v.einordnung=einordnen(v);
+  return v;
+}
+function teilB(L){
+  const anf=arAnfragen();
+  return (async()=>{
+    status('Teil B: AR startet …');
+    const s=await arEinrichten(L, anf); if(!s) return;
+    const z=S, rueck=rueckListe();
+    const plan=[{art:'facingMode', c:{video:{facingMode:'environment'}}}, ...rueck.map(r=>({art:'deviceId', id:r.id, label:r.label, c:{video:{deviceId:{exact:r.id}}}}))];
+    L.plan=plan.map(x=>({art:x.art, label:x.label || null}));
+    if(!rueck.length) ereignis(L, 'ohne-teil-a', {hinweis:'keine Rueckkameras aus Teil A gemerkt - nur facingMode'});
+    await erstesXrBild(L);
+    status('Teil B: ruhig halten – in 8 s öffnet die Seite zusätzlich die Rückkamera.');
+    await warteBis(8000, ()=>z.ende || z.jetzt || L.abbruch);
+    ereignis(L, 'versuche-start', {knopf:!!z.jetzt});
+    L.versuche=[];
+    for(const [i, p] of plan.entries()){
+      if(z.ende || L.abbruch) break;
+      // Vor jedem Versuch ruhige Ortung abwarten (Befund 2); der Knopf „getUserMedia jetzt“ gilt fuer den naechsten Versuch.
+      let stabil=null;
+      if(!z.jetzt){ status(`Teil B: Versuch ${i+1}/${plan.length} – warte auf ruhige AR-Ortung …`); stabil=await arStabil(L, z, ARSTABIL_MS);
+        if(!stabil && !z.ende && !L.abbruch && !z.jetzt) ereignis(L, 'ar-nicht-stabil', {versuch:i+1, warteMs:ARSTABIL_MS}); }
+      z.jetzt=false;
+      if(z.ende || L.abbruch) break;
+      L.versuche.push(await gumVersuch(L, p, i+1, plan.length, stabil)); speichern();
+    }
+    if(z.ende && !L.abbruch) ereignis(L, 'versuche-abgebrochen', {grund:'sitzung zu', nach:L.versuche.length});
+    await arBeenden(L);
+    L.ergebnis={versuche:L.versuche.length, klassen:L.versuche.map(v=>v.einordnung.klasse), sitzungEndeVonSelbst:L.versuche.some(v=>v.sitzungEnde!=null)};
+    status(`Teil B fertig: ${L.ergebnis.klassen.join(', ') || 'kein Versuch'}.`, 'ok');
+  })();
+}
+
+// ---------------------------------------------------------------- Teil C
+// Abweichung vom Ablauf „3 s, dann requestSession“: Chrome laesst requestSession nur kurz nach einem Tipp zu
+// (die App wartet deshalb hoechstens 2 s, startAR in raumskizze-probe). Nach 3 s Kamera kommt ein zweiter Knopf.
+const C={anf:null};
+async function teilC(L){
+  const md=navigator.mediaDevices;
+  if(!md || !md.getUserMedia) throw Object.assign(new Error('navigator.mediaDevices.getUserMedia fehlt'), {name:'NotSupportedError'});
+  L.rechtVorher=await rechtAbfragen(false);
+  status('Teil C: Rückkamera startet …');
+  const t0=performance.now();
+  let stream=null;
+  try{ stream=await frist(()=>md.getUserMedia({video:{facingMode:'environment'}}), gumFrist(L.rechtVorher), 'getUserMedia', stopp); L.gumOk=true; }
+  catch(e){ L.gumOk=false; L.gumFehler=fehlerText(e); }
+  L.gumMs=Math.round(performance.now()-t0);
+  if(!stream){ L.einordnung=einordnenC(L); status('Teil C: getUserMedia scheiterte – '+L.gumFehler.name, 'bad'); return; }
+  const tr=stream.getVideoTracks()[0]; L.gumLabel=tr ? tr.label : null; L.gumSettings=kopie(tr && tr.getSettings ? tr.getSettings() : null);
+  spurHoeren(L, tr, L); videoAn(stream, $('vidC')); taktAn(L);
+  try{
+    await warteBis(3000, ()=>L.abbruch);
+    taktEins(L); L.vorAR=fenster(L, 0, rel(L)); L.spurVorAR=spurStand(tr);
+    C.anf=null; $('btnC2').classList.remove('hidden');
+    status('Teil C: Kamera läuft – jetzt „AR jetzt starten“ tippen.', 'warn');
+    await warteBis(30000, ()=>C.anf || L.abbruch);
+    $('btnC2').classList.add('hidden');
+    if(!C.anf){ ereignis(L, 'kein-ar-start'); L.sitzungOk=false; L.sitzungFehler={name:'KeinTipp', message:'AR nicht innerhalb von 30 s gestartet'}; }
+    else {
+      L.zweiterTipp=rel(L); L.kameraVorAR=rund((performance.now()-t0)/1000, 2);
+      const s=await arEinrichten(L, C.anf);
+      if(s){
+        const z=S; videoUmziehen($('arVid'));
+        await erstesXrBild(L);
+        // ARCore braucht nach dem Start einen Moment bis zur ersten Pose; dieser Anlauf ist keine Stoerung durch
+        // getUserMedia. Hoechstens 10 s auf ruhige Ortung warten, dann 10 s werten (Anlauf steht als arAnlauf).
+        taktEins(L); const t1=rel(L);
+        status('Teil C: AR startet – warte auf ruhige Ortung …');
+        L.arStabil=await arStabil(L, z, 10000);
+        taktEins(L); const ta=rel(L); L.arAnlauf=fenster(L, t1, ta);
+        status('Teil C: AR läuft – 10 s beobachten …');
+        await warteBis(5000, ()=>z.ende || L.abbruch);
+        taktEins(L); const th=rel(L);
+        await warteBis(5000, ()=>z.ende || L.abbruch);
+        taktEins(L); L.waehrend=fenster(L, ta, rel(L)); L.waehrendHalb=fenster(L, th, rel(L)); L.spurWaehrend=spurStand(tr);
+        if(z.ende) L.sitzungEnde=z.endeT;
+        await arBeenden(L);
+        videoUmziehen($('vidC'));
+      }
+    }
+    taktEins(L); const tb=rel(L);
+    status('Teil C: Sitzung zu – 8 s beobachten, ob das Kamerabild zurückkommt …');
+    await warteBis(4000, ()=>L.abbruch);
+    taktEins(L); const tc=rel(L);
+    await warteBis(4000, ()=>L.abbruch);
+    taktEins(L); L.danach=fenster(L, tb, rel(L)); L.danachHalb=fenster(L, tc, rel(L)); L.spurDanach=spurStand(tr);
+  } finally { videoAus(); C.anf=null; $('btnC2').classList.add('hidden'); }
+  L.einordnung=einordnenC(L);
+  status(`Teil C fertig: ${L.einordnung.klasse}${L.einordnung.gumZurueck ? ', Kamerabild kam zurück' : ''}.`, 'ok');
+}
+
+// ---------------------------------------------------------------- Teil D
+function teilD(L, quer){
+  L.variante=quer ? 'quer' : 'hoch'; L.startAusrichtung=jetztKopf().ausrichtung;
+  const anf=arAnfragen();
+  return (async()=>{
+    status(`Teil D (${L.variante}): AR startet …`);
+    const s=await arEinrichten(L, anf); if(!s) return;
+    const z=S;
+    // Schwerkraft in Geraeteachsen als zweite, von der Viewer-Pose unabhaengige Quelle fuer „Telefon gedreht“ (Befund 10).
+    let g=null;
+    const bewegung=e=>{ const a=e && e.accelerationIncludingGravity; if(a && a.x!=null && a.y!=null) g=[a.x, a.y, a.z ?? null]; };
+    addEventListener('devicemotion', bewegung);
+    try{
+      await erstesXrBild(L);
+      L.proben=[];
+      const probe=()=>{ const k=jetztKopf(), x=z.letzt || {};
+        L.proben.push({t:rel(L), typ:k.ausrichtung, winkel:k.winkel, inner:k.inner, vp:x.vp || null, cam:x.cam || null, fov:x.fov ? [x.fov.h, x.fov.v] : null,
+          roll:x.roll ?? null, g:g ? g.map(w=>rund(w, 2)) : null, rollG:rollenSchwere(g)}); };
+      const ts=rel(L); let gesagt=false;
+      probe();
+      status(`Teil D (${L.variante}): ruhig halten …`);
+      while(!z.ende && !L.abbruch && rel(L)-ts<25-1e-6){
+        await warteBis(Math.min(2000, (25-(rel(L)-ts))*1000), ()=>z.ende || L.abbruch);
+        if(z.ende || L.abbruch) break;
+        probe();
+        if(!gesagt && rel(L)-ts>=10-1e-6){ gesagt=true; ereignis(L, 'hinweis-drehen');
+          status(quer ? 'Teil D: Jetzt einmal ins Hochformat drehen.' : 'Teil D: Jetzt einmal ins Querformat drehen.', 'warn'); }
+      }
+    } finally { removeEventListener('devicemotion', bewegung); }
+    await arBeenden(L);
+    L.ergebnis=ausrichtungAuswerten(L.proben);
+    const a=L.ergebnis;
+    status(a ? `Teil D fertig: ${a.start.typ}, Kamera ${j(a.start.cam)}, Sichtfeld ${a.start.fov ? a.start.fov.join('° × ')+'°' : '–'}, Telefon gedreht `
+      +`${a.physischGedreht==null ? '?' : a.physischGedreht ? 'ja' : 'nein'}, Bildschirm folgte ${a.drehung ? 'ja' : 'nein'}.` : 'Teil D: keine Proben.', 'ok');
+  })();
+}
+
+// ---------------------------------------------------------------- Ablauf
+// Ein Teil zur Zeit. fn laeuft synchron an, damit requestSession in der Nutzergeste liegt.
+function teilStarten(teil, fn){
+  if(LAEUFT) return null;
+  const L=neuerLauf(teil); LAEUFT=L; knoepfe();
+  let p; try{ p=Promise.resolve(fn(L)); }catch(e){ p=Promise.reject(e); }
+  return p.catch(e=>{ L.fehler.push(fehlerText(e)); ereignis(L, 'fehler', fehlerText(e)); status(`Teil ${teil}: Fehler – ${e && e.message || e}`, 'bad'); })
+    .then(async()=>{ try{ if(S && S.L===L && !S.ende) await arBeenden(L); }catch(e){}
+      // Berechtigung nachfuehren (Teil A/C kann sie erteilt haben): der Knopf fuer Teil B haengt daran.
+      try{ const r=await rechtAbfragen(false); if(r!==KOPF.kameraRecht){ ereignis(L, 'recht', {zustand:r}); KOPF.kameraRecht=r; } }catch(e){} })
+    .finally(()=>{ try{ videoAus(); }catch(e){} taktAus(); $('ar').classList.add('hidden');
+      L.dauer=rel(L); L.fertig=true; if(L.abbruch) L.abgebrochen='Knopf'; LAEUFT=null; speichern(); zeigen(); });
+}
+function abbrechen(){ const L=LAEUFT; if(!L) return; L.abbruch=true; ereignis(L, 'abbruch'); if(S && S.L===L && !S.ende) S.session.end().catch(()=>{}); }
+function protokollText(){ return JSON.stringify({...P, gesichert:new Date().toISOString(), kopfJetzt:jetztKopf()}, null, 1); }
+const dateiName=()=>'kamera-messung-'+new Date().toISOString().replace(/\.\d+Z$/, 'Z').replace(/:/g, '-')+'.json';
+function sichern(){
+  const b=new Blob([protokollText()], {type:'application/json'}), a=document.createElement('a'), u=URL.createObjectURL(b);
+  a.href=u; a.download=dateiName(); document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(u), 5000);
+  status('Protokoll gesichert: '+a.download, 'ok');
+}
+async function teilen(){
+  try{
+    if(typeof File==='function' && navigator.canShare && navigator.share){
+      // Chrome teilt nur Dateien einer festen Liste (ShareServiceImpl.java, Tag 155.0.8059.87): .json und
+      // application/json fehlen, .txt und text/plain sind drin. Darum als Text teilen; der Download bleibt .json.
+      const f=new File([protokollText()], dateiName()+'.txt', {type:'text/plain'});
+      if(navigator.canShare({files:[f]})){ await navigator.share({files:[f], title:'Kamera-Messung'}); status('Protokoll geteilt.', 'ok'); return; }
+    }
+  }catch(e){ if(e && e.name==='AbortError') return; status('Teilen fehlgeschlagen: '+(e && e.message || e)+' – als Datei gesichert.', 'warn'); sichern(); return; }
+  sichern(); status('Teilen geht hier nicht – als Datei gesichert.', 'warn');
+}
+
+async function start(){
+  for(const t of 'ABCD') $('erw'+t).textContent='Erwartung (Recherche): '+ERWARTUNG[t];
+  $('btnA').onclick=()=>teilStarten('A', teilA);
+  $('btnB').onclick=()=>teilStarten('B', teilB);
+  $('btnC').onclick=()=>teilStarten('C', teilC);
+  $('btnC2').onclick=()=>{ if(LAEUFT && LAEUFT.teil==='C' && !C.anf) C.anf=arAnfragen(); };
+  $('btnDq').onclick=()=>teilStarten('D', L=>teilD(L, true));
+  $('btnDh').onclick=()=>teilStarten('D', L=>teilD(L, false));
+  $('btnGum').onclick=()=>{ if(S && !S.ende){ S.jetzt=true; $('btnGum').classList.add('hidden'); } };
+  $('btnArEnde').onclick=abbrechen; $('btnAbbruch').onclick=abbrechen;
+  $('btnSichern').onclick=sichern; $('btnTeilen').onclick=()=>{ teilen(); };
+  $('btnLeeren').onclick=()=>{ if(LAEUFT) return; const ja=typeof confirm==='function' ? confirm('Alle Läufe dieses Protokolls löschen?') : true;
+    if(!ja) return; P.laeufe=[]; speichern(); zeigen(); status('Protokoll geleert.'); };
+  document.addEventListener('visibilitychange', ()=>ereignis(LAEUFT, 'sichtbarkeit', {zustand:document.visibilityState}));
+  const so=globalThis.screen && screen.orientation;
+  if(so && so.addEventListener) so.addEventListener('change', ()=>ereignis(LAEUFT, 'ausrichtung', {ausrichtung:so.type, winkel:so.angle, inner:[innerWidth, innerHeight]}));
+  addEventListener('resize', ()=>ereignis(LAEUFT, 'groesse', {inner:[innerWidth, innerHeight]}));
+  if(navigator.mediaDevices && navigator.mediaDevices.addEventListener) navigator.mediaDevices.addEventListener('devicechange', ()=>ereignis(LAEUFT, 'devicechange'));
+
+  // Kopf: Geraet, Browser, Anzeige, was die Seite braucht
+  const k=KOPF;
+  k.ua=navigator.userAgent;
+  try{ const u=navigator.userAgentData;
+    if(u && u.getHighEntropyValues){ const h=await frist(()=>u.getHighEntropyValues(['model', 'platformVersion', 'fullVersionList']), 2000, 'userAgentData');
+      const c=(h.fullVersionList || []).find(b=>/Chrome|Chromium/i.test(b.brand));
+      k.browser=c ? `${c.brand} ${c.version}` : null; k.modell=h.model || null; k.plattform=[h.platform, h.platformVersion].filter(Boolean).join(' ') || null; } }
+  catch(e){ k.uaFehler=fehlerText(e); }
+  Object.assign(k, jetztKopf());
+  k.sicher=!!globalThis.isSecureContext;
+  k.mediaDevices=!!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  k.enumerateDevices=!!(navigator.mediaDevices && navigator.mediaDevices.enumerateDevices);
+  k.imageCapture=typeof ImageCapture==='function';
+  k.rvfc=typeof HTMLVideoElement==='function' ? 'requestVideoFrameCallback' in HTMLVideoElement.prototype : typeof $('vid').requestVideoFrameCallback==='function';
+  k.webxr=!!navigator.xr; k.ar=false;
+  if(navigator.xr){ try{ k.ar=!!await frist(()=>navigator.xr.isSessionSupported('immersive-ar'), 3000, 'isSessionSupported'); }catch(e){ k.arFehler=fehlerText(e); } }
+  // Kameraberechtigung beim Laden und bei jeder Aenderung (Teil B haengt daran, Befund 4).
+  k.kameraRecht='unbekannt';
+  try{ const pm=navigator.permissions;
+    if(pm && pm.query){ const st=await frist(()=>pm.query({name:'camera'}), 2000, 'permissions.query'); k.kameraRecht=st && st.state || 'unbekannt';
+      const neu=()=>{ KOPF.kameraRecht=st.state; ereignis(LAEUFT, 'recht', {zustand:st.state}); knoepfe(); };
+      if(st && st.addEventListener) st.addEventListener('change', neu); else if(st) st.onchange=neu; } }
+  catch(e){ k.rechtFehler=fehlerText(e); }
+  P.geraet={...k};
+  kopfZeile('Gerät', [k.modell, k.plattform].filter(Boolean).join(' · ') || '–');
+  kopfZeile('Browser', k.browser || k.ua);
+  kopfZeile('Anzeige', `${j(k.inner)} CSS-px · DPR ${k.dpr} · Bildschirm ${j(k.bildschirm)}`);
+  kopfZeile('Ausrichtung', k.ausrichtung ? `${k.ausrichtung} (${k.winkel}°)` : 'screen.orientation fehlt', k.ausrichtung ? '' : 'warn');
+  kopfZeile('Sicherer Kontext', k.sicher ? 'ja' : 'nein – https nötig', k.sicher ? 'ok' : 'bad');
+  kopfZeile('getUserMedia', k.mediaDevices ? 'vorhanden' : 'fehlt', k.mediaDevices ? 'ok' : 'bad');
+  kopfZeile('ImageCapture · rVFC', `${k.imageCapture ? 'ja' : 'fehlt'} · ${k.rvfc ? 'ja' : 'fehlt'}`, k.imageCapture && k.rvfc ? 'ok' : 'warn');
+  kopfZeile('WebXR immersive-ar', !k.webxr ? 'WebXR fehlt' : k.ar ? 'unterstützt' : 'nicht unterstützt', k.ar ? 'ok' : 'bad');
+  kopfZeile('Kameraberechtigung', k.kameraRecht, k.kameraRecht==='granted' ? 'ok' : 'warn');
+  speichern(); zeigen();
+  status(!k.mediaDevices && !k.ar ? 'Hier fehlen getUserMedia und WebXR – nichts zu messen.' : !k.ar ? 'Ohne WebXR nur Teil A.' : !k.mediaDevices ? 'Ohne getUserMedia nur Teil D.'
+    : P.laeufe.length ? `Bereit. Im Protokoll: ${P.laeufe.length} Läufe.` : 'Bereit. Mit Teil A beginnen.', k.ar && k.mediaDevices ? 'ok' : 'warn');
+}
+const BEREIT=start().catch(e=>{ try{ status('Start fehlgeschlagen: '+(e && e.message || e), 'bad'); }catch(_){} });
+
+globalThis.KAMERA_MESSUNG={VERSION, K, STEHT_AB, SCHWARZ, HELL, LUECKE, STOER_MIN, GUM_MIN, ARSTABIL_MS, ERWARTUNG, sichtfeld, kachelHash, kachelLuma,
+  xrZustand, stufe, fenster, gumLiefert, einordnen, einordnenC, klasseFarbe, FARBE, ausrichtungAuswerten, rollen, rollenSchwere, frist, warteBis, kopie,
+  metaKurz, P, KOPF, BEREIT, laeuft:()=>LAEUFT, sitzung:()=>S, video:V,
+  starte:{A:()=>teilStarten('A', teilA), B:()=>teilStarten('B', teilB), C:()=>teilStarten('C', teilC), D:quer=>teilStarten('D', L=>teilD(L, quer))}};
+})();
+</script>

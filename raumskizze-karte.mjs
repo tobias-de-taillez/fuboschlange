@@ -13,6 +13,7 @@
 //        [--umriss mincut|cabral] [--aus ordner] [--knoten] [--lago auto|aus|immer] [--pp fest|frei] [--anker gefroren|rel]
 //        [--orakel-landmarken] [--platzhalter datei.mjs] [--erfassungen app|alle] [--metrik voll|export|aus] [--html seite]
 //        [--spiegel nein|ja] [--uhr versatz] [--module M0,M1,M2,M10] [--platzhalter-vor] [--stand ordner] [--datei M10=pfad,M5=pfad]
+//        [--sichtfeld 0.6] [--sichtfeld-erf lassen|schneiden]
 //   import {ladeSeite, ladeQuelle, laufen, ...} from './raumskizze-karte.mjs'
 //
 // Module: vendor + geo der Seite; jede Moduldatei M0-M10, die die Seite (noch) nicht traegt, wird als eigener
@@ -27,6 +28,10 @@
 // --erfassungen app ohne suspect, wie der Pool der App), ep der naechsten Zeile.
 // Wiederholbarkeit (10.9): keine Uhr und kein Zufall in Entscheidungen; Zufall nur ueber G.KG.rnd(--seed).
 // --uhr versatz verstellt die Messuhr (Pruefung, dass ms nichts entscheidet).
+// --sichtfeld f (Doku 12.7, Hebel (d)): Ablation, das Bild offline mittig auf etwa f der Breite beschneiden, bei gleicher
+// Winkelaufloesung (siehe sichtfeldFenster); f = 1 ist das heutige Verhalten, wortgleich. raumskizze-ablation.mjs rechnet damit
+// die Tabelle Faktor x Quelle. --sichtfeld-erf schneiden beschneidet dazu die Fadenkreuz-Erfassungen wie die engere Kamera
+// (erfassungBeschneiden); Vorgabe lassen: alle bleiben unveraendert drin, nur ihre ndc gehen ins beschnittene Bild.
 import {readFileSync, writeFileSync, existsSync, statSync, readdirSync, mkdirSync} from 'node:fs';
 import {spawn, spawnSync} from 'node:child_process';
 import {gunzipSync} from 'node:zlib';
@@ -45,7 +50,7 @@ const f2=x=>Number.isFinite(x) ? x.toFixed(2) : '–', cm=x=>Number.isFinite(x) 
 export const DEF={quelle:'segmente', skala:'fest', reg:'voll', ohne:[], segmente:'nachspiel', inseln:'nein', takt:0.5,
   arbeit:{iter:3, relin:20000, reg:2000, hyp:4, lin:2}, schluss:{iter:20}, weglassen:0, block:0, seed:1, ohneAb:[], bis:Infinity, umriss:'mincut',
   knoten:false, lago:'aus', pp:'fest', anker:'gefroren', orakelRahmen:false, orakelLandmarken:false, erfassungen:'app', metrik:'voll',
-  spiegel:'nein', standJe:2, H:undefined};
+  spiegel:'nein', standJe:2, H:undefined, sichtfeld:1, sichtfeldErf:'lassen'};
 
 // ------------------------------------------------ Seite und Module
 export const MODULE=[
@@ -253,10 +258,85 @@ export function ankerKorrektur(G, A, id, t, T){
   return G.gKomp(G.gInv(gT), G.gKomp(Cl, gT));
 }
 // Auftrag aus einem dekodierten Bild (Polsterspalte weg, w = bild.breite) und G.bild -> BildErgebnis (3.1).
-export function bildAusVideo(G, BZ, A, p, v, k, fy, senk){
+// fen (--sichtfeld < 1): nur die Spalten x0 .. x0+w'-1 der echten Breite (die Polsterspalte rechts liegt ausserhalb).
+export function bildAusVideo(G, BZ, A, p, v, k, fy, senk, fen=null){
   const camTo=G.m4mul(G.m4inv(G.gMat(G.gAusT(p.T))), m4q(p.pose.slice(0, 3), p.pose.slice(3)));
-  const buf=new Uint8Array(A.w*A.h); for(let y=0;y<A.h;y++) buf.set(v.fr.subarray(y*v.SW, y*v.SW+A.w), y*A.w);
-  return G.bild(BZ, {k, vi:k, t:p.t, ep:p.ep, fmt:'luma8', w:A.w, h:A.h, buf:buf.buffer, voll:null, camTo:Array.from(camTo), proj:Array.from(A.proj), flipY:fy, senk});
+  const x0=fen ? fen.x0 : 0, w=fen ? fen.w2 : A.w, proj=fen ? fen.proj : A.proj;
+  const buf=new Uint8Array(w*A.h); for(let y=0;y<A.h;y++) buf.set(v.fr.subarray(y*v.SW+x0, y*v.SW+x0+w), y*w);
+  return G.bild(BZ, {k, vi:k, t:p.t, ep:p.ep, fmt:'luma8', w, h:A.h, buf:buf.buffer, voll:null, camTo:Array.from(camTo), proj:Array.from(proj), flipY:fy, senk});
+}
+
+// ------------------------------------------------ Sichtfeld (Doku 12.7, Hebel (d): Ablation)
+// Mittiger Ausschnitt der Breite w' = w - 2·x0, x0 = round(w·(1-f)/2), Zeilen unberuehrt (Zeile 0 unten, flipY gilt weiter).
+// Gleiche Winkelaufloesung heisst gleiche Brennweite in px: die x-Zeile der Projektion (proj[0], [4], [8], [12],
+// spaltenweise) waechst mit w/w'. Dann gilt fuer jeden Punkt x_ndc' = x_ndc·w/w' (G.pixToNdc: Pixelmitte u+0.5,
+// Spalte u' = u - x0), und der Hauptpunkt bleibt, wo er war (heute proj[8] = 0: mittig). Symmetrisch statt
+// w' = round(f·w), weil sonst bei ungerader Breite (287) ein halbes Pixel Rand uebrig bliebe; w' weicht davon um
+// hoechstens 1 px ab, darum nennt der Bericht das wirksame w'/w. x0 = 0 (f = 1) gibt null: T1 laeuft dann wortgleich.
+export function sichtfeldFenster(w, f, proj){
+  if(!(f>0 && f<=1)) throw new Error('--sichtfeld: Faktor 0 < f <= 1 erwartet, nicht '+f);
+  const x0=Math.round(w*(1-f)/2), w2=w-2*x0;
+  if(!x0) return null;
+  if(w2<16) throw new Error(`--sichtfeld ${f}: nur ${w2} px Breite`);
+  const p=Array.from(proj); for(const i of [0, 4, 8, 12]) p[i]=proj[i]*w/w2;
+  const hfov=P=>2*Math.atan(1/Math.abs(P[0]))*R2D;
+  return {f, fEff:w2/w, w, w2, x0, proj:p, hfov:[hfov(proj), hfov(p)]};
+}
+export const ndcBeschnitten=(x, fen)=>x*fen.w/fen.w2;
+// Ein Segment (Pixel wie G.pixToNdc, Rohsegment {x1, y1, x2, y2, ...}) auf das Fenster [x0-0.5, x0+w'-0.5] beschneiden,
+// Liang-Barsky nur in x, dann um x0 verschieben; null, wenn nichts im Fenster liegt. z zaehlt drin/geschnitten/weg.
+export function segmentBeschneiden(s, fen, z=null){
+  const lo=fen.x0-0.5, hi=fen.x0+fen.w2-0.5, dx=s.x2-s.x1, dy=s.y2-s.y1; let t0=0, t1=1;
+  for(const [p, d] of [[-dx, s.x1-lo], [dx, hi-s.x1]]){
+    if(p===0){ if(d<0){ t1=-1; break; } continue; }
+    const r=d/p; if(p<0){ if(r>t0) t0=r; } else if(r<t1) t1=r; }
+  if(!(t1>t0)){ if(z) z.weg++; return null; }
+  if(z) z[t0>0 || t1<1 ? 'geschnitten' : 'drin']++;
+  return {...s, x1:s.x1+t0*dx-fen.x0, y1:s.y1+t0*dy, x2:s.x1+t1*dx-fen.x0, y2:s.y1+t1*dy};
+}
+// --sichtfeld-erf schneiden: eine Fadenkreuz-Erfassung, wie die engere Kamera sie gesehen haette. Das Stueck zwischen den
+// Enden (e.ndc im vollen Bild) wird auf |x| <= w'/w beschnitten (Liang-Barsky in x, y mit demselben Parameter s), dann ins
+// beschnittene Bild umgerechnet. Strahl eines geschnittenen Endes ohne camTo (die Zeile traegt es nicht immer): Lochkamera,
+// die Richtung im Kamerarahmen c = [(x+P8)/P0, (y+P9)/P5, -1] ist affin in ndc, also d(s) ~ (1-s)·|c_a|·ra.d + s·|c_b|·rb.d
+// (ra.d, rb.d normiert; auf A8 stimmen Strahlen und ndc so auf 3e-6° ueberein). Der Ursprung (Kameralage) bleibt.
+// proj ist die volle Projektion. null, wenn nichts im Fenster liegt; z zaehlt drin/geschnitten/weg.
+export function erfassungBeschneiden(e, fen, proj, z=null){
+  const [a, b]=e.ndc, g=fen.w2/fen.w, dx=b[0]-a[0], dy=b[1]-a[1]; let t0=0, t1=1;
+  for(const [p, d] of [[-dx, a[0]+g], [dx, g-a[0]]]){
+    if(p===0){ if(d<0){ t1=-1; break; } continue; }
+    const r=d/p; if(p<0){ if(r>t0) t0=r; } else if(r<t1) t1=r; }
+  if(!(t1>t0)){ if(z) z.weg++; return null; }
+  // auf +-1 geklemmt: der Schnittpunkt liegt rechnerisch genau auf dem Rand, die Rundung soll ihn nicht hinausschieben
+  const ndc=s=>[Math.max(-1, Math.min(1, ndcBeschnitten(a[0]+s*dx, fen))), a[1]+s*dy];
+  if(t0===0 && t1===1){ if(z) z.drin++; return {...e, ndc:[ndc(0), ndc(1)]}; }
+  if(z) z.geschnitten++;
+  const c=([x, y])=>Math.hypot((x+proj[8])/proj[0], (y+proj[9])/proj[5], 1), na=c(a), nb=c(b);
+  const strahl=(s, r)=>{ const v=[0, 1, 2].map(i=>(1-s)*na*e.ra.d[i]+s*nb*e.rb.d[i]), l=Math.hypot(...v); return {...r, o:[...r.o], d:v.map(x=>x/l)}; };
+  return {...e, ndc:[ndc(t0), ndc(t1)], ra:t0>0 ? strahl(t0, e.ra) : e.ra, rb:t1<1 ? strahl(t1, e.rb) : e.rb, beschnitten:[t0, t1]};
+}
+// BildErgebnis einer synthetischen Sitzung (T3, Segmente schon in px) beschneiden: Enden wie oben, dann neu einteilen mit
+// G.lmSegmente/lmGier/lmRechtwinklig auf w', proj' wie M3 (ohne Verschmelzen: T3 verschmilzt nicht, damit wahr passt), sPx
+// und nTeile wie vorher. Senkrechte (top/bottom in NDC) nur, wenn beide Enden im Fenster liegen. Beilage wahr: dieselbe
+// Auswahl je Segment (WAHR_SEG) bzw. je Senkrechte (WAHR_SENK), die Felder ausdruecklich genannt wie in T3 (raumskizze-sim.mjs,
+// w = {wand, seite, ring, ecke, kante, kid, senkKid, senkEcke, ab, g, pp}); nach der Laenge zu raten hielte pp = [0, 0] bei
+// genau 2 Segmenten fuer ein Segmentfeld. Fuer ehrliche Simulationen eines engeren Sichtfelds ist T3 mit eigener Kamera besser.
+export const WAHR_SEG=['wand', 'seite', 'ring', 'ecke', 'kante', 'kid'], WAHR_SENK=['senkKid', 'senkEcke'];
+export function bildErgBeschneiden(G, b, fen, wahr=null, z=null){
+  const S=G.KG.SEG, roh=[], idx=[];
+  for(let i=0;i<b.n;i++){ const j=i*S, r=segmentBeschneiden({x1:b.seg[j], y1:b.seg[j+1], x2:b.seg[j+2], y2:b.seg[j+3], sal:b.seg[j+4]}, fen, z);
+    if(r){ roh.push(r); idx.push(i); } }
+  const proj=Float32Array.from(fen.proj), bi=G.lmSegmente(roh, fen.w2, b.h, proj, b.camTo, b.flipY);
+  idx.forEach((i,n)=>{ bi.seg[n*S+5]=b.seg[i*S+5]; });
+  const sx=x=>ndcBeschnitten(x, fen), senkIdx=[], senk=b.senk ? b.senk.filter((s,i)=>{ const ok=Math.abs(sx(s.top[0]))<=1 && Math.abs(sx(s.bottom[0]))<=1; if(ok) senkIdx.push(i); return ok; })
+    .map(s=>({...s, top:[sx(s.top[0]), s.top[1]], bottom:[sx(s.bottom[0]), s.bottom[1]]})) : null;
+  const kopfB={k:b.k, vi:b.vi, t:b.t, ep:b.ep, camTo:Float64Array.from(b.camTo), proj, flipY:!!b.flipY, w:fen.w2, h:b.h, f:G.fokusPx(proj, b.h),
+    man:new Int8Array(bi.n).fill(-1), nTeile:Uint8Array.from(idx.map(i=>b.nTeile ? b.nTeile[i] : 1)), psi0:null, senk:null, ms:{}};
+  const psi0=G.lmGier({...kopfB, ...bi}), bv=G.lmRechtwinklig({...kopfB, ...bi}, psi0);
+  let w2=null;
+  if(wahr){ w2={};
+    for(const [k,v] of Object.entries(wahr)){ const feld=v && (Array.isArray(v) || ArrayBuffer.isView(v));
+      w2[k]=feld && WAHR_SENK.includes(k) ? senkIdx.map(i=>v[i]) : feld && WAHR_SEG.includes(k) ? idx.map(i=>v[i]) : v; } }
+  return {b:{...kopfB, ...bv, psi0, senk, ms:{}}, wahr:w2};
 }
 // Bodenmarken (9.4 Punkt 7a, S6-M): je Ereignis marke {t, id, p (Treffer am Boden, local), an} die Lage in F0 gefroren
 // (Bezug der Zeile, G.gBei des Abschnitts) und ankerrelativ (Korrektur des Messankers an[0], neueste Lage), dazu die
@@ -316,6 +396,23 @@ export async function laufen(G, A, o0={}){
   const o={...DEF, ...o0, arbeit:{...DEF.arbeit, ...(o0.arbeit||{})}}, info={warnungen:[...(A.warnungen||[])], bilder:0, bildFehlt:0, weg:{bild:0, erf:0}, ereignisse:0, tiefe:0, ebenen:0};
   const posen=A.art==='sitzung' ? A.posen.map(p=>({...p})) : posenAus(G, A);
   let erf=erfassungenAus(A, posen, o.erfassungen, G);
+  // --sichtfeld < 1 (12.7 (d)): kam ist das beschnittene Bild (w', proj'), sonst genau A. Die Tiefe faellt dann weg: ihre
+  // Strahlen (G.depthRays aus d.M und proj) muessten mitbeschnitten werden, und sie traegt live ohnehin nicht (12.6, Stand 9).
+  // Vorgabe --sichtfeld-erf lassen: Erfassungen bleiben alle drin (Strahlen ra/rb unveraendert, sie entstehen am Fadenkreuz);
+  // nur ihre ndc gehen ins beschnittene Bild. Enden mit |x'| > 1 laegen ausserhalb und werden gezaehlt: die Referenz
+  // 'erfassungen' ist darum optimistisch, und in 'beide' bestimmen sie die Stufen der Abschnitte unabhaengig vom Faktor.
+  // schneiden: jede Erfassung wie die engere Kamera sie saehe (erfassungBeschneiden), ganz draussen faellt sie weg.
+  // Erfassungen ohne ndc (T3-Sitzungen, alte Protokolle) bleiben in beiden Faellen unveraendert (erfOhneNdc).
+  if(!['lassen', 'schneiden'].includes(o.sichtfeldErf)) throw new Error('--sichtfeld-erf lassen|schneiden, nicht '+o.sichtfeldErf);
+  const fen=o.sichtfeld==null || o.sichtfeld===1 ? null : sichtfeldFenster(A.w, o.sichtfeld, A.proj), kam=fen ? {w:fen.w2, h:A.h, proj:fen.proj} : {w:A.w, h:A.h, proj:A.proj};
+  if(fen){ const SF={f:fen.f, fEff:fen.fEff, w:fen.w, w2:fen.w2, x0:fen.x0, proj0:[A.proj[0], fen.proj[0]], hfov:fen.hfov, tiefeAus:false, erfNdc:0, erfEnden:0, erfEndenAussen:0,
+      erfAussen:0, erfOhneNdc:0, erfModus:o.sichtfeldErf, erfSchnitt:o.sichtfeldErf==='schneiden' ? {drin:0, geschnitten:0, weg:0} : null, seg:{drin:0, geschnitten:0, weg:0}};
+    if(!o.ohne.includes('tiefe')){ o.ohne=[...o.ohne, 'tiefe'];
+      if(A.art!=='sitzung' && A.tiefeBuf){ SF.tiefeAus=true; info.warnungen.push('--sichtfeld < 1: Tiefe ausgelassen (--ohne tiefe erzwungen)'); } }
+    erf=erf.map(e=>{ if(!e.ndc){ SF.erfOhneNdc++; return e; } const ndc=e.ndc.map(p=>[ndcBeschnitten(p[0], fen), p[1]]), aus=ndc.filter(p=>Math.abs(p[0])>1).length;
+      SF.erfNdc++; SF.erfEnden+=ndc.length; SF.erfEndenAussen+=aus; if(aus) SF.erfAussen++;
+      return SF.erfSchnitt ? erfassungBeschneiden(e, fen, A.proj, SF.erfSchnitt) : {...e, ndc}; }).filter(Boolean);
+    info.sichtfeld=SF; }
   if(A.art!=='sitzung' && A.tiefeBuf && !o.ohne.includes('tiefe')) A.tiefe=tiefeLesen(A.tiefeBuf, A.M);
   const hLaser=o.H===null ? null : Number.isFinite(o.H) ? o.H : A.hLaserMm ? A.hLaserMm/1000 : null;
   // --anker rel: Erfassungen ueber den Messanker (obs.an) mit dessen neuester Lage umrechnen
@@ -324,9 +421,11 @@ export async function laufen(G, A, o0={}){
     info.ankerRel=n; if(!n) info.warnungen.push('--anker rel: keine Erfassung mit obs.an (Aufnahme vor Stand 6 bzw. ohne ?mess=1) - gefroren gerechnet'); }
   const orakel=o.orakel || null;
   const KZ=G.karteNeu({H:hLaser ? {laser:hLaser, sigma:0.015} : null, quelle:o.quelle, arbeit:o.arbeit, knoten:o.knoten, lago:o.lago, pp:o.pp, skala:o.skala,
-    reg:o.reg!=='aus', ohne:o.ohne, ohneAb:o.ohneAb, proj:A.proj, w:A.w, h:A.h, umriss:!o.ohne.includes('umriss'), umrissOpt:o.umriss==='cabral' ? {art:'cabral'} : {},
+    reg:o.reg!=='aus', ohne:o.ohne, ohneAb:o.ohneAb, proj:kam.proj, w:kam.w, h:kam.h, umriss:!o.ohne.includes('umriss'), umrissOpt:o.umriss==='cabral' ? {art:'cabral'} : {},
     orakel, uhr:uhrMit(o.uhr), ...(o.karte||{})});
-  const BZ=G.bildNeu({}), flipAt=A.art==='sitzung' ? (()=>false) : flipAtAus(A), seg=o.segmente==='geraet' ? segmenteLesen(A.segmenteBin) : null;
+  // M3 skaliert seine px-Schwellen mit skala 'auto' = min(w, h)/287; beschnitten muss die Skala des vollen Bilds bleiben,
+  // sonst saenken sich minLineLen, minLen und die Verschmelz-Schwellen mit der Breite (andere Kanten statt weniger Sichtfeld).
+  const BZ=G.bildNeu(fen ? {skala:Math.min(A.w, A.h)/287} : {}), flipAt=A.art==='sitzung' ? (()=>false) : flipAtAus(A), seg=o.segmente==='geraet' ? segmenteLesen(A.segmenteBin) : null;
   if(o.segmente==='geraet' && !A.segmenteBin) throw new Error('--segmente geraet: segmente.bin fehlt (Aufnahmen vor Stand 6)');
   const L=zeitleiste(G, A, posen, erf, o), t0=posen.length ? posen[0].t : 0, t1=posen.length ? posen[posen.length-1].t : 0;
   const weg=weglassenPlan(G, o, t0, t1), runden=[], verdraengt=new Set();
@@ -368,17 +467,21 @@ export async function laufen(G, A, o0={}){
     else if(x.art==='erf') G.karteErfassung(KZ, erf[x.i]);
     else if(x.art==='bild'){
       let b=null;
-      if(A.art==='sitzung'){ const s=A.bilder[x.i]; b=s.bildErg; if(o.mitWahr) b.wahr=s.wahr; }
+      if(A.art==='sitzung'){ const s=A.bilder[x.i];
+        if(fen){ const r=bildErgBeschneiden(G, s.bildErg, fen, o.mitWahr ? s.wahr : null, info.sichtfeld.seg); b=r.b; if(o.mitWahr) b.wahr=r.wahr; }
+        else { b=s.bildErg; if(o.mitWahr) b.wahr=s.wahr; } }
       else { const p=posen[x.i];
         const camTo=G.m4mul(G.m4inv(G.gMat(G.gAusT(p.T))), m4q(p.pose.slice(0, 3), p.pose.slice(3))), fy=flipAt(p.t);
         if(seg){ const s=seg.get(x.k); if(!s){ info.bildFehlt++; continue; }
+          // --sichtfeld < 1: Geraete-Segmente (px des vollen Bilds) aufs Fenster beschneiden, dann wie bisher
+          const roh=fen ? s.roh.map(r=>segmentBeschneiden(r, fen, info.sichtfeld.seg)).filter(Boolean) : s.roh;
           // lmVerschmelzen braucht ein volles BildErgebnis (camTo, proj, w, h, flipY; P-B Befund 6), nicht die Ausgabe von lmSegmente
-          const bi=G.lmSegmente(s.roh, A.w, A.h, A.proj, camTo, fy), kopfB={k:x.k, vi:x.k, t:p.t, ep:p.ep, camTo:Float64Array.from(camTo), proj:Float32Array.from(A.proj), flipY:fy, w:A.w, h:A.h,
-            f:G.fokusPx(A.proj, A.h), man:new Int8Array(bi.n).fill(-1), nTeile:new Uint8Array(bi.n).fill(1), psi0:null, senk:null, ms:{}};
+          const bi=G.lmSegmente(roh, kam.w, A.h, kam.proj, camTo, fy), kopfB={k:x.k, vi:x.k, t:p.t, ep:p.ep, camTo:Float64Array.from(camTo), proj:Float32Array.from(kam.proj), flipY:fy, w:kam.w, h:A.h,
+            f:G.fokusPx(kam.proj, A.h), man:new Int8Array(bi.n).fill(-1), nTeile:new Uint8Array(bi.n).fill(1), psi0:null, senk:null, ms:{}};
           let bv=G.lmVerschmelzen({...kopfB, ...bi}); const psi0=G.lmGier(bv); bv=G.lmRechtwinklig(bv, psi0);
           b={...kopfB, ...bv, psi0, senk:null, ms:{}}; }
         else { const v=await naechstesVideo(x.k); if(!v){ info.bildFehlt++; continue; }
-          b=bildAusVideo(G, BZ, A, p, v, x.k, fy, x.k%2===0 && !o.ohne.includes('senk')); } }
+          b=bildAusVideo(G, BZ, A, p, v, x.k, fy, x.k%2===0 && !o.ohne.includes('senk'), fen); } }
       info.bilder++; G.karteBild(KZ, b); }
     else if(x.art==='tiefe'){ const d=A.tiefe[x.i], p=poseV.get(d.vi);
       const camTo=G.m4mul(G.m4inv(G.gMat(G.gAusT(p.T))), m4q(p.pose.slice(0, 3), p.pose.slice(3)));
@@ -392,7 +495,7 @@ export async function laufen(G, A, o0={}){
   if(o.inseln==='ja'){ const offen=letzte.stand.ringe.filter(R=>R.art==='insel' && R.entscheid==='offen');
     if(offen.length){ for(const R of offen) G.karteEntscheid(KZ, {ring:R.id, wahl:'ja', t:KZ.lauf.tMax}); letzte=runde({arbeit:{...o.arbeit, ...o.schluss}, schluss:true}); } }
   const ex=exportieren(G, letzte.stand, hLaser, o);
-  return {G, A, KZ, posen, erf, runden, letzte, ...ex, hLaser, info, flipAt};
+  return {G, A, KZ, posen, erf, runden, letzte, ...ex, hLaser, info, flipAt, fen};
 }
 // Export ueber M8: exportierte Ringe, Aussenring zuerst.
 export function exportieren(G, stand, hLaser, o={}){
@@ -423,6 +526,12 @@ export function metrikEingabe(lauf){
 export function bericht(lauf, m, alt, herkunft, quellen, pruef={}){
   const S=lauf.letzte.stand, K=lauf.runden.map(r=>r.kopf), L=[], ms=K.map(k=>k.ms.gesamt).filter(Number.isFinite);
   L.push(`Quelle ${lauf.quelleName} · ${lauf.posen.length} Posen, ${lauf.info.bilder} Bilder (fehlend ${lauf.info.bildFehlt}, weggelassen ${lauf.info.weg.bild}), ${lauf.erf.length} Erfassungen, ${lauf.info.ereignisse} Ereignisse, ${lauf.info.tiefe} Tiefe`);
+  const SF=lauf.info.sichtfeld;
+  if(SF) L.push(`Sichtfeld (12.7 (d)): Faktor ${SF.f} (wirksam ${SF.fEff.toFixed(3)}), Breite ${SF.w} -> ${SF.w2} px ab Spalte ${SF.x0}, horizontal ${SF.hfov[0].toFixed(1)}° -> ${SF.hfov[1].toFixed(1)}°`
+    +` (proj[0] ${SF.proj0[0].toFixed(3)} -> ${SF.proj0[1].toFixed(3)}, Brennweite in px gleich)${SF.tiefeAus ? ', Tiefe erzwungen aus' : ''} · Erfassungen mit ndc ${SF.erfNdc}, davon ${SF.erfAussen} mit Enden`
+    +` ausserhalb (${SF.erfEndenAussen} von ${SF.erfEnden} Enden |x'| > 1, `+(SF.erfSchnitt ? `beschnitten: drin/geschnitten/weg ${SF.erfSchnitt.drin}/${SF.erfSchnitt.geschnitten}/${SF.erfSchnitt.weg}` : 'bleiben drin')
+    +`${SF.erfOhneNdc ? `; ${SF.erfOhneNdc} ohne ndc unveraendert` : ''}${lauf.KZ.opt.quelle==='segmente' ? '; Quelle segmente: nicht eingespeist' : ''})`
+    +` · Segmente drin/geschnitten/weg ${SF.seg.drin}/${SF.seg.geschnitten}/${SF.seg.weg}${SF.seg.drin+SF.seg.geschnitten+SF.seg.weg ? '' : ' (Video: Kanten im Ausschnitt neu gesucht)'}`);
   L.push('Module: '+Object.entries(quellen).map(([k,v])=>`${k} ${v}${pruef[k] ? ' '+pruef[k] : ''}`).join(', '));
   const hk={}; for(const [n,v] of Object.entries(herkunft)) (hk[v]=hk[v]||[]).push(n);
   for(const [v,ns] of Object.entries(hk)) if(v!=='Modul') L.push(`  ${v}: ${ns.join(' ')}`);
@@ -475,7 +584,8 @@ export function optionenAus(a){
     bis:a.bis ? +a.bis : Infinity, umriss:a.umriss || DEF.umriss, knoten:!!a.knoten, lago:a.lago || DEF.lago, pp:a.pp || DEF.pp, anker:a.anker || DEF.anker,
     orakelRahmen:!!a['orakel-rahmen'] || !!a['orakel-landmarken'], orakelLandmarken:!!a['orakel-landmarken'], erfassungen:a.erfassungen || DEF.erfassungen,
     metrik:a.metrik || DEF.metrik, spiegel:a.spiegel || DEF.spiegel, H:a.ohneH ? null : a.H!=null ? +a.H : undefined, uhr:a.uhr!=null ? +a.uhr : null,
-    rundenArbeit:!!a['runden-arbeit'], mitWahr:!!a['mit-wahr'] || !!a['orakel-rahmen'] || !!a['orakel-landmarken']};
+    rundenArbeit:!!a['runden-arbeit'], mitWahr:!!a['mit-wahr'] || !!a['orakel-rahmen'] || !!a['orakel-landmarken'],
+    sichtfeld:a.sichtfeld!=null ? +a.sichtfeld : DEF.sichtfeld, sichtfeldErf:a['sichtfeld-erf'] || DEF.sichtfeldErf};
 }
 // Orakel (5.1): --orakel-rahmen setzt g je Abschnitt aus der Wahrheit (Sitzung: wahr.g zur Bildzeit) und legt
 // F0 in den Rahmen der Wahrheit; --orakel-landmarken setzt zusaetzlich die Wahrheitswaende als feste Landmarken.
@@ -525,7 +635,7 @@ async function main(){
     writeFileSync(join(d, 'bericht.txt'), txt+'\n');
     writeFileSync(join(d, 'plan.svg'), planSvg(lauf, m, wahrheit));
     writeFileSync(join(d, 'ergebnis.json'), JSON.stringify({kopf:{werkzeug:'raumskizze-karte.mjs', version:VERSION, quelle:src, optionen:{...o, orakel:o.orakel ? Object.keys(o.orakel) : null, runden:o.runden ? o.runden.length : null},
-      module:quellen, pruef, herkunft, node:process.version}, runden:lauf.runden.map(r=>r.kopf), letzterStand:lauf.letzte.stand, export:lauf.export, teilen:lauf.teilen, hinweise:lauf.hinweise,
+      module:quellen, pruef, herkunft, node:process.version, sichtfeld:lauf.info.sichtfeld || {f:o.sichtfeld}}, runden:lauf.runden.map(r=>r.kopf), letzterStand:lauf.letzte.stand, export:lauf.export, teilen:lauf.teilen, hinweise:lauf.hinweise,
       pruef:lauf.pruef, alt, metrik:m, bodenmarken:BM, info:lauf.info, ms:{lauf:msLauf, metrik:msM}}, (k,v)=>v===Infinity ? 'Infinity' : v instanceof Float64Array || v instanceof Float32Array ? Array.from(v) : v));
     console.log(`Ausgabe: ${d}/{ergebnis.json, export.json, bericht.txt, plan.svg, karte.jsonl}`); }
 }
