@@ -41,7 +41,7 @@ const m4q=(p,[x,y,z,w])=>[1-2*(y*y+z*z), 2*(x*y+z*w), 2*(x*z-y*w), 0,  2*(x*y-z*
   chk('Datei laedt allein (new Function, ohne geo-Kern) und haengt genau die Namen aus 4 an G', !fehler && JSON.stringify(neu)===JSON.stringify(soll),
     fehler || neu.filter(k=>!NAMEN.includes(k)).concat(NAMEN.filter(k=>!neu.includes(k))).join(',') || neu.length+' Namen');
   const kollision=NAMEN.filter(k=>G0keys.has(k));
-  chk('keine Kollision mit Namen, die der geo-Block schon traegt', !kollision.length, kollision.join(',') || (traegt ? 'Seite traegt das Modul' : 'eingefuegt'));
+  chk('keine Kollision mit Namen, die der geo-Block schon traegt', traegt || !kollision.length, kollision.join(',') || (traegt ? 'Seite traegt das Modul' : 'eingefuegt'));
   chk('Datei endet mit genau einem Zeilenumbruch, kein import/export/</script>', /[^\n]\n$/.test(src) && !/^\s*(import|export)\s/m.test(src) && !src.includes('</script>'));
   const verboten=[/Math\.random/, /Date\.now/, /performance\.now/, /\bwindow\b/, /\bdocument\b/, /\bself\b/].filter(r=>r.test(src.replace(/\/\/.*$/gm, '')));
   chk('kein Math.random, keine Uhr, kein DOM/Worker-Global im Code (2)', !verboten.length, verboten.map(String).join(' '));

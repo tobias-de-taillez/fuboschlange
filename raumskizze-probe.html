@@ -23,6 +23,13 @@
       8741 -> localhost:8741, am Telefon http://localhost:8741/raumskizze-probe.html
   ?debug legt den Zustand als globalThis.PROBE in die Konsole,
   ?app=<URL> ändert das Ziel des Links, ?ds=<px> die Größe des gelesenen Bilds.
+  Stand 6 (ARCHITEKTUR v3, 9.4): ?karte=1 startet den Bild-Worker (ELSED, Einteilung,
+  Senkrechte; Ansicht „Segmente“; Aufnahme segmente.bin, bild.jsonl, Tiefe je Bild) -
+  die Karte selbst kommt mit Stand 7. ?mess=1 ist der Messmodus der Messsitzung S6-M
+  (Anker nach Weg, Knopf „Marke“, IMU, readPixels-Kosten, Löserzeit). ?tiefe=raw|smooth
+  fordert die Tiefenart an. Ohne Schalter verhält sich die Seite wie Stand 5; neu ist
+  dann nur, was die Aufnahme zusätzlich mitschreibt (Version 2: Epoche, Ebenen,
+  ref-reset, emuliert, Tiefe mit Grundcode).
 
   Die Rechnung steht im Block "geo" und wird von test/raumskizze-probe.mjs
   gegen synthetische Kameras und gerenderte Bilder mit bekannter Wahrheit
@@ -132,6 +139,7 @@
 <div class="card">
   <button id="start" disabled>AR starten</button>
   <div class="hint" id="startHint" style="margin-top:8px">Prüfe das Gerät …</div>
+  <div class="hint" style="margin-top:8px">Messungen (je eine eigene Sitzung): <a href="?ds=1920" style="color:inherit">Rechenzeit bei vollem Kamerabild</a> · <a href="?mess=1" style="color:inherit">Messsitzung</a> (Anker, IMU, Ebenen, rohe Tiefe)</div>
   <button id="dlLast" class="ghost hidden" style="margin-top:8px">Protokoll vom letzten Seitenaufruf (JSON)</button>
   <button id="dlRecLast" class="ghost hidden" style="margin-top:8px">Letzte Aufnahme sichern</button>
   <div class="hint" style="margin-top:8px">Automatisch: (1) Kurz auf freien Boden halten – der Boden setzt sich selbst. (2) Fadenkreuz langsam an der Kante zwischen Wand und Decke entlangführen, einmal rundum, ruhig auch hinter Schränken weiter. Die Reihenfolge ist egal, ein paar Schritte zwischendurch helfen. Telefon auf Brusthöhe. (3) Zurück an der ersten Wand schließt sich der Raum. Steht oben blau „Umriss aus den Wandenden“, endet es nicht von selbst: Ecken prüfen, dann „Raum schließen“. Im Bild: grün unterlegt heißt „die Kante liegt, wo die Skizze sie erwartet“, orange unterlegt „hier weicht sie ab – dort noch einmal entlang“. Grüne senkrechte Linien sind erkannte Kanten bis zur Decke, die eine Ecke der Skizze bestätigen. An der noch unsichersten Wand steht „näher ran“ – dort näher herangehen. Rot gestrichelt fehlt noch etwas.</div>
@@ -183,6 +191,9 @@
       <button id="btnAnsicht" class="ghost">Ansicht: Kamera</button>
       <button id="btnFlip2" class="ghost">Bild y-Spiegel</button>
       <button id="btnEnd2" class="ghost">Beenden</button>
+    </div>
+    <div class="row hidden" id="arBtnsMess">
+      <button id="btnMarke" class="ghost">Marke</button>
     </div>
   </div>
 </div>
@@ -2479,8 +2490,1211 @@ G.senkLive=(st, found, camTo, M, o={})=>{
   return {runs, shown:shown.filter((s,j)=>keep.includes(j)), all:shown};
 };
 
+{
+// ------------------------------------------------ ELSED: Liniensegmente im Bild
+// Herkunft: ELSED - Enhanced Line SEgment Drawing, I. Suarez, J. M. Buenaposada,
+// L. Baumela, Pattern Recognition 127 (2022) 108619, doi:10.1016/j.patcog.2022.108619.
+// Quelle: https://github.com/iago-suarez/ELSED, Commit 1878213b2f5f06a9261d8b1838f53d48e5fd128d
+// (src/ELSED.cpp, EdgeDrawer.cpp, FullSegmentInfo.cpp, Utils.h, ELSED.h).
+// Lizenz: Apache License 2.0 (Text: LICENSE im Original-Repo). Das Repo traegt keine
+// Copyright-Zeile (LICENSE ist der unausgefuellte Vordruck, keine NOTICE-Datei); Urheber:
+// Iago Suarez, Jose M. Buenaposada, Luis Baumela. Glaettung und Gausskern folgen OpenCV 4.x
+// (modules/imgproc/src/smooth.dispatch.cpp, smooth.simd.hpp; Apache-2.0).
+//
+//   Licensed under the Apache License, Version 2.0 (the "License");
+//   you may not use this file except in compliance with the License.
+//   You may obtain a copy of the License at
+//       http://www.apache.org/licenses/LICENSE-2.0
+//   Unless required by applicable law or agreed to in writing, software
+//   distributed under the License is distributed on an "AS IS" BASIS,
+//   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//   See the License for the specific language governing permissions and
+//   limitations under the License.
+//
+// Nach JavaScript portiert, geaendert (Apache-2.0, Abschnitt 4b):
+//   - C++ -> JavaScript, ohne OpenCV: cv::GaussianBlur (CV_8U, bit-exakter Festkommapfad
+//     von OpenCV 4.x, Rand REFLECT_101) und cv::Sobel (3x3, CV_16S, Rand REPLICATE) nachgebaut;
+//   - float-Rechnung des Originals mit Math.fround nachgebildet, int64-Summen exakt;
+//   - Klassen aufgeloest: EdgeDrawer/FullSegmentInfo als Zustand im Abschluss, Pixel/Segmente
+//     in Typed Arrays, Puffer bleiben zwischen Aufrufen gleicher Groesse erhalten;
+//   - Eingabe Float32Array wird wie convertTo(CV_8U) gerundet (halb-gerade, 0..255);
+//   - scanIntervals < 1 wirft (Original: Endlosschleife); Farbbilder nicht unterstuetzt;
+//   - Zusatzoptionen o.zeiten / o.debug (nur Messung/Test, aendern nichts am Ergebnis).
+// Bezeichner der portierten Teile wie im Original, damit der Port Zeile fuer Zeile mit
+// dem C++-Code vergleichbar bleibt.
+//
+// G.elsed(g, W, H, o) -> [{x1,y1,x2,y2,salience}, ...]
+//   g: Graustufen 0..255, Zeile fuer Zeile, Laenge W*H (Uint8Array oder Float32Array).
+//   Endpunkte in Pixelkoordinaten (Pixelmitte = ganze Zahl), float32-Werte wie im Original.
+//   salience wie SalientSegment: mit validate = Zahl der Pixel, deren Gradientenrichtung zur
+//   Geraden passt; ohne validate = Segmentlaenge.
+//   o (ELSEDParams, gleiche Namen und Vorgaben):
+//     ksize 5               Groesse des Gausskerns (<= 2: keine Glaettung)
+//     sigma 1               Sigma des Gausskerns
+//     gradientThreshold 30  Pixel mit |dx|+|dy| darunter sind keine Kantenkandidaten
+//     anchorThreshold 8     Anker: Gradient um so viel groesser als beide Nachbarn quer zur Kante
+//     scanIntervals 2       Ankersuche in jeder n-ten Zeile/Spalte
+//     minLineLen 15         Mindestlaenge eines Segments (Pixel)
+//     lineFitErrThreshold 0.2  mittlerer quadratischer Abstand zur Geraden fuer den Segmentstart
+//     pxToSegmentDistTh 1.5    Abstand, bis zu dem ein neues Pixel zum Segment gehoert
+//     junctionEigenvalsTh 10   Kreuzungssprung: erster Eigenwert der Gradienten-Autokorrelation
+//                              mindestens so viel mal groesser als der zweite
+//     junctionAngleTh 10 Grad  (im Bogenmass) Winkel zwischen Segmentnormale und Gradient im Sprung
+//     validationTh 0.15        Pruefung: erlaubter Winkelfehler des Gradienten (rad)
+//     validate true            Segmente pruefen
+//     treatJunctions true      ueber Kreuzungen springen
+//     listJunctionSizes [5,7,9]  getestete Sprungweiten (Pixel)
+//     zeiten {}   wird mit Millisekunden je Abschnitt gefuellt (glaetten, gradient, anker,
+//                 zeichnen, pruefen)
+//     debug {}    erhaelt Kopien der Zwischenbilder (blur, dx, dy), Kern, Ankerzahl
+// Die Parameter des Originals sind fuer 640x480 abgestimmt; groessere Bilder liefern mehr,
+// kuerzere Segmente.
+G.elsed=(()=>{
+  const fr=Math.fround, PI=Math.PI, PI_2=Math.PI/2, T26=67108864;
+  // Utils.h
+  const UPM_EDGE_VERTICAL=0, UPM_EDGE_HORIZONTAL=255;
+  const UPM_ED_NO_EDGE_PIXEL=0, UPM_ED_EDGE_PIXEL=255, UPM_ED_ANCHOR_PIXEL=204,
+        UPM_ED_SEGMENT_INLIER_PX=153, UPM_ED_SEGMENT_OUTLIER_PX=102, UPM_ED_JUNTION_PX=152;
+  const UPM_LEFT=1, UPM_RIGHT=2, UPM_UP=3, UPM_DOWN=4, UPM_SKIP_EDGE_PT=2, UPM_MAX_OUTLIERS_TH=3;
+
+  // Bildpuffer (wiederverwendet, solange W*H gleich bleibt)
+  let nBuf=-1, img8, hBuf, vAcc, P, dxImg, dyImg, gImg, dirImg, edgeImg, anchors;
+  let Pb, hB, dxB, dyB, gB, dirB;   // dieselben Puffer, als lokale Konstanten in den Bildschleifen
+  let W=0, H=0;
+  // Parameter des laufenden Aufrufs (EdgeDrawer-Felder)
+  let lineFitThreshold, pxToSegmentDistTh, minLineLength, treatJunctions, listOfJunctionSizes,
+      junctionEigenvalsTh, junctionAngleTh;
+
+  // EdgeDrawer::pixels - eine Kette fuer alle Segmente
+  let PX=new Int32Array(1<<14), PY=new Int32Array(1<<14), nP=0;
+  const pushPx=(x,y)=>{
+    if(nP===PX.length){ const a=new Int32Array(nP*2), b=new Int32Array(nP*2); a.set(PX); b.set(PY); PX=a; PY=b; }
+    PX[nP]=x; PY[nP++]=y;
+  };
+  // EdgeDrawer::segments (fertige): je 8 int (firstPxIndex, lastPxIndex, N, firstPx, lastPx,
+  // isHorizontal) und 4 float (endpoints)
+  let SI=new Int32Array(8*512), SE=new Float32Array(4*512), nS=0;
+
+  // ---------------------------------------- FullSegmentInfo (das eine Arbeitssegment)
+  let sX=0, sY=0, sXY=0, sXX=0, sN=0, sDx=0, sDy=0, sHor=false, e0=0, e1=0, e2=0;
+  let sFx=0, sFy=0, sPFx=0, sPFy=0, sLx=0, sLy=0, sPLx=0, sPLy=0, sFi=-1, sLi=-1;
+  let sSorted=true, sExt1=false, sExt2=false;   // arePixelsSorted, first/secondEndpointExtended
+  // segments.emplace_back(pixels): nur die Felder mit Vorgabewert werden gesetzt
+  const segNew=()=>{ sX=0; sY=0; sXY=0; sXX=0; sN=0; sFi=-1; sLi=-1; sSorted=true; sExt1=false; sExt2=false; };
+  const calculateLineEq=()=>{
+    // c = sum_y*sum_x2 - sum_x*sum_xy ist im Original int64. Die Produkte bleiben bei 861x1920
+    // unter ~4e15 (gemessen < 1e15), uebersteigen 2^53 aber ab etwa 1080x2400 bei bildhohen
+    // Kanten. Zerlegt in 26-Bit-Haelften sind alle Teilprodukte exakt, gerundet wird einmal
+    // am Schluss wie (double)int64.
+    const h1=Math.floor(sXX/T26), h2=Math.floor(sXY/T26);
+    let c=(sY*h1-sX*h2)*T26+(sY*(sXX-h1*T26)-sX*(sXY-h2*T26)), a, b;
+    if(sHor){ a=sN*sXY-sX*sY; b=sX*sX-sN*sXX; }
+    else { b=sN*sXY-sX*sY; a=sX*sX-sN*sXX; }
+    const f=1/Math.sqrt(a*a+b*b);
+    a*=f; b*=f; c*=f;
+    if(sDx*-b+sDy*a<0){ a=-a; b=-b; c=-c; }
+    e0=a; e1=b; e2=c;
+  };
+  // Summen ohne Gleichung; jede oeffentliche Methode endet wie im Original mit calculateLineEq
+  const addToModel=(x,y)=>{ const i=sHor?x:y, d=sHor?y:x; sN++; sX+=i; sY+=d; sXX+=i*i; sXY+=i*d; };
+  const subtractPointFromModel=(x,y)=>{ const i=sHor?x:y, d=sHor?y:x; sN--; sX-=i; sY-=d; sXX-=i*i; sXY-=i*d; };
+  const leastSquareLineFit=st=>{
+    let a=0, b=0, c=0, d=0;
+    if(sHor) for(let i=st;i<nP;i++){ const x=PX[i], y=PY[i]; a+=x; b+=y; c+=x*x; d+=x*y; }
+    else for(let i=st;i<nP;i++){ const x=PY[i], y=PX[i]; a+=x; b+=y; c+=x*x; d+=x*y; }
+    sX=a; sY=b; sXX=c; sXY=d; sN=nP-st;
+    calculateLineEq();
+  };
+  const segInit=st=>{
+    sDx=PX[nP-1]-PX[st]; sDy=PY[nP-1]-PY[st]; sHor=Math.abs(sDx)>=Math.abs(sDy);
+    leastSquareLineFit(st);
+    sFx=PX[st]; sFy=PY[st]; sLx=PX[nP-1]; sLy=PY[nP-1];
+    sPFx=PX[st+1]; sPFy=PY[st+1]; sPLx=PX[nP-2]; sPLy=PY[nP-2];
+    sFi=st; sLi=nP-1; sSorted=true; sExt1=false; sExt2=false;
+  };
+  const skipPositions=()=>{
+    subtractPointFromModel(sFx, sFy); subtractPointFromModel(sPFx, sPFy);
+    sFi+=UPM_SKIP_EDGE_PT; sLi+=UPM_SKIP_EDGE_PT;
+    sFx=PX[sFi]; sFy=PY[sFi]; sLx=PX[nP-1]; sLy=PY[nP-1];
+    sPFx=PX[sFi+1]; sPFy=PY[sFi+1]; sPLx=PX[sLi-1]; sPLy=PY[sLi-1];
+    sDx=sLx-sFx; sDy=sLy-sFy;
+    const t=Math.abs(sDx)>=Math.abs(sDy);
+    if(t!==sHor){ sHor=t; leastSquareLineFit(sFi); }
+    else { addToModel(sPLx, sPLy); addToModel(sLx, sLy); calculateLineEq(); }
+  };
+  const addPixel=(x,y,idx,atEnd)=>{
+    addToModel(x, y); calculateLineEq();
+    if(atEnd){ sPLx=sLx; sPLy=sLy; sLx=x; sLy=y; } else { sPFx=sFx; sPFy=sFy; sFx=x; sFy=y; }
+    sLi=idx; sSorted=sSorted && atEnd;
+  };
+  const removeLastPx=fromEnd=>{
+    if(fromEnd) subtractPointFromModel(sLx, sLy); else subtractPointFromModel(sFx, sFy);
+    calculateLineEq();
+    if(fromEnd){ sLx=sPLx; sLy=sPLy; sPLx=-1; sPLy=-1; } else { sFx=sPFx; sFy=sPFy; sPFx=-1; sPFy=-1; }
+    sLi--;
+  };
+  const getFitError=()=>{ let s=0; for(let i=sFi;i<=sLi;i++){ const d=e0*PX[i]+e1*PY[i]+e2; s+=d*d; } return s/sN; };
+  const isInlier=(x,y,th)=>{ const d=e0*x+e1*y+e2; return (d>=0 ? d : -d)<th; };
+  // finish(): calcSegmentEndpoints (float), dann in die Tabelle
+  const finishSegment=()=>{
+    if(nS*8===SI.length){ const a=new Int32Array(SI.length*2), b=new Float32Array(SE.length*2); a.set(SI); b.set(SE); SI=a; SE=b; }
+    const a1=fr(e1*e1), a2=fr(e0*e0), a3=fr(e0*e1), a4=fr(e2*e0), a5=fr(e2*e1), k=nS*4, j=nS*8;
+    SE[k]=fr(fr(fr(a1*sFx)-fr(a3*sFy))-a4); SE[k+1]=fr(fr(fr(a2*sFy)-fr(a3*sFx))-a5);
+    SE[k+2]=fr(fr(fr(a1*sLx)-fr(a3*sLy))-a4); SE[k+3]=fr(fr(fr(a2*sLy)-fr(a3*sLx))-a5);
+    SI[j]=sFi; SI[j+1]=sLi; SI[j+2]=sN; SI[j+3]=sFx; SI[j+4]=sFy; SI[j+5]=sLx; SI[j+6]=sLy; SI[j+7]=sHor ? 1 : 0;
+    nS++;
+  };
+
+  // ---------------------------------------- EdgeDrawer
+  // Zeichenstapel (DrawingBranch): Richtung, Pixel, addPixelsForTheFirstSide, Pixelliste (je BK)
+  let BK=16, BD=new Int32Array(64), BX=new Int32Array(64), BY=new Int32Array(64), BF=new Uint8Array(64),
+      BN=new Int32Array(64), BPX=new Int32Array(64*BK), BPY=new Int32Array(64*BK), nB=0;
+  const setBK=k=>{ if(k!==BK){ BK=k; BPX=new Int32Array(BD.length*BK); BPY=new Int32Array(BD.length*BK); } };
+  const pushBranch=(d,x,y,f)=>{
+    if(nB===BD.length){
+      const n=nB*2, g=(A,T)=>{ const a=new T(A.length*2); a.set(A); return a; };
+      BD=g(BD,Int32Array); BX=g(BX,Int32Array); BY=g(BY,Int32Array); BF=g(BF,Uint8Array); BN=g(BN,Int32Array);
+      BPX=g(BPX,Int32Array); BPY=g(BPY,Int32Array); if(BD.length!==n) throw new Error('ELSED: Stapel');
+    }
+    BD[nB]=d; BX[nB]=x; BY[nB]=y; BF[nB]=f ? 1 : 0; BN[nB]=0;
+    return nB++;
+  };
+  const OLX=new Int32Array(8), OLY=new Int32Array(8);           // outliersList (hoechstens 5)
+  let nOL=0, INX=new Int32Array(16), INY=new Int32Array(16), nIn=0;  // initialPixels
+  let EXX=new Int32Array(64), EXY=new Int32Array(64), nEx=0;       // extensionPixels
+  let VAX=new Int32Array(64), VAY=new Int32Array(64), nVa=0;       // pixelsToValidate
+  const pushEx=(x,y)=>{
+    if(nEx===EXX.length){ const a=new Int32Array(nEx*2), b=new Int32Array(nEx*2); a.set(EXX); b.set(EXY); EXX=a; EXY=b; }
+    EXX[nEx]=x; EXY[nEx++]=y;
+  };
+  const pushVa=(x,y)=>{
+    if(nVa===VAX.length){ const a=new Int32Array(nVa*2), b=new Int32Array(nVa*2); a.set(VAX); b.set(VAY); VAX=a; VAY=b; }
+    VAX[nVa]=x; VAY[nVa++]=y;
+  };
+
+  // Laufendes Pixel (px) und Vorgaenger (lastPx) von findNextPxWithGradient. drawEdgeTreeStack
+  // und canSegmentBeExtended teilen sie; nach canSegmentBeExtended liest der Aufrufer px/lastPx
+  // erst wieder, nachdem er sie neu gesetzt hat (wie die getrennten Locals im Original).
+  let cx=0, cy=0, clx=0, cly=0;
+  const findNextPxWithGradient=pxGradDirection=>{
+    const lastX=clx, lastY=cly; clx=cx; cly=cy;
+    let i=cy*W+cx;
+    if(pxGradDirection===UPM_EDGE_HORIZONTAL){
+      if(lastX<cx){
+        if(cx===W-1 || cy===0 || cy===H-1) return false;
+        i++; cx++;
+        const g1=gImg[i-W], g2=gImg[i], g3=gImg[i+W];
+        if(g1>g2 && g1>g3) cy--; else if(g3>g2 && g3>g1) cy++;
+      } else if(lastX>cx){
+        if(cx===0 || cy===0 || cy===H-1) return false;
+        i--; cx--;
+        const g1=gImg[i-W], g2=gImg[i], g3=gImg[i+W];
+        if(g1>g2 && g1>g3) cy--; else if(g3>g2 && g3>g1) cy++;
+      } else if(lastY<cy){
+        if(cy===H-1 || cx===0 || cx===W-1) return false;
+        i+=W; cy++;
+        if(gImg[i-1]>gImg[i+1]) cx--; else cx++;
+      } else {
+        if(cy===0 || cx===0 || cx===W-1) return false;
+        i-=W; cy--;
+        if(gImg[i-1]>gImg[i+1]) cx--; else cx++;
+      }
+    } else {
+      if(lastY<cy){
+        if(cy===H-1 || cx===0 || cx===W-1) return false;
+        i+=W; cy++;
+        const g1=gImg[i+1], g2=gImg[i], g3=gImg[i-1];
+        if(g1>g2 && g1>g3) cx++; else if(g3>g2 && g3>g1) cx--;
+      } else if(lastY>cy){
+        if(cy===0 || cx===0 || cx===W-1) return false;
+        i-=W; cy--;
+        const g1=gImg[i+1], g2=gImg[i], g3=gImg[i-1];
+        if(g1>g2 && g1>g3) cx++; else if(g3>g2 && g3>g1) cx--;
+      } else if(lastX<cx){
+        if(cx===W-1 || cy===0 || cy===H-1) return false;
+        i++; cx++;
+        if(gImg[i-W]>gImg[i+W]) cy--; else cy++;
+      } else {
+        if(cx===0 || cy===0 || cy===H-1) return false;
+        i--; cx--;
+        if(gImg[i-W]>gImg[i+W]) cy--; else cy++;
+      }
+    }
+    return gImg[cy*W+cx]!==0;
+  };
+  // eq als cv::Vec3f (q0..q2), getProjectionPtn und Rechnung in float
+  const findNextPxWithProjection=(q0,q1,q2,invertLineDir,stepSize)=>{
+    const X=cx, Y=cy;
+    let rx, ry, s=0;
+    s=fr(s+fr(q0*X)); s=fr(s+fr(q1*Y)); s=fr(s+q2);
+    if(s===0){ rx=X; ry=Y; }
+    else {
+      const r0=q1, r1=-q0, r2=fr(fr(q0*Y)-fr(q1*X));
+      const p0=fr(fr(q1*r2)-fr(q2*r1)), p1=fr(fr(q2*r0)-fr(q0*r2)), p2=fr(fr(q0*r1)-fr(q1*r0));
+      rx=fr(p0/p2); ry=fr(p1/p2);
+    }
+    let ex, ey;
+    if(!invertLineDir){ ex=fr(rx-fr(stepSize*q1)); ey=fr(ry+fr(stepSize*q0)); }
+    else { ex=fr(rx+fr(stepSize*q1)); ey=fr(ry-fr(stepSize*q0)); }
+    if(ex<0 || ex>=W || ey<0 || ey>=H) return false;
+    const x=Math.trunc(ex), y=Math.trunc(ey), xa=Math.min(x+1, W-1), ya=Math.min(y+1, H-1);
+    const g1=gImg[y*W+x], g2=gImg[y*W+xa], g3=gImg[ya*W+x], g4=gImg[ya*W+xa];
+    let gv;
+    if(g2>g1){
+      if(g3>g2){
+        if(g4>g3){ cx=Math.min(x+1, W); cy=Math.min(y+1, H); gv=g4; }
+        else { cx=x; cy=Math.min(y+1, H); gv=g3; }
+      } else {
+        if(g4>g2){ cx=Math.min(x+1, W); cy=Math.min(y+1, H); gv=g4; }
+        else { cx=Math.min(x+1, W); cy=y; gv=g2; }
+      }
+    } else {
+      if(g3>g1){
+        if(g4>g3){ cx=Math.min(x+1, W); cy=Math.min(y+1, H); gv=g4; }
+        else { cx=x; cy=Math.min(y+1, H); gv=g3; }
+      } else {
+        if(g4>g1){ cx=Math.min(x+1, W); cy=Math.min(y+1, H); gv=g4; }
+        else { cx=x; cy=y; gv=g1; }
+      }
+    }
+    return gv!==0;
+  };
+  const bresenham=(x0,y0,x1,y1)=>{
+    nEx=0;
+    let dx=x1-x0, dy=y1-y0, x=x0, y=y0;
+    const xi=dx<0 ? -1 : 1, yi=dy<0 ? -1 : 1;
+    dx=Math.abs(dx); dy=Math.abs(dy);
+    if(dx>=dy){
+      let p=2*dy-dx;
+      while(x!==x1){ pushEx(x, y); if(p>=0){ y+=yi; p+=2*dy-2*dx; } else p+=2*dy; x+=xi; }
+    } else {
+      let p=2*dx-dy;
+      while(y!==y1){ pushEx(x, y); if(p>=0){ x+=xi; p+=2*dx-2*dy; } else p+=2*dx; y+=yi; }
+    }
+    pushEx(x1, y1);
+  };
+  const circularDist=(A,B,mod)=>{
+    let a, b; if(A<B){ a=A; b=B; } else { a=B; b=A; }
+    const d1=b-a, d2=a+(mod-b);
+    return d2<d1 ? d2 : d1;
+  };
+  const canSegmentBeExtended=extendByTheEnd=>{
+    const fx=extendByTheEnd ? sLx : sFx, fy=extendByTheEnd ? sLy : sFy;
+    const q0=fr(e0), q1=fr(e1), q2=fr(e2);   // Vec3d -> Vec3f
+    nVa=0;                                     // pixelsToValidate sammelt ueber alle Groessen
+    for(let jj=0;jj<listOfJunctionSizes.length;jj++){
+      const J=listOfJunctionSizes[jj];
+      if(sN<=(J>>>0)) break;
+      cx=fx; cy=fy;
+      if(!findNextPxWithProjection(q0, q1, q2, !extendByTheEnd, J)) continue;
+      bresenham(fx, fy, cx, cy);
+      clx=EXX[nEx-2]; cly=EXY[nEx-2];
+      for(let i=0;i<J;i++){
+        if(!findNextPxWithGradient(sHor ? UPM_EDGE_HORIZONTAL : UPM_EDGE_VERTICAL)){ nEx=0; break; }
+        if(isInlier(cx, cy, pxToSegmentDistTh)){ pushEx(cx, cy); pushVa(cx, cy); }
+        else { nEx=0; break; }
+      }
+      if(nEx===0) continue;
+      let theta=Math.atan2(e0, e1)+PI_2;
+      while(theta<0) theta+=PI;
+      while(theta>=PI) theta-=PI;
+      // Autokorrelation der Gradienten M = [[a, b], [b, d]] in float
+      let a=0, b=0, d=0;
+      const hv=Math.abs(VAX[nVa-1]-VAX[0])>=Math.abs(VAY[nVa-1]-VAY[0]);
+      for(let k=0;k<nVa;k++) for(let off=-1;off<=1;off++){
+        const yy=VAY[k]+(hv ? off : 0), xx=VAX[k]+(hv ? 0 : off);
+        const ii=Math.min(H-1, Math.max(0, yy))*W+Math.min(W-1, Math.max(0, xx));
+        const gx=dxImg[ii], gy=dyImg[ii];
+        a=fr(a+gx*gx); b=fr(b+gx*gy); d=fr(d+gy*gy);
+      }
+      const tmp=fr(fr(a*a)-fr(d*d));
+      const s1=fr(fr(fr(a*a)+fr(fr(2*b)*b))+fr(d*d));
+      const ad=fr(a+d);
+      const s2=fr(Math.sqrt(fr(fr(tmp*tmp)+fr(fr(fr(fr(4*b)*b)*ad)*ad))));
+      let eigen_angle=fr(-0.5*fr(Math.atan2(fr(fr(fr(2*a)*b)+fr(fr(2*b)*d)), tmp)));
+      while(eigen_angle<0) eigen_angle=fr(eigen_angle+PI);
+      while(eigen_angle>=PI) eigen_angle=fr(eigen_angle-PI);
+      const fitsEigenvaluesCond=Math.sqrt(fr(s1+s2)/(fr(s1-s2)+0.00001))>junctionEigenvalsTh;
+      const fitsAngleCond=circularDist(theta, eigen_angle, PI)<junctionAngleTh;
+      if(!fitsEigenvaluesCond || !fitsAngleCond) continue;
+      return true;
+    }
+    return false;
+  };
+  const inverseDirection=d=>d===UPM_RIGHT ? UPM_LEFT : d===UPM_LEFT ? UPM_RIGHT : d===UPM_UP ? UPM_DOWN : UPM_UP;
+  const directionFromLineEq=()=>{
+    const lineX=-e1, lineY=e0;
+    if((lineX>=0 ? lineX : -lineX)>(lineY>=0 ? lineY : -lineY)) return lineX>0 ? UPM_RIGHT : UPM_LEFT;
+    return lineY>0 ? UPM_DOWN : UPM_UP;
+  };
+  const addJunctionPixelsToSegment=addFirst=>{
+    if(addFirst) sExt1=true; else sExt2=true;
+    const half=nEx>>>1;
+    for(let i=0;i<nEx;i++){
+      const x=EXX[i], y=EXY[i];
+      if(isInlier(x, y, pxToSegmentDistTh)){
+        edgeImg[y*W+x]=i<half ? UPM_ED_JUNTION_PX : UPM_ED_SEGMENT_INLIER_PX;
+        pushPx(x, y);
+        addPixel(x, y, nP-1, addFirst);
+      } else edgeImg[y*W+x]=UPM_ED_SEGMENT_OUTLIER_PX;
+    }
+  };
+  const drawEdgeTreeStack=(ax,ay,firstAnchorDirection)=>{
+    let indexInArray=0, segment=false, firstBranch=true;
+    const isAnchorFirstPx=PX[nP-1]===ax && PY[nP-1]===ay && firstAnchorDirection;
+    segNew();
+    while(nB>0){
+      let popStack=true;
+      const b=nB-1;                                  // branchesStack.back()
+      let initialPxIndex=nP;
+      if(firstBranch && isAnchorFirstPx) initialPxIndex--;
+      const direction=BD[b], addFirst=BF[b]===1;
+      cx=BX[b]; cy=BY[b];
+      for(let k=0, o=b*BK;k<BN[b];k++) pushPx(BPX[o+k], BPY[o+k]);
+      let lastChekedPxIdx=initialPxIndex, inlierOverwritten=false;
+      nOL=0;
+      switch(direction){                             // calcLastPixelWithDirection
+        case UPM_UP: clx=cx; cly=cy+1; break;
+        case UPM_DOWN: clx=cx; cly=cy-1; break;
+        case UPM_LEFT: clx=cx+1; cly=cy; break;
+        case UPM_RIGHT: clx=cx-1; cly=cy; break;
+        default: clx=-1; cly=-1;
+      }
+      let gradDir=(direction===UPM_DOWN || direction===UPM_UP) ? UPM_EDGE_VERTICAL : UPM_EDGE_HORIZONTAL;
+      let localSegInitialized=false;
+      while(nOL<=UPM_MAX_OUTLIERS_TH){
+        if(!findNextPxWithGradient(gradDir)) break;
+        indexInArray=cy*W+cx;
+        const ev=edgeImg[indexInArray];
+        inlierOverwritten=ev===UPM_ED_SEGMENT_INLIER_PX || ev===UPM_ED_JUNTION_PX || ev===UPM_ED_EDGE_PIXEL;
+        if(inlierOverwritten) break;
+        if(segment){
+          if(isInlier(cx, cy, pxToSegmentDistTh)){
+            edgeImg[indexInArray]=UPM_ED_SEGMENT_INLIER_PX;
+            pushPx(cx, cy);
+            nOL=0;
+            addPixel(cx, cy, nP-1, addFirst);
+            if(addFirst) sExt1=false; else sExt2=false;
+          } else {
+            OLX[nOL]=cx; OLY[nOL++]=cy;
+            edgeImg[indexInArray]=UPM_ED_SEGMENT_OUTLIER_PX;
+          }
+        } else {
+          pushPx(cx, cy);
+          edgeImg[indexInArray]=UPM_ED_EDGE_PIXEL;
+          if(nP-lastChekedPxIdx>=minLineLength){
+            if(localSegInitialized) skipPositions();
+            else { localSegInitialized=true; segInit(lastChekedPxIdx); }
+            if(getFitError()<lineFitThreshold){
+              segment=true;
+              for(let i=lastChekedPxIdx;i<lastChekedPxIdx+minLineLength;i++) edgeImg[PY[i]*W+PX[i]]=UPM_ED_SEGMENT_INLIER_PX;
+            } else lastChekedPxIdx+=UPM_SKIP_EDGE_PT;
+          }
+        }
+        gradDir=dirImg[indexInArray];
+      }
+      // Pixel neben dem Anker fuer die Gegenrichtung merken
+      if(firstBranch && edgeImg[ay*W+ax]!==UPM_ED_SEGMENT_INLIER_PX){
+        nIn=0;
+        const nElements=Math.min(nP-initialPxIndex, minLineLength-1);
+        for(let i=initialPxIndex+nElements-1;i>=initialPxIndex;i--){
+          const ii=PY[i]*W+PX[i];
+          if(edgeImg[ii]===UPM_ED_SEGMENT_INLIER_PX || edgeImg[ii]===UPM_ED_JUNTION_PX) break;
+          INX[nIn]=PX[i]; INY[nIn++]=PY[i];
+        }
+      }
+      if(segment){
+        if(nOL>0 && (addFirst || !sSorted)){        // letztes Pixel entfernen
+          const dX=addFirst ? sLx : sFx, dY=addFirst ? sLy : sFy;
+          edgeImg[dY*W+dX]=UPM_ED_NO_EDGE_PIXEL;
+          removeLastPx(addFirst);
+          for(let k=nOL;k>0;k--){ OLX[k]=OLX[k-1]; OLY[k]=OLY[k-1]; }
+          OLX[0]=PX[nP-1]; OLY[0]=PY[nP-1]; nOL++; nP--;
+          if(!addFirst && sFx===ax && sFy===ay) sExt2=true;
+        }
+        // BRANCH 3: ohne Segment weiterzeichnen (Eintrag wiederverwenden)
+        if(nOL>UPM_MAX_OUTLIERS_TH){
+          for(let k=0;k<nOL;k++) edgeImg[OLY[k]*W+OLX[k]]=UPM_ED_NO_EDGE_PIXEL;
+          const predictedLastDir=dirImg[indexInArray]===UPM_EDGE_HORIZONTAL ? (clx<cx ? UPM_RIGHT : UPM_LEFT) : (cly<cy ? UPM_DOWN : UPM_UP);
+          popStack=false;
+          BD[b]=predictedLastDir; BX[b]=cx; BY[b]=cy; BF[b]=1;
+          const o=b*BK;
+          BPX[o]=PX[nP-1]; BPY[o]=PY[nP-1];
+          for(let k=0;k<nOL;k++){ BPX[o+1+k]=OLX[k]; BPY[o+1+k]=OLY[k]; }
+          BN[b]=nOL+1;
+        }
+        // BRANCH 1: geradeaus ueber die Kreuzung
+        if((nOL>UPM_MAX_OUTLIERS_TH || inlierOverwritten) && !sExt1 && treatJunctions && canSegmentBeExtended(true)){
+          const lineDirection=directionFromLineEq();
+          addJunctionPixelsToSegment(addFirst);
+          if(popStack){ popStack=false; BD[b]=lineDirection; BX[b]=EXX[nEx-1]; BY[b]=EXY[nEx-1]; BF[b]=1; BN[b]=0; }
+          else pushBranch(lineDirection, EXX[nEx-1], EXY[nEx-1], true);
+        } else {
+          // BRANCH 2: die andere Seite des Segments
+          sExt1=true;
+          const wasExtended=sExt2;
+          if(!wasExtended && sFx===ax && sFy===ay){
+            const oppositeLineDirection=inverseDirection(directionFromLineEq());
+            sExt2=true;
+            if(popStack){ popStack=false; BD[b]=oppositeLineDirection; BX[b]=ax; BY[b]=ay; BF[b]=0; BN[b]=0; }
+            else pushBranch(oppositeLineDirection, ax, ay, false);
+          } else if(!wasExtended && treatJunctions && canSegmentBeExtended(false)){
+            addJunctionPixelsToSegment(false);
+            const opositeLineDirection=inverseDirection(directionFromLineEq());
+            if(popStack){ popStack=false; BD[b]=opositeLineDirection; BX[b]=EXX[nEx-1]; BY[b]=EXY[nEx-1]; BF[b]=0; BN[b]=0; }
+            else pushBranch(opositeLineDirection, EXX[nEx-1], EXY[nEx-1], false);
+          } else {
+            sExt2=true;
+            finishSegment();                         // fertig; neues Arbeitssegment
+            segNew();
+            segment=false;
+          }
+        }
+      }
+      if(popStack) nB--;
+      firstBranch=false;
+      nEx=0;
+    }
+  };
+  const drawEdgeInBothDirections=(direction,ax,ay)=>{
+    edgeImg[ay*W+ax]=UPM_ED_ANCHOR_PIXEL;
+    pushBranch(direction, ax, ay, true);
+    pushPx(ax, ay);
+    nIn=0;
+    drawEdgeTreeStack(ax, ay, true);
+    const b=pushBranch(inverseDirection(direction), ax, ay, true), o=b*BK;
+    for(let k=0;k<nIn;k++){ BPX[o+k]=INX[k]; BPY[o+k]=INY[k]; }
+    BN[b]=nIn;
+    drawEdgeTreeStack(ax, ay, false);
+  };
+
+  // ---------------------------------------- Glaetten und Gradient
+  // Gausskern wie OpenCV 4.x fuer CV_8U: getGaussianKernelBitExact, dann
+  // getGaussianKernelFixedPoint_ED (8 Nachkommabits, Fehlerdiffusion, cvRound halb-gerade).
+  // (OpenCV rechnet mit softdouble; sigma <= 0 ausserhalb der Tabellen nutzt dort ein
+  // fusioniertes mulAdd - hier n*0.15+0.35.)
+  const rhe=v=>{ const r=Math.round(v); return (r-v===0.5 && (r&1)) ? r-1 : r; };
+  const KTAB={1:[1], 3:[.25,.5,.25], 5:[.0625,.25,.375,.25,.0625], 7:[.03125,.109375,.21875,.28125,.21875,.109375,.03125],
+    9:[4/256,13/256,30/256,51/256,60/256,51/256,30/256,13/256,4/256]};
+  const kCache=new Map();
+  const gaussKernel=(n,sigma)=>{
+    const key=n+'/'+sigma; let k=kCache.get(key); if(k) return k;
+    if(!(n&1) || n<1) throw new Error('ELSED: ksize muss ungerade sein');
+    let v;
+    if(sigma<=0 && KTAB[n]) v=KTAB[n];
+    else {
+      const sx=sigma>0 ? sigma : n*0.15+0.35, s2=-0.125/(sx*sx), n2=(n-1)>>1, val=[];
+      let sum=0;
+      for(let i=0, x=1-n;i<n2;i++, x+=2){ const t=Math.exp(x*x*s2); val.push(t); sum+=t; }
+      sum*=2; sum+=1;
+      const m=1/sum; v=new Array(n);
+      for(let i=0;i<n2;i++) v[i]=v[n-1-i]=val[i]*m;
+      v[n2]=m;
+    }
+    k=new Int32Array(n);
+    const h=n>>1; let err=0, s=0;
+    for(let i=0;i<h;i++){ const adj=v[i]*256+err, r=rhe(adj); err=adj-r; k[i]=k[n-1-i]=r; s+=r; }
+    k[h]=256-2*s;
+    kCache.set(key, k);
+    return k;
+  };
+  const reflect101=(p,len)=>{
+    if(p>=0 && p<len) return p;
+    if(len===1) return 0;
+    do { p=p<0 ? -p : 2*len-2-p; } while(p<0 || p>=len);
+    return p;
+  };
+  // src (W*H, 8 Bit) -> Innenbereich von P ((W+2)*(H+2)); Zeilenpass exakt, Spaltenpass
+  // 16.16 mit (s + 2^15) >> 16 wie fixedSmoothInvoker<uint8_t, ufixedpoint16>
+  // (Kerne sind symmetrisch; der 5er-Kern - Vorgabe - hat einen ausgeschriebenen Innenpfad.)
+  const gaussianBlurInto=(src,kx,ky)=>{
+    const nx=kx.length, ny=ky.length, rx=nx>>1, ry=ny>>1, W2=W+2, hBuf=hB, P=Pb;
+    for(let y=0;y<H;y++){
+      const r=y*W;
+      let x0=Math.min(rx, W), x1=Math.max(x0, W-rx);
+      for(let x=0;x<W;x++){
+        if(x===x0 && x<x1){
+          if(nx===5){
+            const a=kx[0], b=kx[1], c=kx[2];
+            for(let q=r+x, e=r+x1;q<e;q++) hBuf[q]=a*(src[q-2]+src[q+2])+b*(src[q-1]+src[q+1])+c*src[q];
+          } else for(let q=r+x, e=r+x1;q<e;q++){
+            let s=kx[rx]*src[q];
+            for(let j=0;j<rx;j++) s+=kx[j]*(src[q-rx+j]+src[q+rx-j]);
+            hBuf[q]=s;
+          }
+          x=x1-1; continue;
+        }
+        let s=0;
+        for(let j=0;j<nx;j++) s+=kx[j]*src[r+reflect101(x-rx+j, W)];
+        hBuf[r+x]=s;
+      }
+    }
+    const rowOf=i=>(i>=0 && i<H ? i : reflect101(i, H))*W;
+    for(let y=0;y<H;y++){
+      const p=(y+1)*W2+1;
+      if(ny===5){
+        const a=ky[0], b=ky[1], c=ky[2], q0=rowOf(y-2), q1=rowOf(y-1), q2=y*W, q3=rowOf(y+1), q4=rowOf(y+2);
+        for(let x=0;x<W;x++) P[p+x]=(a*(hBuf[q0+x]+hBuf[q4+x])+b*(hBuf[q1+x]+hBuf[q3+x])+c*hBuf[q2+x]+32768)>>16;
+      } else {
+        vAcc.fill(0, 0, W);
+        for(let i=0;i<ny;i++){
+          const k=ky[i], q=rowOf(y-ry+i);
+          for(let x=0;x<W;x++) vAcc[x]+=k*hBuf[q+x];
+        }
+        for(let x=0;x<W;x++) P[p+x]=(vAcc[x]+32768)>>16;
+      }
+    }
+  };
+  // Sobel 3x3 (BORDER_REPLICATE) und computeGradients in einem Durchgang ueber P
+  const computeGradients=gradientTh=>{
+    const W2=W+2, P=Pb, dxImg=dxB, dyImg=dyB, gImg=gB, dirImg=dirB;   // lokal: schneller in V8
+    for(let y=1;y<=H;y++){ P[y*W2]=P[y*W2+1]; P[y*W2+W+1]=P[y*W2+W]; }
+    P.copyWithin(0, W2, 2*W2);
+    P.copyWithin((H+1)*W2, H*W2, (H+1)*W2);
+    for(let y=0;y<H;y++){
+      // getrennt gerechnet, Fenster gleitet: je Spalte sv = oben+2*mitte+unten und
+      // dv = unten-oben; dx = sv(x+1)-sv(x-1), dy = dv(x-1)+2*dv(x)+dv(x+1) (ganzzahlig exakt)
+      const p=y*W2, p1=p+W2, p2=p1+W2;
+      let i=y*W, svA=P[p]+2*P[p1]+P[p2], dvA=P[p2]-P[p], svB=P[p+1]+2*P[p1+1]+P[p2+1], dvB=P[p2+1]-P[p+1];
+      for(let q=2, e=W+2;q<e;q++, i++){
+        const t=P[p+q], u=P[p2+q], svC=t+2*P[p1+q]+u, dvC=u-t;
+        const gx=svC-svA, gy=dvA+2*dvB+dvC;
+        svA=svB; svB=svC; dvA=dvB; dvB=dvC;
+        dxImg[i]=gx; dyImg[i]=gy;
+        const ax=gx<0 ? -gx : gx, ay=gy<0 ? -gy : gy, sum=ax+ay;
+        gImg[i]=sum<gradientTh ? 0 : sum;
+        dirImg[i]=ax>=ay ? UPM_EDGE_VERTICAL : UPM_EDGE_HORIZONTAL;
+      }
+    }
+  };
+  const computeAnchorPoints=(scanInterval,anchorThresh)=>{
+    let n=0;
+    for(let w=1;w<W-1;w+=scanInterval) for(let h=1;h<H-1;h+=scanInterval){
+      const i=h*W+w, gv=gImg[i];
+      if(gv===0) continue;
+      if(dirImg[i]===UPM_EDGE_HORIZONTAL){
+        if(gv>=gImg[i-W]+anchorThresh && gv>=gImg[i+W]+anchorThresh) anchors[n++]=i;
+      } else if(gv>=gImg[i-1]+anchorThresh && gv>=gImg[i+1]+anchorThresh) anchors[n++]=i;
+    }
+    return n;
+  };
+  const blerp=(c00,c10,c01,c11,tx,ty)=>{
+    const a=fr(c00+fr(fr(c10-c00)*tx)), b=fr(c01+fr(fr(c11-c01)*tx));
+    return fr(a+fr(fr(b-a)*ty));
+  };
+
+  // ---------------------------------------- ELSED::processImage + drawAnchorPoints
+  return (g,Wi,Hi,o={})=>{
+    const now=()=>(typeof performance!=='undefined' ? performance.now() : Date.now());
+    const zeiten=o.zeiten, t0=zeiten ? now() : 0;
+    W=Wi|0; H=Hi|0;
+    if(W<=0 || H<=0) return [];
+    const ksize=(o.ksize ?? 5)|0, sigma=fr(o.sigma ?? 1), gradientThreshold=fr(o.gradientThreshold ?? 30);
+    const anchorThreshold=(o.anchorThreshold ?? 8)&255, scanIntervals=(o.scanIntervals ?? 2)>>>0;
+    const validationTh=o.validationTh ?? 0.15, validate=o.validate ?? true;
+    if(scanIntervals<1) throw new Error('ELSED: scanIntervals >= 1');
+    minLineLength=(o.minLineLen ?? 15)|0;
+    lineFitThreshold=fr(o.lineFitErrThreshold ?? 0.2);    // im EdgeDrawer float
+    pxToSegmentDistTh=fr(o.pxToSegmentDistTh ?? 1.5);     // im EdgeDrawer float
+    treatJunctions=o.treatJunctions ?? true;
+    listOfJunctionSizes=(o.listJunctionSizes ?? [5, 7, 9]).map(v=>v|0);
+    junctionEigenvalsTh=o.junctionEigenvalsTh ?? 10;
+    junctionAngleTh=o.junctionAngleTh ?? 10*(PI/180);
+
+    const N=W*H;
+    if(N!==nBuf){
+      nBuf=N;
+      img8=new Uint8Array(N); hBuf=new Uint16Array(N); P=new Uint8Array((W+2)*(H+2));
+      dxImg=new Int16Array(N); dyImg=new Int16Array(N); gImg=new Int16Array(N); dirImg=new Uint8Array(N); edgeImg=new Uint8Array(N);
+      anchors=new Int32Array(Math.max(1, Math.ceil(N/4)));
+    }
+    if(!vAcc || vAcc.length<W) vAcc=new Int32Array(W);
+    if(P.length!==(W+2)*(H+2)) P=new Uint8Array((W+2)*(H+2));
+    Pb=P; hB=hBuf; dxB=dxImg; dyB=dyImg; gB=gImg; dirB=dirImg;
+    const nAMax=(W>2 ? Math.floor((W-3)/scanIntervals)+1 : 0)*(H>2 ? Math.floor((H-3)/scanIntervals)+1 : 0);
+    if(anchors.length<nAMax) anchors=new Int32Array(nAMax);
+
+    // Graustufen 8 Bit (cv::Mat CV_8UC1)
+    let src;
+    if(g instanceof Uint8Array || g instanceof Uint8ClampedArray) src=g;
+    else {
+      src=img8;
+      for(let i=0;i<N;i++){ const v=g[i]; src[i]=v>=255 ? 255 : v>0 ? rhe(v) : 0; }
+    }
+    // GaussianBlur(image, blurredImg, Size(ksize, ksize), sigma), Rand REFLECT_101
+    let kern=null;
+    if(ksize>2){
+      const kw=W===1 ? 1 : ksize, kh=H===1 ? 1 : ksize;
+      if(kw===1 && kh===1){ for(let y=0;y<H;y++) P.set(src.subarray(y*W, y*W+W), (y+1)*(W+2)+1); }
+      else { kern=gaussKernel(kw, sigma); gaussianBlurInto(src, kern, kh===kw ? kern : gaussKernel(kh, sigma)); }
+    } else for(let y=0;y<H;y++) P.set(src.subarray(y*W, y*W+W), (y+1)*(W+2)+1);
+    const t1=zeiten ? now() : 0;
+    computeGradients((Math.trunc(gradientThreshold)<<16)>>16);   // (short) gradientThreshold
+    const t2=zeiten ? now() : 0;
+
+    let anchorTh=anchorThreshold, nA=0, anchoThIsZero;
+    do {
+      anchoThIsZero=anchorTh===0;
+      nA=computeAnchorPoints(scanIntervals, anchorTh);
+      if(nA===0) anchorTh=anchorTh>>1;
+    } while(nA===0 && !anchoThIsZero);
+    edgeImg.fill(0);
+    const t3=zeiten ? now() : 0;
+
+    nP=0; nS=0; nB=0;
+    setBK(Math.max(minLineLength, 8));
+    if(INX.length<BK){ INX=new Int32Array(BK); INY=new Int32Array(BK); }
+    for(let k=0;k<nA;k++){
+      const i=anchors[k];
+      if(edgeImg[i]) continue;
+      const ax=i%W, ay=(i-ax)/W;
+      drawEdgeInBothDirections(dirImg[i]===UPM_EDGE_HORIZONTAL ? UPM_RIGHT : UPM_DOWN, ax, ay);
+    }
+    const t4=zeiten ? now() : 0;
+
+    // Pruefung: Gradientenrichtung entlang des Segments (UPM_SD_USE_REPROJECTION)
+    const out=[];
+    for(let s=0;s<nS;s++){
+      const j=s*8, k=s*4, fi=SI[j], li=SI[j+1], n=SI[j+2], fx=SI[j+3], fy=SI[j+4], lx=SI[j+5], ly=SI[j+6], hor=SI[j+7]===1;
+      const x1=SE[k], y1=SE[k+1], x2=SE[k+2], y2=SE[k+3];
+      let valid=true, saliency=0;
+      if(validate){
+        if(n<2) valid=false;
+        else {
+          let theta=(x2>x1 ? fr(Math.atan2(fr(y2-y1), fr(x2-x1))) : fr(Math.atan2(fr(y1-y2), fr(x1-x2))))+PI_2;
+          while(theta<0) theta+=PI;
+          while(theta>=PI) theta-=PI;
+          let l0=fr(y1-y2), l1=fr(x2-x1), l2=fr(fr(x1*y2)-fr(y1*x2));
+          const ia=fr(1/fr(Math.sqrt(fr(fr(l0*l0)+fr(l1*l1)))));
+          l0=fr(l0*ia); l1=fr(l1*ia); l2=fr(l2*ia);
+          const nPixelsToTrim=Math.trunc(Math.min(5.0, n*0.1));
+          let nOriInliers=0, nOriOutliers=0;
+          for(let i=fi;i<=li;i++){
+            const x=PX[i], y=PY[i];
+            if(edgeImg[y*W+x]!==UPM_ED_SEGMENT_INLIER_PX) continue;
+            const endpointDist=hor ? Math.min(Math.abs(x-lx), Math.abs(x-fx)) : Math.min(Math.abs(y-ly), Math.abs(y-fy));
+            if(endpointDist<nPixelsToTrim) continue;
+            let dot=0; dot=fr(dot+fr(x*l0)); dot=fr(dot+fr(y*l1)); dot=fr(dot+l2);
+            const px=fr(x-fr(l0*dot)), py=fr(y-fr(l1*dot));
+            if(px!==px || py!==py) continue;
+            let x0=px<0 ? 0 : Math.trunc(px); if(x0>=W) x0=W-1;
+            let y0=py<0 ? 0 : Math.trunc(py); if(y0>=H) y0=H-1;
+            let xa=Math.trunc(fr(px+1)); if(xa>=W) xa=W-1;
+            let ya=Math.trunc(fr(py+1)); if(ya>=H) ya=H-1;
+            const tx=fr(px-Math.trunc(px)), ty=fr(py-Math.trunc(py)), r0=y0*W, r1=ya*W;
+            const lerp_dx=blerp(dxImg[r0+x0], dxImg[r0+xa], dxImg[r1+x0], dxImg[r1+xa], tx, ty);
+            const lerp_dy=blerp(dyImg[r0+x0], dyImg[r0+xa], dyImg[r1+x0], dyImg[r1+xa], tx, ty);
+            let angle=fr(Math.atan2(lerp_dy, lerp_dx));
+            if(angle<0) angle+=PI;
+            if(angle>=PI) angle-=PI;
+            if(circularDist(theta, angle, PI)>validationTh) nOriOutliers++; else nOriInliers++;
+          }
+          valid=nOriInliers>nOriOutliers;
+          saliency=nOriInliers;
+        }
+      } else {
+        const dx=fr(x1-x2), dy=fr(y1-y2);
+        saliency=fr(Math.sqrt(fr(fr(dx*dx)+fr(dy*dy))));
+      }
+      if(valid) out.push({x1, y1, x2, y2, salience:saliency});
+    }
+    if(zeiten){
+      const t5=now();
+      zeiten.glaetten=t1-t0; zeiten.gradient=t2-t1; zeiten.anker=t3-t2; zeiten.zeichnen=t4-t3; zeiten.pruefen=t5-t4;
+    }
+    if(o.debug){
+      const d=o.debug, bl=new Uint8Array(N);
+      for(let y=0;y<H;y++) bl.set(P.subarray((y+1)*(W+2)+1, (y+1)*(W+2)+1+W), y*W);
+      d.blur=bl; d.dx=dxImg.slice(0, N); d.dy=dyImg.slice(0, N); d.kern=kern; d.nAnker=nA; d.ankerSchwelle=anchorTh;
+      d.nSegmenteVorPruefung=nS;
+    }
+    return out;
+  };
+})();
+}
+{
+// ------------------------------------------------ Karte: Grundlagen (M0)
+// Rahmen, Gier, Waende, Hysterese, Robustkern und die duennbesetzte LDL^T fuer die
+// Karte (Module M3-M10). Vertrag: ARCHITEKTUR v3, Abschnitte 1.1-1.3 (Konventionen),
+// 3 (Strukturen, als JSDoc unten), 4 (Block M0), 17.1 (Bauauftrag). Die Datei steht
+// wortgleich als eigener Block { ... } im geo-Block; sie setzt G und den geo-Kern
+// (G.m4inv, G.m4mul, G.m4vec, G.ray, G.pixToNdc) voraus und haengt nur an G.
+// Kein DOM, keine Uhr, kein Math.random: laeuft im Hauptfaden, im Worker und in Node.
+//
+// Rahmen (1.1):
+//   ARCore-local: Rahmen der XR-Posen, y oben. Bodenbezug T je Zustandszeile (Tpsi, Tx, Ty, Tz):
+//     T = [c,0,-s,0, 0,1,0,0, s,0,c,0, Tx,Ty,Tz,1] (spaltenweise, c = cos Tpsi, s = sin Tpsi).
+//   Bezug B_s des Abschnitts s: camTo = T^-1 · Pose, Boden y ~ 0, Kamera camTo[12..14].
+//   Sitzungsrahmen F0 = B_kern. Grundriss p = [x, z] in m.
+//   Versatz g = {psi, tx, ty, tz} bildet B_s -> F0 ab (cs = cos psi, sn = sin psi):
+//     x' = cs*x - sn*z + tx,   y' = y + ty,   z' = sn*x + cs*z + tz;   camTo_F0 = gMat(g)·camTo.
+//   Wandlinie n·p = rho, n = [cos phi, sin phi] zeigt zur FREIEN Seite (dort stand die Kamera),
+//     u = [-sin phi, cos phi], Laengskoordinate s = u·p, phi in [0, 2pi) (Gegenflaechen: phi + pi).
+// Gier (1.2): Plan-Gier = Winkel in der Draufsicht (x, z), positiv von +x nach +z. g.psi und alle
+//   Gier-Groessen in M4-M10 sind Plan-Gier. Einstiege nur ueber G.psiAusTpsi, G.blickPlan,
+//   G.ankerPlan; kein anderes Modul ruft atan2 auf Matrixeintraege auf.
+//   Differenzen von yawOfM (App) haben das umgekehrte Vorzeichen von Differenzen der Plan-Gier.
+// Kern (1.3): der erste Abschnitt mit >= 8 Schluesselbildern an bestaetigten Landmarken auf
+//   >= 2 Wandrichtungen (>= 60° auseinander). F0 := B_kern, g_kern = Einheit, fest fuer die Sitzung;
+//   mit Stuetzstellen zusaetzlich d_0 = 0 in jedem Abschnitt. Gesetzt von M10, hier nur festgehalten.
+//
+// Strukturen (3), Kurzform; Felder und Eigentum wie ARCHITEKTUR 3 und 14.1:
+/**
+ * @typedef {{psi:number, tx:number, ty:number, tz:number}} Versatz  B_s -> F0 (bzw. Korrektur d_j im Bezug)
+ * @typedef {{k:number, vi:number, t:number, ep:number, fmt:'rgba'|'luma8', w:number, h:number, buf:ArrayBuffer,
+ *   voll:({w:number,h:number,buf:ArrayBuffer,fmt:'luma4'}|null), camTo:number[], proj:number[], flipY:boolean, senk:boolean}} Auftrag
+ * @typedef {{k:number, vi:number, t:number, ep:number, camTo:Float64Array, proj:Float32Array, flipY:boolean, w:number, h:number,
+ *   f:number, n:number, seg:Float32Array, cls:Int8Array, man:Int8Array, dir:Float32Array, nTeile:Uint8Array,
+ *   psi0:({psi:number,sig:number,n:number}|null), senk:(Object[]|null), ms:Object}} BildErgebnis
+ *   seg je Segment G.KG.SEG = 10 Werte: x1, y1, x2, y2 (px, Zeile 0 unten), sal, sPx, psi (Plan-Gier [0, pi) oder NaN),
+ *   el1, el2 (rad), len (px); cls G.KG.KL; dir 6 je Segment (Einheitsstrahlen da, db im Bezug des Bilds).
+ * @typedef {{t:number, ep:number, pose:number[], T:number[], cam:number[], blick:number, flags:number, imuPsi:(number|undefined)}} PoseZeile
+ * @typedef {{t:number, epA:number, epB:number, art:'bruch'|'kamera'|'t-wechsel'|'anker-zurueck'|'reset'|'rest'|'gyro',
+ *   klasse:'nurT'|'reloc'|'pause'|'zurueck', grund:*, dt:number, cb:number[], ca:number[], pb:number[], pa:number[],
+ *   rPose:number, rPsi:number, dCam:number, dT:Versatz,
+ *   bindung:{art:'pose'|'kamera'|'keine', sP:number, sY:number, sH:number, kern:'mm',
+ *            mm:{name:'stetig'|'sprung'|'anker', w:number, sP:number, sY:number, sH:number}[], k:*},
+ *   anker:{id:number, pb:number[], pa:number[]}[], zurueckZu:(number|null)}} Schnitt
+ * @typedef {{t:Float64Array, s:Float64Array, d:Float64Array, cov:(Float64Array|null)}} Knoten  d: 4 je Knoten (psi, tx, ty, tz)
+ * @typedef {{ab:number, t0:number, t1:number, ep0:number, ep1:number, g0:Versatz, g:(Versatz|null), cov:(Float64Array|null),
+ *   knoten:(Knoten|null), hLok:({hC:number,sHC:number}|null), sig:(Object|null), reg:(Object|null),
+ *   stufe:'lokal'|'verbunden'|'locker'|'lose', w:number, nBilder:number, nSchluessel:number, nBeob:number,
+ *   mitWand:boolean, richtungen:*, psi0:*}} Abschnitt
+ * @typedef {{id:*, k:number, t:number, ab:number, ep:number, i:number, art:'decke'|'boden'|'stoer'|'ecke'|'erfassung', L:*,
+ *   c:number[], da:number[], db:(number[]|null), sPx:number, f:number, len:number, nSeg:number, schluessel:boolean,
+ *   nutzer:boolean, w:number, chi2:number, mu:number}} Beob
+ * @typedef {{id:*, rahmen:number, phi:number, rho:number, cov:number[], h:('c'|'f'|'lokal'|number), hLokal:(Object|null),
+ *   cls:'kandidat'|'wand'|'unklar'|'stoer'|'schrank'|'unterzug', clsZaehler:number, hFrei:(Object|null), dChiC:number, dChiF:number,
+ *   beob:number[], nBilder:number, nSchluessel:number, nStandpunkte:number, basis:number, abschnitte:number[],
+ *   iv:{s0:number,s1:number,n:number,bilder:number,t0:number,t1:number,beidseits:boolean,ring:number}[],
+ *   durchblick:number[][], boden:{s0:number,s1:number,n:number}[], ecken:number[], sSchwer:number,
+ *   zustand:'kandidat'|'bestaetigt'|'begrenzt', teile:number[], ringe:number[], insel:'nein'|'verdacht'|'ja', inselRunden:number}} Wand
+ * @typedef {{id:*, rahmen:number, p:number[], cov:number[], art:'konkav'|'konvex'|'unklar', waende:(Array|null), beob:number[],
+ *   frei:number[][], senk:boolean, top:(number|null), nPeil:number}} Ecke
+ * @typedef {Object} KarteZustand  opt, skala, hC, hF, sHC, sHF, H, hoehen, posen, epoche, schnitte, abschnitte, kern, bilder,
+ *   warte, beob, waende (Map), ecken (Map), spuren, bloecke (Map 'L:ab:j'), pp {cx,cy,sig,frei}, ldl {struktur,perm,name,nnzL},
+ *   tiefe, inselEntscheide (Map), umriss, runde, version, ms
+ * @typedef {{id:*, n:number[], d:number, iv:number[][], side:number, w:number, sd:number, sth:number, hOk:boolean,
+ *   kind:'decke'|'boden'|'ecken'|'lokal', kap:number[], wAb:number, vert:number[], durchblick:number[][]}} UmrissLinie
+ * @typedef {{c:number[], a:number[], b:number[], line:*, ab:number, w:number}} Facher
+ * @typedef {{lines:UmrissLinie[], fans:Facher[], path:{p:number[],w:number}[], bodenFrei:*, wBoden:number,
+ *   inselFest:{id:*,poly:number[][]}[], ausschluss:{id:*,poly:number[][]}[]}} UmrissEingabe
+ * @typedef {{id:string, quelle:'ecke'|'gegen'|'senk', linien:Array, ecken:Array, poly:number[][], A:number, U:number, dicke:number}} InselHyp
+ * @typedef {{id:string, dE:number, dEn:number, phi:number, pfad:boolean, supRing:number, seiten:number,
+ *   stufe:'nein'|'kandidat'|'teil'|'voll', runden:number}} InselBewertung
+ * @typedef {{id:*, art:'aussen'|'insel', pts:number[][], waende:Array, sup:number[], hyp:boolean[], flaeche:number, teil:boolean,
+ *   supRing:number, phi:number, dicke:number, quelle:'schnitt'|'hypothese',
+ *   entscheid:'auto'|'offen'|'nutzer-ja'|'nutzer-nein'|'schrank', exportiert:boolean}} Ring
+ * @typedef {{ringe:Ring[], kandidaten:Object[], hypothesen:InselBewertung[], aufgefuellt:*, verworfen:*,
+ *   innenVerworfen:{A:number,n:number}[], nLinien:number, nZellen:number, arbeit:Object, ms:number, warn:string[]}} UmrissErgebnis
+ * @typedef {{pts:{id:*,x:number,y:number}[], walls:Array[], meas:Array, openings:Array, hmeas:Array, idSeq:number, openSeq:number,
+ *   kamera:(Object|undefined)}} RoomData
+ * @typedef {{name:string, data:RoomData}} Teilen
+ * @typedef {{t:number, id:*, ab:number, phi:number, rho:number, cov:number[], extent:number[], quelle:'ar'|'tiefe', wallId:*}} EbeneBeob
+ * @typedef {{v:*, t:number, runde:number, waende:Object[], lokal:(Object|null), ecken:Object[], ringe:Ring[], kandidaten:Object[],
+ *   hypothesen:InselBewertung[], abschnitte:{ab:number,t0:number,t1:number,g:(Versatz|null),sig:*,stufe:string,w:number,
+ *   mitWand:boolean,knoten:({t:number,d:number[]}[]|null)}[], hoehen:Object, hinweise:Object[], raster:(Object|undefined),
+ *   arbeit:Object, ms:Object, abschluss:{bereit:boolean,fehlt:string[],ausgeschlossen:number[]}, fehler:(string|null)}} KarteStand
+ * @typedef {{runde:number, t:number, kBis:number, tPose:number, epoche:number, verdraengt:number[], arbeit:Object,
+ *   lago:(null|{grund:string}), ldl:{n:number,nnzL:number,ordnung:string}, ms:Object, kopf:*}} RundeKopf
+ */
+
+// ------------------------------------------------ Konstanten
+// rnd: Mulberry32 (deterministisch, Samen 32 bit). KNOTEN: Stuetzstellen 3.2.3; die Werte
+// sind die Vorgabe der Architektur [S] (Lage 1 cm/m nach Hasler 2019, Gier 0,1 °/m, Hoehe
+// 0,2 cm/m) und werden erst mit G-0.5 (T3, A7 mit Orakel-Landmarken, S6-M) geeicht; das
+// Ergebnis kommt mit Herkunft hierher.
+G.KG={SEG:10, KL:{X:0, V:1, O:2, U:3}, EPS:1e-9,
+  rnd:seed=>{ let s=seed|0; return ()=>{ s=s+0x6D2B79F5|0; let t=Math.imul(s^s>>>15, 1|s); t=t+Math.imul(t^t>>>7, 61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; },
+  KNOTEN:{dT:15, dS:3.0, minBeob:30, minRicht:2, richtDeg:60, sP0:0.005, kP:0.010, sY0Deg:0.05, kYDeg:0.10, sH0:0.002, kH:0.002,
+          chiRest:16, rundenRest:2}};
+
+// ------------------------------------------------ Versatz g (B_s -> F0)
+// Keine Rundung von psi auf (-pi, pi]: Gieren bleiben stetig fuer Ausgleich und Interpolation.
+G.gMat=g=>{ const c=Math.cos(g.psi), s=Math.sin(g.psi), m=new Float64Array(16);
+  m[0]=c; m[2]=s; m[5]=1; m[8]=-s; m[10]=c; m[12]=g.tx; m[13]=g.ty; m[14]=g.tz; m[15]=1; return m; };
+G.gAnw=(g,P)=>{ const c=Math.cos(g.psi), s=Math.sin(g.psi); return [c*P[0]-s*P[2]+g.tx, P[1]+g.ty, s*P[0]+c*P[2]+g.tz]; };
+G.gPlan=(g,p)=>{ const c=Math.cos(g.psi), s=Math.sin(g.psi); return [c*p[0]-s*p[1]+g.tx, s*p[0]+c*p[1]+g.tz]; };
+G.gInv=g=>{ const c=Math.cos(g.psi), s=Math.sin(g.psi); return {psi:-g.psi, tx:-(c*g.tx+s*g.tz), ty:-g.ty, tz:s*g.tx-c*g.tz}; };
+// a∘b: erst b, dann a. gMat(gKomp(a, b)) = gMat(a)·gMat(b).
+G.gKomp=(a,b)=>{ const c=Math.cos(a.psi), s=Math.sin(a.psi);
+  return {psi:a.psi+b.psi, tx:c*b.tx-s*b.tz+a.tx, ty:a.ty+b.ty, tz:s*b.tx+c*b.tz+a.tz}; };
+// Planwirkung eines Bodenbezugs: T als 4x4 (spaltenweise) oder als Zustandsspalten [Tpsi, Tx, Ty, Tz].
+G.gAusT=T=>T.length===4 ? {psi:G.psiAusTpsi(T[0]), tx:T[1], ty:T[2], tz:T[3]}
+  : {psi:Math.atan2(T[2], T[0]), tx:T[12], ty:T[13], tz:T[14]};
+
+// ------------------------------------------------ Gier (1.2)
+G.psiAusTpsi=Tpsi=>-Tpsi;
+G.blickPlan=m=>Math.atan2(-m[10], -m[8]);         // Plan-Gier der Kamera-Achse -z
+G.ankerPlan=psi=>-psi;                             // anker.jsonl: Gier wie Tpsi
+
+// ------------------------------------------------ Waende
+G.wandN=phi=>[Math.cos(phi), Math.sin(phi)];
+G.wandU=phi=>[-Math.sin(phi), Math.cos(phi)];
+G.wandSchnitt=(Wa,Wb)=>{ const ca=Math.cos(Wa.phi), sa=Math.sin(Wa.phi), cb=Math.cos(Wb.phi), sb=Math.sin(Wb.phi), det=ca*sb-sa*cb;
+  if(!(Math.abs(det)>G.KG.EPS)) return null;
+  return [(Wa.rho*sb-Wb.rho*sa)/det, (ca*Wb.rho-cb*Wa.rho)/det]; };
+G.wandSeite=(W,c)=>Math.cos(W.phi)*c[0]+Math.sin(W.phi)*c[1]-W.rho;   // > 0,1 m: Kamera auf der freien Seite
+
+// F0 -> Bezug des laufenden Abschnitts (Zeichnen): Waende, Ecken, Ringe eines KarteStand mit gInv(g).
+// Kovarianz der Wand bei festem g: rho' = rho + n'·t, d rho'/d phi = u'·t. Ohne Unsicherheit von g
+// (die ergaenzt M6 in G.fehlerband).
+const ZWEIPI=2*Math.PI, wrap2pi=a=>{ a%=ZWEIPI; return a<0 ? a+ZWEIPI : a; };
+const ivVerschieben=(iv,d)=>iv.map(x=>Array.isArray(x) ? [x[0]+d, x[1]+d] : {...x, s0:x.s0+d, s1:x.s1+d});
+G.zuBezug=(stand,g)=>{
+  const gi=G.gInv(g), c=Math.cos(gi.psi), s=Math.sin(gi.psi);
+  const waende=(stand.waende||[]).map(W=>{ const phi=wrap2pi(W.phi+gi.psi), n=G.wandN(phi), u=G.wandU(phi), a=n[0]*gi.tx+n[1]*gi.tz, b=u[0]*gi.tx+u[1]*gi.tz;
+    const o={...W, phi, rho:W.rho+a};
+    if(W.cov) o.cov=[W.cov[0], W.cov[1]+b*W.cov[0], W.cov[2]+2*b*W.cov[1]+b*b*W.cov[0]];
+    if(W.iv) o.iv=ivVerschieben(W.iv, b);
+    if(W.boden) o.boden=ivVerschieben(W.boden, b);
+    if(W.durchblick) o.durchblick=ivVerschieben(W.durchblick, b);
+    if(Number.isFinite(W.sSchwer)) o.sSchwer=W.sSchwer+b;
+    return o; });
+  const ecken=(stand.ecken||[]).map(E=>{ const o={...E, p:G.gPlan(gi, E.p)};
+    if(E.cov){ const [xx,xz,zz]=E.cov; o.cov=[c*c*xx-2*c*s*xz+s*s*zz, c*s*(xx-zz)+(c*c-s*s)*xz, s*s*xx+2*c*s*xz+c*c*zz]; }
+    return o; });
+  const ringe=(stand.ringe||[]).map(R=>({...R, pts:R.pts.map(p=>G.gPlan(gi, p))}));
+  return {waende, ecken, ringe};
+};
+
+// ------------------------------------------------ Kleinkram
+G.fokusPx=(proj,h)=>proj[5]*h/2;                                    // Brennweite in px des Bilds der Hoehe h
+// Hysterese: '>=' setzt bei wert >= setzen und loest bei wert < loesen; '<=' setzt bei wert <= setzen
+// und loest bei wert > loesen. NaN behaelt den Zustand.
+G.hyst=(alt,wert,setzen,loesen,richtung='>=')=>richtung==='<='
+  ? (alt ? !(wert>loesen) : wert<=setzen)
+  : (alt ? !(wert<loesen) : wert>=setzen);
+G.gmGewicht=(r,c,mu)=>{ const k=mu*c*c, v=k/(r*r+k); return v*v; };   // Geman-McClure mit GNC-Stufe mu (6.5)
+
+// ------------------------------------------------ Stuetzstellen (3.2.3)
+// g zur Zeit t: gKomp(A.g, d(t)), d komponentenweise linear zwischen den Knoten, ausserhalb konstant.
+// A: Abschnitt (knoten {t, d: Float64Array}) oder KarteStand-Eintrag (knoten [{t, d:[4]}]). Knoten,
+// fuer die M6 d noch nicht verlaengert hat (knoten.t laenger als d/4), gelten als d des vorigen.
+// A.g = null (Abschnitt lokal): null - ohne Versatz gibt es keinen Weg nach F0.
+G.gBei=(A,t)=>{
+  const g=A && A.g; if(!g) return null;
+  const K=A.knoten;
+  let n=0, tj, dj;
+  if(Array.isArray(K)){ n=K.length; tj=j=>K[j].t; dj=(j,c)=>K[j].d[c]; }
+  else if(K && K.t && K.d){ n=Math.min(K.t.length, Math.floor(K.d.length/4)); tj=j=>K.t[j]; dj=(j,c)=>K.d[4*j+c]; }
+  if(n<1) return {psi:g.psi, tx:g.tx, ty:g.ty, tz:g.tz};
+  let j0, j1, u;
+  if(n===1 || t<=tj(0)){ j0=j1=0; u=0; }
+  else if(t>=tj(n-1)){ j0=j1=n-1; u=0; }
+  else { let lo=0, hi=n-1; while(hi-lo>1){ const m=(lo+hi)>>1; if(tj(m)<=t) lo=m; else hi=m; }
+    j0=lo; j1=hi; const dt=tj(j1)-tj(j0); u=dt>0 ? (t-tj(j0))/dt : 1; }
+  const d=[0,1,2,3].map(c=>dj(j0,c)+u*(dj(j1,c)-dj(j0,c)));
+  return G.gKomp(g, {psi:d[0], tx:d[1], ty:d[2], tz:d[3]});
+};
+
+// ------------------------------------------------ Duennbesetzte LDL^T (5.4)
+// Nach T. A. Davis, LDL (up-looking, Eliminationsbaum; ACM TOMS 31, 2005), Vorlage slam/bench-loeser.mjs.
+// Eingang: symmetrische Matrix als CSC, nur oberes Dreieck (Eintraege mit Zeile > Spalte werden
+// ignoriert). Die Permutation perm[k] = alte Nummer der k-ten Unbekannten: ldlSymb baut das obere
+// Dreieck von P·A·P^T einmal auf (mit Streukarte je Eintrag von A), ldlNum faktorisiert es, ldlLoes
+// loest mit P. nnzL = Zahl der Eintraege von L unter der Diagonalen (wie R13).
+G.ldlSymb=(n,Ap,Ai,perm)=>{
+  const pinv=new Int32Array(n);
+  if(perm){ pinv.fill(-1); for(let k=0;k<n;k++){ const i=perm[k]; if(!(i>=0 && i<n) || pinv[i]>=0) throw new Error('ldlSymb: perm ist keine Permutation'); pinv[i]=k; } }
+  else for(let k=0;k<n;k++) pinv[k]=k;
+  const nzA=Ap[n], cnt=new Int32Array(n+1), map=new Int32Array(nzA).fill(-1);
+  for(let j=0;j<n;j++) for(let p=Ap[j];p<Ap[j+1];p++){ const i=Ai[p]; if(i>j) continue; const a=pinv[i], b=pinv[j]; cnt[(a>b ? a : b)+1]++; }
+  const Cp=new Int32Array(n+1); for(let k=0;k<n;k++) Cp[k+1]=Cp[k]+cnt[k+1];
+  const next=Cp.slice(0, n), Ci=new Int32Array(Cp[n]);
+  for(let j=0;j<n;j++) for(let p=Ap[j];p<Ap[j+1];p++){ const i=Ai[p]; if(i>j) continue; const a=pinv[i], b=pinv[j], col=a>b ? a : b, q=next[col]++;
+    Ci[q]=a>b ? b : a; map[p]=q; }
+  const Parent=new Int32Array(n), Lnz=new Int32Array(n), Flag=new Int32Array(n), Lp=new Int32Array(n+1);
+  for(let k=0;k<n;k++){ Parent[k]=-1; Flag[k]=k; Lnz[k]=0;
+    for(let p=Cp[k];p<Cp[k+1];p++){ let i=Ci[p]; if(i<k) for(; Flag[i]!==k; i=Parent[i]){ if(Parent[i]===-1) Parent[i]=k; Lnz[i]++; Flag[i]=k; } } }
+  for(let k=0;k<n;k++) Lp[k+1]=Lp[k]+Lnz[k];
+  return {n, perm:perm ? Int32Array.from(perm) : null, pinv, Cp, Ci, map, Parent, Lp, nnzL:Lp[n]};
+};
+// null, wenn ein Pivot nicht positiv ist oder relativ zu seinem Diagonaleintrag <= pivMin
+// (singulaer oder indefinit); M6 schreibt dann nichts (ok = false).
+G.ldlNum=(S,Ax,o={})=>{
+  const pivMin=o.pivMin ?? 1e-12, n=S.n, {Cp, Ci, Parent, Lp, map}=S, Cx=new Float64Array(Cp[n]);
+  for(let p=0;p<map.length;p++) if(map[p]>=0) Cx[map[p]]=Ax[p];
+  const Li=new Int32Array(Lp[n]), Lx=new Float64Array(Lp[n]), D=new Float64Array(n), Y=new Float64Array(n),
+        Pattern=new Int32Array(n), Flag=new Int32Array(n), Lnz=new Int32Array(n);
+  for(let k=0;k<n;k++){
+    Y[k]=0; let top=n, dkk=0; Flag[k]=k; Lnz[k]=0;
+    for(let p=Cp[k];p<Cp[k+1];p++){ let i=Ci[p]; if(i===k) dkk+=Cx[p]; Y[i]+=Cx[p]; let len=0;
+      for(; Flag[i]!==k; i=Parent[i]){ Pattern[len++]=i; Flag[i]=k; }
+      while(len>0) Pattern[--top]=Pattern[--len]; }
+    D[k]=Y[k]; Y[k]=0;
+    for(; top<n; top++){ const i=Pattern[top], yi=Y[i]; Y[i]=0; const p2=Lp[i]+Lnz[i];
+      for(let p=Lp[i];p<p2;p++) Y[Li[p]]-=Lx[p]*yi;
+      const l=yi/D[i]; D[k]-=l*yi; Li[p2]=k; Lx[p2]=l; Lnz[i]++; }
+    if(!(dkk>0) || !(D[k]>pivMin*dkk)) return null;
+  }
+  return {S, Li, Lx, D, y:new Float64Array(n)};
+};
+G.ldlLoes=(F,b,x)=>{
+  const {S, Li, Lx, D, y}=F, n=S.n, Lp=S.Lp, perm=S.perm;
+  for(let k=0;k<n;k++) y[k]=b[perm ? perm[k] : k];
+  for(let j=0;j<n;j++){ const yj=y[j]; for(let p=Lp[j];p<Lp[j+1];p++) y[Li[p]]-=Lx[p]*yj; }
+  for(let j=0;j<n;j++) y[j]/=D[j];
+  for(let j=n-1;j>=0;j--){ let v=y[j]; for(let p=Lp[j];p<Lp[j+1];p++) v-=Lx[p]*y[Li[p]]; y[j]=v; }
+  const out=x || new Float64Array(n);
+  for(let k=0;k<n;k++) out[perm ? perm[k] : k]=y[k];
+  return out;
+};
+// Reihenfolge: zaehlt nnz(L) symbolisch fuer jeden Kandidaten und nimmt den kleineren (Gleichstand: erster).
+// gruppen: Gruppe je Unbekannte (0 Knoten/Posen in Zeitfolge, 1 Waende/Ecken, 2 global); innerhalb einer
+// Gruppe bleibt die Reihenfolge der Eingabe. 'knotenZuerst' = 0, 1, 2; 'waendeZuerst' = 1, 0, 2.
+// Andere Gruppennummern kommen in Eingabereihenfolge ans Ende.
+const LDL_FOLGE={knotenZuerst:[0, 1, 2], waendeZuerst:[1, 0, 2]};
+G.ldlOrdnung=(n,Ap,Ai,gruppen,o={})=>{
+  const kand=o.kandidaten || ['knotenZuerst', 'waendeZuerst'];
+  let best=null;
+  for(const name of kand){ const f=LDL_FOLGE[name]; if(!f) throw new Error('ldlOrdnung: unbekannte Reihenfolge '+name);
+    const perm=new Int32Array(n); let k=0;
+    for(const gr of f) for(let i=0;i<n;i++) if(gruppen[i]===gr) perm[k++]=i;
+    for(let i=0;i<n;i++) if(!f.includes(gruppen[i])) perm[k++]=i;
+    const nnzL=G.ldlSymb(n, Ap, Ai, perm).nnzL;
+    if(!best || nnzL<best.nnzL) best={perm, name, nnzL}; }
+  return best;
+};
+}
+{
+// ------------------------------------------------ Bild-Worker-Schritt (M3), PLATZHALTER Stand 6
+// Bis raumskizze-segmente.js (Paket P-B) fertig ist: Luma, ELSED, Einteilung, Gier, rechtwinklige
+// Klasse - NICHT verschmolzen (sPx = 1, nTeile = 1). ARCHITEKTUR v3, 9.4 Punkt 1 und 17.12 ("M3 als
+// nur Einteilung"), Signaturen 4 Block M3, Strukturen 3.1. Dieselbe Rechnung wie die Fixture F1
+// (karte/fixtures/lib.mjs: einteilen, gier, rechtwinklig; Vorlage lm/messung.mjs), damit Geraet und
+// F1 vergleichbar bleiben. Steht das echte Modul schon vor diesem Block im geo-Block, bleibt es; ein
+// spaeter eingefuegtes ueberschreibt diesen Block. Angehaengt ueber Object.assign statt ueber eine
+// Zuweisung an G.bild: Werkzeuge erkennen das echte M3 an dieser Zuweisung und fuegen es sonst nicht ein.
+if(!G.bild){
+  const D2R=Math.PI/180, R2D=180/Math.PI, uhr=()=>typeof performance!=='undefined' ? performance.now() : 0;
+  // Luma wie live (3.1): (77 R + 150 G + 29 B) >> 8; 'luma8' wird kopiert (der Puffer geht zurueck).
+  const lumaAus=(buf, fmt, w, h, aus)=>{
+    const n=w*h, o=aus && aus.length===n ? aus : new Uint8Array(n);
+    const s=ArrayBuffer.isView(buf) ? new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength) : new Uint8Array(buf);
+    if(fmt==='luma8'){ o.set(s.subarray(0, n)); return o; }
+    for(let i=0,j=0;i<n;i++,j+=4) o[i]=(77*s[j]+150*s[j+1]+29*s[j+2])>>8;
+    return o;
+  };
+  // Einteilung je Segment (Pixel, Zeile 0 unten): Strahlen durch die Enden (G.pixToNdc, G.ray) im Bezug
+  // des Bilds; senkrecht (V) unter vDeg zum senkrechten Fluchtpunkt, sonst waagerecht oben (O) bzw.
+  // unten (U), wenn beide Enden ueber +elDeg bzw. unter -elDeg liegen, sonst verworfen (X); kuerzer als
+  // minLen (Abstand der Enden) ebenfalls X. psi = Plan-Gier der waagerechten Deutung in [0, pi).
+  const lmSegmente=(roh, w, h, proj, camTo, flipY, o={})=>{
+    o={vDeg:2, elDeg:4, minLen:15, ...o};
+    const V=G.vertVanish(proj, camTo, w, h, flipY), EL=Math.sin(o.elDeg*D2R), KL=G.KG.KL, S=G.KG.SEG, n=roh.length;
+    const seg=new Float32Array(n*S), cls=new Int8Array(n), dir=new Float32Array(n*6);
+    for(let i=0;i<n;i++){ const s=roh[i], L=Math.hypot(s.x2-s.x1, s.y2-s.y1), mx=(s.x1+s.x2)/2, my=(s.y1+s.y2)/2;
+      const A=G.pixToNdc(s.x1, s.y1, w, h, flipY), B=G.pixToNdc(s.x2, s.y2, w, h, flipY), ra=G.ray(proj, camTo, A[0], A[1]), rb=G.ray(proj, camTo, B[0], B[1]);
+      const vx=V ? V[0]-mx*V[2] : 0, vy=V ? V[1]-my*V[2] : 1, aV=Math.asin(Math.min(1, Math.abs((s.x2-s.x1)*vy-(s.y2-s.y1)*vx)/(L*Math.hypot(vx, vy))))*R2D;
+      const ea=ra.d[1], eb=rb.d[1]; let k, psi=NaN;
+      if(L<o.minLen) k=KL.X;
+      else if(aV<o.vDeg) k=KL.V;
+      else if(ea>EL && eb>EL) k=KL.O;
+      else if(ea<-EL && eb<-EL) k=KL.U;
+      else k=KL.X;
+      if(k===KL.O || k===KL.U){ const d=ra.d, e=rb.d, nn=[d[1]*e[2]-d[2]*e[1], d[2]*e[0]-d[0]*e[2], d[0]*e[1]-d[1]*e[0]];
+        psi=Math.atan2(-nn[0], nn[2]); psi=((psi%Math.PI)+Math.PI)%Math.PI; }
+      seg.set([s.x1, s.y1, s.x2, s.y2, s.salience, 1, psi, Math.asin(Math.max(-1, Math.min(1, ea))), Math.asin(Math.max(-1, Math.min(1, eb))), L], i*S);
+      cls[i]=k; dir.set([...ra.d, ...rb.d], i*6); }
+    return {n, seg, cls, dir, nTeile:new Uint8Array(n).fill(1)};
+  };
+  const lmVerschmelzen=bild=>bild;   // Platzhalter: nicht verschmolzen
+  // Raumrichtung mod 90° (Plan-Gier): Histogramm von psi mod 90° (Faecher fachDeg, Gewicht Laenge der
+  // O/U-Segmente), zyklisch geglaettet (Gauss glattDeg), Spitze, gewichtetes Mittel im Fenster
+  // +-fensterDeg; sig = gewichteter RMS-Rest / Wurzel(n). null bei weniger als minN Segmenten.
+  const d4=(a,b)=>{ const q=Math.PI/2; let d=((a-b)%q+q)%q; return d>q/2 ? d-q : d; };
+  const lmGier=(b, o={})=>{
+    o={fachDeg:0.25, glattDeg:0.75, fensterDeg:3, minN:3, ...o};
+    const S=G.KG.SEG, KL=G.KG.KL, q=Math.PI/2, NB=Math.round(90/o.fachDeg), hst=new Float64Array(NB), idx=[];
+    for(let i=0;i<b.n;i++) if(b.cls[i]===KL.O || b.cls[i]===KL.U){ const p=b.seg[i*S+6], wl=b.seg[i*S+9]; idx.push(i);
+      hst[Math.floor(((p%q+q)%q)/q*NB)%NB]+=wl; }
+    if(idx.length<o.minN) return null;
+    const sg=o.glattDeg/o.fachDeg, R=Math.ceil(3*sg), gl=new Float64Array(NB);
+    for(let j=0;j<NB;j++){ let s=0; for(let r=-R;r<=R;r++) s+=hst[(j+r+NB)%NB]*Math.exp(-r*r/(2*sg*sg)); gl[j]=s; }
+    let jb=0; for(let j=1;j<NB;j++) if(gl[j]>gl[jb]) jb=j;
+    const c0=(jb+0.5)/NB*q, win=o.fensterDeg*D2R; let sw=0, sr=0, n=0;
+    for(const i of idx){ const r=d4(b.seg[i*S+6], c0); if(Math.abs(r)<win){ const wl=b.seg[i*S+9]; sw+=wl; sr+=wl*r; n++; } }
+    if(n<o.minN) return null;
+    const psi=((c0+sr/sw)%q+q)%q; let s2=0;
+    for(const i of idx){ const r=d4(b.seg[i*S+6], psi); if(Math.abs(r)<win) s2+=b.seg[i*S+9]*r*r; }
+    return {psi, sig:Math.sqrt(s2/sw)/Math.sqrt(n), n};
+  };
+  // Rechtwinklige Klasse: k in {0, 1}, wenn |psi - psi0 - k·90°| < fensterDeg (psi nur mod 180° bekannt),
+  // sonst -1; ohne psi0 alle -1. Setzt bild.man.
+  const lmRechtwinklig=(b, psi0, o={})=>{
+    const fensterDeg=o.fensterDeg ?? 6, man=new Int8Array(b.n).fill(-1), S=G.KG.SEG;
+    if(psi0) for(let i=0;i<b.n;i++){ const p=b.seg[i*S+6]; if(!Number.isFinite(p)) continue;
+      let d=((p-psi0.psi)%Math.PI+Math.PI)%Math.PI, k=Math.round(d/(Math.PI/2)); const r=d-k*Math.PI/2; k%=2;
+      if(Math.abs(r)<fensterDeg*D2R) man[i]=k; }
+    b.man=man; return b;
+  };
+  const bildNeu=(o={})=>({opt:{elsed:{}, einteilen:{}, gier:{}, rechtwinklig:{}, ...o}, luma:null});
+  // Auftrag -> BildErgebnis (3.1). Senkrechte (auftrag.senk) wie senkFrame der Seite: auf G.luma
+  // (0,299/0,587/0,114, Float32), damit sie gleich bleiben wie im Hauptfaden; bei 'luma8' auf der Luma.
+  const bild=(BZ, a)=>{
+    const w=a.w, h=a.h, t0=uhr();
+    const g=BZ.luma=lumaAus(a.buf, a.fmt, w, h, BZ.luma);
+    const t1=uhr(), roh=G.elsed(g, w, h, BZ.opt.elsed);
+    const t2=uhr(), b=G.lmSegmente(roh, w, h, a.proj, a.camTo, a.flipY, BZ.opt.einteilen);
+    const t3=uhr(); G.lmVerschmelzen(b, BZ.opt.verschmelzen);
+    const t4=uhr(), psi0=G.lmGier(b, BZ.opt.gier); G.lmRechtwinklig(b, psi0, BZ.opt.rechtwinklig);
+    const t5=uhr(); let senk=null;
+    if(a.senk){ const gs=a.fmt==='rgba' ? G.luma(ArrayBuffer.isView(a.buf) ? a.buf : new Uint8Array(a.buf), w*h) : g, k=G.lumaKlein(gs, w, h);
+      senk=G.verticalEdges(k.g, k.w, k.h, a.proj, a.camTo, a.flipY); }
+    const t6=uhr(), r3=x=>Math.round(x*1000)/1000;
+    return {k:a.k, vi:a.vi, t:a.t, ep:a.ep, camTo:Float64Array.from(a.camTo), proj:Float32Array.from(a.proj), flipY:!!a.flipY, w, h,
+      f:G.fokusPx(a.proj, h), n:b.n, seg:b.seg, cls:b.cls, man:b.man, dir:b.dir, nTeile:b.nTeile, psi0, senk,
+      ms:{luma:r3(t1-t0), elsed:r3(t2-t1), verschm:r3(t4-t3), einteilen:r3((t3-t2)+(t5-t4)), senk:r3(t6-t5), gesamt:r3(t6-t0)}};
+  };
+  bild.platzhalter='M3 nur Einteilung (Stand 6)';
+  Object.assign(G, {lumaAus, lmSegmente, lmVerschmelzen, lmGier, lmRechtwinklig, bildNeu, bild});
+}
+}
+{
+// ------------------------------------------------ Messmodus: Loeserzeit (9.4 Punkt 7e, nur Messung)
+// Synthetisches Problem wie slam/bench-loeser.mjs (Posen 4 Unbekannte, Waende 3, Odometrie nur
+// innerhalb der Abschnitte, Linienbeobachtungen mit 2 Resten), geloest mit der LDL^T aus M0
+// (G.ldlOrdnung, G.ldlSymb, G.ldlNum, G.ldlLoes); dazu die Auswertung von 1000 Resten mit der Formel
+// von G.resSegment (f·asin(n_c·d), Jacobi analytisch, G.messRest) und eine Loesung der Stufe 2 (5.4):
+// lineares System, 2 gewichtete Loesungen mit GNC (Gewichte nach G.gmGewicht), Symbolik einmal.
+// Zufall nur ueber G.KG.rnd (Samen fest): Mac und Pixel rechnen dieselben Zahlen, die Zeiten sind
+// damit der Faktor Pixel/Mac fuer genau diesen Code. Zeiten werden nur gemessen, nie entschieden.
+const uhr=()=>typeof performance!=='undefined' ? performance.now() : 0;
+// Rest eines Segmentendes im Bild (px): Ebene durch die Kamera c und die Wandlinie {n·p = rho, y = h},
+// Normale w = u × (q − c), r = f·asin(w·d / |w|). Unbekannte (phi, rho, h, psi, tx, ty, tz); Kamera
+// und Strahl im Bezug des Abschnitts (cB, dB), mit g = (psi, tx, ty, tz) nach F0 (1.1). J (7) analytisch.
+G.messRest=(phi, rho, h, g, cB, dB, f, J)=>{
+  const cp=Math.cos(phi), sp=Math.sin(phi), cs=Math.cos(g.psi), sn=Math.sin(g.psi);
+  const n=[cp, 0, sp], u=[-sp, 0, cp], q=[rho*cp, h, rho*sp];
+  const c=[cs*cB[0]-sn*cB[2]+g.tx, cB[1]+g.ty, sn*cB[0]+cs*cB[2]+g.tz], d=[cs*dB[0]-sn*dB[2], dB[1], sn*dB[0]+cs*dB[2]];
+  const v=[q[0]-c[0], q[1]-c[1], q[2]-c[2]];
+  const X=(a,b)=>[a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]], D=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+  const w=X(u, v), wl=Math.sqrt(D(w, w)), wd=D(w, d), s=wd/wl, r=f*Math.asin(Math.max(-1, Math.min(1, s)));
+  if(J){ const k=f/Math.sqrt(Math.max(1e-12, 1-s*s));
+    const ds=(dw, dd)=>((D(dw, d)+(dd ? D(w, dd) : 0))/wl-wd*D(w, dw)/(wl*wl*wl));
+    const dcPsi=[-sn*cB[0]-cs*cB[2], 0, cs*cB[0]-sn*cB[2]], ddPsi=[-sn*dB[0]-cs*dB[2], 0, cs*dB[0]-sn*dB[2]];
+    const neg=a=>[-a[0], -a[1], -a[2]];
+    J[0]=k*ds(neg(X(n, v)));                         // d/dphi: du/dphi = -n, dq/dphi = rho·u (u × u = 0)
+    J[1]=k*ds(X(u, n));                              // d/drho: dq/drho = n
+    J[2]=k*ds(X(u, [0, 1, 0]));                      // d/dh
+    J[3]=k*ds(X(u, neg(dcPsi)), ddPsi);              // d/dpsi: Kamera und Strahl drehen mit
+    J[4]=k*ds(X(u, [-1, 0, 0])); J[5]=k*ds(X(u, [0, -1, 0])); J[6]=k*ds(X(u, [0, 0, -1]));
+  }
+  return r;
+};
+// Ein Fall: nKF Posen bzw. Knoten (Gruppe 0, DP Unbekannte), nW Waende (Gruppe 1, DL), beob
+// Linienbeobachtungen je Pose, nAb Abschnitte; lin > 0: Stufe 2 (5.4) - lin gewichtete Loesungen, vor
+// jeder die GM-Gewichte (G.gmGewicht) aus einem festen Ersatzrest je Faktor, mu <- max(1, mu/1,4),
+// Symbolik einmal. Liefert eine Zeile fuer messung.jsonl. wdh: Wiederholungen je Schritt (Median).
+const fall=(name, nKF, nW, beob, nAb, o)=>{
+  const rnd=G.KG.rnd(o.seed ?? 20261025), DP=o.DP ?? 4, DL=o.DL ?? 3, n=nKF*DP+nW*DL, wdh=o.wdh ?? 3, lin=o.lin ?? 0;
+  const off=i=>i<nKF ? i*DP : nKF*DP+(i-nKF)*DL, dim=i=>i<nKF ? DP : DL, nb=nKF+nW;
+  const F=[], segLen=Math.ceil(nKF/nAb);
+  for(let i=0;i+1<nKF;i++) if(Math.floor(i/segLen)===Math.floor((i+1)/segLen)) F.push({b:[i, i+1], r:DP});
+  for(let i=0;i<nKF;i++){ const ab=Math.floor(i/segLen), kopf=Math.floor(i*0.6+ab*17)%nW;
+    for(let k=0;k<beob;k++) F.push({b:[i, nKF+(kopf+k)%nW], r:2}); }
+  const Js=F.map(fa=>fa.b.map(b=>{ const m=new Float64Array(fa.r*dim(b)); for(let q=0;q<m.length;q++) m[q]=rnd()-0.5; return m; }));
+  const gruppen=new Int32Array(n); for(let i=nKF*DP;i<n;i++) gruppen[i]=1;
+  const med=a=>{ const s=[...a].sort((x,y)=>x-y); return s[s.length>>1]; }, r3=x=>Math.round(x*1000)/1000;
+  // Normalgleichungen J^T W J (oberes Dreieck je Block, w je Faktor) als CSC, Daempfung 1e-2·I
+  const aufbau=wf=>{
+    const B=new Map();
+    F.forEach((fa,fi)=>{ const ww=wf ? wf[fi] : 1;
+      for(let x=0;x<2;x++) for(let y=0;y<2;y++){ const a=fa.b[x], b=fa.b[y]; if(a>b) continue;
+        const da=dim(a), db=dim(b), key=a*nb+b; let M=B.get(key); if(!M){ M=new Float64Array(da*db); B.set(key, M); }
+        const Ja=Js[fi][x], Jb=Js[fi][y];
+        for(let i=0;i<da;i++) for(let j=0;j<db;j++){ let s=0; for(let r=0;r<fa.r;r++) s+=Ja[r*da+i]*Jb[r*db+j]; M[i*db+j]+=ww*s; } } });
+    for(let b=0;b<nb;b++){ const key=b*nb+b, d=dim(b); let M=B.get(key); if(!M){ M=new Float64Array(d*d); B.set(key, M); } for(let i=0;i<d;i++) M[i*d+i]+=1e-2; }
+    const cols=Array.from({length:n}, ()=>[]);
+    for(const [key, M] of B){ const a=Math.floor(key/nb), b=key%nb, da=dim(a), db=dim(b), oa=off(a), ob=off(b);
+      for(let i=0;i<da;i++) for(let j=0;j<db;j++){ const r=oa+i, c=ob+j; if(r<=c) cols[c].push([r, M[i*db+j]]); } }
+    const Ap=new Int32Array(n+1); let nz=0;
+    for(let c=0;c<n;c++){ cols[c].sort((x,y)=>x[0]-y[0]); Ap[c]=nz; nz+=cols[c].length; } Ap[n]=nz;
+    const Ai=new Int32Array(nz), Ax=new Float64Array(nz); let p=0;
+    for(let c=0;c<n;c++) for(const [r, v] of cols[c]){ Ai[p]=r; Ax[p++]=v; }
+    return {Ap, Ai, Ax};
+  };
+  const b=new Float64Array(n); for(let i=0;i<n;i++) b[i]=rnd()-0.5;
+  const rf=F.map(()=>3*(rnd()-0.5)), x=new Float64Array(n);
+  const zeit=f=>{ const ts=[]; let r; for(let k=0;k<wdh;k++){ const t0=uhr(); r=f(); ts.push(uhr()-t0); } return [med(ts), r]; };
+  // Aufbau, Symbolik (Ordnung + Symbolik), Numerik, Loesen; bei lin > 0 je Schritt die Summe ueber lin Loesungen
+  const ws=lin ? Array.from({length:lin}, (_,l)=>{ const mu=Math.max(1, 8/Math.pow(1.4, l)); return rf.map(r=>G.gmGewicht(r, 1, mu)); }) : [null];
+  const [msAufbau, As]=zeit(()=>ws.map(w=>aufbau(w)));
+  const A=As[0];
+  const [msSymb, SY]=zeit(()=>{ const ord=G.ldlOrdnung(n, A.Ap, A.Ai, gruppen); return {ord, S:G.ldlSymb(n, A.Ap, A.Ai, ord.perm)}; });
+  const [msNum, Fs]=zeit(()=>As.map(Ak=>G.ldlNum(SY.S, Ak.Ax)));
+  const [msLoes]=zeit(()=>Fs.map(Fk=>Fk ? G.ldlLoes(Fk, b, x) : null));
+  // Probe der letzten Loesung: |A x - b| / |b| (oberes Dreieck symmetrisch ergaenzt)
+  const AL=As[As.length-1], res=Float64Array.from(b);
+  for(let c=0;c<n;c++) for(let p=AL.Ap[c];p<AL.Ap[c+1];p++){ const i=AL.Ai[p], v=AL.Ax[p]; res[i]-=v*x[c]; if(i!==c) res[c]-=v*x[i]; }
+  const rel=Math.sqrt(res.reduce((s,v)=>s+v*v, 0)/b.reduce((s,v)=>s+v*v, 0));
+  // 1000 Reste mit analytischer Jacobi (Formel von G.resSegment, G.messRest), Geometrie zufaellig
+  let msRes1000=null;
+  if(!lin){ const R=[]; for(let i=0;i<1000;i++) R.push([rnd()*6.283, 1+3*rnd(), 2.2+0.4*rnd(), {psi:rnd()-0.5, tx:rnd()-0.5, ty:0.1*(rnd()-0.5), tz:rnd()-0.5},
+      [rnd()-0.5, 1.2+0.5*rnd(), rnd()-0.5], (()=>{ const d=[rnd()-0.5, 0.3+0.5*rnd(), rnd()-0.5], l=Math.hypot(...d); return d.map(z=>z/l); })()]);
+    const J=new Float64Array(7);
+    [msRes1000]=zeit(()=>{ let s=0; for(const a of R) s+=G.messRest(a[0], a[1], a[2], a[3], a[4], a[5], 461, J); return s; }); }
+  return {typ:'loeser', fall:name, n, nnzL:SY.S.nnzL, ordnung:SY.ord.name, lin, msAufbau:r3(msAufbau), msSymb:r3(msSymb), msNum:r3(msNum), msLoes:r3(msLoes),
+    msRes1000:msRes1000==null ? null : r3(msRes1000), relRest:rel, ok:Fs.every(Boolean), phase:o.phase ?? null};
+};
+// Faelle R13 (n = Posen·4 + Waende·3 = 520 / 1000 / 1750) und Stufe 2 an der Groesse von n520
+// (Knoten mit tx, ty, tz, Waende mit rho: 40·3 + 120·1 = 240 Unbekannte, 2 gewichtete Loesungen).
+G.MESS_FAELLE=[['n520', 40, 120, 15, 10, {}], ['n1000', 100, 200, 20, 20, {}], ['n1750', 400, 50, 8, 6, {}],
+  ['stufe2-n240', 40, 120, 15, 10, {DP:3, DL:1, lin:2}]];
+G.messLoeser=(o={})=>{
+  const out=[], t0=uhr();
+  for(const [name, nKF, nW, beob, nAb, oo] of (o.faelle || G.MESS_FAELLE)) out.push(fall(name, nKF, nW, beob, nAb, {...o, ...oo}));
+  const ges=Math.round((uhr()-t0)*1000)/1000; for(const z of out) z.msLauf=ges;
+  return out;
+};
+}
+
 globalThis.RAUMSKIZZE=G;
 })();
+</script>
+
+<script id="bildwerk" type="text/plain">
+// Bild-Worker (Stand 6, nur ?karte=1; ARCHITEKTUR v3 5.2, 9.4 Punkt 1, Nachrichten in 4). Der
+// Hauptfaden haengt den geo-Block davor (wie makeSolver) - dieselbe Rechnung wie im Selbsttest.
+// latest-wins: hoechstens 1 Bild in Arbeit und 1 wartend; ein neues verdraengt das wartende, dessen
+// Puffer sofort zurueckgeht. Gerechnet wird ueber setTimeout(0): so kommen inzwischen eingetroffene
+// Auftraege vorher an und verdraengen sich gegenseitig, statt sich hinter dem Rechnen zu stauen.
+// An den Hauptfaden (Puffer per Transfer zurueck in den Pool):
+//   {typ:'ergebnis', k, t, n, w, h, flipY, seg, cls, man, nTeile, psi0, senk, ms, buf, luma}
+//   {typ:'verdraengt', k, buf}, {typ:'fehler', k, msg, buf}, {typ:'bereit', m3}
+// luma (Uint8, nur mit opt.luma) ist das Bild, auf dem die Segmente liegen - fuer die Ansicht „Segmente“.
+(()=>{
+const G=RAUMSKIZZE, BZ=G.bildNeu({}), opt={luma:false}, M3=G.bild.platzhalter || 'raumskizze-segmente.js';
+let wartend=null, geplant=false;
+const plane=()=>{ if(!geplant && wartend){ geplant=true; setTimeout(lauf, 0); } };
+onmessage=e=>{ const m=e.data;
+  if(m.typ==='opt'){ Object.assign(opt, m.opt || {}); return; }
+  if(m.typ!=='bild') return;
+  if(wartend){ const v=wartend; postMessage({typ:'verdraengt', k:v.k, buf:v.buf}, [v.buf]); }
+  wartend=m; plane(); };
+function lauf(){
+  geplant=false; const a=wartend; wartend=null; if(!a) return;
+  let r=null;
+  try{ r=G.bild(BZ, a); }
+  catch(x){ postMessage({typ:'fehler', k:a.k, msg:String(x && x.message || x), buf:a.buf}, [a.buf]); plane(); return; }
+  const luma=opt.luma ? Uint8Array.from(BZ.luma) : null;
+  const tr=[a.buf, r.seg.buffer, r.cls.buffer, r.man.buffer, r.nTeile.buffer]; if(luma) tr.push(luma.buffer);
+  postMessage({typ:'ergebnis', k:r.k, t:r.t, n:r.n, w:r.w, h:r.h, flipY:r.flipY, seg:r.seg, cls:r.cls, man:r.man, nTeile:r.nTeile,
+    psi0:r.psi0, senk:r.senk, ms:r.ms, buf:a.buf, luma}, tr);
+  plane(); }
+postMessage({typ:'bereit', m3:M3});
+})();
+</script>
+
+<script id="messwerk" type="text/plain">
+// Mess-Worker (Stand 6, nur ?mess=1; ARCHITEKTUR v3 9.4 Punkt 7e): Loeserzeit der LDL^T aus M0 an einem
+// festen synthetischen Problem (G.messLoeser im geo-Block, dieselben Zahlen wie am Mac) - waehrend
+// immersive-ar alle 60 s und einmal nach dem Ende. Antwort {typ:'loeser', id, phase, zeilen, err}.
+onmessage=e=>{ const m=e.data; if(!m || m.typ!=='loeser') return;
+  let zeilen=null, err=null;
+  try{ zeilen=RAUMSKIZZE.messLoeser({phase:m.phase}); }catch(x){ err=String(x && x.message || x); }
+  postMessage({typ:'loeser', id:m.id, phase:m.phase, zeilen, err}); };
 </script>
 
 <script id="app">
@@ -2494,12 +3708,22 @@ const Q=new URLSearchParams(location.search);
 // Ziel des Links und lange Seite des verkleinerten Kamerabilds, beides per
 // URL ueberschreibbar: ?app=https://…/&ds=480
 const APP_URL=(Q.get('app') || 'https://raumaufmass.irazari-te.ch/').replace(/#.*$/,'');
-// Laenge der langen Bildseite, auf der die Erkennung arbeitet (Vorgabe 640).
-// Chrome liefert in der AR-Sitzung hoechstens 861x1920 (ARCore-Kamerastrom,
-// aufs Bildschirmformat beschnitten); ?ds=1920 nimmt das volle Bild -
-// langsamer, aber feinere Kanten.
+// Laenge der langen Bildseite, auf der die Erkennung arbeitet (Vorgabe 640, ohne Schalter wie
+// Stand 5). Chrome liefert in der AR-Sitzung hoechstens 861x1920 (ARCore-Kamerastrom, aufs
+// Bildschirmformat beschnitten); ?ds=1920 nimmt das volle Bild - langsamer, aber feinere Kanten.
+// Die Startseite hat zwei getrennte Links: ?ds=1920 (Rechenzeit bei voller Aufloesung, in vier Sitzungen
+// ohne Parameter nie gemessen) und ?mess=1 (Messsitzung S6-M nach ARCHITEKTUR 9.5, ohne ds=1920, damit die
+// Last der vollen Aufloesung die Messung von readPixels und Loeserzeit nicht verfaelscht).
 const DS=Math.max(240, Math.min(1920, Number(Q.get('ds'))||640));
 const FARBEN_KLAR=Q.get('farben')==='klar';
+// Stand 6 (ARCHITEKTUR v3, 9.4). ?karte=1: Bild-Worker (ELSED, Einteilung, Senkrechte) mit Puffer-Pool,
+// Ansicht „Segmente“, Aufnahme der Segmente - die Karte selbst kommt mit Stand 7, die Anzeige bleibt wie
+// heute. ?mess=1: Messmodus fuer die Messsitzung S6-M (Punkt 7: Anker nach Weg, Bodenmarken, IMU,
+// readPixels, Loeserzeit). ?tiefe=raw|smooth fordert die Tiefenart an (8.6, mit karte=1 oder mess=1 Vorgabe raw).
+// Ohne Schalter wie Stand 5 - neu ist dann nur, was die Aufnahme zusaetzlich mitschreibt (Epoche,
+// Ebenen, ref-reset, emuliert, Tiefe mit Grundcode). Das prueft der Selbsttest am nachgebauten Geraet.
+const KARTE=Q.get('karte')==='1', MESS=Q.get('mess')==='1';
+const TIEFE_ANF=Q.get('tiefe')==='smooth' ? 'smooth' : (Q.get('tiefe')==='raw' || KARTE || MESS) ? 'raw' : null;
 // Stand der Seite: Nummer und Zeitpunkt des Hochladens. Setzt
 // scripts/raumskizze-deploy.sh - nicht von Hand aendern.
 const STAND={nr:5, zeit:'2026-10-25T16:59:57+01:00'};
@@ -2588,7 +3812,9 @@ function makeGpu(gl){
   return {prog, buf, loc:gl.getAttribLocation(prog,'p'), uT:gl.getUniformLocation(prog,'t'),
           fbo:gl.createFramebuffer(), tex:null, w:0, h:0, px:null, camFbo:gl.createFramebuffer(), roi:null};
 }
-function readSmall(gl, P, camTex, W, H){
+// ziel (Stand 6, ?karte=1): liefert fuer n Bytes einen Puffer aus dem Pool des Bild-Workers oder null -
+// dann wie bisher in P.px. pool sagt, ob px ein Pool-Puffer ist (geht nach dem Bild an den Worker).
+function readSmall(gl, P, camTex, W, H, ziel){
   const f=Math.min(1, DS/Math.max(W,H));
   const w=Math.max(16, Math.round(W*f)), h=Math.max(16, Math.round(H*f));
   if(!P.tex || P.w!==w || P.h!==h){
@@ -2615,10 +3841,11 @@ function readSmall(gl, P, camTex, W, H){
   gl.enableVertexAttribArray(P.loc);
   gl.vertexAttribPointer(P.loc, 2, gl.FLOAT, false, 0, 0);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-  gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, P.px);
+  const px=(ziel && ziel(w*h*4)) || P.px;
+  gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
   // Die Kameratextur gilt nur in diesem Bild - nicht gebunden liegen lassen.
   gl.bindTexture(gl.TEXTURE_2D, null);
-  return {w, h, px:P.px};
+  return {w, h, px, pool:px!==P.px};
 }
 function readRoi(gl, P, camTex, W, H, size=256){
   gl.bindFramebuffer(gl.FRAMEBUFFER, P.camFbo);
@@ -2672,7 +3899,7 @@ function capture(view, camTo){
   const dist=Math.hypot(mid[0]-camTo[12], mid[1]-camTo[14]);
   Object.assign(ob, {wall:S.walls.length-1, t:now(), tTap:tap, z:+L.z.toFixed(1), n:L.n, frac:+L.frac.toFixed(2),
     ndc:[L.A, L.B], cam:[camTo[12], camTo[13], camTo[14]], len:+len.toFixed(3), dist:+dist.toFixed(2),
-    good:L.good, flipY:S.flipY});
+    good:L.good, flipY:S.flipY, ...(MESS ? {an:messAn(view.transform.matrix)} : {})});
   const cur=S.walls[S.walls.length-1];
   cur.push(ob);
   LOG.obs.push(ob);
@@ -2783,7 +4010,7 @@ function autoCapture(view, camTo){
   Object.assign(ob, {auto:true, t, z:+L.z.toFixed(1), n:L.n, frac:+L.frac.toFixed(2), ndc:[L.A, L.B], cam:pos,
     len:+Math.hypot(seg[1][0]-seg[0][0], seg[1][1]-seg[0][1]).toFixed(3), dist:+range.toFixed(2), good:true,
     flipY:S.flipY, speed:+(S.speed||0).toFixed(0), moved:Number.isFinite(moved) ? +moved.toFixed(3) : null,
-    turn:Number.isFinite(turn) ? +turn.toFixed(1) : null, Hlive:+H.toFixed(3)});
+    turn:Number.isFinite(turn) ? +turn.toFixed(1) : null, Hlive:+H.toFixed(3), ...(MESS ? {an:messAn(view.transform.matrix)} : {})});
   S.pool.push(ob);
   LOG.obs.push(ob);
   if(navigator.vibrate) navigator.vibrate(8);
@@ -2806,9 +4033,9 @@ function slim(ob){ return {ra:ob.ra, rb:ob.rb, t:ob.t}; }
 function makeSolver(){
   try{
     const src=$('geo').textContent+`
-onmessage=e=>{ const {id,obs,opt}=e.data; let r=null, err=null;
+onmessage=e=>{ const {id,obs,opt}=e.data; let r=null, err=null; const t0=performance.now();
   try{ r=RAUMSKIZZE.solveSweepAuto(obs,opt); }catch(x){ err=String(x && x.message || x); }
-  postMessage({id,r,err}); };`;
+  postMessage({id,r,err,ms:performance.now()-t0}); };`;
     const w=new Worker(URL.createObjectURL(new Blob([src], {type:'text/javascript'})));
     w.onmessage=e=>onSolved(e.data);
     w.onerror=e=>{ ev('worker-fehler', {msg:String(e.message||e)}); S.worker=null; S.solveBusy=false; };
@@ -2823,10 +4050,12 @@ function requestSolve(){
   if(S.worker) S.worker.postMessage(msg);
   else setTimeout(()=>{ let r=null, err=null; try{ r=G.solveSweepAuto(msg.obs, msg.opt); }catch(x){ err=String(x); } onSolved({id:msg.id, r, err}); }, 0);
 }
-function onSolved({id, r, err}){
+function onSolved({id, r, err, ms}){
   // Antwort auf eine Anfrage eines frueheren Durchlaufs: nichts anfassen.
   if(id!==S.solveId) return;
   S.solveBusy=false;
+  // solveIn: Rechenzeit im Worker (trennt Rechnen und Warten, live 2.3) - nur Protokoll.
+  if(Number.isFinite(ms)){ LOG.timings.solveIn.push(+ms.toFixed(1)); if(LOG.timings.solveIn.length>2000) LOG.timings.solveIn.shift(); }
   if(err) ev('auswertung-fehler', {msg:err});
   if(r){
     const ms=performance.now()-S.solveSent;
@@ -2835,6 +4064,242 @@ function onSolved({id, r, err}){
   }
   if(S.solveDirty) requestSolve();
 }
+// ------------------------------------------------ Bild-Worker (Stand 6, ?karte=1)
+// ARCHITEKTUR v3 5.2, 9.4 Punkt 1. Jedes ausgewertete Bild mit Bezug geht nach der alten Pipeline
+// (snapCenter, autoCapture, recFrame, trackFrame lesen es vorher) per Transfer an den Bild-Worker
+// (Quelltext: geo-Block + Block "bildwerk"). readSmall liest dazu in einen Puffer aus dem Pool
+// (BILD_POOL Stueck); ist er leer - der Worker haengt oder verdraengt nicht schnell genug -, liest es wie
+// bisher in P.px, und das Bild geht nicht hin (LOG.bild.poolLeer). Die alte Pipeline merkt davon nichts.
+// Zurueck kommen Segmente (Ansicht „Segmente“, Aufnahme segmente.bin), die Senkrechten fuer die Anzeige
+// (G.senkLive bleibt im Hauptfaden) und die Zeiten. Ein Fehler des Workers nimmt nur ihn selbst mit.
+const BILD_POOL=3;
+const BW={w:null, pool:[], groesse:0, k:0, offen:new Map(), letzt:null};
+function bildWerkNeu(){
+  try{
+    const src=$('geo').textContent+'\n'+$('bildwerk').textContent;
+    const w=new Worker(URL.createObjectURL(new Blob([src], {type:'text/javascript'})));
+    w.onmessage=e=>{ try{ onBild(e.data); }catch(x){ if(!S.warned.bildE){ S.warned.bildE=true; ev('bild-fehler', {msg:String(x && x.message || x)}); } } };
+    w.onerror=e=>{ ev('bild-worker-fehler', {msg:String(e && e.message || e)}); if(BW.w===w) BW.w=null; };
+    return w;
+  }catch(e){ ev('bild-worker-fehlt', {msg:String(e && e.message || e)}); return null; }
+}
+function bildWerkEnde(){
+  if(BW.w){ try{ BW.w.terminate(); }catch(e){} }
+  Object.assign(BW, {w:null, pool:[], groesse:0, offen:new Map(), letzt:null});
+}
+// Pool-Puffer fuer n Bytes (Ziel von readSmall), null wenn kein Worker oder Pool leer.
+function bildPuffer(n){
+  if(!BW.w) return null;
+  if(n!==BW.groesse){ BW.groesse=n; BW.pool=Array.from({length:BILD_POOL}, ()=>new ArrayBuffer(n)); }
+  const b=BW.pool.pop();
+  if(!b){ LOG.bild.poolLeer++; return null; }
+  return new Uint8Array(b);
+}
+const bildZurueck=buf=>{ if(buf && buf.byteLength===BW.groesse && BW.pool.length<BILD_POOL) BW.pool.push(buf); };
+// Auftrag (3.1) an den Worker; senk jedes 2. Bild (wie senkFrame), an im Messmodus. tt = t der Zustandszeile
+// dieses Bilds (5.2: KZ.warte ordnet das Ergebnis ueber t der Pose zu), dasselbe t in BW.offen -> bild.jsonl.
+function bildSenden(img, view, camTo, k, vi, tt){
+  const buf=img.px.buffer;
+  const a={typ:'bild', k, vi, t:tt, ep:S.ep, fmt:'rgba', w:img.w, h:img.h, buf, voll:null, camTo:Array.from(camTo), proj:Array.from(view.projectionMatrix),
+    flipY:S.flipY, senk:SENK && k%2===0, ...(MESS ? {an:messAn(view.transform.matrix)} : {})};
+  BW.offen.set(k, {t:tt, tSend:performance.now(), camTo:a.camTo, kF:S.frames.length});
+  BW.w.postMessage(a, [buf]);
+  LOG.bild.gesendet++;
+}
+function bildOpt(){ if(BW.w) BW.w.postMessage({typ:'opt', opt:{luma:S.ansicht==='segmente'}}); }
+function onBild(m){
+  if(m.typ==='bereit'){ LOG.bild.m3=m.m3; return; }
+  bildZurueck(m.buf);
+  const a=BW.offen.get(m.k); BW.offen.delete(m.k);
+  if(m.typ==='verdraengt'){ LOG.bild.verdraengt++; return; }
+  if(m.typ==='fehler'){ LOG.bild.fehler++; if(LOG.bild.fehler<=3) ev('bild-fehler', {k:m.k, msg:m.msg}); return; }
+  if(m.typ!=='ergebnis' || !a) return;
+  const antwort=performance.now()-a.tSend, T=LOG.timings;
+  LOG.bild.ergebnisse++; LOG.bild.segmente+=m.n;
+  T.bild.push(+antwort.toFixed(1)); T.bildW.push(m.ms.gesamt); if(m.senk) T.senkW.push(m.ms.senk);
+  for(const key of ['bild', 'bildW', 'senkW']) if(T[key].length>2000) T[key].shift();
+  recSegmente(m, a);
+  REC.bj.push({k:m.k, t:a.t, n:m.n, antwort:+antwort.toFixed(1), ms:m.ms, psi0:m.psi0, senk:m.senk ? m.senk.length : null}); REC.bjN++;
+  BW.letzt={...m, a};
+  if(m.senk) senkAusBild(m.senk, a);
+}
+// segmente.bin (live 3.11): u32 k, f32 t, u16 n, u16 w, u16 h, dann n × (i16 x1, y1, x2, y2 in 1/8 px,
+// u8 Salienz/4, u8 Klasse: Bits 0-1 cls, Bits 2-4 man + 1).
+function recSegmente(m, a){
+  if(!REC.name) return;
+  const n=Math.min(m.n, 65535), b=new ArrayBuffer(14+10*n), dv=new DataView(b), SG=G.KG.SEG, q=x=>Math.max(-32768, Math.min(32767, Math.round(x*8)));
+  dv.setUint32(0, m.k, true); dv.setFloat32(4, a.t, true); dv.setUint16(8, n, true); dv.setUint16(10, m.w, true); dv.setUint16(12, m.h, true);
+  for(let i=0;i<n;i++){ const o=14+10*i, j=i*SG;
+    dv.setInt16(o, q(m.seg[j]), true); dv.setInt16(o+2, q(m.seg[j+1]), true); dv.setInt16(o+4, q(m.seg[j+2]), true); dv.setInt16(o+6, q(m.seg[j+3]), true);
+    dv.setUint8(o+8, Math.min(255, Math.round(m.seg[j+4]/4))); dv.setUint8(o+9, (m.cls[i]&3)|((m.man[i]+1)<<2)); }
+  REC.sgBuf.push(new Uint8Array(b)); REC.sgN++; REC.sgSeg+=n; REC.sgBytes+=b.byteLength;
+}
+// Senkrechte aus dem Bild-Worker (ersetzt senkFrame mit ?karte=1): dieselbe Regel - zurueckgesetzt bei
+// neuem Bodenbezug, Pause, Ersatzbezug, Anker oder Tracking weg, nach SENK_STALE ohne Lauf neu gezaehlt;
+// G.senkLive mit der Pose DES Bilds und dem Live-Modell von jetzt.
+function senkAusBild(found, a){
+  if(!SENK || !S.auto || S.phase!=='waende') return;
+  if(S.senkK!==S.frames.length){ S.senk=null; S.senkK=S.frames.length; }
+  if(S.paused || S.subst || S.anchorLost || S.trackLost){ S.senk=null; return; }
+  if(S.senk && now()-S.senk.t>SENK_STALE) S.senk=null;
+  if(a.kF!==S.frames.length) return;
+  const sol=S.sol, M=liveModel(), H=sol && sol.H;
+  if(!M || !(H>0)) return;
+  const t0=performance.now();
+  S.senk={...G.senkLive(S.senk, found, a.camTo, M, {H, decke:SENK_DECKE}), t:now()};
+  LOG.timings.senk.push(+(performance.now()-t0).toFixed(2)); if(LOG.timings.senk.length>2000) LOG.timings.senk.shift();
+}
+
+// ------------------------------------------------ Messmodus (Stand 6, ?mess=1)
+// Fuer die Messsitzung S6-M (ARCHITEKTUR v3 9.4 Punkt 7, 9.5): misst, was die SLAM-Recherche offen
+// laesst. Das Anker-Netz (7a) steht bei netzFrame; hier IMU (7b), readPixels-Kosten (7d), Loeserzeit
+// im Mess-Worker (7e), Takt je 10 s und die Bodenmarken. Alles nur Aufnahme (imu.jsonl, messung.jsonl) und
+// Ereignisse; nichts wirkt auf Bezug, Erfassung oder Auswertung. Ohne ?mess=1 laeuft davon nichts: kein
+// devicemotion-Hoerer, kein Mess-Worker, kein zusaetzliches readPixels, Netz wie Stand 5.
+// MESS_DANACH_MS bleibt unter den 2 s, die startAR auf recStop des vorigen Laufs wartet.
+const MESS_RP_DT=2, MESS_RP_KLEIN=[480, 1080], MESS_TAKT=10, MESS_LOESER_ERST=10, MESS_LOESER_DT=60, MESS_DANACH_MS=1500;
+function messStart(){
+  const M=S.mess={w:null, id:0, offen:null, danach:null, loeserNext:now()+MESS_LOESER_ERST,
+    rp:{next:now()+MESS_RP_DT, n:0, nG:0, nK:0, min:-1, pbo:null, ziele:{}, camFbo:null}, takt:{t0:now(), n:0, ms:[]}, gyro:null};
+  try{
+    const src=$('geo').textContent+'\n'+$('messwerk').textContent;
+    M.w=new Worker(URL.createObjectURL(new Blob([src], {type:'text/javascript'})));
+    M.w.onmessage=e=>onMessLoeser(M, e.data);
+    M.w.onerror=e=>{ ev('mess-worker-fehler', {msg:String(e && e.message || e)}); M.w=null; if(M.danach){ M.danach(); M.danach=null; } };
+  }catch(e){ ev('mess-worker-fehlt', {msg:String(e && e.message || e)}); }
+  addEventListener('devicemotion', onImu);
+  if(typeof Gyroscope==='function'){
+    try{ const g=new Gyroscope({frequency:60});
+      g.addEventListener('reading', ()=>{ if(g.timestamp==null) return; REC.imu.push({q:'gyro', t:+((g.timestamp-T0)/1000).toFixed(4), ta:now(), ts:+g.timestamp.toFixed(3),
+        w:[+g.x.toFixed(5), +g.y.toFixed(5), +g.z.toFixed(5)]}); REC.imuN++; LOG.mess.gyro++; });
+      g.addEventListener('error', e=>{ LOG.mess.gyroFehler=String(e && e.error && (e.error.name+': '+e.error.message) || e); });
+      g.start(); M.gyro=g; }
+    catch(e){ LOG.mess.gyroFehler=String(e && e.name || e); }
+  } else LOG.mess.gyroFehler='Gyroscope fehlt';
+  ev('mess-start', {worker:!!M.w, gyro:!!M.gyro});
+}
+function messStopp(){
+  const M=S.mess; if(!M) return;
+  removeEventListener('devicemotion', onImu);
+  if(M.gyro){ try{ M.gyro.stop(); }catch(e){} M.gyro=null; }
+  // Ohne Aufnahme (Vorbereitung gescheitert) wartet kein recStop auf die Messung danach.
+  if(!REC.on && M.w){ try{ M.w.terminate(); }catch(e){} M.w=null; }
+}
+// devicemotion (7b): t in der Zeitbasis von now() aus timeStamp, ta = Eingang, ts roh.
+function onImu(e){
+  const r=e.rotationRate, a=e.accelerationIncludingGravity, f=x=>x==null ? null : +x.toFixed(5);
+  REC.imu.push({t:+((e.timeStamp-T0)/1000).toFixed(4), ta:now(), ts:+(+e.timeStamp).toFixed(3), iv:e.interval ?? null,
+    rr:r ? [f(r.alpha), f(r.beta), f(r.gamma)] : null, ag:a ? [f(a.x), f(a.y), f(a.z)] : null});
+  REC.imuN++; LOG.mess.imu++;
+}
+const messZeile=z=>{ REC.mg.push(z); REC.mgN++; };
+// readPixels (7d): alle MESS_RP_DT s eine Lesung, synchron oder asynchron (PIXEL_PACK_BUFFER + fenceSync);
+// 480×1080 aus dem gezeichneten Kamerabild, an der ersten Lesung jeder Minute statt dessen die volle
+// Kameratextur (W×H, direkt). Die Art wechselt je Groesse an eigenem Zaehler (nG, nK) fest ab, beginnend mit
+// sync: so liefert jede Groesse beide Arten, unabhaengig davon, wie viele kleine Lesungen eine Minute hat. Die
+// erste volle Lesung (sync, Sitzungsstart) ist kalt - in der Auswertung (d) auslassen. Je Groesse eigenes
+// Ziel (Textur, FBO, PBO), nichts davon teilt readSmall. Gemessen: sync die Zeit um readPixels; pbo die Zeit
+// fuer readPixels in den Puffer (msAuftrag), bis der Zaun steht (msWarte, bilder) und fuer getBufferSubData (ms).
+function messZiel(gl, w, h, kamera){
+  const R=S.mess.rp, key=(kamera ? 'k' : 'z')+w+'x'+h; let Z=R.ziele[key];
+  if(Z) return Z;
+  Z=R.ziele[key]={w, h, kamera, fbo:gl.createFramebuffer(), tex:null, px:new Uint8Array(w*h*4), pbo:null};
+  if(!kamera){ Z.tex=gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, Z.tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, Z.fbo); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, Z.tex, 0);
+    gl.bindTexture(gl.TEXTURE_2D, null); }
+  return Z;
+}
+function messLesen(gl, camTex, W, H){
+  const M=S.mess, R=M && M.rp, t=now();
+  if(!R || t<R.next || R.pbo) return;
+  R.next=t+MESS_RP_DT; R.n++;
+  const min=Math.floor(t/60), gross=min!==R.min; if(gross) R.min=min;
+  const art=(gross ? R.nG++ : R.nK++)%2 ? 'pbo' : 'sync', Z=gross ? messZiel(gl, W, H, true) : messZiel(gl, MESS_RP_KLEIN[0], MESS_RP_KLEIN[1], false), P=S.gpu;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, Z.fbo);
+  if(Z.kamera){ gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, camTex, 0);
+    const st=gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    if(st!==gl.FRAMEBUFFER_COMPLETE){ gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, null, 0);
+      messZeile({typ:'readPixels', t, w:Z.w, h:Z.h, art, quelle:'kamera', fehler:'fbo '+st}); return; } }
+  else { gl.viewport(0, 0, Z.w, Z.h);
+    gl.disable(gl.BLEND); gl.disable(gl.DEPTH_TEST); gl.disable(gl.SCISSOR_TEST); gl.disable(gl.CULL_FACE);
+    gl.useProgram(P.prog); gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, camTex); gl.uniform1i(P.uT, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, P.buf); gl.enableVertexAttribArray(P.loc); gl.vertexAttribPointer(P.loc, 2, gl.FLOAT, false, 0, 0);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); gl.bindTexture(gl.TEXTURE_2D, null); }
+  const quelle=Z.kamera ? 'kamera' : 'zeichnen';
+  if(art==='sync'){ const t0=performance.now(); gl.readPixels(0, 0, Z.w, Z.h, gl.RGBA, gl.UNSIGNED_BYTE, Z.px);
+    messZeile({typ:'readPixels', t, w:Z.w, h:Z.h, art, quelle, ms:+(performance.now()-t0).toFixed(3)}); }
+  else {
+    if(!Z.pbo){ Z.pbo=gl.createBuffer(); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, Z.pbo); gl.bufferData(gl.PIXEL_PACK_BUFFER, Z.w*Z.h*4, gl.STREAM_READ); }
+    else gl.bindBuffer(gl.PIXEL_PACK_BUFFER, Z.pbo);
+    const t0=performance.now(); gl.readPixels(0, 0, Z.w, Z.h, gl.RGBA, gl.UNSIGNED_BYTE, 0);
+    const msAuftrag=performance.now()-t0;
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+    const zaun=gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0); gl.flush();
+    R.pbo={Z, zaun, t, t0, msAuftrag, bilder:0, quelle}; }
+  if(Z.kamera) gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, null, 0);
+  LOG.mess.readPixels++;
+}
+// Je XR-Bild (Messmodus): Zaun der asynchronen Lesung pruefen, Takt je MESS_TAKT s, Loeser-Takt.
+function messBild(gl, tFrame){
+  const M=S.mess; if(!M) return;
+  const R=M.rp, p=R.pbo;
+  if(p){ p.bilder++;
+    try{ const st=gl.clientWaitSync(p.zaun, 0, 0);
+      if(st===gl.ALREADY_SIGNALED || st===gl.CONDITION_SATISFIED){ const msWarte=performance.now()-p.t0, t1=performance.now();
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, p.Z.pbo); gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, p.Z.px); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+        messZeile({typ:'readPixels', t:p.t, w:p.Z.w, h:p.Z.h, art:'pbo', quelle:p.quelle, ms:+(performance.now()-t1).toFixed(3), msAuftrag:+p.msAuftrag.toFixed(3),
+          msWarte:+msWarte.toFixed(3), bilder:p.bilder});
+        gl.deleteSync(p.zaun); R.pbo=null; }
+      else if(st===gl.WAIT_FAILED || p.bilder>90){ messZeile({typ:'readPixels', t:p.t, w:p.Z.w, h:p.Z.h, art:'pbo', quelle:p.quelle, fehler:st===gl.WAIT_FAILED ? 'WAIT_FAILED' : 'Zaun nach 90 Bildern offen', bilder:p.bilder});
+        gl.deleteSync(p.zaun); R.pbo=null; } }
+    catch(e){ R.pbo=null; messZeile({typ:'readPixels', t:p.t, art:'pbo', fehler:String(e && e.message || e)}); } }
+  const K=M.takt, t=now(); K.n++; K.ms.push(performance.now()-tFrame);
+  if(t-K.t0>=MESS_TAKT){ const s=[...K.ms].sort((a,b)=>a-b), q=f=>+s[Math.min(s.length-1, Math.floor(f*s.length))].toFixed(2), dt=t-K.t0;
+    messZeile({typ:'takt', t, dt:+dt.toFixed(3), xrHz:+(K.n/dt).toFixed(2), ms:{med:q(0.5), p90:q(0.9), p99:q(0.99), max:q(1)}, n:K.n});
+    K.t0=t; K.n=0; K.ms=[]; }
+  if(M.w && !M.offen && t>=M.loeserNext){ M.loeserNext=t+MESS_LOESER_DT; M.offen=++M.id; M.w.postMessage({typ:'loeser', id:M.offen, phase:'waehrend'}); }
+}
+// Antwort des Mess-Workers M; gehoert er nicht mehr zur laufenden Sitzung, wird sie verworfen.
+function onMessLoeser(M, m){
+  if(!M || !m || m.typ!=='loeser') return;
+  if(m.id===M.offen) M.offen=null;
+  const d=m.phase==='danach' ? M.danach : null;
+  if(d) M.danach=null;
+  if(M===S.mess){
+    if(m.err) ev('mess-loeser-fehler', {msg:m.err});
+    const t=now();
+    for(const z of m.zeilen || []) messZeile({...z, t});
+    LOG.mess.loeser.push({t, phase:m.phase, n:(m.zeilen||[]).map(z=>[z.fall, +(z.msAufbau+z.msSymb+z.msNum+z.msLoes).toFixed(3)])});
+  }
+  if(d) d();
+}
+// Nach dem Ende einmal (in recStop, vor dem letzten Schreiben); hoechstens MESS_DANACH_MS warten.
+function messLoeserDanach(){
+  const M=S.mess; if(!M || !M.w) return Promise.resolve();
+  return new Promise(res=>{ const fertig=()=>{ clearTimeout(tm); try{ M.w.terminate(); }catch(e){} M.w=null; res(); };
+    const tm=setTimeout(()=>{ ev('mess-loeser-zeitueberschreitung'); M.danach=null; fertig(); }, MESS_DANACH_MS);
+    M.danach=fertig; M.w.postMessage({typ:'loeser', id:++M.id, phase:'danach'}); });
+}
+// Bodenmarke (7a): tiefster nach oben zeigender Treffer am Fadenkreuz (wie die Bodensuche) in local,
+// Ereignis marke {id, p, an (Kamera rel. Messanker), pAn (Treffer rel. Messanker)}. Jede Marke zweimal
+// anpeilen (vor und nach einem Ortungsverlust); die Nummer zaehlt die Peilungen.
+function messMarke(frame, view){
+  S.markeReq=false;
+  let best=null;
+  for(const h of (S.hit ? frame.getHitTestResults(S.hit) : [])){ const hp=h.getPose(S.ref); if(!hp) continue;
+    const n=quatUp(hp.transform.orientation), p=hp.transform.position;
+    if(Math.acos(Math.max(-1, Math.min(1, n[1])))*180/Math.PI>=15) continue;
+    if(!best || p.y<best[1]) best=[p.x, p.y, p.z]; }
+  if(!best){ hint('Marke: kein Bodentreffer – Fadenkreuz auf die Marke am Boden.', 'warn'); ev('marke-ohne-treffer'); return; }
+  const id=++S.markeN; LOG.mess.marken++;
+  ev('marke', {id, p:best.map(x=>netzR(x, 4)), an:messAn(view.transform.matrix), pAn:messAnPunkt(best)});
+  hint(`Marke ${id} gepeilt.`);
+  if(navigator.vibrate) navigator.vibrate([20, 40, 20]);
+}
+
 function applySolution(r){
   const wasClosed=autoClosed(S.sol);
   S.sol=r;
@@ -3009,13 +4474,21 @@ const wrapPi=a=>Math.atan2(Math.sin(a), Math.cos(a));
 // Erfassung oder Auswertung. ?netz=0 schaltet ab.
 const NETZ=Q.get('netz')!=='0';
 const NETZ_DT=12, NETZ_MAX=8, NETZ_TAKT=0.5, NETZ_JUNG=4, NETZ_NACH=1, NETZ_D=0.03, NETZ_PSI=0.5*Math.PI/180, NETZ_EVMAX=40;
+// Messmodus (?mess=1, 9.4 Punkt 7a): ein Messanker je NETZ_WEG m Kameraweg (statt je NETZ_DT s), hoechstens
+// NETZ_MAX_M; Lagen bei jeder Aenderung ueber NETZ_AEND_D / NETZ_AEND_PSI (Pruefung je XR-Bild), dazu je
+// Bild die letzte 1 s vor und 2 s nach jedem Sprung, jeder Luecke und jedem ref-reset (NETZ_MESS).
+// Jede Erfassung, jeder Bild-Auftrag und jede Marke traegt an = Kamera relativ zum naechsten
+// verfolgten Messanker. Ohne ?mess=1 bleibt alles wie Stand 5 (NETZ_DT, NETZ_MAX).
+const NETZ_WEG=1.5, NETZ_MAX_M=16, NETZ_AEND_D=0.001, NETZ_AEND_PSI=0.05*Math.PI/180, NETZ_VOR=1, NETZ_NACH_M=2;
+const NETZ_ANZ=MESS ? NETZ_MAX_M : NETZ_MAX;
 const NETZ_COLS=['t','anlass','kx','ky','kz','kpsi','bezug','vorher','anker'];
 // Momentaufnahme bei diesen Ereignissen; ein Befund bei Spruengen und Luecken.
 const NETZ_SNAP=new Set(['anker-sprung','bezug-sprung','anker-zurück-nach-sprung','tracking-zurück','anker-neu','anker-ersetzt','anker-zurück','anker-verloren','anker-gestoppt','relokalisiert']);
 const NETZ_SPRUNG=new Set(['anker-sprung','bezug-sprung','anker-zurück-nach-sprung']);
 function netzNeu(){
   return {ids:new WeakMap(), nId:0, meta:[], net:[], alter:new Map(), busy:false, tReq:-1e9, tTakt:-1e9, evI:LOG.events.length,
-    last:null, lastP:new Map(), nach:[], vorNetz:null, aus:false, tEv:{}, nSpontan:0, nPose:0};
+    last:null, lastP:new Map(), nach:[], vorNetz:null, aus:false, tEv:{}, nSpontan:0, nPose:0,
+    weg:Infinity, wegP:null, mess:null, akt:null, aktBild:-1, sBild:null};
 }
 const netzR=(x,n)=>+x.toFixed(n);
 const netzLen=x=>x==null ? '–' : x>=0.5 ? x.toFixed(2)+' m' : (x*100).toFixed(1)+' cm';
@@ -3167,15 +4640,15 @@ function netzAuswerten(s, anl, nach){
 }
 function netzSetzen(frame, pose, t){
   const N=S.netz;
-  if(N.busy || t-N.tReq<NETZ_DT || !frame.createAnchor || !S.anchor || !S.Tcur) return;
+  if(N.busy || (MESS ? N.weg<NETZ_WEG : t-N.tReq<NETZ_DT) || !frame.createAnchor || !S.anchor || !S.Tcur) return;
   if(S.track!=='ok' || S.anchorLost || S.subst || S.substBad || S.jumpHold || S.trackLost || t<(S.settleUntil||0)) return;
   const m=pose.transform.matrix, soll=[m[12], S.Tcur[13], m[14]];
-  N.busy=true; N.tReq=t;
-  // Den aeltesten vorher loeschen: ARCore haelt so nie mehr als NETZ_MAX Messanker.
+  N.busy=true; N.tReq=t; N.weg=0;
+  // Den aeltesten vorher loeschen: ARCore haelt so nie mehr als NETZ_ANZ Messanker.
   // Erst aus der Liste, dann delete() - danach wirft anchorSpace.
   const drop=max=>{ while(N.net.length>max){ const o=N.net.shift(), mo=N.meta.find(x=>x.id===o.id); if(mo) mo.weg=now();
     try{ o.a.delete(); }catch(e){} LOG.netz.geloescht++; } };
-  drop(NETZ_MAX-1);
+  drop(NETZ_ANZ-1);
   const fail=e=>{ if(S.netz===N) N.busy=false; LOG.netz.fehl++; if(LOG.netz.fehl<=3) ev('netz-anker-fehlgeschlagen', {msg:String(e && e.message || e)}); };
   try{
     frame.createAnchor(new XRRigidTransform({x:soll[0], y:soll[1], z:soll[2]}, {x:0, y:0, z:0, w:1}), S.ref).then(a=>{
@@ -3183,11 +4656,62 @@ function netzSetzen(frame, pose, t){
       N.busy=false;
       const id=netzId(a, 'netz', {soll:soll.map(x=>netzR(x, 4)), tAnfrage:t});
       N.alter.set(id, now()); N.net.push({a, id}); LOG.netz.gesetzt++;
-      drop(NETZ_MAX);   // nur falls eine verspaetete Zusage dazukam
+      drop(NETZ_ANZ);   // nur falls eine verspaetete Zusage dazukam
       LOG.netz.max=Math.max(LOG.netz.max, N.net.length+(S.anchor ? 1 : 0)+(S.anchorPrev && S.anchorPrev!==S.anchor ? 1 : 0));
     }, fail);
   }catch(e){ fail(e); }
 }
+// Messmodus: Kameraweg in local (waagerecht) seit dem letzten Messanker; Schritte ueber 0,5 m je Bild
+// sind Spruenge, kein Weg.
+const NETZ_MESS=new Set([...NETZ_SNAP, 'tracking-verloren', 'ref-reset', 'pose-sprung']);
+function netzWeg(pose){
+  const N=S.netz, m=pose.transform.matrix, p=[m[12], m[14]];
+  if(N.wegP && S.track==='ok'){ const d=Math.hypot(p[0]-N.wegP[0], p[1]-N.wegP[1]); if(d<0.5) N.weg+=d; }
+  N.wegP=p;
+}
+// Gleiche Lage (Messmodus): beide verfolgt und hoechstens NETZ_AEND_D / NETZ_AEND_PSI auseinander, oder
+// beide im selben Nicht-Zustand (0 pausiert, -1 gestoppt).
+const netzGleich=(a,b)=>Array.isArray(a) && Array.isArray(b) ? netzDist(a, b)<=NETZ_AEND_D && Math.abs(wrapPi(a[3]-b[3]))<=NETZ_AEND_PSI : a===b;
+// Je XR-Bild im Messmodus: Lage aller Anker; geschrieben bei einer Aenderung ('aenderung'), beim Anlass
+// selbst, aus dem Ringpuffer die letzte NETZ_VOR s davor ('vor:<anlass>') und NETZ_NACH_M s lang jedes
+// Bild danach ('nach'). Die Zeilen der Vorlaufs stehen mit ihrer eigenen Zeit, also nicht nach t sortiert.
+function netzMess(frame, pose, t, anlM){
+  const N=S.netz, M=N.mess || (N.mess={ring:[], nachBis:-1, letzt:new Map()});
+  const s=N.sBild || netzAufnahme(frame, pose, t, 0);
+  N.akt=s; N.aktBild=S.frame;
+  let geschrieben=!!N.sBild;
+  if(anlM.length){
+    for(const r of M.ring) if(!r.geschrieben){ netzZeile({...r, anlass:'vor:'+anlM.join(',')}); r.geschrieben=true; }
+    M.nachBis=t+NETZ_NACH_M;
+    if(!geschrieben){ netzZeile({...s, anlass:anlM.join(',')}); geschrieben=true; }
+  }
+  if(!geschrieben && t<=M.nachBis){ netzZeile({...s, anlass:'nach'}); geschrieben=true; }
+  if(!geschrieben){ for(const [id,P] of s.A) if(!netzGleich(M.letzt.get(id), P)){ netzZeile({...s, anlass:'aenderung'}); geschrieben=true; LOG.mess.aenderung++; break; } }
+  if(geschrieben) for(const [id,P] of s.A) M.letzt.set(id, P);
+  M.ring.push({...s, geschrieben}); while(M.ring.length && t-M.ring[0].t>NETZ_VOR) M.ring.shift();
+}
+// an (Messmodus): Kamera (bzw. Punkt) relativ zum naechsten verfolgten Messanker dieses Bilds,
+// [id, x, y, z, psi] im 4-FG-Rahmen des Ankers (Gier wie Tpsi, Rahmen wie der Bodenbezug T: rel = Ta⁻¹·m),
+// psi = G.blickPlan(rel); fuer einen Punkt [id, x, y, z]. 0, wenn keiner verfolgt ist.
+function netzNaechster(p){
+  const N=S.netz, s=N && N.aktBild===S.frame ? N.akt : null; if(!s) return null;
+  let best=null, bd=Infinity;
+  for(const e of N.net){ const P=s.A.get(e.id); if(!Array.isArray(P)) continue; const d=Math.hypot(P[0]-p[0], P[1]-p[1], P[2]-p[2]); if(d<bd){ bd=d; best={id:e.id, P}; } }
+  if(!best) return null;
+  const P=best.P, c=Math.cos(P[3]), sn=Math.sin(P[3]);
+  return {id:best.id, Ta:[c,0,-sn,0, 0,1,0,0, sn,0,c,0, P[0],P[1],P[2],1]};
+}
+function messAn(m){
+  const a=MESS && m ? netzNaechster([m[12], m[13], m[14]]) : null; if(!a) return 0;
+  const rel=G.m4mul(G.m4inv(a.Ta), m);
+  return [a.id, netzR(rel[12], 4), netzR(rel[13], 4), netzR(rel[14], 4), netzR(G.blickPlan(rel), 5)];
+}
+function messAnPunkt(p){
+  const a=MESS && p ? netzNaechster(p) : null; if(!a) return 0;
+  const Ti=G.m4inv(a.Ta), x=Ti[0]*p[0]+Ti[4]*p[1]+Ti[8]*p[2]+Ti[12], y=Ti[1]*p[0]+Ti[5]*p[1]+Ti[9]*p[2]+Ti[13], z=Ti[2]*p[0]+Ti[6]*p[1]+Ti[10]*p[2]+Ti[14];
+  return [a.id, netzR(x, 4), netzR(y, 4), netzR(z, 4)];
+}
+
 // Je Bild mit Pose, nach dem Bezug: Ereignisse dieses Bilds lesen, im Takt oder
 // bei einem Anlass aufnehmen und befinden, dann ggf. einen Messanker setzen.
 function netzFrame(frame, pose){
@@ -3195,9 +4719,11 @@ function netzFrame(frame, pose){
   if(!NETZ || !N || N.aus || S.phase!=='waende') return;
   const t0=performance.now(); let did=false;
   try{
-    const t=now(), anl=[];
-    for(let i=N.evI;i<LOG.events.length;i++){ const ty=LOG.events[i].type; if(NETZ_SNAP.has(ty) && !anl.includes(ty)) anl.push(ty); }
+    const t=now(), anl=[], anlM=[];
+    for(let i=N.evI;i<LOG.events.length;i++){ const ty=LOG.events[i].type; if(NETZ_SNAP.has(ty) && !anl.includes(ty)) anl.push(ty);
+      if(MESS && NETZ_MESS.has(ty) && !anlM.includes(ty)) anlM.push(ty); }
     N.evI=LOG.events.length;
+    if(MESS) netzWeg(pose);
     if(N.busy && t-N.tReq>5) N.busy=false;   // Zusage kam nicht (Chromium verwirft Anfragen nach 3 s)
     const nach=N.nach.filter(r=>t>=r.t);
     if(anl.length || nach.length || t-N.tTakt>=NETZ_TAKT){
@@ -3208,9 +4734,11 @@ function netzFrame(frame, pose){
         netzAuswerten(s, anl, nach);
         netzZeile(s);
         for(const [id,P] of s.A) if(Array.isArray(P)) N.lastP.set(id, {t, P});
-        N.last=s; LOG.netz.takte++;
+        N.last=s; LOG.netz.takte++; N.sBild=s;
       }
     }
+    if(MESS) netzMess(frame, pose, t, anlM);
+    N.sBild=null;
     netzSetzen(frame, pose, t);
   }catch(e){ N.aus=true; ev('netz-fehler', {msg:String(e && e.message || e)}); }
   if(did){ LOG.timings.netz.push(+(performance.now()-t0).toFixed(2)); if(LOG.timings.netz.length>2000) LOG.timings.netz.shift(); }
@@ -3218,9 +4746,9 @@ function netzFrame(frame, pose){
 
 // ---------------------------------------------------------- Bild-Schleife
 function onFrame(t, frame){
-  const session=frame.session;
+  const session=frame.session, tFrame=performance.now();
   session.requestAnimationFrame(onFrame);
-  S.frame++;
+  S.frame++; S.xrSeit++;
   if(S.lastT){ S.fps.push(1000/(t-S.lastT)); if(S.fps.length>60) S.fps.shift(); }
   S.lastT=t;
   const gl=S.gl, layer=session.renderState.baseLayer;
@@ -3255,6 +4783,7 @@ function onFrame(t, frame){
     drawOverlay(null, null);
     arState();
     stats();
+    if(MESS) messBild(gl, tFrame);
     return;
   }
   if(S.trackLost){
@@ -3271,8 +4800,12 @@ function onFrame(t, frame){
   }
   if(pose.emulatedPosition){ LOG.tracking.emulated++; S.track='geschätzt'; }
   else { LOG.tracking.ok++; S.track='ok'; }
+  // Signal 2 des Bruchdetektors (3.2.1, 9.4 Punkt 7f): jeder Wechsel von emulatedPosition als Ereignis.
+  if(!!pose.emulatedPosition!==S.emul){ S.emul=!!pose.emulatedPosition; ev('emuliert', {an:S.emul}); }
   const view=pose.views[0];
   { const m=pose.transform.matrix; S.lastView={p:[m[12], m[13], m[14]], yaw:yawOfM(m)}; }
+  // Ebenen mit Geometrie (nur Aufnahme): jedes 3. XR-Bild auf Aenderungen pruefen.
+  if(S.frame%3===0){ try{ recEbenen(frame); }catch(e){ if(!S.warned.eb){ S.warned.eb=true; ev('ebenen-fehler', {msg:String(e && e.message || e)}); } } }
 
   // Stichproben fuer Stufe 0: Ebenen und Tiefe.
   if(S.frame%30===0){
@@ -3294,7 +4827,8 @@ function onFrame(t, frame){
         const d=frame.getDepthInformation(view);
         S.depth=d ? `${d.width}×${d.height}` : 'kein Bild';
         if(d) LOG.depth={w:d.width, h:d.height, rawValueToMeters:d.rawValueToMeters};
-      }catch(e){ S.depth='–'; if(!LOG.depth) LOG.depth={error:String(e && e.message || e)}; }
+        tiefeStatus(d ? (d.data ? 1 : -2) : 0);
+      }catch(e){ S.depth='–'; if(!LOG.depth) LOG.depth={error:String(e && e.message || e)}; tiefeStatus(-1, String(e && e.message || e)); }
     }
   }
 
@@ -3416,7 +4950,7 @@ function onFrame(t, frame){
         const d=Math.hypot(pc[0]-pv.p[0], pc[1]-pv.p[1], pc[2]-pv.p[2]), v=d/(tt-pv.t);
         S.camV=0.8*S.camV+0.2*v;
         if(d>0.15 && v>1.5){ const t0=now()-2, sus=S.pool.filter(o=>o.t>=t0);
-          ev('pose-sprung', {d:+d.toFixed(3), verdaechtig:sus.length}); S.settleUntil=now()+SETTLE; S.camV=0;
+          ev('pose-sprung', {d:+d.toFixed(3), verdaechtig:sus.length}); S.settleUntil=now()+SETTLE; S.camV=0; S.poseSprungN++;
           if(sus.length){ sus.forEach(o=>{ o.suspect=true; }); S.pool=S.pool.filter(o=>!o.suspect); requestSolve(); } } }
       S.prevCam={p:pc, t:tt}; }
   } else if(S.floorY!==null){
@@ -3426,6 +4960,8 @@ function onFrame(t, frame){
   }
   // Anker-Netz: nur Protokoll, nach dem Bezug dieses Bilds (seine Ereignisse stehen schon im Log).
   netzFrame(frame, pose);
+  // Messmodus: Bodenmarke am Fadenkreuz (Knopf „Marke“), nach netzFrame (an braucht die Ankerlagen dieses Bilds).
+  if(MESS && S.markeReq) messMarke(frame, view);
 
   if(S.phase==='boden'){
     // Chromium liefert die Treffer naechste zuerst; ein Tisch ueber dem Boden
@@ -3503,7 +5039,7 @@ function onFrame(t, frame){
         } else if(!S.warned.fbo){ S.warned.fbo=true; ev('fbo-unvollständig', {status:r.status}); }
       }
       if(S.phase==='waende'){
-        const t0=performance.now(), img=readSmall(gl, S.gpu, tex, W, H);
+        const t0=performance.now(), img=readSmall(gl, S.gpu, tex, W, H, KARTE ? bildPuffer : null);
         LOG.timings.small.push(+(performance.now()-t0).toFixed(2));
         if(LOG.timings.small.length>2000) LOG.timings.small.shift();
         S.small=[img.w, img.h];
@@ -3519,8 +5055,21 @@ function onFrame(t, frame){
         // Flag 64 bzw. 8 und Videobild - genau diese Abschnitte soll die Aufnahme zeigen.
         // Aufnahme und Stufe 2 sind Beiwerk: ein Fehler darin nimmt weder das andere noch den
         // Rest des Bilds (Countdown, Zustand, Overlay) mit - wie bei netzFrame.
-        try{ recFrame(frame, view, pose, camTo, img); }catch(e){ recFail('Zustand: '+(e && e.message || e)); }
+        // Stand 6, ?karte=1: ein Bild im Pool-Puffer mit Bezug wird Bild-Auftrag k (steht in der Zeile) und geht
+        // erst nach recFrame und trackFrame an den Bild-Worker - beide lesen es vorher (Transfer leert img.px).
+        // Der Auftrag traegt das t seiner Zeile (ohne Aufnahme das t vor recFrame), nicht die Zeit nach
+        // Video, Tiefe und Verfolgen: sonst passt t in bild.jsonl/segmente.bin nicht zu zustand.jsonl.
+        const kA=img.pool && camTo ? BW.k++ : -1, tZ=now();
+        epocheFort(); S.zeile=null;
+        try{ S.zeile=recFrame(frame, view, pose, camTo, img, kA); }catch(e){ recFail('Zustand: '+(e && e.message || e)); }
         try{ trackFrame(view, camTo); }catch(e){ if(!S.warned.trk){ S.warned.trk=true; ev('verfolgen-fehler', {msg:String(e && e.message || e)}); } }
+        if(img.pool){
+          if(kA>=0){ try{ bildSenden(img, view, camTo, kA, S.zeile ? S.zeile[15] : -1, S.zeile ? S.zeile[0] : tZ); }catch(e){ LOG.bild.fehler++; bildZurueck(img.px.buffer);
+            if(!S.warned.bildS){ S.warned.bildS=true; ev('bild-senden-fehler', {msg:String(e && e.message || e)}); } } }
+          else { LOG.bild.ohneBezug++; bildZurueck(img.px.buffer); }
+        }
+        // Messmodus: readPixels-Kosten (9.4 Punkt 7d) an der Kameratextur dieses Bilds.
+        if(MESS){ try{ messLesen(gl, tex, W, H); }catch(e){ if(!S.warned.rp){ S.warned.rp=true; ev('mess-readpixels-fehler', {msg:String(e && e.message || e)}); } } }
       }
     } else if(!S.warned.tex){ S.warned.tex=true; ev('getCameraImage-null'); }
     gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
@@ -3575,6 +5124,9 @@ function onFrame(t, frame){
   try{ senkFrame(); }catch(e){ if(!S.warned.senk){ S.warned.senk=true; ev('senkrechte-fehler', {msg:String(e && e.message || e)}); } }
   drawMiniMap(camTo);
   stats();
+  // Dauer dieses Bilds in die Zeile (Spalte ms), wenn es eine schrieb.
+  if(S.zeile){ S.zeile[REC_MS]=+(performance.now()-tFrame).toFixed(2); S.zeile=null; }
+  if(MESS) messBild(gl, tFrame);
 }
 // Zustandsbalken. Rot, solange nichts erfasst wird (Tracking weg, Bezug
 // unbrauchbar), gelb im Ersatzbezug. Nach 8 s Stillstand der Ausweg: was
@@ -3710,6 +5262,7 @@ function trkSeg(st, t){
 const SENK=Q.get('senk')!=='0', SENK_HELL=Q.get('senkhell')==='1';
 const SENK_EVERY=2, SENK_STALE=1, SENK_DECKE=Q.get('senkdecke')!=null && Number.isFinite(parseFloat(Q.get('senkdecke'))) ? parseFloat(Q.get('senkdecke')) : 0.75;
 function senkFrame(){
+  if(KARTE) return;   // Stand 6, ?karte=1: der Bild-Worker findet die Senkrechten (senkAusBild)
   if(!SENK || !S.auto || S.phase!=='waende') return;
   if(S.senkK!==S.frames.length){ S.senk=null; S.senkK=S.frames.length; }
   if(S.paused || S.subst || S.anchorLost || S.trackLost){ S.senk=null; return; }
@@ -3771,8 +5324,10 @@ function liveModel(){
 // (Wurzel-Skala, damit schwache Deckenkanten sichtbar bleiben). Unverschmiert gezeichnet:
 // man sieht die echte Aufloesung. Die Overlay-Linien liegen darueber. Gerechnet wird nur,
 // wenn die Ansicht an ist und ein neues Bild da ist (bei ?ds=1920 einige 10 ms je Bild).
-const ANSICHTEN=['kamera','luma','gradient'], ANSICHT_NAME={kamera:'Kamera', luma:'Luma', gradient:'Gradient'};
+// Mit ?karte=1 dazu 'segmente' (Stand 6, live 3.9): drawSegmente.
+const ANSICHTEN=['kamera','luma','gradient', ...(KARTE ? ['segmente'] : [])], ANSICHT_NAME={kamera:'Kamera', luma:'Luma', gradient:'Gradient', segmente:'Segmente'};
 function drawAnsicht(c, cw, ch){
+  if(S.ansicht==='segmente') return drawSegmente(c, cw, ch);
   const img=S.lumaImg; if(!img) return;
   if(S.ansichtFor!==img || S.ansichtFuer!==S.ansicht){
     const {g, w, h}=img; let cv=S.ansichtCv;
@@ -3790,6 +5345,26 @@ function drawAnsicht(c, cw, ch){
   c.save(); c.imageSmoothingEnabled=false;
   if(!img.flipY){ c.translate(0, ch); c.scale(1, -1); }
   c.drawImage(S.ansichtCv, 0, 0, cw, ch); c.restore();
+}
+// Ansicht „Segmente“ (Stand 6, ?karte=1, live 3.9): Luma des Bilds k aus dem Bild-Worker (kommt, solange
+// die Ansicht an ist) und alle ELSED-Segmente desselben Bilds, Farbe nach Klasse: senkrecht blau,
+// waagerecht Richtung 1 rot, Richtung 2 gruen (rechtwinklige Klasse man), sonst waagerecht hell, verworfen
+// grau und duenn. Bild und Segmente hinken dem Kamerabild 100-300 ms nach, liegen aber aufeinander.
+const SEG_STIL=[{color:'rgba(156,163,175,.55)', w:1}, {color:'#3b82f6', w:2.5}, {color:'#ef4444', w:2.5}, {color:'#22c55e', w:2.5}, {color:'#e5e7eb', w:2}];
+function drawSegmente(c, cw, ch){
+  const r=BW.letzt; if(!r) return;
+  const flipY=r.flipY, w=r.w, h=r.h, dpr=devicePixelRatio||1;
+  if(r.luma && S.segFor!==r){
+    let cv=S.segCv; if(!cv || cv.width!==w || cv.height!==h){ cv=S.segCv=document.createElement('canvas'); cv.width=w; cv.height=h; S.segData=cv.getContext('2d').createImageData(w, h); }
+    const d=S.segData.data, g=r.luma; for(let i=0;i<w*h;i++){ d[4*i]=d[4*i+1]=d[4*i+2]=g[i]; d[4*i+3]=255; }
+    cv.getContext('2d').putImageData(S.segData, 0, 0); S.segFor=r; S.segFlip=flipY;
+  }
+  if(S.segCv && S.segFor){ c.save(); c.imageSmoothingEnabled=false; if(!S.segFlip){ c.translate(0, ch); c.scale(1, -1); } c.drawImage(S.segCv, 0, 0, cw, ch); c.restore(); }
+  const SG=G.KG.SEG, KL=G.KG.KL, wege=SEG_STIL.map(()=>[]), px=n=>[(n[0]+1)/2*cw, (1-n[1])/2*ch];
+  for(let i=0;i<r.n;i++){ const k=r.cls[i], j=i*SG, st=k===KL.V ? 1 : (k===KL.O || k===KL.U) ? (r.man[i]===0 ? 2 : r.man[i]===1 ? 3 : 4) : 0;
+    wege[st].push(px(G.pixToNdc(r.seg[j], r.seg[j+1], w, h, flipY)), px(G.pixToNdc(r.seg[j+2], r.seg[j+3], w, h, flipY))); }
+  SEG_STIL.forEach((st,k)=>{ const a=wege[k]; if(!a.length) return; c.strokeStyle=st.color; c.lineWidth=st.w*dpr; c.beginPath();
+    for(let i=0;i<a.length;i+=2){ c.moveTo(a[i][0], a[i][1]); c.lineTo(a[i+1][0], a[i+1][1]); } c.stroke(); });
 }
 
 function drawOverlay(view, camTo){
@@ -3972,6 +5547,8 @@ function stats(){
     ['fps', fps.toFixed(0)],
     ['Ebenen', S.planes ? `${S.planes.h}h/${S.planes.v}v` : '–'],
     ['Tiefe', S.depth || '–'],
+    ...(KARTE ? [['Bild-W', `${ms(median(LOG.timings.bildW.slice(-20)))}/${ms(median(LOG.timings.bild.slice(-20)))}, ${LOG.bild.verdraengt} verdr., ${LOG.bild.poolLeer} leer`]] : []),
+    ...(MESS ? [['Mess', `${S.netz ? S.netz.net.length : 0} Anker, IMU ${LOG.mess.imu}, Marken ${LOG.mess.marken}`]] : []),
     ['y-Spiegel', S.flipY ? 'an' : 'aus'],
   ];
   $('arStats').replaceChildren(...parts.map(([k,v])=>el('span', deNum(`${k} ${v}`))));
@@ -4017,6 +5594,8 @@ function showButtons(){
   $('btnNext').classList.toggle('hidden', !!S.auto);
   $('btnPause').classList.toggle('hidden', !S.auto);
   $('btnBoden').textContent=S.auto ? 'Boden jetzt' : 'Boden setzen';
+  // Messmodus: „Marke“ nur in der Wandphase (die Bodenmarken liegen im Bezug des Bodenankers).
+  $('arBtnsMess').classList.toggle('hidden', !MESS || b);
   updateWallInfo();
 }
 
@@ -4024,13 +5603,20 @@ function showButtons(){
 // Ein Durchlauf pro Sitzung; vorige Durchlaeufe wandern nach LOG.runs. Das
 // Protokoll liegt nach jeder Erfassung und am Sitzungsende auch im
 // localStorage - ein Neuladen oder ein Absturz der Seite verliert es nicht.
-const RUN_KEYS=['session','floor','events','obs','trk','trkN','result','timings','planes','depth','tracking','roiLuma','anchorPath','viewPath','breaks','hLaserMm','hEingabe','mode','netz'];
+const RUN_KEYS=['session','floor','events','obs','trk','trkN','result','timings','planes','depth','tracking','roiLuma','anchorPath','viewPath','breaks','hLaserMm','hEingabe','mode','netz','bild','mess','tiefe'];
 function freshRun(){
-  return {session:{}, floor:null, events:[], obs:[], trk:[], trkN:{}, result:null, timings:{roi:[], small:[], snap:[], solve:[], draw:[], rec:[], track:[], netz:[], senk:[]}, mode:null,
+  return {session:{}, floor:null, events:[], obs:[], trk:[], trkN:{}, result:null, timings:{roi:[], small:[], snap:[], solve:[], draw:[], rec:[], track:[], netz:[], senk:[],
+            solveIn:[], bild:[], bildW:[], senkW:[]}, mode:null,
           planes:[], depth:null, tracking:{ok:0, emulated:0, lost:0, anchorLost:0}, roiLuma:[], anchorPath:[], viewPath:[], breaks:[],
           hLaserMm:null, hEingabe:null,
           // Anker-Netz: Zaehler fuer die Kosten (Lagen je Takt, gleichzeitige Anker); die Lagen selbst nur in REC.an.
-          netz:{gesetzt:0, geloescht:0, fehl:0, max:0, takte:0, getPose:0, getPoseMax:0, befunde:{}, unterdrueckt:0}};
+          netz:{gesetzt:0, geloescht:0, fehl:0, max:0, takte:0, getPose:0, getPoseMax:0, befunde:{}, unterdrueckt:0},
+          // Stand 6: Bild-Worker (?karte=1) - Zaehler; Zeiten in timings.bild (Senden bis Antwort) und bildW (im Worker).
+          bild:{an:KARTE, m3:null, gesendet:0, ergebnisse:0, verdraengt:0, poolLeer:0, fehler:0, segmente:0, ohneBezug:0},
+          // Messmodus (?mess=1): Zaehler; die Messwerte selbst in der Aufnahme (imu, messung, anker).
+          mess:{an:MESS, aenderung:0, imu:0, gyro:0, gyroFehler:null, marken:0, readPixels:0, loeser:[]},
+          // Tiefe: Anforderung, erhaltene Art, Abfragen je Grundcode (1 da, 0 null, -1 Ausnahme, -2 keine Daten)
+          tiefe:{anforderung:TIEFE_ANF, erhalten:null, codes:{}}};
 }
 function newRun(){
   if(LOG.events.length || LOG.obs.length){
@@ -4069,16 +5655,28 @@ function saveLog(){
 // recStop) - ein Absturz verliert hoechstens das letzte Stueck. Weitergegeben
 // wird erst mit „Aufnahme sichern“ (TAR). Nichts geht auf einen Server.
 const REC_FPS=10, REC_CHUNK=10, REC_KEEP={video:3, zustand:5}, REC_PREF='raumskizze-probe.video';
-const REC_COLS=['t','px','py','pz','qx','qy','qz','qw','Tpsi','Tx','Ty','Tz','flags','tempo','live','v','tiefe'];
+// Stand 6 (Aufnahme Version 2, ARCHITEKTUR v3 9.4 Punkt 3): hinten angehaengte Spalten - die Werkzeuge lesen
+// nach Namen. ab: Abschnittszaehler des Hauptfadens (+1 je Eintrag in LOG.breaks und je pose-sprung, live
+// 3.7; nur Protokoll - die Karte vergibt Abschnitte selbst); ep: Epoche (3.2); k: Bild-Auftrag oder -1; ms:
+// Dauer von onFrame dieses Bilds; xr: XR-Bilder seit der vorigen Zeile; tq: Tiefe dieses Bilds (1 da, 0 null,
+// -1 Ausnahme, -2 keine Daten, null nicht abgefragt); an (nur ?mess=1): Kamera relativ zum naechsten Messanker.
+const REC_COLS=['t','px','py','pz','qx','qy','qz','qw','Tpsi','Tx','Ty','Tz','flags','tempo','live','v','tiefe','ab','ep','k','ms','xr','tq', ...(MESS ? ['an'] : [])];
+const REC_MS=REC_COLS.indexOf('ms');
 const REC_FLAGS={geschaetzt:1, ankerVerloren:2, ersatz:4, ersatzSchlecht:8, sprungHalt:16, pause:32, ohneBezug:64, erfasst:128};
 // Dazu, wenn das Anker-Netz laeuft: REC.an (anker-NNNN.jsonl, gleiche Stuecke) - Lage
 // aller Anker in local, 2/s und bei jedem Sprung oder Verlust (siehe netzFrame).
+// Stand 6 dazu: REC.eb (ebenen-NNNN.jsonl, immer), REC.sgBuf (segmente-NNNN.bin) und REC.bj (bild-NNNN.jsonl)
+// mit ?karte=1, REC.imu (imu-NNNN.jsonl) und REC.mg (messung-NNNN.jsonl) mit ?mess=1. Diese werden nach dem
+// Schreiben verworfen (nicht im Protokoll).
+// imu/mg/eb von Anfang an: messStart haengt die Sensor-Hoerer vor recStart an (startAR), beim ersten Lauf
+// je Seitenaufruf fiel REC.imu.push sonst mit Sensortakt (Abnahme Stand 6).
 const REC={st:[], an:[], anOut:0, name:null, lauf:0, dir:null, video:false, enc:null, encCfg:null, encBusy:false, err:null,
-  vN:0, vDrop:0, vBytes:0, flushing:Promise.resolve(), on:false, stopping:Promise.resolve()};
+  vN:0, vDrop:0, vBytes:0, flushing:Promise.resolve(), on:false, stopping:Promise.resolve(), imu:[], imuN:0, mg:[], mgN:0, eb:[]};
 function recReset(){
   // on: diese Sitzung hat recStart aufgerufen - nur dann schliesst recStop die Aufnahme ab.
   Object.assign(REC, {on:true, st:[], stOut:0, an:[], anOut:0, dir:null, video:false, enc:null, encCfg:null, encBusy:false, err:null,
     vBuf:[], vN:0, vOut:0, vDrop:0, vBytes:0, lastV:-1, dBuf:[], dN:0, dBytes:0, part:0, flushT:now(),
+    eb:[], ebN:0, ebId:new Map(), ebNr:0, ebT:-1e9, sgBuf:[], sgN:0, sgSeg:0, sgBytes:0, bj:[], bjN:0, imu:[], imuN:0, mg:[], mgN:0,
     flushing:Promise.resolve(), img:null, pad:null, obsN:LOG.obs.length, badgeT:0,
     // Bitrate mit der Bildflaeche (1,5 Mbit/s bei 640), hoechstens 8 Mbit/s.
     bitrate:Number(Q.get('vbr'))||Math.min(8e6, 1.5e6*(DS/640)**2), name:'aufnahme-'+LOG.started.replace(/[:.]/g,'-')+'-lauf'+LOG.runs.length, lauf:LOG.runs.length});
@@ -4143,16 +5741,43 @@ function recChunk(chunk){
   const b=new Uint8Array(chunk.byteLength); chunk.copyTo(b);
   REC.vBuf.push(b); REC.vBytes+=b.length; REC.vOut++;
 }
-function recDepth(vi, tt, d){
+// Satz Version 2 (8.6, tiefe 4): Kopf 96 Byte - wie Version 1 (80 Byte) und dazu u8 Art (session.depthType:
+// 0 unbekannt, 1 raw, 2 smooth), u8 aktiv (session.depthActive: 0, 1, 255 unbekannt), u16 Grundcode (1 = da;
+// geschrieben wird nur mit Daten, Ausfaelle stehen als tq im Zustand), i32 Bild-Auftrag k oder -1, 8 Byte frei.
+// Nur mit ?karte=1, ?mess=1 oder ?tiefe=… (live 6.1: Tiefe mit Grundcode gehoert zu karte=1; die Messsitzung
+// S6-M braucht raw). Ohne Schalter bleibt der Satz Version 1 wie in Stand 5 (entschieden 26.10.: ohne Schalter
+// wie Stand 5, Abweichung von ARCHITEKTUR 8.6 „Vorgabe raw“). raumskizze-aufnahme.mjs liest die Kopfgroesse aus
+// manifest.tiefe.kopf.
+const TIEFE_V2=!!TIEFE_ANF, TIEFE_KOPF=TIEFE_V2 ? 96 : 80, TIEFE_ART={raw:1, smooth:2};
+const tryWert=f=>{ try{ return f(); }catch(e){ return null; } };
+function recDepth(vi, tt, d, k=-1){
   const src=new Uint8Array(d.data), m=d.normDepthBufferFromNormView ? d.normDepthBufferFromNormView.matrix : null;
-  const head=new ArrayBuffer(80), dv=new DataView(head);
-  dv.setUint32(0, vi, true); dv.setFloat32(4, tt, true); dv.setUint16(8, d.width, true); dv.setUint16(10, d.height, true);
+  const head=new ArrayBuffer(TIEFE_KOPF), dv=new DataView(head), ses=S.session;
+  dv.setUint32(0, vi>>>0, true); dv.setFloat32(4, tt, true); dv.setUint16(8, d.width, true); dv.setUint16(10, d.height, true);
   dv.setFloat32(12, d.rawValueToMeters, true);
-  for(let k=0;k<16;k++) dv.setFloat32(16+4*k, m ? m[k] : (k%5===0 ? 1 : 0), true);
-  REC.dBuf.push(new Uint8Array(head), src.slice()); REC.dBytes+=80+src.length; REC.dN++;
+  for(let j=0;j<16;j++) dv.setFloat32(16+4*j, m ? m[j] : (j%5===0 ? 1 : 0), true);
+  const art=TIEFE_V2 && ses ? tryWert(()=>ses.depthType) : null, aktiv=TIEFE_V2 && ses ? tryWert(()=>ses.depthActive) : null;
+  if(TIEFE_V2){ dv.setUint8(80, TIEFE_ART[art] || 0); dv.setUint8(81, aktiv===true ? 1 : aktiv===false ? 0 : 255); dv.setUint16(82, 1, true); dv.setInt32(84, k, true); }
+  REC.dBuf.push(new Uint8Array(head), src.slice()); REC.dBytes+=TIEFE_KOPF+src.length; REC.dN++;
 }
-function recFrame(frame, view, pose, camTo, img){
-  if(!REC.name) return;
+// Tiefe abfragen mit Grundcode (1 da, 0 null, -1 Ausnahme, -2 ohne Daten); Ereignis 'tiefe' bei jedem
+// Wechsel verfuegbar <-> nicht verfuegbar, mit Grund ('null' | 'inaktiv' | 'fehler' | 'keine-daten').
+function tiefeHolen(frame, view){
+  let d=null, code, msg=null;
+  try{ d=frame.getDepthInformation(view); code=d ? (d.data ? 1 : -2) : 0; }catch(e){ code=-1; msg=String(e && e.message || e); }
+  tiefeStatus(code, msg);
+  return {d:code===1 ? d : null, code};
+}
+function tiefeStatus(code, msg){
+  LOG.tiefe.codes[code]=(LOG.tiefe.codes[code]||0)+1;
+  const an=code===1; if(an===S.tiefeAn) return;
+  S.tiefeAn=an;
+  const aktiv=S.session ? tryWert(()=>S.session.depthActive) : null;
+  ev('tiefe', an ? {an} : {an, grund:code===-1 ? 'fehler' : aktiv===false ? 'inaktiv' : code===-2 ? 'keine-daten' : 'null', ...(msg ? {msg} : {})});
+}
+// kA: Bild-Auftrag dieses Bilds (Stand 6, ?karte=1) oder -1. Liefert die Zeile (onFrame traegt ms nach).
+function recFrame(frame, view, pose, camTo, img, kA=-1){
+  if(!REC.name) return null;
   const t0=performance.now(), tt=now(), tf=view.transform, p=tf.position, q=tf.orientation || {x:0, y:0, z:0, w:1}, T=S.Tcur;
   const r4=x=>+x.toFixed(4), r5=x=>+x.toFixed(5);
   let f=(pose && pose.emulatedPosition ? 1 : 0)|(S.anchorLost ? 2 : 0)|(S.subst ? 4 : 0)|(S.substBad ? 8 : 0)
@@ -4175,15 +5800,50 @@ function recFrame(frame, view, pose, camTo, img){
         vi=REC.vN++; REC.lastV=tt; REC.img=[img.w, img.h, w2, h2];
       }catch(e){ recFail('Bild: '+(e && e.message || e)); }
     }
-    if(vi>=0 && frame.getDepthInformation){ try{ const d=frame.getDepthInformation(view); if(d && d.data){ recDepth(vi, tt, d); di=1; } }catch(e){} }
   }
-  REC.st.push([tt, r4(p.x), r4(p.y), r4(p.z), r5(q.x), r5(q.y), r5(q.z), r5(q.w),
-    T ? r5(psiOfT(T)) : 0, T ? r4(T[12]) : 0, T ? r4(T[13]) : 0, T ? r4(T[14]) : 0, f, Math.round(S.speed||0), live, vi, di]);
+  // Tiefe je Videobild (wie Stand 5) und mit ?karte=1 je Bild-Auftrag, auch ohne Video; Grundcode in tq.
+  let tq=null;
+  if((vi>=0 || kA>=0) && frame.getDepthInformation){ const r=tiefeHolen(frame, view); tq=r.code; if(r.d){ recDepth(vi, tt, r.d, kA); di=1; } }
+  const row=[tt, r4(p.x), r4(p.y), r4(p.z), r5(q.x), r5(q.y), r5(q.z), r5(q.w),
+    T ? r5(psiOfT(T)) : 0, T ? r4(T[12]) : 0, T ? r4(T[13]) : 0, T ? r4(T[14]) : 0, f, Math.round(S.speed||0), live, vi, di,
+    LOG.breaks.length+S.poseSprungN, S.ep, kA, null, S.xrSeit, tq];
+  if(MESS) row.push(messAn(tf.matrix));
+  S.xrSeit=0;
+  REC.st.push(row);
   if(tt-REC.flushT>=REC_CHUNK) recFlush();
   LOG.timings.rec.push(+(performance.now()-t0).toFixed(2));
   if(LOG.timings.rec.length>2000) LOG.timings.rec.shift();
   if(tt-REC.badgeT>=1){ REC.badgeT=tt; const b=$('arRec');
     if(b){ b.classList.toggle('hidden', !REC.vN && !REC.err); b.textContent=REC.err ? 'REC aus' : REC.vN ? `● REC ${(REC.vBytes/1e6).toFixed(0)} MB` : ''; } }
+  return row;
+}
+// Epoche (3.2): +1 an einer Zustandszeile, deren Bodenbezug sich gegen die vorige Zeile geaendert hat oder
+// vor der seit der vorigen Zeile ein Bruch kam (jeder Eintrag in LOG.breaks, auch nurProtokoll) -
+// hoechstens +1 je Zeile, wie die Rekonstruktion offline (karte/fixtures/lib.mjs, epochen). Verglichen wird
+// T so gerundet, wie es in der Zeile steht. Laeuft direkt vor recFrame, auch ohne Aufnahme.
+function epocheFort(){
+  const T=S.Tcur, Tz=T ? [+psiOfT(T).toFixed(5), +T[12].toFixed(4), +T[13].toFixed(4), +T[14].toFixed(4)] : [0, 0, 0, 0];
+  if(S.epT && (Tz.some((x,i)=>x!==S.epT[i]) || LOG.breaks.length!==S.epBr)) S.ep++;
+  S.epT=Tz; S.epBr=LOG.breaks.length;
+}
+// Ebenen (8.6, 9.4 Punkt 7c; immer, nur Aufnahme): je ARCore-Ebene bei jeder Aenderung von lastChangedTime
+// und spaetestens je EB_DT s (dann alle im selben Bild - ein starrer Sprung aller Ebenen ist ein Signal
+// fuer stille Weltspruenge). {t, id, o: 'h'|'v'|null, pose: planeSpace in local [x,y,z,qx,qy,qz,qw] | null,
+// poly: [[x, z]] in planeSpace | null, lct}. id zaehlt die Ebenen dieses Laufs (Map XRPlane -> Zahl).
+const EB_DT=1;
+function recEbenen(frame){
+  if(!REC.name || !frame.detectedPlanes) return;
+  const t=now(), alle=t-REC.ebT>=EB_DT, r4=x=>+x.toFixed(4), r5=x=>+x.toFixed(5);
+  if(alle) REC.ebT=t;
+  frame.detectedPlanes.forEach(pl=>{
+    let e=REC.ebId.get(pl); if(!e){ e={id:++REC.ebNr, lct:null}; REC.ebId.set(pl, e); }
+    const lct=pl.lastChangedTime ?? null; if(!alle && lct===e.lct) return;
+    e.lct=lct;
+    let pose=null; try{ const pp=pl.orientation!=null ? frame.getPose(pl.planeSpace, S.ref) : null;
+      if(pp){ const o=pp.transform.position, q=pp.transform.orientation; pose=[r4(o.x), r4(o.y), r4(o.z), r5(q.x), r5(q.y), r5(q.z), r5(q.w)]; } }catch(x){}
+    const poly=pl.polygon ? Array.from(pl.polygon, v=>[r4(v.x), r4(v.z)]) : null;
+    REC.eb.push({t, id:e.id, o:pl.orientation==='horizontal' ? 'h' : pl.orientation==='vertical' ? 'v' : null, pose, poly, lct:lct!=null ? +(+lct).toFixed(1) : null});
+    REC.ebN++; });
 }
 async function recPut(dir, name, parts){
   const fh=await dir.getFileHandle(name, {create:true}), w=await fh.createWritable();
@@ -4194,8 +5854,10 @@ async function recPut(dir, name, parts){
 function recFlush(){
   REC.flushT=now();
   const part=String(REC.part++).padStart(4, '0'), st=REC.st.slice(REC.stOut), an=REC.an.slice(REC.anOut), v=REC.vBuf, dd=REC.dBuf, dir=REC.dir;
-  REC.stOut=REC.st.length; REC.anOut=REC.an.length; REC.vBuf=[]; REC.dBuf=[];
+  const eb=REC.eb, sg=REC.sgBuf, bj=REC.bj, imu=REC.imu, mg=REC.mg;
+  REC.stOut=REC.st.length; REC.anOut=REC.an.length; REC.vBuf=[]; REC.dBuf=[]; REC.eb=[]; REC.sgBuf=[]; REC.bj=[]; REC.imu=[]; REC.mg=[];
   if(!dir) return REC.flushing;
+  const jsonl=a=>a.map(r=>JSON.stringify(r)).join('\n')+'\n';
   // Manifest mit dem Stand genau dieser Stuecke (Zeilen = was in den Dateien steht):
   // ohne regulaeres Ende (Absturz, Neuladen) bleibt die Aufnahme so auswertbar.
   let man=null; try{ man=JSON.stringify({...recManifest(), vorlaeufig:true}, null, 1); }catch(e){}
@@ -4205,24 +5867,53 @@ function recFlush(){
     if(v.length) await recPut(dir, `video-${part}.h264`, v);
     if(dd.length){ const gz=await new Response(new Blob(dd).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
       await recPut(dir, `tiefe-${part}.bin.gz`, [gz]); }
+    if(eb.length) await recPut(dir, `ebenen-${part}.jsonl`, [jsonl(eb)]);
+    if(sg.length) await recPut(dir, `segmente-${part}.bin`, sg);
+    if(bj.length) await recPut(dir, `bild-${part}.jsonl`, [jsonl(bj)]);
+    if(imu.length) await recPut(dir, `imu-${part}.jsonl`, [jsonl(imu)]);
+    if(mg.length) await recPut(dir, `messung-${part}.jsonl`, [jsonl(mg)]);
     if(man) await recPut(dir, 'manifest.json', [man]);
   }).catch(e=>recFail('Schreiben: '+(e && e.message || e)));
   return REC.flushing;
 }
 function recManifest(){
   const geo=LOG.session && LOG.session.geometry || null;
-  return {format:'raumskizze-aufnahme', version:1, stand:STAND, name:REC.name, sitzung:LOG.started, lauf:REC.lauf,
+  return {format:'raumskizze-aufnahme', version:2, stand:STAND, name:REC.name, sitzung:LOG.started, lauf:REC.lauf,
     geraet:LOG.caps && LOG.caps.Browser || null, geometrie:geo, fehler:REC.err,
+    // Version 2 (Stand 6): Schalter der Sitzung; mess nennt den Messmodus (S6-M misst, gibt aber nicht frei, 9.6).
+    schalter:{karte:KARTE, mess:MESS, tiefe:TIEFE_ANF, ds:DS}, mess:MESS,
+    // Nur Dateien, die recTar auch packt (Zaehler > 0): ob devicemotion in immersive-ar ankommt, ist eine offene Frage der Messsitzung.
+    dateien:['manifest.json', 'zustand.jsonl', ...(REC.ebN ? ['ebenen.jsonl'] : []), ...(REC.an.length ? ['anker.jsonl'] : []), ...(REC.vN ? ['video.h264'] : []), ...(REC.dN ? ['tiefe.bin.gz'] : []),
+      ...(KARTE && REC.sgN ? ['segmente.bin'] : []), ...(KARTE && REC.bjN ? ['bild.jsonl'] : []), ...(MESS && REC.imuN ? ['imu.jsonl'] : []), ...(MESS && REC.mgN ? ['messung.jsonl'] : [])],
     bild:REC.img ? {breite:REC.img[0], hoehe:REC.img[1], gepolstert:[REC.img[2], REC.img[3]],
       zeilen:'wie readPixels: Zeile 0 = unten', flipY:!!S.flipY, luma:'0.299 R + 0.587 G + 0.114 B',
-      quelle:'Kameratextur verkleinert (readSmall), genau das Bild von captureEdge'} : null,
+      quelle:`Kameratextur verkleinert (readSmall, lange Seite ${DS} px), genau das Bild von captureEdge`+(KARTE ? '; dasselbe Bild erkennt der Bild-Worker (Luma 77/150/29 >> 8)' : '')} : null,
     video:REC.encCfg ? {...REC.encCfg, datei:'video.h264', format:'H.264 Annex B, Bild k = k-tes v ≥ 0 im Zustand',
       fps:REC_FPS, bilder:REC.vN, ausgegeben:REC.vOut, ausgelassen:REC.vDrop, bytes:REC.vBytes} : null,
-    tiefe:REC.dN ? {datei:'tiefe.bin.gz', bilder:REC.dN, bytes:REC.dBytes, format:LOG.session && LOG.session.depthDataFormat || null,
-      satz:'u32 Videobild, f32 t, u16 w, u16 h, f32 rawValueToMeters, 16 × f32 normDepthBufferFromNormView (spaltenweise), dann w·h Werte'} : null,
+    tiefe:{anforderung:TIEFE_ANF, erhalten:LOG.session && LOG.session.depthType || null, datei:REC.dN ? 'tiefe.bin.gz' : null, bilder:REC.dN, bytes:REC.dBytes,
+      format:LOG.session && LOG.session.depthDataFormat || null, je:KARTE ? 'Videobild und Bild-Auftrag' : 'Videobild', satzVersion:TIEFE_V2 ? 2 : 1, kopf:TIEFE_KOPF,
+      satz:TIEFE_V2 ? 'u32 Videobild (0xFFFFFFFF = keins), f32 t, u16 w, u16 h, f32 rawValueToMeters, 16 × f32 normDepthBufferFromNormView (spaltenweise), u8 Art (0 unbekannt, 1 raw, 2 smooth), u8 aktiv (0/1, 255 unbekannt), u16 Grundcode (1 = da), i32 Bild-Auftrag k oder -1, 8 Byte frei, dann w·h Werte'
+        : 'u32 Videobild, f32 t, u16 w, u16 h, f32 rawValueToMeters, 16 × f32 normDepthBufferFromNormView (spaltenweise), dann w·h Werte',
+      abfragen:LOG.tiefe.codes},
     zustand:{datei:'zustand.jsonl', zeilen:REC.st.length, spalten:REC_COLS, flags:REC_FLAGS,
       live:'[Ax, Ay, Bx, By, z, sicher] in NDC oder 0', T:'Bodenbezug: Gier Tpsi und Lage Tx/Ty/Tz in local; camTo = T⁻¹ · Pose',
-      v:'Videobild oder -1', zeit:'t wie obs.t im Protokoll'},
+      v:'Videobild oder -1', zeit:'t wie obs.t im Protokoll',
+      ab:'Abschnittszaehler des Hauptfadens: Eintraege in LOG.breaks (auch nurProtokoll) + pose-sprung (nur Protokoll)',
+      ep:'Epoche (ARCHITEKTUR 3.2): +1 je Zeile mit geaendertem T oder einem Bruch seit der vorigen Zeile',
+      k:'Bild-Auftrag an den Bild-Worker (nur ?karte=1) oder -1', ms:'Dauer von onFrame dieses Bilds (ms)', xr:'XR-Bilder seit der vorigen Zeile (mit dieser)',
+      tq:'Tiefe dieses Bilds: 1 da, 0 null, -1 Ausnahme, -2 ohne Daten, null nicht abgefragt',
+      ...(MESS ? {an:'[id, x, y, z, psi]: Kamera im 4-FG-Rahmen des naechsten verfolgten Messankers (rel = Ta⁻¹ · Pose, psi = Plan-Gier von rel) oder 0'} : {})},
+    ebenen:{datei:'ebenen.jsonl', zeilen:REC.ebN, ebenen:REC.ebNr, format:'{t, id, o: h|v|null, pose: planeSpace in local [x,y,z,qx,qy,qz,qw] | null, poly: [[x, z]] in planeSpace | null, lct: lastChangedTime (ms)}',
+      takt:`je Aenderung von lastChangedTime, spaetestens je ${EB_DT} s (dann alle Ebenen im selben Bild), geprueft jedes 3. XR-Bild`},
+    ...(KARTE ? {segmente:{datei:'segmente.bin', bilder:REC.sgN, segmente:REC.sgSeg, bytes:REC.sgBytes, m3:LOG.bild.m3,
+        satz:'u32 k, f32 t, u16 n, u16 w, u16 h, dann n × (i16 x1, y1, x2, y2 in 1/8 px, Zeile 0 unten; u8 Salienz; u8 Klasse), little endian',
+        salienz:'min(255, round(salience / 4)) - ELSED zaehlt gepruefte Pixel', klasse:'Bits 0-1 cls (0 X, 1 V, 2 O, 3 U), Bits 2-4 man + 1 (0 = keine rechtwinklige Klasse)'},
+      bildWorker:{datei:'bild.jsonl', zeilen:REC.bjN, format:'{k, t, n, antwort (ms Senden bis Ergebnis), ms: {luma, elsed, verschm, einteilen, senk, gesamt} im Worker, psi0, senk: Zahl}', zahlen:LOG.bild}} : {}),
+    ...(MESS ? {imu:{datei:'imu.jsonl', zeilen:REC.imuN,
+        format:'devicemotion {t, ta, ts, iv, rr: [alpha, beta, gamma] (Grad/s), ag: [x, y, z] (m/s², mit Schwerkraft)}; Gyroscope {q:\'gyro\', t, ta, ts, w: [x, y, z] (rad/s)}',
+        zeit:'t = (timeStamp - Seitenstart) / 1000 s wie t im Zustand, ta = Eingang im Hauptfaden, ts = timeStamp roh (ms)', gyro:LOG.mess.gyroFehler || (LOG.mess.gyro ? 'ja' : 'keine Werte')},
+      messung:{datei:'messung.jsonl', zeilen:REC.mgN,
+        typen:"readPixels {t, w, h, art: sync|pbo, quelle: zeichnen|kamera, ms, msAuftrag, msWarte, bilder}; takt {t, dt, xrHz, ms: {med, p90, p99, max}, n} je 10 s; loeser {fall, n, nnzL, ordnung, lin, msAufbau, msSymb, msNum, msLoes, msRes1000, relRest, phase: waehrend|danach}"}} : {}),
     // Optional (fehlt ohne Anker-Netz): Lage aller Anker, Befunde als Ereignisse 'netz' im Protokoll.
     ...(REC.an.length ? {anker:{datei:'anker.jsonl', zeilen:REC.an.length, spalten:NETZ_COLS,
       anker:'je Anker [id, x, y, z, psi] in local (psi = Gier wie Tpsi), [id, 0] = pausiert (getPose null), [id, -1] = gestoppt (fehlt in trackedAnchors)',
@@ -4242,6 +5933,8 @@ async function recStop(){
   try{ if(REC.enc && REC.enc.state==='configured') await REC.enc.flush(); }catch(e){}
   try{ if(REC.enc && REC.enc.state!=='closed') REC.enc.close(); }catch(e){}
   REC.enc=null; REC.video=false;
+  // Messmodus: die Loeserzeit einmal nach dem Ende (9.4 Punkt 7e) gehoert noch in diese Aufnahme.
+  if(MESS) await messLoeserDanach();
   await recFlush();
   if(REC.dir){ try{ await recPut(REC.dir, 'manifest.json', [JSON.stringify(recManifest(), null, 1)]); }catch(e){ recFail('Manifest: '+(e && e.message || e)); } }
   ev('aufnahme-ende', {bilder:REC.vN, ausgelassen:REC.vDrop, mb:+(REC.vBytes/1e6).toFixed(1), tiefe:REC.dN, zustand:REC.st.length});
@@ -4267,7 +5960,8 @@ async function recTar(dirName, protoText){
   const parts=[];
   const add=(name, blobs)=>{ const size=blobs.reduce((a,b)=>a+b.size, 0);
     parts.push(tarHead(dirName+'/'+name, size), ...blobs); if(size%512) parts.push(new Uint8Array(512-size%512)); };
-  for(const [name,re] of [['manifest.json',/^manifest\.json$/], ['zustand.jsonl',/^zustand-\d+\.jsonl$/], ['anker.jsonl',/^anker-\d+\.jsonl$/], ['video.h264',/^video-\d+\.h264$/], ['tiefe.bin.gz',/^tiefe-\d+\.bin\.gz$/]]){
+  for(const [name,re] of [['manifest.json',/^manifest\.json$/], ['zustand.jsonl',/^zustand-\d+\.jsonl$/], ['anker.jsonl',/^anker-\d+\.jsonl$/], ['video.h264',/^video-\d+\.h264$/], ['tiefe.bin.gz',/^tiefe-\d+\.bin\.gz$/],
+    ['ebenen.jsonl',/^ebenen-\d+\.jsonl$/], ['segmente.bin',/^segmente-\d+\.bin$/], ['bild.jsonl',/^bild-\d+\.jsonl$/], ['imu.jsonl',/^imu-\d+\.jsonl$/], ['messung.jsonl',/^messung-\d+\.jsonl$/]]){
     const bl=Object.keys(files).filter(n=>re.test(n)).sort().map(n=>files[n]); if(bl.length) add(name, bl); }
   if(protoText) add('protokoll.json', [new Blob([protoText])]);
   parts.push(new Uint8Array(1024));
@@ -4332,6 +6026,8 @@ async function startAR(){
     floorFoundT:null, floorWarn:false, floorReq:false, capReq:false, live:null, camSize:null, small:null,
     planes:null, depth:null, trackLost:false, closed:false, endArm:0, fps:[], lastT:0, frame:0, warned:{},
     aspectWarn:false});
+  // Stand 6: Epoche, Zeilenzaehler, Signale, Messmodus
+  Object.assign(S, {ep:0, epT:null, epBr:0, poseSprungN:0, xrSeit:0, zeile:null, emul:false, tiefeAn:null, markeReq:false, markeN:0, mess:null});
   const canvas=document.createElement('canvas');
   const gl=canvas.getContext('webgl2', {xrCompatible:true, alpha:true, antialias:false});
   if(!gl){ $('startHint').textContent='WebGL2 fehlt.'; return; }
@@ -4340,7 +6036,8 @@ async function startAR(){
     session=await navigator.xr.requestSession('immersive-ar', {
       optionalFeatures:['local','hit-test','anchors','dom-overlay','camera-access','plane-detection','depth-sensing'],
       domOverlay:{root:$('ar')},
-      depthSensing:{usagePreference:['cpu-optimized'], dataFormatPreference:['luminance-alpha','unsigned-short']},
+      depthSensing:{usagePreference:['cpu-optimized'], dataFormatPreference:['luminance-alpha','unsigned-short'],
+        ...(TIEFE_ANF ? {depthTypeRequest:[TIEFE_ANF]} : {})},
     });
   }catch(e){
     $('startHint').textContent='AR-Sitzung abgelehnt: '+(e && e.message || e);
@@ -4355,6 +6052,9 @@ async function startAR(){
   LOG.mode=S.auto ? 'automatisch' : 'von Hand';
   S.netz=netzNeu();   // nach newRun (evI); Messanker einer frueheren Sitzung gibt es nicht mehr
   if(S.auto && !S.worker) S.worker=makeSolver();
+  // Stand 6: Bild-Worker je Sitzung (?karte=1), Messmodus (?mess=1)
+  if(KARTE){ bildWerkEnde(); BW.k=0; BW.w=bildWerkNeu(); if(S.ansicht==='segmente') bildOpt(); }
+  if(MESS) messStart();
   // Ende sofort abonnieren: auch ein Abbruch waehrend der Vorbereitung muss
   // das Overlay wieder einklappen und den Start freigeben.
   session.addEventListener('end', onEnd);
@@ -4371,6 +6071,10 @@ async function startAR(){
     if(gl.makeXRCompatible) await gl.makeXRCompatible();
     session.updateRenderState({baseLayer:new XRWebGLLayer(session, gl, {alpha:true, antialias:false})});
     S.ref=await session.requestReferenceSpace('local');
+    // Signal 2 des Bruchdetektors (3.2.1, 9.4 Punkt 7f): reset am Referenzraum, auch ohne ?mess=1.
+    try{ S.ref.addEventListener('reset', e=>{ const tr=e && e.transform, p=tr && tr.position, q=tr && tr.orientation;
+      ev('ref-reset', {transform:p && q ? [p.x, p.y, p.z, q.x, q.y, q.z, q.w].map(x=>+x.toFixed(5)) : null}); }); }
+    catch(e){ ev('ref-reset-hoerer-fehlt', {msg:String(e && e.message || e)}); }
     S.gpu=makeGpu(gl);
     S.binding=('XRWebGLBinding' in window) ? new XRWebGLBinding(session, gl) : null;
   }catch(e){
@@ -4391,6 +6095,8 @@ async function startAR(){
     start:now(), chrome:LOG.caps.Browser || null, enabledFeatures:feats,
     domOverlay:session.domOverlayState ? session.domOverlayState.type : null,
     depthUsage:tryGet(()=>session.depthUsage), depthDataFormat:tryGet(()=>session.depthDataFormat),
+    depthType:tryGet(()=>session.depthType), depthActive:tryGet(()=>session.depthActive), depthTypeRequest:TIEFE_ANF,
+    karte:KARTE, mess:MESS,
     blendMode:session.environmentBlendMode || null, hitTest:!!S.hit, binding:!!S.binding,
   };
   ev('sitzung-start', LOG.session);
@@ -4408,6 +6114,9 @@ async function startAR(){
 function onEnd(){
   ev('sitzung-ende');
   LOG.session.end=now();
+  LOG.tiefe.erhalten=LOG.session.depthType ?? null;
+  if(MESS) messStopp();
+  if(KARTE) bildWerkEnde();
   // startAR wartet darauf: ein Fehler in recStop darf den naechsten Start nicht dauerhaft sperren.
   REC.stopping=recStop().catch(e=>{ try{ ev('aufnahme-fehler', {msg:'Abschluss: '+String(e && e.message || e)}); }catch(_){} });
   $('ar').classList.add('hidden');
@@ -4632,7 +6341,8 @@ $('dlLog').onclick=()=>{
   if(REC.an.length) txt=txt.replace(/\n}$/, ',\n "anker": '+JSON.stringify({lauf:REC.lauf, spalten:NETZ_COLS, netz:S.netz ? S.netz.meta : [], zeilen:REC.an})+'\n}');
   download('raumskizze-protokoll-'+LOG.started.replace(/[:.]/g,'-')+'.json', txt);
 };
-$('rec').checked=(()=>{ try{ return localStorage.getItem(REC_PREF)==='1'; }catch(e){ return false; } })();
+// Messmodus: Video an, sonst schreibt er keine Tiefe (ohne karte=1 nur je Videobild).
+$('rec').checked=MESS || (()=>{ try{ return localStorage.getItem(REC_PREF)==='1'; }catch(e){ return false; } })();
 $('rec').onchange=()=>{ try{ localStorage.setItem(REC_PREF, $('rec').checked ? '1' : '0'); }catch(e){} };
 if(!('VideoEncoder' in window)){ $('rec').checked=false; $('rec').disabled=true; }
 recListLast();
@@ -4645,7 +6355,9 @@ $('btnBoden').onclick=()=>{ S.floorReq=true; ev('tap-boden'); };
 const flip=()=>{ S.flipY=!S.flipY; ev('y-spiegel', {an:S.flipY}); };
 $('btnFlip').onclick=flip; $('btnFlip2').onclick=flip;
 $('btnAnsicht').onclick=()=>{ S.ansicht=ANSICHTEN[(ANSICHTEN.indexOf(S.ansicht||'kamera')+1)%ANSICHTEN.length];
-  $('btnAnsicht').textContent='Ansicht: '+ANSICHT_NAME[S.ansicht]; ev('ansicht', {modus:S.ansicht}); };
+  $('btnAnsicht').textContent='Ansicht: '+ANSICHT_NAME[S.ansicht]; ev('ansicht', {modus:S.ansicht}); if(KARTE) bildOpt(); };
+// Messmodus: Bodenmarke anpeilen (im naechsten XR-Bild, messMarke).
+$('btnMarke').onclick=()=>{ S.markeReq=true; ev('tap-marke'); };
 const end=()=>{ if(S.session) S.session.end().catch(()=>{}); };
 // Beenden mitten im Rundgang braucht einen zweiten Tipp: sonst entsteht ein
 // geschlossener Raum mit geratener letzter Ecke. "Raum schließen" ist der
@@ -4728,9 +6440,10 @@ $('btnClose').onclick=()=>{
 // ?debug: Zustand fuer die Konsole (chrome://inspect am Telefon, oder
 // Ergebnisanzeige im Desktop-Browser mit eingespeisten Beobachtungen).
 if(Q.has('debug')) globalThis.PROBE={S, LOG, computeResult, showResult, requestSolve, applySolution, drawMiniMap, slim, solveOpt, makeSolver,
-  REC, recStart, recFrame, recStop, recTar, trackFrame, trkSeg, senkFrame};
+  REC, recStart, recFrame, recStop, recTar, trackFrame, trkSeg, senkFrame,
+  BW, bildSenden, onBild, drawSegmente, epocheFort, recEbenen, messAn, messMarke, messLesen, messBild, KARTE, MESS, TIEFE_ANF, REC_COLS};
 $('start').disabled=true;
-$('stand').textContent=standText();
+$('stand').textContent=standText()+(KARTE ? ' · karte=1 (Bild-Worker, ohne Karte)' : '')+(MESS ? ' · Messmodus' : '')+(TIEFE_ANF ? ` · Tiefe ${TIEFE_ANF}` : '');
 stage0();
 })();
 </script>

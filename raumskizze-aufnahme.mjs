@@ -480,10 +480,11 @@ if(obs && obs.length){
   if(d.length && Math.max(...d)>0.02) auff.push(`Pose-Kette: Kamera im Bezug weicht von obs.cam ab (max ${(Math.max(...d)*1000).toFixed(0)} mm, ${d.filter(x=>x>0.02).length} von ${d.length} über 2 cm${dT.length ? ', zuerst bei '+f2(dT[0])+' s' : ''}) – Bezug T im Zustand passt nicht zu den Erfassungen`);
 }
 if(M.tiefe && files['tiefe.bin.gz']){
-  const d=gunzipSync(files['tiefe.bin.gz']); let o=0, n=0; const med=[];
-  while(o+80<=d.length){ const ww=d.readUInt16LE(o+8), hh=d.readUInt16LE(o+10), sc=d.readFloatLE(o+12), len=ww*hh*2;
-    if(n%10===0){ const v=[]; for(let i=0;i<ww*hh;i+=7){ const raw=d.readUInt16LE(o+80+2*i); if(raw) v.push(raw*sc); } med.push(q(v,0.5)); }
-    o+=80+len; n++; }
+  // Satzkopf: Stand 6 mit ?karte=1/?mess=1/?tiefe= schreibt Version 2 (96 Byte), sonst 80 Byte.
+  const d=gunzipSync(files['tiefe.bin.gz']), KOPF=M.tiefe.kopf ?? (M.tiefe.satzVersion===2 ? 96 : 80); let o=0, n=0; const med=[];
+  while(o+KOPF<=d.length){ const ww=d.readUInt16LE(o+8), hh=d.readUInt16LE(o+10), sc=d.readFloatLE(o+12), len=ww*hh*2;
+    if(n%10===0){ const v=[]; for(let i=0;i<ww*hh;i+=7){ const raw=d.readUInt16LE(o+KOPF+2*i); if(raw) v.push(raw*sc); } med.push(q(v,0.5)); }
+    o+=KOPF+len; n++; }
   console.log(`Tiefe: ${n} Bilder, Median-Abstand je 10. Bild: ${med.map(f2).join(' ')} m`);
 }
 
