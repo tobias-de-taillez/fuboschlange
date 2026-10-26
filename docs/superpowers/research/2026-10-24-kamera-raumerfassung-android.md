@@ -832,7 +832,7 @@ Reparatur in drei Runden: Erfassungsweg in M5, Höhe an Laser-H und Boden gebund
   - Ausfall (wirft außen, schweigt, wirft je Runde) mit Hinweis; die alte Pipeline bleibt gleich Stand 5.
   
   Die Modultests sind grün, sie prüfen ihr Modul weiter gegen Platzhalter (`test/karte-geo.mjs` nimmt M3–M10 dafür aus dem geo-Block). Im Browser startet der Karten-Worker aus der Seite und rechnet ohne Konsolenfehler.
-- **Neue Aufnahme 26.10. 16:00** (Stand 6 ohne Schalter, 170 s, 161 Erfassungen, ohne Laser-H): T1 nimmt alle Module aus der Seite. 328 Runden, Mac Median 0,9 ms, p90 12 ms, max 53 ms. 15 Abschnitte, Außenring mit 8 Ecken. Raum unbekannt: Ohne Laser-H ist h_c ≈ 2,95 m (alt 2,97 m) nur Parallaxe, und in der Wohnküche lief die freie Höhe schon 1,95–3,61 m (12.5). Darum gibt es keinen Vergleich gegen eine Wahrheit.
+- **Aufnahme 26.10. 16:00** (Stand 6 ohne Schalter, 170 s, 161 Erfassungen, ohne Laser-H; laut Tobias nur ein Testlauf, keine Auswertung): Sie diente nur als Lauftest. T1 nimmt alle Module aus der Seite, 328 Runden, Mac Median 0,9 ms, p90 12 ms, max 53 ms.
 - **Offen am Pixel (9.6):** Rundenzeit p90 (Ziel ≤ 150 ms), KarteStand p90 ≤ 500 ms, ausgefallene Takte < 5 %, `drawKarte` p99 ≤ 1,5 ms, `ms` p99 ≤ 33 ms. Gemessen wird an einer Sitzung ≥ 8 min mit `?karte=1`; dazu einmal `?karte=1&quelle=beide` für die Rechenzeit mit Segmenten.
 
 ## Quellen
