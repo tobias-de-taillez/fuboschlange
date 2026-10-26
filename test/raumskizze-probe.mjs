@@ -963,50 +963,53 @@ if(G.trackModelEdges){
       sz.shown.length===1 && sz.shown[0].n===2 && Math.abs(sz.shown[0].az-(b0+0.5*Math.PI/180))<1e-9, `gezeigt ${sz.shown.map(s=>(s.az*180/Math.PI).toFixed(2)+'°/n'+s.n).join(' ')}`); }
 }
 
-// ======================================== Stand 6 (ARCHITEKTUR v3, Bauauftrag 17.12)
-// Wortgleich: M1 (raumskizze-elsed.js) und M0 (raumskizze-karte-grund.js) stehen als eigene Bloecke im
-// geo-Block (wie die Senkrechte); der Platzhalter fuer M3 haengt sich nicht ueber "G.bild=" an, damit
-// Werkzeuge die Seite nicht fuer das echte raumskizze-segmente.js halten.
+// ======================================== Stand 6 und 7 (ARCHITEKTUR v3, Bauauftraege 17.12, 9.3)
+// Wortgleich: M0-M10 stehen als eigene Bloecke im geo-Block (wie die Senkrechte), so wie raumskizze-karte.mjs (T1)
+// sie zusammensetzt; T1 erkennt ein Modul nur an seinem Namen - eine veraltete Kopie in der Seite fiele dort nicht auf.
+// Seit Stand 7 ist M3 das echte raumskizze-segmente.js (der Platzhalter von Stand 6 bleibt stumm, if(!G.bild)).
 {
   const geo=pick(probe,'geo');
-  for(const f of ['raumskizze-elsed.js', 'raumskizze-karte-grund.js']){
+  for(const f of ['raumskizze-karte-grund.js', 'raumskizze-elsed.js', 'raumskizze-senkrechte.js', 'raumskizze-segmente.js', 'raumskizze-abschnitte.js', 'raumskizze-landmarken.js',
+    'raumskizze-ausgleich.js', 'raumskizze-umriss.js', 'raumskizze-ringe.js', 'raumskizze-tiefe.js', 'raumskizze-kartenlauf.js']){
     let src=null; try{ src=read(f); }catch(e){}
-    chk(`Stand 6: der geo-Block traegt ${f} wortgleich`, !!src && geo.includes('{\n'+src+'}\n'), src ? '' : 'Datei fehlt'); }
-  chk('Stand 6: M3-Platzhalter (G.bild, G.bildNeu, G.lumaAus, G.lmSegmente, G.lmGier, G.lmRechtwinklig) da, ohne "G.bild=" im geo-Block',
-    ['bild','bildNeu','lumaAus','lmSegmente','lmVerschmelzen','lmGier','lmRechtwinklig'].every(k=>typeof G[k]==='function') && !!G.bild.platzhalter && !/G\.bild=/.test(geo), G.bild.platzhalter);
-  const blocks=['bildwerk','messwerk'].map(id=>{ const m=probe.match(new RegExp(`<script id="${id}" type="text/plain">([\\s\\S]*?)</script>`)); return m && m[1]; });
-  chk('Stand 6: Worker-Huellen "bildwerk" und "messwerk" als text/plain-Bloecke (laufen nicht im Hauptfaden)', blocks.every(Boolean));
+    chk(`Stand 7: der geo-Block traegt ${f} wortgleich`, !!src && geo.includes('{\n'+src+'}\n'), src ? '' : 'Datei fehlt'); }
+  chk('Stand 7: M3 echt (G.bild ohne platzhalter, G.bildNeu, G.lumaAus, G.lmSegmente, G.lmVerschmelzen, G.lmGier, G.lmRechtwinklig), M10 da (G.karteNeu, G.karteRechnen)',
+    ['bild','bildNeu','lumaAus','lmSegmente','lmVerschmelzen','lmGier','lmRechtwinklig','karteNeu','karteRechnen'].every(k=>typeof G[k]==='function') && !G.bild.platzhalter);
+  const blocks=['bildwerk','messwerk','kartenwerk'].map(id=>{ const m=probe.match(new RegExp(`<script id="${id}" type="text/plain">([\\s\\S]*?)</script>`)); return m && m[1]; });
+  chk('Stand 7: Worker-Huellen "bildwerk", "messwerk" und "kartenwerk" als text/plain-Bloecke (laufen nicht im Hauptfaden)', blocks.every(Boolean));
 }
 
-// M3-Platzhalter (9.4 Punkt 1): Luma 77/150/29 >> 8, dieselbe Kette wie F1 (ELSED, Einteilung, Gier,
-// rechtwinklige Klasse), Senkrechte wie senkFrame auf G.luma. Bild: Regal bis zur Decke vor der Kamera.
+// M3 (9.4 Punkt 1, 17.2): Luma 77/150/29 >> 8; ohne Verschmelzen dieselbe Kette wie F1 (ELSED, Einteilung, Gier,
+// rechtwinklige Klasse; M3 rechnet mit proj als Float32Array), mit Verschmelzen hoechstens so viele Segmente; Senkrechte im
+// Worker auf dem Luma des Bilds (bis 640 px lange Seite unverkleinert). Bild: Regal bis zur Decke.
 {
   const cam=lookAt([3.9,1.45,2.0],[3.9,2.4,0.45]), g=render(cam, 4242, 0.5), rgba=new Uint8Array(IW*IH*4);
   for(let i=0;i<IW*IH;i++){ const v=Math.max(0, Math.min(255, Math.round(g[i]))); rgba[4*i]=v; rgba[4*i+1]=Math.max(0, v-7); rgba[4*i+2]=Math.min(255, v+5); rgba[4*i+3]=255; }
   const L=G.lumaAus(rgba.buffer, 'rgba', IW, IH, null);
   let lumaOk=true; for(let i=0;i<IW*IH;i++) if(L[i]!==((77*rgba[4*i]+150*rgba[4*i+1]+29*rgba[4*i+2])>>8)) lumaOk=false;
   const L8=G.lumaAus(L.buffer, 'luma8', IW, IH, null);
-  chk('M3-Platzhalter: lumaAus rgba = (77R + 150G + 29B) >> 8, luma8 als Kopie', lumaOk && L8!==L && L8.every((v,i)=>v===L[i]));
+  chk('M3: lumaAus rgba = (77R + 150G + 29B) >> 8, luma8 als Kopie', lumaOk && L8!==L && L8.every((v,i)=>v===L[i]));
   const a={k:5, vi:2, t:12.5, ep:1, fmt:'rgba', w:IW, h:IH, buf:rgba.buffer.slice(0), camTo:cam, proj:PROJ, flipY:false, senk:true};
-  const BZ=G.bildNeu({}), b=G.bild(BZ, a);
-  const roh=G.elsed(L, IW, IH), e=G.lmSegmente(roh, IW, IH, PROJ, cam, false), psi0=G.lmGier(e); G.lmRechtwinklig(e, psi0);
-  const gl3=G.luma(rgba, IW*IH), kl=G.lumaKlein(gl3, IW, IH), senk=G.verticalEdges(kl.g, kl.w, kl.h, PROJ, cam, false);
+  const B0=G.bildNeu({skala:1, verschm:false}), b0=G.bild(B0, {...a, buf:rgba.buffer.slice(0)}), b=G.bild(G.bildNeu({}), a);
+  const roh=G.elsed(L, IW, IH), e=G.lmSegmente(roh, IW, IH, Float32Array.from(PROJ), Float64Array.from(cam), false, B0.o.segmente), psi0=G.lmGier(e, B0.o.gier), er=G.lmRechtwinklig(e, psi0, B0.o.recht);
   const gleich=(x,y)=>x.length===y.length && x.every((v,i)=>Object.is(v, y[i]));
-  chk('M3-Platzhalter: G.bild = Kette elsed -> lmSegmente -> lmGier -> lmRechtwinklig (seg, cls, man, dir, psi0), nicht verschmolzen',
-    b.n===roh.length && gleich(b.seg, e.seg) && gleich(b.cls, e.cls) && gleich(b.man, e.man) && gleich(b.dir, e.dir) && JSON.stringify(b.psi0)===JSON.stringify(psi0)
-    && b.nTeile.every(x=>x===1) && b.k===5 && b.vi===2 && b.ep===1 && b.t===12.5 && Math.abs(b.f-PROJ[5]*IH/2)<1e-9, `${b.n} Segmente`);
-  chk('M3-Platzhalter: Senkrechte = senkFrame der Seite (G.verticalEdges auf G.luma), im Worker gerechnet', JSON.stringify(b.senk)===JSON.stringify(senk), `${senk.length} Funde`);
+  chk('M3: G.bild ohne Verschmelzen (skala 1) = Kette elsed -> lmSegmente -> lmGier -> lmRechtwinklig (seg, cls, man, dir, psi0), Kopf k, vi, ep, t, f',
+    b0.n===roh.length && gleich(b0.seg, e.seg) && gleich(b0.cls, e.cls) && gleich(b0.man, er.man) && gleich(b0.dir, e.dir) && JSON.stringify(b0.psi0)===JSON.stringify(psi0)
+    && b0.nTeile.every(x=>x===1) && b0.k===5 && b0.vi===2 && b0.ep===1 && b0.t===12.5 && Math.abs(b0.f-Math.fround(PROJ[5])*IH/2)<1e-9, `${b0.n} Segmente`);
+  chk('M3: mit Verschmelzen (Vorgabe) hoechstens so viele Segmente, nTeile >= 1', b.n<=roh.length && b.n>0 && b.nTeile.every(x=>x>=1), `${roh.length} roh -> ${b.n}`);
+  const senk=G.verticalEdges(L, IW, IH, Float32Array.from(PROJ), Float64Array.from(cam), false, {});
+  chk('M3: Senkrechte im Worker = G.verticalEdges auf dem Luma des Bilds', Array.isArray(b.senk) && JSON.stringify(b.senk)===JSON.stringify(senk), `${senk.length} Funde`);
   const S10=G.KG.SEG, KL=G.KG.KL, idx=[...Array(b.n).keys()];
   const V=idx.filter(i=>b.cls[i]===KL.V).length, O0=idx.filter(i=>b.cls[i]===KL.O && Math.min(b.seg[i*S10+6], Math.PI-b.seg[i*S10+6])<2*Math.PI/180).length;
-  chk('M3-Platzhalter: Regal bis zur Decke - Seitenkanten senkrecht (V), Deckenkante waagerecht oben (O) mit Plan-Gier 0 (±2°)', V>=1 && O0>=1, `V ${V}, O mit psi≈0 ${O0}`);
+  chk('M3: Regal bis zur Decke - Seitenkanten senkrecht (V), Deckenkante waagerecht oben (O) mit Plan-Gier 0 (±2°)', V>=1 && O0>=1, `V ${V}, O mit psi≈0 ${O0}`);
   // Gier und rechtwinklige Klasse an einem gebauten Bild: 10 Segmente bei 0,3 rad, 8 rechtwinklig dazu, 2 schraege
   const nn=20, sb={n:nn, seg:new Float32Array(nn*S10), cls:new Int8Array(nn).fill(KL.O)}, R=rng(5);
   for(let i=0;i<nn;i++){ sb.seg[i*S10+6]=i<10 ? 0.3+(R()-0.5)*0.004 : i<18 ? 0.3+Math.PI/2+(R()-0.5)*0.004 : 0.9; sb.seg[i*S10+9]=50; }
-  const gp=G.lmGier(sb); G.lmRechtwinklig(sb, gp);
-  chk('M3-Platzhalter: lmGier findet die Raumrichtung mod 90° (±0,1°), lmRechtwinklig teilt 0 / 1 / -1 zu', !!gp && Math.abs(gp.psi-0.3)<0.1*Math.PI/180 && gp.n===18
-    && [...sb.man].every((m,i)=>m===(i<10 ? 0 : i<18 ? 1 : -1)), gp ? `psi0 ${f3(gp.psi*180/Math.PI)}°, n ${gp.n}` : 'null');
+  const gp=G.lmGier(sb), sr=G.lmRechtwinklig(sb, gp);
+  chk('M3: lmGier findet die Raumrichtung mod 90° (±0,1°), lmRechtwinklig teilt 0 / 1 / -1 zu', !!gp && Math.abs(gp.psi-0.3)<0.1*Math.PI/180 && gp.n===18
+    && [...sr.man].every((m,i)=>m===(i<10 ? 0 : i<18 ? 1 : -1)), gp ? `psi0 ${f3(gp.psi*180/Math.PI)}°, n ${gp.n}` : 'null');
   const b287=G.bild(G.bildNeu({}), {...a, w:287, buf:new Uint8Array(287*IH*4).fill(200).buffer, senk:false});
-  chk('M3-Platzhalter: ungerade Breite 287 (Pixel-Geraet) laeuft, senk nur auf Wunsch', b287.w===287 && b287.senk===null);
+  chk('M3: ungerade Breite 287 (Pixel-Geraet) laeuft, senk nur auf Wunsch', b287.w===287 && b287.senk===null);
 }
 
 // Messmodus 7e: Rest-Formel von G.resSegment (f·asin) mit analytischer Jacobi gegen Differenzen; das
@@ -1096,7 +1099,7 @@ const geraetBau=()=>{
     let uhr=1000; const aufg=[]; let seq=0;
     const plane=(due, fn, wk=null, kosten=0)=>aufg.push({due, seq:seq++, fn, wk, kosten});
     const leer=()=>new Promise(r=>setImmediate(r));
-    const stat={readPixels:[], createAnchor:[], worker:[], hoerer:{}, gyro:0, anfrage:null, solver:[], bildAn:[], bildVon:[], messVon:[], fehler:[], getBufferSubData:0, segZeichnen:0};
+    const stat={readPixels:[], createAnchor:[], worker:[], hoerer:{}, gyro:0, anfrage:null, solver:[], bildAn:[], bildVon:[], messVon:[], karteAn:[], karteVon:[], fehler:[], getBufferSubData:0, segZeichnen:0};
     const lauf=async bis=>{
       for(;;){ let best=null, be=Infinity;
         for(const a of aufg){ const e=a.wk ? Math.max(a.due, a.wk.frei) : a.due; if(e<be || (e===be && best && a.seq<best.seq)){ be=e; best=a; } }
@@ -1115,20 +1118,24 @@ const geraetBau=()=>{
     class Werk{
       constructor(url){
         const src=urls.get(url), w=this;
-        this.art=src.includes('RAUMSKIZZE.solveSweepAuto(obs,opt)') ? 'schaetzer' : src.includes('// Bild-Worker (Stand 6') ? 'bild' : src.includes('// Mess-Worker (Stand 6') ? 'mess' : 'anders';
+        this.art=src.includes('RAUMSKIZZE.solveSweepAuto(obs,opt)') ? 'schaetzer' : src.includes('// Bild-Worker (Stand 6') ? 'bild' : src.includes('// Mess-Worker (Stand 6') ? 'mess' : src.includes('// Karten-Worker (Stand 7') ? 'karte' : 'anders';
         stat.worker.push(this.art); this.frei=0; this.weg=false; this.ende=null; this.onmessage=null; this.onerror=null;
-        const zuMain=(m, tr)=>{ const c=structuredClone(m, {transfer:tr || []}); if(w.art==='bild') stat.bildVon.push(c); if(w.art==='mess') stat.messVon.push(c);
+        const zuMain=(m, tr)=>{ const c=structuredClone(m, {transfer:tr || []}); if(w.art==='bild') stat.bildVon.push(c); if(w.art==='mess') stat.messVon.push(c); if(w.art==='karte') stat.karteVon.push({t:uhr, ...c});
           plane(w.ende ?? uhr, ()=>{ if(!w.weg && w.onmessage) w.onmessage({data:c}); }); };
         const ctx=this.ctx=vm.createContext({console, performance:{now:()=>uhr}, postMessage:zuMain,
           setTimeout:(f, d=0)=>{ plane(uhr+(+d || 0), f, w, w.art==='bild' ? (o.bildMs ?? 40) : 0); return 1; }, clearTimeout:()=>{}});
         vm.runInContext(src, ctx);
         if(this.art==='bild' && o.bild==='wirftInnen') ctx.RAUMSKIZZE.bild=Object.assign(()=>{ throw new Error('Platzhalter wirft'); }, {platzhalter:'wirft'});
+        if(this.art==='karte' && o.karte==='wirftInnen') ctx.RAUMSKIZZE.karteRechnen=()=>{ throw new Error('Platzhalter wirft'); };
       }
       postMessage(m, tr){
         if(this.weg) return;
         const c=structuredClone(m, {transfer:tr || []}), w=this;
         if(w.art==='schaetzer') stat.solver.push({t:uhr, obs:JSON.stringify(c.obs), opt:JSON.stringify(c.opt)});
         if(w.art==='bild' && c.typ==='bild') stat.bildAn.push({t:uhr, ta:c.t, k:c.k, ep:c.ep, vi:c.vi, w:c.w, h:c.h, an:c.an, senk:c.senk, bytes:c.buf.byteLength});
+        if(w.art==='karte') stat.karteAn.push({t:uhr, typ:c.typ, ...(c.typ==='rechne' ? {id:c.id, schluss:c.schluss} : c.typ==='pose' ? {zt:c.zeile.t, ep:c.zeile.ep} : c.typ==='erfassung' ? {et:c.erf.t, id:c.erf.id} : c.typ==='ereignis' ? {ev:c.ev.typ} : {})});
+        if(w.art==='karte' && o.karte==='schweigt') return;
+        if(w.art==='karte' && o.karte==='wirftAussen'){ plane(uhr, ()=>{ if(!w.weg && w.onerror) w.onerror({message:'Platzhalter wirft'}); }); return; }
         if(w.art==='bild' && o.bild==='schweigt') return;
         if(w.art==='bild' && o.bild==='wirftAussen'){ plane(uhr, ()=>{ if(!w.weg && w.onerror) w.onerror({message:'Platzhalter wirft'}); }); return; }
         plane(uhr, ()=>{ if(w.ctx.onmessage) w.ctx.onmessage({data:c}); }, w, w.art==='schaetzer' ? 250 : w.art==='mess' ? 100 : 0);
@@ -1295,6 +1302,8 @@ if(alt){
   const rm=await geraet(probe, {...basis, query:'mess=1', klicks:[...ANSICHT, [6,'btnMarke'], [21,'btnMarke']]});
   const kurz={cache, dauer:8, klicks:ANSICHT, rausch:0.5, query:'karte=1', video:true};
   const rf1=await geraet(probe, {...kurz, bild:'wirftAussen'}), rf2=await geraet(probe, {...kurz, bild:'schweigt'}), rf3=await geraet(probe, {...kurz, bild:'wirftInnen'}), rl=await geraet(probe, {...kurz, bildMs:400});
+  const kb=await geraet(probe, {...kurz, query:'karte=1&quelle=beide'});
+  const kf1=await geraet(probe, {...kurz, karte:'wirftAussen'}), kf2=await geraet(probe, {...kurz, karte:'schweigt'}), kf3=await geraet(probe, {...kurz, karte:'wirftInnen'});
   // Nachbesserung: rz - Video und Tiefe kosten Zeit (die Uhr laeuft in encode und getDepthInformation weiter, wie am
   // Pixel); rg - die Seite ist schon 50 s offen, die Sitzung laeuft ueber die Minutengrenze (zwei volle Lesungen),
   // mit tiefe=raw ausdruecklich (mess=1 allein fordert seit der Korrektur ebenfalls raw an, geprueft an rm).
@@ -1362,11 +1371,11 @@ if(alt){
   const B=rk.P.LOG.bild, Tk=typen(rk), kz=zk.filter(r=>r[19]>=0);
   chk('karte=1: alte Pipeline unveraendert (Erfassungen, Schaetzer-Auftraege, readPixels, Anker gleich Stand 5)',
     obsJ(rk)===obsJ(r5) && J(rk.stat.solver)===J(r5.stat.solver) && rpJ(rk)===rpJ(r5) && J(rk.stat.createAnchor)===J(r5.stat.createAnchor));
-  chk('karte=1: Bild-Worker (geo + bildwerk) und Schaetzer, kein Mess-Worker, kein devicemotion; depthTypeRequest raw', J(rk.stat.worker)===J(['schaetzer','bild']) && !(rk.stat.hoerer.devicemotion||[]).length
+  chk('karte=1: Bild-Worker (geo + bildwerk), Karten-Worker (geo + kartenwerk) und Schaetzer, kein Mess-Worker, kein devicemotion; depthTypeRequest raw', J(rk.stat.worker)===J(['schaetzer','bild','karte']) && !(rk.stat.hoerer.devicemotion||[]).length
     && J(rk.stat.anfrage.depthSensing.depthTypeRequest)===J(['raw']) && rk.P.LOG.tiefe.erhalten==='raw');
   chk('karte=1: jedes ausgewertete Bild mit Bezug ist Auftrag k = 0, 1, 2 ... (Spalte k), Pool nie leer, nichts verdraengt',
     B.gesendet===kz.length && kz.every((r,i)=>r[19]===i) && B.poolLeer===0 && B.verdraengt===0 && B.gesendet>100, `${B.gesendet} Auftraege, ${B.ergebnisse} Ergebnisse`);
-  chk('karte=1: jeder Auftrag ist beantwortet (Ergebnisse + verdraengt + Fehler + hoechstens 3 offen (Pool) = gesendet)', B.ergebnisse+B.verdraengt+B.fehler<=B.gesendet && B.gesendet-(B.ergebnisse+B.verdraengt+B.fehler)<=3 && B.m3===G.bild.platzhalter);
+  chk('karte=1: jeder Auftrag ist beantwortet (Ergebnisse + verdraengt + Fehler + hoechstens 3 offen (Pool) = gesendet)', B.ergebnisse+B.verdraengt+B.fehler<=B.gesendet && B.gesendet-(B.ergebnisse+B.verdraengt+B.fehler)<=3 && B.m3==='raumskizze-segmente.js');
   const anK=new Map(rk.stat.bildAn.map(a=>[a.k, a]));
   chk('karte=1: Auftrag traegt t, ep und vi seiner Zeile, RGBA 288×640 im Pool-Puffer, senk jedes 2. Bild', kz.every(r=>{ const a=anK.get(r[19]); return a && a.ta===r[0] && a.ep===r[18] && a.vi===r[15] && a.bytes===IW*IH*4 && a.senk===(a.k%2===0); }));
   // segmente.bin (live 3.11): je Ergebnis ein Satz, Lage in 1/8 px, Klasse und rechtwinklige Klasse
@@ -1404,6 +1413,60 @@ if(alt){
   chk('Bild-Worker langsam (400 ms je Bild): latest-wins verdraengt, Auftraege bilanziert, alte Pipeline gleich Stand 5',
     vor(rl)===vor(r5) && Bv(rl).verdraengt>5 && Bv(rl).ergebnisse>3 && Bv(rl).gesendet-(Bv(rl).ergebnisse+Bv(rl).verdraengt)<=3 && Bv(rl).gesendet===nk(rl),
     `gesendet ${Bv(rl).gesendet}, Ergebnisse ${Bv(rl).ergebnisse}, verdraengt ${Bv(rl).verdraengt}, ohne Puffer ${Bv(rl).poolLeer}`);
+  // --- Stand 7, ?karte=1: Karten-Worker (9.3) - Eingaenge wie T1, Takt, karte.jsonl, Nachspiel (10.9), Ausfall (5.2)
+  {
+    const KA=rk.stat.karteAn, KV=rk.stat.karteVon, Lk=rk.P.LOG.karte, zk7=jsonl(rk, 'zustand'), kj=jsonl(rk, 'karte'), Mk7=man(rk);
+    const posK=KA.filter(m=>m.typ==='pose'), reK=KA.filter(m=>m.typ==='rechne'), ruK=KV.filter(m=>m.typ==='runde'), erK=KA.filter(m=>m.typ==='erfassung');
+    chk('karte=1: Karten-Worker startet einmal mit dem ersten Bild; je Zustandszeile genau eine PoseZeile (t und ep der Zeile)',
+      KA.filter(m=>m.typ==='start').length===1 && posK.length===zk7.length && posK.every((p,i)=>p.zt===zk7[i][0] && p.ep===zk7[i][18]), `${posK.length} Zeilen`);
+    const tObs=new Set(rk.P.LOG.obs.map(x=>x.t));
+    chk('karte=1: jede Erfassung geht mit id 0, 1, 2 ... und ihrem t an die Karte', erK.length>=10 && erK.length===rk.P.LOG.obs.filter(x=>x.ra && x.rb && !x.undone && x.suspect!==true).length
+      && erK.every((e,i)=>e.id===i && tObs.has(e.et)), `${erK.length} Erfassungen`);
+    const t0=posK.length ? posK[0].zt : 0, t1=posK.length ? posK[posK.length-1].zt : 0, soll=Math.max(0, Math.ceil((t1-t0)/0.5)-1);
+    const kjR=kj.filter(z=>z.runde), aus=kjR.reduce((n,z)=>n+(z.ausgefallen|0), 0);
+    chk('karte=1: Takt je 0,5 s Sitzungszeit (Runden + ausgefallene = Takte), Schlussrunde zuletzt, jede Runde beantwortet',
+      reK.length>=10 && Math.abs(reK.length-1+aus-soll)<=1 && reK[reK.length-1].schluss===true && ruK.length===reK.length && ruK[ruK.length-1].schluss===true,
+      `${reK.length-1} Runden + ${aus} ausgefallen, ${soll} Takte`);
+    chk('karte=1: karte.jsonl - RundeKopf je Runde (kopf-Pruefsumme), KarteStand alle 2 s und nach der Schlussrunde; Manifest nennt Datei und Quelle',
+      kjR.length===ruK.length && kjR.every(z=>typeof z.runde.kopf==='string') && kjR[kjR.length-1].schluss===true && kj.filter(z=>z.stand).length>=2 && !!kj[kj.length-1].stand
+      && Mk7.dateien.includes('karte.jsonl') && Mk7.karte && Mk7.karte.quelle==='erfassungen' && Mk7.karte.zeilen===kj.length, `${kjR.length} Runden, ${kj.filter(z=>z.stand).length} Staende`);
+    chk('karte=1: KarteStand serialisierbar (structuredClone und JSON), kein Ausfall, kein Fehler im Lauf',
+      ruK.every(m=>JSON.parse(JSON.stringify(m.stand)).runde===m.stand.runde) && Lk.runden===ruK.length && !Lk.aus.length && Lk.fehler===0 && !(typen(rk)['karte-fehler']), JSON.stringify(Lk.letzte));
+    const Tk=rk.P.LOG.timings;
+    chk('karte=1: gemessen werden Runde im Worker, Antwort und drawKarte (Protokoll timings.karte, karteAntwort, karteDraw)', Tk.karte.length===ruK.length && Tk.karteAntwort.length>=ruK.length-1
+      && Array.isArray(Tk.karteDraw), `drawKarte ${Tk.karteDraw.length} Bilder, Median ${f3(Tk.karteDraw.slice().sort((x,y)=>x-y)[Tk.karteDraw.length>>1] ?? NaN)} ms [M, Node]`);
+    chk('ohne Schalter und mit mess=1: kein Karten-Worker, kein karte.jsonl, kein LOG.karte', !r6.stat.karteAn.length && !rm.stat.karteAn.length && !jsonl(r6, 'karte').length
+      && r6.P.LOG.karte===undefined && !man(r6).dateien.includes('karte.jsonl'));
+    // Nachspiel (10.9): dieselbe Aufnahme durch raumskizze-karte.mjs mit --runden karte.jsonl - gleiche kopf-Pruefsumme je Runde
+    const {mkdtempSync, writeFileSync, rmSync}=await import('node:fs'), {tmpdir}=await import('node:os'), {join}=await import('node:path');
+    const dir=mkdtempSync(join(tmpdir(), 'raumskizze-stand7-'));
+    try{
+      for(const [name, re] of [['manifest.json', /^manifest\.json$/], ['zustand.jsonl', /^zustand-\d+\.jsonl$/], ['anker.jsonl', /^anker-\d+\.jsonl$/], ['ebenen.jsonl', /^ebenen-\d+\.jsonl$/],
+        ['karte.jsonl', /^karte-\d+\.jsonl$/]]){ const teile=Object.keys(rk.dateien).filter(n=>re.test(n)).sort().map(n=>rk.dateien[n]); if(teile.length) writeFileSync(join(dir, name), Buffer.concat(teile.map(x=>Buffer.from(x)))); }
+      writeFileSync(join(dir, 'protokoll.json'), JSON.stringify(rk.P.LOG));
+      const T1=await import('../raumskizze-karte.mjs'), {G:G1, quellen}=await T1.ladeSeite(process.env.RAUMSKIZZE_HTML ? {html:process.env.RAUMSKIZZE_HTML} : {});
+      const A=T1.ladeAufnahme(dir), lauf=await T1.laufen(G1, A, {quelle:'erfassungen', ohne:['tiefe', 'ebenen'], runden:A.karte.filter(z=>z.runde)});
+      const K1=lauf.runden.map(r=>r.kopf.kopf), K0=kjR.map(z=>z.runde.kopf), gleich=K0.filter((k,i)=>k===K1[i]).length;
+      chk('karte=1: Nachspiel mit raumskizze-karte.mjs --runden karte.jsonl: alle Module aus der Seite, gleiche Rundenzahl, kopf gleich in >= 99 % der Runden (10.9)',
+        Object.values(quellen).every(q=>q==='Seite') && K1.length===K0.length && gleich>=0.99*K0.length, `${gleich}/${K0.length} gleich, ${K1.length} nachgespielt`
+        +(()=>{ const i=K0.findIndex((k,j)=>k!==K1[j]); if(i<0) return ''; const r=kjR[i].runde, q=lauf.runden[i] && lauf.runden[i].kopf, k=x=>x ? `${x.runde}@${f3(x.t)} tPose ${f3(x.tPose)} ep ${x.epoche}` : '–';
+          return ` · erste Abweichung Runde ${i+1}: Geraet ${k(r)}, Nachspiel ${k(q)}, danach ${k(lauf.runden[i+1] && lauf.runden[i+1].kopf)}`; })());
+    } finally { rmSync(dir, {recursive:true, force:true}); }
+    // ?quelle=beide: jedes Bild-Ergebnis geht als volles BildErgebnis (camTo, proj, dir, ep) an die Karte, Erfassungen ebenso
+    const bK=kb.stat.karteAn.filter(m=>m.typ==='bild'), bE=kb.stat.bildVon.filter(m=>m.typ==='ergebnis');
+    chk('karte=1&quelle=beide: jedes Bild-Ergebnis (mit camTo, proj, dir, ep) und jede Erfassung an die Karte, Runden ohne Fehler, alte Pipeline gleich Stand 5',
+      vor(kb)===vor(r5) && bE.length>5 && bK.length===bE.length && bE.every(m=>m.camTo && m.proj && m.dir && Number.isFinite(m.ep)) && kb.stat.karteAn.some(m=>m.typ==='erfassung')
+      && kb.P.LOG.karte.runden>=10 && kb.P.LOG.karte.fehler===0 && !kb.P.LOG.karte.aus.length && man(kb).karte.quelle==='beide', `${bK.length} Bilder, ${kb.P.LOG.karte.runden} Runden`);
+    // Ausfall (5.2): wirft aussen (onerror), schweigt, wirft in jeder Runde - Hinweis „Karte ausgefallen“, alte Pipeline gleich Stand 5
+    const hinweisAus=r=>r.P.LOG.events.some(e=>e.type==='hinweis' && /Karte ausgefallen/.test(e.text));
+    const ausG=r=>r.P.LOG.karte.aus.map(a=>a.grund);
+    chk('Ausfall Karten-Worker (onerror): Ereignis, Worker weg, Hinweis „Karte ausgefallen“, alte Pipeline gleich Stand 5', vor(kf1)===vor(r5) && (typen(kf1)['karte-worker-fehler']||0)===1
+      && J(ausG(kf1))===J(['worker']) && hinweisAus(kf1) && kf1.stat.karteVon.filter(m=>m.typ==='runde').length===0, J(ausG(kf1)));
+    chk('Ausfall Karten-Worker (schweigt): nach 2 s ohne Runde ausgefallen, Takte fallen aus statt sich zu stauen, alte Pipeline gleich Stand 5', vor(kf2)===vor(r5) && ausG(kf2)[0]==='still'
+      && hinweisAus(kf2) && kf2.stat.karteAn.filter(m=>m.typ==='rechne').length<=2 && kf2.P.LOG.karte.ausgefallen>=5, `${kf2.P.LOG.karte.ausgefallen} ausgefallen`);
+    chk('Karten-Worker wirft in jeder Runde: Fehler gefangen, Hinweis, keine Runde in karte.jsonl, weitere Takte, alte Pipeline gleich Stand 5', vor(kf3)===vor(r5) && ausG(kf3)[0]==='fehler'
+      && hinweisAus(kf3) && kf3.P.LOG.karte.fehler>=5 && !jsonl(kf3, 'karte').filter(z=>z.runde).length, `${kf3.P.LOG.karte.fehler} Fehler`);
+  }
   // --- ?mess=1 (S6-M): Anker nach Weg, Aenderungen, an, IMU, readPixels, Loeser, Marken
   const Lm=rm.P.LOG, Tm=typen(rm), mg=jsonl(rm, 'messung'), imu=jsonl(rm, 'imu'), anz=jsonl(rm, 'anker'), Mm=man(rm);
   const obsAn=Lm.obs.filter(x=>Array.isArray(x.an));

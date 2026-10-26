@@ -8,6 +8,7 @@
 //
 //   node test/karte-kartenlauf.mjs            (RAUMSKIZZE_HTML=pfad: anderer Stand der Seite)
 import {readFileSync} from 'node:fs';
+import {geoOhneKarte} from './karte-geo.mjs';
 import {gzipSync} from 'node:zlib';
 
 const read=f=>readFileSync(new URL('../'+f, import.meta.url), 'utf8');
@@ -16,7 +17,7 @@ const pick=id=>{ const m=html.match(new RegExp(`<script id="${id}">([\\s\\S]*?)<
 const DATEI='raumskizze-kartenlauf.js', src=read(DATEI), M0=read('raumskizze-karte-grund.js');
 const mark='globalThis.RAUMSKIZZE=G;';
 const ohneKomm=s=>s.replace(/\/\/.*$/gm, '');
-let geo=pick('geo'); const at=geo.lastIndexOf(mark); if(at<0) throw new Error('geo-Block ohne '+mark);
+let geo=geoOhneKarte(pick('geo')); const at=geo.lastIndexOf(mark); if(at<0) throw new Error('geo-Block ohne '+mark);
 const traegt=geo.includes('{\n'+src+'}\n') || geo.includes('{\n'+src+'\n}\n'), traegtM0=/G\.gBei=/.test(ohneKomm(geo));
 new Function('"use strict";\n'+pick('vendor')+'\n'+geo)();
 const G0keys=new Set(Object.keys(globalThis.RAUMSKIZZE));

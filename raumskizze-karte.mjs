@@ -331,15 +331,21 @@ export async function laufen(G, A, o0={}){
   const L=zeitleiste(G, A, posen, erf, o), t0=posen.length ? posen[0].t : 0, t1=posen.length ? posen[posen.length-1].t : 0;
   const weg=weglassenPlan(G, o, t0, t1), runden=[], verdraengt=new Set();
   // Runden: Takt nach Sitzungszeit oder genau die Runden des Geraets (--runden)
-  const RK=o.runden ? o.runden.map(z=>z && typeof z.runde==='object' ? z.runde : z).filter(k=>k && Number.isFinite(k.runde)) : null;
+  // Zeilen von karte.jsonl ({runde: RundeKopf, schluss?}) oder RundeKoepfe; schluss markiert die Schlussrunde des Geraets (Stand 7)
+  const RK=o.runden ? o.runden.map(z=>z && typeof z.runde==='object' ? {...z.runde, ...(z.schluss===true ? {schluss:true} : {})} : z).filter(k=>k && Number.isFinite(k.runde)) : null;
   if(RK) for(const k of RK) for(const v of k.verdraengt||[]) verdraengt.add(v);
   let iR=0, tNaechste=t0+o.takt;
   const runde=(extra={})=>{ const r=G.karteRechnen(KZ, {arbeit:o.arbeit, ...extra}); runden.push(r); return r; };
-  // --runden: die letzte Runde der Datei ist die Schlussrunde (live: computeResult schreibt sie zuletzt, 5.1 Schritt 6)
+  // --runden: die letzte Runde der Datei ist die Schlussrunde (live: computeResult schreibt sie zuletzt, 5.1 Schritt 6).
+  // Traegt sie schluss (karte.jsonl ab Stand 7), nimmt der Karten-Worker live danach nichts mehr an (KW.zu): Eingaenge,
+  // die erst nach ihr faellig waeren (etwa 'aufnahme-ende'), entfallen (false), statt sie als gewoehnliche Runde auszuloesen.
   const vorEingang=(x)=>{
     if(RK){ while(iR<RK.length){ const k=RK[iR]; const faellig=x==null || (x.art==='pose' ? posen[x.i].t>k.tPose : x.art==='bild' ? x.k>k.kBis : x.t>k.t);
-        if(!faellig || x==null && iR===RK.length-1) break; runde({arbeit:{...o.arbeit, ...(o.rundenArbeit ? k.arbeit : {})}}); iR++; } }
-    else if(x) while(x.t>tNaechste){ runde(); tNaechste+=o.takt; } };
+        if(!faellig) break;
+        if(iR===RK.length-1){ if(k.schluss) return false; if(x==null) break; }
+        runde({arbeit:{...o.arbeit, ...(o.rundenArbeit ? k.arbeit : {})}}); iR++; } }
+    else if(x) while(x.t>tNaechste){ runde(); tNaechste+=o.takt; }
+    return true; };
   let vid=null, vk=null;
   if(o.quelle!=='erfassungen' && A.art!=='sitzung' && o.segmente!=='geraet'){ if(!A.video) info.warnungen.push('kein Video - keine Segmente'); else vid=videoBilder(A); }
   const naechstesVideo=async k=>{ while(vid && (!vk || vk.k<k)){ const n=await vid.next(); if(n.done){ vid=null; vk=null; break; } vk=n.value; } return vk && vk.k===k ? vk : null; };
@@ -356,7 +362,7 @@ export async function laufen(G, A, o0={}){
   for(const x of L){
     if(x.t>o.bis) break;
     if(!nimmt(x)) continue;
-    vorEingang(x);
+    if(!vorEingang(x)) continue;
     if(x.art==='pose') G.kartePose(KZ, posen[x.i]);
     else if(x.art==='ereignis'){ G.karteEreignis(KZ, x.ev); info.ereignisse++; }
     else if(x.art==='erf') G.karteErfassung(KZ, erf[x.i]);
@@ -498,8 +504,8 @@ async function main(){
   const A=ladeQuelle(resolve(src), {protokoll:a.protokoll ? resolve(a.protokoll) : null});
   const wahrheit=a.wahrheit ? resolve(a.wahrheit) : existsSync(WAHRHEIT) ? WAHRHEIT : null;
   if(o.orakelRahmen){ if(!wahrheit && A.art!=='sitzung') throw new Error('--orakel-rahmen braucht --wahrheit'); o.orakel=orakelAus(G, A, o, wahrheit); }
-  if(a.runden===true){ if(!A.karte || !A.karte.length) throw new Error('--runden ohne Datei: die Aufnahme hat keine karte.jsonl (vor Stand 7)'); o.runden=A.karte.map(z=>z.runde).filter(Boolean); }
-  else if(a.runden) o.runden=zeilenJSON(readFileSync(resolve(a.runden))).map(z=>z.runde).filter(Boolean);
+  if(a.runden===true){ if(!A.karte || !A.karte.length) throw new Error('--runden ohne Datei: die Aufnahme hat keine karte.jsonl (vor Stand 7)'); o.runden=A.karte.filter(z=>z.runde); }
+  else if(a.runden) o.runden=zeilenJSON(readFileSync(resolve(a.runden))).filter(z=>z.runde);
   const tS=performance.now(), lauf=await laufen(G, A, o); lauf.quelleName=basename(src);
   const msLauf=performance.now()-tS, alt=A.art==='aufnahme' ? altPipeline(G, A, lauf.hLaser) : null;
   let m=null, msM=0;
@@ -511,7 +517,9 @@ async function main(){
   console.log(txt);
   if(a.aus){ const d=resolve(a.aus); mkdirSync(d, {recursive:true});
     const karte=[], tStand={t:-Infinity};
-    for(const r of lauf.runden){ karte.push(JSON.stringify({runde:r.kopf})); if(r.stand.t-tStand.t>=o.standJe || r===lauf.runden[lauf.runden.length-1]){ tStand.t=r.stand.t; karte.push(JSON.stringify({stand:r.stand})); } }
+    // wie die Seite (Stand 7): die letzte Runde ist die Schlussrunde und traegt schluss (Nachspiel mit --runden)
+    for(const r of lauf.runden){ const letzte=r===lauf.runden[lauf.runden.length-1]; karte.push(JSON.stringify({runde:r.kopf, ...(letzte ? {schluss:true} : {})}));
+      if(r.stand.t-tStand.t>=o.standJe || letzte){ tStand.t=r.stand.t; karte.push(JSON.stringify({stand:r.stand})); } }
     writeFileSync(join(d, 'karte.jsonl'), karte.join('\n')+'\n');
     writeFileSync(join(d, 'export.json'), JSON.stringify(lauf.teilen));
     writeFileSync(join(d, 'bericht.txt'), txt+'\n');

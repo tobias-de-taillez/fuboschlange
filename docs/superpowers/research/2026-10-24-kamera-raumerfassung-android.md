@@ -820,6 +820,20 @@ Reparatur in drei Runden: Erfassungsweg in M5, Höhe an Laser-H und Boden gebund
 - Hauptrestproblem: die Lage der Abschnitte zueinander. Mit Lage und Höhe je Abschnitt aus der Wahrheit (Orakel) läge der Median bei 2,3 cm (A6) bzw. 5,8 cm (A7). Die Kanten selbst sind also gut; es fehlt die Verbindung der Abschnitte nach ARCore-Brüchen. Die Abschnitte teilen in diesen Aufnahmen kaum Wände (0–8 %), darum ist die Verbindung über Wände kaum beobachtbar.
 - Modultests: alle 11 grün (der Segmente-Test vergleicht jetzt gegen F1 ohne Verschmelzen).
 
+**12.6 Stand 7 (26.10.): Karten-Worker live, als Messstand.** Die Abnahme M4–M6 offline (Vorbedingung in ARCHITEKTUR 9.3) steht aus, siehe 12.5. Stand 7 geht trotzdem live, weil alles hinter `?karte=1` liegt: Ohne Schalter verhält sich die Seite wie Stand 6, das prüft der Selbsttest. Zweck ist die Messung am Gerät (9.6: Rundenzeit, Antwortzeit und `drawKarte` am Pixel), nicht die Genauigkeit. Das Ergebnis und der Export kommen weiter aus der alten Pipeline.
+- **Seite:** M3–M10 stehen wortgleich im geo-Block, M3 ist jetzt das echte `raumskizze-segmente.js`. Dazu kommt der Worker-Block `kartenwerk`. Der Hauptfaden speist genau das ein, was `raumskizze-karte.mjs` (T1) aus der Aufnahme baut: die PoseZeile aus den gerundeten Werten der Zustandszeile, Brüche, alle Ereignisse und die Erfassungen mit ep und camTo der Zeile. Bild-Ergebnisse gehen nur mit `?quelle=segmente|beide` hin; Vorgabe ist `erfassungen`, der einzige gegen die Wahrheit gemessene Weg. Der Takt liegt bei 0,5 s Sitzungszeit vor dem ersten Eingang danach, wie `vorEingang`. Läuft eine Runde noch, fällt der Takt aus und wird gezählt, statt sich zu stauen.
+- **Anzeige:** Die Wandlinien kommen aus der Karte statt aus dem Modell der alten Pipeline, mit Fehlerband ±2σ⊥ aus `G.fehlerband` (über 1 m nur gestrichelt). Dazu Bodenlinien und Lote an den Ecken, grün mit Senkrechter. Solange der laufende Abschnitt `lokal` ist, erscheint nur seine lokale Karte, halb durchsichtig. Hinweise: „Ortung neu“, „Zur Ecke“ und „Karte ausgefallen – alte Skizze aktiv“ (bei `fehler`, `onerror` oder > 2 s ohne Runde).
+- **Aufnahme:** `karte.jsonl` mit einem RundeKopf je Runde (dazu ausgefallene Takte, Antwortzeit und Rechenzeit) und alle 2 s einem KarteStand. Die letzte Runde ist die Schlussrunde und trägt `schluss`. Das Nachspiel läuft mit `raumskizze-karte.mjs <aufnahme> --runden --quelle erfassungen --ohne tiefe,ebenen`. T1 wertet `schluss` aus: Eingänge nach der Schlussrunde entfallen, wie live.
+- **Nicht live (Stand 9):** Tiefe und AR-Ebenen. Abweichung zu T1: Eine Erfassung, die die App später als `suspect` markiert, ist live schon eingespeist. Rückgängig nimmt sie als Ereignis `rueckgaengig` zurück.
+- **Prüfung:** Der Selbsttest ist grün, auf dem nachgebauten Gerät in 22 s:
+  - je Zeile eine PoseZeile; Takte 41 + 1 ausgefallen gegen 42 Sollwerte;
+  - **Nachspiel der Gerätesitzung durch T1 mit `--runden`: 42/42 Runden mit gleicher `kopf`-Prüfsumme (10.9)**;
+  - Ausfall (wirft außen, schweigt, wirft je Runde) mit Hinweis; die alte Pipeline bleibt gleich Stand 5.
+  
+  Die Modultests sind grün, sie prüfen ihr Modul weiter gegen Platzhalter (`test/karte-geo.mjs` nimmt M3–M10 dafür aus dem geo-Block). Im Browser startet der Karten-Worker aus der Seite und rechnet ohne Konsolenfehler.
+- **Neue Aufnahme 26.10. 16:00** (Stand 6 ohne Schalter, 170 s, 161 Erfassungen, ohne Laser-H): T1 nimmt alle Module aus der Seite. 328 Runden, Mac Median 0,9 ms, p90 12 ms, max 53 ms. 15 Abschnitte, Außenring mit 8 Ecken. Die Decke liegt bei ≈ 2,95 m (alt 2,97 m) und nicht bei 2,42 m, also vermutlich nicht die Wohnküche. Ohne Wahrheit gibt es keinen Vergleich.
+- **Offen am Pixel (9.6):** Rundenzeit p90 (Ziel ≤ 150 ms), KarteStand p90 ≤ 500 ms, ausgefallene Takte < 5 %, `drawKarte` p99 ≤ 1,5 ms, `ms` p99 ≤ 33 ms. Gemessen wird an einer Sitzung ≥ 8 min mit `?karte=1`; dazu einmal `?karte=1&quelle=beide` für die Rechenzeit mit Segmenten.
+
 ## Quellen
 
 Plattform:

@@ -11,6 +11,7 @@
 //
 //   node test/karte-landmarken.mjs [--schnell] [--m6]      (F4=ordner: Fixtures, T3=ordner: Sitzungen, RAUMSKIZZE_HTML=pfad)
 //   import {laden, lauf, auswerten} from './karte-landmarken.mjs'   (Messskripte in design/bau/P-C)
+import {geoOhneKarte} from './karte-geo.mjs';
 import {readFileSync, existsSync} from 'node:fs';
 import {gunzipSync} from 'node:zlib';
 import {fileURLToPath} from 'node:url';
@@ -32,7 +33,7 @@ export const DATEI='raumskizze-landmarken.js';
 export function laden(o={}){
   const html=process.env.RAUMSKIZZE_HTML ? readFileSync(process.env.RAUMSKIZZE_HTML, 'utf8') : read('raumskizze-probe.html');
   const pick=id=>{ const m=html.match(new RegExp(`<script id="${id}">([\\s\\S]*?)</script>`)); if(!m) throw new Error(`Script-Block "${id}" nicht gefunden`); return m[1]; };
-  const mark='globalThis.RAUMSKIZZE=G;'; let geo=pick('geo'); const quellen={};
+  const mark='globalThis.RAUMSKIZZE=G;'; let geo=geoOhneKarte(pick('geo')); const quellen={};
   new Function('"use strict";\n'+pick('vendor')+'\n'+geo)(); const G0keys=new Set(Object.keys(globalThis.RAUMSKIZZE));
   for(const [f, re] of o.m6 ? [...MODULE, ...MODULE_M6] : MODULE){ const src=read(f); if(geo.includes('{\n'+src+'}\n') || re.test(geo)){ quellen[f]='Seite'; continue; }
     const at=geo.lastIndexOf(mark); geo=geo.slice(0, at)+'{\n'+src+'\n}\n'+geo.slice(at); quellen[f]='Datei'; }

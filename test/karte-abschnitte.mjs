@@ -10,6 +10,7 @@
 //
 //   node test/karte-abschnitte.mjs      (RAUMSKIZZE_HTML=pfad: anderer Stand; FIX=ordner: Fixtures F2; T3=0: ohne T3-Teil)
 import {readFileSync, existsSync, readdirSync} from 'node:fs';
+import {geoOhneKarte} from './karte-geo.mjs';
 import {join} from 'node:path';
 import * as T3 from '../raumskizze-sim.mjs';
 
@@ -17,7 +18,7 @@ const read=f=>readFileSync(new URL('../'+f, import.meta.url), 'utf8');
 const html=process.env.RAUMSKIZZE_HTML ? readFileSync(process.env.RAUMSKIZZE_HTML, 'utf8') : read('raumskizze-probe.html');
 const pick=id=>{ const m=html.match(new RegExp(`<script id="${id}">([\\s\\S]*?)</script>`)); if(!m) throw new Error(`Script-Block "${id}" nicht gefunden`); return m[1]; };
 const DATEI='raumskizze-abschnitte.js', src=read(DATEI), mark='globalThis.RAUMSKIZZE=G;';
-let geo=pick('geo');
+let geo=geoOhneKarte(pick('geo'));
 const traegt=geo.includes('{\n'+src+'}\n') || geo.includes('{\n'+src+'\n}\n');
 new Function('"use strict";\n'+pick('vendor')+'\n'+geo)();
 const G0keys=new Set(Object.keys(globalThis.RAUMSKIZZE));
