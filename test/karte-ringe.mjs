@@ -159,6 +159,10 @@ const poly=wp(data), A=fl(poly);
   fall('Aussenring mit 2 Ecken', [{...Ra, pts:q.slice(0, 2)}, Rw], 'aussen:zu-wenig-ecken');
   fall('Aussenring mit NaN', [{...Ra, pts:[[NaN, 0], ...q.slice(1)]}, Rw], 'aussen:nicht-endlich');
   fall('Aussenring mit doppelter Ecke (0,3 mm)', [{...Ra, pts:[q[0], [q[0][0]+0.0003, q[0][1]], ...q.slice(1)]}, Rw], 'aussen:doppelte-ecke');
+  // 19.2 Z10: Aussenring unter 1,0 m² (Splitter wie A7 0,60 m²) verworfen; 1,0 m² genau und o.minAussen 0 gehen durch
+  fall('Aussenring 0,9 × 0,9 m (unter 1,0 m²)', [{art:'aussen', pts:[[0,0],[0.9,0],[0.9,0.9],[0,0.9]], exportiert:true}], 'aussen:aussen-klein');
+  { const k1=G.ringePruefen([{art:'aussen', pts:[[0,0],[1,0],[1,1],[0,1]], exportiert:true}]), k0=G.ringePruefen([{art:'aussen', pts:[[0,0],[0.9,0],[0.9,0.9],[0,0.9]], exportiert:true}], {minAussen:0});
+    chk('Aussenring 1,0 × 1,0 m ok (Grenze nicht verworfen); o.minAussen 0 schaltet die Regel ab', k1.ok && k0.ok, JSON.stringify([k1.verworfen, k0.verworfen])); }
   const eKein=G.ringePruefen([Rw, Rp]), eZwei=G.ringePruefen([Ra, {...Ra}]);
   chk('ohne Aussenring bzw. mit zwei Aussenringen: ok false mit fehler', !eKein.ok && /kein Außenring/.test(eKein.fehler) && !eZwei.ok && eZwei.verworfen[0].i===1, eKein.fehler+' / '+eZwei.fehler);
   chk('ungeprueft: wallPolygon null bei „ragt hinaus“, „Insel in Insel“, Kante durch die Nische, sich kreuzenden Inseln, Insel ausserhalb, Schleife, Aussenring gekreuzt',

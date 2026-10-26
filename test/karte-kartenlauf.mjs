@@ -115,8 +115,11 @@ function attrappen(st={}){
   G.ebeneAusAR=(rec, bezug)=>({t:rec.t, id:rec.id, ab:0, phi:0, rho:1, cov:[0,0,0], extent:[0,1], quelle:'ar', wallId:null, bezug:Array.from(bezug)});
   for(const n of ['depthRays','depthLift','depthQuality','depthFloorFree','depthWallPlanes']) delete G[n];
 }
-const ring=(id, art, pts, waende, x={})=>({id, art, pts, waende, sup:pts.map(()=>1), hyp:pts.map(()=>false), flaeche:1, teil:false, supRing:1, phi:0, dicke:0, quelle:'schnitt',
-  entscheid:'auto', exportiert:true, ...x});
+// Flaeche aus den Ecken; der Aussenring traegt plaus wie M7 (19.2 Z10: Kameraweg und Freiraum ganz im Ring), sonst
+// lehnte das Tor mlAussenTor jeden Attrappen-Ring ab
+const flaecheVon=P=>{ let a=0; for(let i=0,j=P.length-1;i<P.length;j=i++) a+=P[j][0]*P[i][1]-P[i][0]*P[j][1]; return Math.abs(a)/2; };
+const ring=(id, art, pts, waende, x={})=>({id, art, pts, waende, sup:pts.map(()=>1), hyp:pts.map(()=>false), flaeche:flaecheVon(pts), teil:false, supRing:1, phi:0, dicke:0, quelle:'schnitt',
+  entscheid:'auto', exportiert:true, ...(art==='aussen' ? {plaus:{pfadIn:1, freiIn:1, aRel:1, aFrei:flaecheVon(pts)}} : {}), ...x});
 const quadrat=(x={})=>({ringe:[ring('A', 'aussen', [[0,0],[4,0],[4,3],[0,3]], ['w0','w1','w2','w3'])], kandidaten:[], hypothesen:[], aufgefuellt:0, verworfen:0, innenVerworfen:[],
   nLinien:4, nZellen:9, arbeit:{schnitte:1, zellen:9}, ms:0, warn:[], ...x});
 // Eingaenge: Pose (T = Bodenbezug, cam = camTo-Kamera), Bild mit Attrappen-Waenden
@@ -217,7 +220,9 @@ function speise(KZ, t0, t1, ep, mock, dt=0.1, k0=null){ let k=k0 ?? Math.round(t
   const hypG={psi:0.3, tx:1, ty:0.01, tz:-2};
   attrappen({klasse:()=>({klasse:'reloc', sP:0.5, sY:5*D2R}), reg:(ab, KZ)=>STEUER.annehmen ? {hyp:[{g:hypG, kosten:1, nSeg:30, nRicht:2, nBilder:10}], gewaehlt:0, verhaeltnis:2, arbeit:200}
     : {hyp:(STEUER.hypListe||[]).map(g=>({g, kosten:1})), gewaehlt:-1, verhaeltnis:1.0, arbeit:200}});
-  const KZ=neu(); speise(KZ, 0, 1.2, 0, zweiWaende); speise(KZ, 1.3, 2.5, 1, zweiWaende); G.kartePose(KZ, pose(2.6, 2, 0, 0)); G.karteBild(KZ, bild(200, 2.6, 2, zweiWaende));
+  // Weg (c) aus: diese Pruefungen gelten dem Weg nach 'lose' (3.2.2); seit Runde 2 ist die Vorgabe verbinden.kette 'kette' (19.2 Z9),
+  // dann ginge Abschnitt 1 nach 30 s ueber die Kette statt nach 'lose' (geprueft unten bei Z9)
+  const KZ=neu({verbinden:{kette:'aus'}}); speise(KZ, 0, 1.2, 0, zweiWaende); speise(KZ, 1.3, 2.5, 1, zweiWaende); G.kartePose(KZ, pose(2.6, 2, 0, 0)); G.karteBild(KZ, bild(200, 2.6, 2, zweiWaende));
   G.karteRechnen(KZ);
   chk('Stufe (b): ohne angenommene Registrierung bleibt der Abschnitt lokal', KZ.abschnitte[1].stufe==='lokal' && KZ.abschnitte[1].g==null && LOG.includes('registriere:1'));
   for(let t=2.7; t<33.5; t+=0.5){ G.kartePose(KZ, pose(+t.toFixed(2), 2, 0, 0)); }
@@ -258,6 +263,140 @@ function speise(KZ, t0, t1, ep, mock, dt=0.1, k0=null){ let k=k0 ?? Math.round(t
     G.karteRechnen(K); const s1=K.abschnitte[1].stufe, p1=K.lauf.probe[1]!=null, sig1=K.abschnitte[1].sig; G.karteRechnen(K); const s2=K.abschnitte[1].stufe;
     chk(`Stufe (b) Probe: Uebergang ohne sig (M6 rechnet den Abschnitt erst ab der naechsten Runde); erstes sig ${Math.round(100*sP)} cm / ${psiDeg}° -> ${soll}`,
       s1==='verbunden' && p1 && sig1==null && s2===soll && K.lauf.probe[1]==null, `${s1} -> ${s2}`); }
+}
+
+// ------------------------------------------------- R3 (19.2 Z5, Z9, Z10): Kernhoehe, ketteNachF0, Weg (c) Kette, Aussenring-Tor
+{
+  // Z5: mit Laser-H nur Kern bei |hLok.hC - (hLok.hF ?? 0) - H| <= 5 cm; hLok kommt aus dem lokalen Ausgleich (Schritt 5)
+  const kernH=(hLok, H=2.416, runden=2)=>{ attrappen({ausgleich:(KZ, o)=>{ if(o.nurAb==null) return 'weiter'; const A=KZ.abschnitte[o.nurAb]; if(A && hLok) A.hLok={sHC:0.01, ...hLok};
+      return {ok:true, iter:1, lin:0, relin:1, ldl:{n:0, nnzL:0, ordnung:null}, mm:[], rest:[]}; }});
+    const KZ=neu(H ? {H:{laser:H, sigma:0.015}} : {}); for(let i=0;i<8;i++){ G.kartePose(KZ, pose(i*0.1, 0, 0, 0)); G.karteBild(KZ, bild(i, i*0.1, 0, zweiWaende)); }
+    const st=[]; for(let r=0;r<runden;r++) st.push(G.karteRechnen(KZ).stand); return {KZ, st}; };
+  const k1=kernH({hC:3.008}), k2=kernH({hC:2.43}), k3=kernH({hC:2.47, hF:0.03}), k4=kernH({hC:3.008}, null), k5=kernH({hC:2.43}, 2.416, 1);
+  const hw=k1.st[1].hinweise.find(h=>h.code==='kern-hoehe');
+  chk('Z5: hLok 3,008 m bei Laser-H 2,416 m -> kein Kern, Hinweis kern-hoehe {ab, dH}', k1.KZ.kern===null && hw && hw.ab===0 && Math.abs(hw.dH-0.592)<1e-9, JSON.stringify(hw));
+  chk('Z5: dH 1,4 cm -> Kern; hC - hF (2,47 - 0,03) zaehlt; ohne Laser-H gilt die Bedingung nicht; nach dem Kern kein Hinweis', k2.KZ.kern===0 && k3.KZ.kern===0 && k4.KZ.kern===0
+    && !k2.st[1].hinweise.some(h=>h.code==='kern-hoehe'));
+  chk('Z5: ohne hLok (erste Runde, lokaler Ausgleich noch nicht gelaufen) noch kein Kern, Hinweis mit dH null', k5.KZ.kern===null && k5.st[0].hinweise.some(h=>h.code==='kern-hoehe' && h.dH===null));
+  // Z5: G.ketteNachF0 (M4) bei der Kernbildung, Rueckgabe gilt; fehlt sie, merkt M10 das und bildet den Kern trotzdem
+  const gX={psi:0.2, tx:0.5, ty:0.01, tz:-1}, d=(a,b)=>Math.max(Math.abs(a.psi-b.psi), Math.abs(a.tx-b.tx), Math.abs(a.ty-b.ty), Math.abs(a.tz-b.tz));
+  const f0=mit=>{ attrappen(); const ruf=[]; if(mit) G.ketteNachF0=(A, k)=>{ ruf.push(k); const inv=G.gInv(A[k].g0); return A.map(a=>a.g0 ? {...a, g0:G.gKomp(inv, a.g0)} : a); };
+    const KZ=neu(); for(let i=0;i<5;i++){ G.kartePose(KZ, pose(i*0.1, 0, 0, 0)); G.karteBild(KZ, bild(i, i*0.1, 0, zweiWaende)); }
+    for(let i=5;i<20;i++){ G.kartePose(KZ, pose(i*0.1, 1, 0, 0)); G.karteBild(KZ, bild(i, i*0.1, 1, zweiWaende)); }
+    KZ.abschnitte[0].g0={psi:0, tx:0, ty:0, tz:0}; KZ.abschnitte[1].g0={...gX}; G.karteRechnen(KZ); delete G.ketteNachF0; return {KZ, ruf}; };
+  const fm=f0(true), fo=f0(false);
+  chk('Z5: G.ketteNachF0(abschnitte, kern) einmal bei der Kernbildung, zurueckgegebene Abschnitte gelten (g0_kern Einheit, g0_0 = gX^-1)',
+    fm.ruf.join()==='1' && fm.KZ.kern===1 && d(fm.KZ.abschnitte[1].g0, {psi:0, tx:0, ty:0, tz:0})<1e-12 && d(fm.KZ.abschnitte[0].g0, G.gInv(gX))<1e-12 && !fm.KZ.lauf.ohneKetteNachF0);
+  chk('Z5: ohne G.ketteNachF0 Kern trotzdem, g0 unveraendert, KZ.lauf.ohneKetteNachF0', fo.KZ.kern===1 && fo.KZ.lauf.ohneKetteNachF0===true && d(fo.KZ.abschnitte[1].g0, gX)===0);
+  // Z9: Abschnitt 1 ohne (a)/(b) nach 30 s; aus -> lose, kette -> g_kern ∘ g0, app -> g_kern; locker, quelle kette, Gewicht w, fest
+  const kette=(V, schluss=false)=>{ attrappen({klasse:()=>({klasse:'reloc', sP:0.5, sY:5*D2R}), sig:A=>({psi:3*D2R, max:A.ab===0 ? 0.01 : 0.5, min:0, ang:0, y:0.01})});
+    const KZ=neu({verbinden:V}); speise(KZ, 0, 1.2, 0, zweiWaende); speise(KZ, 1.3, 2.5, 1, zweiWaende); G.kartePose(KZ, pose(2.6, 2, 0, 0)); G.karteBild(KZ, bild(200, 2.6, 2, zweiWaende));
+    G.karteRechnen(KZ); KZ.abschnitte[1].g0={...gX}; const ein=LOG.filter(x=>x==='lmEinbinden:1').length;
+    for(let t=2.7; t<33.5; t+=0.5) G.kartePose(KZ, pose(+t.toFixed(2), 2, 0, 0));
+    const r1=G.karteRechnen(KZ).stand, r2=G.karteRechnen(KZ).stand, r3=G.karteRechnen(KZ, {schluss:true}).stand;
+    return {KZ, r1, r2, r3, ein:LOG.filter(x=>x==='lmEinbinden:1').length-ein}; };
+  // Seit Runde 2 ist die Vorgabe {kette:'kette', w:1, fest:true, schluss:true} (19.2 Z9); vk und vp setzen fest/schluss darum
+  // ausdruecklich, damit sie weiter die einzelnen Schalter pruefen; vv ist die Vorgabe ohne Schalter.
+  const va=kette({kette:'aus'}), vk=kette({kette:'kette', w:0.3, fest:false, schluss:false}), vp=kette({kette:'app', w:1, fest:true, schluss:false}),
+    vs=kette({kette:'kette', w:0.3, fest:false, schluss:true}), vv=kette(undefined);
+  const A1=x=>x.KZ.abschnitte[1], A2=x=>x.KZ.abschnitte[2];
+  chk('Z9 Schalter aus: wie bisher lose nach 30 s, kein Hinweis abschnitt-kette / abschnitte-kette', A1(va).stufe==='lose' && A1(va).quelle==null
+    && !va.r1.hinweise.some(h=>h.code==='abschnitt-kette' || h.code==='abschnitte-kette'));
+  chk('Z9 Vorgabe (Runde 2): verbinden = {kette, w 1, fest, schluss}; ohne Schalter geht Abschnitt 1 nach 30 s ueber die Kette (locker, fest, w 1, g = g_kern ∘ g0), '
+    +'in der Schlussrunde auch der laufende', JSON.stringify(G.karteNeu().opt.verbinden)===JSON.stringify({kette:'kette', w:1, fest:true, schluss:true})
+    && A1(vv).stufe==='locker' && A1(vv).quelle==='kette' && A1(vv).fest===true && A1(vv).w===1 && d(A1(vv).g, gX)<1e-12 && A2(vv).stufe==='locker' && A2(vv).quelle==='kette',
+    `${JSON.stringify(G.karteNeu().opt.verbinden)} ${A1(vv).stufe} ${A2(vv).stufe}`);
+  const hz=x=>x.hinweise.filter(h=>h.code==='abschnitte-kette');
+  chk('Z9 Hinweis abschnitte-kette {n, ab, art} einmal mit der Zahl der nur ueber die Kette verbundenen Abschnitte (1, nach Schluss 2)',
+    hz(vv.r1).length===1 && hz(vv.r1)[0].n===1 && hz(vv.r1)[0].ab.join()==='1' && hz(vv.r1)[0].art==='kette' && hz(vv.r3).length===1 && hz(vv.r3)[0].n===2
+    && hz(vv.r3)[0].ab.join()==='1,2' && vv.r3.hinweise.filter(h=>h.code==='abschnitt-kette').length===2, JSON.stringify(hz(vv.r3)));
+  chk('Z9 kette: locker, quelle kette, g = g_kern ∘ g0, w = 0,3, lmEinbinden einmal, Hinweis abschnitt-kette {ab 1, art kette}; laufender Abschnitt bleibt lokal',
+    A1(vk).stufe==='locker' && A1(vk).quelle==='kette' && d(A1(vk).g, gX)<1e-12 && A1(vk).w===0.3 && !A1(vk).fest && vk.ein===1
+    && vk.r1.hinweise.some(h=>h.code==='abschnitt-kette' && h.ab===1 && h.art==='kette') && A2(vk).stufe==='lokal', `${A1(vk).stufe} ${A1(vk).quelle} w ${A1(vk).w}`);
+  chk('Z9 kette: sig 50 cm von M6 aendert die Stufe nicht (bleibt locker, w bleibt), Stand traegt quelle und fest', vk.r2.abschnitte[1].stufe==='locker' && vk.r2.abschnitte[1].w===0.3
+    && vk.r2.abschnitte[1].quelle==='kette' && vk.r2.abschnitte[1].fest===false && vk.r2.abschnitte[0].quelle==='kern');
+  // Runde 2: 'app' nimmt den Plan aus g_kern, die Hoehe aus der Kette ((g_kern ∘ g0).ty = gX.ty = 0,01)
+  chk('Z9 app mit fest: Plan = g_kern (Einheit), ty aus der Kette (g_kern ∘ g0).ty, A.fest true, w 1', A1(vp).stufe==='locker'
+    && d(A1(vp).g, {psi:0, tx:0, ty:gX.ty, tz:0})===0 && A1(vp).fest===true && A1(vp).w===1 && vp.r2.abschnitte[1].fest===true, JSON.stringify(A1(vp).g));
+  chk('Z9 schluss: in der Schlussrunde geht mit verbinden.schluss auch der laufende Abschnitt ueber die Kette, ohne nicht', A2(vs).stufe==='locker' && A2(vs).quelle==='kette'
+    && A2(vk).stufe==='lokal' && A2(va).stufe==='lokal', `${A2(vs).stufe} / ${A2(vk).stufe} / ${A2(va).stufe}`);
+  // Z10: Tor des Aussenrings aus Ring.plaus (M7) mit Hysterese, Mindestflaeche, Huelle des Kamerawegs
+  const tor=(folge, extra=null)=>{ attrappen({umriss:K=>{ const x=folge[(K.runde-1)%folge.length]; return x==null ? quadrat({ringe:[]}) : quadrat({ringe:[ring('A', 'aussen', x.pts || [[0,0],[4,0],[4,3],[0,3]], ['w0','w1','w2','w3'],
+      x.pts ? {} : {plaus:x.plaus===undefined ? {pfadIn:x.p ?? 1, freiIn:1, aRel:1, aFrei:12} : x.plaus})]}); }});
+    const KZ=neu(); speise(KZ, 0, 1.0, 0, zweiWaende); if(extra) extra(KZ); const z=[];
+    for(let r=0;r<folge.length;r++){ const {stand}=G.karteRechnen(KZ), R=stand.ringe.find(x=>x.art==='aussen'), h=stand.hinweise.find(x=>x.code==='aussen-unplausibel');
+      z.push({e:R ? R.entscheid+(R.exportiert ? '/exp' : '') : '-', fehlt:h ? h.fehlt.join('+') : '', klein:stand.hinweise.some(x=>x.code==='aussen-klein'), tor:KZ.lauf.aussenTor}); }
+    return z; };
+  const zh=tor([{p:0.55}, {p:0.65}, {p:0.55}, {p:0.45}, {p:0.55}, {p:0.6}]);
+  chk('Z10: pfadIn mit Hysterese [0,6; 0,5]: 0,55 offen, 0,65 auto, 0,55 auto, 0,45 offen, 0,55 offen, 0,6 auto; Hinweis aussen-unplausibel {fehlt pfadIn}',
+    zh.map(x=>x.e).join(',')==='offen,auto/exp,auto/exp,offen,offen,auto/exp' && zh[0].fehlt==='pfadIn' && zh[1].fehlt==='', zh.map(x=>x.e+':'+x.fehlt).join(','));
+  const zk=tor([{pts:[[0,0],[0.9,0],[0.9,0.9],[0,0.9]]}, {plaus:null}, null]);
+  chk('Z10: Splitter 0,81 m² offen (aMin, Hinweis aussen-klein); ohne plaus offen (pfadIn, freiIn, aRel); ohne Aussenring KZ.lauf.aussenTor null, kein Hinweis',
+    zk[0].e==='offen' && zk[0].fehlt.includes('aMin') && zk[0].klein && zk[1].e==='offen' && zk[1].fehlt==='pfadIn+freiIn+aRel' && zk[2].e==='-' && zk[2].tor===null && zk[2].fehlt==='',
+    zk.map(x=>x.e+':'+x.fehlt).join(','));
+  const zw=tor([{p:1}], KZ=>{ let t=1.05; for(const [x, z] of [[10, 0], [10, 10], [0, 10]]){ G.kartePose(KZ, pose(t, 0, x, z)); t+=0.05; } });
+  chk('Z10: Kameraweg 10 × 10 m, Ring 12 m² -> kH 0,12 < 0,6, offen; Weg auf einer Linie (keine Huelle) zaehlt als bestanden', zw[0].e==='offen' && zw[0].fehlt==='kH'
+    && Math.abs(zw[0].tor.kH-0.12)<0.02 && zh[1].tor.kH===Infinity, `${zw[0].fehlt} kH ${zw[0].tor && zw[0].tor.kH}`);
+}
+
+// ------------------------------------------------- Nachregistrierung ueber Erfassungen (19.2 Z13)
+{
+  // Kern = Abschnitt 0 (g Einheit), Abschnitt 1 geht nach 30 s ueber die Kette (g = g0 = gX), Laser-H 2,416 m, ohne ketteNachF0 (dBoden 0).
+  // Erfassungen sind Strahlen im Bezug der Zeile: Wandstuecke in F0 mit der wahren Lage des Abschnitts zurueckgerechnet, Decke bei
+  // y = H - g0.ty wie M10 hebt. wahr = wahre Lage, gX = Kette (falsch), ref/ab = Wandstuecke [[x, z], [x, z]] in F0.
+  const H=2.416, stuecke=(a, b, n, l=0.5)=>{ const L=Math.hypot(b[0]-a[0], b[1]-a[1]), u=[(b[0]-a[0])/L, (b[1]-a[1])/L], out=[];
+    for(let i=0;i<n;i++){ const s=(L-l)*i/Math.max(1, n-1); out.push([[a[0]+s*u[0], a[1]+s*u[1]], [a[0]+(s+l)*u[0], a[1]+(s+l)*u[1]]]); } return out; };
+  const erfVon=([P, Q], g, ty, camF0)=>{ const gi=G.gInv(g), p=G.gPlan(gi, P), q=G.gPlan(gi, Q), c=G.gPlan(gi, camF0), y=H-ty, o=[c[0], 1.5, c[1]];
+    const d=v=>{ const x=[v[0]-o[0], y-o[1], v[1]-o[2]], l=Math.hypot(...x); return x.map(k=>k/l); }; return {ra:{o, d:d(p)}, rb:{o:[...o], d:d(q)}}; };
+  const nr=({ref, ab, wahr, gX, abReg={}, ohneH=false, ab2=null})=>{
+    attrappen({klasse:(i, P)=>ab2 && P[i].ep===2 ? {klasse:'nurT', sP:0.01, sY:0.2*D2R} : {klasse:'reloc', sP:0.5, sY:5*D2R}});
+    const einG={}, ein=G.lmEinbinden; G.lmEinbinden=(K, x)=>{ if(K.abschnitte[x].g) einG[x]={...K.abschnitte[x].g}; return ein(K, x); };   // g beim Einbinden
+    const KZ=neu({quelle:'beide', proj:PROJ, H:ohneH ? null : {laser:H, sigma:0.015}, abReg});
+    speise(KZ, 0, 1.2, 0, zweiWaende); speise(KZ, 1.3, 2.5, 1, zweiWaende); if(ab2) speise(KZ, 2.6, 3.0, 2, zweiWaende, 0.1, 400);
+    G.kartePose(KZ, pose(3.1, 3, 0, 0)); G.karteBild(KZ, bild(500, 3.1, 3, zweiWaende));
+    G.karteRechnen(KZ); G.karteRechnen(KZ);                       // Kern 0 (Z5: hLok aus der ersten Runde)
+    KZ.abschnitte[1].g0={...gX}; if(ab2) KZ.abschnitte[2].g0={...gX};
+    let id=0; const cam=[1.5, 1.5];
+    ref.forEach((s,i)=>G.karteErfassung(KZ, {t:0.05+0.05*i, ep:0, id:id++, ...erfVon(s, {psi:0, tx:0, ty:0, tz:0}, 0, cam)}));
+    ab.forEach((s,i)=>G.karteErfassung(KZ, {t:1.35+0.05*i, ep:1, id:id++, ...erfVon(s, wahr, gX.ty, cam)}));
+    if(ab2) ab2.forEach((s,i)=>G.karteErfassung(KZ, {t:2.65+0.02*i, ep:2, id:id++, ...erfVon(s, wahr, gX.ty, cam)}));
+    for(let t=3.2; t<33.5; t+=0.5) G.kartePose(KZ, pose(+t.toFixed(2), 3, 0, 0));
+    const st=G.karteRechnen(KZ).stand; return {KZ, st, A1:KZ.abschnitte[1], A2:KZ.abschnitte[2], einG}; };
+  const dPlan=(g, h, p=[1, 1])=>{ const a=G.gPlan(g, p), b=G.gPlan(h, p); return Math.hypot(a[0]-b[0], a[1]-b[1]); };
+  const wahr={psi:0.3, tx:1.0, ty:0.03, tz:-0.5}, gX={psi:0.3+8*D2R, tx:1.5, ty:0.03, tz:-0.8};
+  // (1) eindeutig: Kern sieht eine L-Ecke, Abschnitt 1 dieselbe Ecke, Kette 8° / 0,6 m daneben
+  const L1=[...stuecke([0, 0], [3, 0], 5), ...stuecke([0, 0], [0, 3], 5)], L2=[...stuecke([0.2, 0], [2.8, 0], 4), ...stuecke([0, 0.2], [0, 2.8], 4)];
+  const e1=nr({ref:L1, ab:L2, wahr, gX}), h1=e1.st.hinweise.find(h=>h.code==='abschnitt-registriert');
+  chk('Z13 eindeutige Lage: angenommen, Plan von A.g auf die wahre Lage (< 2 cm, < 0,3°), ty, fest, quelle kette und w bleiben, vorher Kette',
+    e1.A1.abReg && e1.A1.abReg.angenommen && dPlan(e1.A1.g, wahr)<0.02 && Math.abs(e1.A1.g.psi-wahr.psi)<0.3*D2R && e1.A1.g.ty===gX.ty && e1.A1.fest===true
+    && e1.A1.quelle==='kette' && e1.A1.stufe==='locker' && e1.A1.w===1 && dPlan(e1.A1.abReg.gVor, gX)<1e-12,
+    `${e1.A1.abReg && e1.A1.abReg.grund} d ${(100*dPlan(e1.A1.g, wahr)).toFixed(1)} cm, dpsi ${((e1.A1.g.psi-wahr.psi)/D2R).toFixed(2)}°`);
+  chk('Z13 Hinweis abschnitt-registriert {ab, dpsi, dt} (dpsi ~ -8°, dt > 0), Rest faellt auf <= 0,7, >= 50 % nah, zwei Richtungen >= 60°',
+    h1 && h1.ab===1 && Math.abs(h1.dpsi+8*D2R)<0.5*D2R && h1.dt>0.3 && e1.A1.abReg.r1<=0.7*e1.A1.abReg.r0 && e1.A1.abReg.nah>=0.5 && e1.A1.abReg.richtW>=60*D2R-1e-9,
+    JSON.stringify(h1));
+  // lmEinbinden laeuft nach der Nachregistrierung (die Waende gehen mit dem neuen g in die Karte)
+  chk('Z13 Reihenfolge: Nachregistrierung vor lmEinbinden des Abschnitts (dort schon das neue g), Zeit in RundeKopf.ms.abreg, Versuch im Protokoll KZ.lauf.abRegLog',
+    e1.einG[1] && JSON.stringify(e1.einG[1])===JSON.stringify(e1.A1.g) && dPlan(e1.einG[1], gX)>0.3 && e1.KZ.lauf.abRegLog.length===1 && e1.KZ.lauf.abRegLog[0].ab===1 && Number.isFinite(e1.KZ.lauf.letzte.ms.abreg));
+  // (2) Manhattan-Gleiten: Referenz und Abschnitt sehen nur eine Wandrichtung -> abgelehnt (Richtung), g bleibt die Kette
+  const e2=nr({ref:stuecke([0, 0], [6, 0], 10), ab:stuecke([1, 0], [3, 0], 4), wahr, gX:{psi:wahr.psi+3*D2R, tx:wahr.tx+0.7, ty:0.03, tz:wahr.tz+0.2}});
+  chk('Z13 Manhattan-Gleiten (nur eine Richtung): abgelehnt mit grund richtung, A.g bleibt die Kette, kein Hinweis', e2.A1.abReg && !e2.A1.abReg.angenommen
+    && e2.A1.abReg.grund==='richtung' && dPlan(e2.A1.g, {psi:wahr.psi+3*D2R, tx:wahr.tx+0.7, ty:0.03, tz:wahr.tz+0.2})===0 && !e2.st.hinweise.some(h=>h.code==='abschnitt-registriert'),
+    e2.A1.abReg && `${e2.A1.abReg.grund}, Rest ${e2.A1.abReg.r0.toFixed(3)} -> ${e2.A1.abReg.r1.toFixed(3)}`);
+  // (3) mehrdeutig: zwei gleiche L-Ecken 1 m auseinander, die Kette liegt 0,5 m neben beiden -> abgelehnt (mehrdeutig)
+  const kamm=[...stuecke([0, 0], [4, 0], 8), ...stuecke([1, 0], [1, 1], 2, 0.45), ...stuecke([2, 0], [2, 1], 2, 0.45)];
+  const e3=nr({ref:kamm, ab:[...stuecke([0.2, 0], [0.95, 0], 2, 0.35), ...stuecke([1, 0.05], [1, 0.95], 2, 0.4)], wahr:{psi:0, tx:0, ty:0, tz:0}, gX:{psi:0, tx:0.5, ty:0, tz:0.05}});
+  chk('Z13 mehrdeutige Lage (zwei gleiche Ecken 1 m auseinander): abgelehnt mit grund mehrdeutig (Marge < 1,5), A.g bleibt die Kette', e3.A1.abReg && !e3.A1.abReg.angenommen
+    && e3.A1.abReg.grund==='mehrdeutig' && e3.A1.abReg.marge<1.5 && dPlan(e3.A1.g, {psi:0, tx:0.5, ty:0, tz:0.05})===0, e3.A1.abReg && `${e3.A1.abReg.grund}, Marge ${e3.A1.abReg.marge}`);
+  // (4) ohne Laser-H und mit abReg.an false kein Schritt; (5) an (a) gebundener Abschnitt derselben Runde geht als starre Gruppe mit
+  const e4=nr({ref:L1, ab:L2, wahr, gX, ohneH:true}), e5=nr({ref:L1, ab:L2, wahr, gX, abReg:{an:false}});
+  chk('Z13 ohne Laser-H bzw. abReg.an false: kein Versuch, A.g = Kette', !e4.A1.abReg && !e5.A1.abReg && dPlan(e4.A1.g, gX)===0 && dPlan(e5.A1.g, gX)===0 && !e4.KZ.lauf.abRegLog.length);
+  const e6=nr({ref:L1, ab:L2.slice(0, 3), ab2:L2.slice(3), wahr, gX});
+  chk('Z13 Gruppe: Abschnitt 2 haengt in derselben Runde ueber (a) an 1, seine Erfassungen zaehlen mit, beide gehen auf die wahre Lage (Bindung bleibt starr)',
+    e6.A2.quelle==='bindung' && e6.A2.bindungAn===1 && e6.A1.abReg && e6.A1.abReg.angenommen && e6.A1.abReg.gruppe.join()==='1,2' && e6.A1.abReg.nErf===L2.length
+    && dPlan(e6.A1.g, wahr)<0.02 && dPlan(e6.A2.g, wahr)<0.02 && !e6.A2.abReg, e6.A1.abReg && `${e6.A1.abReg.grund} Gruppe ${e6.A1.abReg.gruppe} ${e6.A2.quelle}`);
+  // Wiederholbarkeit: gleicher Lauf, gleiches Ergebnis (bitgleich)
+  const e7=nr({ref:L1, ab:L2, wahr, gX});
+  chk('Z13 zweimal gleicher Lauf: A.g bitgleich', JSON.stringify(e7.A1.g)===JSON.stringify(e1.A1.g));
 }
 
 // ------------------------------------------------- Registrierung: Budget und Reihenfolge
@@ -539,11 +678,12 @@ function speise(KZ, t0, t1, ep, mock, dt=0.1, k0=null){ let k=k0 ?? Math.round(t
   const r=G.karteErfassung(KZ, {t:0.05, ep:0, ra, rb, id:7}), b=STEUER.aufgenommen ? STEUER.aufgenommen[0] : null;
   chk('quelle erfassungen: Bilder nicht aufgenommen, Erfassung als BildErgebnis mit 1 Segment (O), Strahlen ra/rb, nutzer', !LOG.includes('lmAufnehmen') && LOG.includes('lmAufnehmen:nutzer')
     && b && b.n===1 && b.cls[0]===KL.O && b.erfassung.nutzer===true && b.erfassung.id===7 && Math.abs(b.dir[0]-0.6)<1e-6 && Math.abs(b.dir[5]-0.45)<1e-6 && b.camTo[12]===0.1 && Math.abs(b.f-G.fokusPx(PROJ, 640))<1e-9);
-  { attrappen(); const KE=neu({quelle:'erfassungen', proj:PROJ}), seen=[]; G.kartePose(KE, pose(0, 0, 0, 0));
-    G.lmErfassung=(K, bi, o)=>{ seen.push({k:bi.k, id:bi.erfassung.id, nutzer:o.nutzer, ab:o.ab}); return {zugeordnet:1, neu:0}; };
-    const re=G.karteErfassung(KE, {t:0.05, ep:0, ra, rb, id:9}); delete G.lmErfassung;
-    chk('Erfassung: gibt es G.lmErfassung (Vorschlag fuer 4, M5), geht sie dorthin statt an lmAufnehmen', seen.length===1 && seen[0].id===9 && seen[0].nutzer===true && seen[0].ab===0
-      && re.zugeordnet===1 && !LOG.some(x=>x.startsWith('lmAufnehmen')), JSON.stringify(seen)); }
+  { attrappen(); const KE=neu({quelle:'erfassungen', proj:PROJ, erfassung:{minNutzer:3}}), seen=[]; G.kartePose(KE, pose(0, 0, 0, 0));
+    G.lmErfassung=(K, bi, o)=>{ seen.push({k:bi.k, id:bi.erfassung.id, nutzer:o.nutzer, ab:o.ab, urteil:bi.erfassung.urteil, erf:o.erfassung}); return {zugeordnet:1, neu:0}; };
+    const re=G.karteErfassung(KE, {t:0.05, ep:0, ra, rb, id:9, urteil:'Kante tiefer als die Decke'}), re2=G.karteErfassung(KE, {t:0.06, ep:0, ra, rb, id:10}); delete G.lmErfassung;
+    chk('Erfassung (19.3 M5 -> M10): G.lmErfassung statt lmAufnehmen; erfassung {id, nutzer, urteil = erf.urteil bzw. null}, o {ab, erfassung = opt.erfassung}',
+      seen.length===2 && seen[0].id===9 && seen[0].nutzer===true && seen[0].ab===0 && seen[0].urteil==='Kante tiefer als die Decke' && seen[1].urteil===null
+      && seen[0].erf && seen[0].erf.minNutzer===3 && re.zugeordnet===1 && re2.zugeordnet===1 && !LOG.some(x=>x.startsWith('lmAufnehmen')), JSON.stringify(seen)); }
   attrappen(); const KZ2=neu({quelle:'segmente'}); G.kartePose(KZ2, pose(0, 0, 0, 0)); G.karteErfassung(KZ2, {t:0, ep:0, ra, rb, id:1});
   chk('quelle segmente: Erfassungen gehen nicht in die Karte', !LOG.length || !LOG.some(x=>x.startsWith('lmAufnehmen')));
   attrappen(); const KZ3=neu(); G.kartePose(KZ3, pose(0, 0, 0, 0)); G.karteEreignis(KZ3, {typ:'pause', t:0}); G.karteBild(KZ3, bild(1, 0, 0, zweiWaende));
@@ -566,7 +706,9 @@ function speise(KZ, t0, t1, ep, mock, dt=0.1, k0=null){ let k=k0 ?? Math.round(t
 // ------------------------------------------------- KarteStand (3.6), Pruefsumme, Wiederholbarkeit (10.9)
 {
   const lauf=(uhr)=>{ attrappen({klasse:i=>({klasse:i<15 ? 'nurT' : 'reloc', sP:0.01, sY:0.2*D2R}), knoten:A=>A.ab===0 ? (A.knoten || {t:Float64Array.from([0, 0.8]), s:Float64Array.from([0, 0.2]), d:Float64Array.from([0,0,0,0, 0.001,0.002,0,0.003]), cov:null}) : A.knoten});
-    const KZ=neu({uhr, knoten:true}), st=[];
+    // schluss false: geprueft wird KarteStand.lokal des laufenden Abschnitts; mit der Vorgabe (Runde 2, verbinden.schluss) ginge er in
+    // der Schlussrunde ueber die Kette in die globale Karte und lokal waere null
+    const KZ=neu({uhr, knoten:true, verbinden:{schluss:false}}), st=[];
     speise(KZ, 0, 1.4, 0, zweiWaende); st.push(G.karteRechnen(KZ)); speise(KZ, 1.5, 2.4, 1, zweiWaende); st.push(G.karteRechnen(KZ)); st.push(G.karteRechnen(KZ, {schluss:true}));
     return {KZ, st}; };
   const A=lauf(null); let n=0; const B=lauf(()=>(n+=1000.37)), S=A.st[A.st.length-1].stand;

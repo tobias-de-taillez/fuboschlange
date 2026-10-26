@@ -318,7 +318,9 @@ const BLICKE=[[1.6, 1.3, 30, 20], [2.8, 1.8, 200, 15], [1.2, 2.2, 120, 25], [3.0
 // A6 ganz, A8 die guten Abschnitte 5/6/8. Abschnitte, Rahmen und Wahrheit wie lm/messung.mjs und
 // design/bau/P-B/abnahme.mjs (Grenzen an den Bruechen auf 0,01 s; truth = T.m ? T.r - phT : phT - T.r).
 const SP='/private/tmp/claude-501/-Volumes-external-TobiCodetEndlichWieder-Zaene/86e1205e-9d6d-494b-b0b6-88f6e01be4b0/scratchpad';
-const aufnahme=n=>{ const base=SP+'/a'+n, F=SP+`/karte/fixtures/f1-a${n}.jsonl.gz`;
+// Verglichen wird gegen F1 ohne Verschmelzen (f1-aN-v0): f1-aN wurde beim Zusammenfuehren (J0) mit dem
+// echten M3 samt Verschmelzen neu erzeugt, der Vergleich 'ohne Verschmelzen bitgleich' gilt aber der rohen Kette.
+const aufnahme=n=>{ const base=SP+'/a'+n, F=SP+`/karte/fixtures/f1-a${n}-v0.jsonl.gz`;
   if(!existsSync(F) || !existsSync(base+'/x') || !existsSync(base+`/protokoll${n}.json`)) return null;
   const dir=base+'/x/'+readdirSync(base+'/x').find(d=>d.startsWith('aufnahme')), M=JSON.parse(readFileSync(dir+'/manifest.json', 'utf8'));
   const P=JSON.parse(readFileSync(base+`/protokoll${n}.json`, 'utf8')), C=Object.fromEntries(M.zustand.spalten.map((k,i)=>[k,i]));

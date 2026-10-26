@@ -1,7 +1,8 @@
 // Prueft M6 raumskizze-ausgleich.js (ARCHITEKTUR v3, 17.5): Datei und Einbau, Jacobi der Bildreste gegen zentrale
 // Differenzen, Ausgleich auf F4 (Sprung 40 cm / 10°, T-Wechsel 3 cm, Hoehe sigma 2 cm), Gier-Vorzeichen, Max-Mixture,
 // Wiederholbarkeit (andere Uhr), Takahashi gegen Spaltenloesungen, Fehlerband (Monte Carlo), Rueckfallweg ohne Knoten
-// und Stufen (werfende Platzhalter), Knoten auf T3 (ohne Drift gleich knoten:false), lokaler Ausgleich nurAb.
+// und Stufen (werfende Platzhalter), Knoten auf T3 (ohne Drift gleich knoten:false), lokaler Ausgleich nurAb, Hoehe ohne
+// Boden (h_c an H - dBoden, hcPriorOhneBoden; mit Boden bitgleich) und ty der Kette (A.fest mit quelle 'kette', tyKette).
 // Laedt vendor + geo von raumskizze-probe.html wie raumskizze-protokoll.mjs und fuegt M0 und M6 als eigene Bloecke
 // vor globalThis.RAUMSKIZZE=G; ein, wenn die Seite sie (noch) nicht traegt.
 //
@@ -314,6 +315,46 @@ if(istHaupt){
     const tyW=S.abWahr.map(a=>a.g.ty);
     chk('F4 Hoehe (sigma 2 cm je Abschnitt, Registrierungsstart): |ty - ty_wahr| <= 1 cm je Abschnitt, Lage <= 2 cm / 0,3° (10.4, 6.6 c)', r.ok && Math.max(...ty)<=0.01 && lage<=0.02 && psi<=0.3*D2R,
       `ty wahr ${tyW.map(x=>f1(100*x)).join('/')} cm; Fehler ${ty.map(x=>f2(100*x)).join('/')} cm (sigma ${karte.abschnitte.map(a=>f2(100*a.sig.y)).join('/')}); Lage max ${f2(100*lage)} cm, Gier ${f3(psi*R2D)}°; h_c ${f3(karte.hC)} m (sigma ${f1(1000*karte.sHC)} mm), q ${f2(karte.hoehen.q)}; Kettenstart waere ${Fk.map(a=>f1(a.psiMax*R2D)+'°').join('/')}`);
+  }
+
+  // ---------------------------------------------- Hoehe ohne Boden, ty der Kette (6.1, 6.2; rep/m6b)
+  { // kein Boden (Bodenkanten weg): h_c ~ H - dBoden mit sigma hcPriorOhneBoden (1 mm) statt hcPrior (0,3 m). H liegt hier
+    // 4 cm ueber der Wahrheit 2,416 m (Kern 0: dBoden 0), Start h_c 2,70 m; alter Weg (hcPriorOhneBoden null) = Parallaxe.
+    // schwach: Parallaxe wie auf A6-A8 schwach (jedes 30. Bild Schluessel, 3 px Rauschen, sPx 2 wie Erfassungen) -> h_c an
+    // H - dBoden; stark: alle Bilder ohne Rauschen (Parallaxe sigma < 1 mm) -> h_c = gewichtetes Mittel aus Prior und Parallaxe.
+    const S=sitzungF4('hoehe'), Hb=2.456, mk=o=>{ const k=karteBauen(G, S, {start:'wahr', boden:false, hC:2.70, H:Hb, ...o}); if(o.sPx) for(const b of k.beob) b.sPx=o.sPx; return k; };
+    const SW={jede:30, rausch:[3, 5], sPx:2};
+    const k1=mk(SW), r1=lauf(k1, {}, 4), k0=mk(SW), r0=lauf(k0, {hcPriorOhneBoden:null}, 4);
+    const fBoden=k1.beob.filter(b=>b.art==='boden').length;
+    chk('kein Boden, Parallaxe schwach: h_c an H - dBoden (<= 2 mm, quelle laser-kette), alter Weg folgt der Parallaxe (> 3 cm daneben) (6.2, rep/m6b)',
+      r1.ok && r0.ok && fBoden===0 && r1.hoehe.boden===false && Math.abs(r1.hoehe.hcM-(Hb-r1.hoehe.dBoden))<1e-12 && Math.abs(k1.hC-r1.hoehe.hcM)<=0.002
+        && k1.hoehen.quelle==='laser-kette' && k0.hoehen.quelle==='parallaxe' && Math.abs(k0.hC-r0.hoehe.hcM)>0.03,
+      `Bodenkanten ${fBoden}; H - dBoden ${f3(r1.hoehe.hcM)} m (dBoden ${f3(r1.hoehe.dBoden)}); neu h_c ${(k1.hC).toFixed(4)} m (sigma ${f1(1000*k1.sHC)} mm, ${k1.hoehen.quelle}); alt ${(k0.hC).toFixed(4)} m (sigma ${f1(1000*k0.sHC)} mm, ${k0.hoehen.quelle}), Wahrheit 2.416`);
+    const s1=mk({}), q1=lauf(s1, {}, 4), s0=mk({}), q0=lauf(s0, {hcPriorOhneBoden:null}, 4), sp=0.001, sa=s0.sHC;
+    const erw=(q1.hoehe.hcM/sp**2+s0.hC/sa**2)/(1/sp**2+1/sa**2);
+    chk('kein Boden, Parallaxe stark: h_c = gewichtetes Mittel aus H - dBoden (sigma 1 mm) und Parallaxe (alter Weg) auf 0,5 mm',
+      q1.ok && q0.ok && Math.abs(s1.hC-erw)<=0.0005, `neu ${(s1.hC).toFixed(4)} m, erwartet ${erw.toFixed(4)} m aus Parallaxe ${(s0.hC).toFixed(4)} m (sigma ${f2(1000*sa)} mm)`);
+    // mit Boden: hcPriorOhneBoden und tyKette wirken nicht (kein A.fest), der Weg bleibt bitgleich
+    const zust=k=>JSON.stringify({hC:k.hC, hF:k.hF, sHC:k.sHC, g:k.abschnitte.map(a=>a.g), cov:k.abschnitte.map(a=>Array.from(a.cov || [])), w:[...k.waende.values()].map(w=>[w.phi, w.rho, w.cov])});
+    const kb1=karteBauen(G, S, {start:'wahr'}); lauf(kb1, {}, 3); const kb0=karteBauen(G, S, {start:'wahr'}); lauf(kb0, {hcPriorOhneBoden:null, tyKette:null}, 3);
+    chk('mit Boden: Ergebnis mit Vorgabe = alter Weg (hcPriorOhneBoden null, tyKette null) bitgleich', zust(kb1)===zust(kb0) && kb1.hoehen.boden===true,
+      `h_c ${f3(kb1.hC)} / ${f3(kb0.hC)} m, quelle ${kb1.hoehen.quelle}`);
+  }
+  { // A.fest mit quelle 'kette' (M10 Weg (c)): tyKette 'fest' haelt G_0 = A.g = g0 ganz (ty wie Plan), auch wenn die Bild-Beob
+    // (Bodenkanten, h_c - h_f = H) ein anderes ty wollen: g = g0 = Wahrheit, nur g0.ty von ab 2 liegt 5 cm daneben (wie eine Kette
+    // mit Hoehenfehler am Schnitt). Alter Weg (tyKette null): ty frei, die Beob ziehen ab 2 zurueck.
+    // Der Anker (tyKette als Zahl) wirkt sichtbar nur bei schwacher Parallaxe (jedes 30. Bild, 3 px Rauschen, sPx 2).
+    const S=sitzungF4('hoehe'), mk=(o={})=>{ const k=karteBauen(G, S, {start:'wahr', ...o}); if(o.sPx) for(const b of k.beob) b.sPx=o.sPx;
+      for(const A of k.abschnitte){ if(A.ab===0) continue; A.g0={...A.g, ty:A.g.ty+(A.ab===2 ? 0.05 : 0)}; A.g={...A.g0}; A.fest=true; A.quelle='kette'; A.stufe='locker'; } return k; };
+    const d=k=>k.abschnitte.filter(A=>A.ab>0).map(A=>A.g.ty-A.g0.ty), plan=k=>k.abschnitte.filter(A=>A.ab>0).every(A=>A.g.psi===A.g0.psi && A.g.tx===A.g0.tx && A.g.tz===A.g0.tz);
+    const SW={jede:30, rausch:[3, 5], sPx:2};
+    const kf=mk(), rf=lauf(kf, {}, 4), ka=mk(), ra=lauf(ka, {tyKette:null}, 4), kz=mk(SW), rz=lauf(kz, {tyKette:0.01}, 4), kn=mk(SW), rn=lauf(kn, {tyKette:null}, 4);
+    const df=d(kf), da=d(ka), dz=d(kz), dn=d(kn), mx=a=>Math.max(...a.map(Math.abs));
+    chk("A.fest + quelle 'kette': ty = g0.ty der Kette und Plan = g0 (bitgleich, A.cov 0), alter Weg verschiebt ty (6.1, rep/m6b)",
+      rf.ok && ra.ok && mx(df)===0 && plan(kf) && kf.abschnitte.every(A=>A.cov && A.cov.every(x=>x===0)) && plan(ka) && mx(da)>0.02,
+      `ty - g0.ty je ab 1-${df.length}: tyKette fest ${df.map(x=>f1(100*x)).join('/')} cm, null ${da.map(x=>f1(100*x)).join('/')} cm`);
+    chk("tyKette als Zahl (1 cm), Parallaxe schwach: Anker auch mit Ketten im Ausgleich, max |ty - g0.ty| >= 1 cm kleiner als ohne Anker", rz.ok && rn.ok && mx(dz)<=mx(dn)-0.01 && plan(kz),
+      `max ${f1(100*mx(dz))} cm gegen ${f1(100*mx(dn))} cm ohne Anker; je ab ${dz.map(x=>f1(100*x)).join('/')} gegen ${dn.map(x=>f1(100*x)).join('/')} cm`);
   }
 
   // ---------------------------------------------- Wiederholbarkeit, Uhr

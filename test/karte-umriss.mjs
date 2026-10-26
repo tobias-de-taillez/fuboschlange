@@ -325,10 +325,15 @@ const U=(inp, o={})=>G.umriss(inp, {hyp:true, ...o});   // Weg b im selben Aufru
     `Insel ${I[0] && I[0].pts.length} Ecken, sup ${I[0] && f2(I[0].supRing)}, phi ${I[0] && f2(I[0].phi)}`);
   const lageF=I[0] ? Math.max(...I[0].pts.map(p=>Math.min(...[[2.3,2.3],[2.7,2.3],[2.7,2.67],[2.3,2.67]].map(t=>Math.hypot(p[0]-t[0], p[1]-t[1]))))) : NaN;
   chk('Inselecken exakt (Schnitt der Linien)', lageF<1e-9, lageF.toExponential(1));
-  const R=e.ringe[0], felder=['id','art','pts','waende','sup','hyp','flaeche','teil','supRing','phi','dicke','quelle','entscheid','exportiert'];
+  // plaus nur am Aussenring (19.2 Z10, Vertrag 19.3 M7 -> M10)
+  const R=e.ringe[0], felder=['id','art','pts','waende','sup','hyp','flaeche','teil','supRing','phi','dicke','quelle','entscheid','exportiert','plaus'];
   const EF=['ringe','kandidaten','hypothesen','aufgefuellt','verworfen','innenVerworfen','nLinien','nZellen','arbeit','ms','warn'];
   chk('Ring und UmrissErgebnis haben genau die Felder aus 3.4; intern nicht aufzaehlbar', JSON.stringify(Object.keys(R))===JSON.stringify(felder) && JSON.stringify(Object.keys(e))===JSON.stringify(EF) && e.intern && !Object.keys(e).includes('intern'),
     Object.keys(e).join(','));
+  // 19.2 Z10: Kameraweg und gesehener Freiraum liegen im Raum, Flaeche gegen Freiraum endlich; Insel ohne plaus
+  const pl=R.plaus || {}, ctx=e.intern; let frG=0; for(const f of ctx.faces) frG+=f.A*(f.phi || 0);
+  chk('Aussenring plaus (19.2 Z10): pfadIn 1, freiIn >= 0,95, aRel endlich, aFrei = Summe A·phi aller Zellen; Insel ohne plaus',
+    pl.pfadIn===1 && pl.freiIn>=0.95 && Number.isFinite(pl.aRel) && pl.aRel>0.5 && Math.abs(pl.aFrei-frG)<1e-9 && !('plaus' in I[0]), JSON.stringify(pl));
   chk('Ring.waende: Wand-ids, null fuer Hypothesenlinien; Ecke k = Schnitt von Wand k-1 und k', I[0] && I[0].waende.every(w=>['PS','PW','PN','PE'].includes(w)) && R.waende.every(w=>/^S\d$/.test(w)),
     I[0] && I[0].waende.join(','));
   const g=U(raum(camsAll, ['S','W','N','E'], 1, true));

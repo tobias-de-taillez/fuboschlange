@@ -39,7 +39,9 @@
 //  8 Raender je Komponente verfolgen (innen links), Laeufe derselben Linie zusammenfassen, Ecke = Schnitt
 //    der Nachbarlinien. Versprung zwischen fast parallelen Linien bleibt nur, wenn er >= jogMin und
 //    > jogSigma·sqrt(sd1² + sd2²) ist; direkt folgende Kanten fast kollinearer Linien (<= mergeDeg) werden
-//    zu einer Kante, wenn ihr Abstand nicht signifikant ist (7.6). Exportregel 7.3.
+//    zu einer Kante, wenn ihr Abstand nicht signifikant ist (7.6). Exportregel 7.3. Der Aussenring traegt
+//    plaus = {pfadIn, freiIn, aRel, aFrei} (flaechengewichteter Anteil von Kameraweg und Freiraum phi in den Raumzellen,
+//    Raumflaeche / Freiraumflaeche; 19.2 Z10), daraus entscheidet M10 das Tor.
 //  9 Inselhypothesen (Weg b, 7.2): G.inselHypothesen, je Hypothese ein zusaetzlicher Schnitt im selben
 //    Graphen (G.inselBewerten: Restnetz des freien Schnitts fortgesetzt), hoechstens hypMax, Reihenfolge nach id.
 //    Rechtecke, die eine Insel des freien Schnitts ueberlappen, entfallen (kein zweiter Ring fuer dasselbe Objekt).
@@ -546,6 +548,10 @@ G.umriss=(inp,opt={})=>{
     const ra=RA[0], supA=ra.sup.reduce((s,v,i)=>s+v*Math.hypot(ra.pts[(i+1)%ra.pts.length][0]-ra.pts[i][0], ra.pts[(i+1)%ra.pts.length][1]-ra.pts[i][1]), 0);
     let lenA=0; for(let i=0;i<ra.pts.length;i++){ const p=ra.pts[i], q=ra.pts[(i+1)%ra.pts.length]; lenA+=Math.hypot(q[0]-p[0], q[1]-p[1]); }
     ringe.push(ringObj(ctx, ra, {id:'aussen', art:'aussen', supRing:lenA>0 ? supA/lenA : 0, entscheid:'auto', exportiert:true}));
+    // Plausibilitaet des Aussenrings (19.2 Z10, Wortlaut rep/export/proto; M10 mlAussenTor): Anteil Kameraweg und gesehener
+    // Freiraum im Raum, Flaeche gegen Freiraum
+    { let pfG=0, pfR=0, frG=0, frR=0, Ar=0; for(let fi=0;fi<ctx.nF;fi++){ const f=ctx.faces[fi], wp=f.A*(f.pfad || 0), wf=f.A*(f.phi || 0); pfG+=wp; frG+=wf; if(inRoom[fi]){ pfR+=wp; frR+=wf; Ar+=f.A; } }
+      ringe[0].plaus={pfadIn:pfG>0 ? pfR/pfG : null, freiIn:frG>0 ? frR/frG : null, aRel:frG>0 ? Ar/frG : null, aFrei:frG}; }
     for(const h of lebend){ const m=new Uint8Array(ctx.nF); for(const fi of h.faces) m[fi]=1; const R=ringeVon(ctx, inRoom, m);
       if(!R.length){ warn.push('Insel ohne Rand: '+h.id); continue; } if(R.length>1) warn.push(`Insel ${h.id} in ${R.length} Schleifen`);
       const x=aus.find(e=>pip(h.c, e.poly)), teil=h.sup<o.islandFullSup || !h.ecke;

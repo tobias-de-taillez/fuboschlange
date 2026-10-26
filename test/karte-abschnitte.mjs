@@ -36,8 +36,9 @@ const SP='/private/tmp/claude-501/-Volumes-external-TobiCodetEndlichWieder-Zaene
 const FIX=process.env.FIX || SP+'/karte/fixtures';
 const zeit=f=>{ const t0=process.hrtime.bigint(), r=f(); return [r, Number(process.hrtime.bigint()-t0)/1e6]; };
 const q=(a,p)=>{ if(!a.length) return NaN; const s=Float64Array.from(a).sort(); return s[Math.min(s.length-1, Math.floor(p*s.length))]; };
+// 19.3 (Vertrag M4 -> M10, R2): dazu G.ketteNachF0
 const NAMEN=['sessionCuts','schnittKlasse','sectionOf','ketteStart','registriere','ankerEinordnen','resKette','resAnker','abschnittSigma',
-  'abschnittGewicht','knotenSetzen','resKnoten'];
+  'abschnittGewicht','knotenSetzen','resKnoten','ketteNachF0'];
 const m4q=(p,[x,y,z,w])=>[1-2*(y*y+z*z), 2*(x*y+z*w), 2*(x*z-y*w), 0,  2*(x*y-z*w), 1-2*(x*x+z*z), 2*(y*z+x*w), 0,
   2*(x*z+y*w), 2*(y*z-x*w), 1-2*(x*x+y*y), 0,  p[0], p[1], p[2], 1];
 // Max-Mixture-Kosten je Komponente wie 3.2.1: ½chi² + ½ln|Σ| - ln w (w = 0: unendlich)
@@ -48,7 +49,7 @@ const chi2=(r,s)=>r.reduce((a,x,i)=>a+(x/s[i])**2, 0);
 {
   const Gs={}; let fehler=null; try{ new Function('G', '"use strict";\n'+src)(Gs); }catch(x){ fehler=x.message; }
   const neu=Object.keys(Gs).sort(), soll=[...NAMEN].sort();
-  chk('Datei laedt allein (new Function, ohne G-Zugriff beim Laden) und haengt genau die 12 Namen aus 4 an G', !fehler && JSON.stringify(neu)===JSON.stringify(soll),
+  chk('Datei laedt allein (new Function, ohne G-Zugriff beim Laden) und haengt genau die 13 Namen aus 4 und 19.3 an G', !fehler && JSON.stringify(neu)===JSON.stringify(soll),
     fehler || neu.filter(k=>!NAMEN.includes(k)).concat(NAMEN.filter(k=>!neu.includes(k))).join(',') || neu.length+' Namen');
   const koll=NAMEN.filter(k=>G0keys.has(k));
   chk('keine Kollision mit Namen, die der geo-Block schon traegt', !koll.length, koll.join(',') || (traegt ? 'Seite traegt das Modul' : 'eingefuegt'));

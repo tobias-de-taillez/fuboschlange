@@ -11,18 +11,21 @@
 // Ablauf je Runde (G.karteRechnen, feste Reihenfolge, 4):
 //   1 Schnitte/Abschnitte (G.sessionCuts inkrementell, auch Ereignisse 'ref-reset' und 'rest')
 //   2 G.ketteStart fuer neue Abschnitte (g0)
-//   3 Kern nach 1.3, dann stufe 'verbunden', g = Einheit, G.lmEinbinden
+//   3 Kern nach 1.3 (mit Laser-H nur bei |hLok.hC - hLok.hF - H| <= kern.dH, 19.2 Z5), dann G.ketteNachF0 (g0 aller
+//     Abschnitte nach F0), stufe 'verbunden', g = Einheit, G.lmEinbinden
 //   4 G.registriere fuer lokale und lose Abschnitte mit neuen Schluessel-Beob oder gewachsener globaler Karte
 //     (Budget arbeit.reg Vorhersagen je Runde, je Aufruf mindestens regMin, reihum nach ab ab dem Zeiger der vorigen Runde)
 //   4a nur bei opt.knoten: G.knotenSetzen fuer verbundene/lockere Abschnitte
 //   5 G.lmBloecke, G.lmAusgleich global (lago aus dem Strukturwechsel); lokal je Abschnitt mit nurAb (relin
 //     aus dem Rest des gemeinsamen Rundenbudgets, 5.3)
 //   5a Folgekanten mit chi2 > chiRest in rundenRest Runden in Folge -> Ereignis 'rest' (je Kante einmal)
-//   6 Stufen (3.2.2), G.lmEinbinden fuer neu verbundene, G.lmNeuZuordnen
+//   6 Stufen (3.2.2, Weg (c) Kette nach 19.2 Z9), Nachregistrierung der neuen Kettenabschnitte ueber ihre Erfassungen
+//     (19.2 Z13, vor dem Einbinden), G.lmEinbinden fuer neu verbundene, G.lmNeuZuordnen
 //   7 G.lmDurchblick, G.lmZusammenfuehren, G.lmTrennen, G.lmIntervalle, G.lmHoehenklasse (je Wand nur bei
 //     geaendertem Eingang, offener Hysterese oder lmAlle Runden ohne Besuch; hoechstens arbeit.lm Waende)
 //   8 G.umriss (G.umrissEingabe, vorher = Umriss der vorigen Runde), G.inselHypothesen, G.inselBewerten
-//     (hoechstens arbeit.hyp); nur 'voll' geht als inselFest in den zweiten Schnitt, 'teil' als offener Ring
+//     (hoechstens arbeit.hyp); nur 'voll' geht als inselFest in den zweiten Schnitt, 'teil' als offener Ring;
+//     Aussenring nur ueber das Tor mlAussenTor (Ring.plaus aus M7, Hysterese ML_TOR, 19.2 Z10), sonst 'offen'
 //   9 W.ringe, iv[].ring, W.insel (3 Runden Hysterese) aus dem neuen Umriss
 //  10 G.karteAbschluss
 //
@@ -38,8 +41,29 @@
 //    Hysterese bei <= 5 cm und <= 1°). Zurueck nach 'lokal' geht nicht, weil G.lmEinbinden nicht umkehrbar ist.
 //  - lose -> lokal bei neuen Hypothesen (Lage > 0,15 m oder Gier > 2° neben allen Hypothesen zur Zeit des
 //    Wechsels nach 'lose'); die 30 s bis 'lose' zaehlen dann ab der Rueckkehr.
-//  - Erfassungen: G.lmErfassung(KZ, bildErg, o), wenn M5 sie hat; sonst als BildErgebnis mit einem Segment
-//    (erfassung: {id, nutzer: true}) an G.lmAufnehmen (M5 kennt o.nutzer bisher nicht, Bericht P-H).
+//  - Weg (c) Kette (19.2 Z9, Schalter opt.verbinden.kette 'aus' | 'kette' | 'app', Vorgabe seit Runde 2 'kette' mit w 1,
+//    fest, schluss; 'aus' bleibt ueber den Schalter): statt nach 'lose' geht ein Abschnitt, der nach loseNach s weder ueber
+//    (a) noch ueber (b) verbunden ist, mit g := g_kern ∘ g0 (g0 nach F0, 'kette') bzw. Plan aus g_kern und Hoehe ty aus der
+//    Kette (g_kern ∘ g0).ty ('app', Rahmen der App) als 'locker' in die globale Karte; quelle 'kette', Gewicht
+//    A.w = verbinden.w, mit verbinden.fest A.fest = true (M6 haelt g wie beim Kern). Solche Abschnitte bleiben 'locker'
+//    (keine Stufenwechsel ueber sig). verbinden.schluss: in der Schlussrunde gilt die Wartezeit als abgelaufen, auch fuer
+//    den laufenden Abschnitt (Festlegung R3, 19.7). Abschnitt.quelle 'kern' | 'bindung' | 'reg' | 'orakel' | 'kette' nur Bericht.
+//    Hinweise: je solcher Abschnitt 'abschnitt-kette' {ab, art}, dazu einmal 'abschnitte-kette' {n, ab, art} mit ihrer Zahl.
+//  - Nachregistrierung (19.2 Z13, opt.abReg): in mlStufen nach Weg (c) und vor G.lmEinbinden (das ist nicht umkehrbar) legt
+//    M10 jeden neuen Kettenabschnitt mit >= abReg.minErf Erfassungen ueber seine Erfassungen auf die Erfassungen des Kerns und
+//    der schon angenommenen Abschnitte (wachsend vom Kern, Erfassung gegen Erfassung, keine M5-Landmarken). Gehoben wird bei
+//    y = (H - dBoden) - g0.ty (H = KZ.H.laser, dBoden wie M6 bodenVersatz), ohne H kein Schritt. Angenommen wird nur mit
+//    (a) Rest <= restFaktor * Ausgangsrest, (b) >= anteilNah der Punkte < nah, (c) gepaarte Referenz auf 2 Richtungen
+//    >= richtDeg (1.3), (d) eindeutig (zweite unterscheidbare Lage kostet >= marge-fach). Dann setzt M10 nur den Plan von
+//    A.g (psi, tx, tz; ty, fest, quelle 'kette' und w bleiben), A.abReg traegt das Ergebnis, Hinweis 'abschnitt-registriert'
+//    {ab, dpsi, dt}. Abschnitte, die in derselben Runde ueber (a) am Kettenabschnitt haengen, gehen als starre Gruppe mit
+//    (A.bindungAn = Partner der Bindung, von M10 gesetzt). Die Erfassungen haelt M10 selbst (KZ.lauf.erf, Strahlen im Bezug
+//    der Zeile); Protokoll der Versuche KZ.lauf.abRegLog, Zeit KZ.lauf.abRegMs und RundeKopf.ms.abreg.
+//  - G.ketteNachF0 (M4) fehlt der Seite noch: M10 laesst den Schritt aus und merkt KZ.lauf.ohneKetteNachF0 (sonst
+//    braeche jede Kernrunde ab); Vertrag 19.3 M4 -> M10.
+//  - Erfassungen (Vertrag 19.3 M5 -> M10, 19.2 Z1/Z2): G.lmErfassung(KZ, bildErg, o = {ab, erfassung: opt.erfassung})
+//    mit bildErg.erfassung = {id, nutzer: true, urteil} (urteil = erf.urteil aus obs.final, T1; live null). Fehlt
+//    G.lmErfassung, geht die Erfassung als BildErgebnis mit einem Segment an G.lmAufnehmen (o.nutzer).
 //  - G.registriere schreibt A.reg und A.g0 selbst (M4); M10 liest den Verbrauch aus r.arbeit.vorhersagen
 //    (Zahl als Rueckfall) und schreibt A.reg/g0 nur, wenn das Modul sie nicht geschrieben hat (Platzhalter).
 //  - lmDurchblick/lmIntervalle/lmHoehenklasse schreiben bei M5 durchblick, iv, cls und zustand selbst; M10
@@ -54,7 +78,25 @@ const ML_DEF={H:null, quelle:'segmente', arbeit:{iter:3, lin:2, relin:20000, reg
   skala:'fest', umriss:true, umrissJede:2, reg:true, tiefe:0, ebenen:0, ohne:[], ohneAb:[], warteMax:1.0, loseNach:30, loseErledigt:10,
   proj:null, w:287, h:640, sPxErf:2, kopfRaster:1e6, topoRunden:3, topoDauer:3, verlaufMax:60, hypRunden:3, orakel:null, uhr:null,
   verbunden:{sP:0.05, sY:1*Math.PI/180}, locker:{max:0.08, psi:1.5*Math.PI/180}, lose:{max:0.20, zurueck:0.15},
-  kern:{bilder:8, richtungen:2, winkelDeg:60}, eckeSigma:0.05, schnitt:{},
+  // Kern 1.3; dH: Hoehenbedingung mit Laser-H (19.2 Z5)
+  kern:{bilder:8, richtungen:2, winkelDeg:60, dH:0.05}, eckeSigma:0.05, schnitt:{},
+  // Weg (c) Kette (19.2 Z9, Vorgabe Runde 2): ohne (a)/(b) nach loseNach s ueber die Kette, fest, auch in der Schlussrunde. Mit
+  // 'aus' wurden ohne Orakel nur 1-4 von 17, 2 von 14 und 2 von 19 Abschnitten verbunden und 5 von 6 Laeufen A6-A8 hatten keinen
+  // Export; 'kette' ist der bessere reine Plan (gemeinsamer Median 27,2 / 44,3 / 8,2 cm gegen 'app' 50,5 / 45,0 / 20,2 cm,
+  // rep/q1/hk-*.txt). erfassung: Optionen fuer G.lmErfassung (null = Vorgaben von M5)
+  verbinden:{kette:'kette', w:1, fest:true, schluss:true}, erfassung:null,
+  // Nachregistrierung der Kettenabschnitte ueber Erfassungen (19.2 Z13): Suche Gier +-gierDeg (Raster rasterGierDeg), Versatz
+  // +-versatz je Achse (Raster rasterVersatz) um den Schwerpunkt der Punkte, dann Gauss-Newton Punkt-zu-Linie mit Paaren < paar
+  // (iter Schritte, je Schritt hoechstens schrittDeg / schrittM). Rest (m) = Wurzel aus dem Mittel von min(d, paar)^2 ueber Enden
+  // und Mitte jeder Erfassung, wie die Logs von rep/zl/reg.mjs ihn zeigen (reg.mjs selbst prueft das Quadrat: 0,7 dort = 0,84
+  // hier); (a) und die Marge (d) gelten fuer diesen Rest. Annahme (a)-(d) siehe oben; eine Richtung zaehlt mit >= minRicht gepaarten Punkten
+  // (Buendel richtTol), unterscheidbar heisst > margeLage am Schwerpunkt oder > margeGierDeg, Rest fuer die Marge nach unten auf
+  // kostenMin begrenzt (zwei fast perfekte Lagen gelten als mehrdeutig). kandidaten: verfeinerte Rasterminima neben der Kette.
+  // ref 'kern': Kern und angenommene Abschnitte; 'verbunden': dazu alle verbundenen (nicht Kette). wieder: abgelehnte
+  // Kettenabschnitte spaeterer Runden erneut, wenn die Referenz gewachsen ist (nach dem Einbinden, darum Vorgabe aus).
+  abReg:{an:true, minErf:4, gierDeg:15, versatz:1.5, rasterGierDeg:5, rasterVersatz:0.25, paar:0.4, nah:0.15, anteilNah:0.5, restFaktor:0.7,
+    richtDeg:60, richtTol:10, minRicht:3, marge:1.5, margeLage:0.30, margeGierDeg:5, kostenMin:0.01, kandidaten:5, iter:15, schrittDeg:5, schrittM:0.25,
+    ref:'kern', wieder:false, logMax:2000},
   // Registrierung erneut, wenn die globale Karte um >= 10 % (mindestens 1) nicht-kandidat Waende gewachsen ist
   // oder sich die Menge der verbundenen/lockeren Abschnitte geaendert hat [S]; neue Hypothese: neben allen alten
   // um > rivalLage / rivalWinkel wie G.registriere (4)
@@ -80,7 +122,8 @@ const mlHatL=L=>L!=null && L!==-1;                 // Beob.L: Wand-/Ecke-id (Zah
 // ------------------------------------------------ Zustand
 G.karteNeu=(o={})=>{
   const opt={...ML_DEF, ...o, arbeit:{...ML_DEF.arbeit, ...(o.arbeit||{})}, verbunden:{...ML_DEF.verbunden, ...(o.verbunden||{})},
-    locker:{...ML_DEF.locker, ...(o.locker||{})}, lose:{...ML_DEF.lose, ...(o.lose||{})}, kern:{...ML_DEF.kern, ...(o.kern||{})}};
+    locker:{...ML_DEF.locker, ...(o.locker||{})}, lose:{...ML_DEF.lose, ...(o.lose||{})}, kern:{...ML_DEF.kern, ...(o.kern||{})},
+    verbinden:{...ML_DEF.verbinden, ...(o.verbinden||{})}, abReg:{...ML_DEF.abReg, ...(o.abReg||{})}};
   opt.ohne=[...(opt.ohne||[])]; opt.ohneAb=[...(opt.ohneAb||[])];
   const KZ={opt, skala:1, hC:null, hF:0, sHC:null, sHF:null, H:opt.H || null,
     hoehen:{quelle:opt.H ? 'laser-weich' : 'parallaxe', q:0},
@@ -91,7 +134,8 @@ G.karteNeu=(o={})=>{
     lauf:{breaks:[], ereignisse:[], tMax:-Infinity, tPose:-Infinity, kBis:-1, verdraengt:[], pause:false, marken:[], schrank:new Set(),
       letzte:null, verlauf:[], loseSeit:{}, loseVon:{}, regStand:{}, lokalStand:{}, lokalSeit:{}, regSig:{}, probe:{}, regZeiger:0,
       restZahl:new Map(), restGemeldet:new Set(), lmBesuch:new Map(), lmZeiger:null, gVersion:{},
-      struktur:null, hypVorher:new Map(), msZuordnen:0, msTiefe:0, nachRegel:false, entscheidNeu:false, zuletztFehler:null}};
+      struktur:null, hypVorher:new Map(), msZuordnen:0, msTiefe:0, nachRegel:false, entscheidNeu:false, zuletztFehler:null,
+      erf:[], abRegLog:[], abRegMs:0}};
   // Orakel-Landmarken (T1 --orakel-landmarken, Eichung G-0.5): Wahrheitswaende als feste globale Waende.
   if(opt.orakel && opt.orakel.waende) for(const w of opt.orakel.waende) KZ.waende.set(w.id, {rahmen:-1, cov:[1e-8, 0, 1e-8], h:'c', hLokal:null, cls:'wand',
     clsZaehler:0, hFrei:null, dChiC:0, dChiF:0, beob:[], nBilder:0, nSchluessel:0, nStandpunkte:0, basis:0, abschnitte:[], iv:[], durchblick:[], boden:[],
@@ -101,7 +145,7 @@ G.karteNeu=(o={})=>{
 
 // ------------------------------------------------ Abschnitte gliedern
 const mlAbschnittNeu=(ab,t0,ep0)=>({ab, t0, t1:t0, ep0, ep1:ep0, g0:null, g:null, cov:null, knoten:null, hLok:null, sig:null, reg:null,
-  stufe:'lokal', w:0, nBilder:0, nSchluessel:0, nBeob:0, mitWand:false, richtungen:0, psi0:null});
+  stufe:'lokal', w:0, nBilder:0, nSchluessel:0, nBeob:0, mitWand:false, richtungen:0, psi0:null, quelle:null, fest:false, bindungAn:null});
 const mlSchnittOpt=KZ=>{ const o=KZ.opt; return {...o.schnitt, reset:!o.ohne.includes('reset'), rest:true, gyro:false}; };
 // Zeiten der Abschnitte aus den Posen; Epoche und Zeit entscheiden ueber G.sectionOf (Kritik 34).
 const mlZeiten=(KZ)=>{
@@ -130,6 +174,7 @@ const mlGliedern=(KZ, altS)=>{
   for(const W of KZ.waende.values()){ if(W.rahmen>=0) W.rahmen=mapAb(W.rahmen); if(W.abschnitte) W.abschnitte=[...new Set(W.abschnitte.map(mapAb))].sort((a,b)=>a-b); }
   for(const E of KZ.ecken.values()) if(E.rahmen>=0) E.rahmen=mapAb(E.rahmen);
   if(KZ.kern!=null) KZ.kern=mapAb(KZ.kern);
+  for(const A of neuA) if(A.bindungAn!=null) A.bindungAn=mapAb(A.bindungAn);
   KZ.bloecke.clear();
   for(const feld of ['loseSeit', 'loseVon', 'regStand', 'lokalStand', 'lokalSeit', 'regSig', 'probe', 'gVersion']){ const alt=L[feld], neu={}; for(const k of Object.keys(alt)) neu[mapAb(+k)]=alt[k]; L[feld]=neu; }
   L.umgegliedert=(L.umgegliedert||0)+1;
@@ -190,15 +235,19 @@ const mlBild=(KZ, b)=>{
   return {zugeordnet:r.zugeordnet|0, neu:r.neu|0, wartet:false};
 };
 // Fadenkreuz-Erfassung (Strahlen ra, rb im Bezug der Zeile) als BildErgebnis mit einem Segment, Klasse
-// waagerecht oben; nutzer = true soll bei M5 die Klasse 'wand' erzwingen (3.3). Vorschlag fuer 4:
-// G.lmErfassung(karte, bildErg /*n = 1, erfassung {id, nutzer}*/, o = {ab}) -> {zugeordnet, neu, L}; fehlt sie,
-// geht die Erfassung an G.lmAufnehmen (dort heute wie ein Bildsegment, also ueber Spuren). Optional erf.camTo (Kamera der
-// Zeile, Lage = ra.o) und erf.ndc ([[x, y], [x, y]] der Enden, Protokoll obs.ndc) geben Ausrichtung und
-// Pixel; ohne sie Einheitsdrehung und Pixel NaN.
+// waagerecht oben. Vertrag 19.2 Z1/Z2, 19.3 M5 -> M10: G.lmErfassung(karte, bildErg /*n = 1, erfassung {id, nutzer: true,
+// urteil}*/, o = {ab, erfassung: opt.erfassung}) -> {zugeordnet, neu, L, grund}; urteil = erf.urteil (obs.final des
+// Protokolls, von T1 gesetzt; live null), M5 fuehrt Urteile aus DEF.erfassung.urteilStoer nicht als Wand-Erfassung.
+// Fehlt G.lmErfassung, geht die Erfassung an G.lmAufnehmen (dort wie ein Bildsegment, also ueber Spuren). Optional
+// erf.camTo (Kamera der Zeile, Lage = ra.o) und erf.ndc ([[x, y], [x, y]] der Enden, Protokoll obs.ndc) geben Ausrichtung
+// und Pixel; ohne sie Einheitsdrehung und Pixel NaN.
 G.karteErfassung=(KZ, erf)=>{
   const L=KZ.lauf, o=KZ.opt; mlZeit(KZ, erf.t);
   if(o.quelle==='segmente' || L.pause || !KZ.abschnitte.length) return {zugeordnet:0, neu:0};
   const ab=mlAbVon(KZ, erf.t, erf.ep); if(o.ohneAb.includes(ab)) return {zugeordnet:0, neu:0};
+  // eigene Liste fuer die Nachregistrierung (19.2 Z13): Strahlen im Bezug der Zeile, Abschnitt erst beim Gebrauch (G.sectionOf)
+  const kopie=r=>({o:[+r.o[0], +r.o[1], +r.o[2]], d:[+r.d[0], +r.d[1], +r.d[2]]});
+  L.erf.push({id:erf.id, t:erf.t, ep:erf.ep, ra:kopie(erf.ra), rb:kopie(erf.rb), urteil:erf.urteil ?? null});
   const t0=mlUhr(KZ), da=erf.ra.d, db=erf.rb.d, nn=[da[1]*db[2]-da[2]*db[1], da[2]*db[0]-da[0]*db[2], da[0]*db[1]-da[1]*db[0]];
   let psi=Math.atan2(-nn[0], nn[2]); psi=((psi%Math.PI)+Math.PI)%Math.PI;
   const c=erf.ra.o, camTo=erf.camTo ? Float64Array.from(erf.camTo) : new Float64Array(16), fy=!!erf.flipY;
@@ -208,8 +257,8 @@ G.karteErfassung=(KZ, erf)=>{
   const pxS=px ? [px[0][0], px[0][1], px[1][0], px[1][1], Math.hypot(px[1][0]-px[0][0], px[1][1]-px[0][1])] : [NaN, NaN, NaN, NaN, NaN];
   const b={k:-1-(erf.id|0), vi:-1, t:erf.t, ep:erf.ep, camTo, proj:o.proj ? Float32Array.from(o.proj) : null, flipY:fy, w:o.w, h:o.h, f, n:1,
     seg:Float32Array.from([pxS[0], pxS[1], pxS[2], pxS[3], 0, o.sPxErf, psi, el(da), el(db), pxS[4]]), cls:Int8Array.from([G.KG.KL.O]), man:Int8Array.from([-1]),
-    dir:Float32Array.from([...da, ...db]), nTeile:Uint8Array.from([1]), psi0:null, senk:null, ms:{}, erfassung:{id:erf.id, nutzer:true}};
-  let r={}; try{ r=(mlHat('lmErfassung') ? G.lmErfassung(KZ, b, {nutzer:true, ohne:o.ohne, ab}) : mlRuf('lmAufnehmen', KZ, b, {nutzer:true, ohne:o.ohne})) || {}; }catch(e){ mlEingangFehler(KZ, e); }
+    dir:Float32Array.from([...da, ...db]), nTeile:Uint8Array.from([1]), psi0:null, senk:null, ms:{}, erfassung:{id:erf.id, nutzer:true, urteil:erf.urteil ?? null}};
+  let r={}; try{ r=(mlHat('lmErfassung') ? G.lmErfassung(KZ, b, {nutzer:true, ohne:o.ohne, ab, erfassung:o.erfassung}) : mlRuf('lmAufnehmen', KZ, b, {nutzer:true, ohne:o.ohne})) || {}; }catch(e){ mlEingangFehler(KZ, e); }
   L.msZuordnen+=mlUhr(KZ)-t0;
   return {zugeordnet:r.zugeordnet|0, neu:r.neu|0};
 };
@@ -226,6 +275,7 @@ G.karteEreignis=(KZ, ev)=>{
   else if(typ==='rueckgaengig'){ // Beobachtungen der letzten 2 s (oder ev.von..ev.bis) zuruecknehmen (live 3.8)
     const bis=ev.bis ?? ev.t, von=ev.von ?? bis-2, weg=new Set();
     KZ.beob=KZ.beob.filter(b=>{ const raus=b.t>=von && b.t<=bis; if(raus) weg.add(b.id); return !raus; });
+    L.erf=L.erf.filter(e=>!(e.t>=von && e.t<=bis));
     for(const W of KZ.waende.values()) W.beob=W.beob.filter(i=>!weg.has(i));
     for(const E of KZ.ecken.values()) E.beob=E.beob.filter(i=>!weg.has(i)); }
   else L.ereignisse.push(ev);                // 'ref-reset', 'rest', 'anker...' und Protokoll-Ereignisse fuer G.sessionCuts
@@ -258,15 +308,24 @@ G.karteEbenen=(KZ, ebenen)=>{
 // ------------------------------------------------ Kern (1.3)
 // Erster Abschnitt mit >= kern.bilder Schluesselbildern mit Beob an bestaetigten Landmarken (zustand
 // 'bestaetigt' oder 'begrenzt') auf >= kern.richtungen Wandrichtungen, die >= kern.winkelDeg auseinander liegen.
+// Mit Laser-H (19.2 Z5) zusaetzlich |hLok.hC - (hLok.hF ?? 0) - H| <= kern.dH; hLok kommt aus dem lokalen Ausgleich
+// der vorigen Runden, ohne hLok noch kein Kern. Abgelehnte Abschnitte stehen in KZ.lauf.kernHoehe (Hinweis kern-hoehe),
+// die Suche geht zum naechsten.
+const mlKernHoehe=(KZ, A)=>{ const H=KZ.H && Number.isFinite(KZ.H.laser) ? KZ.H.laser : null; if(H==null) return null;
+  const h=A.hLok, dH=h && Number.isFinite(h.hC) ? h.hC-(Number.isFinite(h.hF) ? h.hF : 0)-H : null;
+  return dH!=null && Math.abs(dH)<=KZ.opt.kern.dH ? null : {ab:A.ab, dH}; };
 const mlKernSuchen=(KZ)=>{
-  const K=KZ.opt.kern, je=new Map();
+  const K=KZ.opt.kern, je=new Map(), ab0=[]; KZ.lauf.kernHoehe=ab0;
   for(const b of KZ.beob){ if(!b.schluessel || !mlHatL(b.L)) continue; const W=KZ.waende.get(b.L); if(!W || !(W.zustand==='bestaetigt' || W.zustand==='begrenzt')) continue;
     let e=je.get(b.ab); if(!e){ e={bilder:new Set(), phi:[]}; je.set(b.ab, e); } e.bilder.add(b.k); e.phi.push(W.phi); }
   for(const ab of [...je.keys()].sort((a,b)=>a-b)){ const e=je.get(ab); if(e.bilder.size<K.bilder) continue;
     const R=[]; for(const p of e.phi) if(!R.some(r=>mlRichtAbst(r, p)<1*ML_D2R)) R.push(p);
     let ok=K.richtungen<=1 && R.length>=1;
     for(let i=0;i<R.length && !ok;i++) for(let j=i+1;j<R.length;j++) if(mlRichtAbst(R[i], R[j])>=K.winkelDeg*ML_D2R-1e-9){ ok=true; break; }
-    if(ok) return ab; }
+    if(!ok) continue;
+    const hz=KZ.abschnitte[ab] ? mlKernHoehe(KZ, KZ.abschnitte[ab]) : null;
+    if(hz){ ab0.push(hz); continue; }
+    return ab; }
   return null;
 };
 
@@ -299,20 +358,165 @@ const mlZaehlen=(KZ)=>{
   KZ.abschnitte.forEach((A,ab)=>{ A.nBeob=nB[ab]; A.nSchluessel=sch[ab].size; A.mitWand=wand[ab].size>=3; A.richtungen=rich[ab].length; A.nBilder=nBi[ab]; });
 };
 
+// ------------------------------------------------ Nachregistrierung ueber Erfassungen (19.2 Z13)
+// Bodenversatz des Kerns, wortgleich zu bodenVersatz in M6 (6.2): Hoehe des Bodens von B_kern ueber dem Boden von B_0 entlang
+// der Kette. Eigene Kopie, damit der Schritt nicht an M6 haengt (Hoehe der Decke in F0 = H - dBoden).
+const mlBodenVersatz=KZ=>{ const S=KZ.schnitte || [], k=KZ.kern; if(!(k>0)) return 0;
+  const ty=[0];
+  for(let i=1;i<=k;i++){ const s=S[i-1], b=s && s.bindung; let v=ty[i-1];
+    if(s && s.klasse==='zurueck' && s.zurueckZu!=null && s.zurueckZu>=0 && s.zurueckZu<i) v=ty[s.zurueckZu];
+    else if(!s || s.art==='rest') v=ty[i-1];
+    else if(b && b.art==='pose'){ const d=b.dG; v=ty[i-1]+(d && Number.isFinite(d.ty) ? d.ty : 0); }
+    else if(s.ca && s.cb) v=ty[i-1]+s.cb[1]-s.ca[1];
+    ty.push(Number.isFinite(v) ? v : ty[i-1]); }
+  return ty[k]; };
+// Strahl {o, d} auf Hoehe y (Bezug der Zeile) -> Planpunkt [x, z]; nur vor der Kamera bis 25 m (wie rep/zl/reg.mjs)
+const mlHeb=(r,y)=>{ const d=r.d; if(!(Math.abs(d[1])>1e-6)) return null; const t=(y-r.o[1])/d[1]; return t>0 && t<25 ? [r.o[0]+t*d[0], r.o[2]+t*d[2]] : null; };
+// Erfassungen je Abschnitt (ab ueber G.sectionOf beim Gebrauch), ohne opt.ohneAb und ohne Urteile aus erfassung.urteilStoer (Z2, Teiltext)
+const mlErfJe=(KZ)=>{ const je=new Map(), st=(KZ.opt.erfassung && KZ.opt.erfassung.urteilStoer) || [];
+  for(const e of KZ.lauf.erf){ if(typeof e.urteil==='string' && st.some(s=>typeof s==='string' && s && e.urteil.includes(s))) continue;
+    const ab=G.sectionOf(KZ.schnitte, e.t, e.ep); if(KZ.opt.ohneAb.includes(ab)) continue;
+    if(!je.has(ab)) je.set(ab, []); je.get(ab).push(e); }
+  return je; };
+// Erfassungen eines Abschnitts bei y = hcM - g0.ty gehoben, mit dem Plan von gBei(A, t) in F0: Segmente [a, b]
+const mlErfF0=(A, E, hcM)=>{ const y=hcM-(A.g0 && Number.isFinite(A.g0.ty) ? A.g0.ty : A.g && Number.isFinite(A.g.ty) ? A.g.ty : 0), out=[];
+  for(const e of E||[]){ const a=mlHeb(e.ra, y), b=mlHeb(e.rb, y); if(!a || !b) continue; const g=G.gBei(A, e.t); if(!g) continue;
+    out.push([G.gPlan(g, a), G.gPlan(g, b)]); }
+  return out; };
+// Referenz als Zellen der Kantenlaenge tau: jedes Segment steht in allen Zellen, die sein um tau erweitertes Rechteck trifft,
+// darum findet die Zelle des Punktes jedes Segment naeher als tau.
+const mlZelle=(i,j)=>(i+32768)*65536+(j+32768);
+const mlNetz=(segs, tau)=>{ const M=new Map(), S=[];
+  for(const [a,b] of segs){ const dx=b[0]-a[0], dz=b[1]-a[1], l=Math.hypot(dx, dz); if(!(l>1e-6)) continue;
+    const k=S.length; S.push({a, l, u:[dx/l, dz/l], n:[-dz/l, dx/l], phi:((Math.atan2(dz, dx)%Math.PI)+Math.PI)%Math.PI});
+    const i0=Math.floor((Math.min(a[0], b[0])-tau)/tau), i1=Math.floor((Math.max(a[0], b[0])+tau)/tau), j0=Math.floor((Math.min(a[1], b[1])-tau)/tau), j1=Math.floor((Math.max(a[1], b[1])+tau)/tau);
+    for(let i=i0;i<=i1;i++) for(let j=j0;j<=j1;j++){ const z=mlZelle(i, j); let Lz=M.get(z); if(!Lz){ Lz=[]; M.set(z, Lz); } Lz.push(k); } }
+  return {M, S, tau}; };
+const mlAbst=(N,x,z)=>{ const Lz=N.M.get(mlZelle(Math.floor(x/N.tau), Math.floor(z/N.tau))); let m=Infinity; if(!Lz) return m;
+  for(const k of Lz){ const s=N.S[k], t=Math.max(0, Math.min(s.l, (x-s.a[0])*s.u[0]+(z-s.a[1])*s.u[1])), d=Math.hypot(x-s.a[0]-t*s.u[0], z-s.a[1]-t*s.u[1]); if(d<m) m=d; }
+  return m; };
+const mlNaechst=(N,x,z)=>{ const Lz=N.M.get(mlZelle(Math.floor(x/N.tau), Math.floor(z/N.tau))); let m=Infinity, best=null; if(!Lz) return {d:m, s:null, q:null};
+  for(const k of Lz){ const s=N.S[k], t=Math.max(0, Math.min(s.l, (x-s.a[0])*s.u[0]+(z-s.a[1])*s.u[1])), qx=s.a[0]+t*s.u[0], qz=s.a[1]+t*s.u[1], d=Math.hypot(x-qx, z-qz);
+    if(d<m){ m=d; best={d, s, q:[qx, qz]}; } }
+  return best || {d:m, s:null, q:null}; };
+// Lage k = {psi, tx, tz}: p' = R(psi)(p - c) + c + (tx, tz), Drehung um den Schwerpunkt c der Punkte
+const mlLage=(p,c,co,si,k)=>{ const ox=p[0]-c[0], oz=p[1]-c[1]; return [co*ox-si*oz+c[0]+k.tx, si*ox+co*oz+c[1]+k.tz]; };
+const mlKost=(N,P,c,k)=>{ const co=Math.cos(k.psi), si=Math.sin(k.psi), tau=N.tau; let s=0;
+  for(const p of P){ const q=mlLage(p, c, co, si, k), d=Math.min(mlAbst(N, q[0], q[1]), tau); s+=d*d; }
+  return P.length ? s/P.length : Infinity; };
+const mlLoes3=(A,b)=>{ const M=[[A[0], A[1], A[2], b[0]], [A[3], A[4], A[5], b[1]], [A[6], A[7], A[8], b[2]]];
+  for(let i=0;i<3;i++){ let p=i; for(let j=i+1;j<3;j++) if(Math.abs(M[j][i])>Math.abs(M[p][i])) p=j; if(!(Math.abs(M[p][i])>1e-12)) return null;
+    if(p!==i){ const t=M[i]; M[i]=M[p]; M[p]=t; }
+    for(let j=0;j<3;j++){ if(j===i) continue; const f=M[j][i]/M[i][i]; for(let l=i;l<4;l++) M[j][l]-=f*M[i][l]; } }
+  return [M[0][3]/M[0][0], M[1][3]/M[1][1], M[2][3]/M[2][2]]; };
+// Gauss-Newton Punkt-zu-Linie (Linie des naechsten Referenzsegments) mit Paaren < tau, gedaempft (Levenberg-Marquardt):
+// ein Schritt (hoechstens schrittDeg / schrittM) gilt nur, wenn der gekappte Rest mlKost faellt. Ohne diese Probe glitt die
+// Lage auf A8 entlang paralleler Waende aus dem Fenster (Schritt 1 cm Rest 10 -> Rand des Fensters, gemessen rep/nr v1).
+const mlGN=(N,P,c,k0,o)=>{ let k={...k0}, v=mlKost(N, P, c, k), lam=1e-3; const smax=o.schrittDeg*ML_D2R;
+  for(let it=0; it<o.iter; it++){ const co=Math.cos(k.psi), si=Math.sin(k.psi), A=[0,0,0, 0,0,0, 0,0,0], b=[0,0,0]; let m=0;
+    for(const p of P){ const ox=p[0]-c[0], oz=p[1]-c[1], rx=co*ox-si*oz, rz=si*ox+co*oz, qx=rx+c[0]+k.tx, qz=rz+c[1]+k.tz, r=mlNaechst(N, qx, qz); if(!(r.d<N.tau)) continue;
+      const n=r.s.n, e=(qx-r.q[0])*n[0]+(qz-r.q[1])*n[1], J=[-rz*n[0]+rx*n[1], n[0], n[1]];
+      for(let x=0;x<3;x++){ b[x]-=J[x]*e; for(let y=0;y<3;y++) A[3*x+y]+=J[x]*J[y]; } m++; }
+    if(m<3) break;
+    let weiter=false, s=null;
+    for(let t=0;t<6 && !weiter;t++){ const Ad=A.slice(); for(let x=0;x<3;x++) Ad[4*x]+=lam*Math.max(A[4*x], 1e-9)+1e-9;
+      s=mlLoes3(Ad, b); if(!s || !s.every(Number.isFinite)){ lam*=4; continue; }
+      const f=Math.min(1, smax/Math.max(1e-12, Math.abs(s[0])), o.schrittM/Math.max(1e-12, Math.hypot(s[1], s[2]))), kn={psi:k.psi+f*s[0], tx:k.tx+f*s[1], tz:k.tz+f*s[2]}, vn=mlKost(N, P, c, kn);
+      if(vn<v){ k=kn; v=vn; lam=Math.max(1e-6, lam/3); weiter=true; } else lam*=4; }
+    if(!weiter || Math.abs(s[0])<1e-6 && Math.hypot(s[1], s[2])<1e-5) break; }
+  return k; };
+// Richtungen der gepaarten Referenzsegmente (Paare < tau) in Buendeln richtTol; zaehlt mit >= minRicht Punkten; groesster Abstand
+const mlRichtungen=(N,P,c,k,o)=>{ const co=Math.cos(k.psi), si=Math.sin(k.psi), R=[]; let nah=0;
+  for(const p of P){ const q=mlLage(p, c, co, si, k), r=mlNaechst(N, q[0], q[1]); if(r.d<o.nah) nah++; if(!(r.d<N.tau)) continue;
+    const B=R.find(x=>mlRichtAbst(x.phi, r.s.phi)<=o.richtTol*ML_D2R); if(B) B.n++; else R.push({phi:r.s.phi, n:1}); }
+  const T=R.filter(x=>x.n>=o.minRicht); let w=0;
+  for(let i=0;i<T.length;i++) for(let j=i+1;j<T.length;j++) w=Math.max(w, mlRichtAbst(T[i].phi, T[j].phi));
+  return {w, n:T.length, nah:P.length ? nah/P.length : 0}; };
+const mlUnterscheidbar=(a,b,o)=>Math.hypot(a.tx-b.tx, a.tz-b.tz)>o.margeLage || Math.abs(mlWrap(a.psi-b.psi))>o.margeGierDeg*ML_D2R;
+// Ein Versuch: Segmente des Abschnitts (F0, Kette) gegen die Referenz N. Rueckgabe mit angenommen, grund, delta (F0 -> F0).
+const mlAbRegEins=(N, segs, o)=>{
+  const P=[]; for(const [a,b] of segs) P.push(a, b, [(a[0]+b[0])/2, (a[1]+b[1])/2]);
+  let cx=0, cz=0; for(const p of P){ cx+=p[0]; cz+=p[1]; } const c=[cx/P.length, cz/P.length], null0={psi:0, tx:0, tz:0};
+  const r0=Math.sqrt(mlKost(N, P, c, null0)), nP=Math.round(o.gierDeg/o.rasterGierDeg), nT=Math.round(o.versatz/o.rasterVersatz), NP=2*nP+1, NT=2*nT+1;
+  const lage=(a,i,j)=>({psi:(a-nP)*o.rasterGierDeg*ML_D2R, tx:(i-nT)*o.rasterVersatz, tz:(j-nT)*o.rasterVersatz}), C=new Float64Array(NP*NT*NT), ix=(a,i,j)=>(a*NT+i)*NT+j;
+  for(let a=0;a<NP;a++) for(let i=0;i<NT;i++) for(let j=0;j<NT;j++) C[ix(a,i,j)]=mlKost(N, P, c, lage(a,i,j));
+  // oertliche Minima des Rasters (<= alle Nachbarn), nach Rest, dann Index; unterscheidbar unterdrueckt, hoechstens kandidaten
+  const minima=[];
+  for(let a=0;a<NP;a++) for(let i=0;i<NT;i++) for(let j=0;j<NT;j++){ const v=C[ix(a,i,j)]; let ok=true;
+    for(let da=-1;da<=1 && ok;da++) for(let di=-1;di<=1 && ok;di++) for(let dj=-1;dj<=1;dj++){ if(!da && !di && !dj) continue; const A2=a+da, I=i+di, J=j+dj;
+      if(A2<0 || A2>=NP || I<0 || I>=NT || J<0 || J>=NT) continue; if(C[ix(A2,I,J)]<v){ ok=false; break; } }
+    if(ok) minima.push({v, n:ix(a,i,j), k:lage(a,i,j)}); }
+  minima.sort((x,y)=>x.v-y.v || x.n-y.n);
+  const starts=[null0];
+  for(const m of minima){ if(starts.length>o.kandidaten) break; if(starts.slice(1).every(s=>mlUnterscheidbar(s, m.k, o))) starts.push(m.k); }
+  const imFenster=k=>Math.abs(k.psi)<=o.gierDeg*ML_D2R+1e-9 && Math.abs(k.tx)<=o.versatz+1e-9 && Math.abs(k.tz)<=o.versatz+1e-9;
+  const kand=starts.map(s=>mlGN(N, P, c, s, o)).filter(imFenster).map(k=>({k, v:Math.sqrt(mlKost(N, P, c, k))}));
+  const best=kand.reduce((b,x)=>!b || x.v<b.v ? x : b, null);
+  const erg={angenommen:false, grund:null, nPunkte:P.length, r0, r1:best ? best.v : null, nah:0, richtW:0, marge:null, dpsi:0, dt:0, k:best ? best.k : null, c, delta:null, nKand:kand.length};
+  if(!best){ erg.grund='ohne-lage'; return erg; }
+  const zweit=kand.filter(x=>mlUnterscheidbar(x.k, best.k, o)).reduce((b,x)=>!b || x.v<b.v ? x : b, null);
+  const R=mlRichtungen(N, P, c, best.k, o), km=o.kostenMin;
+  erg.nah=R.nah; erg.richtW=R.w; erg.marge=zweit ? Math.max(zweit.v, km)/Math.max(best.v, km) : Infinity; erg.zweit=zweit ? {...zweit.k, v:zweit.v} : null;
+  erg.dpsi=best.k.psi; erg.dt=Math.hypot(best.k.tx, best.k.tz);
+  erg.grund=!(best.v<=o.restFaktor*r0) ? 'rest' : !(R.nah>=o.anteilNah) ? 'nah' : !(R.w>=o.richtDeg*ML_D2R-1e-9) ? 'richtung' : !(erg.marge>=o.marge) ? 'mehrdeutig' : null;
+  erg.angenommen=erg.grund==null;
+  const co=Math.cos(best.k.psi), si=Math.sin(best.k.psi);
+  erg.delta={psi:best.k.psi, tx:c[0]+best.k.tx-(co*c[0]-si*c[1]), ty:0, tz:c[1]+best.k.tz-(si*c[0]+co*c[1])};
+  return erg; };
+// Schritt fuer die neuen Kettenabschnitte dieser Runde (mit abReg.wieder auch fruehere abgelehnte, wenn die Referenz gewachsen
+// ist). Ein Kettenabschnitt geht mit den Abschnitten, die in derselben Runde ueber (a) an ihm haengen (Bindung nurT/zurueck,
+// auch ueber mehrere), als starre Gruppe: ihre Erfassungen zaehlen mit, und eine Annahme verschiebt alle (sonst risse die enge
+// Bindung; A6 ab 12 traegt 13 und 14 mit 43 von 52 Erfassungen). Referenz: Kern, angenommene Abschnitte und was ueber (a) an
+// ihnen haengt (A.bindungAn), mit ref 'verbunden' alle verbundenen ausser Kette. Reihenfolge nach |ab - kern|, dann ab;
+// Durchgaenge, bis keiner mehr angenommen wird; angenommene werden nicht wieder bewegt. Rueckgabe: angenommene ab.
+const mlAbReg=(KZ, neu, neuB, kopf)=>{
+  const o=KZ.opt.abReg, L=KZ.lauf, H=KZ.H && Number.isFinite(KZ.H.laser) ? KZ.H.laser : null, A=KZ.abschnitte, K=KZ.kern;
+  if(!o || !o.an || H==null || K==null || !A[K] || !L.erf.length) return [];
+  const angen=B=>!!(B && B.abReg && B.abReg.angenommen);
+  const offen0=[...new Set([...neu, ...(o.wieder ? A.filter(B=>B.quelle==='kette' && B.stufe==='locker' && !angen(B)).map(B=>B.ab) : [])])];
+  if(!offen0.length) return [];
+  const t0=mlUhr(KZ), hcM=H-mlBodenVersatz(KZ), je=mlErfJe(KZ);
+  // Gruppen: Wurzel jedes neu gebundenen Abschnitts ueber seine Partner
+  const par=new Map(); for(const b of neuB||[]){ const r=mlBindungMit(KZ, b); par.set(b, r ? r.partner : null); }
+  const wurzel=b=>{ let x=b; for(let n=0; n<64 && par.has(x) && par.get(x)!=null; n++) x=par.get(x); return x; };
+  const gruppe=ab=>[ab, ...(neuB||[]).filter(b=>b!==ab && wurzel(b)===ab)].sort((a,b)=>a-b);
+  const nErf=ab=>gruppe(ab).reduce((s,x)=>s+(je.get(x)||[]).length, 0);
+  const offen=offen0.filter(ab=>A[ab] && A[ab].quelle==='kette' && A[ab].g && !angen(A[ab]) && nErf(ab)>=o.minErf).sort((a,b)=>Math.abs(a-K)-Math.abs(b-K) || a-b);
+  // Mitglieder noch offener Gruppen gehoeren nie zur Referenz (sonst legte sich die Gruppe mit ref 'verbunden' auf sich selbst)
+  const offenG=()=>new Set(offen.filter(ab=>!angen(A[ab])).flatMap(gruppe));
+  let ausRef=offenG();
+  const inRef=(B, tiefe=0)=>!!(B && B.g && !ausRef.has(B.ab) && (B.ab===K || angen(B) || o.ref==='verbunden' && B.stufe==='verbunden' && B.quelle!=='kette'
+    || B.quelle==='bindung' && B.stufe==='verbunden' && B.bindungAn!=null && B.bindungAn!==B.ab && tiefe<64 && inRef(A[B.bindungAn], tiefe+1)));
+  const segsVon=ids=>{ const out=[]; for(const ab of ids) out.push(...mlErfF0(A[ab], je.get(ab), hcM)); return out; };
+  const refBau=()=>{ const ids=A.filter(B=>inRef(B)).map(B=>B.ab), segs=segsVon(ids); return {N:mlNetz(segs, o.paar), n:segs.length, stempel:ids.join(',')+':'+segs.length}; };
+  const neuAn=[]; let R=refBau(), weiter=true;
+  while(weiter){ weiter=false;
+    for(const ab of offen){ const B=A[ab]; if(angen(B) || !R.n) continue; if(B.abReg && B.abReg.stempel===R.stempel) continue;
+      const grp=gruppe(ab), segs=segsVon(grp); if(segs.length<o.minErf) continue;
+      const r=mlAbRegEins(R.N, segs, o);
+      B.abReg={angenommen:r.angenommen, grund:r.grund, dpsi:r.dpsi, dt:r.dt, r0:r.r0, r1:r.r1, nah:r.nah, richtW:r.richtW, marge:r.marge, nErf:segs.length, gruppe:grp,
+        versuche:((B.abReg && B.abReg.versuche)||0)+1, stempel:R.stempel, runde:KZ.runde, gVor:{...B.g}};
+      L.abRegLog.push({runde:KZ.runde, ab, nRef:R.n, ...B.abReg, zweit:r.zweit, delta:r.delta}); if(L.abRegLog.length>o.logMax) L.abRegLog.shift();
+      if(r.angenommen){ for(const x of grp) A[x].g=G.gKomp(r.delta, A[x].g); neuAn.push(ab); ausRef=offenG(); R=refBau(); weiter=true; } } }
+  const dt=mlUhr(KZ)-t0; L.abRegMs+=dt; if(kopf && kopf.ms) kopf.ms.abreg=(kopf.ms.abreg||0)+dt;
+  return neuAn; };
+
 // ------------------------------------------------ Stufen (3.2.2)
 // Bindung des Schnitts vor Abschnitt ab an einen verbundenen Abschnitt: nurT (g := g_A ∘ ΔT) oder
 // zurueck (g := g des zurueckgekehrten Abschnitts), jeweils nur bei engem sigma.
-const mlBindungG=(KZ, ab)=>{
+// mlBindungMit gibt dazu den Partner (ab), an dem die Bindung haengt (fuer 19.2 Z13: gebundene Abschnitte gehen mit ihm).
+const mlBindungMit=(KZ, ab)=>{
   const o=KZ.opt.verbunden, A=KZ.abschnitte, verb=B=>B && B.g && (B.stufe==='verbunden' || B.stufe==='locker');
   for(let i=0;i<KZ.schnitte.length;i++){ const s=KZ.schnitte[i], b=s.bindung;
     if(!b || !(b.sP<=o.sP) || !(b.sY<=o.sY) || !(i===ab || i+1===ab)) continue;
     const andere=A[i===ab ? i+1 : i];
     if(s.klasse==='nurT' && verb(andere)){ const TA=mlZeileVor(KZ, s), TB=mlZeileNach(KZ, s); if(!TA || !TB) continue;
       const dT=G.gKomp(G.gInv(G.gAusT(TA.T)), G.gAusT(TB.T)), g=G.gBei(andere, s.t); if(!g) continue;
-      return i+1===ab ? G.gKomp(g, dT) : G.gKomp(g, G.gInv(dT)); }
-    if(s.klasse==='zurueck' && i+1===ab && s.zurueckZu!=null && verb(A[s.zurueckZu])) return G.gBei(A[s.zurueckZu], s.t); }
+      return {g:i+1===ab ? G.gKomp(g, dT) : G.gKomp(g, G.gInv(dT)), partner:andere.ab}; }
+    if(s.klasse==='zurueck' && i+1===ab && s.zurueckZu!=null && verb(A[s.zurueckZu])) return {g:G.gBei(A[s.zurueckZu], s.t), partner:s.zurueckZu}; }
   return null;
 };
+const mlBindungG=(KZ, ab)=>{ const r=mlBindungMit(KZ, ab); return r ? r.g : null; };
 const mlZeileVor=(KZ, s)=>{ let z=null; for(const p of KZ.posen){ if(p.ep===s.epA && p.t<=s.t) z=p; if(p.t>s.t) break; } return z; };
 const mlZeileNach=(KZ, s)=>{ for(const p of KZ.posen) if(p.ep===s.epB && p.t>=s.t) return p; return null; };
 // Orakel (T1 --orakel-rahmen, obere Schranke): g des Abschnitts aus der Wahrheit (Sitzung: gAt(t0); Aufnahme: g[ab]).
@@ -322,20 +526,36 @@ const mlOrakelG=(KZ, A)=>{ const O=KZ.opt.orakel; if(!O) return null; const g=O.
 const mlHypLagen=reg=>reg && reg.hyp ? reg.hyp.filter(h=>h && h.g).map(h=>({psi:h.g.psi, tx:h.g.tx, tz:h.g.tz})) : [];
 const mlHypNeu=(KZ, reg, alt)=>{ const o=KZ.opt.hypNeu, a=alt||[];
   return mlHypLagen(reg).some(h=>a.every(x=>Math.hypot(h.tx-x.tx, h.tz-x.tz)>o.lage || Math.abs(mlWrap(h.psi-x.psi))>o.gierDeg*ML_D2R)); };
-const mlStufen=(KZ, kopf)=>{
-  const o=KZ.opt, L=KZ.lauf, neuVerbunden=[];
+// Weg (c) Kette (19.2 Z9): g fuer einen Abschnitt, dessen Wartezeit ohne (a)/(b) abgelaufen ist; 'kette': g0 (nach F0,
+// G.ketteNachF0) hinter g_kern, 'app': Plan (psi, tx, tz) aus g_kern (Rahmen der App), Hoehe ty aus der Kette (g_kern ∘ g0).ty,
+// denn der Bodenbezug der App springt an Schnitten auch in der Hoehe (A8 bis 28 cm; offline mit ty aus der Kette 8,9 statt
+// 20,2 cm Median gegen die Hoehe von B_0, rep/q1/hk-app-a8.txt; in der Pipeline haengt der Gewinn an der Hoehe von F0 = B_kern
+// aus M6, auf A8 gemessen 26,5 statt 14,2 cm, ARCHITEKTUR 19.10). null: Weg aus oder ohne g0 (beide Arten; 'app' ohne g0
+// haette keine Hoehe).
+const mlKetteG=(KZ, A)=>{ const art=KZ.opt.verbinden.kette, K=KZ.kern!=null ? KZ.abschnitte[KZ.kern] : null, gk=K && K.g ? K.g : null;
+  if(!gk || !A.g0 || !(art==='kette' || art==='app')) return null;
+  const gK=G.gKomp(gk, A.g0);
+  return art==='app' ? {psi:gk.psi, tx:gk.tx, ty:gK.ty, tz:gk.tz} : gK; };
+const mlStufen=(KZ, kopf, schluss=false)=>{
+  const o=KZ.opt, L=KZ.lauf, V=o.verbinden, neuVerbunden=[], zuEnde=!!(schluss && V.schluss);
   for(const A of KZ.abschnitte){ const ab=A.ab, alt=A.stufe, sg=A.sig;
-    if(ab===KZ.kern){ A.stufe='verbunden'; delete L.probe[ab]; A.w=mlHat('abschnittGewicht') ? G.abschnittGewicht(A) : 1; continue; }
+    if(ab===KZ.kern){ A.stufe='verbunden'; A.quelle=A.quelle || 'kern'; delete L.probe[ab]; A.w=mlHat('abschnittGewicht') ? G.abschnittGewicht(A) : 1; continue; }
     if(KZ.kern==null){ A.stufe=alt==='lose' ? 'lose' : 'lokal'; }
     else if(alt==='lokal' || alt==='lose' && L.loseVon[ab]!=='locker'){
       // (a) enge Bindung an einen verbundenen Abschnitt, (b) angenommene Registrierung (auf Probe bis zum ersten sig von M6)
-      const og=mlOrakelG(KZ, A), gB=og ? null : mlBindungG(KZ, ab), reg=A.reg && A.reg.gewaehlt>=0 ? A.reg.hyp[A.reg.gewaehlt] : null;
-      if(og || gB || reg){ A.g=og || gB || {...reg.g}; A.stufe='verbunden'; neuVerbunden.push(ab);
+      const og=mlOrakelG(KZ, A), bM=og ? null : mlBindungMit(KZ, ab), gB=bM ? bM.g : null, reg=A.reg && A.reg.gewaehlt>=0 ? A.reg.hyp[A.reg.gewaehlt] : null;
+      const zeitUm=alt==='lokal' && L.tMax-Math.max(A.t1, L.tKern ?? -Infinity, L.lokalSeit[ab] ?? -Infinity)>=o.loseNach && ab<KZ.abschnitte.length-1;
+      const gK=og || gB || reg || !(zeitUm || alt==='lokal' && zuEnde) ? null : mlKetteG(KZ, A);
+      if(og || gB || reg){ A.g=og || gB || {...reg.g}; A.stufe='verbunden'; A.quelle=og ? 'orakel' : gB ? 'bindung' : 'reg'; neuVerbunden.push(ab); A.bindungAn=gB ? bM.partner : null;
         for(const f of ['loseSeit', 'loseVon', 'lokalSeit', 'regSig']) delete L[f][ab];
         if(!og && !gB) L.probe[ab]={runde:KZ.runde, sig:A.sig || null}; }
-      else if(alt==='lokal' && L.tMax-Math.max(A.t1, L.tKern ?? -Infinity, L.lokalSeit[ab] ?? -Infinity)>=o.loseNach && ab<KZ.abschnitte.length-1){
+      else if(gK){ // (c) Kette: locker mit Gewicht w, optional fest (M6 haelt g)
+        A.g=gK; A.stufe='locker'; A.quelle='kette'; A.fest=!!V.fest; neuVerbunden.push(ab);
+        for(const f of ['loseSeit', 'loseVon', 'lokalSeit', 'regSig']) delete L[f][ab]; }
+      else if(zeitUm){
         A.stufe='lose'; L.loseSeit[ab]=L.tMax; L.loseVon[ab]='lokal'; L.regSig[ab]=mlHypLagen(A.reg); }
       else if(alt==='lose' && mlHypNeu(KZ, A.reg, L.regSig[ab])){ A.stufe='lokal'; L.lokalSeit[ab]=L.tMax; for(const f of ['loseSeit', 'loseVon', 'regSig']) delete L[f][ab]; } }
+    else if(A.quelle==='kette'){ A.stufe='locker'; }   // (c) bleibt locker, ohne Wechsel ueber sig
     else if(L.probe[ab] && alt==='verbunden'){
       // (b) zweite Haelfte: erst das erste sig, das M6 nach dem Uebergang geschrieben hat, entscheidet
       if(sg && sg!==L.probe[ab].sig && Number.isFinite(sg.max)){ delete L.probe[ab];
@@ -345,7 +565,10 @@ const mlStufen=(KZ, kopf)=>{
       else if(alt==='locker' && sg.max>o.lose.max){ A.stufe='lose'; L.loseSeit[ab]=L.tMax; L.loseVon[ab]='locker'; }
       else if(alt==='locker' && sg.max<=o.verbunden.sP && sg.psi<=o.verbunden.sY) A.stufe='verbunden';
       else if(alt==='lose' && sg.max<o.lose.zurueck){ A.stufe='locker'; delete L.loseSeit[ab]; delete L.loseVon[ab]; } }
-    A.w=mlHat('abschnittGewicht') ? G.abschnittGewicht(A) : (A.stufe==='verbunden' || A.stufe==='locker' ? 1 : 0); }
+    A.w=A.quelle==='kette' && A.stufe==='locker' ? V.w : mlHat('abschnittGewicht') ? G.abschnittGewicht(A) : (A.stufe==='verbunden' || A.stufe==='locker' ? 1 : 0); }
+  // 19.2 Z13: neue Kettenabschnitte ueber ihre Erfassungen nachregistrieren, bevor G.lmEinbinden ihre Waende mit g umrechnet
+  const neuKette=neuVerbunden.filter(ab=>KZ.abschnitte[ab].quelle==='kette'), neuBindung=neuVerbunden.filter(ab=>KZ.abschnitte[ab].quelle==='bindung');
+  if(neuKette.length || o.abReg.wieder) mlAbReg(KZ, neuKette, neuBindung, kopf);
   for(const ab of neuVerbunden) mlRuf('lmEinbinden', KZ, ab);
   return neuVerbunden;
 };
@@ -408,12 +631,31 @@ const mlUmriss=(KZ, kopf, schluss, A)=>{
   erg.hypothesen=bew.map(x=>({...x.b}));
   // Ring.entscheid und exportiert nach 7.3 (Nutzer ueber KZ.inselEntscheide)
   for(const R of erg.ringe||[]){
-    if(R.art==='aussen'){ R.entscheid='auto'; R.exportiert=true; continue; }
+    if(R.art==='aussen'){ const ok=mlAussenTor(KZ, R); R.entscheid=ok ? 'auto' : 'offen'; R.exportiert=ok; continue; }
     const e=mlEntscheid(KZ.inselEntscheide.get(R.id));
     if(e){ R.entscheid=e; R.exportiert=e==='nutzer-ja'; }
     else if(R.teil){ R.entscheid='offen'; R.exportiert=false; }
     else { R.entscheid='auto'; R.exportiert=true; } }
   return erg;
+};
+// Tor des Aussenrings (19.2 Z10, Wortlaut rep/export/proto): Kameraweg und gesehener Freiraum im Ring (aus M7, R.plaus),
+// Flaeche gegen Freiraum und gegen die Huelle des ganzen Kamerawegs (alle Abschnitte, Bezug), absolute Mindestflaeche;
+// Hysterese je Groesse. Abweichung vom Prototyp: kH ohne Huelle (weniger als 3 Posen oder alle auf einer Linie) gilt als
+// bestanden (A/0 = Infinity), fehlende Groessen (plaus fehlt, NaN) nicht. Nicht bestanden: entscheid 'offen', nicht exportiert,
+// Hinweis aussen-unplausibel {fehlt}. abschluss.bereit ist kein Exporttor.
+const ML_TOR={pfadIn:[0.6, 0.5], freiIn:[0.7, 0.6], aRel:[0.85, 0.75], aMin:[1.2, 1.0], kH:[0.6, 0.5]};
+const mlHuelle=P=>{ const Q=[...P].sort((a,b)=>a[0]-b[0] || a[1]-b[1]); if(Q.length<3) return 0;
+  const kr=(o,a,b)=>(a[0]-o[0])*(b[1]-o[1])-(a[1]-o[1])*(b[0]-o[0]), lo=[], hi=[];
+  for(const p of Q){ while(lo.length>=2 && kr(lo[lo.length-2], lo[lo.length-1], p)<=0) lo.pop(); lo.push(p); }
+  for(const p of Q.slice().reverse()){ while(hi.length>=2 && kr(hi[hi.length-2], hi[hi.length-1], p)<=0) hi.pop(); hi.push(p); }
+  const H=lo.slice(0,-1).concat(hi.slice(0,-1)); let s=0; for(let i=0;i<H.length;i++){ const p=H[i], q=H[(i+1)%H.length]; s+=p[0]*q[1]-q[0]*p[1]; } return Math.abs(s)/2; };
+const mlAussenTor=(KZ, R)=>{
+  const L=KZ.lauf, p=R.plaus || {}, war=!!L.aussenOk, A=Math.abs(R.flaeche || 0);
+  const ah=mlHuelle(KZ.posen.filter(z=>z.pose && Number.isFinite(z.pose[0])).map(z=>[z.pose[0], z.pose[2]]));
+  const w={pfadIn:p.pfadIn, freiIn:p.freiIn, aRel:p.aRel, aMin:A, kH:ah>0 ? A/ah : Infinity}, fehlt=[];
+  for(const k in ML_TOR){ const x=w[k]; if(!((Number.isFinite(x) || x===Infinity) && G.hyst(war, x, ML_TOR[k][0], ML_TOR[k][1], '>='))) fehlt.push(k); }
+  L.aussenOk=!fehlt.length; L.aussenTor={...w, fehlt};
+  return L.aussenOk;
 };
 // W.ringe, iv[].ring und W.insel mit 3 Runden Hysterese aus dem Umriss dieser Runde (Kritik 37).
 const mlRingeAnWaende=(KZ, erg)=>{
@@ -506,6 +748,17 @@ const mlHinweise=(KZ, stand)=>{
   for(const b of stand.hypothesen||[]) if(b.stufe==='teil') H.push({code:'insel-erkannt', ring:b.id});
   for(const k of stand.kandidaten||[]) if(k.grund==='rund') H.push({code:'insel-rund', ring:k.id});
   for(const W of stand.waende) if(W.cls==='schrank') H.push({code:'schrank', wand:W.id});
+  // 19.2 Z5, Z9, Z10, Z12
+  if(!stand.ringe.some(r=>r.art==='aussen')) KZ.lauf.aussenTor=null;
+  if(KZ.lauf.aussenTor && KZ.lauf.aussenTor.fehlt.length) H.push({code:'aussen-unplausibel', fehlt:[...KZ.lauf.aussenTor.fehlt]});
+  const RA=stand.ringe.find(r=>r.art==='aussen'); if(RA && Math.abs(RA.flaeche || 0)<ML_TOR.aMin[1]) H.push({code:'aussen-klein'});
+  // nur ueber die Kette verbunden (Weg (c), 19.2 Z9): je Abschnitt, dazu einmal die Zahl (Runde 2), wenn es solche gibt
+  const nurKette=A.filter(a=>a.quelle==='kette' && a.stufe==='locker').map(a=>a.ab);
+  for(const ab of nurKette) H.push({code:'abschnitt-kette', ab, art:KZ.opt.verbinden.kette});
+  if(nurKette.length) H.push({code:'abschnitte-kette', n:nurKette.length, ab:nurKette, art:KZ.opt.verbinden.kette});
+  // 19.2 Z13: Kettenabschnitte, deren Plan ueber die Erfassungen nachregistriert ist (dpsi rad, dt m am Schwerpunkt)
+  for(const a of A) if(a.abReg && a.abReg.angenommen) H.push({code:'abschnitt-registriert', ab:a.ab, dpsi:a.abReg.dpsi, dt:a.abReg.dt});
+  for(const k of KZ.lauf.kernHoehe || []) H.push({code:'kern-hoehe', ab:k.ab, dH:k.dH});
   return H;
 };
 const mlStand=(KZ, kopf, fehler)=>{
@@ -518,7 +771,7 @@ const mlStand=(KZ, kopf, fehler)=>{
     ringe:U ? (U.ringe||[]).map(R=>({...R, pts:R.pts.map(p=>[p[0], p[1]]), waende:mlArr(R.waende), sup:mlArr(R.sup), hyp:mlArr(R.hyp)})) : [],
     kandidaten:U ? (U.kandidaten||[]).map(k=>({id:k.id, pts:k.pts, grund:k.grund})) : [], hypothesen:U ? (U.hypothesen||[]).map(b=>({...b})) : [],
     abschnitte:KZ.abschnitte.map(A=>({ab:A.ab, t0:A.t0, t1:A.t1, g:A.g ? {psi:A.g.psi, tx:A.g.tx, ty:A.g.ty, tz:A.g.tz} : null, sig:A.sig ? {...A.sig} : null,
-      stufe:A.stufe, w:A.w, mitWand:A.mitWand, knoten:mlKnotenListe(A)})),
+      stufe:A.stufe, w:A.w, mitWand:A.mitWand, knoten:mlKnotenListe(A), quelle:A.quelle || null, fest:!!A.fest})),
     hoehen:{hC:KZ.hC, sHC:KZ.sHC, hF:KZ.hF, sHF:KZ.sHF, skala:KZ.skala, quelle:KZ.hoehen.quelle, q:KZ.hoehen.q},
     hinweise:[], arbeit:{...kopf.arbeit}, ms:{...kopf.ms}, abschluss:{bereit:false, fehlt:[], ausgeschlossen:[]}, fehler:fehler||null};
   stand.hinweise=mlHinweise(KZ, stand);
@@ -587,10 +840,14 @@ G.karteRechnen=(KZ, o0={})=>{
     mlZaehlen(KZ);
     // 3 Kern
     if(KZ.kern==null){ const k=mlKernSuchen(KZ);
-      if(k!=null){ const K=KZ.abschnitte[k], og=mlOrakelG(KZ, K);   // Orakel (T1 --orakel-rahmen): F0 = Rahmen der Wahrheit
-        KZ.kern=k; L.tKern=L.tMax; K.stufe='verbunden'; K.g=og ? {...og} : mlEins(); K.cov=null;
+      if(k!=null){ // g0 aller Abschnitte nach F0 (19.2 Z5, Eigentum M4); fehlt G.ketteNachF0, bleibt g0 in B_0
+        if(mlHat('ketteNachF0')){ const r=mlRuf('ketteNachF0', KZ.abschnitte, k); if(Array.isArray(r) && r.length===KZ.abschnitte.length) KZ.abschnitte=r; }
+        else L.ohneKetteNachF0=true;
+        const K=KZ.abschnitte[k], og=mlOrakelG(KZ, K);   // Orakel (T1 --orakel-rahmen): F0 = Rahmen der Wahrheit
+        KZ.kern=k; L.tKern=L.tMax; K.stufe='verbunden'; K.quelle='kern'; K.g=og ? {...og} : mlEins(); K.cov=null;
         if(K.knoten && K.knoten.d) K.knoten.d.fill(0, 0, 4);
         mlRuf('lmEinbinden', KZ, k); } }
+    else L.kernHoehe=[];
     // 4 Registrierung (Budget in Vorhersagen, reihum nach ab ab dem Zeiger; faellig nach mlRegFaellig)
     if(KZ.kern!=null && opt.reg && !opt.ohne.includes('reg')) mess('reg', ()=>{ let rest=A.reg;
       const st=mlRegStempel(KZ), n=KZ.abschnitte.length, z=((L.regZeiger|0)%Math.max(1, n)+n)%Math.max(1, n);
@@ -629,7 +886,7 @@ G.karteRechnen=(KZ, o0={})=>{
       if(!r) stumm.push('lmAusgleich(nurAb)'); else { kopf.arbeit.iter+=r.iter|0; kopf.arbeit.relin+=r.relin|0; }
       L.lokalStand[S.ab]=S.nSchluessel; }
     // 6 Stufen, Einbinden, neu zuordnen
-    mess('stufen', ()=>{ mlStufen(KZ, kopf);
+    mess('stufen', ()=>{ mlStufen(KZ, kopf, !!o.schluss);
       if(mlHat('lmNeuZuordnen')) for(const S of KZ.abschnitte) if(S.stufe==='verbunden' || S.stufe==='locker') G.lmNeuZuordnen(KZ, S.ab); });
     mlZaehlen(KZ);
     // 7 Landmarken pflegen

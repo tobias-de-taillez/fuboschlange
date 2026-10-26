@@ -239,10 +239,10 @@ const KL=G.KG.KL, SEG=G.KG.SEG;
 
 // ------------------------------------------------- Datei und Einbau
 { const src=read(DATEI), NAMEN=['lmVorhersage','lmZuordnen','lmAufnehmen','lmSchluessel','lmSpuren','lmHoehe','lmDurchblick','lmZusammenfuehren','lmTrennen',
-    'lmIntervalle','lmHoehenklasse','lmEcken','lmEinbinden','lmNeuZuordnen'], EXTRA=['lmBodenguete','lmSchrankVerdacht'];
+    'lmIntervalle','lmHoehenklasse','lmEcken','lmEinbinden','lmNeuZuordnen'], EXTRA=['lmBodenguete','lmSchrankVerdacht', 'lmErfassung'];   // lmErfassung: Erfassungsweg Z1 (ARCHITEKTUR 19.2, Vertrag 19.3)
   const Gs={}; let fehler=null; try{ new Function('G', '"use strict";\n'+src)(Gs); }catch(x){ fehler=x.message; }
   const neu=Object.keys(Gs).sort(), soll=[...NAMEN, ...EXTRA].sort();
-  chk('Datei laedt allein (new Function, ohne geo-Kern und M0, also ohne Zugriff beim Laden) und haengt genau die 14 Namen aus 4 plus lmBodenguete, lmSchrankVerdacht an G',
+  chk('Datei laedt allein (new Function, ohne geo-Kern und M0, also ohne Zugriff beim Laden) und haengt genau die 14 Namen aus 4 plus lmBodenguete, lmSchrankVerdacht, lmErfassung (Z1, 19.2) an G',
     !fehler && JSON.stringify(neu)===JSON.stringify(soll), fehler || neu.length+' Namen');
   chk('keine Kollision mit Namen, die der geo-Block schon traegt', !soll.some(k=>G0keys.has(k)), JSON.stringify(quellen));
   chk('Datei endet mit genau einem Zeilenumbruch, kein import/export/</script>, keine aeusseren Klammern', /[^\n]\n$/.test(src) && !/^\s*(import|export)\s/m.test(src) && !src.includes('</script>') && !src.startsWith('{'));
@@ -443,6 +443,36 @@ if(ERG.rund){ const ms=ERG.rund.R.log.ms; zeile(`     Laufzeit rund (Mac, Auskun
 if(ERG.rund){ const K=ERG.rund.R.K, sv=[...K.waende.values()].filter(W=>W.rahmen===-1 && W.cls==='wand' && G.lmSchrankVerdacht(W, K).verdacht);
   chk('lmSchrankVerdacht: auf F4 rund (keine Schraenke) an keiner wand-Landmarke', !sv.length, sv.map(W=>W.id).join(',')); }
 if(ERG.rund){ const B=G.lmBodenguete(ERG.rund.R.K); chk('lmBodenguete: q in [0, 1], b > 0 auf rund (Bodenkanten gesehen)', B.q>=0 && B.q<=1 && B.b>0, `q ${B.q.toFixed(2)}, b ${B.b.toFixed(2)} m, p ${B.p.toFixed(2)}, Δχ² ${B.dchi.toFixed(1)}, Wand ${B.wand}, h frei ${B.h.toFixed(3)}`); }
+
+// ------------------------------------------------- Erfassungsweg G.lmErfassung (Z1, Z2; ARCHITEKTUR 19.2, Vertrag 19.3)
+// Synthetisch, ein lokaler Abschnitt, H 2,4 m: Erfassungen der Deckenkante x = 3 (Normale zur Kamera -x, rho -3) und eine
+// Kante 2,0 m hoch an z = 2,5. Fadenkreuz wie M10 (G.karteErfassung): n 1, Klasse oben, dir = Strahlen der Enden.
+{ const KE=karteNeu({H:2.4}); KE.abschnitte=[abschnittNeu({ab:0, t0:0, t1:100, g:EINS})];
+  const STOER='verworfen: Kante tiefer als die Decke (Leiste, Stuck oder Schrank?)';
+  const erf=(K, id, c, p1, p2, urteil=null, o={})=>{ const d=p=>{ const v=[p[0]-c[0], p[1]-c[1], p[2]-c[2]], l=Math.hypot(...v); return v.map(x=>x/l); }, d1=d(p1), d2=d(p2);
+    const camTo=new Float64Array(16); camTo[0]=camTo[5]=camTo[10]=camTo[15]=1; camTo[12]=c[0]; camTo[13]=c[1]; camTo[14]=c[2];
+    const b={k:-1-id, vi:-1, t:id, ep:0, camTo, proj:null, flipY:false, w:287, h:640, f:500, n:1, seg:Float32Array.from([0, 0, 0, 0, 0, 2, 0, 0, 0, 200]),
+      cls:Int8Array.from([KL.O]), man:Int8Array.from([-1]), dir:Float32Array.from([...d1, ...d2]), nTeile:Uint8Array.from([1]), psi0:null, senk:null, ms:{}, erfassung:{id, nutzer:true, urteil}};
+    return G.lmErfassung(K, b, {nutzer:true, ab:0, ...o}); };
+  const nutzerAn=(K, W)=>W.beob.filter(i=>K.beob[i].nutzer===true && K.beob[i].L===W.id).length;
+  const r0=erf(KE, 0, [0, 1.5, 0], [3, 2.4, -1], [3, 2.4, 1]), r1=erf(KE, 1, [0.4, 1.5, 0.6], [3, 2.4, -0.6], [3, 2.4, 1.4]), W=KE.waende.get(r0.L);
+  chk('lmErfassung (Z1): erste Erfassung neue Wand, zweite derselben Kante zugeordnet; cls wand, bestaetigt ab 2 Erfassungen, rho -3',
+    r0.neu===1 && r1.zugeordnet===1 && r1.L===r0.L && KE.waende.size===1 && W.cls==='wand' && W.zustand==='bestaetigt' && nutzerAn(KE, W)===2 && Math.abs(W.rho+3)<1e-6,
+    `${JSON.stringify([r0.grund, r1.grund])}, ${KE.waende.size} Wand, ${W && W.cls}/${W && W.zustand}, rho ${W && W.rho.toFixed(6)}`);
+  const ZS={erfassung:{urteilStoer:[STOER]}};   // Vorgabe urteilStoer ist leer (R1: kein Gewinn gemessen), hier eingeschaltet
+  const r2=erf(KE, 2, [0, 1.5, 0], [-1, 2.0, 2.5], [1, 2.0, 2.5], STOER, ZS), b2=KE.beob[KE.beob.length-1];
+  chk('lmErfassung (Z2): Urteil aus urteilStoer ohne passende Landmarke -> Beob nutzer stoer ohne Wand, keine neue Wand',
+    r2.neu===0 && r2.L===-1 && r2.grund==='stoer ohne Wand' && KE.waende.size===1 && b2.nutzer==='stoer' && b2.L===-1, `${r2.grund}, ${KE.waende.size} Wand, nutzer ${b2.nutzer}`);
+  const r3=erf(KE, 3, [0.2, 1.5, -0.4], [3, 2.4, -1.2], [3, 2.4, 0.8], STOER, ZS), b3=KE.beob[KE.beob.length-1];
+  chk('lmErfassung (Z2): Stoer-Urteil an der Kante einer Erfassungs-Wand wie ein Segment zugeordnet, zaehlt nicht als Erfassung',
+    r3.grund==='stoer zugeordnet' && r3.L===r0.L && b3.nutzer==='stoer' && nutzerAn(KE, W)===2 && KE.waende.size===1, `${r3.grund}, L ${r3.L}, Erfassungen an der Wand ${nutzerAn(KE, W)}`);
+  const vor=KE.beob.map(b=>b.L).join(','), nz=G.lmNeuZuordnen(KE, 0, {immer:true});
+  chk('lmNeuZuordnen (immer): Erfassungen und Stoer-Beob bleiben, Erfassungs-Wand verfaellt nicht', KE.beob.map(b=>b.L).join(',')===vor && KE.waende.has(r0.L),
+    `L vorher ${vor}, nachher ${KE.beob.map(b=>b.L).join(',')}, verfallen ${nz.verfallen}`);
+  const KL2=karteNeu({H:2.4}); KL2.abschnitte=[abschnittNeu({ab:0, t0:0, t1:100, g:EINS})];
+  const r4=erf(KL2, 0, [0, 1.5, 0], [-1, 2.0, 2.5], [1, 2.0, 2.5], STOER), r5=erf(KL2, 1, [0, 1.5, 0], [-1, 2.0, 2.5], [1, 2.0, 2.5], null);
+  chk('lmErfassung (Z2): mit der Vorgabe (urteilStoer leer) bzw. ohne Urteil wie Z1 (neue Wand / zugeordnet, nutzer true)',
+    r4.neu===1 && r5.zugeordnet===1 && KL2.beob.every(b=>b.nutzer===true), `${r4.grund}, ${r5.grund}`); }
 
 // ------------------------------------------------- T3-Sonderfaelle (8.1-8.4)
 const T3F=SCHNELL ? [] : ['vorhang', 'schrank', 'unterzug', 'unterzugEinseitig', 'tuer', 'moebel'];

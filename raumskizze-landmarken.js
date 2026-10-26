@@ -68,8 +68,11 @@ const DEF={
   // Hoehenklasse (6.5, 8.3, 8.4): Rand der Wanddeutung dChiC (siehe lmHoehenklasse), lokal ab 3 cm in >= 2
   // Abschnitten (loesen < 2 cm, hoechstens 0,5 m [S]); Vorhang: Paar <= 0,25 m, naehere nahe Decke (0,15 m [S]),
   // fernere <= 3 cm an h_c.
+  // Schalter Z3 (ARCHITEKTUR 19.2): unterzug 'an'|'aus' (Durchsicht-Regel 8.3, auch fuer lmDurchblick.unterzug), wandTol 0|m:
+  // zusaetzlich 'wand', wenn die Hoehe entschieden ist, |h - hR| <= wandTol und basis >= basis (0,3 m). Vorgabe 'an' / 0 bis
+  // R1 sie auf S0 misst (Messung rep/r1).
   klasse:{basis:0.3, halb:0.05, dchiSetzen:4, dchiLoesen:2, basisLoesen:0.2, runden:2, dchiStoer:9, lokalSetzen:0.03, lokalLoesen:0.02, lokalMax:0.5,
-          lokalAb:2, lokalMinBeob:8, vorhangAbst:0.25, vorhangMin:0.02, vorhangDecke:0.15, vorhangWand:0.03, maxBeob:120},
+          lokalAb:2, lokalMinBeob:8, vorhangAbst:0.25, vorhangMin:0.02, vorhangDecke:0.15, vorhangWand:0.03, maxBeob:120, unterzug:'an', wandTol:0},
   // Ecken: Peilfehler 1,5 px/f, offene Peilungen hoechstens 150 je Sitzung und 10 s alt, Bogen >= 2° zwischen
   // zwei Peilungen, Haufen max(5 cm, 3σ·Abstand), Wand an der Ecke <= 10 cm quer und <= 0,3 m vom Ende [S].
   // Neue Ecke erst aus >= 4 Peilungen von >= 3 Standpunkten, Bogen >= 5° von der Ecke aus gesehen, obere Enden der
@@ -205,6 +208,10 @@ const hGrenzen=(R,o)=>{ const cy=R.map(z=>z.c[1]); return obenR(R) ? [Math.max(o
 const hebeAuf=(c,d,nx,nz,rho)=>{ const nd=nx*d[0]+nz*d[2]; if(!(nd<-1e-6)) return null; const l=-(nx*c[0]+nz*c[2]-rho)/nd; if(!(l>0)) return null;
   return -nz*(c[0]+l*d[0])+nx*(c[2]+l*d[2]); };
 const hebeS=(K,W,b)=>{ if(!b.db) return null; const g=gZu(K, W.rahmen, b.ab, b.t); if(!g) return null; const Z=strahlen(K, b, g), nx=Math.cos(W.phi), nz=Math.sin(W.phi);
+  // rep/erf: Erfassung (nutzer) auf ihrer Hoehe heben und laengs projizieren: der Schnitt mit der senkrechten Wandebene laeuft
+  // bei fast parallelem Strahl beliebig weit (gemessen A7 beide Orakel: Intervall einer Erfassungswand 722 m, Speicher 8 GB)
+  if(b.nutzer){ const h=hBeob(b, W, K), lz=d=>{ const D=h-Z.c[1]; if(!(d[1]>1e-3) || !(D>0)) return null; const t=D/d[1]; return -nz*(Z.c[0]+t*d[0])+nx*(Z.c[2]+t*d[2]); };
+    const a=lz(Z.da), e=lz(Z.db); return a==null || e==null ? null : [Math.min(a, e), Math.max(a, e)]; }
   const a=hebeAuf(Z.c, Z.da, nx, nz, W.rho), e=hebeAuf(Z.c, Z.db, nx, nz, W.rho); return a==null || e==null ? null : [Math.min(a, e), Math.max(a, e)]; };
 const camIn=(K,W,b)=>{ const g=gZu(K, W.rahmen, b.ab, b.t); return g ? (g===EINS ? b.c : G.gAnw(g, b.c)) : null; };
 // Zahl der Standpunkte (gierig, >= abst auseinander); mit max endet die Zaehlung dort (Vergleich '>= max' bleibt gleich)
@@ -451,7 +458,8 @@ const schluesselBeob=(K,W,max)=>{ const B=[]; for(const id of W.beob){ const b=K
 // (Halbbreite <= klasse.halb, nicht am Rand), sonst gegen die Bezugshoehe (Oeffnungen in Luecken); die Durchsicht-Regel
 // 'unterzug' (8.3) gilt nur fuer Linien mit entschiedener Hoehe (A8: 24 von 137 Linien 'unterzug' gegen festes h_c).
 const hEntschieden=W=>!!(W.hFrei && Number.isFinite(W.hFrei.h) && (W.hFrei.hi-W.hFrei.lo)/2<=DEF.klasse.halb && !W.hFrei.rand);
-const istUnterzug=(W,o)=>hEntschieden(W) && belegt(W)>=o.unterzugMinL && unterzugAnteil(W)>=o.anteilUnterzug;
+// an: Schalter klasse.unterzug (Z3, 19.2); 'aus' schaltet die Regel ab, sonst gilt sie wie bisher
+const istUnterzug=(W,o,an)=>(an ?? DEF.klasse.unterzug)!=='aus' && hEntschieden(W) && belegt(W)>=o.unterzugMinL && unterzugAnteil(W)>=o.anteilUnterzug;
 // Strahlen-Verzeichnis je Rahmen: die Strahlen der Schluessel-Beob aller Landmarken mit >= minSchl (Reihenfolge wie die volle
 // Rechnung: Landmarken in karte.waende, Beob, Ende da/db) als flache Liste mit l2 und |d_xz|. Es aendert kein Ergebnis:
 // neu gebaut, sobald sich etwas aendert, woraus es rechnet - spuren.aend des Rahmens und alle, Hauptpunkt, maxBeob, minSchl,
@@ -516,7 +524,7 @@ G.lmDurchblick=(W,karte,o={})=>{ o={...DEF.durchblick, ...o}; const K=karte, nx=
           const s=ux*(c[0]+l*d[0])+uz*(c[2]+l*d[2]); if(s<lo || s>hi) continue;
           PS.push(s); PX.push(c[0]); PZ.push(c[2]); } } } }
   else { const V=strahlVz(K, r, o), alt=DBW.get(W), sch=[W.phi, W.rho, hT, lo, hi, o.nah, o.unterHoehe, o.haufen, o.minStrahlen, o.standAbst, o.minStandpunkte, o.anteilUnterzug, o.unterzugMinL];
-    if(alt && alt.V===V && gleichA(alt.sch, sch)){ W.durchblick=alt.st.map(x=>[...x]); return {durchblick:W.durchblick, unterzug:istUnterzug(W, o)}; }
+    if(alt && alt.V===V && gleichA(alt.sch, sch)){ W.durchblick=alt.st.map(x=>[...x]); return {durchblick:W.durchblick, unterzug:istUnterzug(W, o, o.unterzug)}; }
     const R=V.R, BC=V.BC, wo=V.W.indexOf(W), ax=W.rho*nx+lo*ux, az=W.rho*nz+lo*uz, bx=W.rho*nx+hi*ux, bz=W.rho*nz+hi*uz, e=1e-9;
     const qx0=Math.min(ax, bx)-e, qx1=Math.max(ax, bx)+e, qz0=Math.min(az, bz)-e, qz1=Math.max(az, bz)+e;
     const weg=(x0,x1,z0,z1)=>{ if(x1<qx0 || x0>qx1 || z1<qz0 || z0>qz1) return true; if(!(x0>-Infinity && x1<Infinity && z0>-Infinity && z1<Infinity)) return false;
@@ -530,7 +538,7 @@ G.lmDurchblick=(W,karte,o={})=>{ o={...DEF.durchblick, ...o}; const K=karte, nx=
         const s=ux*(R[k]+l*R[k+3])+uz*(R[k+2]+l*R[k+5]); if(s<lo || s>hi) continue;
         PS.push(s); PX.push(R[k]); PZ.push(R[k+2]); } } }
   const stuecke=durchStuecke(PS, PX, PZ, o); W.durchblick=stuecke; if(!o.voll) DBW.set(W, {V:strahlVz(K, r, o), sch:[W.phi, W.rho, hT, lo, hi, o.nah, o.unterHoehe, o.haufen, o.minStrahlen, o.standAbst, o.minStandpunkte, o.anteilUnterzug, o.unterzugMinL], st:stuecke.map(x=>[...x])});
-  return {durchblick:stuecke, unterzug:istUnterzug(W, o)}; };
+  return {durchblick:stuecke, unterzug:istUnterzug(W, o, o.unterzug)}; };
 const belegt=W=>(W.iv||[]).reduce((s,x)=>s+x.s1-x.s0, 0);
 const unterzugAnteil=W=>{ let L=0, d=0; for(const x of W.iv||[]){ L+=x.s1-x.s0; for(const [a,b] of W.durchblick||[]) d+=Math.max(0, Math.min(b, x.s1)-Math.max(a, x.s0)); }
   return L>0 ? d/L : 0; };
@@ -660,10 +668,13 @@ const eckBeleg=(K,W,hR,o)=>{ const H=ivHuelle(W); if(!H || W.nSchluessel<3 && !W
 const klasseVon=W=>W.cls==='wand' && W.hFrei && W.hFrei.lokal ? 'lokal' : W.cls;
 G.lmHoehenklasse=(W,karte,o={})=>{ o={...DEF.klasse, ...o}; const K=karte; zustand(K);
   if(W.cls==='schrank') return 'wand';
+  if(nutzerKlasse(K, W, DEF.erfassung)) return klasseVon(W);   // rep/erf: Wand mit Erfassung bleibt 'wand'
   const alt=klasseVon(W), hR=hRefC(K, W.rahmen), F=wandFit(K, W, o, false); let roh='unklar';
   if(F){ const H=F.H, hw=(H.hi-H.lo)/2, entsch=hw<=o.halb && !H.rand; W.hFrei={h:H.h, lo:H.lo, hi:H.hi, n:H.n, lokal:!!(W.hFrei && W.hFrei.lokal), rand:H.rand};
     if(hR!=null){ const rd=randDeutung(H, hR, o.halb); W.dChiC=rd.d; const dA=Math.abs(H.h-hR);
-      const eck=eckBeleg(K, W, hR, o), wand=(alt==='wand' ? !(rd.d<o.dchiLoesen || W.basis<o.basisLoesen) : rd.d>=o.dchiSetzen && W.basis>=o.basis) || eck && rd.ab<o.dchiStoer;
+      // Z3 (19.2): mit o.wandTol > 0 auch 'wand' bei entschiedener Hoehe |h - hR| <= wandTol und basis >= o.basis (Weg aus rep/m5)
+      const eck=eckBeleg(K, W, hR, o), wand=(alt==='wand' ? !(rd.d<o.dchiLoesen || W.basis<o.basisLoesen) : rd.d>=o.dchiSetzen && W.basis>=o.basis) || eck && rd.ab<o.dchiStoer
+        || o.wandTol>0 && entsch && W.basis>=o.basis && dA<=o.wandTol;
       const lokal=alt==='lokal' ? entsch && dA>=o.lokalLoesen : entsch && rd.ab>=o.dchiStoer && W.basis>=o.basis && dA>o.lokalSetzen && dA<=o.lokalMax && abschnitteAbw(K, W, F, hR, o)>=o.lokalAb;
       const stoer=entsch && rd.ab>=o.dchiStoer && dA>=o.halb && W.basis>=o.basis;
       roh=wand ? 'wand' : lokal ? 'lokal' : stoer ? 'stoer' : 'unklar'; } }
@@ -672,8 +683,8 @@ G.lmHoehenklasse=(W,karte,o={})=>{ o={...DEF.klasse, ...o}; const K=karte; zusta
   if(!F && W.ausEcken && hR!=null && eckBeleg(K, W, hR, o)) roh='wand';   // Kurzwand aus Ecken: beide Senkrechten bis zur Decke
   if(roh!=='stoer' && vorhang(K, W, o, hR)) roh='stoer';
   // Durchsicht-Regel 8.3 nur fuer Linien mit >= 0,5 m Beleg (Unterzug, Sturz; kurze Stuecke wie Z-AA 0,16 m sonst falsch [S])
-  // und mit entschiedener Hoehe (hFrei, siehe lmDurchblick)
-  if(istUnterzug(W, DEF.durchblick)) roh='unterzug';
+  // und mit entschiedener Hoehe (hFrei, siehe lmDurchblick); Schalter o.unterzug (Z3)
+  if(istUnterzug(W, DEF.durchblick, o.unterzug)) roh='unterzug';
   // Hysterese 6.5 auch ab 'kandidat': eine neue Klasse erst nach o.runden gleichen Rohklassen in Folge
   const nx=zustand(K).naechste;
   if(roh===alt){ W.clsZaehler=0; delete nx[W.id]; }
@@ -910,6 +921,12 @@ G.lmNeuZuordnen=(karte,ab,o={})=>{ o={...DEF.zuordnen, ...DEF.neu, ...o}; const 
           if(q<3 && (!best || q<best.q)) best={E, q}; }
         if(best) L=best.E.id; }
       if(L!==b.L){ n++; b.L=L; } continue; }
+    // rep/erf: Erfassung mit eigener Regel; die bisherige Wand gewinnt, solange sie das Tor besteht. Stoer-Erfassungen
+    // (nutzer 'stoer', Z2) gehen wie Segment-Beob ueber den Weg darunter.
+    if(b.nutzer===true){
+      const Zs=erfStrahlen(K, b, r), Z=Zs && erfLinie(K, Zs.c, Zs.da, Zs.db, r, DEF.erfassung), X=K.waende.get(b.L);
+      const bleibt=Z && X && X.rahmen===r && erfSuche(K, Z, r, {...DEF.erfassung, nur:X}), z=bleibt || (Z && erfSuche(K, Z, r, DEF.erfassung)), L=z ? z.W.id : -1;
+      if(L!==b.L){ n++; b.L=L; } continue; }
     const g=gZu(K, r, ab, b.t); let L=-1, art=b.art;
     if(g && b.db){ const Z=strahlen(K, b, g), e=entscheide(kandidaten(K, {c:Z.c, d1:Z.da, d2:Z.db, sPx:b.sPx, len:b.len, f:b.f}, P, o, A), o);
       // Endpruefung mit dem Rest von M6 (G.resSegment), gleiches Band wie in der Zuordnung
@@ -918,10 +935,88 @@ G.lmNeuZuordnen=(karte,ab,o={})=>{ o={...DEF.zuordnen, ...DEF.neu, ...o}; const 
   let verfallen=0;
   if(o.immer){ let tJ=-Infinity; for(const b of K.beob) if(b.t>tJ) tJ=b.t;
     const alt=(X,f)=>{ let t=-Infinity, k=0; for(const id of X.beob){ const b=K.beob[id]; if(b.L!==X.id || (b.art==='ecke')!==f) continue; if(b.t>t) t=b.t; if(b.schluessel) k++; } return {t, k}; };
-    for(const W of K.waende.values()){ if(W.rahmen!==r) continue; const a=alt(W, false); if(a.k<o.minSchl && tJ-a.t>o.verfall){ for(const id of W.beob) if(K.beob[id].L===W.id){ K.beob[id].L=-1; n++; } verfallen++; } }
+    for(const W of K.waende.values()){ if(W.rahmen!==r || nutzerZahl(K, W)) continue; const a=alt(W, false); if(a.k<o.minSchl && tJ-a.t>o.verfall){ for(const id of W.beob) if(K.beob[id].L===W.id){ K.beob[id].L=-1; n++; } verfallen++; } }
     for(const E of K.ecken.values()){ if(E.rahmen!==r) continue; const a=alt(E, true); if(E.beob.length<o.minPeil && tJ-a.t>o.verfall){ for(const id of E.beob) if(K.beob[id].L===E.id){ K.beob[id].L=-1; n++; } verfallen++; } } }
   if(n){ aend(K); for(const W of K.waende.values()) W.beob=[]; for(const E of K.ecken.values()) E.beob=[];
     for(const b of K.beob){ if(b.L<0) continue; const X=b.art==='ecke' ? K.ecken.get(b.L) : K.waende.get(b.L); if(X) X.beob.push(b.id); else b.L=-1; }
     for(const W of [...K.waende.values()]){ if(!W.beob.length && !(W.ausEcken && W.ausEcken.every(id=>K.ecken.has(id)))){ K.waende.delete(W.id); naechsteWeg(K, W.id); for(const E of K.ecken.values()) if(E.waende && E.waende.includes(W.id)) E.waende=null; continue; } G.lmIntervalle(W, K); }
     for(const E of [...K.ecken.values()]){ if(!E.beob.length) K.ecken.delete(E.id); else eckeAktualisieren(K, E, DEF.ecken); } }
   return {geaendert:n, verfallen}; };
+
+// ------------------------------------------------ Erfassungen (Fadenkreuz, nutzer; Vorschlag rep/erf zu 3.3/4)
+// G.lmErfassung(karte, bildErg /*n = 1, erfassung {id, nutzer, urteil}*/, o = {ab, erfassung}) -> {zugeordnet, neu, L, grund}
+// (Vertrag ARCHITEKTUR 19.2 Z1/Z2, 19.3: urteil = obs.final der App oder null; o.erfassung ueberschreibt DEF.erfassung)
+// Eine Erfassung ist eine vom Nutzer gezeigte Wand-Decke-Kante (die App hat sie schon als solche geprueft). Sie geht
+// NICHT ueber Kandidatenspuren (lmSpuren): eine Spur braucht >= 5 pixelstetige Bilder im selben Abschnitt, Erfassungen
+// liegen Sekunden und Meter auseinander (gemessen: 57/138, 152/275, 85/192 verfallen dort). Statt dessen:
+//   1. beide Strahlen auf h_c des Rahmens heben (lokal hLok.hC, sonst H_Laser; global karte.hC), Linie (phi, rho) mit n
+//      zur Kamera;
+//   2. zuordnen ohne Lueckentest gegen Waende desselben Rahmens: gleiche Seite (<= winkelDeg), beide Enden <= drho quer,
+//      Kamera frei (> seite); die naechste gewinnt;
+//   3. sonst neue Wand aus dieser einen Erfassung (h 'c', Kovarianz aus sPx/f und sigma von H).
+// Beob: art 'decke', nutzer true, schluessel true (jede Erfassung ist eine eigene Geste, kein Verstaerken), sPx o.sPx.
+// Klasse: eine Wand mit >= 1 nutzer-Beob ist cls 'wand'; zustand 'bestaetigt' ab minNutzer nutzer-Beob (lmHoehenklasse
+// laesst sie so; lmNeuZuordnen ordnet nutzer-Beob mit derselben Regel neu zu und laesst ihre Waende nicht verfallen).
+// Z2 (19.2): Traegt die Erfassung ein Urteil der App (bildErg.erfassung.urteil, Text aus obs.final), das einen Eintrag aus
+// urteilStoer enthaelt, ist sie keine Wand-Erfassung: Beob nutzer 'stoer' (schluessel), Zuordnung wie ein Bildsegment
+// (lmZuordnen: Hoehe der Landmarke, Lueckentest, eindeutig) an eine bestehende Landmarke, sonst ohne Landmarke (L -1).
+// Keine neue Wand (eine Linie auf h_c waere fuer eine Kante unter der Decke falsch), keine Kandidatenspur, kein Zwang zu
+// 'wand', kein Schutz vor Verfall; lmNeuZuordnen fuehrt sie wie eine Segment-Beob. Nur nutzer === true zaehlt als Erfassung.
+// Vorgabe urteilStoer leer: R1 hat ohne Orakel keinen Gewinn gemessen (A6-A8, 20 von 605 Erfassungen betroffen; Export,
+// Aussenring-IoU und Erfassungs-Median nach dem Lauf unveraendert, rep/r1). Einschalten mit
+// o.erfassung.urteilStoer = ['verworfen: Kante tiefer als die Decke (Leiste, Stuck oder Schrank?)'] (Text aus obs.final).
+DEF.erfassung={sPx:2, winkelDeg:5, drho:0.10, seite:0.1, minNutzer:2, hSigma:0.03, tMax:25, urteilStoer:[]};
+const nutzerZahl=(K,W)=>{ let n=0; for(const id of W.beob){ const b=K.beob[id]; if(b && b.nutzer===true && b.L===W.id) n++; } return n; };
+const nutzerKlasse=(K,W,o)=>{ if(W.cls==='schrank') return false; const n=nutzerZahl(K, W); if(!n) return false;
+  W.cls='wand'; W.clsZaehler=0; naechsteWeg(K, W.id); if(W.zustand==='kandidat' && n>=o.minNutzer) W.zustand='bestaetigt'; return true; };
+// Linie einer Erfassung im Rahmen r: {c, p1, p2, phi, rho, len, h, dist} oder null
+const erfLinie=(K,c,d1,d2,r,o)=>{ if(!(d1[1]>1e-3 && d2[1]>1e-3)) return null;
+  const h=hRefC(K, r) ?? hSchaetz(K), D=h-c[1]; if(!(D>0.05)) return null;
+  const t1=D/d1[1], t2=D/d2[1]; if(!(t1<o.tMax && t2<o.tMax)) return null;
+  const p1=[c[0]+t1*d1[0], c[2]+t1*d1[2]], p2=[c[0]+t2*d2[0], c[2]+t2*d2[2]], len=Math.hypot(p2[0]-p1[0], p2[1]-p1[1]); if(!(len>0.05)) return null;
+  let n=[-(p2[1]-p1[1])/len, (p2[0]-p1[0])/len]; if(n[0]*(c[0]-p1[0])+n[1]*(c[2]-p1[1])<0) n=[-n[0], -n[1]];
+  const rho=n[0]*p1[0]+n[1]*p1[1], sd=n[0]*c[0]+n[1]*c[2]-rho; if(!(sd>o.seite)) return null;
+  const dist=Math.hypot((p1[0]+p2[0])/2-c[0], (p1[1]+p2[1])/2-c[2]);
+  return {c, p1, p2, phi:wrap2pi(Math.atan2(n[1], n[0])), rho, len, h, D, dist, sd}; };
+const erfSuche=(K,Z,r,o)=>{ let best=null;
+  for(const W of (o.nur ? [o.nur] : K.waende.values())){ if(W.rahmen!==r || istStoer(W) || W.cls==='schrank' || W.h==='f') continue;
+    if(Math.cos(W.phi-Z.phi)<Math.cos(o.winkelDeg*D2R)) continue;
+    const nx=Math.cos(W.phi), nz=Math.sin(W.phi); if(!(nx*Z.c[0]+nz*Z.c[2]-W.rho>o.seite)) continue;
+    const q1=Math.abs(nx*Z.p1[0]+nz*Z.p1[1]-W.rho), q2=Math.abs(nx*Z.p2[0]+nz*Z.p2[1]-W.rho), q=Math.max(q1, q2); if(q>o.drho) continue;
+    if(!best || q<best.q || q===best.q && W.id<best.W.id) best={W, q}; }
+  return best; };
+const erfStrahlen=(K,b,r)=>{ const g=gZu(K, r, b.ab, b.t); if(!g) return null; const Z=strahlen(K, b, g); return Z.db ? Z : null; };
+// Z2: Urteil der Erfassung aus urteilStoer? (Teiltext, damit Zahlen im Urteil nicht stoeren)
+const urteilStoer=(bild,oe)=>{ const u=bild.erfassung && bild.erfassung.urteil; if(typeof u!=='string' || !u) return false;
+  for(const s of oe.urteilStoer||[]) if(typeof s==='string' && s && u.includes(s)) return true;
+  return false; };
+// Z2: Stoer-Erfassung als Beob nutzer 'stoer' (siehe oben); d1, d2 pp-korrigiert im Bezug (nur fuer die Laenge in px)
+const erfStoer=(K,bild,ab,o,oe,c0,d1,d2)=>{ const D=bild.dir, f=Number.isFinite(bild.f) && bild.f>0 ? bild.f : 500;
+  const Zo=G.lmZuordnen(bild, K, {...(o.zuordnen||{}), ab}), p=Zo.paare.length ? Zo.paare[0] : null, W=p ? K.waende.get(p.L) : null;
+  const cw=Math.max(-1, Math.min(1, d1[0]*d2[0]+d1[1]*d2[1]+d1[2]*d2[2]));
+  const b=beobNeu(K, {k:bild.k, t:bild.t, ab, ep:bild.ep, i:-1, art:W ? p.art : 'decke', L:-1, c:c0, da:[D[0], D[1], D[2]], db:[D[3], D[4], D[5]], sPx:oe.sPx, f,
+    len:Number.isFinite(bild.seg[9]) ? bild.seg[9] : f*Math.acos(cw), nSeg:1});
+  b.nutzer='stoer'; b.schluessel=true; if(bild.erfassung) b.erf=bild.erfassung.id;
+  if(!W) return {zugeordnet:0, neu:0, L:-1, grund:Zo.mehrdeutig.length ? 'stoer mehrdeutig' : 'stoer ohne Wand'};
+  b.L=W.id; W.beob.push(b.id); buchen(K, W, b); K.bilder.get(bild.k).schluessel=true;
+  return {zugeordnet:1, neu:0, L:W.id, grund:'stoer zugeordnet'}; };
+G.lmErfassung=(karte,bildErg,o={})=>{ const K=karte, bild=bildErg, oe={...DEF.erfassung, ...(o.erfassung||{})}; zustand(K);
+  const ab=abVon(K, bild, o), r=rahmenVon(K, ab), A=K.abschnitte[ab], g=r===-1 ? (A ? G.gBei(A, bild.t) : null) : EINS;
+  if(!K.bilder.has(bild.k)) K.bilder.set(bild.k, {t:bild.t, ab, ep:bild.ep, c:[bild.camTo[12], bild.camTo[13], bild.camTo[14]], camTo:Array.from(bild.camTo), f:bild.f, schluessel:false});
+  if(!g) return {zugeordnet:0, neu:0, L:-1, grund:'ohne g'};
+  const c0=[bild.camTo[12], bild.camTo[13], bild.camTo[14]], pp=ppAn(K); let [d1, d2]=segStrahlen(bild, 0, pp);
+  if(urteilStoer(bild, oe)) return erfStoer(K, bild, ab, o, oe, c0, d1, d2);
+  const c=g===EINS ? c0 : G.gAnw(g, c0); if(g!==EINS){ d1=drehen(g.psi, d1); d2=drehen(g.psi, d2); }
+  const Z=erfLinie(K, c, d1, d2, r, oe); if(!Z) return {zugeordnet:0, neu:0, L:-1, grund:'nicht hebbar'};
+  const D=bild.dir, f=Number.isFinite(bild.f) && bild.f>0 ? bild.f : 500;
+  const b=beobNeu(K, {k:bild.k, t:bild.t, ab, ep:bild.ep, i:-1, art:'decke', L:-1, c:c0, da:[D[0], D[1], D[2]], db:[D[3], D[4], D[5]], sPx:oe.sPx, f,
+    len:Number.isFinite(bild.seg[9]) ? bild.seg[9] : Z.len*f/Math.max(0.3, Z.dist), nSeg:1});
+  b.nutzer=true; b.schluessel=true; if(bild.erfassung) b.erf=bild.erfassung.id;
+  const z=erfSuche(K, Z, r, oe); let W, neu=0;
+  if(z) W=z.W;
+  else { const sl=Z.dist*oe.sPx/f, sh=Z.dist/Math.max(0.3, Z.D)*oe.hSigma, sr2=sl*sl+sh*sh, sp2=2*sl*sl/(Z.len*Z.len);
+    W=wandNeu(K, {rahmen:r, phi:Z.phi, rho:Z.rho, cov:[sp2, 0, sr2], h:'c', hFrei:null}); K.waende.set(W.id, W); neu=1; }
+  b.L=W.id; W.beob.push(b.id); buchen(K, W, b); K.bilder.get(bild.k).schluessel=true;
+  if(neu) G.lmIntervalle(W, K);
+  nutzerKlasse(K, W, oe);
+  return {zugeordnet:neu ? 0 : 1, neu, L:W.id, grund:neu ? 'neue Wand' : 'zugeordnet'}; };

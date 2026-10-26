@@ -8,15 +8,24 @@
 // Block (keine function-Deklarationen: der geo-Block laeuft ohne "use strict", Annex B wuerde sie global machen).
 //
 // Unbekannte (global): je verbundenem Abschnitt der Versatz G_j = gBei(A, t_j) an jedem Knoten (ohne Knoten nur
-//   G_0 = A.g); der Kern hat G_0 = Einheit fest (Eichung, d_0 = 0). Zwischen den Knoten ist gBei komponentenweise
+//   G_0 = A.g); der Kern hat G_0 = Einheit fest (Eichung, d_0 = 0), ein Abschnitt mit A.fest und quelle 'kette' (M10 Weg (c),
+//   ARCHITEKTUR 19.2 Z9: A.g = g_kern ∘ g0) haelt G_0 = A.g ganz fest (tyKette 'fest', Vorgabe; rep/m6b: mit freiem ty schob
+//   die Parallaxe ganze Ketten von Abschnitten um 16-46 cm, A7 ab 6-9, A8 ab 11-13). Ein anderer A.fest (oder tyKette als
+//   Zahl bzw. null) haelt nur den Plan von G_0 (psi, tx, tz); ty bleibt Unbekannte mit Anker bzw. der Bindung des Schnitts
+//   (6.1, rep/q1 ty-vgl: mit festem ty lag es 6,6/3,7/8,3 cm im Median neben der Kette). Zwischen den Knoten ist gBei komponentenweise
 //   linear in den G_j, denn gKomp(g, lerp(d_j, d_j+1)) = lerp(gKomp(g, d_j), gKomp(g, d_j+1)); M6 schreibt
 //   d_j = gKomp(gInv(G_0), G_j). Dazu je Wand phi, rho (und eine eigene Hoehe bei h = Zahl oder 'lokal'), je freier
 //   Ecke p, global h_c, h_f, die Raumrichtung phi_ref der weichen Rechtwinkligkeit (je Aufruf neu gestartet) und mit
-//   pp 'frei' der Hauptpunkt (cx, cy). Lokal (nurAb): Waende/Ecken mit rahmen = ab und hLok.hC, g fest Einheit.
+//   pp 'frei' der Hauptpunkt (cx, cy). Lokal (nurAb): Waende/Ecken mit rahmen = ab, hLok.hC und hLok.hF (Boden des
+//   Bezugs), g fest Einheit; lokal gilt h_c = H mit sigma sHlok bei h_f = 0 (lokH 'hc', Vorgabe) bzw. h_c - h_f = H,
+//   h_f ~ hfLok (lokH 'hcf'), siehe 19.2 Z4 und DEF_A.
 // Reste: Segmentende r = f·asin(n_c·d) px gegen die Ebene durch die Kamera, die die Linie enthaelt; Senkrechte gegen
 //   die senkrechte Ebene durch Kamera und Ecke. Jacobi analytisch. Ketten (G.resKette, Max-Mixture mit Hysterese) und
 //   Folgekanten (G.resKnoten, ohne Robustkern) mit zentralen Differenzen ueber G (je Schnitt <= 8 bzw. 12 Werte).
-//   Weich: h_f ~ hfPrior, h_c - h_f = H mit sigma_H(q) (6.2), Rechtwinkligkeit phi - phi_ref - k·90° (sigma 1,5°,
+//   Weich (6.2): h_c ~ H - dBoden (dBoden: Boden des Kerns ueber dem Boden von B_0 entlang der Kette, bodenVersatz); mit
+//   Bodenkanten (Gruppen 'f') schwach (sigma hcPrior) und dazu h_f ~ hfPrior[0] - dBoden und h_c - h_f = H mit sigma_H(q);
+//   ohne Boden ist h_f nicht im Ausgleich und h_c eng an H - dBoden gebunden (sigma hcPriorOhneBoden, Vorgabe 1 mm: die
+//   Parallaxe verfaelscht h_c auf A6-A8 um 28-34 cm, rep/m6b). Rechtwinkligkeit phi - phi_ref - k·90° (sigma 1,5°,
 //   nur bis rundDeg), pp ~ N(0, ppSigma). Robust: Geman-McClure je Beob mit GNC-Stufe mu (6.5); gmC gilt in Einheiten
 //   von sigma (rn = sqrt(chi2/nr), chi2 = r^2/sPx^2), also nur bei sPx = 1 in px.
 // Bloecke (5.3): Normalgleichungen je (Landmarke, Abschnitt, Knotenintervall) am Linearisierungspunkt, als lineares
@@ -59,6 +68,28 @@ const hashIdx=a=>{ let h=0x811c9dc5; for(let i=0;i<a.length;i++){ h^=a[i]; h=Mat
 const gleich=(a,b)=>{ if(a.length!==b.length) return false; for(let i=0;i<a.length;i++) if(a[i]!==b[i]) return false; return true; };
 const DEF_A={iter:3, relinMax:20000, gmC:3, kette:true, rechtwinklig:1.5, laserH:null, hfPrior:[0, 0.3], sHmin:0.015, skala:'fest', tiefe:0, ebenen:0, nurAb:null,
   knoten:false, lago:'aus', lin:2, gncFaktor:1.4, rundDeg:10, basisMin:0.05, mmSchwelle:16, mmZurueck:9, pp:'fest', ppSigma:1,
+  // 6.2 (rep/q1, rep/m6h): mit beobachtetem Boden (Gruppen 'f') ist h_c frei mit dem schwachen Prior hcPrior (m) um
+  // H - dBoden, und H bindet h_c - h_f. Ohne Boden bindet hcPriorOhneBoden (m) h_c um H - dBoden (rep/m6b): die Parallaxe
+  // verfaelscht h_c dort, statt nur zu streuen (frei 2,778 / 2,734 / 2,508 m gegen H - dBoden 2,441 / 2,409 / 2,224 m auf
+  // A6-A8, formal sigma 24,6 / 4,2 / 1,5 cm), und der T2-Erfassungsmedian springt schon bei 2 mm h_c (A6 35,0 -> 46,5 cm);
+  // mit 1 cm lag h_c 0,7 / 0,3 / 2,1 cm daneben. Vorgabe 1 mm: h_c praktisch H - dBoden, bleibt aber Unbekannte (sHC, cov).
+  // null: hcPrior auch ohne Boden (alter Weg, nur zum Vergleich). Erfassungen sind kein Bodenbeleg (erfassungBoden Vorgabe
+  // false): F0 ist der App-Boden des Kerns, und der liegt in A8 19,2 cm neben dem Boden von B_0; mit dem alten Beleg
+  // (q >= qErfassung, sigma h_f = hfErfassung) hielt M6 h_c auf H ± 3 cm ueber diesem Boden (A8 Erfassungsmedian 35,3 statt
+  // 8,2 cm der Kette). erfassungBoden true stellt den alten Weg her (nur zum Vergleich), ebenso festTy true (jeder A.fest
+  // haelt G_0 ganz).
+  // tyKette: ty eines Abschnitts mit A.fest und quelle 'kette' (M10 Weg (c)); 'fest' (Vorgabe, rep/m6b): G_0 = A.g ganz fest
+  // wie beim Kern, also ty = (g_kern ∘ g0).ty der Kette; Zahl: Anker mit diesem sigma (m) um (g_kern ∘ g0).ty, auch mit Ketten
+  // im Ausgleich; null: alter Weg (nur der Plan fest, ty frei, tyAnker nur ohne Kette). Mit freiem ty schob die Parallaxe
+  // ganze Ketten von Abschnitten (A7 ab 6-9 +36..46 cm, A8 ab 11-13 -16 cm), mit h_c auf H - dBoden bis 150 cm (A6 ab 10/11).
+  // tyAnker: sigma (m) fuer ty eines anderen Abschnitts mit A.fest ohne jede Kette im Ausgleich (sonst traegt ty nur die
+  // Parallaxe), um ty der Kette (A.g0) bzw. den Startwert.
+  // lokale Hoehe (nurAb): lokH 'hc' bindet h_c an H (sigma sHlok), h_f = 0 fest (Boden des Bezugs = Bodenanker);
+  // 'hcf' bindet h_c - h_f an H (sigma sHlok), h_f ~ hfLok frei. Vorgabe 'hc' nach Messung R4 (rep/r4): mit 'hcf' lag
+  // h_c auf A6-A8 in 9/29 (Segmente) bzw. 5/29 (Erfassungen) Abschnitten <= 5 cm an H, mit 'hc' in 22/29 bzw. 27/29;
+  // h_f wanderte dabei bis +0,9 m (A8), die Bindung h_c - h_f = H haelt dort nur sich selbst.
+  // sHC >= max(1,4826·MAD/sqrt(n) der entschiedenen Kantenhoehen (Halbbreite <= halbKante), sHCmin).
+  erfassungBoden:false, qErfassung:1, hfErfassung:0.03, hcPrior:0.3, hcPriorOhneBoden:0.001, tyAnker:0.3, tyKette:'fest', festTy:false, lokH:'hc', sHlok:0.02, hfLok:[0, 0.3], sHCmin:0.02, halbKante:0.05,
   // intern (nicht in 4): Start-mu, Daempfung, groesster Schritt [rad, m], erzwungener lago-Grund (M10), Schlussrunde
   muStart:16, lambda:1e-8, schritt:[0.3, 1.0], lagoGrund:null, schluss:false};
 const DEF_B={dPhi:0.05*D2R, dRho:0.002, dG:0.002, dPsi:0.05*D2R, dPp:0.05};
@@ -144,16 +175,31 @@ const strahlPP=(d, R, f, cx, cy)=>{
 const ppJ=(cs,sn,dd)=>RL[0]*(RL[1]*(cs*dd[0]-sn*dd[2])+RL[2]*dd[1]+RL[3]*(sn*dd[0]+cs*dd[2]));
 
 // ------------------------------------------------ Hoehe einer Beobachtung
-// Zahl/'lokal': eigene Hoehe der Wand; Bodenkante bzw. h = 'f': h_f; sonst h_c (lokal: hLok.hC des Abschnitts).
+// Zahl/'lokal': eigene Hoehe der Wand; Bodenkante bzw. h = 'f': h_f (lokal: hLok.hF, fehlt -> 0); sonst h_c (lokal:
+// hLok.hC des Abschnitts).
 const hSchl=(W,b,glob,ab)=>(typeof W.h==='number' || W.h==='lokal') ? kW(W.id, 'h')
   : (b.art==='boden' || W.h==='f') ? (glob ? 'hf' : kL(ab, 'f')) : (glob ? 'hc' : kL(ab, 'c'));
+const hLokF=(karte,ab)=>{ const A=karte.abschnitte && karte.abschnitte[ab]; return A && A.hLok && Number.isFinite(A.hLok.hF) ? A.hLok.hF : 0; };
 const hWert=(karte,W,b,ab)=>{
   if(typeof W.h==='number') return W.h;
   if(W.h==='lokal') return W.hLokal && Number.isFinite(W.hLokal.h) ? W.hLokal.h : (karte.hC ?? 2.4);
-  if(b.art==='boden' || W.h==='f') return W.rahmen===-1 ? (karte.hF ?? 0) : 0;
+  if(b.art==='boden' || W.h==='f') return W.rahmen===-1 ? (karte.hF ?? 0) : hLokF(karte, W.rahmen);
   if(W.rahmen===-1) return karte.hC ?? 2.4;
   const A=karte.abschnitte[ab]; return A && A.hLok && Number.isFinite(A.hLok.hC) ? A.hLok.hC : (karte.hC ?? 2.4);
 };
+// Bodenversatz des Kerns (6.2): Hoehe des Bodens von B_kern ueber dem Boden von B_0 entlang der Kette, wie G.ketteStart
+// (pose: dG.ty, kamera: cb.y - ca.y, rest: 0, zurueck: wie zurueckZu); nur Daten der Schnitte, ohne Schnitt 0. Nicht aus
+// A.g0, denn eine angenommene Registrierung ueberschreibt g0 (rep/q1 kette-vgl: g0 sonst bitgleich zur Kette).
+// A8 (Kern 5): +19,2 cm, A6 (Kern 1): -2,5 cm, A7 (Kern 1): +0,7 cm.
+const bodenVersatz=karte=>{ const S=karte.schnitte || [], k=karte.kern; if(!(k>0)) return 0;
+  const ty=[0];
+  for(let i=1;i<=k;i++){ const s=S[i-1], b=s && s.bindung; let v=ty[i-1];
+    if(s && s.klasse==='zurueck' && s.zurueckZu!=null && s.zurueckZu>=0 && s.zurueckZu<i) v=ty[s.zurueckZu];
+    else if(!s || s.art==='rest') v=ty[i-1];
+    else if(b && b.art==='pose'){ const d=b.dG; v=ty[i-1]+(d && Number.isFinite(d.ty) ? d.ty : 0); }
+    else if(s.ca && s.cb) v=ty[i-1]+s.cb[1]-s.ca[1];
+    ty.push(Number.isFinite(v) ? v : ty[i-1]); }
+  return ty[k]; };
 const strahlen=b=>b.db ? [b.da, b.db] : [b.da];
 const ppAn=karte=>karte.pp && (karte.pp.frei || karte.pp.cx || karte.pp.cy);
 const bildR=(karte,b)=>{ const B=karte.bilder && karte.bilder.get ? karte.bilder.get(b.k) : null; return B && B.camTo ? B.camTo : null; };
@@ -192,8 +238,15 @@ G.resEbene=(eb, W, g)=>{ const phi=eb.phi+g.psi, rho=eb.rho+Math.cos(phi)*g.tx+M
 const kontext=(karte, o)=>{
   const glob=o.nurAb==null, X=werte(woerterbuch(karte)), I=new Map(), A=karte.abschnitte || [];
   const aktiv=a=>a && (glob ? (a.g && (a.ab===karte.kern || a.stufe==='verbunden' || a.stufe==='locker')) : a.ab===o.nurAb);
+  // G_0 fest (fest0): Kern (Einheit, Eichung), A.fest mit quelle 'kette' bei tyKette 'fest' (Vorgabe, M10 Weg (c): g =
+  // g_kern ∘ g0) und nur zum Messen der Orakel-Rahmen (T1 --orakel-rahmen, obere Schranke; o.orakelFest false schaltet ihn
+  // ab). Fest heisst: A.g bleibt bitgleich, A.cov = 0. Ein anderer A.fest (M10, 19.2 Z9; mit festTy jeder: fest0) haelt nur
+  // den Plan (plan0): psi, tx, tz von G_0 bleiben bitgleich, ty ist Unbekannte (6.1), A.cov traegt nur Var(ty).
+  const fest=a=>a.ab===karte.kern || (o.festTy===true && a.fest===true) || (o.tyKette==='fest' && a.fest===true && a.quelle==='kette')
+    || !!(o.orakel && o.orakel.g && o.orakel.g[a.ab] && o.orakelFest!==false);
   for(const a of A){ if(!aktiv(a)) continue;
-    const info={ab:a.ab, A:a, K:1, t:null, fest0:glob ? a.ab===karte.kern : true, lokal:!glob, dfix:null};
+    const f0=glob ? fest(a) : true, info={ab:a.ab, A:a, K:1, t:null, fest0:f0, plan0:glob && !f0 && a.fest===true, lokal:!glob, dfix:null,
+      ty0:a.g && Number.isFinite(a.g.ty) ? a.g.ty : 0};
     if(glob){
       const Kn=a.knoten, nT=Kn && Kn.t ? Kn.t.length : 0;
       if(o.knoten && nT>=2){ info.K=nT; info.t=Float64Array.from(Kn.t);
@@ -205,7 +258,7 @@ const kontext=(karte, o)=>{
       else { const g0=a.ab===karte.kern ? {psi:0, tx:0, ty:0, tz:0} : a.g;
         X.set(kG(a.ab, 0, 0), g0.psi); X.set(kG(a.ab, 0, 1), g0.tx); X.set(kG(a.ab, 0, 2), g0.ty); X.set(kG(a.ab, 0, 3), g0.tz);
         if(Kn && Kn.d && Kn.d.some(v=>v!==0)) info.dfix={g:{psi:0, tx:0, ty:0, tz:0}, knoten:Kn}; } }
-    else X.set(kL(a.ab, 'c'), a.hLok && Number.isFinite(a.hLok.hC) ? a.hLok.hC : (karte.hC ?? 2.4)), X.set(kL(a.ab, 'f'), 0);
+    else X.set(kL(a.ab, 'c'), a.hLok && Number.isFinite(a.hLok.hC) ? a.hLok.hC : (karte.hC ?? 2.4)), X.set(kL(a.ab, 'f'), o.lokH==='hcf' ? hLokF(karte, a.ab) : 0);
     I.set(a.ab, info); }
   X.set('hc', karte.hC ?? 2.4); X.set('hf', karte.hF ?? 0);
   X.set('ppx', karte.pp ? karte.pp.cx || 0 : 0); X.set('ppy', karte.pp ? karte.pp.cy || 0 : 0);
@@ -532,14 +585,29 @@ const knotenFaktoren=(K, nurPsi, chiAus)=>{
       else F.push(faktor(keys, r, J, rk.sigma)); } }
   return F || [];
 }
-// h_f-Prior, H weich (6.2), Hauptpunkt-Prior, Rechtwinkligkeit (nur Stufe 1 und 3).
+// h_f-Prior, H weich (6.2), Hauptpunkt-Prior, Rechtwinkligkeit (nur Stufe 1 und 3). Lokal (19.2 Z4): lokH 'hcf'
+// h_f ~ hfLok und h_c - h_f = H (sigma K.sHlok), 'hc' h_c = H (sigma K.sHlok) bei h_f = 0 fest.
 const priorFaktoren=(K, mitWinkel, nurHoehe)=>{
   const o=K.o, X=K.X, F=[], karte=K.karte;
   if(K.glob){
-    F.push(faktor(['hf'], [X.get('hf')-o.hfPrior[0]], Float64Array.of(1), [o.hfPrior[1]]));
-    if(K.H!=null) F.push(faktor(['hc', 'hf'], [X.get('hc')-X.get('hf')-K.H], Float64Array.of(1, -1), [K.sH]));
+    // 6.2: h_c ~ H - dBoden, mit Boden schwach (hcPrior), ohne Boden eng (hcPriorOhneBoden, K.sHc); h_f und H (h_c - h_f)
+    // nur mit beobachtetem Boden
+    if(K.H!=null && K.sHc>0) F.push(faktor(['hc'], [X.get('hc')-K.hcM], Float64Array.of(1), [K.sHc]));
+    if(K.boden){ F.push(faktor(['hf'], [X.get('hf')-K.hfM], Float64Array.of(1), [K.hfSig ?? o.hfPrior[1]]));
+      if(K.H!=null) F.push(faktor(['hc', 'hf'], [X.get('hc')-X.get('hf')-K.H], Float64Array.of(1, -1), [K.sH])); }
+    // ty eines Abschnitts mit A.fest (plan0) um ty der Kette: quelle 'kette' mit tyKette als Zahl immer (auch mit Ketten im
+    // Ausgleich), sonst tyAnker nur ohne Kette im Ausgleich
+    const sK=typeof o.tyKette==='number' && o.tyKette>0 ? o.tyKette : 0;
+    if(o.tyAnker>0 || sK>0) for(const info of K.I.values()){ if(!info.plan0) continue;
+      const ket=sK>0 && info.A.quelle==='kette', s=ket ? sK : o.tyAnker; if(!ket && (K.mitKette.has(info.ab) || !(s>0))) continue;
+      const k=kG(info.ab, 0, 2), g0=info.A.g0, Ak=K.karte.abschnitte[K.karte.kern], gk=Ak && Ak.g ? Ak.g.ty : 0;
+      const m=info.A.quelle==='kette' && g0 && Number.isFinite(g0.ty) ? gk+g0.ty : info.ty0;   // M10 (c): g = g_kern ∘ g0
+      F.push(faktor([k], [X.get(k)-m], Float64Array.of(1), [s])); }
     if(K.ppFrei && !nurHoehe){ F.push(faktor(['ppx'], [X.get('ppx')], Float64Array.of(1), [o.ppSigma])); F.push(faktor(['ppy'], [X.get('ppy')], Float64Array.of(1), [o.ppSigma])); } }
-  else if(K.H!=null) F.push(faktor([kL(K.ab, 'c')], [X.get(kL(K.ab, 'c'))-K.H], Float64Array.of(1), [K.sH]));
+  else { const kc=kL(K.ab, 'c'), kf=kL(K.ab, 'f');
+    if(o.lokH==='hcf'){ F.push(faktor([kf], [X.get(kf)-o.hfLok[0]], Float64Array.of(1), [o.hfLok[1]]));
+      if(K.H!=null) F.push(faktor([kc, kf], [X.get(kc)-X.get(kf)-K.H], Float64Array.of(1, -1), [K.sHlok])); }
+    else if(K.H!=null) F.push(faktor([kc], [X.get(kc)-K.H], Float64Array.of(1), [K.sHlok])); }
   if(mitWinkel && o.rechtwinklig>0){ const ref=X.get('ref'), sig=o.rechtwinklig*D2R, lim=o.rundDeg*D2R;
     for(const w of K.waende.values()){ const k=kW(w.id, 'p'), r=wrap(X.get(k)-ref-Math.round((X.get(k)-ref)/(Math.PI/2))*Math.PI/2);
       if(Math.abs(r)<=lim) F.push(faktor([k, 'ref'], [r], Float64Array.of(1, -1), [sig])); } }
@@ -607,7 +675,7 @@ const stufeGier=(K, wahl)=>{
     F.push({keys, m, H, g:gv, c}); }
   F.push(...kettenFaktoren(K, wahl, true), ...knotenFaktoren(K, true, null), ...priorFaktoren(K, true, true).filter(f=>f.keys.includes('ref')));
   K.frei=new Set();
-  for(const info of K.I.values()) if(!info.lokal) for(let j=0;j<info.K;j++) if(!(j===0 && info.fest0)) K.frei.add(kG(info.ab, j, 0));
+  for(const info of K.I.values()) if(!info.lokal) for(let j=0;j<info.K;j++) if(!(j===0 && (info.fest0 || info.plan0))) K.frei.add(kG(info.ab, j, 0));
   for(const w of K.waende.values()) K.frei.add(kW(w.id, 'p'));
   K.frei.add('ref');
   const L=loese(K, F, 'gier'); if(!L) return false;
@@ -633,13 +701,17 @@ const stufeLinear=(K, wahl)=>{
       const s=nx*(cs*b.c[0]-sn*b.c[2]+gw.tx)+nz*(sn*b.c[0]+cs*b.c[2]+gw.tz); sp.lo=Math.min(sp.lo, s); sp.hi=Math.max(sp.hi, s); } }
   for(const w of K.waende.values()){ if(Number.isFinite(w.basis)){ basis.set(w.id, w.basis); continue; }
     const sp=span.get(w.id); basis.set(w.id, sp.hi>sp.lo ? sp.hi-sp.lo : 0); }
-  const wBasis=b=>{ if(b.art==='ecke') return 1; const v=basis.get(b.L); return Math.min(1, (v ?? 0.3)/0.3); };
+  // rep/erf: Waende mit Erfassungen (nutzer) haben die Tiefe aus h_c, nicht aus der Basis: Gewicht 1, rho frei
+  const nutzerW=new Set(); for(const b of K.beob) if(b && b.nutzer && b.L!=null && b.L!==-1) nutzerW.add(b.L);
+  const wBasis=b=>{ if(b.art==='ecke' || nutzerW.has(b.L)) return 1; const v=basis.get(b.L); return Math.min(1, (v ?? 0.3)/0.3); };
   K.frei=new Set();
-  for(const info of K.I.values()) if(!info.lokal) for(let j=0;j<info.K;j++) if(!(j===0 && info.fest0)) for(let c=1;c<4;c++) K.frei.add(kG(info.ab, j, c));
+  for(const info of K.I.values()) if(!info.lokal) for(let j=0;j<info.K;j++){ if(j===0 && info.fest0) continue;
+    if(j===0 && info.plan0){ K.frei.add(kG(info.ab, 0, 2)); continue; }   // A.fest: nur ty (6.1)
+    for(let c=1;c<4;c++) K.frei.add(kG(info.ab, j, c)); }
   // Hoehen nur global (h_c, h_f; 5.4): eigene Hoehen ('lokal', Zahl) bleiben in Stufe 2 fest (sonst zoege h auf Kamerahoehe)
-  for(const w of K.waende.values()) if((basis.get(w.id) ?? 0)>=o.basisMin) K.frei.add(kW(w.id, 'r'));
+  for(const w of K.waende.values()) if((basis.get(w.id) ?? 0)>=o.basisMin || nutzerW.has(w.id)) K.frei.add(kW(w.id, 'r'));
   for(const e of K.ecken.values()){ K.frei.add(kE(e.id, 'x')); K.frei.add(kE(e.id, 'z')); }
-  K.frei.add('hc'); K.frei.add('hf');
+  K.frei.add('hc'); if(K.boden) K.frei.add('hf');
   // frei je Platz: linGruppe (modus 2) laesst die Zeilen fester Spalten aus (Gier, Wandrichtung; loese nutzt sie ohnehin nicht)
   for(const k of K.frei) K.X.platz(k);
   K.freiP=new Uint8Array(K.X.D.keys.length); for(const k of K.frei) K.freiP[K.X.D.m.get(k)]=1;
@@ -663,8 +735,21 @@ G.lmAusgleich=(karte, o0={})=>{
   if(!K.gruppen.size) return {...leer, grund:'keine Beobachtungen'};
   // H weich mit sigma_H(q); q aus den Bodenkanten
   const Hl=o.laserH ?? (karte.H && Number.isFinite(karte.H.laser) ? karte.H.laser : null), bloecke=new Map(karte.bloecke || []), q=K.glob ? bodenGuete(K, bloecke) : 0;
-  K.H=Hl; K.sH=Math.hypot(Math.max(o.sHmin, karte.H && karte.H.sigma || 0), 0.25*(1-q));
+  // 6.2 (rep/q1): Boden beobachtet = mindestens eine Gruppe 'f' (Bodenkante bzw. Wand mit h 'f') im globalen Ausgleich; nur
+  // dann sind h_f und h_c - h_f = H im Ausgleich. Erfassungen (nutzer) gelten nur mit erfassungBoden (Vergleich, alter Weg
+  // rep/erf: Bezugsboden als Beleg, q >= qErfassung, sigma h_f = hfErfassung) als Boden.
+  const mitNutzer=o.erfassungBoden===true && (karte.beob||[]).some(b=>b && b.nutzer && b.schluessel && b.L!=null && b.L!==-1);
+  const bodenF=K.glob && [...K.gruppen.values()].some(g=>g.art==='f');
+  const qH=mitNutzer ? Math.max(q, o.qErfassung ?? 1) : q; K.hfSig=mitNutzer ? Math.min(o.hfPrior[1], o.hfErfassung ?? 0.03) : o.hfPrior[1];
+  K.H=Hl; K.sH=Math.hypot(Math.max(o.sHmin, karte.H && karte.H.sigma || 0), 0.25*(1-qH));
+  K.boden=K.glob && (bodenF || mitNutzer); K.dBoden=K.glob ? bodenVersatz(karte) : 0;
+  K.hcM=Hl!=null ? Hl-K.dBoden : null; K.hfM=o.hfPrior[0]-K.dBoden;
+  K.sHc=!K.boden && o.hcPriorOhneBoden>0 ? o.hcPriorOhneBoden : o.hcPrior;   // sigma des h_c-Priors (6.2, rep/m6b)
+  if(K.glob && !Number.isFinite(karte.hC) && K.hcM!=null) K.X.set('hc', K.hcM);   // Start ohne h_c der Karte: Mitte des Priors
+  // lokal (19.2 Z4): eigene Bindung mit sHlok statt K.sH (dort wirkte qH aus den Erfassungen als h_c fest mit 1,5 cm)
+  K.sHlok=Math.max(o.sHlok, karte.H && karte.H.sigma || 0);
   K.ketten=K.glob && o.kette ? kettenPaare(K) : [];
+  K.mitKette=new Set(); for(const kp of K.ketten){ K.mitKette.add(kp.ia.ab); K.mitKette.add(kp.ib.ab); }
   const wahlAlt=new Map(K.ketten.map(kp=>[kp.i, kp.s.bindung.k || null])), wahl=new Map();
   const beobAus={w:new Float64Array(K.beob.length).fill(NaN), chi2:new Float64Array(K.beob.length)};
   const waehle=()=>{ for(const kp of K.ketten) wahl.set(kp.i, mmWahl(K, kp, (wahl.get(kp.i) || {}).k ?? wahlAlt.get(kp.i))); };
@@ -684,12 +769,14 @@ G.lmAusgleich=(karte, o0={})=>{
     stufen.lin=n; lin+=n; stufen.grund=grund; }
   // ---- Stufe 3: Gauss-Newton im Bild
   K.frei=new Set();
-  for(const info of K.I.values()) if(!info.lokal) for(let j=0;j<info.K;j++) if(!(j===0 && info.fest0)) for(let c=0;c<4;c++) K.frei.add(kG(info.ab, j, c));
+  for(const info of K.I.values()) if(!info.lokal) for(let j=0;j<info.K;j++){ if(j===0 && info.fest0) continue;
+    if(j===0 && info.plan0){ K.frei.add(kG(info.ab, 0, 2)); continue; }   // A.fest: nur ty (6.1)
+    for(let c=0;c<4;c++) K.frei.add(kG(info.ab, j, c)); }
   for(const w of K.waende.values()){ K.frei.add(kW(w.id, 'p')); K.frei.add(kW(w.id, 'r')); if(typeof w.h==='number' || w.h==='lokal') K.frei.add(kW(w.id, 'h')); }
   for(const e of K.ecken.values()){ K.frei.add(kE(e.id, 'x')); K.frei.add(kE(e.id, 'z')); }
   K.frei.add('ref');
-  if(K.glob){ K.frei.add('hc'); K.frei.add('hf'); if(K.ppFrei){ K.frei.add('ppx'); K.frei.add('ppy'); } }
-  else K.frei.add(kL(K.ab, 'c'));
+  if(K.glob){ K.frei.add('hc'); if(K.boden) K.frei.add('hf'); if(K.ppFrei){ K.frei.add('ppx'); K.frei.add('ppy'); } }
+  else { K.frei.add(kL(K.ab, 'c')); if(o.lokH==='hcf') K.frei.add(kL(K.ab, 'f')); }
   let budget=o.relinMax, relin=0, it=0, L=null, F=null, offen=0;
   for(;it<o.iter;it++){
     waehle();
@@ -702,7 +789,7 @@ G.lmAusgleich=(karte, o0={})=>{
     for(const f of F){ const ix=f.ix; for(let a=0;a<ix.length;a++) dat[ix[a]]=1; }
     for(let p=0;p<dat.length;p++) if(dat[p] && D.keys[p][0]==='G') abDaten.add(+D.keys[p].slice(1, 6));
     const daten={has:k=>{ const p=D.m.get(k); return p!==undefined && dat[p]===1; }};
-    const okAb=ab=>abDaten.has(ab) || (K.I.get(ab) && K.I.get(ab).fest0 && K.I.get(ab).K<2);
+    const okAb=ab=>abDaten.has(ab) || (K.I.get(ab) && (K.I.get(ab).fest0 || K.I.get(ab).plan0) && K.I.get(ab).K<2);
     const ketten=K.ketten; K.ketten=ketten.filter(kp=>okAb(kp.ia.ab) && okAb(kp.ib.ab));
     const Fk=kettenFaktoren(K, wahl, false); K.ketten=ketten;
     const Fn=o.knoten ? knotenFaktoren(K, false, null).filter(f=>f.keys.some(k=>daten.has(k))) : [];
@@ -726,6 +813,10 @@ G.lmAusgleich=(karte, o0={})=>{
     const Gj=j=>({psi:X.get(kG(A.ab, j, 0)), tx:X.get(kG(A.ab, j, 1)), ty:X.get(kG(A.ab, j, 2)), tz:X.get(kG(A.ab, j, 3))});
     let neu=false;
     if(info.fest0){ A.cov=new Float64Array(16); neu=true; }
+    else if(info.plan0){ const ky=kG(A.ab, 0, 2), C=new Float64Array(16);   // A.fest: Plan bitgleich, ty aus dem Ausgleich
+      if(drin(ky)){ A.g={psi:A.g.psi, tx:A.g.tx, ty:X.get(ky), tz:A.g.tz}; C[10]=Z(ix(ky), ix(ky)); }
+      else if(A.cov && A.cov.length>=16) C[10]=A.cov[10];
+      A.cov=C; neu=true; }
     else if(drin(kG(A.ab, 0, 0))){ A.g=Gj(0); A.cov=cv(k4(A.ab, 0)); neu=true; }
     if(info.K>=2){ const g0=Gj(0), i0=G.gInv(g0), d=new Float64Array(4*info.K), C=new Float64Array(16*info.K), alt=A.knoten.cov;
       for(let j=0;j<info.K;j++){ const dj=j===0 ? {psi:0, tx:0, ty:0, tz:0} : G.gKomp(i0, Gj(j)); d.set([dj.psi, dj.tx, dj.ty, dj.tz], 4*j);
@@ -764,10 +855,20 @@ G.lmAusgleich=(karte, o0={})=>{
     e.p=p; e.cov=P2; }
   const vH=k=>Math.sqrt(Math.max(0, Z(ix(k), ix(k))));
   if(K.glob){ if(drin('hc')){ karte.hC=X.get('hc'); karte.sHC=vH('hc'); } if(drin('hf')){ karte.hF=X.get('hf'); karte.sHF=vH('hf'); }
-    karte.hoehen={quelle:Hl==null ? 'parallaxe' : q>=0.9 ? 'laser' : 'laser-weich', q};
+    // quelle: 'laser' bzw. 'laser-weich' nur mit beobachtetem Boden (H bindet h_c - h_f); ohne Boden 'laser-kette' (h_c eng um
+    // H - dBoden, hcPriorOhneBoden) bzw. 'parallaxe' (ohne H oder hcPriorOhneBoden null: Prior hcPrior); hC, sHC, boden, dBoden,
+    // hcM nur Bericht (rep/m6h, rep/m6b)
+    const ohneB=Hl!=null && !K.boden && o.hcPriorOhneBoden>0;
+    karte.hoehen={quelle:ohneB ? 'laser-kette' : Hl==null || !K.boden ? 'parallaxe' : q>=0.9 ? 'laser' : 'laser-weich', q, boden:K.boden, dBoden:K.dBoden, hcM:K.hcM,
+      hC:karte.hC, sHC:karte.sHC};
     if(K.ppFrei && drin('ppx')) karte.pp={cx:X.get('ppx'), cy:X.get('ppy'), sig:Math.max(vH('ppx'), vH('ppy')), frei:true};
     else if(!K.ppFrei && karte.pp && karte.pp.frei) karte.pp={...karte.pp, frei:false}; }   // 'fest': cx, cy bleiben (geschaetzt)
-  else if(drin(kL(K.ab, 'c'))){ const A=karte.abschnitte[K.ab]; A.hLok={hC:X.get(kL(K.ab, 'c')), sHC:vH(kL(K.ab, 'c'))}; }
+  // lokal: hLok = {hC, sHC, hF} (19.3); sHC nach unten durch die Streuung der entschiedenen Kantenhoehen begrenzt (19.2 Z4)
+  let lok=null;
+  if(!K.glob && drin(kL(K.ab, 'c'))){ const A=karte.abschnitte[K.ab], kf=kL(K.ab, 'f'), st=kantenStreuung(K, o), sF=vH(kL(K.ab, 'c'));
+    const hF=o.lokH==='hcf' && drin(kf) ? X.get(kf) : 0;
+    A.hLok={hC:X.get(kL(K.ab, 'c')), sHC:Math.max(sF, st.s, o.sHCmin), hF};
+    lok={sHCformal:sF, streu:st.s, nKanten:st.n, sHF:o.lokH==='hcf' && drin(kf) ? vH(kf) : 0}; }
   for(const g of K.gruppen.values()) for(const i of g.idx){ const b=K.beob[i];   // neu linearisierte Beob (nur Gruppen-Beob)
     if(!Number.isNaN(beobAus.w[i])){ b.w=beobAus.w[i]; b.chi2=beobAus.chi2[i]; }
     b.mu=Math.max(1, K.mu[i]/o.gncFaktor); if(!Number.isFinite(b.w)) b.w=1; }
@@ -776,9 +877,21 @@ G.lmAusgleich=(karte, o0={})=>{
   karte.bloecke=bloecke;
   const S=L ? L.S : null;
   if(K.glob) karte.ldl={struktur:S ? S.hash : null, perm:S ? S.perm : null, name:S ? S.name : null, nnzL:S ? S.nnzL : 0, lagoSig:sig};
-  bereichC(karte, K.scope).letzte=L && L.F ? {F:L.F, n:L.n, idx:L.idx, glob:K.glob, ab:K.ab, kern:K.glob ? karte.kern : null} : null;
+  bereichC(karte, K.scope).letzte=L && L.F ? {F:L.F, n:L.n, idx:L.idx, glob:K.glob, ab:K.ab, kern:K.glob ? karte.kern : null,
+    fest:K.glob ? [...K.I.values()].filter(i=>i.fest0).map(i=>i.ab) : null, plan:K.glob ? [...K.I.values()].filter(i=>i.plan0).map(i=>i.ab) : null} : null;
   return {chi2, iter:it, lin, relin, abgehaengt:0, cov:!!Z, ok:true, stufen, ldl:{n:L ? L.n : 0, nnzL:S ? S.nnzL : 0, ordnung:S ? S.name : null},
-    mm, rest, offen, q};
+    mm, rest, offen, q, lok, hoehe:K.glob ? {hC:karte.hC, sHC:karte.sHC, boden:K.boden, dBoden:K.dBoden, hcM:K.hcM} : null};
+};
+// Streuung der entschiedenen Kantenhoehen eines lokalen Ausgleichs: Waende mit h 'c' (gemeinsame Deckenhoehe des
+// Rahmens) und hFrei (M5) mit Halbbreite <= halbKante, nicht am Rand; s = 1,4826·MAD/sqrt(n) (robuste Streuung des
+// Mittels), unter 2 Kanten 0.
+const kantenStreuung=(K, o)=>{
+  const h=[];
+  for(const w of K.waende.values()){ const F=w.hFrei; if(w.h!=='c' || !F || !Number.isFinite(F.h) || F.rand || !((F.hi-F.lo)/2<=o.halbKante)) continue; h.push(F.h); }
+  if(h.length<2) return {s:0, n:h.length};
+  const med=a=>{ const x=[...a].sort((u,v)=>u-v), m=x.length>>1; return x.length%2 ? x[m] : (x[m-1]+x[m])/2; };
+  const m=med(h), mad=med(h.map(x=>Math.abs(x-m)));
+  return {s:1.4826*mad/Math.sqrt(h.length), n:h.length};
 };
 // Struktur fuer lago 'auto' (aus dem Zustand): Kern, verbundene Abschnitte, Knotenzahlen, gewaehlte Komponenten,
 // gewaehlte Registrierungshypothesen.
@@ -813,6 +926,11 @@ const bandK=(phi, cw, quer, Cg, g)=>{
 // Zugriffe, die auch die Form des KarteStand (3.6: Felder statt Map, knoten [{t, d}]) nehmen.
 const holeW=(M, id)=>!M ? null : M.get ? M.get(id) : Array.isArray(M) ? M.find(x=>x && x.id===id) || null : null;
 const holeA=(karte, ab)=>{ const A=karte && karte.abschnitte; if(!A) return null; const a=A[ab]; return a && a.ab===ab ? a : A.find(x=>x && x.ab===ab) || null; };
+// G_0 des Abschnitts fest (Kern, A.fest mit quelle 'kette' bei tyKette 'fest', Orakel-Rahmen): aus der letzten Faktorisierung,
+// sonst aus dem Zustand (nur der Kern; ein A.fest gilt dann als planAb mit gespeicherter cov, die 0 ist).
+// Nur der Plan fest (A.fest, 6.1): psi, tx, tz von G_0 fest, ty frei (Lz.plan, sonst A.fest ausser am Kern).
+const festAb=(karte, Lz, ab)=>{ if(Lz && Lz.fest) return Lz.fest.includes(ab); if(Lz) return Lz.kern===ab; return !!karte && karte.kern===ab; };
+const planAb=(karte, Lz, ab)=>{ if(Lz && Lz.plan) return Lz.plan.includes(ab); const A=holeA(karte, ab); return !!(A && A.fest===true) && !(karte && karte.kern===ab); };
 const knotenZahl=A=>!A || !A.knoten ? 0 : Array.isArray(A.knoten) ? A.knoten.length : A.knoten.t ? A.knoten.t.length : 0;
 const letzterKnoten=A=>{ const n=knotenZahl(A); return n>1 ? n-1 : 0; };
 const covGueltig=c=>!!c && c.length>=3 && c.every(Number.isFinite) && (c[0]>0 || c[2]>0);
@@ -826,8 +944,9 @@ const covG=(A, j)=>{
   return null;
 }
 // ids: [{L}] -> (phi, rho), [{ab, j?}] -> (psi, tx, ty, tz) des Knotens j (Vorgabe 0), [{E}] -> (x, z).
-// Quelle je id (Ergebnis.quelle): 'faktor' (alle Groessen in der letzten Faktorisierung dieser Karte: volle Querbloecke),
-// 'fest' (Kern bzw. eigener Abschnitt einer lokalen Karte: 0 exakt), 'gespeichert' (W.cov, E.cov, A.cov/knoten.cov;
+// Quelle je id (Ergebnis.quelle): 'faktor' (alle Groessen in der letzten Faktorisierung dieser Karte: volle Querbloecke;
+// A.fest mit j = 0: psi, tx, tz exakt 0, ty aus der Faktorisierung), 'fest' (Kern, A.fest mit quelle 'kette' bzw. Orakel-Rahmen mit j = 0, eigener
+// Abschnitt einer lokalen Karte: 0 exakt), 'gespeichert' (W.cov, E.cov, A.cov/knoten.cov;
 // 'gespeichert-alt': hoechster gespeicherter Knoten unter j), 'fehlt' (NaN). Querterme zwischen Quellen, die nicht beide
 // 'faktor' sind: aus W.band.quer, wenn Abschnitt und Knoten passen ('band'), mit 'fest' 0, sonst NaN (nie still 0).
 // Ergebnis.voll: keine NaN.
@@ -840,8 +959,9 @@ G.covBlock=(karte, ids)=>{
     const keys=id.L!=null ? [kW(id.L, 'p'), kW(id.L, 'r')] : id.E!=null ? [kE(id.E, 'x'), kE(id.E, 'z')] : [0, 1, 2, 3].map(c=>kG(id.ab, id.j || 0, c));
     const t={id, keys, n:keys.length, quelle:'fehlt', c:null};
     if(Lz && keys.every(k=>Lz.idx.has(k))){ t.quelle='faktor'; return t; }
+    if(Lz && id.L==null && id.E==null && !(id.j>0) && rahmen<0 && planAb(karte, Lz, id.ab) && Lz.idx.has(keys[2])){ t.quelle='faktor'; return t; }
     if(id.L==null && id.E==null){ const j=id.j || 0;
-      if(rahmen>=0 ? id.ab===rahmen : (Lz ? Lz.kern : karte.kern)===id.ab && j===0){ t.quelle='fest'; t.c=new Array(16).fill(0); return t; }
+      if(rahmen>=0 ? id.ab===rahmen : festAb(karte, Lz, id.ab) && j===0){ t.quelle='fest'; t.c=new Array(16).fill(0); return t; }
       const g=rahmen>=0 ? null : covG(holeA(karte, id.ab), j); if(g){ t.quelle=g.alt ? 'gespeichert-alt' : 'gespeichert'; t.c=g.c; }
       return t; }
     const x=id.L!=null ? holeW(karte.waende, id.L) : holeW(karte.ecken, id.E);
@@ -850,7 +970,7 @@ G.covBlock=(karte, ids)=>{
   const k=T.reduce((s,t)=>s+t.n, 0), out=new Float64Array(k*k).fill(NaN), off=[]; { let o=0; for(const t of T){ off.push(o); o+=t.n; } }
   // faktor × faktor: Spaltenloesungen
   const fk=T.filter(t=>t.quelle==='faktor');
-  if(fk.length){ const ks=fk.flatMap(t=>t.keys), C=covSpalten(Lz.F, Lz.n, ks.map(s=>Lz.idx.get(s))), pos=fk.flatMap(t=>t.keys.map((_, a)=>off[T.indexOf(t)]+a));
+  if(fk.length){ const ks=fk.flatMap(t=>t.keys), C=covSpalten(Lz.F, Lz.n, ks.map(s=>Lz.idx.has(s) ? Lz.idx.get(s) : -1)), pos=fk.flatMap(t=>t.keys.map((_, a)=>off[T.indexOf(t)]+a));
     for(let a=0;a<ks.length;a++) for(let b=0;b<ks.length;b++) out[pos[a]*k+pos[b]]=C[a*ks.length+b]; }
   // Diagonalbloecke aus dem Zustand
   T.forEach((t,q)=>{ if(!t.c) return; for(let a=0;a<t.n;a++) for(let b=0;b<t.n;b++) out[(off[q]+a)*k+off[q]+b]=t.c[a*t.n+b]; });
@@ -867,8 +987,8 @@ G.covBlock=(karte, ids)=>{
 // n_B·p = rho - n·t, phi_B = phi - psi, d_quer = d rho_B - s_B·d phi_B, s_B = s - u·t. r (Abstand der Kamera) ist nicht
 // noetig: der Gierhebel steckt in s_B. Reihenfolge der Quellen (aus.quelle, optional aus = {}):
 //   'lokal'    lokale Wand im eigenen Abschnitt: g fest, exakt aus W.cov;
-//   'faktor'   letzte Faktorisierung dieser Karte enthaelt Wand und G_j (Kern j = 0: G fest): exakt;
-//   'fest'     Kern mit j = 0 ohne Faktorisierung: G fest, Querterm 0, exakt aus W.cov;
+//   'faktor'   letzte Faktorisierung dieser Karte enthaelt Wand und G_j (Kern j = 0: G fest, A.fest j = 0: Plan fest): exakt;
+//   'fest'     Kern bzw. A.fest (nur Plan fest, ty wirkt nicht quer) mit j = 0 ohne Faktorisierung: Querterm 0, exakt aus W.cov;
 //   'band'     W.band fuer diesen Abschnitt (geschrieben von lmAusgleich; Kopie, structuredClone, KarteStand): exakt zum
 //              Stand des letzten Ausgleichs; aus.knotenAlt, wenn seither ein Knoten angehaengt wurde;
 //   'schranke' nur Diagonalbloecke (W.cov, A.cov/knoten.cov): sigma_W + sigma_G, nie zu schmal (Querterm unbekannt);
@@ -877,7 +997,8 @@ G.fehlerband=(W, s, ab, r, karte, aus)=>{
   const A=holeA(karte, ab), j=letzterKnoten(A), setz=(q, v, alt)=>{ if(aus){ aus.quelle=q; aus.knotenAlt=!!alt; } return v; };
   const cw=W && W.cov, wand=c=>Math.sqrt(Math.max(0, c[2]-2*s*c[1]+s*s*c[0]));   // J_w = (-s, 1) bei t = 0
   if(W && W.rahmen>=0) return ab===W.rahmen && covGueltig(cw) ? setz('lokal', wand(cw)) : setz('fehlt', NaN);
-  const C0=karte && CACHE.get(karte), Lz=C0 && C0.g && C0.g.letzte, kern=Lz ? Lz.kern : karte && karte.kern, fest=ab===kern && j===0;
+  // A.fest (j = 0): Plan fest, ty frei; der Querfehler haengt nicht von ty ab (Jv[4] = 0), also exakt wie fest
+  const C0=karte && CACHE.get(karte), Lz=C0 && C0.g && C0.g.letzte, fest=(festAb(karte, Lz, ab) || planAb(karte, Lz, ab)) && j===0;
   const kw=[kW(W.id, 'p'), kW(W.id, 'r')], kg=[0, 1, 2, 3].map(c=>kG(ab, j, c));
   const g=A ? (j ? G.gBei(A, Array.isArray(A.knoten) ? A.knoten[j].t : A.knoten.t[j]) : A.g) : null;
   const Jv=gg=>{ const nx=Math.cos(W.phi), nz=Math.sin(W.phi), ut=-nz*gg.tx+nx*gg.tz, sB=s-ut; return [-ut-sB, 1, sB, -nx, 0, -nz]; };

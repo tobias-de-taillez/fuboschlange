@@ -28,7 +28,8 @@
 // Insel in Insel: beide verworfen (7.7, wie zwei Inseln < minAbstand: nichts raten).
 //
 // Gruende (verworfen[].grund): Aussenring 'kein-aussenring', 'mehrere-aussenringe', 'zu-wenig-ecken',
-// 'nicht-endlich', 'doppelte-ecke', 'kreuzt-sich', 'flaeche' -> ok = false, nichts exportierbar.
+// 'nicht-endlich', 'doppelte-ecke', 'kreuzt-sich', 'flaeche', 'aussen-klein' (Flaeche unter o.minAussen = 1,0 m²,
+// 19.2 Z10: ein Splitter ist kein Raum) -> ok = false, nichts exportierbar.
 // Inseln 'zu-wenig-ecken', 'nicht-endlich', 'seite', 'kreuzt-sich', 'flaeche', 'ragt-hinaus'
 // (Kante schneidet oder beruehrt den Aussenring), 'ausserhalb', 'abstand-aussen', 'kreuzt-insel',
 // 'insel-in-insel', 'abstand-insel' -> nur diese Insel faellt weg (bzw. beide bei den letzten drei).
@@ -42,7 +43,7 @@
 //   Ungesehen ist Wand k, wenn Ring.hyp[k] wahr ist oder Ring.waende[k] null (Hypothesenlinie).
 const GRUND={'kein-aussenring':'kein Außenring', 'mehrere-aussenringe':'mehr als ein Außenring', 'zu-wenig-ecken':'weniger als 3 Ecken',
   'nicht-endlich':'Ecke ohne endliche Koordinate', 'doppelte-ecke':'zwei Ecken auf demselben Millimeter', 'kreuzt-sich':'Ring kreuzt oder berührt sich selbst',
-  'flaeche':'Fläche zu klein'};
+  'flaeche':'Fläche zu klein', 'aussen-klein':'Außenring unter der Mindestfläche'};
 // Export-Folge: [{R, i}] mit i = Index in ringe.
 const folge=ringe=>{ const f=[]; (ringe||[]).forEach((R,i)=>{ if(R && R.exportiert!==false) f.push({R, i}); });
   const a=f.filter(e=>e.R.art==='aussen'); return a.length ? [...a, ...f.filter(e=>e.R.art!=='aussen')] : f; };
@@ -85,13 +86,14 @@ const ringGrund=(R,P,sMin,aMin)=>{
   return null; };
 
 G.ringePruefen=(ringe,o={})=>{
-  o={minAbstand:0.05, minSeite:0.08, minFlaeche:0.02, ...o};
+  o={minAbstand:0.05, minSeite:0.08, minFlaeche:0.02, minAussen:1.0, ...o};
   const F=folge(ringe), A=F.filter(e=>e.R.art==='aussen'), aus=(i,grund)=>({ok:false, ringe:[], verworfen:[{i, grund}], fehler:'Außenring: '+GRUND[grund]});
   if(A.length!==1) return {ok:false, ringe:[], verworfen:A.slice(1).map(e=>({i:e.i, grund:'mehrere-aussenringe'})),
     fehler:GRUND[A.length ? 'mehrere-aussenringe' : 'kein-aussenring']};
   const mm=R=>(R.pts||[]).map(c=>[mmX(c), mmZ(c)]);
   const Ra=A[0].R, Pa=mm(Ra), ga=ringGrund(Ra, Pa, 1, 1e6*o.minFlaeche);
   if(ga) return aus(A[0].i, ga);
+  if(Math.abs(flaeche2(Pa))/2<1e6*o.minAussen) return aus(A[0].i, 'aussen-klein');
   const dMin=1000*o.minAbstand, I=[], grund=new Map();
   for(const e of F.slice(1)){ const P=mm(e.R);
     let g=ringGrund(e.R, P, 1000*o.minSeite, 1e6*o.minFlaeche);
