@@ -104,7 +104,12 @@ const ML_DEF={H:null, quelle:'segmente', arbeit:{iter:3, lin:2, relin:20000, reg
     // (Erfassungen mod 90°, Kreismittel von 4θ nach Laenge). Nur bei Raumrichtung beiderseits (Laenge >= rasterMinL m,
     // Buendelung R >= rasterMinR); einmal je Abschnitt (A.gierRaster). Pruefstand: die Gier der Kette liegt nach einer Pause
     // im Median 15-20° daneben, Z13 sucht nur +-gierDeg.
-    gierRaster:false, rasterSYDeg:5, rasterMinL:1.5, rasterMinR:0.7, mitGyro:'aus'},
+    gierRaster:false, rasterSYDeg:5, rasterMinL:1.5, rasterMinR:0.7, mitGyro:'aus',
+    // Achsen-Registrierung (Doku 12.8): Kettenabschnitte hinter einem Gyro-Schnitt (Gier bekannt) je Raumachse der Referenz um
+    // einen 1-D-Versatz in +-achsFenster m (Raster 1 cm): Laenge der Erfassungslinien (+-achsRichtDeg zur Achse), die eine
+    // Referenzlinie auf achsTol m treffen und sich in der Ausdehnung (+-achsUeber m) ueberlappen; angenommen je Achse ab achsMinL m
+    // und wenn jeder andere Versatz > 12 cm daneben hoechstens achsMarge davon erreicht (Doppellinien 17-40 cm, Geometrie-Teil).
+    achsen:false, achsFenster:0.6, achsTol:0.05, achsMinL:1.0, achsMarge:0.6, achsRichtDeg:10, achsUeber:0.3},
   // Registrierung erneut, wenn die globale Karte um >= 10 % (mindestens 1) nicht-kandidat Waende gewachsen ist
   // oder sich die Menge der verbundenen/lockeren Abschnitte geaendert hat [S]; neue Hypothese: neben allen alten
   // um > rivalLage / rivalWinkel wie G.registriere (4)
@@ -516,7 +521,7 @@ const mlAbReg=(KZ, neu, neuB, kopf)=>{
     || B.quelle==='bindung' && B.stufe==='verbunden' && B.bindungAn!=null && B.bindungAn!==B.ab && tiefe<64 && inRef(A[B.bindungAn], tiefe+1)));
   const segsVon=ids=>{ const out=[]; for(const ab of ids) out.push(...mlErfF0(A[ab], je.get(ab), hcM)); return out; };
   const refBau=()=>{ const ids=A.filter(B=>inRef(B)).map(B=>B.ab), segs=segsVon(ids);
-    return {N:mlNetz(segs, o.paar), n:segs.length, stempel:ids.join(',')+':'+segs.length, man:o.gierRaster ? mlManhattan(segs) : null}; };
+    return {N:mlNetz(segs, o.paar), n:segs.length, stempel:ids.join(',')+':'+segs.length, man:o.gierRaster || o.achsen ? mlManhattan(segs) : null, segs:o.achsen ? segs : null}; };
   const neuAn=[]; let R=refBau(), weiter=true;
   while(weiter){ weiter=false;
     for(const ab of offen){ const B=A[ab]; if(angen(B) || !R.n) continue; if(B.abReg && B.abReg.stempel===R.stempel) continue;
@@ -528,8 +533,33 @@ const mlAbReg=(KZ, neu, neuB, kopf)=>{
         versuche:((B.abReg && B.abReg.versuche)||0)+1, stempel:R.stempel, runde:KZ.runde, gVor:{...B.g}};
       L.abRegLog.push({runde:KZ.runde, ab, nRef:R.n, ...B.abReg, zweit:r.zweit, delta:r.delta}); if(L.abRegLog.length>o.logMax) L.abRegLog.shift();
       if(r.angenommen){ for(const x of grp) A[x].g=G.gKomp(r.delta, A[x].g); neuAn.push(ab); ausRef=offenG(); R=refBau(); weiter=true; } } }
+  if(o.achsen && R.n && R.man && R.man.R>=o.rasterMinR) for(const ab of offen0){ const B=A[ab], s=KZ.schnitte[ab-1];
+    if(!B || B.quelle!=='kette' || !B.g || B.achsReg || !(s && s.bindung && s.bindung.gyro)) continue;
+    const grp=gruppe(ab), segs=segsVon(grp); if(segs.length<o.minErf) continue;
+    const r=mlAchsReg(R.segs, segs, R.man.phi, o); B.achsReg=r;
+    if(r.angenommen){ const d={psi:0, tx:r.dx, ty:0, tz:r.dz}; for(const x of grp) A[x].g=G.gKomp(d, A[x].g); } }
   const dt=mlUhr(KZ)-t0; L.abRegMs+=dt; if(kopf && kopf.ms) kopf.ms.abreg=(kopf.ms.abreg||0)+dt;
   return neuAn; };
+// Achsen-Registrierung (abReg.achsen): Referenz- und Abschnittssegmente (F0) in die Raumachsen gedreht (-phi), je Achse der beste
+// 1-D-Versatz; Rueckgabe {angenommen, dx, dz (F0), achsen: [{achse, delta, s1, s2, nB, nR, ok}]}. Achse 0 = Linien parallel x (Versatz in z).
+const mlAchsReg=(RS, BS, phi, o)=>{
+  const co=Math.cos(-phi), si=Math.sin(-phi), rot=p=>[co*p[0]-si*p[1], si*p[0]+co*p[1]];
+  const linien=(S, achse)=>{ const out=[]; for(const [a0, b0] of S){ const a=rot(a0), b=rot(b0), dx=b[0]-a[0], dz=b[1]-a[1], l=Math.hypot(dx, dz); if(!(l>0.05)) continue;
+      const w=Math.abs(achse===0 ? Math.atan2(dz, dx) : Math.atan2(dx, dz)), ww=Math.min(w, Math.PI-w); if(ww>o.achsRichtDeg*ML_D2R) continue;
+      out.push(achse===0 ? {rho:(a[1]+b[1])/2, s0:Math.min(a[0], b[0]), s1:Math.max(a[0], b[0]), l} : {rho:(a[0]+b[0])/2, s0:Math.min(a[1], b[1]), s1:Math.max(a[1], b[1]), l}); }
+    return out; };
+  const erg={angenommen:false, dx:0, dz:0, achsen:[]}, d=[0, 0];
+  for(const achse of [0, 1]){ const LB=linien(BS, achse), LR=linien(RS, achse), n=Math.round(o.achsFenster/0.01), sc=new Float64Array(2*n+1);
+    for(let j=-n;j<=n;j++){ const del=j*0.01; let sum=0;
+      for(const b of LB) if(LR.some(r=>Math.abs(b.rho+del-r.rho)<=o.achsTol && Math.min(b.s1, r.s1+o.achsUeber)-Math.max(b.s0, r.s0-o.achsUeber)>0)) sum+=b.l;
+      sc[j+n]=sum; }
+    let j1=0, s1=-1; for(let j=-n;j<=n;j++){ const v=sc[j+n]; if(v>s1+1e-9 || (Math.abs(v-s1)<=1e-9 && Math.abs(j)<Math.abs(j1))){ s1=v; j1=j; } }
+    let s2=0; for(let j=-n;j<=n;j++) if(Math.abs(j-j1)*0.01>0.12) s2=Math.max(s2, sc[j+n]);
+    const ok=s1>=o.achsMinL && s2<=o.achsMarge*s1;
+    erg.achsen.push({achse, delta:j1*0.01, s1, s2, nB:LB.length, nR:LR.length, ok});
+    if(ok) d[achse===0 ? 1 : 0]=j1*0.01; }
+  if(d[0] || d[1]){ const c2=Math.cos(phi), s2=Math.sin(phi); erg.dx=c2*d[0]-s2*d[1]; erg.dz=s2*d[0]+c2*d[1]; erg.angenommen=true; }
+  return erg; };
 
 // ------------------------------------------------ Stufen (3.2.2)
 // Bindung des Schnitts vor Abschnitt ab an einen verbundenen Abschnitt: nurT (g := g_A ∘ ΔT) oder

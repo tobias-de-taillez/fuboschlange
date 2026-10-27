@@ -113,6 +113,7 @@ export async function pruefeFenster(G, A, f, o0={}){
   const KB=lauf.KZ.abschnitte[abB];
   if(KB && KB.abReg) r.abReg={angenommen:!!KB.abReg.angenommen, grund:KB.abReg.grund || null, dpsiDeg:Number.isFinite(KB.abReg.dpsi) ? KB.abReg.dpsi*R2D : null, nErf:KB.abReg.nErf};
   if(KB && KB.gierRaster){ const {delta, ...gr}=KB.gierRaster; r.gierRaster=gr; }
+  if(KB && KB.achsReg) r.achsReg=KB.achsReg;
   // Raumrichtung (mod 90°) von A und B gegen den Kern im Endstand: Erfassungen je Abschnitt mit g in F0; die Richtung einer
   // gehobenen Erfassung haengt nicht von H ab (beide Enden skalieren von derselben Kamera aus). Ein Verfahren, das B auf den Kern
   // legt, kann gegen A nicht besser sein als A selbst gegen den Kern liegt.
