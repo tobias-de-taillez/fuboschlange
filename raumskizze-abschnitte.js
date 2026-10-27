@@ -51,7 +51,11 @@ const mmVon=b=>[{name:'stetig', w:1, sP:b.sP, sY:b.sY, sH:b.sH},
 // zeilen[i-1] / zeilen[i]: letzte / erste PoseZeile beiderseits; zeilen[i-2] fuer die Vorhersage mit
 // konstanter Geschwindigkeit (fehlt sie: rPose = rPsi = NaN, Klasse reloc). o.rest = Ereignis 'rest':
 // rPose = |rP|, rPsi = |rPsi| der Folgekante, Klasse reloc (ausser Pause).
-const SK_DEF={rLoc:0.02, rPsiDeg:1.0, dtPause:0.5, rest:null};
+// Gyro-Bruecke (Schalter gyroBruecke, Doku 12.8): traegt die erste Zeile nach einer Pause (oder einem reloc-Schnitt) imuPsi
+// (Aenderung des Plan-Blicks seit der letzten Zeile davor, aus dem Gyro, T1 imuGier), dann bindet der Schnitt den Blick mit
+// dieser Drehung statt mit Blick stetig: bindung.dPsi = imuPsi, sY = gyroSYDeg + gyroDriftDeg · dt, wenn das enger ist als
+// ohne Gyro. Lage und Hoehe bleiben wie ohne Gyro.
+const SK_DEF={rLoc:0.02, rPsiDeg:1.0, dtPause:0.5, rest:null, gyroBruecke:false, gyroSYDeg:1, gyroDriftDeg:0.5};
 G.schnittKlasse=(zeilen,i,art,o0={})=>{
   const o={...SK_DEF, ...o0}, A=zeilen[i-1], B=zeilen[i], Z=zeilen[i-2], dt=B.t-A.t;
   let rPose=NaN, rPsi=NaN;
@@ -67,6 +71,8 @@ G.schnittKlasse=(zeilen,i,art,o0={})=>{
   else if(klasse==='reloc') b={art:'kamera', sP:0.03+0.7*dt+0.5*rPose, sY:(1+45*dt)*D2R+0.5*rPsi, sH:0.01+0.3*dt};
   else if(klasse==='pause') b={art:'kamera', sP:0.03+0.7*dt, sY:(1+45*dt)*D2R, sH:0.01+0.3*dt};
   else b={art:'pose', sP:0.02, sY:0.3*D2R, sH:0.01};
+  if((klasse==='pause' || klasse==='reloc') && o.gyroBruecke && Number.isFinite(B.imuPsi)){ const sG=(o.gyroSYDeg+o.gyroDriftDeg*dt)*D2R;
+    if(sG<b.sY){ b.dPsi=wrap(B.imuPsi); b.sY=sG; b.gyro=true; } }
   b.kern='mm'; b.mm=mmVon(b); b.k=null;
   b.dG=klasse==='zurueck' ? NULLG() : G.gKomp(G.gInv(G.gAusT(A.T)), G.gAusT(B.T));
   return {klasse, rPose, rPsi, bindung:b, dT};
@@ -84,7 +90,10 @@ G.schnittKlasse=(zeilen,i,art,o0={})=>{
 // Inkrementell: Schnitte ohne Epochenwechsel werden erst gemeldet, wenn merge s Posen danach vorliegen (so
 // verschwindet nie ein gemeldeter Abschnitt); prev behaelt die Objekte (und bindung.k von M6) gemeldeter Schnitte.
 // Das Ergebnis haengt nur von den Eingaengen ab: stueckweise eingespeist gleich wie auf einmal.
-const SC_DEF={minJump:[0.05, 0.5], camJump:0.10, camV:1.5, merge:0.3, tWechsel:true, reset:true, rest:true, gyro:false, gyroDeg:null,
+// vorhersage (Doku 12.8): 'still' (Vorgabe) Kamera stetig ueber den Schnitt; 'gedaempft' Kamera um v·tauV·(1 - e^(-dt/tauV))
+// weiter (v im Plan aus den Zeilen bis 0,3 s vor dem Schnitt, gleiche Epoche), als s.vCam im Bezug von A; gemessen an A6-A8
+// fuer Luecken von 1,3 s p90 52/66/45 -> 37/43/29 cm (scratchpad pruef/cv.mjs).
+const SC_DEF={minJump:[0.05, 0.5], camJump:0.10, camV:1.5, merge:0.3, tWechsel:true, reset:true, rest:true, gyro:false, gyroDeg:null, vorhersage:'still', tauV:1,
   anker:null, ankerFenster:5};
 const ankerZeile=z=>Array.isArray(z) ? {t:z[0], A:z[8]} : {t:z.t, A:z.anker};
 // Beidseits verfolgte Anker: letzte Lage bis fenster s vor tA und erste bis fenster s nach tB, im Bezug der Seite.
@@ -137,7 +146,11 @@ G.sessionCuts=(posen,breaks,ereignisse,o0={},prev=null)=>{
     const art=tw ? 't-wechsel' : br.length ? 'bruch' : rs ? 'reset' : re ? 'rest' : ka ? 'kamera' : 'gyro';
     const K=G.schnittKlasse([P[ia-1], A, B], 2, art, {...o, rest:art==='rest' ? re.e : null});
     const cb=A.cam || NAN3, ca=B.cam || NAN3;
-    return {t:P[iCut].t, epA:P[iCut-1].ep, epB:P[iCut].ep, art, klasse:K.klasse,
+    let vCam=null;
+    if(o.vorhersage==='gedaempft' && K.bindung.art==='kamera' && A.cam){ let z0=null;
+      for(let k=ia-1;k>=0;k--){ const z=P[k]; if(z.ep!==A.ep || A.t-z.t>0.3) break; if(z.cam) z0=z; }
+      const d0=z0 ? A.t-z0.t : 0; if(z0 && d0>0.15){ const f=o.tauV*(1-Math.exp(-(B.t-A.t)/o.tauV)); vCam=[(A.cam[0]-z0.cam[0])/d0*f, 0, (A.cam[2]-z0.cam[2])/d0*f]; } }
+    return {t:P[iCut].t, epA:P[iCut-1].ep, epB:P[iCut].ep, art, klasse:K.klasse, vCam,
       grund:br.length ? [...new Set(br.map(e=>e.b.grund))].join('+') : rs ? 'ref-reset' : re ? 'rest' : ka ? 'kamera-sprung' : gy ? 'gyro' : null,
       dt:B.t-A.t, cb, ca, pb:[...cb, A.blick], pa:[...ca, B.blick], rPose:K.rPose, rPsi:K.rPsi,
       dCam:Math.hypot(ca[0]-cb[0], ca[1]-cb[1], ca[2]-cb[2]), dT:K.dT, bindung:K.bindung,
@@ -161,10 +174,12 @@ const ketteG=(s,gA,gZ)=>{
   if(s.klasse==='zurueck') return gZ ? {...gZ} : null;
   if(s.art==='rest') return {psi:gA.psi, tx:gA.tx, ty:gA.ty, tz:gA.tz};
   if(s.bindung.art==='pose') return G.gKomp(gA, s.bindung.dG);
-  const psi=gA.psi+s.pb[3]-s.pa[3], w=G.gAnw(gA, s.cb), c=Math.cos(psi), sn=Math.sin(psi);
+  const psi=gA.psi+s.pb[3]-s.pa[3]+(s.bindung.dPsi || 0), w=G.gAnw(gA, cbV(s)), c=Math.cos(psi), sn=Math.sin(psi);
   return {psi, tx:w[0]-(c*s.ca[0]-sn*s.ca[2]), ty:w[1]-s.ca[1], tz:w[2]-(sn*s.ca[0]+c*s.ca[2])};
 };
 const gVon=(A,t)=>A ? (A.g ? G.gBei(A, t) : A.g0) : null;
+// Kamera vor dem Schnitt, mit der Vorhersage s.vCam (vorhersage 'gedaempft') weitergeschoben
+const cbV=s=>s.vCam ? [s.cb[0]+s.vCam[0], s.cb[1], s.cb[2]+s.vCam[2]] : s.cb;
 G.ketteStart=(schnitte,abschnitte)=>{
   for(let k=0;k<abschnitte.length;k++){ const B=abschnitte[k]; if(B.g0) continue;
     if(k===0){ B.g0=NULLG(); continue; }
@@ -182,8 +197,8 @@ G.resKette=(s,gA,gB)=>{
   const b=s.bindung; let r;
   if(b.art==='pose'){ const gP=G.gKomp(gA, b.dG || NULLG()), c=[s.ca[0], s.ca[2]], q=G.gPlan(gB, c), p=G.gPlan(gP, c);
     r=[q[0]-p[0], q[1]-p[1], wrap(gB.psi-gP.psi), gB.ty-gP.ty]; }
-  else if(b.art==='kamera'){ const qa=G.gAnw(gB, s.ca), qb=G.gAnw(gA, s.cb);
-    r=[qa[0]-qb[0], qa[2]-qb[2], wrap(gB.psi+s.pa[3]-gA.psi-s.pb[3]), qa[1]-qb[1]]; }
+  else if(b.art==='kamera'){ const qa=G.gAnw(gB, s.ca), qb=G.gAnw(gA, cbV(s));
+    r=[qa[0]-qb[0], qa[2]-qb[2], wrap(gB.psi+s.pa[3]-gA.psi-s.pb[3]-(b.dPsi || 0)), qa[1]-qb[1]]; }
   else r=[0, 0, 0, 0];
   const komp=(b.mm || mmVon(b)).map(k=>({name:k.name, w:b.art==='keine' ? 0 : k.w, sigma:[k.sP, k.sP, k.sY, k.sH]}));
   const ak=komp.find(k=>k.name==='anker');

@@ -195,12 +195,52 @@ export function epochen(rows, C, breaks){
 }
 export function posenAus(G, A){
   const {rows, C}=A, ep=epochen(rows, C, A.breaks);
-  return rows.map((r,i)=>{ const pose=[r[C.px], r[C.py], r[C.pz], r[C.qx], r[C.qy], r[C.qz], r[C.qw]], T=[r[C.Tpsi], r[C.Tx], r[C.Ty], r[C.Tz]];
+  const P=rows.map((r,i)=>{ const pose=[r[C.px], r[C.py], r[C.pz], r[C.qx], r[C.qy], r[C.qz], r[C.qw]], T=[r[C.Tpsi], r[C.Tx], r[C.Ty], r[C.Tz]];
     const camTo=(r[C.flags]&64) ? null : G.m4mul(G.m4inv(G.gMat(G.gAusT(T))), m4q(pose.slice(0, 3), pose.slice(3)));
     const z={t:r[C.t], ep:ep[i], pose, T, cam:camTo ? [camTo[12], camTo[13], camTo[14]] : null, blick:camTo ? G.blickPlan(camTo) : null, flags:r[C.flags], v:r[C.v]};
     if(C.imuPsi!=null && Number.isFinite(r[C.imuPsi])) z.imuPsi=r[C.imuPsi];
     if(C.an!=null && Array.isArray(r[C.an])) z.an=r[C.an];
     return z; });
+  // ohne Spalte imuPsi: aus imu.jsonl (Gyro, Stand 6 ?mess=1 / Stand 8 ?imu=1), je Aufnahme einmal (A._imuGier)
+  if(C.imuPsi==null && A.imu && A.imu.length){ const I=A._imuGier!==undefined ? A._imuGier : (A._imuGier=imuGier(A, P));
+    if(I) for(let i=0;i<P.length;i++) if(Number.isFinite(I.psi[i])) P[i].imuPsi=I.psi[i]; }
+  return P;
+}
+// ------------------------------------------------ Gyro (Doku 12.8)
+// Quaternionen [x, y, z, w]; Plan-Blick wie poseBlick in M4: atan2(-m10, -m8) der Drehmatrix (Kamera -> local).
+const qMulK=(a,b)=>[a[3]*b[0]+a[0]*b[3]+a[1]*b[2]-a[2]*b[1], a[3]*b[1]-a[0]*b[2]+a[1]*b[3]+a[2]*b[0], a[3]*b[2]+a[0]*b[1]-a[1]*b[0]+a[2]*b[3], a[3]*b[3]-a[0]*b[0]-a[1]*b[1]-a[2]*b[2]];
+const qExp=(w, dt)=>{ const th=Math.hypot(w[0], w[1], w[2])*dt; if(th<1e-12) return [w[0]*dt/2, w[1]*dt/2, w[2]*dt/2, 1]; const s=Math.sin(th/2)/(th/dt); return [w[0]*s, w[1]*s, w[2]*s, Math.cos(th/2)]; };
+const qBlick=q=>{ const [x, y, z, w]=q; return Math.atan2(-(1-2*(x*x+y*y)), -2*(x*z+y*w)); };
+// 24 echte Drehungen als Achsen-Zuordnung Geraet -> Kamera (Permutation mit Vorzeichen, det +1)
+const ZUORDNUNGEN=(()=>{ const out=[], P=[[0,1,2],[0,2,1],[1,0,2],[1,2,0],[2,0,1],[2,1,0]];
+  for(const p of P) for(let s=0;s<8;s++){ const sg=[s&1 ? -1 : 1, s&2 ? -1 : 1, s&4 ? -1 : 1], M=[[0,0,0],[0,0,0],[0,0,0]]; for(let r=0;r<3;r++) M[r][p[r]]=sg[r];
+    const det=M[0][0]*(M[1][1]*M[2][2]-M[1][2]*M[2][1])-M[0][1]*(M[1][0]*M[2][2]-M[1][2]*M[2][0])+M[0][2]*(M[1][0]*M[2][1]-M[1][1]*M[2][0]); if(det>0) out.push(M); }
+  return out; })();
+// Je PoseZeile i >= 1: psi[i] = Aenderung des Plan-Blicks von Zeile i-1 nach i aus dem Gyro, von der Orientierung der Zeile i-1
+// aus integriert (nullte Ordnung, Abtastwert k gilt fuer (t_k-1, t_k]); ueber eine Ortungsluecke hinweg genau die Drehung in
+// der Luecke. Quelle Gyroscope {q:'gyro', w rad/s}, sonst devicemotion rotationRate (alpha um z, beta um x, gamma um y, Grad/s).
+// Die Zuordnung der Geraeteachsen zur Kamera waehlt die kleinste Abweichung gegen ARCore ueber verfolgte Nachbarzeilen
+// (dt <= 0,1 s, gleiche Epoche). Rueckgabe {psi, quelle, zuordnung, rest (rad, Median), n} oder null.
+export function imuGier(A, posen){
+  const D2R=Math.PI/180, I=A.imu || [];
+  let S=I.filter(x=>x && x.q==='gyro' && Array.isArray(x.w) && Number.isFinite(x.t)).map(x=>({t:x.t, w:x.w})), quelle='gyro';
+  if(S.length<10){ S=I.filter(x=>x && !x.q && Array.isArray(x.rr) && x.rr.every(Number.isFinite) && Number.isFinite(x.t)).map(x=>({t:x.t, w:[x.rr[1]*D2R, x.rr[2]*D2R, x.rr[0]*D2R]})); quelle='devicemotion'; }
+  if(S.length<10 || posen.length<3) return null;
+  S.sort((a,b)=>a.t-b.t);
+  const T=S.map(s=>s.t), ab=t=>{ let lo=0, hi=T.length; while(lo<hi){ const m=(lo+hi)>>1; if(T[m]<=t) lo=m+1; else hi=m; } return lo; };   // erster Index mit T > t
+  const dreh=(M, w)=>[M[0][0]*w[0]+M[0][1]*w[1]+M[0][2]*w[2], M[1][0]*w[0]+M[1][1]*w[1]+M[1][2]*w[2], M[2][0]*w[0]+M[2][1]*w[1]+M[2][2]*w[2]];
+  const zeile=(M, i)=>{ const a=posen[i-1], b=posen[i]; let q=a.pose.slice(3, 7), t=a.t, k=ab(a.t), n=0;
+    while(k<T.length && t<b.t){ const t1=Math.min(T[k], b.t); if(t1>t){ q=qMulK(q, qExp(dreh(M, S[k].w), t1-t)); n++; } t=t1; if(T[k]>b.t) break; k++; }
+    if(!n) return NaN; const d=qBlick(q)-qBlick(a.pose.slice(3, 7)); return Math.atan2(Math.sin(d), Math.cos(d)); };
+  const probe=[]; for(let i=1;i<posen.length && probe.length<1500;i++){ const a=posen[i-1], b=posen[i]; if(b.t-a.t<=0.1 && a.ep===b.ep) probe.push(i); }
+  if(probe.length<20) return null;
+  const arc=i=>{ const d=qBlick(posen[i].pose.slice(3, 7))-qBlick(posen[i-1].pose.slice(3, 7)); return Math.atan2(Math.sin(d), Math.cos(d)); };
+  let best=null;
+  for(let z=0;z<ZUORDNUNGEN.length;z++){ const M=ZUORDNUNGEN[z], f=[]; for(const i of probe){ const v=zeile(M, i); if(Number.isFinite(v)) f.push(Math.abs(v-arc(i))); }
+    if(f.length<20) continue; f.sort((a,b)=>a-b); const r=f[f.length>>1]; if(!best || r<best.rest) best={z, rest:r, n:f.length}; }
+  if(!best) return null;
+  const M=ZUORDNUNGEN[best.z], psi=new Float64Array(posen.length).fill(NaN); for(let i=1;i<posen.length;i++) psi[i]=zeile(M, i);
+  return {psi, quelle, zuordnung:M, rest:best.rest, n:best.n};
 }
 // Aufnahme laden: Manifest, Zustand, Protokoll (Durchlauf), Anker, Tiefe, Ebenen, IMU, Messung, karte.jsonl, segmente.bin, Video.
 export function ladeAufnahme(src, o={}){

@@ -77,6 +77,7 @@
 const ML_DEF={H:null, quelle:'segmente', arbeit:{iter:3, lin:2, relin:20000, reg:2000, hyp:4, lm:150}, knoten:false, lago:'aus', pp:'fest',
   skala:'fest', umriss:true, umrissJede:2, reg:true, tiefe:0, ebenen:0, ohne:[], ohneAb:[], warteMax:1.0, loseNach:30, loseErledigt:10,
   proj:null, w:287, h:640, sPxErf:2, kopfRaster:1e6, topoRunden:3, topoDauer:3, verlaufMax:60, hypRunden:3, orakel:null, uhr:null,
+  ausgleich:null,   // weitere Optionen fuer G.lmAusgleich (M6), z. B. {bodenKette:false}
   kanten:null,   // Bildkanten {liste, min, tolP, tolPsiDeg, partner} (mlKanteMit, 12.8); null = aus
   verbunden:{sP:0.05, sY:1*Math.PI/180}, locker:{max:0.08, psi:1.5*Math.PI/180}, lose:{max:0.20, zurueck:0.15},
   // Kern 1.3; dH: Hoehenbedingung mit Laser-H (19.2 Z5)
@@ -103,7 +104,7 @@ const ML_DEF={H:null, quelle:'segmente', arbeit:{iter:3, lin:2, relin:20000, reg
     // (Erfassungen mod 90°, Kreismittel von 4θ nach Laenge). Nur bei Raumrichtung beiderseits (Laenge >= rasterMinL m,
     // Buendelung R >= rasterMinR); einmal je Abschnitt (A.gierRaster). Pruefstand: die Gier der Kette liegt nach einer Pause
     // im Median 15-20° daneben, Z13 sucht nur +-gierDeg.
-    gierRaster:false, rasterSYDeg:5, rasterMinL:1.5, rasterMinR:0.7},
+    gierRaster:false, rasterSYDeg:5, rasterMinL:1.5, rasterMinR:0.7, mitGyro:'aus'},
   // Registrierung erneut, wenn die globale Karte um >= 10 % (mindestens 1) nicht-kandidat Waende gewachsen ist
   // oder sich die Menge der verbundenen/lockeren Abschnitte geaendert hat [S]; neue Hypothese: neben allen alten
   // um > rivalLage / rivalWinkel wie G.registriere (4)
@@ -368,7 +369,7 @@ const mlZaehlen=(KZ)=>{
 // ------------------------------------------------ Nachregistrierung ueber Erfassungen (19.2 Z13)
 // Bodenversatz des Kerns, wortgleich zu bodenVersatz in M6 (6.2): Hoehe des Bodens von B_kern ueber dem Boden von B_0 entlang
 // der Kette. Eigene Kopie, damit der Schritt nicht an M6 haengt (Hoehe der Decke in F0 = H - dBoden).
-const mlBodenVersatz=KZ=>{ const S=KZ.schnitte || [], k=KZ.kern; if(!(k>0)) return 0;
+const mlBodenVersatz=KZ=>{ const S=KZ.schnitte || [], k=KZ.kern; if(!(k>0) || KZ.opt.ausgleich && KZ.opt.ausgleich.bodenKette===false) return 0;
   const ty=[0];
   for(let i=1;i<=k;i++){ const s=S[i-1], b=s && s.bindung; let v=ty[i-1];
     if(s && s.klasse==='zurueck' && s.zurueckZu!=null && s.zurueckZu>=0 && s.zurueckZu<i) v=ty[s.zurueckZu];
@@ -504,7 +505,10 @@ const mlAbReg=(KZ, neu, neuB, kopf)=>{
   const wurzel=b=>{ let x=b; for(let n=0; n<64 && par.has(x) && par.get(x)!=null; n++) x=par.get(x); return x; };
   const gruppe=ab=>[ab, ...(neuB||[]).filter(b=>b!==ab && wurzel(b)===ab)].sort((a,b)=>a-b);
   const nErf=ab=>gruppe(ab).reduce((s,x)=>s+(je.get(x)||[]).length, 0);
-  const offen=offen0.filter(ab=>A[ab] && A[ab].quelle==='kette' && A[ab].g && !angen(A[ab]) && nErf(ab)>=o.minErf).sort((a,b)=>Math.abs(a-K)-Math.abs(b-K) || a-b);
+  // mitGyro (Doku 12.8): Abschnitte hinter einem vom Gyro gebundenen Schnitt (bindung.gyro) bleiben aus, ausser mitGyro 'an':
+  // ihre Gier ist bekannt, und Z13 nahm auf dem Pruefstand fast nur falsche Lagen an (A8 101,7 s: 1 cm Bewegung -> 31 cm).
+  const gyroGebunden=ab=>{ const s=KZ.schnitte[ab-1]; return !!(s && s.bindung && s.bindung.gyro) && o.mitGyro!=='an'; };
+  const offen=offen0.filter(ab=>A[ab] && A[ab].quelle==='kette' && A[ab].g && !angen(A[ab]) && !gyroGebunden(ab) && nErf(ab)>=o.minErf).sort((a,b)=>Math.abs(a-K)-Math.abs(b-K) || a-b);
   // Mitglieder noch offener Gruppen gehoeren nie zur Referenz (sonst legte sich die Gruppe mit ref 'verbunden' auf sich selbst)
   const offenG=()=>new Set(offen.filter(ab=>!angen(A[ab])).flatMap(gruppe));
   let ausRef=offenG();
@@ -932,7 +936,7 @@ G.karteRechnen=(KZ, o0={})=>{
       const nb=mlHat('lmBloecke') ? G.lmBloecke(KZ, {knoten:!!opt.knoten, pp:opt.pp, nurAb:null, max:A.relin}) : null, relinRest=Math.max(0, A.relin-(nb && nb.relin|0));
       if(nb) kopf.arbeit.relin+=nb.relin|0;
       const r=mlRuf('lmAusgleich', KZ, {iter:A.iter, relinMax:relinRest, lin:A.lin, kette:true, laserH:KZ.H ? KZ.H.laser : null, skala:opt.skala, knoten:!!opt.knoten,
-        lago, strukturwechsel:grund, pp:opt.pp, tiefe:opt.tiefe, ebenen:opt.ebenen, nurAb:null, orakel:opt.orakel});
+        lago, strukturwechsel:grund, pp:opt.pp, tiefe:opt.tiefe, ebenen:opt.ebenen, nurAb:null, orakel:opt.orakel, ...(opt.ausgleich||{})});
       if(!r) stumm.push('lmAusgleich');
       else { kopf.arbeit.iter+=r.iter|0; kopf.arbeit.lin+=r.lin|0; kopf.arbeit.relin+=r.relin|0; if(r.ldl) kopf.ldl={...r.ldl};
         if(!r.ok) L.ausgleichOhne=(L.ausgleichOhne||0)+1;

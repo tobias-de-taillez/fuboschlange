@@ -53,6 +53,27 @@ const oK=T1.optionenAus(T1.argumente(['x', '--karte', '{"abReg":{"gierRaster":tr
 chk('(c) T1 --karte: JSON an G.karteNeu, abReg.gierRaster vorgegeben aus', oK.karte && oK.karte.abReg.gierRaster===true && !('karte' in T1.optionenAus(T1.argumente(['x'])))
   && G.karteNeu({}).opt.abReg.gierRaster===false && G.karteNeu(oK.karte).opt.abReg.gierRaster===true && G.karteNeu(oK.karte).opt.abReg.minErf===4);
 
+// ---- (f) Gyro (Doku 12.8): gyroSim an der synthetischen Aufnahme (Achsen um z gedreht, Rauschen, Drift); T1 imuGier findet
+// die Zuordnung, imuPsi folgt dem Blick; ueber das weggeschnittene Fenster die Drehung in der Luecke. M4 gyroBruecke bindet
+// die Pause mit dPsi = imuPsi und engem sY; vorhersage 'gedaempft' schiebt die Kamera (vCam); ohne Schalter wie bisher.
+{ const Ag=PS.gyroSim(A, {zu:'z90'}), Pg=T1.posenAus(G, Ag), I=Ag._imuGier;
+  // Die Kreisbewegung dreht fast nur um die Senkrechte: mehrere Zuordnungen geben dann denselben Blick (z90 oder z90 mit
+  // Drehung um y um 180°), geprueft wird die Wirkung (imuPsi), nicht die Matrix; die Zuordnung der Eins waere falsch.
+  const ok90=I && !(I.zuordnung[0][0]===1 && I.zuordnung[1][1]===1 && I.zuordnung[2][2]===1);
+  let fmax=0; for(let i=1;i<Pg.length;i++){ const d=wrap(Pg[i].blick-Pg[i-1].blick); fmax=Math.max(fmax, Math.abs(wrap(Pg[i].imuPsi-d))); }
+  chk('(f) gyroSim + imuGier: Zuordnung nicht die Eins, imuPsi je Zeile wie der Blick (<= 0,1°, Rauschen 0,005 rad/s)', I && I.quelle==='gyro' && ok90 && fmax<0.1*D2R, `rest ${(I.rest/D2R).toFixed(4)}°, max ${(fmax/D2R).toFixed(4)}°`);
+  const Ag2=PS.bruchSimulieren(G, Ag, t0, 4, X), P2=T1.posenAus(G, Ag2), iB=P2.findIndex(p=>p.t>=Ag2.sim.tB), wahr=wrap(P2[iB].blick-P2[iB-1].blick);
+  chk('(f) ueber die Luecke (4 s weggeschnitten): imuPsi = Drehung in der Luecke (<= 0,6°: Drift 0,1°/s · 4 s)', Math.abs(wrap(P2[iB].imuPsi-wahr))<0.6*D2R && Math.abs(wahr)>5*D2R, `wahr ${(wahr/D2R).toFixed(2)}°, Gyro ${(P2[iB].imuPsi/D2R).toFixed(2)}°`);
+  const S0=G.sessionCuts(P2, Ag2.breaks, Ag2.events, {}, null), Sg=G.sessionCuts(P2, Ag2.breaks, Ag2.events, {gyroBruecke:true}, null), Sv=G.sessionCuts(P2, Ag2.breaks, Ag2.events, {vorhersage:'gedaempft'}, null);
+  const c0=S0[0], cg=Sg[0], cv=Sv[0];
+  chk('(f) M4 gyroBruecke: Pause mit dPsi = imuPsi, sY = 1° + 0,5°/s · dt, Kette dreht B um dPsi; ohne Schalter unveraendert', c0.klasse==='pause' && c0.bindung.dPsi===undefined && !c0.vCam
+    && cg.bindung.gyro===true && Math.abs(cg.bindung.dPsi-wrap(P2[iB].imuPsi))<1e-12 && Math.abs(cg.bindung.sY-(1+0.5*cg.dt)*D2R)<1e-12 && cg.bindung.sY<c0.bindung.sY
+    && (()=>{ const B0=[{g0:null}, {g0:null}], Bg=[{g0:null}, {g0:null}]; G.ketteStart(S0, B0); G.ketteStart(Sg, Bg); return Math.abs(wrap(Bg[1].g0.psi-B0[1].g0.psi-cg.bindung.dPsi))<1e-9; })(),
+    `dPsi ${(cg.bindung.dPsi/D2R).toFixed(2)}°, sY ${(cg.bindung.sY/D2R).toFixed(2)}° statt ${(c0.bindung.sY/D2R).toFixed(1)}°`);
+  chk('(f) M4 vorhersage gedaempft: vCam = v · (1 - e^-dt) im Plan, Rest der Kette dort null', cv.vCam && cv.vCam[1]===0 && Math.hypot(cv.vCam[0], cv.vCam[2])>0.05
+    && (()=>{ const B=[{g0:null}, {g0:null}]; G.ketteStart(Sv, B); B[0].g=B[0].g0; B[1].g=B[1].g0; const r=G.resKette(cv, B[0].g0, B[1].g0).r; return Math.hypot(r[0], r[1])<1e-9; })(),
+    `|vCam| ${(100*Math.hypot(cv.vCam[0], cv.vCam[2])).toFixed(1)} cm`); }
+
 // ---- (d) orakelAus --spiegel ja (A6)
 const SPAD='/private/tmp/claude-501/-Volumes-external-TobiCodetEndlichWieder-Zaene/86e1205e-9d6d-494b-b0b6-88f6e01be4b0/scratchpad';
 const [tar, prot]=(process.env.A6 || `${SPAD}/a6/aufnahme6.tar,${SPAD}/a6/protokoll6.json`).split(',');

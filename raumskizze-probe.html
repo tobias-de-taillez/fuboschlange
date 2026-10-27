@@ -3961,7 +3961,11 @@ const mmVon=b=>[{name:'stetig', w:1, sP:b.sP, sY:b.sY, sH:b.sH},
 // zeilen[i-1] / zeilen[i]: letzte / erste PoseZeile beiderseits; zeilen[i-2] fuer die Vorhersage mit
 // konstanter Geschwindigkeit (fehlt sie: rPose = rPsi = NaN, Klasse reloc). o.rest = Ereignis 'rest':
 // rPose = |rP|, rPsi = |rPsi| der Folgekante, Klasse reloc (ausser Pause).
-const SK_DEF={rLoc:0.02, rPsiDeg:1.0, dtPause:0.5, rest:null};
+// Gyro-Bruecke (Schalter gyroBruecke, Doku 12.8): traegt die erste Zeile nach einer Pause (oder einem reloc-Schnitt) imuPsi
+// (Aenderung des Plan-Blicks seit der letzten Zeile davor, aus dem Gyro, T1 imuGier), dann bindet der Schnitt den Blick mit
+// dieser Drehung statt mit Blick stetig: bindung.dPsi = imuPsi, sY = gyroSYDeg + gyroDriftDeg · dt, wenn das enger ist als
+// ohne Gyro. Lage und Hoehe bleiben wie ohne Gyro.
+const SK_DEF={rLoc:0.02, rPsiDeg:1.0, dtPause:0.5, rest:null, gyroBruecke:false, gyroSYDeg:1, gyroDriftDeg:0.5};
 G.schnittKlasse=(zeilen,i,art,o0={})=>{
   const o={...SK_DEF, ...o0}, A=zeilen[i-1], B=zeilen[i], Z=zeilen[i-2], dt=B.t-A.t;
   let rPose=NaN, rPsi=NaN;
@@ -3977,6 +3981,8 @@ G.schnittKlasse=(zeilen,i,art,o0={})=>{
   else if(klasse==='reloc') b={art:'kamera', sP:0.03+0.7*dt+0.5*rPose, sY:(1+45*dt)*D2R+0.5*rPsi, sH:0.01+0.3*dt};
   else if(klasse==='pause') b={art:'kamera', sP:0.03+0.7*dt, sY:(1+45*dt)*D2R, sH:0.01+0.3*dt};
   else b={art:'pose', sP:0.02, sY:0.3*D2R, sH:0.01};
+  if((klasse==='pause' || klasse==='reloc') && o.gyroBruecke && Number.isFinite(B.imuPsi)){ const sG=(o.gyroSYDeg+o.gyroDriftDeg*dt)*D2R;
+    if(sG<b.sY){ b.dPsi=wrap(B.imuPsi); b.sY=sG; b.gyro=true; } }
   b.kern='mm'; b.mm=mmVon(b); b.k=null;
   b.dG=klasse==='zurueck' ? NULLG() : G.gKomp(G.gInv(G.gAusT(A.T)), G.gAusT(B.T));
   return {klasse, rPose, rPsi, bindung:b, dT};
@@ -3994,7 +4000,10 @@ G.schnittKlasse=(zeilen,i,art,o0={})=>{
 // Inkrementell: Schnitte ohne Epochenwechsel werden erst gemeldet, wenn merge s Posen danach vorliegen (so
 // verschwindet nie ein gemeldeter Abschnitt); prev behaelt die Objekte (und bindung.k von M6) gemeldeter Schnitte.
 // Das Ergebnis haengt nur von den Eingaengen ab: stueckweise eingespeist gleich wie auf einmal.
-const SC_DEF={minJump:[0.05, 0.5], camJump:0.10, camV:1.5, merge:0.3, tWechsel:true, reset:true, rest:true, gyro:false, gyroDeg:null,
+// vorhersage (Doku 12.8): 'still' (Vorgabe) Kamera stetig ueber den Schnitt; 'gedaempft' Kamera um v·tauV·(1 - e^(-dt/tauV))
+// weiter (v im Plan aus den Zeilen bis 0,3 s vor dem Schnitt, gleiche Epoche), als s.vCam im Bezug von A; gemessen an A6-A8
+// fuer Luecken von 1,3 s p90 52/66/45 -> 37/43/29 cm (scratchpad pruef/cv.mjs).
+const SC_DEF={minJump:[0.05, 0.5], camJump:0.10, camV:1.5, merge:0.3, tWechsel:true, reset:true, rest:true, gyro:false, gyroDeg:null, vorhersage:'still', tauV:1,
   anker:null, ankerFenster:5};
 const ankerZeile=z=>Array.isArray(z) ? {t:z[0], A:z[8]} : {t:z.t, A:z.anker};
 // Beidseits verfolgte Anker: letzte Lage bis fenster s vor tA und erste bis fenster s nach tB, im Bezug der Seite.
@@ -4047,7 +4056,11 @@ G.sessionCuts=(posen,breaks,ereignisse,o0={},prev=null)=>{
     const art=tw ? 't-wechsel' : br.length ? 'bruch' : rs ? 'reset' : re ? 'rest' : ka ? 'kamera' : 'gyro';
     const K=G.schnittKlasse([P[ia-1], A, B], 2, art, {...o, rest:art==='rest' ? re.e : null});
     const cb=A.cam || NAN3, ca=B.cam || NAN3;
-    return {t:P[iCut].t, epA:P[iCut-1].ep, epB:P[iCut].ep, art, klasse:K.klasse,
+    let vCam=null;
+    if(o.vorhersage==='gedaempft' && K.bindung.art==='kamera' && A.cam){ let z0=null;
+      for(let k=ia-1;k>=0;k--){ const z=P[k]; if(z.ep!==A.ep || A.t-z.t>0.3) break; if(z.cam) z0=z; }
+      const d0=z0 ? A.t-z0.t : 0; if(z0 && d0>0.15){ const f=o.tauV*(1-Math.exp(-(B.t-A.t)/o.tauV)); vCam=[(A.cam[0]-z0.cam[0])/d0*f, 0, (A.cam[2]-z0.cam[2])/d0*f]; } }
+    return {t:P[iCut].t, epA:P[iCut-1].ep, epB:P[iCut].ep, art, klasse:K.klasse, vCam,
       grund:br.length ? [...new Set(br.map(e=>e.b.grund))].join('+') : rs ? 'ref-reset' : re ? 'rest' : ka ? 'kamera-sprung' : gy ? 'gyro' : null,
       dt:B.t-A.t, cb, ca, pb:[...cb, A.blick], pa:[...ca, B.blick], rPose:K.rPose, rPsi:K.rPsi,
       dCam:Math.hypot(ca[0]-cb[0], ca[1]-cb[1], ca[2]-cb[2]), dT:K.dT, bindung:K.bindung,
@@ -4071,10 +4084,12 @@ const ketteG=(s,gA,gZ)=>{
   if(s.klasse==='zurueck') return gZ ? {...gZ} : null;
   if(s.art==='rest') return {psi:gA.psi, tx:gA.tx, ty:gA.ty, tz:gA.tz};
   if(s.bindung.art==='pose') return G.gKomp(gA, s.bindung.dG);
-  const psi=gA.psi+s.pb[3]-s.pa[3], w=G.gAnw(gA, s.cb), c=Math.cos(psi), sn=Math.sin(psi);
+  const psi=gA.psi+s.pb[3]-s.pa[3]+(s.bindung.dPsi || 0), w=G.gAnw(gA, cbV(s)), c=Math.cos(psi), sn=Math.sin(psi);
   return {psi, tx:w[0]-(c*s.ca[0]-sn*s.ca[2]), ty:w[1]-s.ca[1], tz:w[2]-(sn*s.ca[0]+c*s.ca[2])};
 };
 const gVon=(A,t)=>A ? (A.g ? G.gBei(A, t) : A.g0) : null;
+// Kamera vor dem Schnitt, mit der Vorhersage s.vCam (vorhersage 'gedaempft') weitergeschoben
+const cbV=s=>s.vCam ? [s.cb[0]+s.vCam[0], s.cb[1], s.cb[2]+s.vCam[2]] : s.cb;
 G.ketteStart=(schnitte,abschnitte)=>{
   for(let k=0;k<abschnitte.length;k++){ const B=abschnitte[k]; if(B.g0) continue;
     if(k===0){ B.g0=NULLG(); continue; }
@@ -4092,8 +4107,8 @@ G.resKette=(s,gA,gB)=>{
   const b=s.bindung; let r;
   if(b.art==='pose'){ const gP=G.gKomp(gA, b.dG || NULLG()), c=[s.ca[0], s.ca[2]], q=G.gPlan(gB, c), p=G.gPlan(gP, c);
     r=[q[0]-p[0], q[1]-p[1], wrap(gB.psi-gP.psi), gB.ty-gP.ty]; }
-  else if(b.art==='kamera'){ const qa=G.gAnw(gB, s.ca), qb=G.gAnw(gA, s.cb);
-    r=[qa[0]-qb[0], qa[2]-qb[2], wrap(gB.psi+s.pa[3]-gA.psi-s.pb[3]), qa[1]-qb[1]]; }
+  else if(b.art==='kamera'){ const qa=G.gAnw(gB, s.ca), qb=G.gAnw(gA, cbV(s));
+    r=[qa[0]-qb[0], qa[2]-qb[2], wrap(gB.psi+s.pa[3]-gA.psi-s.pb[3]-(b.dPsi || 0)), qa[1]-qb[1]]; }
   else r=[0, 0, 0, 0];
   const komp=(b.mm || mmVon(b)).map(k=>({name:k.name, w:b.art==='keine' ? 0 : k.w, sigma:[k.sP, k.sP, k.sY, k.sH]}));
   const ak=komp.find(k=>k.name==='anker');
@@ -5746,7 +5761,9 @@ const DEF_A={iter:3, relinMax:20000, gmC:3, kette:true, rechtwinklig:1.5, laserH
   // h_c auf A6-A8 in 9/29 (Segmente) bzw. 5/29 (Erfassungen) Abschnitten <= 5 cm an H, mit 'hc' in 22/29 bzw. 27/29;
   // h_f wanderte dabei bis +0,9 m (A8), die Bindung h_c - h_f = H haelt dort nur sich selbst.
   // sHC >= max(1,4826·MAD/sqrt(n) der entschiedenen Kantenhoehen (Halbbreite <= halbKante), sHCmin).
-  erfassungBoden:false, qErfassung:1, hfErfassung:0.03, hcPrior:0.3, hcPriorOhneBoden:0.001, tyAnker:0.3, tyKette:'fest', festTy:false, lokH:'hc', sHlok:0.02, hfLok:[0, 0.3], sHCmin:0.02, halbKante:0.05,
+  // bodenKette false (Doku 12.8): dBoden = 0, h_c ~ H ueber dem Boden jedes Bezugs (die Kette lag auf A8 +19 cm daneben,
+  // gemessen an ARCores Deckenebene; die Abstaende schrumpften dort auf das 0,46- bis 0,58-fache).
+  bodenKette:true, erfassungBoden:false, qErfassung:1, hfErfassung:0.03, hcPrior:0.3, hcPriorOhneBoden:0.001, tyAnker:0.3, tyKette:'fest', festTy:false, lokH:'hc', sHlok:0.02, hfLok:[0, 0.3], sHCmin:0.02, halbKante:0.05,
   // intern (nicht in 4): Start-mu, Daempfung, groesster Schritt [rad, m], erzwungener lago-Grund (M10), Schlussrunde
   muStart:16, lambda:1e-8, schritt:[0.3, 1.0], lagoGrund:null, schluss:false};
 const DEF_B={dPhi:0.05*D2R, dRho:0.002, dG:0.002, dPsi:0.05*D2R, dPp:0.05};
@@ -6399,7 +6416,7 @@ G.lmAusgleich=(karte, o0={})=>{
   const bodenF=K.glob && [...K.gruppen.values()].some(g=>g.art==='f');
   const qH=mitNutzer ? Math.max(q, o.qErfassung ?? 1) : q; K.hfSig=mitNutzer ? Math.min(o.hfPrior[1], o.hfErfassung ?? 0.03) : o.hfPrior[1];
   K.H=Hl; K.sH=Math.hypot(Math.max(o.sHmin, karte.H && karte.H.sigma || 0), 0.25*(1-qH));
-  K.boden=K.glob && (bodenF || mitNutzer); K.dBoden=K.glob ? bodenVersatz(karte) : 0;
+  K.boden=K.glob && (bodenF || mitNutzer); K.dBoden=K.glob && o.bodenKette!==false ? bodenVersatz(karte) : 0;
   K.hcM=Hl!=null ? Hl-K.dBoden : null; K.hfM=o.hfPrior[0]-K.dBoden;
   K.sHc=!K.boden && o.hcPriorOhneBoden>0 ? o.hcPriorOhneBoden : o.hcPrior;   // sigma des h_c-Priors (6.2, rep/m6b)
   if(K.glob && !Number.isFinite(karte.hC) && K.hcM!=null) K.X.set('hc', K.hcM);   // Start ohne h_c der Karte: Mitte des Priors
@@ -7943,6 +7960,7 @@ G.ebeneAusAR=(pr,bezug,o={})=>{
 const ML_DEF={H:null, quelle:'segmente', arbeit:{iter:3, lin:2, relin:20000, reg:2000, hyp:4, lm:150}, knoten:false, lago:'aus', pp:'fest',
   skala:'fest', umriss:true, umrissJede:2, reg:true, tiefe:0, ebenen:0, ohne:[], ohneAb:[], warteMax:1.0, loseNach:30, loseErledigt:10,
   proj:null, w:287, h:640, sPxErf:2, kopfRaster:1e6, topoRunden:3, topoDauer:3, verlaufMax:60, hypRunden:3, orakel:null, uhr:null,
+  ausgleich:null,   // weitere Optionen fuer G.lmAusgleich (M6), z. B. {bodenKette:false}
   kanten:null,   // Bildkanten {liste, min, tolP, tolPsiDeg, partner} (mlKanteMit, 12.8); null = aus
   verbunden:{sP:0.05, sY:1*Math.PI/180}, locker:{max:0.08, psi:1.5*Math.PI/180}, lose:{max:0.20, zurueck:0.15},
   // Kern 1.3; dH: Hoehenbedingung mit Laser-H (19.2 Z5)
@@ -7969,7 +7987,7 @@ const ML_DEF={H:null, quelle:'segmente', arbeit:{iter:3, lin:2, relin:20000, reg
     // (Erfassungen mod 90°, Kreismittel von 4θ nach Laenge). Nur bei Raumrichtung beiderseits (Laenge >= rasterMinL m,
     // Buendelung R >= rasterMinR); einmal je Abschnitt (A.gierRaster). Pruefstand: die Gier der Kette liegt nach einer Pause
     // im Median 15-20° daneben, Z13 sucht nur +-gierDeg.
-    gierRaster:false, rasterSYDeg:5, rasterMinL:1.5, rasterMinR:0.7},
+    gierRaster:false, rasterSYDeg:5, rasterMinL:1.5, rasterMinR:0.7, mitGyro:'aus'},
   // Registrierung erneut, wenn die globale Karte um >= 10 % (mindestens 1) nicht-kandidat Waende gewachsen ist
   // oder sich die Menge der verbundenen/lockeren Abschnitte geaendert hat [S]; neue Hypothese: neben allen alten
   // um > rivalLage / rivalWinkel wie G.registriere (4)
@@ -8234,7 +8252,7 @@ const mlZaehlen=(KZ)=>{
 // ------------------------------------------------ Nachregistrierung ueber Erfassungen (19.2 Z13)
 // Bodenversatz des Kerns, wortgleich zu bodenVersatz in M6 (6.2): Hoehe des Bodens von B_kern ueber dem Boden von B_0 entlang
 // der Kette. Eigene Kopie, damit der Schritt nicht an M6 haengt (Hoehe der Decke in F0 = H - dBoden).
-const mlBodenVersatz=KZ=>{ const S=KZ.schnitte || [], k=KZ.kern; if(!(k>0)) return 0;
+const mlBodenVersatz=KZ=>{ const S=KZ.schnitte || [], k=KZ.kern; if(!(k>0) || KZ.opt.ausgleich && KZ.opt.ausgleich.bodenKette===false) return 0;
   const ty=[0];
   for(let i=1;i<=k;i++){ const s=S[i-1], b=s && s.bindung; let v=ty[i-1];
     if(s && s.klasse==='zurueck' && s.zurueckZu!=null && s.zurueckZu>=0 && s.zurueckZu<i) v=ty[s.zurueckZu];
@@ -8370,7 +8388,10 @@ const mlAbReg=(KZ, neu, neuB, kopf)=>{
   const wurzel=b=>{ let x=b; for(let n=0; n<64 && par.has(x) && par.get(x)!=null; n++) x=par.get(x); return x; };
   const gruppe=ab=>[ab, ...(neuB||[]).filter(b=>b!==ab && wurzel(b)===ab)].sort((a,b)=>a-b);
   const nErf=ab=>gruppe(ab).reduce((s,x)=>s+(je.get(x)||[]).length, 0);
-  const offen=offen0.filter(ab=>A[ab] && A[ab].quelle==='kette' && A[ab].g && !angen(A[ab]) && nErf(ab)>=o.minErf).sort((a,b)=>Math.abs(a-K)-Math.abs(b-K) || a-b);
+  // mitGyro (Doku 12.8): Abschnitte hinter einem vom Gyro gebundenen Schnitt (bindung.gyro) bleiben aus, ausser mitGyro 'an':
+  // ihre Gier ist bekannt, und Z13 nahm auf dem Pruefstand fast nur falsche Lagen an (A8 101,7 s: 1 cm Bewegung -> 31 cm).
+  const gyroGebunden=ab=>{ const s=KZ.schnitte[ab-1]; return !!(s && s.bindung && s.bindung.gyro) && o.mitGyro!=='an'; };
+  const offen=offen0.filter(ab=>A[ab] && A[ab].quelle==='kette' && A[ab].g && !angen(A[ab]) && !gyroGebunden(ab) && nErf(ab)>=o.minErf).sort((a,b)=>Math.abs(a-K)-Math.abs(b-K) || a-b);
   // Mitglieder noch offener Gruppen gehoeren nie zur Referenz (sonst legte sich die Gruppe mit ref 'verbunden' auf sich selbst)
   const offenG=()=>new Set(offen.filter(ab=>!angen(A[ab])).flatMap(gruppe));
   let ausRef=offenG();
@@ -8798,7 +8819,7 @@ G.karteRechnen=(KZ, o0={})=>{
       const nb=mlHat('lmBloecke') ? G.lmBloecke(KZ, {knoten:!!opt.knoten, pp:opt.pp, nurAb:null, max:A.relin}) : null, relinRest=Math.max(0, A.relin-(nb && nb.relin|0));
       if(nb) kopf.arbeit.relin+=nb.relin|0;
       const r=mlRuf('lmAusgleich', KZ, {iter:A.iter, relinMax:relinRest, lin:A.lin, kette:true, laserH:KZ.H ? KZ.H.laser : null, skala:opt.skala, knoten:!!opt.knoten,
-        lago, strukturwechsel:grund, pp:opt.pp, tiefe:opt.tiefe, ebenen:opt.ebenen, nurAb:null, orakel:opt.orakel});
+        lago, strukturwechsel:grund, pp:opt.pp, tiefe:opt.tiefe, ebenen:opt.ebenen, nurAb:null, orakel:opt.orakel, ...(opt.ausgleich||{})});
       if(!r) stumm.push('lmAusgleich');
       else { kopf.arbeit.iter+=r.iter|0; kopf.arbeit.lin+=r.lin|0; kopf.arbeit.relin+=r.relin|0; if(r.ldl) kopf.ldl={...r.ldl};
         if(!r.ok) L.ausgleichOhne=(L.ausgleichOhne||0)+1;

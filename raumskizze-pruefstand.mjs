@@ -12,7 +12,7 @@
 // nach dem Fenster: Lage |g_A(c) - g_B(c)| im Plan, Hoehe, Gier g_B.psi - g_A.psi; dazu Stufe und Quelle von B.
 //
 //   node raumskizze-pruefstand.mjs --aufnahme A6=a6.tar,protokoll6.json [--aufnahme A7=...] [--H 2.416] [--w 1.3,4]
-//        [--n 8] [--abstand 10] [--aus ordner] [--t1 "--quelle erfassungen --ohne tiefe,ebenen"] [--X 40,1.3,-0.8]
+//        [--n 8] [--abstand 10] [--aus ordner] [--t1 "--quelle erfassungen --ohne tiefe,ebenen"] [--X 40,1.3,-0.8] [--gyro sim]
 //
 // Vorgabe der T1-Optionen wie live (KARTE_OPT, Stand 7): --quelle erfassungen --ohne tiefe,ebenen. Mit --t1 lassen sich
 // Verfahren gegeneinander messen (gleiche Fenster, gleiche Aufnahme). Ein Lauf je Fenster, nacheinander (T1 ~15 s).
@@ -54,8 +54,29 @@ export function bruchSimulieren(G, A, t0, w, X0=DEF.X){
   const breaks=[...(A.breaks||[]).filter(b=>!imFenster(b.t)), {t:tB, grund:'pausiert', sim:true}].sort((a,b)=>a.t-b.t);
   // Anker und Ebenen nach dem Fenster liegen im alten Rahmen; der Pruefstand misst ohne sie (live ohnehin aus, KARTE_OPT)
   const tAus=z=>Array.isArray(z) ? z[0] : z && z.t;
+  // imu bleibt ganz (der Gyro laeuft durch die Luecke); _imuGier (Cache von T1.posenAus) gilt fuer die alten Zeilen
   return {...A, rows, P, events:ev, breaks, anker:(A.anker||[]).filter(z=>tAus(z)<t0), ebenen:(A.ebenen||[]).filter(z=>tAus(z)<t0),
-    segmenteBin:null, video:null, tiefeBuf:null, karte:[], sim:{t0, w, tB, X:X0, weg}};
+    segmenteBin:null, video:null, tiefeBuf:null, karte:[], _imuGier:undefined, sim:{t0, w, tB, X:X0, weg}};
+}
+
+// Gyro nachgebildet (--gyro sim, Doku 12.8): aus den ARCore-Posen der unveraenderten Aufnahme je Zeile die Drehrate im
+// Kamerarahmen (q_{i-1}^-1 ⊗ q_i / dt), als Gyroscope-Zeile {q:'gyro', t, w} zur Zeit der Zeile, mit Rauschen sigma (rad/s je
+// Achse), fester Drift bias (rad/s je Achse) und Achsen-Zuordnung zu (Geraet -> Kamera: 'eins' oder 'z90', Drehung um z).
+// Ein echter Gyro misst durch die Luecke; der nachgebildete auch (er entsteht vor dem Wegschneiden).
+export function gyroSim(A, o0={}){
+  const o={sigma:0.005, bias:[0.002, -0.0015, 0.001], zu:'z90', seed:1, ...o0}, C=A.C;
+  let s=o.seed>>>0||1; const rnd=()=>{ s=(s*1664525+1013904223)>>>0; return s/4294967296; }, gauss=()=>Math.sqrt(-2*Math.log(rnd()+1e-12))*Math.cos(2*Math.PI*rnd());
+  const Zt=o.zu==='z90' ? [[0, 1, 0], [-1, 0, 0], [0, 0, 1]] : [[1, 0, 0], [0, 1, 0], [0, 0, 1]];   // Kamera -> Geraet (transponiert)
+  // Ueber echte Schnitte (T-Wechsel, Bruch dazwischen, Luecke > 0,25 s) gaebe q_{i-1}^-1 ⊗ q_i auch den Rahmensprung von ARCore
+  // wieder, den ein echter Gyro nicht misst: dort kein Abtastwert (imuPsi fehlt, die Bruecke greift nicht).
+  const tBr=(A.breaks||[]).map(x=>x.t).filter(Number.isFinite).sort((x,y)=>x-y), bruchZw=(t0,t1)=>tBr.some(t=>t>t0 && t<=t1);
+  const imu=[]; for(let i=1;i<A.rows.length;i++){ const a=A.rows[i-1], b=A.rows[i], dt=b[C.t]-a[C.t]; if(!(dt>0) || dt>0.25 || bruchZw(a[C.t], b[C.t])) continue;
+    if(a[C.Tpsi]!==b[C.Tpsi] || a[C.Tx]!==b[C.Tx] || a[C.Ty]!==b[C.Ty] || a[C.Tz]!==b[C.Tz]) continue;
+    const qa=[a[C.qx], a[C.qy], a[C.qz], a[C.qw]], qb=[b[C.qx], b[C.qy], b[C.qz], b[C.qw]], r=qMul([-qa[0], -qa[1], -qa[2], qa[3]], qb);
+    const sg=r[3]<0 ? -1 : 1, v=[sg*r[0], sg*r[1], sg*r[2]], n=Math.hypot(...v), th=2*Math.atan2(n, sg*r[3]), wc=n>1e-12 ? v.map(x=>x/n*th/dt) : [0, 0, 0];
+    const wd=Zt.map(z=>z[0]*wc[0]+z[1]*wc[1]+z[2]*wc[2]).map((x,k)=>x+o.bias[k]+o.sigma*gauss());
+    imu.push({q:'gyro', t:b[C.t], w:wd}); }
+  return {...A, imu, _imuGier:undefined};
 }
 
 // Fenster: in ruhigen Abschnitten (Schnitte der unveraenderten Aufnahme wie M4 sie setzt) mit >= minErf Erfassungen
@@ -106,24 +127,29 @@ export async function pruefeFenster(G, A, f, o0={}){
   else if(!sA || !sB || !sA.g || !sB.g) r.urteil='ohne-lage';
   else { const c=zb.cam || [0, 0, 0], pA=G.gAnw(sA.g, c), pB=G.gAnw(sB.g, c);
     r.dP=Math.hypot(pA[0]-pB[0], pA[2]-pB[2]); r.dH=pB[1]-pA[1]; r.dPsiDeg=wrap(sB.g.psi-sA.g.psi)*R2D;
+    // an den Waenden von B (gehobene Enden der Erfassungen von B, H 2,4 im Bezug): dort wirkt ein Gierfehler mit dem Hebel
+    const dW=[]; for(const e of lauf.erf){ if(G.sectionOf(S, e.t, e.ep)!==abB) continue; for(const rr of [e.ra, e.rb]){ const tt=(2.4-rr.o[1])/rr.d[1]; if(!(tt>0 && tt<25)) continue;
+        const p=[rr.o[0]+tt*rr.d[0], rr.o[2]+tt*rr.d[2]], a=G.gPlan(sA.g, p), b=G.gPlan(sB.g, p); dW.push(Math.hypot(a[0]-b[0], a[1]-b[1])); } }
+    r.dPWand=dW.length ? q(dW, 0.5) : null;
     const ad=Math.abs(r.dPsiDeg);
     r.urteil=sB.stufe==='lose' ? 'lose' : r.dP<=o.treffer.p && ad<=o.treffer.psiDeg ? 'treffer' : r.dP>o.falsch.p || ad>o.falsch.psiDeg ? 'falsch' : 'mittel'; }
   return r;
 }
 
 export function zusammenfassung(R){
-  const z={n:R.length, treffer:0, mittel:0, falsch:0, lose:0, sonst:0}, dP=[], dPsi=[], kette=[];
+  const z={n:R.length, treffer:0, mittel:0, falsch:0, lose:0, sonst:0}, dP=[], dPsi=[], kette=[], dW=[];
   for(const r of R){ if(r.urteil in z) z[r.urteil]++; else z.sonst++;
     if(Number.isFinite(r.dP)){ dP.push(r.dP); dPsi.push(Math.abs(r.dPsiDeg)); }
+    if(Number.isFinite(r.dPWand)) dW.push(r.dPWand);
     if(r.bewegung) kette.push(r.bewegung.p); }
-  return {...z, dPmed:q(dP, 0.5), dPp90:q(dP, 0.9), dPsiMed:q(dPsi, 0.5), dPsiP90:q(dPsi, 0.9), bewegungMed:q(kette, 0.5)};
+  return {...z, dPmed:q(dP, 0.5), dPp90:q(dP, 0.9), dPsiMed:q(dPsi, 0.5), dPsiP90:q(dPsi, 0.9), bewegungMed:q(kette, 0.5), wandMed:q(dW, 0.5), wandP90:q(dW, 0.9)};
 }
 const cm=x=>Number.isFinite(x) ? (100*x).toFixed(1) : '–', g1=x=>Number.isFinite(x) ? x.toFixed(1) : '–';
 export function tabelle(name, R){
-  const L=[`## ${name}`, '', '| t0 | w | Lücke | Bewegung im Fenster | Klasse | Stufe B | Quelle B | Lage | Höhe | Gier | Urteil |', '|---|---|---|---|---|---|---|---|---|---|---|'];
-  for(const r of R) L.push(`| ${r.t0} | ${r.w} | ${r.luecke} | ${r.bewegung ? cm(r.bewegung.p)+' cm / '+g1(r.bewegung.psiDeg)+'°' : '–'} | ${r.klasse || '–'} | ${r.stufeB || '–'} | ${r.quelleB || '–'} | ${cm(r.dP)} cm | ${cm(r.dH)} cm | ${g1(r.dPsiDeg)}° | ${r.urteil}${r.fehler ? ' ('+r.fehler+')' : ''} |`);
+  const L=[`## ${name}`, '', '| t0 | w | Lücke | Bewegung im Fenster | Klasse | Stufe B | Quelle B | Lage | an den Wänden | Höhe | Gier | Urteil |', '|---|---|---|---|---|---|---|---|---|---|---|---|'];
+  for(const r of R) L.push(`| ${r.t0} | ${r.w} | ${r.luecke} | ${r.bewegung ? cm(r.bewegung.p)+' cm / '+g1(r.bewegung.psiDeg)+'°' : '–'} | ${r.klasse || '–'} | ${r.stufeB || '–'} | ${r.quelleB || '–'} | ${cm(r.dP)} cm | ${cm(r.dPWand)} cm | ${cm(r.dH)} cm | ${g1(r.dPsiDeg)}° | ${r.urteil}${r.fehler ? ' ('+r.fehler+')' : ''} |`);
   const z=zusammenfassung(R);
-  L.push('', `${z.n} Fenster: Treffer ${z.treffer} (≤ ${DEF.treffer.p*100} cm, ≤ ${DEF.treffer.psiDeg}°), mittel ${z.mittel}, falsch ${z.falsch} (> ${DEF.falsch.p*100} cm oder > ${DEF.falsch.psiDeg}°), lose ${z.lose}, sonst ${z.sonst}; Lage Median ${cm(z.dPmed)} / p90 ${cm(z.dPp90)} cm, Gier Median ${g1(z.dPsiMed)} / p90 ${g1(z.dPsiP90)}°; Bewegung im Fenster Median ${cm(z.bewegungMed)} cm`, '');
+  L.push('', `${z.n} Fenster: Treffer ${z.treffer} (≤ ${DEF.treffer.p*100} cm, ≤ ${DEF.treffer.psiDeg}°), mittel ${z.mittel}, falsch ${z.falsch} (> ${DEF.falsch.p*100} cm oder > ${DEF.falsch.psiDeg}°), lose ${z.lose}, sonst ${z.sonst}; Lage Median ${cm(z.dPmed)} / p90 ${cm(z.dPp90)} cm, an den Wänden ${cm(z.wandMed)} / ${cm(z.wandP90)} cm, Gier Median ${g1(z.dPsiMed)} / p90 ${g1(z.dPsiP90)}°; Bewegung im Fenster Median ${cm(z.bewegungMed)} cm`, '');
   return L.join('\n');
 }
 
@@ -141,7 +167,7 @@ async function main(){
   const aus=resolve(a.aus || 'pruefstand'); mkdirSync(aus, {recursive:true});
   const {G}=await T1.ladeSeite({}), L=[`# Prüfstand simulierter Bruch (v${VERSION})`, '', `T1: ${o.t1.join(' ')} · X ${o.X.psiDeg}°, (${o.X.tx}, ${o.X.tz}) m · w ${o.w.join(', ')} s`, ''], alle={};
   for(const s of a.aufnahme){ const [name, rest]=s.split('='), [tar, prot]=rest.split(',');
-    const A=T1.ladeQuelle(resolve(tar), {protokoll:prot ? resolve(prot) : null}), F=fenster(G, A, o), R=[];
+    const A0=T1.ladeQuelle(resolve(tar), {protokoll:prot ? resolve(prot) : null}), A=a.gyro==='sim' ? gyroSim(A0) : A0, F=fenster(G, A, o), R=[];
     // %a im T1-Text = Name der Aufnahme klein (z. B. --bildkanten kanten/%a.json)
     const oA={...o, t1:o.t1.map(x=>x.replace(/%a/g, name.toLowerCase()))};
     for(const f of F){ let r; try{ r=await pruefeFenster(G, A, f, oA); }catch(e){ r={...f, urteil:'fehler', fehler:String(e.message || e).slice(0, 120)}; }

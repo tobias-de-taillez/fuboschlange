@@ -89,7 +89,9 @@ const DEF_A={iter:3, relinMax:20000, gmC:3, kette:true, rechtwinklig:1.5, laserH
   // h_c auf A6-A8 in 9/29 (Segmente) bzw. 5/29 (Erfassungen) Abschnitten <= 5 cm an H, mit 'hc' in 22/29 bzw. 27/29;
   // h_f wanderte dabei bis +0,9 m (A8), die Bindung h_c - h_f = H haelt dort nur sich selbst.
   // sHC >= max(1,4826·MAD/sqrt(n) der entschiedenen Kantenhoehen (Halbbreite <= halbKante), sHCmin).
-  erfassungBoden:false, qErfassung:1, hfErfassung:0.03, hcPrior:0.3, hcPriorOhneBoden:0.001, tyAnker:0.3, tyKette:'fest', festTy:false, lokH:'hc', sHlok:0.02, hfLok:[0, 0.3], sHCmin:0.02, halbKante:0.05,
+  // bodenKette false (Doku 12.8): dBoden = 0, h_c ~ H ueber dem Boden jedes Bezugs (die Kette lag auf A8 +19 cm daneben,
+  // gemessen an ARCores Deckenebene; die Abstaende schrumpften dort auf das 0,46- bis 0,58-fache).
+  bodenKette:true, erfassungBoden:false, qErfassung:1, hfErfassung:0.03, hcPrior:0.3, hcPriorOhneBoden:0.001, tyAnker:0.3, tyKette:'fest', festTy:false, lokH:'hc', sHlok:0.02, hfLok:[0, 0.3], sHCmin:0.02, halbKante:0.05,
   // intern (nicht in 4): Start-mu, Daempfung, groesster Schritt [rad, m], erzwungener lago-Grund (M10), Schlussrunde
   muStart:16, lambda:1e-8, schritt:[0.3, 1.0], lagoGrund:null, schluss:false};
 const DEF_B={dPhi:0.05*D2R, dRho:0.002, dG:0.002, dPsi:0.05*D2R, dPp:0.05};
@@ -742,7 +744,7 @@ G.lmAusgleich=(karte, o0={})=>{
   const bodenF=K.glob && [...K.gruppen.values()].some(g=>g.art==='f');
   const qH=mitNutzer ? Math.max(q, o.qErfassung ?? 1) : q; K.hfSig=mitNutzer ? Math.min(o.hfPrior[1], o.hfErfassung ?? 0.03) : o.hfPrior[1];
   K.H=Hl; K.sH=Math.hypot(Math.max(o.sHmin, karte.H && karte.H.sigma || 0), 0.25*(1-qH));
-  K.boden=K.glob && (bodenF || mitNutzer); K.dBoden=K.glob ? bodenVersatz(karte) : 0;
+  K.boden=K.glob && (bodenF || mitNutzer); K.dBoden=K.glob && o.bodenKette!==false ? bodenVersatz(karte) : 0;
   K.hcM=Hl!=null ? Hl-K.dBoden : null; K.hfM=o.hfPrior[0]-K.dBoden;
   K.sHc=!K.boden && o.hcPriorOhneBoden>0 ? o.hcPriorOhneBoden : o.hcPrior;   // sigma des h_c-Priors (6.2, rep/m6b)
   if(K.glob && !Number.isFinite(karte.hC) && K.hcM!=null) K.X.set('hc', K.hcM);   // Start ohne h_c der Karte: Mitte des Priors
