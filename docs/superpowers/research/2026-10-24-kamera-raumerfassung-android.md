@@ -887,24 +887,26 @@ Reparatur in drei Runden: Erfassungsweg in M5, Höhe an Laser-H und Boden gebund
   - Wahrheit: Beide Seiten hatten vorher denselben Bezug, die wahre Relativlage ist also die Einheit (bis auf die Drift von ARCore). Ein Orakel braucht der Prüfstand nicht.
   - Gemessen nach dem ganzen T1-Lauf, wie live: Lage an der Kamera, Gier, und der Fehler „an den Wänden“ (gehobene Erfassungen von B); dort wirkt ein Gierfehler mit dem Hebel.
   - 50 Fenster: A6 13, A7 20, A8 17.
-  - Für den Gyro bildet der Prüfstand die Drehraten aus den ARCore-Posen nach (Rauschen 0,005 rad/s, Drift 0,1°/s, Achsen um 90° gedreht), ohne Abtastwerte über echte Brüche. **Das ist ein idealisierter Gyro, also eine Obergrenze.**
+  - Für den Gyro bildet der Prüfstand die Drehraten aus den ARCore-Posen nach (60 Hz, Rauschen 0,005 rad/s, Drift 0,1°/s, Achsen um 90° gedreht). Über echte Brüche gibt es keine Abtastwerte, dort greift die Brücke nicht. **Das ist ein idealisierter Gyro, also eine Obergrenze.**
+  - Korrektur nach der Code-Prüfung: In einer ersten Fassung hielt T1 `imuGier` einen Gyro-Wert über jede Lücke, ein Aussetzer von 2 s ergab 115° Scheindrehung. Darum band der nachgebildete Gyro auch echte Schnitte mit erfundener Drehung. Behoben: Ein Wert deckt höchstens 50 ms, sonst gibt es kein `imuPsi`. Der Bericht zählt Gyro-Lücken und Zeilen ohne `imuPsi`. Die Zahlen unten sind mit der korrigierten Fassung gerechnet; sie haben sich kaum verändert.
 - **Ergebnis am Prüfstand** (an den Wänden Median/p90 in cm; Gier Median; Treffer = ≤ 10 cm und ≤ 2° an der Kamera, von 50):
 
 | Variante | A6 | A7 | A8 | Treffer |
 |---|---|---|---|---|
-| heute (Kette, Z13) | 154 / 282 · 14,7° | 168 / 296 · 16,9° | 70 / 183 · 20,3° | 1 |
+| bis Stand 9 (Kette, Z13 an) | 154 / 282 · 14,7° | 168 / 296 · 16,9° | 70 / 183 · 20,3° | 1 |
+| Stand 10 (Kette, Z13 aus) | 101 / 282 · 25,3° | 168 / 296 · 16,9° | 48 / 183 · 18,3° | 1 |
 | Gier-Raster (`abReg.gierRaster`) | 110 / 388 · 1,8° | 96 / 195 · 4,5° | 69 / 183 · 17,5° | 1 |
 | Bildkanten offline (`--bildkanten`) | 154 / 282 · 14,7° | 128 / 296 · 14,7° | 48 / 170 · 12,2° | 7 |
 | Z13 aus (`abReg.an:false`) | 101 / 282 · 25,3° | 168 / 296 · 16,9° | 48 / 183 · 18,3° | 1 |
-| Gyro-Brücke (`schnitt.gyroBruecke`) | 23 / 93 · 0,2° | 38 / 171 · 0,3° | 28 / 173 · 0,3° | 13 |
-| Gyro + gedämpfte Vorhersage (`schnitt.vorhersage`) | **21 / 92 · 0,2°** | **34 / 128 · 0,3°** | **18 / 70 · 0,3°** | **14** |
-| Gyro + Vorhersage + Bildkanten | 17 / 92 · 0,2° | 34 / 128 · 0,5° | 25 / 100 · 0,5° | 11 |
+| Gyro-Brücke (`schnitt.gyroBruecke`) | 23 / 94 · 0,3° | 40 / 171 · 0,4° | 21 / 72 · 0,2° | 13 |
+| Gyro + gedämpfte Vorhersage (`schnitt.vorhersage`) | **19 / 92 · 0,3°** | **34 / 129 · 0,4°** | **19 / 70 · 0,2°** | **14** |
+| Gyro + Vorhersage + Bildkanten | 17 / 92 · 0,3° | 34 / 129 · 0,5° | 24 / 69 · 0,4° | 12 |
 
   - **Zweiter Raum** (B1600 / B1714 vom 26.10., ohne Wahrheit, H 2,97 m aus der Pipeline; 19 + 17 Fenster), an den Wänden Median/p90:
     - heute: 18,7 / 82 und 48,9 / 121 cm;
     - Gier-Raster: 9,3 / 40 und **154 / 303 cm** (versagt);
-    - Gyro-Brücke: 3,6 / 19 und 20,2 / 65 cm;
-    - Gyro + Vorhersage: 3,3 / 20 und 21,8 / 31 cm.
+    - Gyro-Brücke: 3,7 / 19 und 20,5 / 65 cm;
+    - Gyro + Vorhersage: 2,9 / 20 und 21,7 / 31 cm.
 
     Z13 nimmt dort nie an, Z13 aus ist gleich heute.
   - **Heute** hängt jeder Abschnitt nach einem harten Bruch nur an der Kette (Kamera stetig). Der Fehler ist die Bewegung in der Lücke (Median 20–34 cm, Gier 15–20°). Über den Hebel werden daraus 0,7–1,7 m an den Wänden.
@@ -915,12 +917,12 @@ Reparatur in drei Runden: Erfassungsweg in M5, Höhe an Laser-H und Boden gebund
 
 | Variante | A6 | A7 | A8 | B1600 | B1714 |
 |---|---|---|---|---|---|
-| heute | 152 | 105 | 57 | 17 | 37 |
-| Z13 aus | 71 | 105 | 57 | 17 | 37 |
+| bis Stand 9 (Z13 an) | 152 | 105 | 57 | 17 | 37 |
+| Stand 10 (Z13 aus) | 71 | 105 | 57 | 17 | 37 |
 | Gier-Raster | 102 | 87 | 50 | 6 | **180** |
 | Bildkanten | 152 | 105 | 94 | – | – |
 | Gyro + Vorhersage | 17 | 28 | 21 | 3 | 20 |
-| dazu Achsen-Registrierung | 17 | 28 | 21 | **11** | 20 |
+| dazu Achsen-Registrierung | 17 | 28 | 21 | 3 (p90 48 statt 9) | 20 |
 
   - **Z13 (Nachregistrierung über Erfassungen):** Auch mit A in der Referenz nimmt Z13 falsche Lagen an. In A6 128,7 s steigt der Fehler an den Wänden von 70 auf 206 cm, in 131,7 s von 40 auf 212 cm; bei 137,7 s reißt ein anderer Z13-Schritt B von 6 auf 198 cm. Einen Nutzen zeigt es nirgends. **Z13 ist darum seit Stand 10 per Vorgabe aus** (`ML_DEF.abReg.an:false`, live und T1 gleich; wieder an mit `abReg:{an:true}`). Auf den echten Aufnahmen ist der Effekt nicht entscheidbar (A6 IoU 0,55 → 0,21 bei mehrdeutiger Passung 1,00–1,06, A7/A8 gleich). Mit Gyro lässt Z13, falls an, die vom Gyro gebundenen Abschnitte aus (`abReg.mitGyro`).
   - **Gyro-Brücke:** Die Drehung in der Lücke kommt aus dem Gyro statt aus „Blick stetig“. `sY` = 1° + 0,5°/s · dt, für Pausen- und reloc-Schnitte, summiert über die ganze Schnittspanne. Sie ist der größte gemessene Hebel. Die gedämpfte Vorhersage (Kamera mit v · τ · (1 − e^−dt/τ), τ = 1 s, weiter) senkt zusätzlich das p90. Als Rest bleibt die Verschiebung in der Lücke.
@@ -942,7 +944,7 @@ Reparatur in drei Runden: Erfassungsweg in M5, Höhe an Laser-H und Boden gebund
      - Vorschlag: eine Mindestgröße der Referenz, etwa nRef ≥ nErf und ≥ 40, und ein Suchfenster nach der Bewegung in Lücken (p90 37–52 cm bei 1,3 s) statt ±1,5 m.
   4. A8 (untersucht): Der Weg der Kamera deckt nur rund 3 × 3 m um die freistehende Wand ab, und T2 misst Maßstab 0,49. Die Kamera war dort nur 0,2–0,4 m unter der Decke; die Hebung mit hC = H − dBoden (2,224 m, dBoden aus der Kette) halbiert dann alle Abstände. Mit `ausgleich.bodenKette:false` liegt der Maßstab bei 0,96, der Export bleibt aber klein (Abdeckung), und A6 verliert damit seinen Außenring. Die Vorgabe bleibt; besser wäre die Deckenhöhe je Abschnitt aus ARCores höchster waagerechter Ebene über der Kamera (Empfehlung der Höhenprüfung).
 - **Messauftrag am Pixel:**
-  - Wohnküche mit `?karte=1&imu=1`, Laser-H eingeben, ≥ 8 min. Die Statuszeile muss „IMU“ zeigen; nach der Sitzung im Manifest `imu.gyro: 'ja'` und die Zeilenzahl prüfen.
+  - Wohnküche mit `?karte=1&imu=1`, Laser-H eingeben, ≥ 8 min. In der AR-Statistik muss „IMU … Gyro“ hochzählen; die Zusammenfassung nennt danach die Zahl der Werte (Warnung ohne Werte), das Manifest `imu.gyro: 'ja'`. Offline zeigt die T1-Zeile „IMU“ Rate, Lücken, Zuordnung, Zeitversatz und Rest gegen ARCore.
   - Einmal absichtlich die Ortung verlieren (Kamera zuhalten) und sich dabei um mehr als 45° drehen.
   - Einmal 10–30 s am selben Fleck warten, dann zur letzten Ecke zurück (kommen Anker nach langem Verlust zurück?).
   - Mit dem Laser die Stürze an den Öffnungen zum Wintergarten und die Decke an einer zweiten Stelle messen.
