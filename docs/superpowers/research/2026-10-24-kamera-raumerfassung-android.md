@@ -900,6 +900,13 @@ Reparatur in drei Runden: Erfassungsweg in M5, Höhe an Laser-H und Boden gebund
 | Gyro + gedämpfte Vorhersage (`schnitt.vorhersage`) | **21 / 92 · 0,2°** | **34 / 128 · 0,3°** | **18 / 70 · 0,3°** | **14** |
 | Gyro + Vorhersage + Bildkanten | 17 / 92 · 0,2° | 34 / 128 · 0,5° | 25 / 100 · 0,5° | 11 |
 
+  - **Zweiter Raum** (B1600 / B1714 vom 26.10., ohne Wahrheit, H 2,97 m aus der Pipeline; 19 + 17 Fenster), an den Wänden Median/p90:
+    - heute: 18,7 / 82 und 48,9 / 121 cm;
+    - Gier-Raster: 9,3 / 40 und **154 / 303 cm** (versagt);
+    - Gyro-Brücke: 3,6 / 19 und 20,2 / 65 cm;
+    - Gyro + Vorhersage: 3,3 / 20 und 21,8 / 31 cm.
+
+    Z13 nimmt dort nie an, Z13 aus ist gleich heute.
   - **Heute** hängt jeder Abschnitt nach einem harten Bruch nur an der Kette (Kamera stetig). Der Fehler ist die Bewegung in der Lücke (Median 20–34 cm, Gier 15–20°). Über den Hebel werden daraus 0,7–1,7 m an den Wänden.
   - **Gier-Raster** (Abschnitt auf die Raumrichtung des Kerns drehen): Die Raumrichtung stimmt danach fast überall auf ±0°. Bei Drehungen über 45° in der Lücke wählt es aber die falsche Vierteldrehung, deshalb das große p90.
   - **Bildkanten:** Gebunden werden 12 von 50 Fenstern, die meisten auf 2–12 cm und unter 4°. Das wirkt nur, wenn M6 den Plan des gebundenen Abschnitts festhält (`A.fest`), denn M6 kennt die Kante nicht und schob den Abschnitt sonst um Meter weg. Die Fenster sind zu kurz, die Bildpaare darüber also optimistisch. An den echten Pausen von A6–A8 gibt es kaum Kanten, und die echten Karten ändern sich nicht.
