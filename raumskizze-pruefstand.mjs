@@ -74,6 +74,8 @@ export function gyroSim(A, o0={}){
   const tBr=(A.breaks||[]).map(x=>x.t).filter(Number.isFinite).sort((x,y)=>x-y), bruchZw=(t0,t1)=>tBr.some(t=>t>t0 && t<=t1);
   const imu=[]; for(let i=1;i<A.rows.length;i++){ const a=A.rows[i-1], b=A.rows[i], dt=b[C.t]-a[C.t]; if(!(dt>0) || dt>0.25 || bruchZw(a[C.t], b[C.t])) continue;
     if(a[C.Tpsi]!==b[C.Tpsi] || a[C.Tx]!==b[C.Tx] || a[C.Ty]!==b[C.Ty] || a[C.Tz]!==b[C.Tz]) continue;
+    // Kamerasprung von ARCore (wie M4: > 10 cm und > 1,5 m/s) ist keine Drehung, die ein Gyro misst (Code-Pruefung 12.8)
+    const dp=Math.hypot(b[C.px]-a[C.px], b[C.py]-a[C.py], b[C.pz]-a[C.pz]); if(dp>0.10 && dp/Math.max(dt, 0.05)>1.5) continue;
     const qa=[a[C.qx], a[C.qy], a[C.qz], a[C.qw]], qb=[b[C.qx], b[C.qy], b[C.qz], b[C.qw]], r=qMul([-qa[0], -qa[1], -qa[2], qa[3]], qb);
     const sg=r[3]<0 ? -1 : 1, v=[sg*r[0], sg*r[1], sg*r[2]], n=Math.hypot(...v), th=2*Math.atan2(n, sg*r[3]), wc=n>1e-12 ? v.map(x=>x/n*th/dt) : [0, 0, 0];
     // je Zeilenintervall hz Werte mit derselben Rate (wie ein Gyro mit 60 Hz zwischen zwei Posen), jeder mit eigenem Rauschen
