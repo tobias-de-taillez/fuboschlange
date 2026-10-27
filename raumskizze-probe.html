@@ -7982,7 +7982,9 @@ const ML_DEF={H:null, quelle:'segmente', arbeit:{iter:3, lin:2, relin:20000, reg
   // kostenMin begrenzt (zwei fast perfekte Lagen gelten als mehrdeutig). kandidaten: verfeinerte Rasterminima neben der Kette.
   // ref 'kern': Kern und angenommene Abschnitte; 'verbunden': dazu alle verbundenen (nicht Kette). wieder: abgelehnte
   // Kettenabschnitte spaeterer Runden erneut, wenn die Referenz gewachsen ist (nach dem Einbinden, darum Vorgabe aus).
-  abReg:{an:true, minErf:4, gierDeg:15, versatz:1.5, rasterGierDeg:5, rasterVersatz:0.25, paar:0.4, nah:0.15, anteilNah:0.5, restFaktor:0.7,
+  // an false seit Doku 12.8 (27.10.): am Pruefstand mit A in der Referenz nahm Z13 nur falsche Lagen an (A6 128,7 / 131,7 s:
+  // 70 -> 206 und 40 -> 212 cm an den Waenden), Nutzen nirgends (A7, A8, B1600, B1714 gleich); einschalten mit abReg {an:true}
+  abReg:{an:false, minErf:4, gierDeg:15, versatz:1.5, rasterGierDeg:5, rasterVersatz:0.25, paar:0.4, nah:0.15, anteilNah:0.5, restFaktor:0.7,
     richtDeg:60, richtTol:10, minRicht:3, marge:1.5, margeLage:0.30, margeGierDeg:5, kostenMin:0.01, kandidaten:5, iter:15, schrittDeg:5, schrittM:0.25,
     ref:'kern', wieder:false, logMax:2000,
     // Gier-Raster (Doku 12.8): vor der Suche dreht M10 einen Kettenabschnitt, dessen Schnitt davor die Gier nur grob kennt

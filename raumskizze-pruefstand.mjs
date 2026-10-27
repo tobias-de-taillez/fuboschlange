@@ -83,12 +83,16 @@ export function gyroSim(A, o0={}){
 // Fenster: in ruhigen Abschnitten (Schnitte der unveraenderten Aufnahme wie M4 sie setzt) mit >= minErf Erfassungen
 // beiderseits im selben Abschnitt, rand s Abstand zu jedem Schnitt, Fenster mindestens abstand s auseinander, je w hoechstens n
 // (gleichmaessig ueber die Kandidaten verteilt). Rueckgabe [{t0, w, ab, nA, nB}].
+// o.spannen [{t0, t1}] (--nurRef): nur Fenster ganz in einer dieser Zeitspannen (je rand s Abstand), etwa die Abschnitte, die in der
+// Grundlinie Kern sind oder ueber eine Bindung an ihm haengen: dann gehoert A zur Referenz, und die Wahrheit B = A gilt auch fuer
+// Verfahren, die B auf die Referenz legen (Z13, Gier-Raster, Achsen, Bildkanten), nicht nur fuer solche, die B an A binden.
 export function fenster(G, A, o0={}){
   const o={...DEF, ...o0}, posen=T1.posenAus(G, A), S=G.sessionCuts(posen, A.breaks, A.events, {}, null), erf=T1.erfassungenAus(A, posen, 'app');
   const tC=S.map(c=>c.t), tE=posen.length ? [posen[0].t, posen[posen.length-1].t] : [0, 0], abE=erf.map(e=>G.sectionOf(S, e.t, e.ep)), out=[];
   for(const w of o.w){ const kand=[];
     for(let t0=tE[0]+o.rand; t0+w<=tE[1]-o.rand; t0+=0.5){
       if(tC.some(t=>t>t0-o.rand && t<t0+w+o.rand)) continue;
+      if(o.spannen && !o.spannen.some(sp=>t0-o.rand>=sp.t0 && t0+w+o.rand<=sp.t1)) continue;
       const i=posen.findIndex(p=>p.t>=t0); if(i<1) continue; const ab=G.sectionOf(S, posen[i-1].t, posen[i-1].ep);
       const nA=erf.filter((e,j)=>abE[j]===ab && e.t<t0).length, nB=erf.filter((e,j)=>abE[j]===ab && e.t>=t0+w).length;
       if(nA>=o.minErf && nB>=o.minErf) kand.push({t0:+t0.toFixed(2), w, ab, nA, nB}); }
@@ -124,6 +128,7 @@ export async function pruefeFenster(G, A, f, o0={}){
   const w90=a=>{ const v=Math.PI/2; let d=((a%v)+v)%v; return d>v/2 ? d-v : d; };
   const mK=kern!=null ? man(kern) : null, mA=man(abA), mB=man(abB);
   r.kern=kern; r.quelleA=sA ? sA.quelle : null; r.bindungArtB=KB ? KB.bindungArt || null : null; r.kanteN=KB && KB.kanteN || null;
+  r.aInRef=!!(sA && sA.stufe==='verbunden' && (sA.quelle==='kern' || sA.quelle==='bindung'));
   r.raumA=mK && mA ? w90(mA.phi-mK.phi)*R2D : null; r.raumB=mK && mB ? w90(mB.phi-mK.phi)*R2D : null;
   if(abA===abB) r.urteil='kein-schnitt';
   else if(!sA || !sB || !sA.g || !sB.g) r.urteil='ohne-lage';
@@ -151,12 +156,12 @@ export function tabelle(name, R){
   const L=[`## ${name}`, '', '| t0 | w | Lücke | Bewegung im Fenster | Klasse | Stufe B | Quelle B | Lage | an den Wänden | Höhe | Gier | Urteil |', '|---|---|---|---|---|---|---|---|---|---|---|---|'];
   for(const r of R) L.push(`| ${r.t0} | ${r.w} | ${r.luecke} | ${r.bewegung ? cm(r.bewegung.p)+' cm / '+g1(r.bewegung.psiDeg)+'°' : '–'} | ${r.klasse || '–'} | ${r.stufeB || '–'} | ${r.quelleB || '–'} | ${cm(r.dP)} cm | ${cm(r.dPWand)} cm | ${cm(r.dH)} cm | ${g1(r.dPsiDeg)}° | ${r.urteil}${r.fehler ? ' ('+r.fehler+')' : ''} |`);
   const z=zusammenfassung(R);
-  L.push('', `${z.n} Fenster: Treffer ${z.treffer} (≤ ${DEF.treffer.p*100} cm, ≤ ${DEF.treffer.psiDeg}°), mittel ${z.mittel}, falsch ${z.falsch} (> ${DEF.falsch.p*100} cm oder > ${DEF.falsch.psiDeg}°), lose ${z.lose}, sonst ${z.sonst}; Lage Median ${cm(z.dPmed)} / p90 ${cm(z.dPp90)} cm, an den Wänden ${cm(z.wandMed)} / ${cm(z.wandP90)} cm, Gier Median ${g1(z.dPsiMed)} / p90 ${g1(z.dPsiP90)}°; Bewegung im Fenster Median ${cm(z.bewegungMed)} cm`, '');
+  L.push('', `${z.n} Fenster (A in Referenz ${R.filter(r=>r.aInRef).length}): Treffer ${z.treffer} (≤ ${DEF.treffer.p*100} cm, ≤ ${DEF.treffer.psiDeg}°), mittel ${z.mittel}, falsch ${z.falsch} (> ${DEF.falsch.p*100} cm oder > ${DEF.falsch.psiDeg}°), lose ${z.lose}, sonst ${z.sonst}; Lage Median ${cm(z.dPmed)} / p90 ${cm(z.dPp90)} cm, an den Wänden ${cm(z.wandMed)} / ${cm(z.wandP90)} cm, Gier Median ${g1(z.dPsiMed)} / p90 ${g1(z.dPsiP90)}°; Bewegung im Fenster Median ${cm(z.bewegungMed)} cm`, '');
   return L.join('\n');
 }
 
 function argumente(argv){ const a={aufnahme:[]};
-  for(let i=0;i<argv.length;i++){ const k=argv[i]; if(!k.startsWith('--')) continue; const [n, v0]=k.slice(2).split('='), v=v0 ?? argv[++i];
+  for(let i=0;i<argv.length;i++){ const k=argv[i]; if(!k.startsWith('--')) continue; if(k==='--nurRef'){ a.nurRef=true; continue; } const [n, v0]=k.slice(2).split('='), v=v0 ?? argv[++i];
     if(n==='aufnahme') a.aufnahme.push(v); else a[n]=v; }
   return a; }
 async function main(){
@@ -169,7 +174,11 @@ async function main(){
   const aus=resolve(a.aus || 'pruefstand'); mkdirSync(aus, {recursive:true});
   const {G}=await T1.ladeSeite({}), L=[`# Prüfstand simulierter Bruch (v${VERSION})`, '', `T1: ${o.t1.join(' ')} · X ${o.X.psiDeg}°, (${o.X.tx}, ${o.X.tz}) m · w ${o.w.join(', ')} s`, ''], alle={};
   for(const s of a.aufnahme){ const [name, rest]=s.split('='), [tar, prot]=rest.split(',');
-    const A0=T1.ladeQuelle(resolve(tar), {protokoll:prot ? resolve(prot) : null}), A=a.gyro==='sim' ? gyroSim(A0) : A0, F=fenster(G, A, o), R=[];
+    const A0=T1.ladeQuelle(resolve(tar), {protokoll:prot ? resolve(prot) : null}), A=a.gyro==='sim' ? gyroSim(A0) : A0;
+    // --nurRef: Referenz-Abschnitte aus einem Lauf der Grundlinie (gleiche Fenster fuer alle Verfahren)
+    let spannen=null; if(a.nurRef){ const oB=T1.optionenAus(T1.argumente(['x', ...DEF.t1])); if(Number.isFinite(o.H)) oB.H=o.H;
+      const LB=await T1.laufen(G, A, oB); spannen=LB.letzte.stand.abschnitte.filter(s=>s.stufe==='verbunden' && (s.quelle==='kern' || s.quelle==='bindung')).map(s=>({t0:s.t0, t1:s.t1, ab:s.ab})); }
+    const F=fenster(G, A, {...o, spannen}), R=[];
     // %a im T1-Text = Name der Aufnahme klein (z. B. --bildkanten kanten/%a.json)
     const oA={...o, t1:o.t1.map(x=>x.replace(/%a/g, name.toLowerCase()))};
     for(const f of F){ let r; try{ r=await pruefeFenster(G, A, f, oA); }catch(e){ r={...f, urteil:'fehler', fehler:String(e.message || e).slice(0, 120)}; }

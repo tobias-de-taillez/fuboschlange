@@ -908,9 +908,21 @@ Reparatur in drei Runden: Erfassungsweg in M5, Höhe an Laser-H und Boden gebund
 
     Z13 nimmt dort nie an, Z13 aus ist gleich heute.
   - **Heute** hängt jeder Abschnitt nach einem harten Bruch nur an der Kette (Kamera stetig). Der Fehler ist die Bewegung in der Lücke (Median 20–34 cm, Gier 15–20°). Über den Hebel werden daraus 0,7–1,7 m an den Wänden.
-  - **Gier-Raster** (Abschnitt auf die Raumrichtung des Kerns drehen): Die Raumrichtung stimmt danach fast überall auf ±0°. Bei Drehungen über 45° in der Lücke wählt es aber die falsche Vierteldrehung, deshalb das große p90.
+  - **Gier-Raster** (Abschnitt auf die Raumrichtung des Kerns drehen): Die Raumrichtung stimmt danach fast überall auf ±0°. Bei Drehungen über 45° in der Lücke wählt es aber die falsche Vierteldrehung, deshalb das große p90. Auch sauber gemessen versagt es in B1714 (37 → 180 cm), vermutlich ist der Raum dort nicht rechtwinklig. Ohne Gyro bleibt es deshalb aus.
   - **Bildkanten:** Gebunden werden 12 von 50 Fenstern, die meisten auf 2–12 cm und unter 4°. Das wirkt nur, wenn M6 den Plan des gebundenen Abschnitts festhält (`A.fest`), denn M6 kennt die Kante nicht und schob den Abschnitt sonst um Meter weg. Die Fenster sind zu kurz, die Bildpaare darüber also optimistisch. An den echten Pausen von A6–A8 gibt es kaum Kanten, und die echten Karten ändern sich nicht.
-  - **Z13 (Nachregistrierung über Erfassungen):** Auf dem Prüfstand waren die angenommenen Lagen fast immer falsch (A6 123,7 s: 6 cm Bewegung → 128 cm; A8 101,7 s: 1 → 31 cm). Auf den echten Aufnahmen ändert Z13 aus fast nichts, die Gesamtmetrik bleibt mehrdeutig; darum bleibt die Vorgabe. Mit Gyro lässt Z13 die vom Gyro gebundenen Abschnitte jetzt aus (`abReg.mitGyro`).
+  - **Vorbehalt, Verzerrung des Prüfstands:** Er misst B gegen A. Verfahren, die B an A binden (Kette, Gyro-Brücke, Vorhersage), misst er unverzerrt. Verfahren, die B auf die Referenz legen (Z13, Gier-Raster, Achsen-Registrierung, Bildkanten zu anderen Partnern als A), bestraft er dagegen, wenn A selbst nur über die Kette hängt und gegen den Kern verschoben ist. Bei 8 von 10 Z13-Annahmen war A ein Kettenabschnitt. Darum der saubere Lauf `--nurRef`: Fenster nur in Abschnitten, die in der Grundlinie Kern sind oder über eine Bindung an ihm hängen (A gehört zur Referenz, Feld `aInRef`).
+  - **Saubere Fenster** (`--nurRef`; A6 11, A7 2, A8 6, B1600 10, B1714 17), an den Wänden Median in cm:
+
+| Variante | A6 | A7 | A8 | B1600 | B1714 |
+|---|---|---|---|---|---|
+| heute | 152 | 105 | 57 | 17 | 37 |
+| Z13 aus | 71 | 105 | 57 | 17 | 37 |
+| Gier-Raster | 102 | 87 | 50 | 6 | **180** |
+| Bildkanten | 152 | 105 | 94 | – | – |
+| Gyro + Vorhersage | 17 | 28 | 21 | 3 | 20 |
+| dazu Achsen-Registrierung | 17 | 28 | 21 | **11** | 20 |
+
+  - **Z13 (Nachregistrierung über Erfassungen):** Auch mit A in der Referenz nimmt Z13 falsche Lagen an. In A6 128,7 s steigt der Fehler an den Wänden von 70 auf 206 cm, in 131,7 s von 40 auf 212 cm; bei 137,7 s reißt ein anderer Z13-Schritt B von 6 auf 198 cm. Einen Nutzen zeigt es nirgends. **Z13 ist darum seit Stand 10 per Vorgabe aus** (`ML_DEF.abReg.an:false`, live und T1 gleich; wieder an mit `abReg:{an:true}`). Auf den echten Aufnahmen ist der Effekt nicht entscheidbar (A6 IoU 0,55 → 0,21 bei mehrdeutiger Passung 1,00–1,06, A7/A8 gleich). Mit Gyro lässt Z13, falls an, die vom Gyro gebundenen Abschnitte aus (`abReg.mitGyro`).
   - **Gyro-Brücke:** Die Drehung in der Lücke kommt aus dem Gyro statt aus „Blick stetig“. `sY` = 1° + 0,5°/s · dt, für Pausen- und reloc-Schnitte, summiert über die ganze Schnittspanne. Sie ist der größte gemessene Hebel. Die gedämpfte Vorhersage (Kamera mit v · τ · (1 − e^−dt/τ), τ = 1 s, weiter) senkt zusätzlich das p90. Als Rest bleibt die Verschiebung in der Lücke.
   - **Achsen-Registrierung (`abReg.achsen`, versucht):** Mit bekannter Gier je Raumachse einen 1-D-Versatz gegen die Wandlinien der Referenz suchen (Vorschlag des Geometrie-Teils). Das trägt nicht. In A6/A8 überlappen die Erfassungen von B fast nie mit der Referenz (0 bzw. 1 von 13/17 angenommen). In B1600 nimmt sie bei nur 4 Referenzlinien eindeutige, aber falsche Versätze an (−26 cm bei 11 cm echter Bewegung); der Median steigt dort von 3,3 auf 10,9 cm. Sie bleibt aus.
   - **Echter Gyro: unbelegt.** Keine Aufnahme hat bisher `imu.jsonl`. Ob Chrome während immersive-ar Gyroscope bzw. devicemotion liefert und ob die Zeitbasis passt, muss die nächste Aufnahme zeigen. T1 schätzt die Achsen-Zuordnung (24 Drehungen) gegen ARCore über verfolgte Nachbarzeilen (Prüfstand: Rest 0,02°).
