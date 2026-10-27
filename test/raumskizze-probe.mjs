@@ -1262,7 +1262,9 @@ const geraetBau=()=>{
       boden.lastChangedTime=1000*3*Math.floor(s/3); wandE.lastChangedTime=1000*2*Math.floor(s/2);
       while(o.klicks && klicks<o.klicks.length && s>=o.klicks[klicks][0]){ const e=doc.getElementById(o.klicks[klicks++][1]); if(e.onclick) e.onclick(); }
       // o.gyroAb (s): Gyroscope liefert erst ab dann Werte (Seite ohne Fokus nach einem Berechtigungsdialog, Tippen holt ihn zurueck)
-      if(o.gyro && gyroObj && !(o.gyroAb!=null && s<o.gyroAb)) for(const dt of [0, dtF/2]){ Object.assign(gyroObj, {x:0.01, y:0.02, z:0.03, timestamp:tI+dt}); if(gyroObj.h.reading) gyroObj.h.reading(); }
+      // o.gyroFehler: der Gyroscope meldet nach 1 s 'error' (Bewegungssensoren in Chrome blockiert)
+      if(o.gyroFehler && gyroObj && s>=1 && !gyroObj.fehlerGesendet){ gyroObj.fehlerGesendet=true; if(gyroObj.h.error) gyroObj.h.error({error:{name:'NotAllowedError', message:'Permission denied'}}); }
+      if(o.gyro && gyroObj && !o.gyroFehler && !(o.gyroAb!=null && s<o.gyroAb)) for(const dt of [0, dtF/2]){ Object.assign(gyroObj, {x:0.01, y:0.02, z:0.03, timestamp:tI+dt}); if(gyroObj.h.reading) gyroObj.h.reading(); }
       if(o.imu && stat.hoerer.devicemotion) for(const f of stat.hoerer.devicemotion) for(const dt of [0, dtF/2]) f({timeStamp:tI+dt, interval:16, rotationRate:{alpha:1, beta:2, gamma:3}, accelerationIncludingGravity:{x:0, y:9.81, z:0}});
       const k=kamera(s), verloren=s>=SZ.verlust[0] && s<SZ.verlust[1], emul=s>=SZ.emuliert[0] && s<SZ.emuliert[1];
       bildJetzt=()=>{ let b=cache.get(i); if(!b){ b=bildRaum(k.Cr, 7000+i, o.rausch ?? 2); cache.set(i, b); } return b; };
@@ -1309,6 +1311,7 @@ if(alt){
   // ri - karte=1&imu=1 (Doku 12.8): Sensoren wie im Messmodus, ohne Mess-Worker; rs - ohne Fokus, Gyro erst ab 5 s (IMU-Wache)
   const ri=await geraet(probe, {...kurz, query:'karte=1&imu=1', imu:true, gyro:true});
   const rs=await geraet(probe, {...kurz, query:'karte=1&imu=1', imu:true, gyro:true, ohneFokus:true, gyroAb:5});
+  const rx=await geraet(probe, {...kurz, query:'karte=1&imu=1', imu:true, gyro:true, gyroFehler:true});
   const kf1=await geraet(probe, {...kurz, karte:'wirftAussen'}), kf2=await geraet(probe, {...kurz, karte:'schweigt'}), kf3=await geraet(probe, {...kurz, karte:'wirftInnen'});
   // Nachbesserung: rz - Video und Tiefe kosten Zeit (die Uhr laeuft in encode und getDepthInformation weiter, wie am
   // Pixel); rg - die Seite ist schon 50 s offen, die Sitzung laeuft ueber die Minutengrenze (zwei volle Lesungen),
@@ -1526,6 +1529,9 @@ if(alt){
         st && st.fokus===false && steht.length===1 && steht[0].seit>1.5 && hin.length===1 && weiter.length===1 && weiter[0].t>steht[0].t
         && !ri.P.LOG.events.some(e=>e.type==='imu-steht') && ri.P.LOG.events.find(e=>e.type==='imu-start').fokus===true,
         `steht nach ${steht[0] ? steht[0].seit : '–'} s, weiter nach Luecke ${weiter[0] ? weiter[0].luecke : '–'} s`); }
+    { const E=rx.P.LOG.events, fe=E.filter(e=>e.type==='imu-fehler'), hin=E.filter(e=>e.type==='hinweis' && /Gyro gesperrt/.test(e.text||''));
+      chk('karte=1&imu=1 mit Gyroscope-Fehler: einmal imu-fehler und der Hinweis auf die Website-Einstellung, kein Tipp-Hinweis', fe.length===1 && /NotAllowedError/.test(fe[0].msg) && hin.length===1
+        && !E.some(e=>e.type==='imu-steht') && !E.some(e=>e.type==='hinweis' && /aufs Kamerabild tippen/.test(e.text||'')), fe[0] ? fe[0].msg : '–'); }
     // gleiche Dauer und Klicks wie rf2 nicht (andere Bild-Attrappe), darum nur: Sitzung meldet den Schalter, es gibt Erfassungen
     chk('karte=1&imu=1: LOG.session.imu gesetzt (karte=1 allein false), Erfassungen da', ri.P.LOG.obs.length>0 && ri.P.LOG.session.imu===true && rk.P.LOG.session.imu===false, `${ri.P.LOG.obs.length} Erfassungen`); }
   chk('mess=1: Manifest v2 mit mess true, imu.jsonl und messung.jsonl; kein Bild-Worker', Mm && Mm.mess===true && Mm.dateien.includes('imu.jsonl') && Mm.dateien.includes('messung.jsonl') && !rm.stat.worker.includes('bild'));

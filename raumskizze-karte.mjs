@@ -202,7 +202,9 @@ export function posenAus(G, A){
     if(C.an!=null && Array.isArray(r[C.an])) z.an=r[C.an];
     return z; });
   // ohne Spalte imuPsi: aus imu.jsonl (Gyro, Stand 6 ?mess=1 / Stand 8 ?imu=1), je Aufnahme einmal (A._imuGier)
-  if(C.imuPsi==null && A.imu && A.imu.length){ const I=A._imuGier!==undefined ? A._imuGier : (A._imuGier=imuGier(A, P));
+  // A.imuOpt (laufen aus --imu-luecke) gehoert zum Cache: andere Optionen rechnen neu
+  const iK=JSON.stringify(A.imuOpt || {});
+  if(C.imuPsi==null && A.imu && A.imu.length){ const I=A._imuGier!==undefined && A._imuGierK===iK ? A._imuGier : (A._imuGierK=iK, A._imuGier=imuGier(A, P, A.imuOpt || {}));
     if(I) for(let i=0;i<P.length;i++) if(Number.isFinite(I.psi[i])) P[i].imuPsi=I.psi[i]; }
   return P;
 }
@@ -251,9 +253,10 @@ export function imuGier(A, posen, o={}){
   let dBest=0, eBest=best.med; for(let j=-25;j<=25;j++){ const d=j/100, e=fehler(ZUORDNUNGEN[best.z], d); if(e && e.med<eBest-1e-12){ eBest=e.med; dBest=d; } }
   if(dBest!==0){ const b2=wahl(dBest); if(b2) best=b2; }
   const M=ZUORDNUNGEN[best.z], psi=new Float64Array(posen.length).fill(NaN); for(let i=1;i<posen.length;i++) psi[i]=zeile(M, i, dBest);
-  const dauer=T0[T0.length-1]-T0[0]; let luecken=0, groesste=0; for(let k=1;k<T0.length;k++){ const g=T0[k]-T0[k-1]; if(g>hMax) luecken++; if(g>groesste) groesste=g; }
+  const dauer=T0[T0.length-1]-T0[0]; let luecken=0, groesste=0; const verteilung=[0, 0, 0];   // Luecken 50-100, 100-250, > 250 ms
+  for(let k=1;k<T0.length;k++){ const g=T0[k]-T0[k-1]; if(g>hMax) luecken++; if(g>groesste) groesste=g; if(g>0.05) verteilung[g<=0.1 ? 0 : g<=0.25 ? 1 : 2]++; }
   return {psi, quelle, zuordnung:M, rest:best.med, restP90:best.p90, n:best.n, versatz:dBest, rate:dauer>0 ? (T0.length-1)/dauer : null, abtast:T0.length,
-    luecken, groessteLuecke:groesste, maxLuecke:hMax, ohnePsi:psi.reduce((n,v,i)=>n+(i>0 && !Number.isFinite(v) ? 1 : 0), 0)};
+    luecken, groessteLuecke:groesste, verteilung, maxLuecke:hMax, ohnePsi:psi.reduce((n,v,i)=>n+(i>0 && !Number.isFinite(v) ? 1 : 0), 0)};
 }
 // Aufnahme laden: Manifest, Zustand, Protokoll (Durchlauf), Anker, Tiefe, Ebenen, IMU, Messung, karte.jsonl, segmente.bin, Video.
 export function ladeAufnahme(src, o={}){
@@ -450,6 +453,7 @@ export function kantenLaden(b){ const J=JSON.parse(readFileSync(b.datei, 'utf8')
 // Ein ganzer Lauf. Rueckgabe {KZ, runden: [{stand, kopf}], letzter, export, teilen, hinweise, alt, info}.
 export async function laufen(G, A, o0={}){
   const o={...DEF, ...o0, arbeit:{...DEF.arbeit, ...(o0.arbeit||{})}}, info={warnungen:[...(A.warnungen||[])], bilder:0, bildFehlt:0, weg:{bild:0, erf:0}, ereignisse:0, tiefe:0, ebenen:0};
+  if(o.imuLuecke!=null) A.imuOpt={...(A.imuOpt||{}), maxLuecke:o.imuLuecke};
   const posen=A.art==='sitzung' ? A.posen.map(p=>({...p})) : posenAus(G, A);
   let erf=erfassungenAus(A, posen, o.erfassungen, G);
   // --sichtfeld < 1 (12.7 (d)): kam ist das beschnittene Bild (w', proj'), sonst genau A. Die Tiefe faellt dann weg: ihre
@@ -585,7 +589,9 @@ export function bericht(lauf, m, alt, herkunft, quellen, pruef={}){
   // IMU (Doku 12.8): Gyro aus imu.jsonl (imuGier) und die Schnitte, an denen die Gyro-Bruecke band
   const IG=lauf.A && lauf.A._imuGier, gr=x=>(x*180/Math.PI).toFixed(2);
   if(IG){ const gS=(lauf.KZ.schnitte||[]).filter(c=>c.bindung && c.bindung.gyro);
-    L.push(`IMU (${IG.quelle}): ${IG.abtast} Werte, ${IG.rate ? IG.rate.toFixed(0) : '–'} Hz, Lücken > ${(1000*IG.maxLuecke).toFixed(0)} ms: ${IG.luecken} (größte ${(1000*IG.groessteLuecke).toFixed(0)} ms), Zeilen ohne imuPsi ${IG.ohnePsi}, Zuordnung ${JSON.stringify(IG.zuordnung)}, Zeitversatz ${(1000*IG.versatz).toFixed(0)} ms, Rest gegen ARCore je Zeile Median ${gr(IG.rest)}° / p90 ${gr(IG.restP90)}° (${IG.n} Zeilen)`
+    // an echten Pausen- und reloc-Schnitten: hat die erste Zeile danach ein imuPsi (sonst greift die Bruecke dort nie)?
+    const pr=(lauf.KZ.schnitte||[]).filter(c=>c.klasse==='pause' || c.klasse==='reloc'), mitPsi=pr.filter(c=>{ const z=lauf.posen.find(p=>p.t===c.t && p.ep===c.epB); return z && Number.isFinite(z.imuPsi); });
+    L.push(`IMU (${IG.quelle}): ${IG.abtast} Werte, ${IG.rate ? IG.rate.toFixed(0) : '–'} Hz, Lücken > ${(1000*IG.maxLuecke).toFixed(0)} ms: ${IG.luecken} (größte ${(1000*IG.groessteLuecke).toFixed(0)} ms; 50–100/100–250/>250 ms: ${IG.verteilung.join('/')}), Zeilen ohne imuPsi ${IG.ohnePsi}, Pausen-/reloc-Schnitte mit imuPsi ${mitPsi.length}/${pr.length}, Zuordnung ${JSON.stringify(IG.zuordnung)}, Zeitversatz ${(1000*IG.versatz).toFixed(0)} ms, Rest gegen ARCore je Zeile Median ${gr(IG.rest)}° / p90 ${gr(IG.restP90)}° (${IG.n} Zeilen)`
       +(gS.length ? ` · Gyro-Bruecke an ${gS.length} Schnitten: `+gS.map(c=>`${c.t.toFixed(2)} ${c.klasse} dt ${c.dt.toFixed(2)} Δψ ${gr(c.bindung.dPsi)}°`).join(', ') : '')); }
   else if(lauf.A && lauf.A.imu && lauf.A.imu.length) L.push(`IMU: ${lauf.A.imu.length} Zeilen, aber ohne verwertbaren Gyro (imuGier null)`);
   const SF=lauf.info.sichtfeld;
@@ -651,7 +657,9 @@ export function optionenAus(a){
     // --karte '{"abReg":{"gierRaster":true}}': Optionen fuer G.karteNeu (M10), z. B. fuer den Pruefstand
     ...(a.karte!=null && a.karte!==true ? {karte:JSON.parse(String(a.karte))} : {}),
     // --bildkanten kanten.json [--bildkanten-min 2] [--bildkanten-sift]: Relativlagen aus der Bild-Wiedererkennung (12.8) an M10 opt.kanten
-    ...(a.bildkanten && a.bildkanten!==true ? {bildkanten:{datei:String(a.bildkanten), min:a['bildkanten-min'] ? +a['bildkanten-min'] : 2, sift:!!a['bildkanten-sift']}} : {})};
+    ...(a.bildkanten && a.bildkanten!==true ? {bildkanten:{datei:String(a.bildkanten), min:a['bildkanten-min'] ? +a['bildkanten-min'] : 2, sift:!!a['bildkanten-sift']}} : {}),
+    // --imu-luecke 0.05: so lange (s) traegt ein Gyro-Wert vor sich (imuGier maxLuecke); laenger heisst kein imuPsi
+    ...(a['imu-luecke']!=null && a['imu-luecke']!==true ? {imuLuecke:+a['imu-luecke']} : {})};
 }
 // Orakel (5.1): --orakel-rahmen setzt g je Abschnitt aus der Wahrheit (Sitzung: wahr.g zur Bildzeit) und legt
 // F0 in den Rahmen der Wahrheit; --orakel-landmarken setzt zusaetzlich die Wahrheitswaende als feste Landmarken.

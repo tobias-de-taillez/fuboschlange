@@ -21,6 +21,11 @@ HARG=(); [ -n "$H" ] && HARG=(--H "$H")
 K='--quelle erfassungen --ohne tiefe,ebenen'
 GY='{"schnitt":{"gyroBruecke":true,"vorhersage":"gedaempft"}}'
 
+# Chrome-Version aus dem Protokoll: bis M156 kostet ein Berechtigungsdialog beim Sitzungsstart den Fokus, dann steht der Gyro (Doku 12.8)
+"$NODE" -e 'const P=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")), R=P.runs && P.runs.length ? {...P, ...P.runs[P.runs.length-1]} : P, b=(P.caps && P.caps.Browser) || P.ua || "?", m=/Chrome (\d+)/.exec(b);
+  console.log("== Geraet: "+b+(m && +m[1]<157 ? " - vor M157: Berechtigungsdialog beim Start nimmt den Fokus, Gyro steht bis zum Tippen" : ""));
+  const E=(R.events||[]).filter(e=>/^imu-|^fokus$/.test(e.type)); if(E.length) console.log("   IMU-Ereignisse: "+E.map(e=>e.type+"@"+e.t+(e.fokus!=null ? " fokus "+e.fokus : "")+(e.seit!=null ? " seit "+e.seit : "")+(e.luecke!=null ? " luecke "+e.luecke : "")).join(", "));' "$PROT" || true
+
 echo "== 1. T1 mit Gyro-Bruecke (Bericht: $AUS/t1-gyro/bericht.txt) und ohne (t1-basis)"
 "$NODE" raumskizze-karte.mjs "$TAR" --protokoll "$PROT" ${HARG[@]+"${HARG[@]}"} --quelle erfassungen --ohne tiefe,ebenen --karte "$GY" --aus "$AUS/t1-gyro" > "$AUS/t1-gyro.txt" 2>&1 || true
 "$NODE" raumskizze-karte.mjs "$TAR" --protokoll "$PROT" ${HARG[@]+"${HARG[@]}"} --quelle erfassungen --ohne tiefe,ebenen --aus "$AUS/t1-basis" > "$AUS/t1-basis.txt" 2>&1 || true

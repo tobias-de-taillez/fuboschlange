@@ -9693,7 +9693,7 @@ const imuSicht=()=>ev('sichtbar', {zustand:document.visibilityState});
 function imuStart(){
   addEventListener('devicemotion', onImu);
   addEventListener('focus', imuFokus); addEventListener('blur', imuFokus); if(document.addEventListener) document.addEventListener('visibilitychange', imuSicht);
-  Object.assign(IMU_G, {start:now(), letzt:null, steht:false});
+  Object.assign(IMU_G, {start:now(), letzt:null, steht:false, fehlerGemeldet:false});
   ev('imu-start', {fokus:document.hasFocus ? document.hasFocus() : null, sichtbar:document.visibilityState, gyroscope:typeof Gyroscope==='function'});
   if(typeof Gyroscope==='function'){
     try{ const g=new Gyroscope({frequency:60});
@@ -9714,7 +9714,11 @@ function imuStopp(){
 }
 // je Bild: steht der Gyro (kein Wert seit IMU_STEHT s), einmal Ereignis und Hinweis; ein neuer Wert hebt es auf (imu-weiter)
 function imuWache(){
-  if(!IMU_G.g || IMU_G.start==null || IMU_G.steht) return;
+  if(IMU_G.start==null) return;
+  // Gyroscope gesperrt oder kaputt ('error' bzw. Ausnahme beim Anlegen): Tippen hilft nicht, die Website-Einstellung schon
+  const f=LOG.mess.gyroFehler; if(f && f!=='Gyroscope fehlt' && !IMU_G.fehlerGemeldet){ IMU_G.fehlerGemeldet=true; ev('imu-fehler', {msg:f});
+    hint(`Gyro gesperrt (${f}) – in Chrome unter Website-Einstellungen „Bewegungssensoren“ erlauben, dann neu starten.`, 'warn'); return; }
+  if(!IMU_G.g || IMU_G.steht || f) return;
   const t=now(), seit=t-(IMU_G.letzt ?? IMU_G.start); if(seit<=IMU_STEHT) return;
   IMU_G.steht=true; ev('imu-steht', {seit:+seit.toFixed(2), fokus:document.hasFocus ? document.hasFocus() : null, sichtbar:document.visibilityState});
   hint('Gyro liefert keine Werte – bitte einmal kurz aufs Kamerabild tippen (nicht auf einen Knopf).', 'warn');
