@@ -48,6 +48,9 @@ chk('(b) fenster: je w hoechstens n, im Abstand, weg von den Raendern', F.length
 const Ab=PS.bruchSimulieren(G, A, 10, 1.3, X), Fb=PS.fenster(G, Ab, {w:[1.3], n:50, abstand:0.5, rand:2, minErf:1});
 chk('(b) fenster meidet Schnitte (rand)', Fb.length>0 && Fb.every(f=>f.t0+f.w<=Ab.sim.tB-2 || f.t0>=Ab.sim.tB+2), `${Fb.length} Fenster`);
 
+const Fs=PS.fenster(G, A, {w:[1.3], n:50, abstand:0.5, rand:2, minErf:1, spannen:[{t0:10, t1:20}, {t0:30, t1:34}]});
+chk('(b) fenster mit spannen (--nurRef): nur Fenster ganz in einer Spanne (mit rand)', Fs.length>0 && Fs.every(f=>(f.t0-2>=10 && f.t0+f.w+2<=20) || (f.t0-2>=30 && f.t0+f.w+2<=34)), `${Fs.length} Fenster`);
+
 // ---- (c) T1 --karte
 const oK=T1.optionenAus(T1.argumente(['x', '--karte', '{"abReg":{"gierRaster":true}}']));
 chk('(c) T1 --karte: JSON an G.karteNeu, abReg.gierRaster vorgegeben aus', oK.karte && oK.karte.abReg.gierRaster===true && !('karte' in T1.optionenAus(T1.argumente(['x'])))
