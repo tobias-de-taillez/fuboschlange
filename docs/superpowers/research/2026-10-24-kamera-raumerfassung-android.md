@@ -818,6 +818,7 @@ Reparatur in drei Runden: Erfassungsweg in M5, Höhe an Laser-H und Boden gebund
 - Inseln: 0 von 2 in allen Läufen; falsche Inseln 0. Kein falscher Export mehr (Tor).
 - Erfolgskriterium (besser als die alte Pipeline auf 2 von 3, kein falscher Export) verfehlt. Die Gegenprüfung hat alle Zahlen reproduziert.
 - Hauptrestproblem: die Lage der Abschnitte zueinander. Mit Lage und Höhe je Abschnitt aus der Wahrheit (Orakel) läge der Median bei 2,3 cm (A6) bzw. 5,8 cm (A7). Die Kanten selbst sind also gut; es fehlt die Verbindung der Abschnitte nach ARCore-Brüchen. Die Abschnitte teilen in diesen Aufnahmen kaum Wände (0–8 %), darum ist die Verbindung über Wände kaum beobachtbar.
+  - **Korrektur (12.8):** Die 2,3 / 5,8 cm sind keine Eckenfehler. Gemessen ist der Median der Erfassungen zur nächsten Wahrheitswand, nachdem Lage *und* Höhe je Abschnitt an genau diese Erfassungen gepasst wurden (E3, Selbstpassung, eine Untergrenze). Richtige Abschnittslagen belegt er nicht. Auch die 33,1 / 47,5 cm der Tabelle sind Erfassungs-Mediane einer mehrdeutigen Passung (1,00–1,11). Das Orakel je Abschnitt taugt nicht als Wahrheit für die Relativlage zweier Abschnitte, siehe 12.8.
 - Modultests: alle 11 grün (der Segmente-Test vergleicht jetzt gegen F1 ohne Verschmelzen).
 
 **12.6 Stand 7 (26.10.): Karten-Worker live, als Messstand.** Die Abnahme M4–M6 offline (Vorbedingung in ARCHITEKTUR 9.3) steht aus, siehe 12.5. Stand 7 geht trotzdem live, weil alles hinter `?karte=1` liegt: Ohne Schalter verhält sich die Seite wie Stand 6, das prüft der Selbsttest. Zweck ist die Messung am Gerät (9.6: Rundenzeit, Antwortzeit und `drawKarte` am Pixel), nicht die Genauigkeit. Das Ergebnis und der Export kommen weiter aus der alten Pipeline.
@@ -865,6 +866,63 @@ Reparatur in drei Runden: Erfassungsweg in M5, Höhe an Laser-H und Boden gebund
   - Nebenbefund: Mit der Quelle segmente allein bilden A6 und A8 keinen Kern (alle Abschnitte lokal), A7 schon.
   - **Folgerung:** Ein weiteres Sichtfeld (43–55° unbeschnitten, ~112° Ultraweitwinkel) ist nach dieser Messung nicht der Hebel für die Verbindung der Abschnitte; die Extrapolation nach oben bleibt unsicher. Der Hebel liegt bei der Verbindung selbst (12.5). Tabelle: Scratchpad `ablation/ablation.md`, nicht im Repo.
 - **Nur messbar:** Kamera-IDs, Ströme und Texturgröße (`dumpsys media.camera` per USB), getUserMedia neben immersive-ar (Testseite: enumerateDevices, Capabilities, AR zuerst bzw. getUserMedia zuerst) und das Querformat. Nativ, als möglicher Companion: Ultraweitwinkel als Physical-Stream der logischen Kamera mit `setPhysicalCameraId` und Sensor-Sync. Neben ARCore lief das nur in einem Nutzerbericht, mit Verzögerungs-Workaround (ARCore-Issue #1664).
+
+**12.8 Abschnitte nach ARCore-Brüchen verbinden (Nacht 26./27.10.).** Auftrag: das Hauptproblem aus 12.5 verbessern. Erst gemessen, welche Quelle die Abschnitte verbinden kann (Workflow mit fünf Teilen, je eine Gegenprüfung), dann ein Prüfstand ohne Orakel, dann gebaut und am Prüfstand gemessen. Alles Neue steht hinter Schaltern; die Vorgaben sind unverändert.
+
+- **Das Orakel taugt nicht als Maßstab** (alle fünf Teile, unabhängig):
+  - Von 19 Orakel-Abschnitten (≥ 12 Erfassungen) sind 17 mehrdeutig (Verhältnis < 1,2); im Bootstrap springen 16 von 19 um 90° oder 180°.
+  - Die zeitlichen Hälften desselben Abschnitts (Wahrheit: Einheit) liegen in 6 von 7 Abschnitten 88–179° auseinander.
+  - An exakten nurT-Schnitten (Kette 1–3 cm) weicht die Orakel-Relativlage um 85–93° oder 3–21 m ab.
+  - Zu 12.5 siehe die Korrektur dort. Ursachen: rechtwinkliger Raum (Drehungen um 90° passen fast gleich gut), kurze Abschnitte, Höhe je Abschnitt.
+  - **Fehler behoben:** T1 `orakelAus` ließ unter `--spiegel ja` den Spiegel `T.m` fallen (Relativ-Gier um 2(r_a − r_b) falsch). Es passt jetzt ohne Spiegel gegen die gespiegelt geladene Wahrheit (A6 `--orakel-rahmen --spiegel ja`: 151,4 → 13,2 cm); `out.verh` meldet die Mehrdeutigkeit je Abschnitt.
+- **Was die Quellen hergeben** (Messung mit Gegenprüfung; Skripte im Scratchpad unter `verbinden/`):
+  - *Ortungslücken:* A6 1,29/0,47/5,68/0,02/0,67 s, A7 1,3/2,86/7,76 s, A8 1,1/0,38/4,2/5,77 s; 7 von 12 dauern höchstens 1,3 s. Die Pause-Bindung heute: sP = 0,03 + 0,7·dt, sY = (1 + 45·dt)°.
+  - *ARCore-Anker:* tragen über harte Brüche nicht. 13 von 15 harten Schnitten bleiben unverbunden; nur in A8 kamen nach kurzen Verlusten (< 5 s) Anker bitgleich zurück (42,05 s, 114,39 s). Pausierte Anker bleiben sonst bis zum Ende PAUSED, ein Ereignis `relokalisiert` gibt es nie. An weichen Schnitten liegen sie im Median 5 cm neben der Kette und streuen untereinander um 9 cm.
+  - *ARCore-Ebenen:* A6–A8 haben keine `ebenen.jsonl`. In B1600/B1714 (ein anderer Raum, H ≈ 2,97 m) überleben die ids weiche Schnitte (52 von 54), Pausen nur 4 von 16. Senkrechte Ebenen liegen oft auf Möbelfronten (±45 cm). Sie taugen als Signal für die Art eines Bruchs, nicht als Versatz.
+  - *Bild-Wiedererkennung (ORB/SIFT, offline mit OpenCV):* Mit Schwerkraftprobe (Neigung aus E < 2°) und PnP auf triangulierten Punkten je Bildpaar Gier 0,1–1,3°, Lage 2–8 cm (Median, Paare im selben Abschnitt). Nur 15–24 % der Abschnittspaare haben ein Bildpaar. ORB kostet am Mac 3–4 ms je Bild; live im Worker geschätzt 0,3–0,8 s je Schlüsselbild.
+  - *Wandgeometrie:* Die Wahrheit ist streng rechtwinklig (99,1 % der Wandlänge innerhalb 2°). Die Raumrichtung liefert die Gier mod 90° je Abschnitt auf 0,1–4°. 14–15 von 31 aufeinanderfolgenden Paaren teilen genau eine Wandlinie (eine Achse). Ein Puzzle ohne Kette scheitert an wiederholter Geometrie (Doppellinien im Abstand von 17–40 cm). M4 verlangt `minSeg` ≥ 20, erreicht wurden höchstens 16.
+  - *Höhe (Gegenprüfung von „9–68 % zu groß“):* gilt nur teilweise. A6 13/14 liegt bei 2,21–2,23 m, bestätigt durch die ARCore-Deckenebene. In A6 3/6 widerspricht die Ebene (2,40 m). In A7 liegt die Decke unter dem Glasdach und an den Stürzen zum Wintergarten tiefer. Der ARCore-Maßstab ist es nicht. Die Pipeline hebt mit hC = H − dBoden, dBoden aus der Kette: in A8 2,224 m (−19 cm, die Abstände schrumpfen dort auf das 0,46- bis 0,58-Fache). Der neue Schalter `ausgleich.bodenKette:false` rettet den A8-Export aber nicht (5,8 statt 6,8 m²); dessen Hauptursache liegt woanders und ist offen.
+- **Prüfstand** `raumskizze-pruefstand.mjs` (Test `test/karte-pruefstand.mjs`):
+  - Aufbau: Mitten in einem ruhigen Abschnitt fällt ein Fenster von 1,3 s bzw. 4 s weg (Zeilen, Erfassungen, Anker). Alles danach liegt in einem neuen ARCore-Rahmen (Gier 40°, Versatz 1,5 m), mit Bruch `pausiert` und den Ereignissen einer echten Pause.
+  - Wahrheit: Beide Seiten hatten vorher denselben Bezug, die wahre Relativlage ist also die Einheit (bis auf die Drift von ARCore). Ein Orakel braucht der Prüfstand nicht.
+  - Gemessen nach dem ganzen T1-Lauf, wie live: Lage an der Kamera, Gier, und der Fehler „an den Wänden“ (gehobene Erfassungen von B); dort wirkt ein Gierfehler mit dem Hebel.
+  - 50 Fenster: A6 13, A7 20, A8 17.
+  - Für den Gyro bildet der Prüfstand die Drehraten aus den ARCore-Posen nach (Rauschen 0,005 rad/s, Drift 0,1°/s, Achsen um 90° gedreht), ohne Abtastwerte über echte Brüche. **Das ist ein idealisierter Gyro, also eine Obergrenze.**
+- **Ergebnis am Prüfstand** (an den Wänden Median/p90 in cm; Gier Median; Treffer = ≤ 10 cm und ≤ 2° an der Kamera, von 50):
+
+| Variante | A6 | A7 | A8 | Treffer |
+|---|---|---|---|---|
+| heute (Kette, Z13) | 154 / 282 · 14,7° | 168 / 296 · 16,9° | 70 / 183 · 20,3° | 1 |
+| Gier-Raster (`abReg.gierRaster`) | 110 / 388 · 1,8° | 96 / 195 · 4,5° | 69 / 183 · 17,5° | 1 |
+| Bildkanten offline (`--bildkanten`) | 154 / 282 · 14,7° | 128 / 296 · 14,7° | 48 / 170 · 12,2° | 7 |
+| Z13 aus (`abReg.an:false`) | 101 / 282 · 25,3° | 168 / 296 · 16,9° | 48 / 183 · 18,3° | 1 |
+| Gyro-Brücke (`schnitt.gyroBruecke`) | 23 / 93 · 0,2° | 38 / 171 · 0,3° | 28 / 173 · 0,3° | 13 |
+| Gyro + gedämpfte Vorhersage (`schnitt.vorhersage`) | **21 / 92 · 0,2°** | **34 / 128 · 0,3°** | **18 / 70 · 0,3°** | **14** |
+| Gyro + Vorhersage + Bildkanten | 17 / 92 · 0,2° | 34 / 128 · 0,5° | 25 / 100 · 0,5° | 11 |
+
+  - **Heute** hängt jeder Abschnitt nach einem harten Bruch nur an der Kette (Kamera stetig). Der Fehler ist die Bewegung in der Lücke (Median 20–34 cm, Gier 15–20°). Über den Hebel werden daraus 0,7–1,7 m an den Wänden.
+  - **Gier-Raster** (Abschnitt auf die Raumrichtung des Kerns drehen): Die Raumrichtung stimmt danach fast überall auf ±0°. Bei Drehungen über 45° in der Lücke wählt es aber die falsche Vierteldrehung, deshalb das große p90.
+  - **Bildkanten:** Gebunden werden 12 von 50 Fenstern, die meisten auf 2–12 cm und unter 4°. Das wirkt nur, wenn M6 den Plan des gebundenen Abschnitts festhält (`A.fest`), denn M6 kennt die Kante nicht und schob den Abschnitt sonst um Meter weg. Die Fenster sind zu kurz, die Bildpaare darüber also optimistisch. An den echten Pausen von A6–A8 gibt es kaum Kanten, und die echten Karten ändern sich nicht.
+  - **Z13 (Nachregistrierung über Erfassungen):** Auf dem Prüfstand waren die angenommenen Lagen fast immer falsch (A6 123,7 s: 6 cm Bewegung → 128 cm; A8 101,7 s: 1 → 31 cm). Auf den echten Aufnahmen ändert Z13 aus fast nichts, die Gesamtmetrik bleibt mehrdeutig; darum bleibt die Vorgabe. Mit Gyro lässt Z13 die vom Gyro gebundenen Abschnitte jetzt aus (`abReg.mitGyro`).
+  - **Gyro-Brücke:** Die Drehung in der Lücke kommt aus dem Gyro statt aus „Blick stetig“. `sY` = 1° + 0,5°/s · dt, für Pausen- und reloc-Schnitte, summiert über die ganze Schnittspanne. Sie ist der größte gemessene Hebel. Die gedämpfte Vorhersage (Kamera mit v · τ · (1 − e^−dt/τ), τ = 1 s, weiter) senkt zusätzlich das p90. Als Rest bleibt die Verschiebung in der Lücke.
+  - **Echter Gyro: unbelegt.** Keine Aufnahme hat bisher `imu.jsonl`. Ob Chrome während immersive-ar Gyroscope bzw. devicemotion liefert und ob die Zeitbasis passt, muss die nächste Aufnahme zeigen. T1 schätzt die Achsen-Zuordnung (24 Drehungen) gegen ARCore über verfolgte Nachbarzeilen (Prüfstand: Rest 0,02°).
+- **Gebaut** (alle Schalter aus, Nachspiel und Selbsttest unverändert grün):
+  - App, live seit Stand 8: `?imu=1` zeichnet Gyroscope (60 Hz) und devicemotion in `imu.jsonl` auf, ohne Messmodus. Startseite: „Karte aus den Erfassungen, mit Gyro“ (`?karte=1&imu=1`) und „ohne Gyro“ (`?karte=1`). Die Statuszeile zeigt „IMU“.
+  - M4: `schnitt.gyroBruecke`, `schnitt.vorhersage:'gedaempft'`.
+  - M10: `abReg.gierRaster`, `abReg.mitGyro`, `kanten` (Bildkanten, Konsens ≥ 2, Partner nur verbundene Abschnitte, die nicht an der Kette hängen, Plan fest), `ausgleich`.
+  - M6: `bodenKette`.
+  - T1: `--karte '<json>'` (Optionen an G.karteNeu), `--bildkanten datei.json [--bildkanten-sift]`, `imuGier` (imuPsi je PoseZeile aus `imu.jsonl`).
+  - Offline mit dem besten Satz: `node raumskizze-karte.mjs <aufnahme> --quelle erfassungen --ohne tiefe,ebenen --karte '{"schnitt":{"gyroBruecke":true,"vorhersage":"gedaempft"}}'`.
+- **Nächste Schritte:**
+  1. Eine Aufnahme mit `?karte=1&imu=1` offline durch T1 mit Gyro-Brücke rechnen. Erst wenn der echte Gyro dort trägt, die Brücke live schalten (Hauptfaden: imuPsi je PoseZeile wie T1 an den Karten-Worker).
+  2. Die Verschiebung über Pausen: Bild-Wiedererkennung live (ORB im Worker), dazu ein Faktor für Bildkanten in M6 statt `A.fest`. Bei kurzen Lücken eventuell der Beschleunigungssensor.
+  3. Z13: Die Annahmeregeln gegen den Prüfstand neu einstellen.
+  4. A8: Warum fällt der Außenring auf 3,7 × 2,3 m zusammen (10 % der Fläche)? Das ist ein Fehler Ende zu Ende, unabhängig von der Mehrdeutigkeit der Passung.
+- **Messauftrag am Pixel:**
+  - Wohnküche mit `?karte=1&imu=1`, Laser-H eingeben, ≥ 8 min. Die Statuszeile muss „IMU“ zeigen; nach der Sitzung im Manifest `imu.gyro: 'ja'` und die Zeilenzahl prüfen.
+  - Einmal absichtlich die Ortung verlieren (Kamera zuhalten) und sich dabei um mehr als 45° drehen.
+  - Einmal 10–30 s am selben Fleck warten, dann zur letzten Ecke zurück (kommen Anker nach langem Verlust zurück?).
+  - Mit dem Laser die Stürze an den Öffnungen zum Wintergarten und die Decke an einer zweiten Stelle messen.
 
 ## Quellen
 
