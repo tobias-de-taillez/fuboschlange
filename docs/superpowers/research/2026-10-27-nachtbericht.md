@@ -19,6 +19,7 @@ Auftrag: „Continue bis morgen 10 Uhr früh. Immer weiter verbessern!“ Ziel w
 | 10 | AR-Statistik mit IMU-Zählern, Warnung in der Zusammenfassung; **Z13 per Vorgabe aus** (zurückgenommen in 11) |
 | 11 | **Z13 wieder an**: Die Abschaltung stützte sich auf einen verzerrten Prüfstand (siehe unten) |
 | 12 | IMU-Wache: Fokus und Sichtbarkeit im Protokoll; nach 1,5 s ohne Gyro-Wert der Hinweis „bitte einmal aufs Kamerabild tippen“ |
+| 13 | Die Wache unterscheidet einen Gyroscope-Fehler (Sensoren blockiert): dann Hinweis auf die Website-Einstellung „Bewegungssensoren“ |
 
 Ohne `?imu=1` verhält sich die Seite wie vor dieser Nacht. Alle neuen Kartenverfahren sind Schalter und stehen aus.
 
@@ -38,7 +39,7 @@ Ohne `?imu=1` verhält sich die Seite wie vor dieser Nacht. Alle neuen Kartenver
 
 ## Für die nächste Aufnahme
 
-1. Vorher `chrome://version` notieren (M156 oder M157). Für die Seite **AR und Kamera dauerhaft erlauben**, damit kein Dialog kommt. Kein DevTools und kein `chrome://inspect` verbinden.
+1. Vorher `chrome://version` notieren. Die Aufnahmen vom 26.10. liefen mit Chrome 155; bis M156 gilt die Fokus-Falle, ab M157 nicht mehr. Für die Seite **AR und Kamera dauerhaft erlauben**, damit kein Dialog kommt. Kein DevTools und kein `chrome://inspect` verbinden.
 2. „Karte aus den Erfassungen, mit Gyro“, Laser-H eingeben, Wohnküche mindestens 8 min. In der AR-Statistik muss „IMU … Gyro“ hochzählen. Kommt „Gyro liefert keine Werte“, einmal aufs Kamerabild tippen.
 3. Einmal die Kamera zuhalten und sich dabei um mehr als 45° drehen. Einmal 10–30 s still warten und dann zur letzten Ecke zurück.
 4. Mit dem Laser die Stürze zum Wintergarten und die Decke an einer zweiten Stelle messen.
@@ -48,7 +49,7 @@ Ohne `?imu=1` verhält sich die Seite wie vor dieser Nacht. Alle neuen Kartenver
 scripts/raumskizze-gyro-pruefen.sh aufnahme.tar protokoll.json
 ```
 
-Das zeigt die IMU-Zeile (Rate, Lücken, Achsen-Zuordnung, Zeitversatz, Rest gegen ARCore) und T1 ohne und mit Gyro-Brücke. Dazu kommt der Prüfstand mit dem **echten** Gyro. Trägt die Brücke dort, ist der nächste Schritt, sie live zu schalten (imuPsi im Hauptfaden an den Karten-Worker).
+Das zeigt die Chrome-Version und die IMU-Ereignisse der App, die IMU-Zeile (Rate, Lückenverteilung, wie viele Pausen- und reloc-Schnitte ein Gyro-Wert abdeckt, Achsen-Zuordnung, Zeitversatz, Rest gegen ARCore) und T1 ohne und mit Gyro-Brücke. Mit T1 `--imu-luecke` lässt sich die Lückengrenze (Vorgabe 50 ms) ändern. Dazu kommt der Prüfstand mit dem **echten** Gyro. Trägt die Brücke dort, ist der nächste Schritt, sie live zu schalten (imuPsi im Hauptfaden an den Karten-Worker).
 
 ## Offen
 
