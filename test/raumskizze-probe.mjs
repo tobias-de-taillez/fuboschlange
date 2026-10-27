@@ -1454,6 +1454,19 @@ if(alt){
         +(()=>{ const i=K0.findIndex((k,j)=>k!==K1[j]); if(i<0) return ''; const r=kjR[i].runde, q=lauf.runden[i] && lauf.runden[i].kopf, k=x=>x ? `${x.runde}@${f3(x.t)} tPose ${f3(x.tPose)} ep ${x.epoche}` : '–';
           return ` · erste Abweichung Runde ${i+1}: Geraet ${k(r)}, Nachspiel ${k(q)}, danach ${k(lauf.runden[i+1] && lauf.runden[i+1].kopf)}`; })());
     } finally { rmSync(dir, {recursive:true, force:true}); }
+    // Nachspiel mit imu.jsonl (karte=1&imu=1, Doku 12.8): T1 haengt dann imuPsi an die Posen (imuGier), live nicht; ohne
+    // gyroBruecke darf das die Runden nicht aendern (kopf gleich wie am Geraet)
+    const dirI=mkdtempSync(join(tmpdir(), 'raumskizze-imu-'));
+    try{
+      for(const [name, re] of [['manifest.json', /^manifest\.json$/], ['zustand.jsonl', /^zustand-\d+\.jsonl$/], ['anker.jsonl', /^anker-\d+\.jsonl$/], ['ebenen.jsonl', /^ebenen-\d+\.jsonl$/],
+        ['imu.jsonl', /^imu-\d+\.jsonl$/], ['karte.jsonl', /^karte-\d+\.jsonl$/]]){ const teile=Object.keys(ri.dateien).filter(n=>re.test(n)).sort().map(n=>ri.dateien[n]); if(teile.length) writeFileSync(join(dirI, name), Buffer.concat(teile.map(x=>Buffer.from(x)))); }
+      writeFileSync(join(dirI, 'protokoll.json'), JSON.stringify(ri.P.LOG));
+      const T1=await import('../raumskizze-karte.mjs'), {G:G1}=await T1.ladeSeite(process.env.RAUMSKIZZE_HTML ? {html:process.env.RAUMSKIZZE_HTML} : {});
+      const A=T1.ladeAufnahme(dirI), kjI=A.karte.filter(z=>z.runde), lauf=await T1.laufen(G1, A, {quelle:'erfassungen', ohne:['tiefe', 'ebenen'], runden:kjI});
+      const K1=lauf.runden.map(r=>r.kopf.kopf), K0=kjI.map(z=>z.runde.kopf), gleich=K0.filter((k,i)=>k===K1[i]).length, mitPsi=lauf.posen.filter(p=>Number.isFinite(p.imuPsi)).length;
+      chk('karte=1&imu=1: Nachspiel mit imu.jsonl (T1 setzt imuPsi) - kopf gleich in >= 99 % der Runden wie am Geraet', A.imu.length>0 && mitPsi>0 && K1.length===K0.length && gleich>=0.99*K0.length,
+        `${gleich}/${K0.length} gleich, ${mitPsi} Posen mit imuPsi, imu ${A.imu.length}`);
+    } finally { rmSync(dirI, {recursive:true, force:true}); }
     // ?quelle=beide: jedes Bild-Ergebnis geht als volles BildErgebnis (camTo, proj, dir, ep) an die Karte, Erfassungen ebenso
     const bK=kb.stat.karteAn.filter(m=>m.typ==='bild'), bE=kb.stat.bildVon.filter(m=>m.typ==='ergebnis');
     chk('karte=1&quelle=beide: jedes Bild-Ergebnis (mit camTo, proj, dir, ep) und jede Erfassung an die Karte, Runden ohne Fehler, alte Pipeline gleich Stand 5',

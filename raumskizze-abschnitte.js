@@ -71,8 +71,10 @@ G.schnittKlasse=(zeilen,i,art,o0={})=>{
   else if(klasse==='reloc') b={art:'kamera', sP:0.03+0.7*dt+0.5*rPose, sY:(1+45*dt)*D2R+0.5*rPsi, sH:0.01+0.3*dt};
   else if(klasse==='pause') b={art:'kamera', sP:0.03+0.7*dt, sY:(1+45*dt)*D2R, sH:0.01+0.3*dt};
   else b={art:'pose', sP:0.02, sY:0.3*D2R, sH:0.01};
-  if((klasse==='pause' || klasse==='reloc') && o.gyroBruecke && Number.isFinite(B.imuPsi)){ const sG=(o.gyroSYDeg+o.gyroDriftDeg*dt)*D2R;
-    if(sG<b.sY){ b.dPsi=wrap(B.imuPsi); b.sY=sG; b.gyro=true; } }
+  // imuSpanne (sessionCuts): Summe von imuPsi ueber alle Zeilen der Spanne (A, B], sonst imuPsi von B
+  const iPsi=Number.isFinite(o.imuSpanne) ? o.imuSpanne : B.imuPsi;
+  if((klasse==='pause' || klasse==='reloc') && o.gyroBruecke && Number.isFinite(iPsi)){ const sG=(o.gyroSYDeg+o.gyroDriftDeg*dt)*D2R;
+    if(sG<b.sY){ b.dPsi=wrap(iPsi); b.sY=sG; b.gyro=true; } }
   b.kern='mm'; b.mm=mmVon(b); b.k=null;
   b.dG=klasse==='zurueck' ? NULLG() : G.gKomp(G.gInv(G.gAusT(A.T)), G.gAusT(B.T));
   return {klasse, rPose, rPsi, bindung:b, dT};
@@ -144,7 +146,8 @@ G.sessionCuts=(posen,breaks,ereignisse,o0={},prev=null)=>{
     // von epA und erster von epB); eingeschmolzene Spruenge weiten nur die Spanne ia..ib der Klasse.
     const iCut=g.i, ia=g.i0-1, ib=g.i1, A=P[ia], B=P[ib];
     const art=tw ? 't-wechsel' : br.length ? 'bruch' : rs ? 'reset' : re ? 'rest' : ka ? 'kamera' : 'gyro';
-    const K=G.schnittKlasse([P[ia-1], A, B], 2, art, {...o, rest:art==='rest' ? re.e : null});
+    let iS=0; for(let k=ia+1;k<=ib;k++){ const v=P[k].imuPsi; if(!Number.isFinite(v)){ iS=NaN; break; } iS+=v; }
+    const K=G.schnittKlasse([P[ia-1], A, B], 2, art, {...o, rest:art==='rest' ? re.e : null, imuSpanne:iS});
     const cb=A.cam || NAN3, ca=B.cam || NAN3;
     let vCam=null;
     if(o.vorhersage==='gedaempft' && K.bindung.art==='kamera' && A.cam){ let z0=null;
