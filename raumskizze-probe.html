@@ -9683,13 +9683,24 @@ function messStart(){
 }
 // Sensoren (7b) bei IMU (?imu=1 oder ?mess=1): vor recStart anhaengen (startAR), sonst fiele beim ersten Lauf je Seitenaufruf
 // REC.imu.push mit Sensortakt (Abnahme Stand 6). Zaehler in LOG.mess (imu, gyro, gyroFehler) wie bisher.
-const IMU_G={g:null};
+// Fokus (Recherche 12.8): Chrome bis M156 nimmt der Seite mit einem eigenen Berechtigungsdialog beim Sitzungsstart (AR, Kamera)
+// den Fokus und gibt ihn nicht zurueck (crbug 568009418, behoben in M157). Dann liefert Gyroscope stumm nichts (ab M153 auch
+// devicemotion), ohne 'error'. Ein Tippen ins Overlay holt den Fokus vermutlich zurueck. Darum: Fokus und Sichtbarkeit protokollieren
+// und nach IMU_STEHT s ohne Gyro-Wert einmal um ein Tippen bitten (imuWache).
+const IMU_G={g:null, start:null, letzt:null, steht:false}, IMU_STEHT=1.5;
+const imuFokus=e=>ev('fokus', {an:e.type==='focus', hat:document.hasFocus ? document.hasFocus() : null});
+const imuSicht=()=>ev('sichtbar', {zustand:document.visibilityState});
 function imuStart(){
   addEventListener('devicemotion', onImu);
+  addEventListener('focus', imuFokus); addEventListener('blur', imuFokus); if(document.addEventListener) document.addEventListener('visibilitychange', imuSicht);
+  Object.assign(IMU_G, {start:now(), letzt:null, steht:false});
+  ev('imu-start', {fokus:document.hasFocus ? document.hasFocus() : null, sichtbar:document.visibilityState, gyroscope:typeof Gyroscope==='function'});
   if(typeof Gyroscope==='function'){
     try{ const g=new Gyroscope({frequency:60});
       g.addEventListener('reading', ()=>{ if(g.timestamp==null) return; REC.imu.push({q:'gyro', t:+((g.timestamp-T0)/1000).toFixed(4), ta:now(), ts:+g.timestamp.toFixed(3),
-        w:[+g.x.toFixed(5), +g.y.toFixed(5), +g.z.toFixed(5)]}); REC.imuN++; LOG.mess.gyro++; });
+        w:[+g.x.toFixed(5), +g.y.toFixed(5), +g.z.toFixed(5)]}); REC.imuN++; LOG.mess.gyro++;
+        const t=now(); if(IMU_G.steht){ IMU_G.steht=false; ev('imu-weiter', {luecke:+(t-(IMU_G.letzt ?? IMU_G.start)).toFixed(2), fokus:document.hasFocus ? document.hasFocus() : null}); }
+        IMU_G.letzt=t; });
       g.addEventListener('error', e=>{ LOG.mess.gyroFehler=String(e && e.error && (e.error.name+': '+e.error.message) || e); });
       g.start(); IMU_G.g=g; }
     catch(e){ LOG.mess.gyroFehler=String(e && e.name || e); }
@@ -9697,7 +9708,16 @@ function imuStart(){
 }
 function imuStopp(){
   removeEventListener('devicemotion', onImu);
+  removeEventListener('focus', imuFokus); removeEventListener('blur', imuFokus); if(document.removeEventListener) document.removeEventListener('visibilitychange', imuSicht);
   if(IMU_G.g){ try{ IMU_G.g.stop(); }catch(e){} IMU_G.g=null; }
+  IMU_G.start=null;
+}
+// je Bild: steht der Gyro (kein Wert seit IMU_STEHT s), einmal Ereignis und Hinweis; ein neuer Wert hebt es auf (imu-weiter)
+function imuWache(){
+  if(!IMU_G.g || IMU_G.start==null || IMU_G.steht) return;
+  const t=now(), seit=t-(IMU_G.letzt ?? IMU_G.start); if(seit<=IMU_STEHT) return;
+  IMU_G.steht=true; ev('imu-steht', {seit:+seit.toFixed(2), fokus:document.hasFocus ? document.hasFocus() : null, sichtbar:document.visibilityState});
+  hint('Gyro liefert keine Werte – bitte einmal kurz aufs Kamerabild tippen (nicht auf einen Knopf).', 'warn');
 }
 function messStopp(){
   const M=S.mess; if(!M) return;
@@ -10636,6 +10656,7 @@ function onFrame(t, frame){
             hint(`Telefon tiefer halten – Brusthöhe, nicht über Kopf. Die Decke ist nur ${Math.round(dl*100)} cm über der Kamera, das macht die Skizze ungenau.`, 'warn'); } }
         else if(dl>0.7) S.lowSince=null; } }
     if(KARTE && S.closeT==null && !S.paused) karteHinweis();
+    if(IMU) imuWache();
   }
 
   arState();

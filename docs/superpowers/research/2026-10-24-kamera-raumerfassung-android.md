@@ -947,9 +947,21 @@ Reparatur in drei Runden: Erfassungsweg in M5, Höhe an Laser-H und Boden gebund
     - Mit `ausgleich.bodenKette:false` (dBoden = 0) liegt der Maßstab bei 0,96–0,97. Der Export bleibt aber klein (5,5–5,8 m²), wegen der Abdeckung.
     - A6 verliert mit dem Schalter seinen Außenring, solange Z13 an ist; mit Z13 aus behält A6 ihn und wird besser (IoU 0,59).
     - Darum bleibt die Vorgabe. Besser wäre die Deckenhöhe je Abschnitt aus ARCores höchster waagerechter Ebene über der Kamera (Empfehlung der Höhenprüfung).
-  - **Echter Gyro: unbelegt.** Keine Aufnahme hat bisher `imu.jsonl`. Ob Chrome während immersive-ar Gyroscope bzw. devicemotion liefert und ob die Zeitbasis passt, muss die nächste Aufnahme zeigen. T1 `imuGier` schätzt die Achsen-Zuordnung (24 Drehungen) und den Zeitversatz gegen ARCore über verfolgte Nachbarzeilen. Am Prüfstand liegt der Rest je Zeile im Median bei 0,01° (p90 0,03°), der Zeitversatz trifft auf etwa ±10 ms.
+  - **Echter Gyro: unbelegt.** Keine Aufnahme hat bisher `imu.jsonl`. Ob die Zeitbasis passt, muss die nächste Aufnahme zeigen.
+  - **Kommt der Gyro während immersive-ar an? Recherche** (Chromium-Quelltext M150–M157, Bug-Tracker, Spezifikationen; drei Suchrichtungen und eine Gegenprüfung; abgeleitet, nicht gemessen):
+    - Chromium schaltet die Sensoren nicht wegen WebXR ab. Der ARCore-Pfad läuft in derselben Activity und ändert weder Fokus noch Sichtbarkeit.
+    - Gyroscope braucht aber den Seitenfokus (sensor_proxy.cc). Ab M153 hält auch der Browser beide APIs ohne Fokus an, also auch devicemotion (frame_sensor_provider_proxy.cc).
+    - **Falle:** Zeigt Chrome beim Sitzungsstart einen eigenen Berechtigungsdialog (AR, oder Kamera wegen `camera-access`), verliert die Seite den Fokus. Bis M156 bekommt sie ihn nicht zurück (crbug 568009418, Korrektur 02785c4323 ab M157). Dann kommen stumm keine Werte, ohne `error`.
+    - Ein Tippen ins DOM-Overlay holt den Fokus vermutlich zurück. Sind AR und Kamera dauerhaft erlaubt, erscheint kein Dialog.
+    - WebXR selbst ignoriert den Fokus; flüssiges AR beweist also nichts.
+    - Raten: Gyroscope höchstens 60 Hz, mit Messzeitstempel. devicemotion läuft mit festem 60-Hz-Takt, `interval` ist immer 16, Werte können doppelt kommen.
+    - Ist DevTools in M153/M154 verbunden, wird nie angehalten. Ein Test über USB-Debugging sähe dann gut aus, auch wenn die Sperre in der Praxis greift.
+  - **IMU-Wache (Stand 12):**
+    - Mit `?imu=1` protokolliert die App `imu-start` (Fokus, Sichtbarkeit) und die Ereignisse `fokus` und `sichtbar`.
+    - Kommt 1,5 s lang kein Gyro-Wert, folgen `imu-steht` und der Hinweis „Gyro liefert keine Werte – bitte einmal kurz aufs Kamerabild tippen“. Das Tippen löst sonst nichts aus, es gibt keinen select-Handler.
+    - Mit dem nächsten Wert folgt `imu-weiter` (mit Länge der Lücke). T1 `imuGier` schätzt die Achsen-Zuordnung (24 Drehungen) und den Zeitversatz gegen ARCore über verfolgte Nachbarzeilen. Am Prüfstand liegt der Rest je Zeile im Median bei 0,01° (p90 0,03°), der Zeitversatz trifft auf etwa ±10 ms.
 - **Gebaut** (alle Schalter aus; Selbsttest, Nachspiel und Modultests grün):
-  - App: Seit Stand 8 zeichnet `?imu=1` Gyroscope (60 Hz) und devicemotion in `imu.jsonl` auf, ohne Messmodus; die Statuszeile zeigt „IMU“. Seit Stand 9 gibt es auf der Startseite „Karte aus den Erfassungen, mit Gyro“ (`?karte=1&imu=1`) und „ohne Gyro“ (`?karte=1`). Seit Stand 10 zeigt die AR-Statistik die IMU-Zähler, und die Zusammenfassung warnt ohne Werte. Stand 11 nimmt die Abschaltung von Z13 zurück.
+  - App: Seit Stand 8 zeichnet `?imu=1` Gyroscope (60 Hz) und devicemotion in `imu.jsonl` auf, ohne Messmodus; die Statuszeile zeigt „IMU“. Seit Stand 9 gibt es auf der Startseite „Karte aus den Erfassungen, mit Gyro“ (`?karte=1&imu=1`) und „ohne Gyro“ (`?karte=1`). Seit Stand 10 zeigt die AR-Statistik die IMU-Zähler, und die Zusammenfassung warnt ohne Werte. Stand 11 nimmt die Abschaltung von Z13 zurück. Stand 12 bringt die IMU-Wache (Fokus-Protokoll, Hinweis zum Tippen).
   - M4: `schnitt.gyroBruecke`, `schnitt.vorhersage:'gedaempft'`.
   - M10: `abReg.gierRaster`, `abReg.achsen`, `abReg.mitGyro`, `kanten` (Bildkanten: Konsens ≥ 2, Partner nur verbundene Abschnitte, die nicht an der Kette hängen, Plan fest), `ausgleich` (Optionen an M6).
   - M6: `bodenKette`.
@@ -962,7 +974,8 @@ Reparatur in drei Runden: Erfassungsweg in M5, Höhe an Laser-H und Boden gebund
   3. Z13 mit einem unverzerrten Test entscheiden.
   4. Deckenhöhe je Abschnitt aus ARCore-Ebenen statt dBoden aus der Kette (A8).
 - **Messauftrag am Pixel:**
-  - Wohnküche mit `?karte=1&imu=1`, Laser-H eingeben, ≥ 8 min. In der AR-Statistik muss „IMU … Gyro“ hochzählen; die Zusammenfassung nennt danach die Zahl der Werte (Warnung ohne Werte), das Manifest `imu.gyro: 'ja'`.
+  - Vorher: in `chrome://version` die Version notieren (M156 oder M157). Für die Seite AR und Kamera *dauerhaft* erlauben (sonst kommt der Dialog, und der Gyro steht). Kein DevTools und kein `chrome://inspect` verbinden.
+  - Wohnküche mit `?karte=1&imu=1`, Laser-H eingeben, ≥ 8 min. In der AR-Statistik muss „IMU … Gyro“ hochzählen. Erscheint „Gyro liefert keine Werte“, einmal aufs Kamerabild tippen. Die Zusammenfassung nennt danach die Zahl der Werte (Warnung ohne Werte), das Manifest `imu.gyro: 'ja'`.
   - Einmal absichtlich die Ortung verlieren (Kamera zuhalten) und sich dabei um mehr als 45° drehen.
   - Einmal 10–30 s am selben Fleck warten, dann zur letzten Ecke zurück (kommen Anker nach langem Verlust zurück?).
   - Mit dem Laser die Stürze an den Öffnungen zum Wintergarten und die Decke an einer zweiten Stelle messen.
