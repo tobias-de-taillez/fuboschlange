@@ -87,8 +87,8 @@ export function gyroSim(A, o0={}){
 // Fenster: in ruhigen Abschnitten (Schnitte der unveraenderten Aufnahme wie M4 sie setzt) mit >= minErf Erfassungen
 // beiderseits im selben Abschnitt, rand s Abstand zu jedem Schnitt, Fenster mindestens abstand s auseinander, je w hoechstens n
 // (gleichmaessig ueber die Kandidaten verteilt). Rueckgabe [{t0, w, ab, nA, nB}].
-// o.spannen [{t0, t1}] (--nurRef): nur Fenster ganz in einer dieser Zeitspannen (je rand s Abstand), etwa die Abschnitte, die in der
-// Grundlinie Kern sind oder ueber eine Bindung an ihm haengen: dann gehoert A zur Referenz, und die Wahrheit B = A gilt auch fuer
+// o.spannen [{t0, t1}] (--nurRef): nur Fenster ganz in einer dieser Zeitspannen (je rand s Abstand), etwa die Abschnitte der
+// Referenz in der Grundlinie (refMenge: Kern, Z13-angenommen, Bindungsketten dorthin): dann gehoert A zur Referenz, und B = A gilt auch fuer
 // Verfahren, die B auf die Referenz legen (Z13, Gier-Raster, Achsen, Bildkanten), nicht nur fuer solche, die B an A binden.
 export function fenster(G, A, o0={}){
   const o={...DEF, ...o0}, posen=T1.posenAus(G, A), S=G.sessionCuts(posen, A.breaks, A.events, {}, null), erf=T1.erfassungenAus(A, posen, 'app');
@@ -105,6 +105,17 @@ export function fenster(G, A, o0={}){
   return out;
 }
 
+// Referenz der Nachregistrierung wie inRef in M10 (mlAbReg, ref 'kern'): Kern, von Z13 angenommene Abschnitte und was ueber eine
+// Bindungskette (quelle 'bindung', verbunden, bindungAn) an ihnen haengt. Gegenpruefung 12.8: eine Bindung an einen
+// Kettenabschnitt genuegt nicht (A6 128,7 s: A an Kettenabschnitt 12, Z13 legte den Block reproduzierbar auf den Kern).
+export function refMenge(KZ){
+  const A=KZ.abschnitte, K=KZ.kern, memo=new Map();
+  const drin=(B, tiefe=0)=>{ if(!B || !B.g) return false; if(memo.has(B.ab)) return memo.get(B.ab); let r=false;
+    if(B.ab===K || (B.abReg && B.abReg.angenommen)) r=true;
+    else if(B.quelle==='bindung' && B.stufe==='verbunden' && B.bindungAn!=null && B.bindungAn!==B.ab && tiefe<64) r=drin(A[B.bindungAn], tiefe+1);
+    memo.set(B.ab, r); return r; };
+  return new Set(A.filter(B=>drin(B)).map(B=>B.ab));
+}
 // Ein Fenster: Bruch simulieren, T1 laufen lassen, Relativlage der Abschnitte beiderseits gegen die Einheit.
 export async function pruefeFenster(G, A, f, o0={}){
   const o={...DEF, ...o0}, A2=bruchSimulieren(G, A, f.t0, f.w, o.X), a=T1.argumente(['x', ...o.t1]), oT=T1.optionenAus(a);
@@ -132,7 +143,7 @@ export async function pruefeFenster(G, A, f, o0={}){
   const w90=a=>{ const v=Math.PI/2; let d=((a%v)+v)%v; return d>v/2 ? d-v : d; };
   const mK=kern!=null ? man(kern) : null, mA=man(abA), mB=man(abB);
   r.kern=kern; r.quelleA=sA ? sA.quelle : null; r.bindungArtB=KB ? KB.bindungArt || null : null; r.kanteN=KB && KB.kanteN || null;
-  r.aInRef=!!(sA && sA.stufe==='verbunden' && (sA.quelle==='kern' || sA.quelle==='bindung'));
+  r.aInRef=refMenge(lauf.KZ).has(abA);
   r.raumA=mK && mA ? w90(mA.phi-mK.phi)*R2D : null; r.raumB=mK && mB ? w90(mB.phi-mK.phi)*R2D : null;
   if(abA===abB) r.urteil='kein-schnitt';
   else if(!sA || !sB || !sA.g || !sB.g) r.urteil='ohne-lage';
@@ -181,7 +192,7 @@ async function main(){
     const A0=T1.ladeQuelle(resolve(tar), {protokoll:prot ? resolve(prot) : null}), A=a.gyro==='sim' ? gyroSim(A0) : A0;
     // --nurRef: Referenz-Abschnitte aus einem Lauf der Grundlinie (gleiche Fenster fuer alle Verfahren)
     let spannen=null; if(a.nurRef){ const oB=T1.optionenAus(T1.argumente(['x', ...DEF.t1])); if(Number.isFinite(o.H)) oB.H=o.H;
-      const LB=await T1.laufen(G, A, oB); spannen=LB.letzte.stand.abschnitte.filter(s=>s.stufe==='verbunden' && (s.quelle==='kern' || s.quelle==='bindung')).map(s=>({t0:s.t0, t1:s.t1, ab:s.ab})); }
+      const LB=await T1.laufen(G, A, oB), RM=refMenge(LB.KZ); spannen=LB.KZ.abschnitte.filter(s=>RM.has(s.ab)).map(s=>({t0:s.t0, t1:s.t1, ab:s.ab})); }
     const F=fenster(G, A, {...o, spannen}), R=[];
     // %a im T1-Text = Name der Aufnahme klein (z. B. --bildkanten kanten/%a.json)
     const oA={...o, t1:o.t1.map(x=>x.replace(/%a/g, name.toLowerCase()))};

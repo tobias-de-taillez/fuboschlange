@@ -352,7 +352,7 @@ function speise(KZ, t0, t1, ep, mock, dt=0.1, k0=null){ let k=k0 ?? Math.round(t
   const nr=({ref, ab, wahr, gX, abReg={}, ohneH=false, ab2=null})=>{
     attrappen({klasse:(i, P)=>ab2 && P[i].ep===2 ? {klasse:'nurT', sP:0.01, sY:0.2*D2R} : {klasse:'reloc', sP:0.5, sY:5*D2R}});
     const einG={}, ein=G.lmEinbinden; G.lmEinbinden=(K, x)=>{ if(K.abschnitte[x].g) einG[x]={...K.abschnitte[x].g}; return ein(K, x); };   // g beim Einbinden
-    const KZ=neu({quelle:'beide', proj:PROJ, H:ohneH ? null : {laser:H, sigma:0.015}, abReg:{an:true, ...abReg}});   // Z13 seit 12.8 per Vorgabe aus
+    const KZ=neu({quelle:'beide', proj:PROJ, H:ohneH ? null : {laser:H, sigma:0.015}, abReg:{an:true, ...abReg}});   // Z13 ausdruecklich an (Vorgabe ist an; Stand 10 hatte sie kurz aus)
     speise(KZ, 0, 1.2, 0, zweiWaende); speise(KZ, 1.3, 2.5, 1, zweiWaende); if(ab2) speise(KZ, 2.6, 3.0, 2, zweiWaende, 0.1, 400);
     G.kartePose(KZ, pose(3.1, 3, 0, 0)); G.karteBild(KZ, bild(500, 3.1, 3, zweiWaende));
     G.karteRechnen(KZ); G.karteRechnen(KZ);                       // Kern 0 (Z5: hLok aus der ersten Runde)

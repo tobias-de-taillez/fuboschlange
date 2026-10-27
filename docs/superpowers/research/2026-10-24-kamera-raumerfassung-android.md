@@ -867,84 +867,102 @@ Reparatur in drei Runden: Erfassungsweg in M5, Höhe an Laser-H und Boden gebund
   - **Folgerung:** Ein weiteres Sichtfeld (43–55° unbeschnitten, ~112° Ultraweitwinkel) ist nach dieser Messung nicht der Hebel für die Verbindung der Abschnitte; die Extrapolation nach oben bleibt unsicher. Der Hebel liegt bei der Verbindung selbst (12.5). Tabelle: Scratchpad `ablation/ablation.md`, nicht im Repo.
 - **Nur messbar:** Kamera-IDs, Ströme und Texturgröße (`dumpsys media.camera` per USB), getUserMedia neben immersive-ar (Testseite: enumerateDevices, Capabilities, AR zuerst bzw. getUserMedia zuerst) und das Querformat. Nativ, als möglicher Companion: Ultraweitwinkel als Physical-Stream der logischen Kamera mit `setPhysicalCameraId` und Sensor-Sync. Neben ARCore lief das nur in einem Nutzerbericht, mit Verzögerungs-Workaround (ARCore-Issue #1664).
 
-**12.8 Abschnitte nach ARCore-Brüchen verbinden (Nacht 26./27.10.).** Auftrag: das Hauptproblem aus 12.5 verbessern. Erst gemessen, welche Quelle die Abschnitte verbinden kann (Workflow mit fünf Teilen, je eine Gegenprüfung), dann ein Prüfstand ohne Orakel, dann gebaut und am Prüfstand gemessen. Alles Neue steht hinter Schaltern; die Vorgaben sind unverändert.
+**12.8 Abschnitte nach ARCore-Brüchen verbinden (Nacht 26./27.10.).** Auftrag: das Hauptproblem aus 12.5 verbessern. Erst gemessen, welche Quelle die Abschnitte verbinden kann (Workflow mit fünf Teilen, je eine Gegenprüfung), dann ein Prüfstand ohne Orakel gebaut und die Verfahren daran gemessen. Zum Schluss hat eine Gegenprüfung (sieben Agenten, 106 Aussagen) diesen Abschnitt gegen die Rohdaten nachgerechnet; die Zahlen hier sind die nachgeprüften. Alles Neue steht hinter Schaltern und ist aus. Z13 war in Stand 10 kurz per Vorgabe aus und ist seit Stand 11 wieder an (siehe Z13 unten).
 
-- **Das Orakel taugt nicht als Maßstab** (alle fünf Teile, unabhängig):
+- **Das Orakel taugt nicht als Maßstab.** Vier der fünf Teile (Anker, Ebenen, Bild, Geometrie) kamen selbst zu diesem Schluss, beim fünften (Literatur) zeigte es die Gegenprüfung. Unabhängig im strengen Sinn ist das nicht: Alle nutzen dieselbe T2-Passung und dieselben 19 Abschnitte.
   - Von 19 Orakel-Abschnitten (≥ 12 Erfassungen) sind 17 mehrdeutig (Verhältnis < 1,2); im Bootstrap springen 16 von 19 um 90° oder 180°.
-  - Die zeitlichen Hälften desselben Abschnitts (Wahrheit: Einheit) liegen in 6 von 7 Abschnitten 88–179° auseinander.
-  - An exakten nurT-Schnitten (Kette 1–3 cm) weicht die Orakel-Relativlage um 85–93° oder 3–21 m ab.
+  - Die zeitlichen Hälften desselben Abschnitts (Wahrheit: Einheit) widersprechen sich. Gegen die gespiegelte Wahrheit liegen sie in 6 von 7 Abschnitten 88–179° auseinander, gegen die ungespiegelte in 4 von 7. In beiden Lagen sind alle 7 Hälftenpaare 1,1–8,2 m auseinander.
+  - An den beiden exakten nurT-Schnitten (A6 S13, A8 S11; Kette etwa 1 cm) weicht die Orakel-Relativlage um 85–93° bzw. 8,6 m ab, an der Kamera 0,8–8,6 m (mit dem behobenen `orakelAus`).
   - Zu 12.5 siehe die Korrektur dort. Ursachen: rechtwinkliger Raum (Drehungen um 90° passen fast gleich gut), kurze Abschnitte, Höhe je Abschnitt.
-  - **Fehler behoben:** T1 `orakelAus` ließ unter `--spiegel ja` den Spiegel `T.m` fallen (Relativ-Gier um 2(r_a − r_b) falsch). Es passt jetzt ohne Spiegel gegen die gespiegelt geladene Wahrheit (A6 `--orakel-rahmen --spiegel ja`: 151,4 → 13,2 cm); `out.verh` meldet die Mehrdeutigkeit je Abschnitt.
+  - **Fehler behoben:** T1 `orakelAus` ließ unter `--spiegel ja` den Spiegel `T.m` fallen (Relativ-Gier um 2(r_a − r_b) falsch). Es passt jetzt ohne Spiegel gegen die gespiegelt geladene Wahrheit (A6 `--orakel-rahmen --spiegel ja`: 151,4 → 13,2 cm). Die Mehrdeutigkeit je Abschnitt gibt es als `out.verh` zurück (bisher nur im Test genutzt).
 - **Was die Quellen hergeben** (Messung mit Gegenprüfung; Skripte im Scratchpad unter `verbinden/`):
   - *Ortungslücken:* A6 1,29/0,47/5,68/0,02/0,67 s, A7 1,3/2,86/7,76 s, A8 1,1/0,38/4,2/5,77 s; 7 von 12 dauern höchstens 1,3 s. Die Pause-Bindung heute: sP = 0,03 + 0,7·dt, sY = (1 + 45·dt)°.
-  - *ARCore-Anker:* tragen über harte Brüche nicht. 13 von 15 harten Schnitten bleiben unverbunden; nur in A8 kamen nach kurzen Verlusten (< 5 s) Anker bitgleich zurück (42,05 s, 114,39 s). Pausierte Anker bleiben sonst bis zum Ende PAUSED, ein Ereignis `relokalisiert` gibt es nie. An weichen Schnitten liegen sie im Median 5 cm neben der Kette und streuen untereinander um 9 cm.
-  - *ARCore-Ebenen:* A6–A8 haben keine `ebenen.jsonl`. In B1600/B1714 (ein anderer Raum, H ≈ 2,97 m) überleben die ids weiche Schnitte (52 von 54), Pausen nur 4 von 16. Senkrechte Ebenen liegen oft auf Möbelfronten (±45 cm). Sie taugen als Signal für die Art eines Bruchs, nicht als Versatz.
-  - *Bild-Wiedererkennung (ORB/SIFT, offline mit OpenCV):* Mit Schwerkraftprobe (Neigung aus E < 2°) und PnP auf triangulierten Punkten je Bildpaar Gier 0,1–1,3°, Lage 2–8 cm (Median, Paare im selben Abschnitt). Nur 15–24 % der Abschnittspaare haben ein Bildpaar. ORB kostet am Mac 3–4 ms je Bild; live im Worker geschätzt 0,3–0,8 s je Schlüsselbild.
-  - *Wandgeometrie:* Die Wahrheit ist streng rechtwinklig (99,1 % der Wandlänge innerhalb 2°). Die Raumrichtung liefert die Gier mod 90° je Abschnitt auf 0,1–4°. 14–15 von 31 aufeinanderfolgenden Paaren teilen genau eine Wandlinie (eine Achse). Ein Puzzle ohne Kette scheitert an wiederholter Geometrie (Doppellinien im Abstand von 17–40 cm). M4 verlangt `minSeg` ≥ 20, erreicht wurden höchstens 16.
-  - *Höhe (Gegenprüfung von „9–68 % zu groß“):* gilt nur teilweise. A6 13/14 liegt bei 2,21–2,23 m, bestätigt durch die ARCore-Deckenebene. In A6 3/6 widerspricht die Ebene (2,40 m). In A7 liegt die Decke unter dem Glasdach und an den Stürzen zum Wintergarten tiefer. Der ARCore-Maßstab ist es nicht. Die Pipeline hebt mit hC = H − dBoden, dBoden aus der Kette: in A8 2,224 m (−19 cm, die Abstände schrumpfen dort auf das 0,46- bis 0,58-Fache). Der neue Schalter `ausgleich.bodenKette:false` rettet den A8-Export aber nicht (5,8 statt 6,8 m²); dessen Hauptursache liegt woanders und ist offen.
+  - *ARCore-Anker:* Über harte Brüche tragen sie nicht; 13 von 15 harten Schnitten bleiben unverbunden.
+    - Bitgleich zurück kamen Anker nur in A8: bei 42,50 s Anker 4 (nach 4,2 s Ortungslücke) und bei 115,11 s die Anker 11–13 (nach etwa 1,1 s Ankerpause, fällt mit dem Kamera-Schnitt bei 115,19 s zusammen).
+    - „Kurz“ trennt nicht: 10 von 12 harten Schnitten mit Lücke unter 5 s kamen nie zurück. In B1600 kamen Anker nach etwa 25 s zurück, nicht bitgleich (0,3–6,5 cm).
+    - Ein Ereignis `relokalisiert` gibt es nie. An weichen Schnitten liegen bewegte Anker im Median 5–6 cm neben der Kette und streuen untereinander um 10 cm.
+  - *ARCore-Ebenen:* A6–A8 haben keine `ebenen.jsonl`. In B1600/B1714 (ein anderer Raum, H ≈ 2,97 m angenommen) überleben die ids weiche Schnitte (52 von 54), Pausen nur 4 von 16. Senkrechte Ebenen liegen oft 36–52 cm neben den Wänden aus den Erfassungen; ob es Möbelfronten sind, ist ungeprüft. Ebenen taugen als Signal für die Art eines Bruchs, nicht als Versatz.
+  - *Bild-Wiedererkennung (ORB/SIFT, offline mit OpenCV):*
+    - Genauigkeit je Bildpaar mit Schwerkraftprobe (Neigung aus E < 2°) und PnP auf triangulierten Punkten, Paare im selben Abschnitt (|dt| < 15 s): Gier im Median 0,2–0,7°, Lage 2–11 cm.
+    - Abdeckung: Nur 17–21 % der Abschnittspaare haben ein Bildpaar (SIFT).
+    - Kosten: ORB am Mac 3–4 ms je Bild; live im Worker geschätzt 0,3–0,8 s je Schlüsselbild.
+  - *Wandgeometrie:*
+    - Die Wahrheit ist streng rechtwinklig (99,1 % der Wandlänge innerhalb 2°).
+    - Die Raumrichtung liefert die Gier mod 90° je Abschnitt auf etwa 1–5° (an exakten Paaren 0,5–4,9°).
+    - 14–15 von 31 aufeinanderfolgenden Paaren teilen mindestens eine Wandlinie, fast nie beide Achsen.
+    - Ein Puzzle ohne Kette scheitert vor allem am falschen Gierzweig, dazu an Doppellinien im Abstand von 15–40 cm.
+    - M4 verlangt `minSeg` ≥ 20, erreicht wurden höchstens 16.
+  - *Höhe (Gegenprüfung von „9–68 % zu groß“):* Das gilt nur teilweise.
+    - A6 13/14 liegt bei 2,21–2,23 m, bestätigt durch die ARCore-Deckenebene. In A6 3/6 widerspricht die Ebene (2,40 m).
+    - In A7 liegt die Decke unter dem Glasdach und an den Stürzen zum Wintergarten tiefer.
+    - Der ARCore-Maßstab ist es nicht.
+    - Die Pipeline hebt mit hC = H − dBoden, dBoden aus der Kette: in A8 2,224 m (−19 cm). Die Abstände schrumpfen dort je Abschnitt auf das 0,18- bis 0,58-Fache (gewichtet 0,46). Mehr unter A8.
 - **Prüfstand** `raumskizze-pruefstand.mjs` (Test `test/karte-pruefstand.mjs`):
   - Aufbau: Mitten in einem ruhigen Abschnitt fällt ein Fenster von 1,3 s bzw. 4 s weg (Zeilen, Erfassungen, Anker). Alles danach liegt in einem neuen ARCore-Rahmen (Gier 40°, Versatz 1,5 m), mit Bruch `pausiert` und den Ereignissen einer echten Pause.
   - Wahrheit: Beide Seiten hatten vorher denselben Bezug, die wahre Relativlage ist also die Einheit (bis auf die Drift von ARCore). Ein Orakel braucht der Prüfstand nicht.
   - Gemessen nach dem ganzen T1-Lauf, wie live: Lage an der Kamera, Gier, und der Fehler „an den Wänden“ (gehobene Erfassungen von B); dort wirkt ein Gierfehler mit dem Hebel.
-  - 50 Fenster: A6 13, A7 20, A8 17.
-  - Für den Gyro bildet der Prüfstand die Drehraten aus den ARCore-Posen nach (60 Hz, Rauschen 0,005 rad/s, Drift 0,1°/s, Achsen um 90° gedreht). Über echte Brüche gibt es keine Abtastwerte, dort greift die Brücke nicht. **Das ist ein idealisierter Gyro, also eine Obergrenze.**
-  - Korrektur nach der Code-Prüfung: In einer ersten Fassung hielt T1 `imuGier` einen Gyro-Wert über jede Lücke, ein Aussetzer von 2 s ergab 115° Scheindrehung. Darum band der nachgebildete Gyro auch echte Schnitte mit erfundener Drehung. Behoben: Ein Wert deckt höchstens 50 ms, sonst gibt es kein `imuPsi`. Der Bericht zählt Gyro-Lücken und Zeilen ohne `imuPsi`. Die Zahlen unten sind mit der korrigierten Fassung gerechnet; sie haben sich kaum verändert.
-- **Ergebnis am Prüfstand** (an den Wänden Median/p90 in cm; Gier Median; Treffer = ≤ 10 cm und ≤ 2° an der Kamera, von 50):
+  - Fenster: A6 13, A7 20, A8 17; B1600 19, B1714 17.
+  - Gyro nachgebildet aus den ARCore-Posen: 60 Hz, Rauschen 0,005 rad/s, Drift 0,1°/s, Achsen um 90° gedreht. Über echte Brüche (T-Wechsel, Bruch, Lücke > 0,25 s) und ARCore-Kamerasprünge (> 10 cm und > 1,5 m/s) gibt es keine Abtastwerte, dort greift die Brücke nicht. **Das ist ein idealisierter Gyro, also eine Obergrenze.**
+  - Korrekturen nach der Code-Prüfung:
+    - T1 `imuGier` hielt einen Gyro-Wert über jede Lücke; ein Aussetzer von 2 s ergab 115° Scheindrehung. Jetzt deckt ein Wert höchstens 50 ms, sonst gibt es kein `imuPsi`, und der Bericht zählt die Lücken.
+    - Der nachgebildete Gyro gab Kamerasprünge von ARCore als Drehung wieder; behoben.
+    - Die Zahlen unten sind mit dem endgültigen Stand gerechnet (Z13 an wie die Vorgabe).
+- **Ergebnis am Prüfstand, alle Fenster** (an den Wänden Median/p90 in cm · Gier Median; Treffer = ≤ 10 cm und ≤ 2° an der Kamera):
 
-| Variante | A6 | A7 | A8 | Treffer |
-|---|---|---|---|---|
-| bis Stand 9 (Kette, Z13 an) | 154 / 282 · 14,7° | 168 / 296 · 16,9° | 70 / 183 · 20,3° | 1 |
-| Stand 10 (Kette, Z13 aus) | 101 / 282 · 25,3° | 168 / 296 · 16,9° | 48 / 183 · 18,3° | 1 |
-| Gier-Raster (`abReg.gierRaster`) | 110 / 388 · 1,8° | 96 / 195 · 4,5° | 69 / 183 · 17,5° | 1 |
-| Bildkanten offline (`--bildkanten`) | 154 / 282 · 14,7° | 128 / 296 · 14,7° | 48 / 170 · 12,2° | 7 |
-| Z13 aus (`abReg.an:false`) | 101 / 282 · 25,3° | 168 / 296 · 16,9° | 48 / 183 · 18,3° | 1 |
-| Gyro-Brücke (`schnitt.gyroBruecke`) | 23 / 94 · 0,3° | 40 / 171 · 0,4° | 21 / 72 · 0,2° | 13 |
-| Gyro + gedämpfte Vorhersage (`schnitt.vorhersage`) | **19 / 92 · 0,3°** | **34 / 129 · 0,4°** | **19 / 70 · 0,2°** | **14** |
-| Gyro + Vorhersage + Bildkanten | 17 / 92 · 0,3° | 34 / 129 · 0,5° | 24 / 69 · 0,4° | 12 |
+| Variante | A6 | A7 | A8 | Treffer (50) | B1600 | B1714 | Treffer (36) |
+|---|---|---|---|---|---|---|---|
+| Kette (Vorgabe, Z13 an) | 154 / 282 · 14,7° | 168 / 295 · 16,9° | 70 / 183 · 20,3° | 1 | 19 / 82 · 7,2° | 49 / 121 · 11,5° | 2 |
+| Kette, Z13 aus (nur Stand 10) | 101 / 282 · 25,3° | 168 / 295 · 16,9° | 48 / 183 · 18,3° | 1 | 19 / 82 · 7,2° | 49 / 121 · 11,5° | 2 |
+| Gier-Raster (`abReg.gierRaster`) | 110 / 388 · 1,8° | 96 / 195 · 4,5° | 68 / 183 · 17,5° | 1 | 9 / 40 · 1,1° | **154 / 303 · 3,3°** | 12 |
+| Bildkanten offline (`--bildkanten`) | 154 / 282 · 14,7° | 128 / 295 · 14,7° | 48 / 170 · 12,2° | 7 | – | – | – |
+| Gyro-Brücke (`schnitt.gyroBruecke`) | 23 / 118 · 0,3° | 39 / 171 · 0,4° | 28 / 139 · 0,2° | 12 | 4 / 19 · 0,2° | 20 / 65 · 0,2° | 17 |
+| Gyro + gedämpfte Vorhersage (`schnitt.vorhersage`) | **19 / 93 · 0,3°** | **34 / 128 · 0,4°** | **21 / 115 · 0,2°** | **13** | **3 / 20 · 0,2°** | **22 / 31 · 0,2°** | **19** |
+| Gyro + Vorhersage + Bildkanten | 17 / 93 · 0,4° | 34 / 128 · 0,6° | 75 / 170 · 1,1° | 12 | – | – | – |
 
-  - **Zweiter Raum** (B1600 / B1714 vom 26.10., ohne Wahrheit, H 2,97 m aus der Pipeline; 19 + 17 Fenster), an den Wänden Median/p90:
-    - heute: 18,7 / 82 und 48,9 / 121 cm;
-    - Gier-Raster: 9,3 / 40 und **154 / 303 cm** (versagt);
-    - Gyro-Brücke: 3,7 / 19 und 20,5 / 65 cm;
-    - Gyro + Vorhersage: 2,9 / 20 und 21,7 / 31 cm.
-
-    Z13 nimmt dort nie an, Z13 aus ist gleich heute.
-  - **Heute** hängt jeder Abschnitt nach einem harten Bruch nur an der Kette (Kamera stetig). Der Fehler ist die Bewegung in der Lücke (Median 20–34 cm, Gier 15–20°). Über den Hebel werden daraus 0,7–1,7 m an den Wänden.
-  - **Gier-Raster** (Abschnitt auf die Raumrichtung des Kerns drehen): Die Raumrichtung stimmt danach fast überall auf ±0°. Bei Drehungen über 45° in der Lücke wählt es aber die falsche Vierteldrehung, deshalb das große p90. Auch sauber gemessen versagt es in B1714 (37 → 180 cm), vermutlich ist der Raum dort nicht rechtwinklig. Ohne Gyro bleibt es deshalb aus.
-  - **Bildkanten:** Gebunden werden 12 von 50 Fenstern, die meisten auf 2–12 cm und unter 4°. Das wirkt nur, wenn M6 den Plan des gebundenen Abschnitts festhält (`A.fest`), denn M6 kennt die Kante nicht und schob den Abschnitt sonst um Meter weg. Die Fenster sind zu kurz, die Bildpaare darüber also optimistisch. An den echten Pausen von A6–A8 gibt es kaum Kanten, und die echten Karten ändern sich nicht.
-  - **Vorbehalt, Verzerrung des Prüfstands:** Er misst B gegen A. Verfahren, die B an A binden (Kette, Gyro-Brücke, Vorhersage), misst er unverzerrt. Verfahren, die B auf die Referenz legen (Z13, Gier-Raster, Achsen-Registrierung, Bildkanten zu anderen Partnern als A), bestraft er dagegen, wenn A selbst nur über die Kette hängt und gegen den Kern verschoben ist. Bei 8 von 10 Z13-Annahmen war A ein Kettenabschnitt. Darum der saubere Lauf `--nurRef`: Fenster nur in Abschnitten, die in der Grundlinie Kern sind oder über eine Bindung an ihm hängen (A gehört zur Referenz, Feld `aInRef`).
-  - **Saubere Fenster** (`--nurRef`; A6 11, A7 2, A8 6, B1600 10, B1714 17), an den Wänden Median in cm:
-
-| Variante | A6 | A7 | A8 | B1600 | B1714 |
-|---|---|---|---|---|---|
-| bis Stand 9 (Z13 an) | 152 | 105 | 57 | 17 | 37 |
-| Stand 10 (Z13 aus) | 71 | 105 | 57 | 17 | 37 |
-| Gier-Raster | 102 | 87 | 50 | 6 | **180** |
-| Bildkanten | 152 | 105 | 94 | – | – |
-| Gyro + Vorhersage | 17 | 28 | 21 | 3 | 20 |
-| dazu Achsen-Registrierung | 17 | 28 | 21 | 3 (p90 48 statt 9) | 20 |
-
-  - **Z13 (Nachregistrierung über Erfassungen):** Auch mit A in der Referenz nimmt Z13 falsche Lagen an. In A6 128,7 s steigt der Fehler an den Wänden von 70 auf 206 cm, in 131,7 s von 40 auf 212 cm; bei 137,7 s reißt ein anderer Z13-Schritt B von 6 auf 198 cm. Einen Nutzen zeigt es nirgends. **Z13 ist darum seit Stand 10 per Vorgabe aus** (`ML_DEF.abReg.an:false`, live und T1 gleich; wieder an mit `abReg:{an:true}`). Auf den echten Aufnahmen ist der Effekt nicht entscheidbar (A6 IoU 0,55 → 0,21 bei mehrdeutiger Passung 1,00–1,06, A7/A8 gleich). Mit Gyro lässt Z13, falls an, die vom Gyro gebundenen Abschnitte aus (`abReg.mitGyro`).
-  - **Gyro-Brücke:** Die Drehung in der Lücke kommt aus dem Gyro statt aus „Blick stetig“. `sY` = 1° + 0,5°/s · dt, für Pausen- und reloc-Schnitte, summiert über die ganze Schnittspanne. Sie ist der größte gemessene Hebel. Die gedämpfte Vorhersage (Kamera mit v · τ · (1 − e^−dt/τ), τ = 1 s, weiter) senkt zusätzlich das p90. Als Rest bleibt die Verschiebung in der Lücke.
-  - **Achsen-Registrierung (`abReg.achsen`, versucht):** Mit bekannter Gier je Raumachse einen 1-D-Versatz gegen die Wandlinien der Referenz suchen (Vorschlag des Geometrie-Teils). Das trägt nicht. In A6/A8 überlappen die Erfassungen von B fast nie mit der Referenz (0 bzw. 1 von 13/17 angenommen). In B1600 nimmt sie bei nur 4 Referenzlinien eindeutige, aber falsche Versätze an (−26 cm bei 11 cm echter Bewegung); der Median steigt dort von 3,3 auf 10,9 cm. Sie bleibt aus.
-  - **Echter Gyro: unbelegt.** Keine Aufnahme hat bisher `imu.jsonl`. Ob Chrome während immersive-ar Gyroscope bzw. devicemotion liefert und ob die Zeitbasis passt, muss die nächste Aufnahme zeigen. T1 schätzt die Achsen-Zuordnung (24 Drehungen) gegen ARCore über verfolgte Nachbarzeilen (Prüfstand: Rest 0,02°).
-- **Gebaut** (alle Schalter aus, Nachspiel und Selbsttest unverändert grün):
-  - App, live seit Stand 8: `?imu=1` zeichnet Gyroscope (60 Hz) und devicemotion in `imu.jsonl` auf, ohne Messmodus. Startseite: „Karte aus den Erfassungen, mit Gyro“ (`?karte=1&imu=1`) und „ohne Gyro“ (`?karte=1`). Die Statuszeile zeigt „IMU“.
+  - **Kette (heute):** Jeder Abschnitt hängt nach einem harten Bruch nur an der Kette (Kamera stetig). Der Fehler ist meist die Bewegung in der Lücke (Median 20–34 cm, Gier 15–20°; in 42 von 50 Fenstern genau sie). Über den Hebel werden daraus 0,7–1,7 m an den Wänden.
+  - **Gyro-Brücke:** Die Drehung in der Lücke kommt aus dem Gyro statt aus „Blick stetig“. `sY` = 1° + 0,5°/s · dt, für Pausen- und reloc-Schnitte, summiert über die ganze Schnittspanne (ohne Brücke, wenn ein Wert fehlt). Sie ist der größte gemessene Hebel. Die gedämpfte Vorhersage (Kamera mit v · τ · (1 − e^−dt/τ), τ = 1 s, weiter) senkt das p90 in A6, A7, A8 und B1714 (am stärksten A7 171 → 128 und B1714 65 → 31 cm), in B1600 steigt es leicht (19 → 20 cm). Als Rest bleibt die Verschiebung in der Lücke. Die Brücke bindet B direkt an A; für sie misst der Prüfstand unverzerrt.
+  - **Vorbehalt, Verzerrung des Prüfstands:** Er misst B gegen A. Verfahren, die B auf die Referenz der Karte legen (Z13, Gier-Raster, Achsen-Registrierung, Bildkanten zu anderen Partnern als A), bestraft er, wenn A selbst nicht in der Referenz liegt, etwa wenn A nur über die Kette hängt und gegen den Kern verschoben ist. Bei 6 von 7 Z13-Annahmen war A ein Kettenabschnitt, beim siebten hing A über eine Bindung an einem.
+    - Dafür gibt es `--nurRef`: Fenster nur in Abschnitten der Referenz wie in M10 (`refMenge`: Kern, von Z13 angenommene Abschnitte und Bindungsketten *dorthin*), dazu das Feld `aInRef`.
+    - Eine erste Fassung nahm auch Bindungen an Kettenabschnitte als Referenz. Darauf stützte sich die Abschaltung von Z13 in Stand 10.
+    - Mit der richtigen Referenzmenge gibt es kaum saubere Fenster: A6 2, A8 4, B1600 2.
+  - **Z13 (Nachregistrierung über Erfassungen):** Offen, Vorgabe wieder an (Stand 11).
+    - In den vermeintlich sauberen Fällen (A6 128,7 / 131,7 s: 70 → 206 und 40 → 212 cm) hing A an Kettenabschnitt 12. Z13 legt den Block dort mit und ohne Bruch reproduzierbar auf dieselbe Lage zum Kern, auf 1 cm und 0,2° genau. Das kann die richtige Korrektur des Kettenversatzes sein. Eine „Zufallsdeckung“ ist nicht belegt.
+    - Auf den wirklich sauberen Fenstern nimmt Z13 dreimal an: einmal besser (8 → 5 cm), zweimal schlechter (55 → 73 und 44 → 70 cm).
+    - Auf den echten Aufnahmen ist der Effekt nicht entscheidbar: A6 IoU 0,55 mit, 0,21 ohne Z13, bei Passung 1,00/1,00; A7 gleich; A8 fast gleich.
+    - Ein besserer Test fehlt noch (Bruch im Kern selbst oder Messung im absoluten Rahmen).
+    - Falls Z13 an ist und der Gyro bindet, lässt Z13 die vom Gyro gebundenen Abschnitte aus (`abReg.mitGyro`).
+  - **Gier-Raster** (Abschnitt auf die Raumrichtung der Referenz drehen): Die Raumrichtung stimmt danach fast überall auf ±0°. Ab etwa 43–45° Drehung in der Lücke wählt es aber die falsche Vierteldrehung; daher stammt das große Gier-p90. In B1714 versagt es auch sauber gemessen (37 → 180 cm): Es dreht um 30–40°, obwohl sich die Kamera kaum gedreht hat. Vermutlich ist der Raum dort nicht rechtwinklig. Es bleibt aus. Das Prüfstandmaß ist für das Raster verzerrt.
+  - **Bildkanten:**
+    - Gebunden werden 13 von 50 Fenstern, davon 8 auf 2,0–12,6 cm und unter 4°.
+    - Das wirkt nur, wenn M6 den Plan des gebundenen Abschnitts festhält (`A.fest`), denn M6 kennt die Kante nicht und schob den Abschnitt sonst um Meter weg.
+    - Auf den echten Karten bindet es in A7 und A8 2 bzw. 5 Abschnitte neu, die Karten ändern sich dort deutlich (Exportform, Maßstab); A6 bleibt gleich. Ob besser, entscheidet die mehrdeutige Passung nicht.
+    - Zusammen mit Gyro und Z13 wird A8 schlechter (75 cm).
+  - **Achsen-Registrierung (`abReg.achsen`, versucht):** Mit bekannter Gier je Raumachse einen 1-D-Versatz gegen die Wandlinien der Referenz suchen (Vorschlag des Geometrie-Teils). Das trägt nicht.
+    - In A6/A8 überlappen die Erfassungen von B fast nie mit der Referenz.
+    - In B1600 nimmt sie eindeutige, aber falsche Versätze an (24,9 s: +48 cm bei 9 Referenzlinien). Der Median bleibt 2,9 cm, das p90 steigt von 9 auf 48 cm.
+    - Sie bleibt aus.
+  - **A8 und `bodenKette`:**
+    - Der Weg der Kamera umfasst nur etwa 3,5 × 3,5 m des Raums, und T2 misst Maßstab 0,49.
+    - Die Kamera war 0,20–0,48 m unter der Decke. Die Hebung mit hC = H − dBoden (2,224 m) verkürzt die Abstände je Abschnitt auf das 0,18- bis 0,58-Fache.
+    - Mit `ausgleich.bodenKette:false` (dBoden = 0) liegt der Maßstab bei 0,96–0,97. Der Export bleibt aber klein (5,5–5,8 m²), wegen der Abdeckung.
+    - A6 verliert mit dem Schalter seinen Außenring, solange Z13 an ist; mit Z13 aus behält A6 ihn und wird besser (IoU 0,59).
+    - Darum bleibt die Vorgabe. Besser wäre die Deckenhöhe je Abschnitt aus ARCores höchster waagerechter Ebene über der Kamera (Empfehlung der Höhenprüfung).
+  - **Echter Gyro: unbelegt.** Keine Aufnahme hat bisher `imu.jsonl`. Ob Chrome während immersive-ar Gyroscope bzw. devicemotion liefert und ob die Zeitbasis passt, muss die nächste Aufnahme zeigen. T1 `imuGier` schätzt die Achsen-Zuordnung (24 Drehungen) und den Zeitversatz gegen ARCore über verfolgte Nachbarzeilen. Am Prüfstand liegt der Rest je Zeile im Median bei 0,01° (p90 0,03°), der Zeitversatz trifft auf etwa ±10 ms.
+- **Gebaut** (alle Schalter aus; Selbsttest, Nachspiel und Modultests grün):
+  - App: Seit Stand 8 zeichnet `?imu=1` Gyroscope (60 Hz) und devicemotion in `imu.jsonl` auf, ohne Messmodus; die Statuszeile zeigt „IMU“. Seit Stand 9 gibt es auf der Startseite „Karte aus den Erfassungen, mit Gyro“ (`?karte=1&imu=1`) und „ohne Gyro“ (`?karte=1`). Seit Stand 10 zeigt die AR-Statistik die IMU-Zähler, und die Zusammenfassung warnt ohne Werte. Stand 11 nimmt die Abschaltung von Z13 zurück.
   - M4: `schnitt.gyroBruecke`, `schnitt.vorhersage:'gedaempft'`.
-  - M10: `abReg.gierRaster`, `abReg.mitGyro`, `kanten` (Bildkanten, Konsens ≥ 2, Partner nur verbundene Abschnitte, die nicht an der Kette hängen, Plan fest), `ausgleich`.
+  - M10: `abReg.gierRaster`, `abReg.achsen`, `abReg.mitGyro`, `kanten` (Bildkanten: Konsens ≥ 2, Partner nur verbundene Abschnitte, die nicht an der Kette hängen, Plan fest), `ausgleich` (Optionen an M6).
   - M6: `bodenKette`.
-  - T1: `--karte '<json>'` (Optionen an G.karteNeu), `--bildkanten datei.json [--bildkanten-sift]`, `imuGier` (imuPsi je PoseZeile aus `imu.jsonl`; schätzt Achsen-Zuordnung und Zeitversatz, Letzteren auf etwa ±10 ms). Der Bericht hat eine Zeile „IMU“: Quelle, Rate, Zuordnung, Zeitversatz, Rest gegen ARCore und die Schnitte mit Gyro-Brücke. Damit ist die erste echte Gyro-Aufnahme in einem Befehl geprüft.
-  - Offline mit dem besten Satz: `node raumskizze-karte.mjs <aufnahme> --quelle erfassungen --ohne tiefe,ebenen --karte '{"schnitt":{"gyroBruecke":true,"vorhersage":"gedaempft"}}'`.
+  - T1: `--karte '<json>'` (Optionen an G.karteNeu, JSON ohne Leerzeichen, wenn über den Prüfstand übergeben), `--bildkanten datei.json [--bildkanten-sift]`, `imuGier`. Der Bericht hat eine Zeile „IMU“: Quelle, Rate, Lücken, Zeilen ohne imuPsi, Zuordnung, Zeitversatz, Rest gegen ARCore und die Schnitte mit Gyro-Brücke.
+  - Prüfstand: `--gyro sim`, `--nurRef`, `--w`, `--n`, `--rand`, `--minErf`, `--abstand`, `--H`.
+  - `scripts/raumskizze-gyro-pruefen.sh aufnahme.tar protokoll.json`: erste Auswertung einer Aufnahme mit echtem Gyro in einem Befehl (an einer nachgebildeten A6-Aufnahme 82 s).
 - **Nächste Schritte:**
-  1. Eine Aufnahme mit `?karte=1&imu=1` offline durch T1 mit Gyro-Brücke rechnen. Erst wenn der echte Gyro dort trägt, die Brücke live schalten (Hauptfaden: imuPsi je PoseZeile wie T1 an den Karten-Worker).
+  1. Eine Aufnahme mit `?karte=1&imu=1` mit dem Skript auswerten. Es liefert die T1-Zeile „IMU“ und den Prüfstand mit dem *echten* Gyro, Grundlinie gegen Gyro-Brücke + Vorhersage. Erst wenn der echte Gyro dort trägt, die Brücke live schalten (Hauptfaden: imuPsi je PoseZeile wie T1 an den Karten-Worker).
   2. Die Verschiebung über Pausen: Bild-Wiedererkennung live (ORB im Worker), dazu ein Faktor für Bildkanten in M6 statt `A.fest`. Bei kurzen Lücken eventuell der Beschleunigungssensor.
-  3. Z13: Die Annahmeregeln gegen den Prüfstand neu einstellen. Ein Fall im Einzelnen (A6, Fenster 123,7 s + 1,3 s):
-     - Die Referenz bestand nur aus 15 Segmenten (Kern).
-     - Z13 verschob die Gruppe 13–15 (47 Erfassungen) um 1,62 m bei 3,5°, eine Zufallsdeckung: Rest 0,38 → 0,18 m, 78 % „nah“, Marge 2,2. Die echte Bewegung in der Lücke waren 6 cm.
-     - Vorschlag: eine Mindestgröße der Referenz, etwa nRef ≥ nErf und ≥ 40, und ein Suchfenster nach der Bewegung in Lücken (p90 37–52 cm bei 1,3 s) statt ±1,5 m.
-  4. A8 (untersucht): Der Weg der Kamera deckt nur rund 3 × 3 m um die freistehende Wand ab, und T2 misst Maßstab 0,49. Die Kamera war dort nur 0,2–0,4 m unter der Decke; die Hebung mit hC = H − dBoden (2,224 m, dBoden aus der Kette) halbiert dann alle Abstände. Mit `ausgleich.bodenKette:false` liegt der Maßstab bei 0,96, der Export bleibt aber klein (Abdeckung), und A6 verliert damit seinen Außenring. Die Vorgabe bleibt; besser wäre die Deckenhöhe je Abschnitt aus ARCores höchster waagerechter Ebene über der Kamera (Empfehlung der Höhenprüfung).
+  3. Z13 mit einem unverzerrten Test entscheiden.
+  4. Deckenhöhe je Abschnitt aus ARCore-Ebenen statt dBoden aus der Kette (A8).
 - **Messauftrag am Pixel:**
-  - Wohnküche mit `?karte=1&imu=1`, Laser-H eingeben, ≥ 8 min. In der AR-Statistik muss „IMU … Gyro“ hochzählen; die Zusammenfassung nennt danach die Zahl der Werte (Warnung ohne Werte), das Manifest `imu.gyro: 'ja'`. Offline zeigt die T1-Zeile „IMU“ Rate, Lücken, Zuordnung, Zeitversatz und Rest gegen ARCore.
+  - Wohnküche mit `?karte=1&imu=1`, Laser-H eingeben, ≥ 8 min. In der AR-Statistik muss „IMU … Gyro“ hochzählen; die Zusammenfassung nennt danach die Zahl der Werte (Warnung ohne Werte), das Manifest `imu.gyro: 'ja'`.
   - Einmal absichtlich die Ortung verlieren (Kamera zuhalten) und sich dabei um mehr als 45° drehen.
   - Einmal 10–30 s am selben Fleck warten, dann zur letzten Ecke zurück (kommen Anker nach langem Verlust zurück?).
   - Mit dem Laser die Stürze an den Öffnungen zum Wintergarten und die Decke an einer zweiten Stelle messen.
