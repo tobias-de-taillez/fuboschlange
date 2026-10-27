@@ -143,7 +143,7 @@ export async function pruefeFenster(G, A, f, o0={}){
   const w90=a=>{ const v=Math.PI/2; let d=((a%v)+v)%v; return d>v/2 ? d-v : d; };
   const mK=kern!=null ? man(kern) : null, mA=man(abA), mB=man(abB);
   r.kern=kern; r.quelleA=sA ? sA.quelle : null; r.bindungArtB=KB ? KB.bindungArt || null : null; r.kanteN=KB && KB.kanteN || null;
-  r.aInRef=refMenge(lauf.KZ).has(abA);
+  r.aInRef=refMenge(lauf.KZ).has(abA); r.aKern=abA===lauf.KZ.kern;
   r.raumA=mK && mA ? w90(mA.phi-mK.phi)*R2D : null; r.raumB=mK && mB ? w90(mB.phi-mK.phi)*R2D : null;
   if(abA===abB) r.urteil='kein-schnitt';
   else if(!sA || !sB || !sA.g || !sB.g) r.urteil='ohne-lage';
@@ -176,7 +176,7 @@ export function tabelle(name, R){
 }
 
 function argumente(argv){ const a={aufnahme:[]};
-  for(let i=0;i<argv.length;i++){ const k=argv[i]; if(!k.startsWith('--')) continue; if(k==='--nurRef'){ a.nurRef=true; continue; } const [n, v0]=k.slice(2).split('='), v=v0 ?? argv[++i];
+  for(let i=0;i<argv.length;i++){ const k=argv[i]; if(!k.startsWith('--')) continue; if(k==='--nurRef'){ a.nurRef=true; continue; } if(k==='--nurKern'){ a.nurKern=true; continue; } const [n, v0]=k.slice(2).split('='), v=v0 ?? argv[++i];
     if(n==='aufnahme') a.aufnahme.push(v); else a[n]=v; }
   return a; }
 async function main(){
@@ -191,8 +191,9 @@ async function main(){
   for(const s of a.aufnahme){ const [name, rest]=s.split('='), [tar, prot]=rest.split(',');
     const A0=T1.ladeQuelle(resolve(tar), {protokoll:prot ? resolve(prot) : null}), A=a.gyro==='sim' ? gyroSim(A0) : A0;
     // --nurRef: Referenz-Abschnitte aus einem Lauf der Grundlinie (gleiche Fenster fuer alle Verfahren)
-    let spannen=null; if(a.nurRef){ const oB=T1.optionenAus(T1.argumente(['x', ...DEF.t1])); if(Number.isFinite(o.H)) oB.H=o.H;
-      const LB=await T1.laufen(G, A, oB), RM=refMenge(LB.KZ); spannen=LB.KZ.abschnitte.filter(s=>RM.has(s.ab)).map(s=>({t0:s.t0, t1:s.t1, ab:s.ab})); }
+    // --nurKern: nur im Kern der Grundlinie (A ist dann die Referenz selbst, auf die Z13 registriert: unverzerrt auch fuer Z13)
+    let spannen=null; if(a.nurRef || a.nurKern){ const oB=T1.optionenAus(T1.argumente(['x', ...DEF.t1])); if(Number.isFinite(o.H)) oB.H=o.H;
+      const LB=await T1.laufen(G, A, oB), RM=a.nurKern ? new Set([LB.KZ.kern]) : refMenge(LB.KZ); spannen=LB.KZ.abschnitte.filter(s=>RM.has(s.ab)).map(s=>({t0:s.t0, t1:s.t1, ab:s.ab})); }
     const F=fenster(G, A, {...o, spannen}), R=[];
     // %a im T1-Text = Name der Aufnahme klein (z. B. --bildkanten kanten/%a.json)
     const oA={...o, t1:o.t1.map(x=>x.replace(/%a/g, name.toLowerCase()))};

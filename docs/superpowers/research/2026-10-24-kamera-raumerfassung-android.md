@@ -929,7 +929,7 @@ Reparatur in drei Runden: Erfassungsweg in M5, Höhe an Laser-H und Boden gebund
     - In den vermeintlich sauberen Fällen (A6 128,7 / 131,7 s: 70 → 206 und 40 → 212 cm) hing A an Kettenabschnitt 12. Z13 legt den Block dort mit und ohne Bruch reproduzierbar auf dieselbe Lage zum Kern, auf 1 cm und 0,2° genau. Das kann die richtige Korrektur des Kettenversatzes sein. Eine „Zufallsdeckung“ ist nicht belegt.
     - Auf den wirklich sauberen Fenstern nimmt Z13 dreimal an: einmal besser (8 → 5 cm), zweimal schlechter (55 → 73 und 44 → 70 cm).
     - Auf den echten Aufnahmen ist der Effekt nicht entscheidbar: A6 IoU 0,55 mit, 0,21 ohne Z13, bei Passung 1,00/1,00; A7 gleich; A8 fast gleich.
-    - Ein besserer Test fehlt noch (Bruch im Kern selbst oder Messung im absoluten Rahmen).
+    - Bruch im Kern selbst (`--nurKern`, 23 Fenster in A6–A8 und B1600): Nach dem Bruch wechselt meist der Kern, A bleibt nur in 6 Fenstern Kern. Z13 nimmt nur einmal an (A8 62,2 s, A nicht Kern, 77 → 109 cm). Auch das entscheidet nichts; Z13 wirkt in diesen Aufnahmen selten. Offen bleibt eine Messung im absoluten Rahmen.
     - Falls Z13 an ist und der Gyro bindet, lässt Z13 die vom Gyro gebundenen Abschnitte aus (`abReg.mitGyro`).
   - **Gier-Raster** (Abschnitt auf die Raumrichtung der Referenz drehen): Die Raumrichtung stimmt danach fast überall auf ±0°. Ab etwa 43–45° Drehung in der Lücke wählt es aber die falsche Vierteldrehung; daher stammt das große Gier-p90. In B1714 versagt es auch sauber gemessen (37 → 180 cm): Es dreht um 30–40°, obwohl sich die Kamera kaum gedreht hat. Vermutlich ist der Raum dort nicht rechtwinklig. Es bleibt aus. Das Prüfstandmaß ist für das Raster verzerrt.
   - **Bildkanten:**
@@ -954,7 +954,7 @@ Reparatur in drei Runden: Erfassungsweg in M5, Höhe an Laser-H und Boden gebund
   - M10: `abReg.gierRaster`, `abReg.achsen`, `abReg.mitGyro`, `kanten` (Bildkanten: Konsens ≥ 2, Partner nur verbundene Abschnitte, die nicht an der Kette hängen, Plan fest), `ausgleich` (Optionen an M6).
   - M6: `bodenKette`.
   - T1: `--karte '<json>'` (Optionen an G.karteNeu, JSON ohne Leerzeichen, wenn über den Prüfstand übergeben), `--bildkanten datei.json [--bildkanten-sift]`, `imuGier`. Der Bericht hat eine Zeile „IMU“: Quelle, Rate, Lücken, Zeilen ohne imuPsi, Zuordnung, Zeitversatz, Rest gegen ARCore und die Schnitte mit Gyro-Brücke.
-  - Prüfstand: `--gyro sim`, `--nurRef`, `--w`, `--n`, `--rand`, `--minErf`, `--abstand`, `--H`.
+  - Prüfstand: `--gyro sim`, `--nurRef`, `--nurKern`, `--w`, `--n`, `--rand`, `--minErf`, `--abstand`, `--H`.
   - `scripts/raumskizze-gyro-pruefen.sh aufnahme.tar protokoll.json`: erste Auswertung einer Aufnahme mit echtem Gyro in einem Befehl (an einer nachgebildeten A6-Aufnahme 82 s).
 - **Nächste Schritte:**
   1. Eine Aufnahme mit `?karte=1&imu=1` mit dem Skript auswerten. Es liefert die T1-Zeile „IMU“ und den Prüfstand mit dem *echten* Gyro, Grundlinie gegen Gyro-Brücke + Vorhersage. Erst wenn der echte Gyro dort trägt, die Brücke live schalten (Hauptfaden: imuPsi je PoseZeile wie T1 an den Karten-Worker).
