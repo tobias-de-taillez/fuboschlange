@@ -21,9 +21,13 @@ HARG=(); [ -n "$H" ] && HARG=(--H "$H")
 K='--quelle erfassungen --ohne tiefe,ebenen'
 GY='{"schnitt":{"gyroBruecke":true,"vorhersage":"gedaempft"}}'
 
-echo "== 1. T1 mit Gyro-Bruecke (Bericht: $AUS/t1-gyro/bericht.txt)"
+echo "== 1. T1 mit Gyro-Bruecke (Bericht: $AUS/t1-gyro/bericht.txt) und ohne (t1-basis)"
 "$NODE" raumskizze-karte.mjs "$TAR" --protokoll "$PROT" ${HARG[@]+"${HARG[@]}"} --quelle erfassungen --ohne tiefe,ebenen --karte "$GY" --aus "$AUS/t1-gyro" > "$AUS/t1-gyro.txt" 2>&1 || true
+"$NODE" raumskizze-karte.mjs "$TAR" --protokoll "$PROT" ${HARG[@]+"${HARG[@]}"} --quelle erfassungen --ohne tiefe,ebenen --aus "$AUS/t1-basis" > "$AUS/t1-basis.txt" 2>&1 || true
 grep -E '^IMU|^Kern|^Export' "$AUS/t1-gyro.txt" || echo "(keine IMU-Zeile: siehe $AUS/t1-gyro.txt)"
+# Ende zu Ende gegen die Wahrheit (T1 nimmt sie, wenn wahrheit-hesterkamp-wohnkueche-*.json im Repo liegt; nur in der Wohnkueche sinnvoll,
+# die Passung ist dort oft mehrdeutig): Aussenring und gehobene Beob, ohne und mit Gyro
+for v in basis gyro; do echo "  T1 $v: $(grep -E 'Außenring' "$AUS/t1-$v.txt" | grep -oE 'A [0-9.]+/[0-9.]+ m² \([^)]*\) · IoU [0-9.]+' | head -1) | $(grep -E 'Beob gehoben' "$AUS/t1-$v.txt" | grep -oE 'Median [0-9.]+ cm, <10 cm [0-9]+ %' | head -1)"; done
 
 echo "== 2. Pruefstand mit echtem Gyro"
 for v in basis gyro; do for art in alle sauber; do
