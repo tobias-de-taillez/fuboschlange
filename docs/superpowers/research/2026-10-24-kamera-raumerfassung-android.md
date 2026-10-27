@@ -924,7 +924,10 @@ Reparatur in drei Runden: Erfassungsweg in M5, Höhe an Laser-H und Boden gebund
 - **Nächste Schritte:**
   1. Eine Aufnahme mit `?karte=1&imu=1` offline durch T1 mit Gyro-Brücke rechnen. Erst wenn der echte Gyro dort trägt, die Brücke live schalten (Hauptfaden: imuPsi je PoseZeile wie T1 an den Karten-Worker).
   2. Die Verschiebung über Pausen: Bild-Wiedererkennung live (ORB im Worker), dazu ein Faktor für Bildkanten in M6 statt `A.fest`. Bei kurzen Lücken eventuell der Beschleunigungssensor.
-  3. Z13: Die Annahmeregeln gegen den Prüfstand neu einstellen.
+  3. Z13: Die Annahmeregeln gegen den Prüfstand neu einstellen. Ein Fall im Einzelnen (A6, Fenster 123,7 s + 1,3 s):
+     - Die Referenz bestand nur aus 15 Segmenten (Kern).
+     - Z13 verschob die Gruppe 13–15 (47 Erfassungen) um 1,62 m bei 3,5°, eine Zufallsdeckung: Rest 0,38 → 0,18 m, 78 % „nah“, Marge 2,2. Die echte Bewegung in der Lücke waren 6 cm.
+     - Vorschlag: eine Mindestgröße der Referenz, etwa nRef ≥ nErf und ≥ 40, und ein Suchfenster nach der Bewegung in Lücken (p90 37–52 cm bei 1,3 s) statt ±1,5 m.
   4. A8 (untersucht): Der Weg der Kamera deckt nur rund 3 × 3 m um die freistehende Wand ab, und T2 misst Maßstab 0,49. Die Kamera war dort nur 0,2–0,4 m unter der Decke; die Hebung mit hC = H − dBoden (2,224 m, dBoden aus der Kette) halbiert dann alle Abstände. Mit `ausgleich.bodenKette:false` liegt der Maßstab bei 0,96, der Export bleibt aber klein (Abdeckung), und A6 verliert damit seinen Außenring. Die Vorgabe bleibt; besser wäre die Deckenhöhe je Abschnitt aus ARCores höchster waagerechter Ebene über der Kamera (Empfehlung der Höhenprüfung).
 - **Messauftrag am Pixel:**
   - Wohnküche mit `?karte=1&imu=1`, Laser-H eingeben, ≥ 8 min. Die Statuszeile muss „IMU“ zeigen; nach der Sitzung im Manifest `imu.gyro: 'ja'` und die Zeilenzahl prüfen.
