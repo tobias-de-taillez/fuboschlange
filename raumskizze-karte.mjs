@@ -227,20 +227,27 @@ export function imuGier(A, posen){
   if(S.length<10){ S=I.filter(x=>x && !x.q && Array.isArray(x.rr) && x.rr.every(Number.isFinite) && Number.isFinite(x.t)).map(x=>({t:x.t, w:[x.rr[1]*D2R, x.rr[2]*D2R, x.rr[0]*D2R]})); quelle='devicemotion'; }
   if(S.length<10 || posen.length<3) return null;
   S.sort((a,b)=>a.t-b.t);
-  const T=S.map(s=>s.t), ab=t=>{ let lo=0, hi=T.length; while(lo<hi){ const m=(lo+hi)>>1; if(T[m]<=t) lo=m+1; else hi=m; } return lo; };   // erster Index mit T > t
+  const T0=S.map(s=>s.t);
   const dreh=(M, w)=>[M[0][0]*w[0]+M[0][1]*w[1]+M[0][2]*w[2], M[1][0]*w[0]+M[1][1]*w[1]+M[1][2]*w[2], M[2][0]*w[0]+M[2][1]*w[1]+M[2][2]*w[2]];
-  const zeile=(M, i)=>{ const a=posen[i-1], b=posen[i]; let q=a.pose.slice(3, 7), t=a.t, k=ab(a.t), n=0;
-    while(k<T.length && t<b.t){ const t1=Math.min(T[k], b.t); if(t1>t){ q=qMulK(q, qExp(dreh(M, S[k].w), t1-t)); n++; } t=t1; if(T[k]>b.t) break; k++; }
-    if(!n) return NaN; const d=qBlick(q)-qBlick(a.pose.slice(3, 7)); return Math.atan2(Math.sin(d), Math.cos(d)); };
+  // Zeitversatz d: Abtastwert k gilt zur Posenzeit T0[k] + d
+  const zeile=(M, i, d=0)=>{ const a=posen[i-1], b=posen[i]; let q=a.pose.slice(3, 7), t=a.t, n=0;
+    let lo=0, hi=T0.length; while(lo<hi){ const m=(lo+hi)>>1; if(T0[m]+d<=a.t) lo=m+1; else hi=m; } let k=lo;   // erster Index mit T > a.t
+    while(k<T0.length && t<b.t){ const tk=T0[k]+d, t1=Math.min(tk, b.t); if(t1>t){ q=qMulK(q, qExp(dreh(M, S[k].w), t1-t)); n++; } t=t1; if(tk>b.t) break; k++; }
+    if(!n) return NaN; const dd=qBlick(q)-qBlick(a.pose.slice(3, 7)); return Math.atan2(Math.sin(dd), Math.cos(dd)); };
   const probe=[]; for(let i=1;i<posen.length && probe.length<1500;i++){ const a=posen[i-1], b=posen[i]; if(b.t-a.t<=0.1 && a.ep===b.ep) probe.push(i); }
   if(probe.length<20) return null;
   const arc=i=>{ const d=qBlick(posen[i].pose.slice(3, 7))-qBlick(posen[i-1].pose.slice(3, 7)); return Math.atan2(Math.sin(d), Math.cos(d)); };
-  let best=null;
-  for(let z=0;z<ZUORDNUNGEN.length;z++){ const M=ZUORDNUNGEN[z], f=[]; for(const i of probe){ const v=zeile(M, i); if(Number.isFinite(v)) f.push(Math.abs(v-arc(i))); }
-    if(f.length<20) continue; f.sort((a,b)=>a-b); const r=f[f.length>>1]; if(!best || r<best.rest) best={z, rest:r, n:f.length}; }
-  if(!best) return null;
-  const M=ZUORDNUNGEN[best.z], psi=new Float64Array(posen.length).fill(NaN); for(let i=1;i<posen.length;i++) psi[i]=zeile(M, i);
-  return {psi, quelle, zuordnung:M, rest:best.rest, n:best.n};
+  const fehler=(M, d)=>{ const f=[]; for(const i of probe){ const v=zeile(M, i, d); if(Number.isFinite(v)) f.push(Math.abs(v-arc(i))); }
+    if(f.length<20) return null; f.sort((a,b)=>a-b); return {med:f[f.length>>1], p90:f[Math.floor(0.9*f.length)], n:f.length}; };
+  const wahl=d=>{ let best=null; for(let z=0;z<ZUORDNUNGEN.length;z++){ const e=fehler(ZUORDNUNGEN[z], d); if(e && (!best || e.med<best.med)) best={z, ...e}; } return best; };
+  // Zuordnung bei d = 0, dann der Zeitversatz (-0,25 .. 0,25 s, 10 ms) mit ihr, dann die Zuordnung noch einmal beim besten d.
+  // Fuer grobe Fehlausrichtung gedacht: verrauschte Raten treffen das Raster nur auf etwa +-10 ms (Pruefstand).
+  let best=wahl(0); if(!best) return null;
+  let dBest=0, eBest=best.med; for(let j=-25;j<=25;j++){ const d=j/100, e=fehler(ZUORDNUNGEN[best.z], d); if(e && e.med<eBest-1e-12){ eBest=e.med; dBest=d; } }
+  if(dBest!==0){ const b2=wahl(dBest); if(b2) best=b2; }
+  const M=ZUORDNUNGEN[best.z], psi=new Float64Array(posen.length).fill(NaN); for(let i=1;i<posen.length;i++) psi[i]=zeile(M, i, dBest);
+  const dauer=T0[T0.length-1]-T0[0];
+  return {psi, quelle, zuordnung:M, rest:best.med, restP90:best.p90, n:best.n, versatz:dBest, rate:dauer>0 ? (T0.length-1)/dauer : null, abtast:T0.length};
 }
 // Aufnahme laden: Manifest, Zustand, Protokoll (Durchlauf), Anker, Tiefe, Ebenen, IMU, Messung, karte.jsonl, segmente.bin, Video.
 export function ladeAufnahme(src, o={}){
@@ -569,6 +576,12 @@ export function metrikEingabe(lauf){
 export function bericht(lauf, m, alt, herkunft, quellen, pruef={}){
   const S=lauf.letzte.stand, K=lauf.runden.map(r=>r.kopf), L=[], ms=K.map(k=>k.ms.gesamt).filter(Number.isFinite);
   L.push(`Quelle ${lauf.quelleName} · ${lauf.posen.length} Posen, ${lauf.info.bilder} Bilder (fehlend ${lauf.info.bildFehlt}, weggelassen ${lauf.info.weg.bild}), ${lauf.erf.length} Erfassungen, ${lauf.info.ereignisse} Ereignisse, ${lauf.info.tiefe} Tiefe`);
+  // IMU (Doku 12.8): Gyro aus imu.jsonl (imuGier) und die Schnitte, an denen die Gyro-Bruecke band
+  const IG=lauf.A && lauf.A._imuGier, gr=x=>(x*180/Math.PI).toFixed(2);
+  if(IG){ const gS=(lauf.KZ.schnitte||[]).filter(c=>c.bindung && c.bindung.gyro);
+    L.push(`IMU (${IG.quelle}): ${IG.abtast} Werte, ${IG.rate ? IG.rate.toFixed(0) : '–'} Hz, Zuordnung ${JSON.stringify(IG.zuordnung)}, Zeitversatz ${(1000*IG.versatz).toFixed(0)} ms, Rest gegen ARCore je Zeile Median ${gr(IG.rest)}° / p90 ${gr(IG.restP90)}° (${IG.n} Zeilen)`
+      +(gS.length ? ` · Gyro-Bruecke an ${gS.length} Schnitten: `+gS.map(c=>`${c.t.toFixed(2)} ${c.klasse} dt ${c.dt.toFixed(2)} Δψ ${gr(c.bindung.dPsi)}°`).join(', ') : '')); }
+  else if(lauf.A && lauf.A.imu && lauf.A.imu.length) L.push(`IMU: ${lauf.A.imu.length} Zeilen, aber ohne verwertbaren Gyro (imuGier null)`);
   const SF=lauf.info.sichtfeld;
   if(SF) L.push(`Sichtfeld (12.7 (d)): Faktor ${SF.f} (wirksam ${SF.fEff.toFixed(3)}), Breite ${SF.w} -> ${SF.w2} px ab Spalte ${SF.x0}, horizontal ${SF.hfov[0].toFixed(1)}° -> ${SF.hfov[1].toFixed(1)}°`
     +` (proj[0] ${SF.proj0[0].toFixed(3)} -> ${SF.proj0[1].toFixed(3)}, Brennweite in px gleich)${SF.tiefeAus ? ', Tiefe erzwungen aus' : ''} · Erfassungen mit ndc ${SF.erfNdc}, davon ${SF.erfAussen} mit Enden`

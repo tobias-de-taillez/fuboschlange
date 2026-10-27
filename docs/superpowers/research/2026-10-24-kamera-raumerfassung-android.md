@@ -911,13 +911,13 @@ Reparatur in drei Runden: Erfassungsweg in M5, Höhe an Laser-H und Boden gebund
   - M4: `schnitt.gyroBruecke`, `schnitt.vorhersage:'gedaempft'`.
   - M10: `abReg.gierRaster`, `abReg.mitGyro`, `kanten` (Bildkanten, Konsens ≥ 2, Partner nur verbundene Abschnitte, die nicht an der Kette hängen, Plan fest), `ausgleich`.
   - M6: `bodenKette`.
-  - T1: `--karte '<json>'` (Optionen an G.karteNeu), `--bildkanten datei.json [--bildkanten-sift]`, `imuGier` (imuPsi je PoseZeile aus `imu.jsonl`).
+  - T1: `--karte '<json>'` (Optionen an G.karteNeu), `--bildkanten datei.json [--bildkanten-sift]`, `imuGier` (imuPsi je PoseZeile aus `imu.jsonl`; schätzt Achsen-Zuordnung und Zeitversatz, Letzteren auf etwa ±10 ms). Der Bericht hat eine Zeile „IMU“: Quelle, Rate, Zuordnung, Zeitversatz, Rest gegen ARCore und die Schnitte mit Gyro-Brücke. Damit ist die erste echte Gyro-Aufnahme in einem Befehl geprüft.
   - Offline mit dem besten Satz: `node raumskizze-karte.mjs <aufnahme> --quelle erfassungen --ohne tiefe,ebenen --karte '{"schnitt":{"gyroBruecke":true,"vorhersage":"gedaempft"}}'`.
 - **Nächste Schritte:**
   1. Eine Aufnahme mit `?karte=1&imu=1` offline durch T1 mit Gyro-Brücke rechnen. Erst wenn der echte Gyro dort trägt, die Brücke live schalten (Hauptfaden: imuPsi je PoseZeile wie T1 an den Karten-Worker).
   2. Die Verschiebung über Pausen: Bild-Wiedererkennung live (ORB im Worker), dazu ein Faktor für Bildkanten in M6 statt `A.fest`. Bei kurzen Lücken eventuell der Beschleunigungssensor.
   3. Z13: Die Annahmeregeln gegen den Prüfstand neu einstellen.
-  4. A8: Warum fällt der Außenring auf 3,7 × 2,3 m zusammen (10 % der Fläche)? Das ist ein Fehler Ende zu Ende, unabhängig von der Mehrdeutigkeit der Passung.
+  4. A8 (untersucht): Der Weg der Kamera deckt nur rund 3 × 3 m um die freistehende Wand ab, und T2 misst Maßstab 0,49. Die Kamera war dort nur 0,2–0,4 m unter der Decke; die Hebung mit hC = H − dBoden (2,224 m, dBoden aus der Kette) halbiert dann alle Abstände. Mit `ausgleich.bodenKette:false` liegt der Maßstab bei 0,96, der Export bleibt aber klein (Abdeckung), und A6 verliert damit seinen Außenring. Die Vorgabe bleibt; besser wäre die Deckenhöhe je Abschnitt aus ARCores höchster waagerechter Ebene über der Kamera (Empfehlung der Höhenprüfung).
 - **Messauftrag am Pixel:**
   - Wohnküche mit `?karte=1&imu=1`, Laser-H eingeben, ≥ 8 min. Die Statuszeile muss „IMU“ zeigen; nach der Sitzung im Manifest `imu.gyro: 'ja'` und die Zeilenzahl prüfen.
   - Einmal absichtlich die Ortung verlieren (Kamera zuhalten) und sich dabei um mehr als 45° drehen.

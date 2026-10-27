@@ -61,10 +61,11 @@ export function bruchSimulieren(G, A, t0, w, X0=DEF.X){
 
 // Gyro nachgebildet (--gyro sim, Doku 12.8): aus den ARCore-Posen der unveraenderten Aufnahme je Zeile die Drehrate im
 // Kamerarahmen (q_{i-1}^-1 ⊗ q_i / dt), als Gyroscope-Zeile {q:'gyro', t, w} zur Zeit der Zeile, mit Rauschen sigma (rad/s je
-// Achse), fester Drift bias (rad/s je Achse) und Achsen-Zuordnung zu (Geraet -> Kamera: 'eins' oder 'z90', Drehung um z).
+// Achse), fester Drift bias (rad/s je Achse), Achsen-Zuordnung zu (Geraet -> Kamera: 'eins' oder 'z90', Drehung um z) und
+// Zeitversatz versatz (s; der Abtastwert traegt die Zeit t - versatz, T1 imuGier soll versatz wiederfinden).
 // Ein echter Gyro misst durch die Luecke; der nachgebildete auch (er entsteht vor dem Wegschneiden).
 export function gyroSim(A, o0={}){
-  const o={sigma:0.005, bias:[0.002, -0.0015, 0.001], zu:'z90', seed:1, ...o0}, C=A.C;
+  const o={sigma:0.005, bias:[0.002, -0.0015, 0.001], zu:'z90', seed:1, versatz:0, ...o0}, C=A.C;   // versatz s: Gyro-Uhr gegen die Posen
   let s=o.seed>>>0||1; const rnd=()=>{ s=(s*1664525+1013904223)>>>0; return s/4294967296; }, gauss=()=>Math.sqrt(-2*Math.log(rnd()+1e-12))*Math.cos(2*Math.PI*rnd());
   const Zt=o.zu==='z90' ? [[0, 1, 0], [-1, 0, 0], [0, 0, 1]] : [[1, 0, 0], [0, 1, 0], [0, 0, 1]];   // Kamera -> Geraet (transponiert)
   // Ueber echte Schnitte (T-Wechsel, Bruch dazwischen, Luecke > 0,25 s) gaebe q_{i-1}^-1 ⊗ q_i auch den Rahmensprung von ARCore
@@ -75,7 +76,7 @@ export function gyroSim(A, o0={}){
     const qa=[a[C.qx], a[C.qy], a[C.qz], a[C.qw]], qb=[b[C.qx], b[C.qy], b[C.qz], b[C.qw]], r=qMul([-qa[0], -qa[1], -qa[2], qa[3]], qb);
     const sg=r[3]<0 ? -1 : 1, v=[sg*r[0], sg*r[1], sg*r[2]], n=Math.hypot(...v), th=2*Math.atan2(n, sg*r[3]), wc=n>1e-12 ? v.map(x=>x/n*th/dt) : [0, 0, 0];
     const wd=Zt.map(z=>z[0]*wc[0]+z[1]*wc[1]+z[2]*wc[2]).map((x,k)=>x+o.bias[k]+o.sigma*gauss());
-    imu.push({q:'gyro', t:b[C.t], w:wd}); }
+    imu.push({q:'gyro', t:b[C.t]-o.versatz, w:wd}); }
   return {...A, imu, _imuGier:undefined};
 }
 

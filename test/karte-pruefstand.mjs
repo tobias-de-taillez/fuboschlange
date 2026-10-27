@@ -62,6 +62,10 @@ chk('(c) T1 --karte: JSON an G.karteNeu, abReg.gierRaster vorgegeben aus', oK.ka
   const ok90=I && !(I.zuordnung[0][0]===1 && I.zuordnung[1][1]===1 && I.zuordnung[2][2]===1);
   let fmax=0; for(let i=1;i<Pg.length;i++){ const d=wrap(Pg[i].blick-Pg[i-1].blick); fmax=Math.max(fmax, Math.abs(wrap(Pg[i].imuPsi-d))); }
   chk('(f) gyroSim + imuGier: Zuordnung nicht die Eins, imuPsi je Zeile wie der Blick (<= 0,1°, Rauschen 0,005 rad/s)', I && I.quelle==='gyro' && ok90 && fmax<0.1*D2R, `rest ${(I.rest/D2R).toFixed(4)}°, max ${(fmax/D2R).toFixed(4)}°`);
+  const Av=PS.gyroSim(A, {zu:'z90', versatz:0.08}), Pv=T1.posenAus(G, Av), Iv=Av._imuGier;
+  // auf +-20 ms: verrauschte Raten bevorzugen leicht ein verschobenes Fenster, das zwei Abtastwerte mittelt (gemessen +10 ms)
+  chk('(f) imuGier findet den Zeitversatz zwischen Gyro und Posen (80 ms auf +-20 ms), Rate und Rest gemeldet', Math.abs(I.versatz)<=0.0201 && Math.abs(Iv.versatz-0.08)<=0.0201 && Iv.rest<0.05*D2R && Math.abs(I.rate-20)<1 && I.abtast>700,
+    `versatz ${(1000*Iv.versatz).toFixed(0)} ms (ohne ${(1000*I.versatz).toFixed(0)} ms), Rest ${(Iv.rest/D2R).toFixed(3)}°, ${I.rate.toFixed(1)} Hz`);
   const Ag2=PS.bruchSimulieren(G, Ag, t0, 4, X), P2=T1.posenAus(G, Ag2), iB=P2.findIndex(p=>p.t>=Ag2.sim.tB), wahr=wrap(P2[iB].blick-P2[iB-1].blick);
   chk('(f) ueber die Luecke (4 s weggeschnitten): imuPsi = Drehung in der Luecke (<= 0,6°: Drift 0,1°/s · 4 s)', Math.abs(wrap(P2[iB].imuPsi-wahr))<0.6*D2R && Math.abs(wahr)>5*D2R, `wahr ${(wahr/D2R).toFixed(2)}°, Gyro ${(P2[iB].imuPsi/D2R).toFixed(2)}°`);
   const S0=G.sessionCuts(P2, Ag2.breaks, Ag2.events, {}, null), Sg=G.sessionCuts(P2, Ag2.breaks, Ag2.events, {gyroBruecke:true}, null), Sv=G.sessionCuts(P2, Ag2.breaks, Ag2.events, {vorhersage:'gedaempft'}, null);
