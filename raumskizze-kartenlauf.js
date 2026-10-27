@@ -502,7 +502,8 @@ const mlGierRaster=(KZ, ab, segs, ref, o)=>{
 // Durchgaenge, bis keiner mehr angenommen wird; angenommene werden nicht wieder bewegt. Rueckgabe: angenommene ab.
 const mlAbReg=(KZ, neu, neuB, kopf)=>{
   const o=KZ.opt.abReg, L=KZ.lauf, H=KZ.H && Number.isFinite(KZ.H.laser) ? KZ.H.laser : null, A=KZ.abschnitte, K=KZ.kern;
-  if(!o || !o.an || H==null || K==null || !A[K] || !L.erf.length) return [];
+  // Z13 (o.an) und die Schalter gierRaster/achsen laufen unabhaengig voneinander (Z13 ist seit 12.8 per Vorgabe aus)
+  if(!o || !(o.an || o.gierRaster || o.achsen) || H==null || K==null || !A[K] || !L.erf.length) return [];
   const angen=B=>!!(B && B.abReg && B.abReg.angenommen);
   const offen0=[...new Set([...neu, ...(o.wieder ? A.filter(B=>B.quelle==='kette' && B.stufe==='locker' && !angen(B)).map(B=>B.ab) : [])])];
   if(!offen0.length) return [];
@@ -530,6 +531,7 @@ const mlAbReg=(KZ, neu, neuB, kopf)=>{
       const grp=gruppe(ab); let segs=segsVon(grp); if(segs.length<o.minErf) continue;
       if(o.gierRaster && !B.gierRaster){ const gr=mlGierRaster(KZ, ab, segs, R.man, o); B.gierRaster=gr;
         if(gr.angewandt){ for(const x of grp) A[x].g=G.gKomp(gr.delta, A[x].g); segs=segsVon(grp); } }
+      if(!o.an) continue;
       const r=mlAbRegEins(R.N, segs, o);
       B.abReg={angenommen:r.angenommen, grund:r.grund, dpsi:r.dpsi, dt:r.dt, r0:r.r0, r1:r.r1, nah:r.nah, richtW:r.richtW, marge:r.marge, nErf:segs.length, gruppe:grp,
         versuche:((B.abReg && B.abReg.versuche)||0)+1, stempel:R.stempel, runde:KZ.runde, gVor:{...B.g}};

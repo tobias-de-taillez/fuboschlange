@@ -63,12 +63,24 @@ chk('(c) T1 --karte: JSON an G.karteNeu, abReg.gierRaster vorgegeben aus', oK.ka
   // Die Kreisbewegung dreht fast nur um die Senkrechte: mehrere Zuordnungen geben dann denselben Blick (z90 oder z90 mit
   // Drehung um y um 180°), geprueft wird die Wirkung (imuPsi), nicht die Matrix; die Zuordnung der Eins waere falsch.
   const ok90=I && !(I.zuordnung[0][0]===1 && I.zuordnung[1][1]===1 && I.zuordnung[2][2]===1);
-  let fmax=0; for(let i=1;i<Pg.length;i++){ const d=wrap(Pg[i].blick-Pg[i-1].blick); fmax=Math.max(fmax, Math.abs(wrap(Pg[i].imuPsi-d))); }
+  // ohne imuPsi duerfen nur Zeilen am Rand sein (Zeitversatz: das Gyro reicht dort nicht bis zur Zeile)
+  let fmax=0, nNaN=0; for(let i=1;i<Pg.length;i++){ if(!Number.isFinite(Pg[i].imuPsi)){ nNaN++; continue; } const d=wrap(Pg[i].blick-Pg[i-1].blick); fmax=Math.max(fmax, Math.abs(wrap(Pg[i].imuPsi-d))); }
+  if(nNaN>2) fmax=NaN;
   chk('(f) gyroSim + imuGier: Zuordnung nicht die Eins, imuPsi je Zeile wie der Blick (<= 0,1°, Rauschen 0,005 rad/s)', I && I.quelle==='gyro' && ok90 && fmax<0.1*D2R, `rest ${(I.rest/D2R).toFixed(4)}°, max ${(fmax/D2R).toFixed(4)}°`);
   const Av=PS.gyroSim(A, {zu:'z90', versatz:0.08}), Pv=T1.posenAus(G, Av), Iv=Av._imuGier;
   // auf +-20 ms: verrauschte Raten bevorzugen leicht ein verschobenes Fenster, das zwei Abtastwerte mittelt (gemessen +10 ms)
-  chk('(f) imuGier findet den Zeitversatz zwischen Gyro und Posen (80 ms auf +-20 ms), Rate und Rest gemeldet', Math.abs(I.versatz)<=0.0201 && Math.abs(Iv.versatz-0.08)<=0.0201 && Iv.rest<0.05*D2R && Math.abs(I.rate-20)<1 && I.abtast>700,
+  chk('(f) imuGier findet den Zeitversatz zwischen Gyro und Posen (80 ms auf +-20 ms), Rate und Rest gemeldet', Math.abs(I.versatz)<=0.0201 && Math.abs(Iv.versatz-0.08)<=0.0201 && Iv.rest<0.05*D2R && Math.abs(I.rate-60)<4 && I.abtast>2000 && I.luecken===0,
     `versatz ${(1000*Iv.versatz).toFixed(0)} ms (ohne ${(1000*I.versatz).toFixed(0)} ms), Rest ${(Iv.rest/D2R).toFixed(3)}°, ${I.rate.toFixed(1)} Hz`);
+  // Code-Pruefung 12.8: ein Gyro-Aussetzer darf keine Drehung erfinden (vorher: 2 s Luecke -> 115° Scheindrehung)
+  const Aa={...Ag, imu:Ag.imu.filter(x=>!(x.t>10 && x.t<12)).map(x=>x.t>=12 && x.t<12.02 ? {...x, w:[1, 1, 1]} : x), _imuGier:undefined}, Pa=T1.posenAus(G, Aa), Ia=Aa._imuGier;
+  const inL=Pa.filter(p=>p.t>10.05 && p.t<=11.95), aussen=Pa.filter((p,i)=>i>0 && i<Pa.length-1 && (p.t<=9.9 || p.t>=12.1));
+  chk('(f) Gyro-Aussetzer 2 s: Zeilen darin ohne imuPsi (keine Scheindrehung), ausserhalb weiter, Bericht zaehlt die Luecke', Ia && inL.length>30 && inL.every(p=>!Number.isFinite(p.imuPsi))
+    && aussen.every(p=>Number.isFinite(p.imuPsi)) && Ia.luecken===1 && Math.abs(Ia.groessteLuecke-2)<0.05 && Ia.ohnePsi>=inL.length,
+    `${inL.length} Zeilen in der Luecke, ohne imuPsi ${Ia && Ia.ohnePsi}, groesste Luecke ${Ia && Ia.groessteLuecke.toFixed(2)} s`);
+  // nachgebildeter Gyro ueber einen echten Schnitt (hier der simulierte Bruch als Teil der Aufnahme): dort kein Wert, keine Bruecke
+  const Ae=PS.gyroSim(PS.bruchSimulieren(G, A, 20, 1.3, X)), Pe=T1.posenAus(G, Ae), ie=Pe.findIndex(p=>p.t>=21.3), Se=G.sessionCuts(Pe, Ae.breaks, Ae.events, {gyroBruecke:true}, null);
+  chk('(f) gyroSim ueber einen echten Schnitt: kein Gyro-Wert, imuPsi NaN, Schnitt ohne Gyro-Bindung', !Number.isFinite(Pe[ie].imuPsi) && Se.length===1 && !Se[0].bindung.gyro && Se[0].bindung.dPsi===undefined,
+    `Schnitt ${Se.map(c=>c.t+' '+c.klasse).join(', ')}`);
   const Ag2=PS.bruchSimulieren(G, Ag, t0, 4, X), P2=T1.posenAus(G, Ag2), iB=P2.findIndex(p=>p.t>=Ag2.sim.tB), wahr=wrap(P2[iB].blick-P2[iB-1].blick);
   chk('(f) ueber die Luecke (4 s weggeschnitten): imuPsi = Drehung in der Luecke (<= 0,6°: Drift 0,1°/s · 4 s)', Math.abs(wrap(P2[iB].imuPsi-wahr))<0.6*D2R && Math.abs(wahr)>5*D2R, `wahr ${(wahr/D2R).toFixed(2)}°, Gyro ${(P2[iB].imuPsi/D2R).toFixed(2)}°`);
   const S0=G.sessionCuts(P2, Ag2.breaks, Ag2.events, {}, null), Sg=G.sessionCuts(P2, Ag2.breaks, Ag2.events, {gyroBruecke:true}, null), Sv=G.sessionCuts(P2, Ag2.breaks, Ag2.events, {vorhersage:'gedaempft'}, null);

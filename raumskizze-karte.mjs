@@ -221,19 +221,24 @@ const ZUORDNUNGEN=(()=>{ const out=[], P=[[0,1,2],[0,2,1],[1,0,2],[1,2,0],[2,0,1
 // der Luecke. Quelle Gyroscope {q:'gyro', w rad/s}, sonst devicemotion rotationRate (alpha um z, beta um x, gamma um y, Grad/s).
 // Die Zuordnung der Geraeteachsen zur Kamera waehlt die kleinste Abweichung gegen ARCore ueber verfolgte Nachbarzeilen
 // (dt <= 0,1 s, gleiche Epoche). Rueckgabe {psi, quelle, zuordnung, rest (rad, Median), n} oder null.
-export function imuGier(A, posen){
-  const D2R=Math.PI/180, I=A.imu || [];
+export function imuGier(A, posen, o={}){
+  const D2R=Math.PI/180, I=A.imu || [], hMax=o.maxLuecke ?? 0.05;
   let S=I.filter(x=>x && x.q==='gyro' && Array.isArray(x.w) && Number.isFinite(x.t)).map(x=>({t:x.t, w:x.w})), quelle='gyro';
   if(S.length<10){ S=I.filter(x=>x && !x.q && Array.isArray(x.rr) && x.rr.every(Number.isFinite) && Number.isFinite(x.t)).map(x=>({t:x.t, w:[x.rr[1]*D2R, x.rr[2]*D2R, x.rr[0]*D2R]})); quelle='devicemotion'; }
   if(S.length<10 || posen.length<3) return null;
   S.sort((a,b)=>a.t-b.t);
   const T0=S.map(s=>s.t);
   const dreh=(M, w)=>[M[0][0]*w[0]+M[0][1]*w[1]+M[0][2]*w[2], M[1][0]*w[0]+M[1][1]*w[1]+M[1][2]*w[2], M[2][0]*w[0]+M[2][1]*w[1]+M[2][2]*w[2]];
-  // Zeitversatz d: Abtastwert k gilt zur Posenzeit T0[k] + d
-  const zeile=(M, i, d=0)=>{ const a=posen[i-1], b=posen[i]; let q=a.pose.slice(3, 7), t=a.t, n=0;
+  // Zeitversatz d: Abtastwert k gilt zur Posenzeit T0[k] + d, fuer (T0[k-1], T0[k]] + d, hoechstens aber hMax s vor sich (Code-
+  // Pruefung 12.8: ohne Grenze trug ein Wert die Rate ueber jeden Aussetzer, 2 s Luecke -> 115° Scheindrehung). Deckt das Gyro das
+  // Zeilenintervall nicht ganz (Aussetzer > hMax, keine Werte bis zum Ende), ist imuPsi NaN und die Gyro-Bruecke greift nicht.
+  const zeile=(M, i, d=0)=>{ const a=posen[i-1], b=posen[i]; let q=a.pose.slice(3, 7), t=a.t;
     let lo=0, hi=T0.length; while(lo<hi){ const m=(lo+hi)>>1; if(T0[m]+d<=a.t) lo=m+1; else hi=m; } let k=lo;   // erster Index mit T > a.t
-    while(k<T0.length && t<b.t){ const tk=T0[k]+d, t1=Math.min(tk, b.t); if(t1>t){ q=qMulK(q, qExp(dreh(M, S[k].w), t1-t)); n++; } t=t1; if(tk>b.t) break; k++; }
-    if(!n) return NaN; const dd=qBlick(q)-qBlick(a.pose.slice(3, 7)); return Math.atan2(Math.sin(dd), Math.cos(dd)); };
+    while(t<b.t){ if(k>=T0.length) return NaN;
+      const tk=T0[k]+d, tv=k>0 ? T0[k-1]+d : -Infinity;
+      if(tk-tv>hMax && t<tk-hMax) return NaN;
+      const t1=Math.min(tk, b.t); if(t1>t) q=qMulK(q, qExp(dreh(M, S[k].w), t1-t)); t=t1; if(tk>=b.t) break; k++; }
+    const dd=qBlick(q)-qBlick(a.pose.slice(3, 7)); return Math.atan2(Math.sin(dd), Math.cos(dd)); };
   const probe=[]; for(let i=1;i<posen.length && probe.length<1500;i++){ const a=posen[i-1], b=posen[i]; if(b.t-a.t<=0.1 && a.ep===b.ep) probe.push(i); }
   if(probe.length<20) return null;
   const arc=i=>{ const d=qBlick(posen[i].pose.slice(3, 7))-qBlick(posen[i-1].pose.slice(3, 7)); return Math.atan2(Math.sin(d), Math.cos(d)); };
@@ -246,8 +251,9 @@ export function imuGier(A, posen){
   let dBest=0, eBest=best.med; for(let j=-25;j<=25;j++){ const d=j/100, e=fehler(ZUORDNUNGEN[best.z], d); if(e && e.med<eBest-1e-12){ eBest=e.med; dBest=d; } }
   if(dBest!==0){ const b2=wahl(dBest); if(b2) best=b2; }
   const M=ZUORDNUNGEN[best.z], psi=new Float64Array(posen.length).fill(NaN); for(let i=1;i<posen.length;i++) psi[i]=zeile(M, i, dBest);
-  const dauer=T0[T0.length-1]-T0[0];
-  return {psi, quelle, zuordnung:M, rest:best.med, restP90:best.p90, n:best.n, versatz:dBest, rate:dauer>0 ? (T0.length-1)/dauer : null, abtast:T0.length};
+  const dauer=T0[T0.length-1]-T0[0]; let luecken=0, groesste=0; for(let k=1;k<T0.length;k++){ const g=T0[k]-T0[k-1]; if(g>hMax) luecken++; if(g>groesste) groesste=g; }
+  return {psi, quelle, zuordnung:M, rest:best.med, restP90:best.p90, n:best.n, versatz:dBest, rate:dauer>0 ? (T0.length-1)/dauer : null, abtast:T0.length,
+    luecken, groessteLuecke:groesste, maxLuecke:hMax, ohnePsi:psi.reduce((n,v,i)=>n+(i>0 && !Number.isFinite(v) ? 1 : 0), 0)};
 }
 // Aufnahme laden: Manifest, Zustand, Protokoll (Durchlauf), Anker, Tiefe, Ebenen, IMU, Messung, karte.jsonl, segmente.bin, Video.
 export function ladeAufnahme(src, o={}){
@@ -472,7 +478,7 @@ export async function laufen(G, A, o0={}){
   const orakel=o.orakel || null;
   const KZ=G.karteNeu({H:hLaser ? {laser:hLaser, sigma:0.015} : null, quelle:o.quelle, arbeit:o.arbeit, knoten:o.knoten, lago:o.lago, pp:o.pp, skala:o.skala,
     reg:o.reg!=='aus', ohne:o.ohne, ohneAb:o.ohneAb, proj:kam.proj, w:kam.w, h:kam.h, umriss:!o.ohne.includes('umriss'), umrissOpt:o.umriss==='cabral' ? {art:'cabral'} : {},
-    orakel, uhr:uhrMit(o.uhr), ...(o.karte||{}), ...(o.bildkanten ? {kanten:kantenLaden(o.bildkanten)} : {})});
+    orakel, uhr:uhrMit(o.uhr), ...(o.karte||{}), ...(o.bildkanten ? {kanten:{...(o.karte && o.karte.kanten || {}), ...kantenLaden(o.bildkanten)}} : {})});
   // M3 skaliert seine px-Schwellen mit skala 'auto' = min(w, h)/287; beschnitten muss die Skala des vollen Bilds bleiben,
   // sonst saenken sich minLineLen, minLen und die Verschmelz-Schwellen mit der Breite (andere Kanten statt weniger Sichtfeld).
   const BZ=G.bildNeu(fen ? {skala:Math.min(A.w, A.h)/287} : {}), flipAt=A.art==='sitzung' ? (()=>false) : flipAtAus(A), seg=o.segmente==='geraet' ? segmenteLesen(A.segmenteBin) : null;
@@ -579,7 +585,7 @@ export function bericht(lauf, m, alt, herkunft, quellen, pruef={}){
   // IMU (Doku 12.8): Gyro aus imu.jsonl (imuGier) und die Schnitte, an denen die Gyro-Bruecke band
   const IG=lauf.A && lauf.A._imuGier, gr=x=>(x*180/Math.PI).toFixed(2);
   if(IG){ const gS=(lauf.KZ.schnitte||[]).filter(c=>c.bindung && c.bindung.gyro);
-    L.push(`IMU (${IG.quelle}): ${IG.abtast} Werte, ${IG.rate ? IG.rate.toFixed(0) : '–'} Hz, Zuordnung ${JSON.stringify(IG.zuordnung)}, Zeitversatz ${(1000*IG.versatz).toFixed(0)} ms, Rest gegen ARCore je Zeile Median ${gr(IG.rest)}° / p90 ${gr(IG.restP90)}° (${IG.n} Zeilen)`
+    L.push(`IMU (${IG.quelle}): ${IG.abtast} Werte, ${IG.rate ? IG.rate.toFixed(0) : '–'} Hz, Lücken > ${(1000*IG.maxLuecke).toFixed(0)} ms: ${IG.luecken} (größte ${(1000*IG.groessteLuecke).toFixed(0)} ms), Zeilen ohne imuPsi ${IG.ohnePsi}, Zuordnung ${JSON.stringify(IG.zuordnung)}, Zeitversatz ${(1000*IG.versatz).toFixed(0)} ms, Rest gegen ARCore je Zeile Median ${gr(IG.rest)}° / p90 ${gr(IG.restP90)}° (${IG.n} Zeilen)`
       +(gS.length ? ` · Gyro-Bruecke an ${gS.length} Schnitten: `+gS.map(c=>`${c.t.toFixed(2)} ${c.klasse} dt ${c.dt.toFixed(2)} Δψ ${gr(c.bindung.dPsi)}°`).join(', ') : '')); }
   else if(lauf.A && lauf.A.imu && lauf.A.imu.length) L.push(`IMU: ${lauf.A.imu.length} Zeilen, aber ohne verwertbaren Gyro (imuGier null)`);
   const SF=lauf.info.sichtfeld;

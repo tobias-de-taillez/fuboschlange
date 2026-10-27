@@ -71,8 +71,9 @@ G.schnittKlasse=(zeilen,i,art,o0={})=>{
   else if(klasse==='reloc') b={art:'kamera', sP:0.03+0.7*dt+0.5*rPose, sY:(1+45*dt)*D2R+0.5*rPsi, sH:0.01+0.3*dt};
   else if(klasse==='pause') b={art:'kamera', sP:0.03+0.7*dt, sY:(1+45*dt)*D2R, sH:0.01+0.3*dt};
   else b={art:'pose', sP:0.02, sY:0.3*D2R, sH:0.01};
-  // imuSpanne (sessionCuts): Summe von imuPsi ueber alle Zeilen der Spanne (A, B], sonst imuPsi von B
-  const iPsi=Number.isFinite(o.imuSpanne) ? o.imuSpanne : B.imuPsi;
+  // imuSpanne (sessionCuts): Summe von imuPsi ueber alle Zeilen der Spanne (A, B] (NaN, wenn eine Zeile keinen hat: dann keine
+  // Bruecke); ohne imuSpanne (Aufruf nicht aus sessionCuts) imuPsi von B
+  const iPsi=o.imuSpanne!==undefined && o.imuSpanne!==null ? o.imuSpanne : B.imuPsi;
   if((klasse==='pause' || klasse==='reloc') && o.gyroBruecke && Number.isFinite(iPsi)){ const sG=(o.gyroSYDeg+o.gyroDriftDeg*dt)*D2R;
     if(sG<b.sY){ b.dPsi=wrap(iPsi); b.sY=sG; b.gyro=true; } }
   b.kern='mm'; b.mm=mmVon(b); b.k=null;
