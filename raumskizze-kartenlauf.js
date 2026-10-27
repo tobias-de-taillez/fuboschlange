@@ -77,6 +77,7 @@
 const ML_DEF={H:null, quelle:'segmente', arbeit:{iter:3, lin:2, relin:20000, reg:2000, hyp:4, lm:150}, knoten:false, lago:'aus', pp:'fest',
   skala:'fest', umriss:true, umrissJede:2, reg:true, tiefe:0, ebenen:0, ohne:[], ohneAb:[], warteMax:1.0, loseNach:30, loseErledigt:10,
   proj:null, w:287, h:640, sPxErf:2, kopfRaster:1e6, topoRunden:3, topoDauer:3, verlaufMax:60, hypRunden:3, orakel:null, uhr:null,
+  kanten:null,   // Bildkanten {liste, min, tolP, tolPsiDeg, partner} (mlKanteMit, 12.8); null = aus
   verbunden:{sP:0.05, sY:1*Math.PI/180}, locker:{max:0.08, psi:1.5*Math.PI/180}, lose:{max:0.20, zurueck:0.15},
   // Kern 1.3; dH: Hoehenbedingung mit Laser-H (19.2 Z5)
   kern:{bilder:8, richtungen:2, winkelDeg:60, dH:0.05}, eckeSigma:0.05, schnitt:{},
@@ -539,7 +540,34 @@ const mlBindungMit=(KZ, ab)=>{
       const dT=G.gKomp(G.gInv(G.gAusT(TA.T)), G.gAusT(TB.T)), g=G.gBei(andere, s.t); if(!g) continue;
       return {g:i+1===ab ? G.gKomp(g, dT) : G.gKomp(g, G.gInv(dT)), partner:andere.ab}; }
     if(s.klasse==='zurueck' && i+1===ab && s.zurueckZu!=null && verb(A[s.zurueckZu])) return {g:G.gBei(A[s.zurueckZu], s.t), partner:s.zurueckZu}; }
-  return null;
+  return mlKanteMit(KZ, ab);
+};
+// Bildkanten (Schalter opt.kanten, Doku 12.8): Relativlagen aus der Wiedererkennung im Bild, je Kante {ti, tj, regel, g}
+// mit g: Bezug der Zeile tj -> Bezug der Zeile ti (M0). Regel 'A' (PnP, 4 FG) bindet; 'B' (nur Gier) nicht. Eine Kante zaehlt,
+// sobald beide Bilder da sind (tMax >= max(ti, tj)) und ihre Zeilen in KZ.posen stehen (|Δt| <= 1 ms), wenn ein Ende in ab
+// liegt und das andere in einem verbundenen oder lockeren Abschnitt. Kandidat g_ab = g_partner ∘ g (bzw. ∘ g^-1); verglichen
+// an der Kamera des ab-Bilds in F0. Gebunden wird der Kandidat mit den meisten Nachbarn innerhalb tolP / tolPsiDeg, wenn
+// es mit ihm mindestens min sind (Konsens; Einzelkanten haben Ausreisser bis 68 cm, Bild-Teil 12.8).
+const mlZeileBei=(KZ, t)=>{ const P=KZ.posen; let lo=0, hi=P.length-1; if(hi<0) return null;
+  while(lo<hi){ const m=(lo+hi)>>1; if(P[m].t<t-1e-3) lo=m+1; else hi=m; } return Math.abs(P[lo].t-t)<=1e-3 ? P[lo] : null; };
+const mlKanteMit=(KZ, ab)=>{
+  const K=KZ.opt.kanten, A=KZ.abschnitte, B=A[ab]; if(!K || !K.liste || !K.liste.length || !B) return null;
+  // Partner (K.partner): 'verbunden' (Vorgabe) nur verbundene, die nicht an der Kette haengen; 'locker' auch lockere und Kette
+  const verb=X=>X && X.g && X.ab!==ab && (K.partner==='locker' ? X.stufe==='verbunden' || X.stufe==='locker' : X.stufe==='verbunden' && X.quelle!=='kette'), D2R=Math.PI/180, kand=[];
+  for(const k of K.liste){ if(k.regel!=='A' || !k.g || !Number.isFinite(k.g.tx) || Math.max(k.ti, k.tj)>KZ.lauf.tMax) continue;
+    const zi=mlZeileBei(KZ, k.ti), zj=mlZeileBei(KZ, k.tj); if(!zi || !zj) continue;
+    const ai=G.sectionOf(KZ.schnitte, zi.t, zi.ep), aj=G.sectionOf(KZ.schnitte, zj.t, zj.ep); if(ai===aj) continue;
+    let partner, g, z;
+    if(aj===ab && verb(A[ai])){ const gp=G.gBei(A[ai], zi.t); if(!gp) continue; partner=ai; g=G.gKomp(gp, k.g); z=zj; }
+    else if(ai===ab && verb(A[aj])){ const gp=G.gBei(A[aj], zj.t); if(!gp) continue; partner=aj; g=G.gKomp(gp, G.gInv(k.g)); z=zi; }
+    else continue;
+    if(!z.cam) continue; kand.push({g, partner, p:G.gPlan(g, [z.cam[0], z.cam[2]])}); }
+  if(kand.length<(K.min||2)) return null;
+  const nah=(a,b)=>Math.hypot(a.p[0]-b.p[0], a.p[1]-b.p[1])<=(K.tolP??0.10) && Math.abs(mlWrap(a.g.psi-b.g.psi))<=(K.tolPsiDeg??2)*D2R;
+  let best=null, nBest=0; for(const a of kand){ const n=kand.filter(b=>nah(a, b)).length; if(n>nBest){ nBest=n; best=a; } }
+  if(nBest<(K.min||2)) return null;
+  B.kanteN=nBest; B.kanteVon=kand.length;
+  return {g:{...best.g}, partner:best.partner, art:'bild', n:nBest};
 };
 const mlBindungG=(KZ, ab)=>{ const r=mlBindungMit(KZ, ab); return r ? r.g : null; };
 const mlZeileVor=(KZ, s)=>{ let z=null; for(const p of KZ.posen){ if(p.ep===s.epA && p.t<=s.t) z=p; if(p.t>s.t) break; } return z; };
@@ -572,6 +600,10 @@ const mlStufen=(KZ, kopf, schluss=false)=>{
       const zeitUm=alt==='lokal' && L.tMax-Math.max(A.t1, L.tKern ?? -Infinity, L.lokalSeit[ab] ?? -Infinity)>=o.loseNach && ab<KZ.abschnitte.length-1;
       const gK=og || gB || reg || !(zeitUm || alt==='lokal' && zuEnde) ? null : mlKetteG(KZ, A);
       if(og || gB || reg){ A.g=og || gB || {...reg.g}; A.stufe='verbunden'; A.quelle=og ? 'orakel' : gB ? 'bindung' : 'reg'; neuVerbunden.push(ab); A.bindungAn=gB ? bM.partner : null;
+        A.bindungArt=gB ? bM.art || 'schnitt' : null;
+        // Bildkante: M6 kennt sie nicht und schob den Abschnitt sonst weg (Pruefstand A8: Gier 1° richtig, Lage Meter daneben);
+        // mit A.fest haelt M6 den Plan (plan0), die Hoehe bleibt frei. kanten.fest false schaltet das ab.
+        if(gB && bM.art==='bild' && KZ.opt.kanten && KZ.opt.kanten.fest!==false) A.fest=true;
         for(const f of ['loseSeit', 'loseVon', 'lokalSeit', 'regSig']) delete L[f][ab];
         if(!og && !gB) L.probe[ab]={runde:KZ.runde, sig:A.sig || null}; }
       else if(gK){ // (c) Kette: locker mit Gewicht w, optional fest (M6 haelt g)

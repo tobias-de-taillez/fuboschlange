@@ -70,6 +70,18 @@ if(existsSync(tar) && existsSync(prot) && existsSync(T1.WAHRHEIT)){
   chk('(d) orakelAus --spiegel nein unveraendert gut, verh je Abschnitt dabei', nein.n===ja.n && nein.m.every(x=>x<0.25) && Object.values(nein.verh).every(Number.isFinite), nein.m.map(x=>(100*x).toFixed(1)).join(' / ')+' cm');
 } else offen('(d) orakelAus --spiegel ja an A6', 'A6 oder Wahrheit fehlt (A6=tar,prot)');
 
+// ---- (e) Bildkanten (T1 --bildkanten, M10 opt.kanten): Fenster A6 133,71 s + 1,3 s, Kanten des Bild-Teils (scratchpad).
+// Ohne Kanten haengt B nur an der Kette (22,7 cm / 7,6° Pruefstand); mit Kanten (Konsens >= 2, Partner verbunden, Plan fest)
+// verbunden ueber 'bild' und deutlich naeher. Ohne die Kantendatei OFFEN.
+const KANTEN=process.env.KANTEN_A6 || '/private/tmp/claude-501/-Volumes-external-TobiCodetEndlichWieder-Zaene/15a5833a-eb10-4375-9448-54f0729a9a0f/scratchpad/bildkanten/a6.json';
+if(existsSync(tar) && existsSync(prot) && existsSync(KANTEN)){
+  const A6=T1.ladeQuelle(tar, {protokoll:prot}), f={t0:133.71, w:1.3};
+  const ohneK=await PS.pruefeFenster(G, A6, f, {}), mitK=await PS.pruefeFenster(G, A6, f, {t1:[...PS.DEF.t1, '--bildkanten', KANTEN, '--bildkanten-sift']});
+  chk('(e) Bildkanten: B ueber Bild verbunden (Konsens >= 2), naeher als die Kette', mitK.bindungArtB==='bild' && mitK.kanteN>=2 && mitK.stufeB==='verbunden' && mitK.dP<ohneK.dP && Math.abs(mitK.dPsiDeg)<Math.abs(ohneK.dPsiDeg) && mitK.dP<0.12,
+    `ohne ${(100*ohneK.dP).toFixed(1)} cm / ${ohneK.dPsiDeg.toFixed(1)}° (${ohneK.quelleB}), mit ${(100*mitK.dP).toFixed(1)} cm / ${mitK.dPsiDeg.toFixed(1)}° (${mitK.bindungArtB}, n ${mitK.kanteN})`);
+  chk('(e) ohne --bildkanten: M10 opt.kanten null, keine Bildbindung', ohneK.bindungArtB!=='bild' && G.karteNeu({}).opt.kanten===null);
+} else offen('(e) Bildkanten an A6', 'A6 oder Kantendatei fehlt (KANTEN_A6=...)');
+
 console.log(out.join('\n'));
 console.log(ok ? `\nALLE CHECKS GRÜN${nOffen ? ` (${nOffen} offen)` : ''}` : '\nROT');
 process.exit(ok ? 0 : 1);

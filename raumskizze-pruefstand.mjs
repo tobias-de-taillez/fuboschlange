@@ -100,7 +100,7 @@ export async function pruefeFenster(G, A, f, o0={}){
     return L>0 ? {phi:Math.atan2(Sn, C)/4, R:Math.hypot(C, Sn)/L, L} : null; };
   const w90=a=>{ const v=Math.PI/2; let d=((a%v)+v)%v; return d>v/2 ? d-v : d; };
   const mK=kern!=null ? man(kern) : null, mA=man(abA), mB=man(abB);
-  r.kern=kern; r.quelleA=sA ? sA.quelle : null;
+  r.kern=kern; r.quelleA=sA ? sA.quelle : null; r.bindungArtB=KB ? KB.bindungArt || null : null; r.kanteN=KB && KB.kanteN || null;
   r.raumA=mK && mA ? w90(mA.phi-mK.phi)*R2D : null; r.raumB=mK && mB ? w90(mB.phi-mK.phi)*R2D : null;
   if(abA===abB) r.urteil='kein-schnitt';
   else if(!sA || !sB || !sA.g || !sB.g) r.urteil='ohne-lage';
@@ -142,7 +142,9 @@ async function main(){
   const {G}=await T1.ladeSeite({}), L=[`# Prüfstand simulierter Bruch (v${VERSION})`, '', `T1: ${o.t1.join(' ')} · X ${o.X.psiDeg}°, (${o.X.tx}, ${o.X.tz}) m · w ${o.w.join(', ')} s`, ''], alle={};
   for(const s of a.aufnahme){ const [name, rest]=s.split('='), [tar, prot]=rest.split(',');
     const A=T1.ladeQuelle(resolve(tar), {protokoll:prot ? resolve(prot) : null}), F=fenster(G, A, o), R=[];
-    for(const f of F){ let r; try{ r=await pruefeFenster(G, A, f, o); }catch(e){ r={...f, urteil:'fehler', fehler:String(e.message || e).slice(0, 120)}; }
+    // %a im T1-Text = Name der Aufnahme klein (z. B. --bildkanten kanten/%a.json)
+    const oA={...o, t1:o.t1.map(x=>x.replace(/%a/g, name.toLowerCase()))};
+    for(const f of F){ let r; try{ r=await pruefeFenster(G, A, f, oA); }catch(e){ r={...f, urteil:'fehler', fehler:String(e.message || e).slice(0, 120)}; }
       R.push(r); process.stderr.write(`${name} t0 ${f.t0} w ${f.w}: ${r.urteil} ${cm(r.dP)} cm ${g1(r.dPsiDeg)}°\n`); }
     alle[name]=R; L.push(tabelle(name, R)); }
   const Z=Object.values(alle).flat(); L.push('## Alle', '', tabelle('gesamt', Z).split('\n').slice(-2).join('\n'));

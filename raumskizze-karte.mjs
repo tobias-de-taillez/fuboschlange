@@ -391,6 +391,9 @@ function zeitleiste(G, A, posen, erf, o){
   L.sort((a,b)=>a.t-b.t || a.ord-b.ord || a.s-b.s);
   return L;
 }
+// Bildkanten (--bildkanten): {kanten:[{ki, kj, ti, tj, regel, g}], kantenSift?} wie scratchpad/bildkanten (Bild-Teil 12.8) -> M10 opt.kanten
+export function kantenLaden(b){ const J=JSON.parse(readFileSync(b.datei, 'utf8'));
+  return {liste:[...(J.kanten||[]), ...(b.sift ? J.kantenSift||[] : [])], min:b.min ?? 2, datei:b.datei}; }
 // Ein ganzer Lauf. Rueckgabe {KZ, runden: [{stand, kopf}], letzter, export, teilen, hinweise, alt, info}.
 export async function laufen(G, A, o0={}){
   const o={...DEF, ...o0, arbeit:{...DEF.arbeit, ...(o0.arbeit||{})}}, info={warnungen:[...(A.warnungen||[])], bilder:0, bildFehlt:0, weg:{bild:0, erf:0}, ereignisse:0, tiefe:0, ebenen:0};
@@ -422,7 +425,7 @@ export async function laufen(G, A, o0={}){
   const orakel=o.orakel || null;
   const KZ=G.karteNeu({H:hLaser ? {laser:hLaser, sigma:0.015} : null, quelle:o.quelle, arbeit:o.arbeit, knoten:o.knoten, lago:o.lago, pp:o.pp, skala:o.skala,
     reg:o.reg!=='aus', ohne:o.ohne, ohneAb:o.ohneAb, proj:kam.proj, w:kam.w, h:kam.h, umriss:!o.ohne.includes('umriss'), umrissOpt:o.umriss==='cabral' ? {art:'cabral'} : {},
-    orakel, uhr:uhrMit(o.uhr), ...(o.karte||{})});
+    orakel, uhr:uhrMit(o.uhr), ...(o.karte||{}), ...(o.bildkanten ? {kanten:kantenLaden(o.bildkanten)} : {})});
   // M3 skaliert seine px-Schwellen mit skala 'auto' = min(w, h)/287; beschnitten muss die Skala des vollen Bilds bleiben,
   // sonst saenken sich minLineLen, minLen und die Verschmelz-Schwellen mit der Breite (andere Kanten statt weniger Sichtfeld).
   const BZ=G.bildNeu(fen ? {skala:Math.min(A.w, A.h)/287} : {}), flipAt=A.art==='sitzung' ? (()=>false) : flipAtAus(A), seg=o.segmente==='geraet' ? segmenteLesen(A.segmenteBin) : null;
@@ -568,7 +571,7 @@ export function planSvg(lauf, m, wahrheit){
 }
 
 // ------------------------------------------------ Kommandozeile
-const BOOL=new Set(['ohneH', 'orakel-rahmen', 'knoten', 'orakel-landmarken', 'runden-arbeit', 'mit-wahr', 'platzhalter-vor']);
+const BOOL=new Set(['ohneH', 'orakel-rahmen', 'knoten', 'orakel-landmarken', 'runden-arbeit', 'mit-wahr', 'platzhalter-vor', 'bildkanten-sift']);
 export function argumente(argv){
   const a={_:[]};
   for(let i=0;i<argv.length;i++){ const x=argv[i]; if(!x.startsWith('--')){ a._.push(x); continue; }
@@ -587,7 +590,9 @@ export function optionenAus(a){
     rundenArbeit:!!a['runden-arbeit'], mitWahr:!!a['mit-wahr'] || !!a['orakel-rahmen'] || !!a['orakel-landmarken'],
     sichtfeld:a.sichtfeld!=null ? +a.sichtfeld : DEF.sichtfeld, sichtfeldErf:a['sichtfeld-erf'] || DEF.sichtfeldErf,
     // --karte '{"abReg":{"gierRaster":true}}': Optionen fuer G.karteNeu (M10), z. B. fuer den Pruefstand
-    ...(a.karte!=null && a.karte!==true ? {karte:JSON.parse(String(a.karte))} : {})};
+    ...(a.karte!=null && a.karte!==true ? {karte:JSON.parse(String(a.karte))} : {}),
+    // --bildkanten kanten.json [--bildkanten-min 2] [--bildkanten-sift]: Relativlagen aus der Bild-Wiedererkennung (12.8) an M10 opt.kanten
+    ...(a.bildkanten && a.bildkanten!==true ? {bildkanten:{datei:String(a.bildkanten), min:a['bildkanten-min'] ? +a['bildkanten-min'] : 2, sift:!!a['bildkanten-sift']}} : {})};
 }
 // Orakel (5.1): --orakel-rahmen setzt g je Abschnitt aus der Wahrheit (Sitzung: wahr.g zur Bildzeit) und legt
 // F0 in den Rahmen der Wahrheit; --orakel-landmarken setzt zusaetzlich die Wahrheitswaende als feste Landmarken.
