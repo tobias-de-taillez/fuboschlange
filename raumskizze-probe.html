@@ -11072,6 +11072,8 @@ function stats(){
     ...(KARTE ? [['Karte', `${ms(median(LOG.timings.karte.slice(-20)))}/${ms(median(LOG.timings.karteAntwort.slice(-20)))}, ${LOG.karte.runden} R, ${LOG.karte.ausgefallen} ausgef., `
       +(KW.letzt ? `${KW.letzt.waende.length} W${KW.letzt.lokal ? ' lokal' : ''}` : '–')+(KW.aus ? ' · AUS '+KW.aus : '')]] : []),
     ...(MESS ? [['Mess', `${S.netz ? S.netz.net.length : 0} Anker, IMU ${LOG.mess.imu}, Marken ${LOG.mess.marken}`]] : []),
+    // ?imu=1 (12.8): kommen Gyro und devicemotion waehrend immersive-ar an? (am Pixel unbelegt)
+    ...(IMU ? [['IMU', `${LOG.mess.gyro} Gyro, ${LOG.mess.imu} dm`+(LOG.mess.gyroFehler ? ` · ${LOG.mess.gyroFehler}` : '')]] : []),
     ['y-Spiegel', S.flipY ? 'an' : 'aus'],
   ];
   $('arStats').replaceChildren(...parts.map(([k,v])=>el('span', deNum(`${k} ${v}`))));
@@ -11744,6 +11746,7 @@ function showResult(res){
     + ` · readPixels 256² ${ms(s0.roiMs)} · verkleinert ${ms(s0.smallMs)} · Kante ${ms(s0.snapMs)}`);
   pt(`Tracking: ${s0.tracking.ok} ok, ${s0.tracking.emulated} geschätzt, ${s0.tracking.lost} verloren, Anker ${s0.tracking.anchorLost||0} verloren · Ebenen max ${s0.planesMax.h}h/${s0.planesMax.v}v · Tiefe ${s0.depth && s0.depth.w ? s0.depth.w+'×'+s0.depth.h : '–'}`);
   pt(`Features: ${s0.enabledFeatures ? s0.enabledFeatures.join(', ') : 'nicht gemeldet'}`);
+  if(IMU) pt(`IMU: ${LOG.mess.gyro} Gyroscope-Werte, ${LOG.mess.imu} devicemotion-Werte`+(LOG.mess.gyroFehler ? ` · Gyroscope: ${LOG.mess.gyroFehler}` : ''), LOG.mess.gyro || LOG.mess.imu ? '' : 'warn');
   if(s0.floor) pt(`Boden: Normale ${s0.floor.normalDeg}° von senkrecht, Kamera ${Math.round(s0.floor.camHeight*1000)} mm darüber, ${s0.floor.anchor ? 'mit Anker' : 'ohne Anker'}`
     + (s0.floor.tFound!=null ? `, gefunden nach ${s0.floor.tFound.toFixed(1)} s` : ''), s0.floor.anchor ? '' : 'warn');
   if(LOG.runs.length) p(`Durchlauf ${LOG.runs.length+1} – frühere Durchläufe stecken im Protokoll.`);
