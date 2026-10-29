@@ -56,3 +56,18 @@ Gebaut hinter Schaltern, Vorgabe unverändert (aus): `karte.lm = {neu, erfassung
 - **Gemischtes Ergebnis, daher nicht eingeschaltet:** A6 und vor allem A8 (Außenring 4 → 14 Ecken, Editdistanz 10 → 3, monoton über 50/70/100 %) werden besser. A7 (Editdistanz 18 → 25) und B1600/B1714 (Ecken des Außenrings 13–14 → 23) werden schlechter. Die übrigen Doppelwände in A7 liegen 20–27 cm auseinander im selben Abschnitt, also keine Frage der Schwelle.
 - `erfassung.minNutzer` ändert nichts am Ring: Die Ringbildung (M7 `umriss`) nimmt die zusätzlichen einzelnen Wände mit. Der nächste Hebel liegt dort (Wände mit einer einzigen Erfassung nicht zu Ringecken machen), nicht in M5.
 - Die T2-Werte (Passung, IoU, „Beob gehoben“) sind hier nicht entscheidbar (Mehrdeutigkeit, A7 „Maßstab nicht gültig“) und wurden nicht verwertet.
+
+### Ringbildung (M7): Einzelwände ausschließen
+Schalter `umrissEingabe.minBeob` (M7, Vorgabe 0 = aus; M10-Option `umrissEingabe`): Wände mit weniger Beob als `minBeob` gehen nicht in den Umriss ein, weil die Höhenklasse jede Wand mit `cls 'wand'` bestätigt, auch wenn sie nur aus einer Erfassung besteht. Außenring-Ecken / Editdistanz bei 100 % (Wahrheit 14 Ecken), Vorgabe, dann Höhe + Tore 0,15 m (`hz15`) und `hz15` mit `minBeob 3`:
+
+| | Vorgabe | hz15 | hz15 + minBeob 3 |
+|---|---|---|---|
+| A6 | 12 / 3 | 14 / 3 | 14 / 2 |
+| A7 | 33 / 18 | 41 / 25 | 38 / 24 |
+| A8 | 4 / 10 | 14 / 3 | 14 / 3 |
+| B1600 | 14 / – | 23 / – | 15 / – |
+| B1714 | 13 / – | 23 / – | 19 / – |
+
+- `minBeob 3` holt von den Zusatzecken von `hz15` den größten Teil zurück (B1600 23 → 15, B1714 23 → 19, A7 41 → 38), ohne die Gewinne in A6 und A8 anzutasten. Allein, ohne `hz15`, bringt es wenig und schadet in A6 (`minBeob 3`: Editdistanz 3 → 6, nur 9 Ecken).
+- Gegenüber der Vorgabe bleiben A7 (Editdistanz 18 → 24) und B1714 (13 → 19 Ecken) schlechter. In A7 wird die Karte auch in der Vorgabe mit mehr Daten schlechter (Editdistanz 6 → 11 → 18); das ist kein Fehler der neuen Schalter, sondern der Abschnittsdrift dort.
+- **Entscheidung:** nicht als Vorgabe eingeschaltet. Es gewinnen A6 und A8 deutlich, es verlieren A7 und B1714 moderat; für eine Vorgabe fehlt eine Aufnahme mehr, auf der die Kombination bestätigt wird. Die nächste Wohnküchen-Aufnahme mit `?karte=1` entscheidet das.

@@ -6811,7 +6811,7 @@ const schwer=P=>{ let A=0, cx=0, cy=0; for(let i=0,j=P.length-1;i<P.length;j=i++
 // wegAbstand (m, Ausduennen des Wegs), eckTol (Senkrechte bis zur Decke: |top - hC| <= eckTol), lokalOben ('gleich': Senkrechte
 // an den Enden einer lokal-Wand mit |top - hLokal| <= eckTol, 8.3 wie geschrieben | 'bis': top >= hLokal - eckTol, Lesart offen, Bericht P-E).
 G.umrissEingabe=(karte,o={})=>{
-  const oo={nurGlobal:true, minW:0.05, faecher:'schluessel', wegAbstand:0.05, eckTol:0.05, lokalOben:'gleich', ...o};
+  const oo={nurGlobal:true, minW:0.05, faecher:'schluessel', wegAbstand:0.05, eckTol:0.05, lokalOben:'gleich', minBeob:0, ...o};
   const AB=new Map((karte.abschnitte||[]).map(A=>[A.ab, A]));
   const wAb=A=>!A || !A.g ? 0 : Number.isFinite(A.w) ? A.w : G.abschnittGewicht ? G.abschnittGewicht(A) : 0;
   const hC=Number.isFinite(karte.hC) ? karte.hC : null, liste=x=>x instanceof Map ? [...x.values()] : (x || []);
@@ -6823,6 +6823,7 @@ G.umrissEingabe=(karte,o={})=>{
   for(const w of W){
     const cls=w.cls, h=w.h, n=G.wandN(w.phi), u=G.wandU(w.phi), sOf=p=>u[0]*p[0]+u[1]*p[1];
     if(cls==='stoer' || cls==='unterzug') continue;
+    if(oo.minBeob>0 && (w.beob || []).length<oo.minBeob) continue;   // Einzelwaende (eine Erfassung) bilden keine Ringecken (Messung 29.10.)
     const iv=(w.iv || []).map(x=>Array.isArray(x) ? [x[0], x[1]] : [x.s0, x.s1]).filter(x=>x[1]>x[0]);
     const senk=E.filter(e=>e.senk && Number.isFinite(e.top) && Array.isArray(e.waende) && e.waende.includes(w.id));
     const decke=hC==null ? [] : senk.filter(e=>Math.abs(e.top-hC)<=oo.eckTol);
@@ -7968,6 +7969,7 @@ const ML_DEF={H:null, quelle:'segmente', arbeit:{iter:3, lin:2, relin:20000, reg
   skala:'fest', umriss:true, umrissJede:2, reg:true, tiefe:0, ebenen:0, ohne:[], ohneAb:[], warteMax:1.0, loseNach:30, loseErledigt:10,
   proj:null, w:287, h:640, sPxErf:2, kopfRaster:1e6, topoRunden:3, topoDauer:3, verlaufMax:60, hypRunden:3, orakel:null, uhr:null,
   ausgleich:null,   // weitere Optionen fuer G.lmAusgleich (M6), z. B. {bodenKette:false}
+  umrissEingabe:null,   // Optionen fuer G.umrissEingabe (M7), z. B. {minBeob:2}
   lm:null,   // Ueberschreibungen fuer M5 {neu, erfassung, zusammen}, z. B. {neu:{hoeheEigen:true}} (karte.opt.lm)
   kanten:null,   // Bildkanten {liste, min, tolP, tolPsiDeg, partner} (mlKanteMit, 12.8); null = aus
   verbunden:{sP:0.05, sY:1*Math.PI/180}, locker:{max:0.08, psi:1.5*Math.PI/180}, lose:{max:0.20, zurueck:0.15},
@@ -8592,7 +8594,7 @@ const mlSchwer=P=>{ let x=0, z=0; for(const p of P){ x+=p[0]; z+=p[1]; } return 
 // G.umrissEingabe (inselEntscheide) als inselFest.
 const mlUmriss=(KZ, kopf, schluss, A)=>{
   const o=KZ.opt, L=KZ.lauf;
-  const inp=mlRuf('umrissEingabe', KZ, {nurGlobal:true, minW:0.05});
+  const inp=mlRuf('umrissEingabe', KZ, {nurGlobal:true, minW:0.05, ...(o.umrissEingabe||{})});
   if(!inp) return null;
   const opt={...(G.UM_DEF||{}), ...(o.umrissOpt||{}), vorher:KZ.umriss || null};
   let erg=mlRuf('umriss', inp, opt); kopf.arbeit.umriss++;

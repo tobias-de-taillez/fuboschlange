@@ -78,6 +78,7 @@ const ML_DEF={H:null, quelle:'segmente', arbeit:{iter:3, lin:2, relin:20000, reg
   skala:'fest', umriss:true, umrissJede:2, reg:true, tiefe:0, ebenen:0, ohne:[], ohneAb:[], warteMax:1.0, loseNach:30, loseErledigt:10,
   proj:null, w:287, h:640, sPxErf:2, kopfRaster:1e6, topoRunden:3, topoDauer:3, verlaufMax:60, hypRunden:3, orakel:null, uhr:null,
   ausgleich:null,   // weitere Optionen fuer G.lmAusgleich (M6), z. B. {bodenKette:false}
+  umrissEingabe:null,   // Optionen fuer G.umrissEingabe (M7), z. B. {minBeob:2}
   lm:null,   // Ueberschreibungen fuer M5 {neu, erfassung, zusammen}, z. B. {neu:{hoeheEigen:true}} (karte.opt.lm)
   kanten:null,   // Bildkanten {liste, min, tolP, tolPsiDeg, partner} (mlKanteMit, 12.8); null = aus
   verbunden:{sP:0.05, sY:1*Math.PI/180}, locker:{max:0.08, psi:1.5*Math.PI/180}, lose:{max:0.20, zurueck:0.15},
@@ -702,7 +703,7 @@ const mlSchwer=P=>{ let x=0, z=0; for(const p of P){ x+=p[0]; z+=p[1]; } return 
 // G.umrissEingabe (inselEntscheide) als inselFest.
 const mlUmriss=(KZ, kopf, schluss, A)=>{
   const o=KZ.opt, L=KZ.lauf;
-  const inp=mlRuf('umrissEingabe', KZ, {nurGlobal:true, minW:0.05});
+  const inp=mlRuf('umrissEingabe', KZ, {nurGlobal:true, minW:0.05, ...(o.umrissEingabe||{})});
   if(!inp) return null;
   const opt={...(G.UM_DEF||{}), ...(o.umrissOpt||{}), vorher:KZ.umriss || null};
   let erg=mlRuf('umriss', inp, opt); kopf.arbeit.umriss++;

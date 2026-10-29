@@ -111,7 +111,7 @@ const schwer=P=>{ let A=0, cx=0, cy=0; for(let i=0,j=P.length-1;i<P.length;j=i++
 // wegAbstand (m, Ausduennen des Wegs), eckTol (Senkrechte bis zur Decke: |top - hC| <= eckTol), lokalOben ('gleich': Senkrechte
 // an den Enden einer lokal-Wand mit |top - hLokal| <= eckTol, 8.3 wie geschrieben | 'bis': top >= hLokal - eckTol, Lesart offen, Bericht P-E).
 G.umrissEingabe=(karte,o={})=>{
-  const oo={nurGlobal:true, minW:0.05, faecher:'schluessel', wegAbstand:0.05, eckTol:0.05, lokalOben:'gleich', ...o};
+  const oo={nurGlobal:true, minW:0.05, faecher:'schluessel', wegAbstand:0.05, eckTol:0.05, lokalOben:'gleich', minBeob:0, ...o};
   const AB=new Map((karte.abschnitte||[]).map(A=>[A.ab, A]));
   const wAb=A=>!A || !A.g ? 0 : Number.isFinite(A.w) ? A.w : G.abschnittGewicht ? G.abschnittGewicht(A) : 0;
   const hC=Number.isFinite(karte.hC) ? karte.hC : null, liste=x=>x instanceof Map ? [...x.values()] : (x || []);
@@ -123,6 +123,7 @@ G.umrissEingabe=(karte,o={})=>{
   for(const w of W){
     const cls=w.cls, h=w.h, n=G.wandN(w.phi), u=G.wandU(w.phi), sOf=p=>u[0]*p[0]+u[1]*p[1];
     if(cls==='stoer' || cls==='unterzug') continue;
+    if(oo.minBeob>0 && (w.beob || []).length<oo.minBeob) continue;   // Einzelwaende (eine Erfassung) bilden keine Ringecken (Messung 29.10.)
     const iv=(w.iv || []).map(x=>Array.isArray(x) ? [x[0], x[1]] : [x.s0, x.s1]).filter(x=>x[1]>x[0]);
     const senk=E.filter(e=>e.senk && Number.isFinite(e.top) && Array.isArray(e.waende) && e.waende.includes(w.id));
     const decke=hC==null ? [] : senk.filter(e=>Math.abs(e.top-hC)<=oo.eckTol);
