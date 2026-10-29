@@ -8002,7 +8002,7 @@ const ML_DEF={H:null, quelle:'segmente', arbeit:{iter:3, lin:2, relin:20000, reg
     // (Erfassungen mod 90°, Kreismittel von 4θ nach Laenge). Nur bei Raumrichtung beiderseits (Laenge >= rasterMinL m,
     // Buendelung R >= rasterMinR); einmal je Abschnitt (A.gierRaster). Pruefstand: die Gier der Kette liegt nach einer Pause
     // im Median 15-20° daneben, Z13 sucht nur +-gierDeg.
-    gierRaster:false, rasterSYDeg:5, rasterMinL:1.5, rasterMinR:0.7, mitGyro:'aus',
+    gierRaster:false, rasterSYDeg:5, rasterMinL:1.5, rasterMinR:0.7, mitGyro:'aus', gyroMit:true,
     // Achsen-Registrierung (Doku 12.8): Kettenabschnitte hinter einem Gyro-Schnitt (Gier bekannt) je Raumachse der Referenz um
     // einen 1-D-Versatz in +-achsFenster m (Raster 1 cm): Laenge der Erfassungslinien (+-achsRichtDeg zur Achse), die eine
     // Referenzlinie auf achsTol m treffen und sich in der Ausdehnung (+-achsUeber m) ueberlappen; angenommen je Achse ab achsMinL m
@@ -8432,7 +8432,11 @@ const mlAbReg=(KZ, neu, neuB, kopf)=>{
       B.abReg={angenommen:r.angenommen, grund:r.grund, dpsi:r.dpsi, dt:r.dt, r0:r.r0, r1:r.r1, nah:r.nah, richtW:r.richtW, marge:r.marge, nErf:segs.length, gruppe:grp,
         versuche:((B.abReg && B.abReg.versuche)||0)+1, stempel:R.stempel, runde:KZ.runde, gVor:{...B.g}};
       L.abRegLog.push({runde:KZ.runde, ab, nRef:R.n, ...B.abReg, zweit:r.zweit, delta:r.delta}); if(L.abRegLog.length>o.logMax) L.abRegLog.shift();
-      if(r.angenommen){ for(const x of grp) A[x].g=G.gKomp(r.delta, A[x].g); neuAn.push(ab); ausRef=offenG(); R=refBau(); weiter=true; } } }
+      if(r.angenommen){ for(const x of grp) A[x].g=G.gKomp(r.delta, A[x].g);
+        // gyroMit (Messung 29.10., A6 p90 an den Waenden 93,5 -> 62,6 cm): Kettenabschnitte, die ueber Gyro-Schnitte hinter der Gruppe haengen,
+        // gehen mit; sonst bricht die Gyro-Relation (A6 142,71 s: Gier -14,4 Grad bei Gyro auf 0,2 Grad genau)
+        if(o.gyroMit){ let k=Math.max(...grp)+1; while(A[k] && A[k].g && A[k].quelle==='kette' && !angen(A[k]) && KZ.schnitte[k-1] && KZ.schnitte[k-1].bindung && KZ.schnitte[k-1].bindung.gyro){ A[k].g=G.gKomp(r.delta, A[k].g); k++; } }
+        neuAn.push(ab); ausRef=offenG(); R=refBau(); weiter=true; } } }
   if(o.achsen && R.n && R.man && R.man.R>=o.rasterMinR) for(const ab of offen0){ const B=A[ab], s=KZ.schnitte[ab-1];
     if(!B || B.quelle!=='kette' || !B.g || B.achsReg || !(s && s.bindung && s.bindung.gyro)) continue;
     const grp=gruppe(ab), segs=segsVon(grp); if(segs.length<o.minErf) continue;
@@ -9515,7 +9519,7 @@ function kwVor(t){ while(KW.tTakt!=null && t>KW.tTakt){ kwTakt(false); KW.tTakt+
 function kwStart(t0){
   const geo=LOG.session && LOG.session.geometry;
   if(!geo || !geo.proj || !S.small) return false;
-  kwSenden({typ:'start', opt:{...KARTE_OPT, H:S.H ? {laser:S.H, sigma:0.015} : null, quelle:KARTE_QUELLE, proj:geo.proj, w:S.small[0], h:S.small[1]}});
+  kwSenden({typ:'start', opt:{...KARTE_OPT, H:S.H ? {laser:S.H, sigma:0.015} : null, quelle:KARTE_QUELLE, proj:geo.proj, w:S.small[0], h:S.small[1], ...(IMU ? {schnitt:{gyroBruecke:true, vorhersage:'gedaempft'}} : {})}});
   KW.an=true; KW.tTakt=t0+KARTE_TAKT;
   for(const x of KW.vorher || []) kwSenden({typ:'ereignis', ev:x});
   KW.vorher=null;
@@ -9537,6 +9541,7 @@ function kwBild(r){
   if(!KW.an && !kwStart(t)) return;
   while(KW.nBr<LOG.breaks.length){ const b=LOG.breaks[KW.nBr++]; if(Number.isFinite(b.t)){ kwVor(b.t); kwSenden({typ:'ereignis', ev:{...JSON.parse(JSON.stringify(b)), typ:'bruch'}}); } }
   const {z, camTo}=kwZeile(r);
+  if(IMU) gyLive(z);
   kwVor(t); kwSenden({typ:'pose', zeile:z});
   // Erfassungen wie erfassungenAus: ohne undone und suspect, ep und camTo der naechsten Zeile (dieser)
   for(;KW.nObs<LOG.obs.length;KW.nObs++){ const x=LOG.obs[KW.nObs];
@@ -9700,7 +9705,48 @@ function messStart(){
 const IMU_G={g:null, start:null, letzt:null, steht:false, off:null}, IMU_STEHT=1.5;
 const imuFokus=e=>ev('fokus', {an:e.type==='focus', hat:document.hasFocus ? document.hasFocus() : null});
 const imuSicht=()=>ev('sichtbar', {zustand:document.visibilityState});
+// Gyro live (Stand 17): imuPsi je Zeile wie T1 imuGier (raumskizze-karte.mjs, Doku 12.8). Achsen-Zuordnung und Zeitversatz werden einmal aus
+// den ersten ~300 verfolgten Zeilenpaaren geschaetzt (kleinste Abweichung gegen ARCore), danach je neue Zeile die Aenderung des Plan-Blicks
+// aus dem Gyro (nullte Ordnung, Abtastwert hoechstens hMax s vor sich). Ohne Zuordnung oder bei Aussetzern bleibt imuPsi weg: dann keine Bruecke.
+const GYL={t:[], w:[], M:null, d:0, a:null, paare:[], rest:null, hMax:0.05, versuche:0, n:0, nan:0};
+const gyReset=()=>{ Object.assign(GYL, {t:[], w:[], M:null, d:0, a:null, paare:[], rest:null, versuche:0, n:0, nan:0}); };
+const gyMul=(a,b)=>[a[3]*b[0]+a[0]*b[3]+a[1]*b[2]-a[2]*b[1], a[3]*b[1]-a[0]*b[2]+a[1]*b[3]+a[2]*b[0], a[3]*b[2]+a[0]*b[1]-a[1]*b[0]+a[2]*b[3], a[3]*b[3]-a[0]*b[0]-a[1]*b[1]-a[2]*b[2]];
+const gyExp=(w, dt)=>{ const th=Math.hypot(w[0], w[1], w[2])*dt; if(th<1e-12) return [w[0]*dt/2, w[1]*dt/2, w[2]*dt/2, 1]; const sn=Math.sin(th/2)/(th/dt); return [w[0]*sn, w[1]*sn, w[2]*sn, Math.cos(th/2)]; };
+const gyBlick=q=>Math.atan2(-(1-2*(q[0]*q[0]+q[1]*q[1])), -2*(q[0]*q[2]+q[1]*q[3]));
+const gyDreh=(M, w)=>[M[0][0]*w[0]+M[0][1]*w[1]+M[0][2]*w[2], M[1][0]*w[0]+M[1][1]*w[1]+M[1][2]*w[2], M[2][0]*w[0]+M[2][1]*w[1]+M[2][2]*w[2]];
+const GY_ZUORD=(()=>{ const out=[], P=[[0,1,2],[0,2,1],[1,0,2],[1,2,0],[2,0,1],[2,1,0]];
+  for(const p of P) for(let sg=0;sg<8;sg++){ const v=[sg&1 ? -1 : 1, sg&2 ? -1 : 1, sg&4 ? -1 : 1], M=[[0,0,0],[0,0,0],[0,0,0]]; for(let r=0;r<3;r++) M[r][p[r]]=v[r];
+    const det=M[0][0]*(M[1][1]*M[2][2]-M[1][2]*M[2][1])-M[0][1]*(M[1][0]*M[2][2]-M[1][2]*M[2][0])+M[0][2]*(M[1][0]*M[2][1]-M[1][1]*M[2][0]); if(det>0) out.push(M); }
+  return out; })();
+function gyZeile(M, a, b, d){
+  const T0=GYL.t, S=GYL.w, hMax=GYL.hMax; let q=a.pose.slice(3, 7), t=a.t;
+  let lo=0, hi=T0.length; while(lo<hi){ const m=(lo+hi)>>1; if(T0[m]+d<=a.t) lo=m+1; else hi=m; } let k=lo;
+  while(t<b.t){ if(k>=T0.length) return NaN;
+    const tk=T0[k]+d, tv=k>0 ? T0[k-1]+d : -Infinity;
+    if(tk-tv>hMax && t<tk-hMax) return NaN;
+    const t1=Math.min(tk, b.t); if(t1>t) q=gyMul(q, gyExp(gyDreh(M, S[k]), t1-t)); t=t1; if(tk>=b.t) break; k++; }
+  const dd=gyBlick(q)-gyBlick(a.pose.slice(3, 7)); return Math.atan2(Math.sin(dd), Math.cos(dd)); }
+function gyKalib(){
+  const P=GYL.paare, arc=([a, b])=>{ const dd=gyBlick(b.pose.slice(3, 7))-gyBlick(a.pose.slice(3, 7)); return Math.atan2(Math.sin(dd), Math.cos(dd)); };
+  const fehler=(M, d)=>{ const f=[]; for(const pr of P){ const v=gyZeile(M, pr[0], pr[1], d); if(Number.isFinite(v)) f.push(Math.abs(v-arc(pr))); }
+    if(f.length<20) return null; f.sort((x, y)=>x-y); return {med:f[f.length>>1], n:f.length}; };
+  const wahl=d=>{ let best=null; for(let z=0;z<GY_ZUORD.length;z++){ const e=fehler(GY_ZUORD[z], d); if(e && (!best || e.med<best.med)) best={z, ...e}; } return best; };
+  let best=wahl(0); if(!best){ ev('imu-kalib', {gut:false, grund:'zu wenige Paare mit lueckenlosem Gyro', paare:P.length, werte:GYL.t.length}); return false; }
+  let dBest=0, eBest=best.med; for(let j=-25;j<=25;j++){ const d=j/100, e=fehler(GY_ZUORD[best.z], d); if(e && e.med<eBest-1e-12){ eBest=e.med; dBest=d; } }
+  if(dBest!==0){ const b2=wahl(dBest); if(b2) best=b2; }
+  ev('imu-kalib', {zuordnung:GY_ZUORD[best.z], versatz:dBest, restDeg:+(best.med*180/Math.PI).toFixed(3), paare:best.n, gut:best.med<0.02});
+  if(best.med>=0.02) return false;   // > 1,1 Grad Rest: Zuordnung unbrauchbar (Gyro stumm oder Zeitbasis falsch), spaeter neu
+  GYL.M=GY_ZUORD[best.z]; GYL.d=dBest; GYL.rest=best.med; return true; }
+// je PoseZeile z (aufsteigende Zeit): imuPsi setzen, sobald die Zuordnung steht
+function gyLive(z){
+  const a=GYL.a; GYL.a=z; if(!a || !GYL.t.length) return;
+  if(!GYL.M){
+    if(z.t-a.t<=0.105 && a.ep===z.ep && GYL.paare.length<300) GYL.paare.push([a, z]);
+    if(GYL.versuche<3 && GYL.paare.length>=[40, 150, 300][GYL.versuche]){ GYL.versuche++; gyKalib(); }   // schlechter Rest: mit mehr Paaren noch zweimal
+    return; }
+  const v=gyZeile(GYL.M, a, z, GYL.d); if(Number.isFinite(v)){ z.imuPsi=v; GYL.n++; } else GYL.nan++; }
 function imuStart(){
+  gyReset();
   addEventListener('devicemotion', onImu);
   addEventListener('focus', imuFokus); addEventListener('blur', imuFokus); if(document.addEventListener) document.addEventListener('visibilitychange', imuSicht);
   Object.assign(IMU_G, {start:now(), letzt:null, steht:false, fehlerGemeldet:false, off:null});
@@ -9712,6 +9758,7 @@ function imuStart(){
         // Passt (ts - T0) nicht zu now() (> 2 s daneben), t = ts/1000 + kleinster bisheriger Versatz (now - ts/1000), ts bleibt roh.
         const tn=now(), tp=(g.timestamp-T0)/1000; let tg=tp;
         if(Math.abs(tp-tn)>2){ const o=tn-g.timestamp/1000; IMU_G.off=IMU_G.off==null ? o : Math.min(IMU_G.off, o); tg=g.timestamp/1000+IMU_G.off; }
+        GYL.t.push(+tg.toFixed(4)); GYL.w.push([+g.x.toFixed(5), +g.y.toFixed(5), +g.z.toFixed(5)]);
         REC.imu.push({q:'gyro', t:+tg.toFixed(4), ta:tn, ts:+g.timestamp.toFixed(3),
         w:[+g.x.toFixed(5), +g.y.toFixed(5), +g.z.toFixed(5)]}); REC.imuN++; LOG.mess.gyro++;
         const t=now(); if(IMU_G.steht){ IMU_G.steht=false; ev('imu-weiter', {luecke:+(t-(IMU_G.letzt ?? IMU_G.start)).toFixed(2), fokus:document.hasFocus ? document.hasFocus() : null}); }

@@ -1133,7 +1133,7 @@ const geraetBau=()=>{
         const c=structuredClone(m, {transfer:tr || []}), w=this;
         if(w.art==='schaetzer') stat.solver.push({t:uhr, obs:JSON.stringify(c.obs), opt:JSON.stringify(c.opt)});
         if(w.art==='bild' && c.typ==='bild') stat.bildAn.push({t:uhr, ta:c.t, k:c.k, ep:c.ep, vi:c.vi, w:c.w, h:c.h, an:c.an, senk:c.senk, bytes:c.buf.byteLength});
-        if(w.art==='karte') stat.karteAn.push({t:uhr, typ:c.typ, ...(c.typ==='rechne' ? {id:c.id, schluss:c.schluss} : c.typ==='pose' ? {zt:c.zeile.t, ep:c.zeile.ep} : c.typ==='erfassung' ? {et:c.erf.t, id:c.erf.id} : c.typ==='ereignis' ? {ev:c.ev.typ} : {})});
+        if(w.art==='karte') stat.karteAn.push({t:uhr, typ:c.typ, ...(c.typ==='rechne' ? {id:c.id, schluss:c.schluss} : c.typ==='pose' ? {zt:c.zeile.t, ep:c.zeile.ep} : c.typ==='erfassung' ? {et:c.erf.t, id:c.erf.id} : c.typ==='ereignis' ? {ev:c.ev.typ} : c.typ==='start' ? {schnitt:(c.opt && c.opt.schnitt) || null} : {})});
         if(w.art==='karte' && o.karte==='schweigt') return;
         if(w.art==='karte' && o.karte==='wirftAussen'){ plane(uhr, ()=>{ if(!w.weg && w.onerror) w.onerror({message:'Platzhalter wirft'}); }); return; }
         if(w.art==='bild' && o.bild==='schweigt') return;
@@ -1262,9 +1262,10 @@ const geraetBau=()=>{
       boden.lastChangedTime=1000*3*Math.floor(s/3); wandE.lastChangedTime=1000*2*Math.floor(s/2);
       while(o.klicks && klicks<o.klicks.length && s>=o.klicks[klicks][0]){ const e=doc.getElementById(o.klicks[klicks++][1]); if(e.onclick) e.onclick(); }
       // o.gyroAb (s): Gyroscope liefert erst ab dann Werte (Seite ohne Fokus nach einem Berechtigungsdialog, Tippen holt ihn zurueck)
+      // o.gyroBoot: Zeitstempel auf Geraetelaufzeit wie am Pixel (Chrome 156)
       // o.gyroFehler: der Gyroscope meldet nach 1 s 'error' (Bewegungssensoren in Chrome blockiert)
       if(o.gyroFehler && gyroObj && s>=1 && !gyroObj.fehlerGesendet){ gyroObj.fehlerGesendet=true; if(gyroObj.h.error) gyroObj.h.error({error:{name:'NotAllowedError', message:'Permission denied'}}); }
-      if(o.gyro && gyroObj && !o.gyroFehler && !(o.gyroAb!=null && s<o.gyroAb)) for(const dt of [0, dtF/2]){ Object.assign(gyroObj, {x:0.01, y:0.02, z:0.03, timestamp:tI+dt}); if(gyroObj.h.reading) gyroObj.h.reading(); }
+      if(o.gyro && gyroObj && !o.gyroFehler && !(o.gyroAb!=null && s<o.gyroAb)) for(const dt of [0, dtF/2]){ Object.assign(gyroObj, {x:0.01, y:0.02, z:0.03, timestamp:tI+dt+(o.gyroBoot ? 283905000 : 0)}); if(gyroObj.h.reading) gyroObj.h.reading(); }
       if(o.imu && stat.hoerer.devicemotion) for(const f of stat.hoerer.devicemotion) for(const dt of [0, dtF/2]) f({timeStamp:tI+dt, interval:16, rotationRate:{alpha:1, beta:2, gamma:3}, accelerationIncludingGravity:{x:0, y:9.81, z:0}});
       const k=kamera(s), verloren=s>=SZ.verlust[0] && s<SZ.verlust[1], emul=s>=SZ.emuliert[0] && s<SZ.emuliert[1];
       bildJetzt=()=>{ let b=cache.get(i); if(!b){ b=bildRaum(k.Cr, 7000+i, o.rausch ?? 2); cache.set(i, b); } return b; };
@@ -1312,6 +1313,7 @@ if(alt){
   const ri=await geraet(probe, {...kurz, query:'karte=1&imu=1', imu:true, gyro:true});
   const rs=await geraet(probe, {...kurz, query:'karte=1&imu=1', imu:true, gyro:true, ohneFokus:true, gyroAb:5});
   const rx=await geraet(probe, {...kurz, query:'karte=1&imu=1', imu:true, gyro:true, gyroFehler:true});
+  const rb=await geraet(probe, {...kurz, query:'karte=1&imu=1', imu:true, gyro:true, gyroBoot:true});   // Stand 17: Gyroscope-Zeitstempel auf Geraetelaufzeit
   const rv=await geraet(probe, {...kurz, query:'karte=1', imu:true, gyro:true});   // Stand 15: ohne imu-Parameter ist der Haken auf der Startseite (Vorgabe an) massgebend
   const kf1=await geraet(probe, {...kurz, karte:'wirftAussen'}), kf2=await geraet(probe, {...kurz, karte:'schweigt'}), kf3=await geraet(probe, {...kurz, karte:'wirftInnen'});
   // Nachbesserung: rz - Video und Tiefe kosten Zeit (die Uhr laeuft in encode und getDepthInformation weiter, wie am
@@ -1534,6 +1536,10 @@ if(alt){
       chk('karte=1&imu=1 mit Gyroscope-Fehler: einmal imu-fehler und der Hinweis auf die Website-Einstellung, kein Tipp-Hinweis', fe.length===1 && /NotAllowedError/.test(fe[0].msg) && hin.length===1
         && !E.some(e=>e.type==='imu-steht') && !E.some(e=>e.type==='hinweis' && /aufs Kamerabild tippen/.test(e.text||'')), fe[0] ? fe[0].msg : '–'); }
     // gleiche Dauer und Klicks wie rf2 nicht (andere Bild-Attrappe), darum nur: Sitzung meldet den Schalter, es gibt Erfassungen
+    { const gb=(jsonl(rb, 'imu').filter(x=>x.q==='gyro')), gi=(jsonl(ri, 'imu').filter(x=>x.q==='gyro'));
+      chk('Stand 17: Gyroscope-Zeitstempel auf Geraetelaufzeit (ts ~ 2.8e8 ms) werden auf Seitenzeit umgerechnet (t nahe ta, ts roh); mit Seitenzeit unveraendert',
+        gb.length>=300 && gb.every(x=>Math.abs(x.t-x.ta)<0.2 && x.ts>2.8e8) && gi.every(x=>Math.abs(x.t-x.ta)<0.2 && x.ts<1e6), `${gb.length} Werte, max |t-ta| ${Math.max(...gb.map(x=>Math.abs(x.t-x.ta))).toFixed(3)} s`); }
+    chk('Stand 17: Karte mit Gyro: Kalibrierung der Achsen versucht (imu-kalib im Protokoll), Karten-Worker bekommt die Bruecke (schnitt.gyroBruecke im Start)', rb.P.LOG.events.some(e=>e.type==='imu-kalib') && rb.stat.karteAn.some(m=>m.typ==='start' && m.schnitt && m.schnitt.gyroBruecke===true) && !rk.stat.karteAn.some(m=>m.typ==='start' && m.schnitt), (rb.P.LOG.events.find(e=>e.type==='imu-kalib')||{}).restDeg+'° Rest');
     chk('Stand 15: ohne imu-Parameter nimmt die Seite den Gyro auf (Haken Vorgabe an): schalter.imu, imu.jsonl, imu=0 schaltet aus', man(rv).schalter.imu===true && man(rv).dateien.includes('imu.jsonl') && man(rk).schalter.imu===false, `${man(rv).imu ? man(rv).imu.zeilen : '–'} Zeilen`);
     chk('karte=1&imu=1: LOG.session.imu gesetzt (karte=1 allein false), Erfassungen da', ri.P.LOG.obs.length>0 && ri.P.LOG.session.imu===true && rk.P.LOG.session.imu===false, `${ri.P.LOG.obs.length} Erfassungen`); }
   chk('mess=1: Manifest v2 mit mess true, imu.jsonl und messung.jsonl; kein Bild-Worker', Mm && Mm.mess===true && Mm.dateien.includes('imu.jsonl') && Mm.dateien.includes('messung.jsonl') && !rm.stat.worker.includes('bild'));

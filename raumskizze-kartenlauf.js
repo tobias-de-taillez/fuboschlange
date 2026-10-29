@@ -110,7 +110,7 @@ const ML_DEF={H:null, quelle:'segmente', arbeit:{iter:3, lin:2, relin:20000, reg
     // (Erfassungen mod 90°, Kreismittel von 4θ nach Laenge). Nur bei Raumrichtung beiderseits (Laenge >= rasterMinL m,
     // Buendelung R >= rasterMinR); einmal je Abschnitt (A.gierRaster). Pruefstand: die Gier der Kette liegt nach einer Pause
     // im Median 15-20° daneben, Z13 sucht nur +-gierDeg.
-    gierRaster:false, rasterSYDeg:5, rasterMinL:1.5, rasterMinR:0.7, mitGyro:'aus',
+    gierRaster:false, rasterSYDeg:5, rasterMinL:1.5, rasterMinR:0.7, mitGyro:'aus', gyroMit:true,
     // Achsen-Registrierung (Doku 12.8): Kettenabschnitte hinter einem Gyro-Schnitt (Gier bekannt) je Raumachse der Referenz um
     // einen 1-D-Versatz in +-achsFenster m (Raster 1 cm): Laenge der Erfassungslinien (+-achsRichtDeg zur Achse), die eine
     // Referenzlinie auf achsTol m treffen und sich in der Ausdehnung (+-achsUeber m) ueberlappen; angenommen je Achse ab achsMinL m
@@ -540,7 +540,11 @@ const mlAbReg=(KZ, neu, neuB, kopf)=>{
       B.abReg={angenommen:r.angenommen, grund:r.grund, dpsi:r.dpsi, dt:r.dt, r0:r.r0, r1:r.r1, nah:r.nah, richtW:r.richtW, marge:r.marge, nErf:segs.length, gruppe:grp,
         versuche:((B.abReg && B.abReg.versuche)||0)+1, stempel:R.stempel, runde:KZ.runde, gVor:{...B.g}};
       L.abRegLog.push({runde:KZ.runde, ab, nRef:R.n, ...B.abReg, zweit:r.zweit, delta:r.delta}); if(L.abRegLog.length>o.logMax) L.abRegLog.shift();
-      if(r.angenommen){ for(const x of grp) A[x].g=G.gKomp(r.delta, A[x].g); neuAn.push(ab); ausRef=offenG(); R=refBau(); weiter=true; } } }
+      if(r.angenommen){ for(const x of grp) A[x].g=G.gKomp(r.delta, A[x].g);
+        // gyroMit (Messung 29.10., A6 p90 an den Waenden 93,5 -> 62,6 cm): Kettenabschnitte, die ueber Gyro-Schnitte hinter der Gruppe haengen,
+        // gehen mit; sonst bricht die Gyro-Relation (A6 142,71 s: Gier -14,4 Grad bei Gyro auf 0,2 Grad genau)
+        if(o.gyroMit){ let k=Math.max(...grp)+1; while(A[k] && A[k].g && A[k].quelle==='kette' && !angen(A[k]) && KZ.schnitte[k-1] && KZ.schnitte[k-1].bindung && KZ.schnitte[k-1].bindung.gyro){ A[k].g=G.gKomp(r.delta, A[k].g); k++; } }
+        neuAn.push(ab); ausRef=offenG(); R=refBau(); weiter=true; } } }
   if(o.achsen && R.n && R.man && R.man.R>=o.rasterMinR) for(const ab of offen0){ const B=A[ab], s=KZ.schnitte[ab-1];
     if(!B || B.quelle!=='kette' || !B.g || B.achsReg || !(s && s.bindung && s.bindung.gyro)) continue;
     const grp=gruppe(ab), segs=segsVon(grp); if(segs.length<o.minErf) continue;
