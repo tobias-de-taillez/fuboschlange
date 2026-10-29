@@ -82,7 +82,7 @@ const DEF={
          topPaar:0.05, kurzMin:0.05, kurzMax:0.30, kurzWinkel:60},
   // neu: o.immer prueft alle Beob ohne Aenderung von g; dabei verfallen Waende mit < 3 Schluessel-Beob und Ecken mit
   // < 4 Peilungen, die seit 5 s nichts bekommen haben (landmarken 3.4 (7): 'unter 3 Beob zurueck zum Kandidaten') [S].
-  neu:{dP:0.02, dPsiDeg:0.3, immer:false, verfall:5, minSchl:3, minPeil:4},
+  neu:{dP:0.02, dPsiDeg:0.3, immer:false, verfall:5, minSchl:3, minPeil:4, hoeheEigen:false},   // hoeheEigen: Erfassungen beim Neuzuordnen auf der Deckenhoehe des eigenen Abschnitts heben (Messung 29.10.)
   schrank:{topTol:0.05, endeTol:0.15, sockel:[0.03, 0.10], dahinter:[0.3, 1.0]},
   boden:{bMax:0.6, minBeob:3},
   standpunkt:0.25,
@@ -577,7 +577,7 @@ const vorzug=(K,a,b)=>{ const v=W=>(W.h==='f' ? 0 : 1); if(v(a)!==v(b)) return v
 // Zusammenfuehren, werden die Kandidaten von a neu bestimmt. o.voll: ohne Vorfilter (Pruefung).
 const huelleS=W=>{ const H=ivHuelle(W); return H ? Math.max(Math.abs(H[0]), Math.abs(H[1])) : 0; };
 const huelleR=W=>{ const H=ivHuelle(W); return H ? Math.sqrt(W.rho*W.rho+Math.max(H[0]*H[0], H[1]*H[1])) : 0; };
-G.lmZusammenfuehren=(karte,o={})=>{ o={...DEF.zusammen, ...o}; const K=karte, paare=[]; zustand(K); const NF=36;
+G.lmZusammenfuehren=(karte,o={})=>{ o={...lmO(karte, 'zusammen'), ...o}; const K=karte, paare=[]; zustand(K); const NF=36;
   const fv=W=>Math.floor(wrap2pi(W.phi)/ZWEIPI*NF)%NF, sinH=Math.sin(Math.acos(Math.min(1, o.cosSeite))/2), fenster=(rho,S)=>o.drhoMax+2*sinH*Math.sqrt(rho*rho+S*S);
   for(let weiter=true;weiter;){ weiter=false; const L=[...K.waende.values()], weg=new Set(), fach=new Map(), R=new Map(), Rb=L.map(huelleR);
     L.forEach((W,i)=>{ const k=W.rahmen+':'+fv(W); if(!fach.has(k)) fach.set(k, []); fach.get(k).push(i); R.set(W.rahmen, Math.max(R.get(W.rahmen)||0, Rb[i])); });
@@ -911,7 +911,9 @@ const geaendert=(K,ab,alt,o)=>{ const A=K.abschnitte[ab], r=rahmenVon(K, ab); if
 // Rest gespeicherter Beob gegen eine Wand: G.resSegment (M6), sonst dieselbe Formel hier
 const resB=(K,b,W)=>{ if(G.resSegment) return G.resSegment(b, W, K); const g=gZu(K, W.rahmen, b.ab, b.t); if(!g) return null; const Z=strahlen(K, b, g), h=hBeob(b, W, K), nx=Math.cos(W.phi), nz=Math.sin(W.phi);
   return [rest(Z.c, Z.da, nx, nz, W.rho, h, b.f), rest(Z.c, Z.db, nx, nz, W.rho, h, b.f)]; };
-G.lmNeuZuordnen=(karte,ab,o={})=>{ o={...DEF.zuordnen, ...DEF.neu, ...o}; const K=karte, st=zustand(K), A=K.abschnitte[ab]; if(!A) return {geaendert:0};
+// Ueberschreibungen je Lauf aus karte.opt.lm = {neu, erfassung, zusammen} (M10-Option lm; Vorgaben unveraendert, wenn null)
+const lmO=(K,name)=>({...DEF[name], ...((K.opt && K.opt.lm && K.opt.lm[name]) || {})});
+G.lmNeuZuordnen=(karte,ab,o={})=>{ o={...DEF.zuordnen, ...lmO(karte, 'neu'), ...o}; const K=karte, st=zustand(K), A=K.abschnitte[ab]; if(!A) return {geaendert:0};
   const alt=st.zuord[ab]; if(alt && !o.immer && !geaendert(K, ab, alt, o)) return {geaendert:0, verfallen:0};
   const jetzt=stand(K, ab); st.zuord[ab]=jetzt; const r=jetzt.r, P=bereitAlle(K, r), Ec=[...K.ecken.values()].filter(E=>E.rahmen===r); let n=0;
   for(const b of K.beob){ if(b.ab!==ab) continue;
@@ -924,8 +926,9 @@ G.lmNeuZuordnen=(karte,ab,o={})=>{ o={...DEF.zuordnen, ...DEF.neu, ...o}; const 
     // rep/erf: Erfassung mit eigener Regel; die bisherige Wand gewinnt, solange sie das Tor besteht. Stoer-Erfassungen
     // (nutzer 'stoer', Z2) gehen wie Segment-Beob ueber den Weg darunter.
     if(b.nutzer===true){
-      const Zs=erfStrahlen(K, b, r), Z=Zs && erfLinie(K, Zs.c, Zs.da, Zs.db, r, DEF.erfassung), X=K.waende.get(b.L);
-      const bleibt=Z && X && X.rahmen===r && erfSuche(K, Z, r, {...DEF.erfassung, nur:X}), z=bleibt || (Z && erfSuche(K, Z, r, DEF.erfassung)), L=z ? z.W.id : -1;
+      const oe=lmO(K, 'erfassung'), hE=o.hoeheEigen && r===-1 && A.hLok && Number.isFinite(A.hLok.hC) && gZu(K, r, ab, b.t) ? A.hLok.hC+gZu(K, r, ab, b.t).ty : null;
+      const Zs=erfStrahlen(K, b, r), Z=Zs && erfLinie(K, Zs.c, Zs.da, Zs.db, r, hE!=null ? {...oe, hEigen:hE} : oe), X=K.waende.get(b.L);
+      const bleibt=Z && X && X.rahmen===r && erfSuche(K, Z, r, {...oe, nur:X}), z=bleibt || (Z && erfSuche(K, Z, r, oe)), L=z ? z.W.id : -1;
       if(L!==b.L){ n++; b.L=L; } continue; }
     const g=gZu(K, r, ab, b.t); let L=-1, art=b.art;
     if(g && b.db){ const Z=strahlen(K, b, g), e=entscheide(kandidaten(K, {c:Z.c, d1:Z.da, d2:Z.db, sPx:b.sPx, len:b.len, f:b.f}, P, o, A), o);
@@ -971,7 +974,7 @@ const nutzerKlasse=(K,W,o)=>{ if(W.cls==='schrank') return false; const n=nutzer
   W.cls='wand'; W.clsZaehler=0; naechsteWeg(K, W.id); if(W.zustand==='kandidat' && n>=o.minNutzer) W.zustand='bestaetigt'; return true; };
 // Linie einer Erfassung im Rahmen r: {c, p1, p2, phi, rho, len, h, dist} oder null
 const erfLinie=(K,c,d1,d2,r,o)=>{ if(!(d1[1]>1e-3 && d2[1]>1e-3)) return null;
-  const h=hRefC(K, r) ?? hSchaetz(K), D=h-c[1]; if(!(D>0.05)) return null;
+  const h=o.hEigen ?? hRefC(K, r) ?? hSchaetz(K), D=h-c[1]; if(!(D>0.05)) return null;
   const t1=D/d1[1], t2=D/d2[1]; if(!(t1<o.tMax && t2<o.tMax)) return null;
   const p1=[c[0]+t1*d1[0], c[2]+t1*d1[2]], p2=[c[0]+t2*d2[0], c[2]+t2*d2[2]], len=Math.hypot(p2[0]-p1[0], p2[1]-p1[1]); if(!(len>0.05)) return null;
   let n=[-(p2[1]-p1[1])/len, (p2[0]-p1[0])/len]; if(n[0]*(c[0]-p1[0])+n[1]*(c[2]-p1[1])<0) n=[-n[0], -n[1]];
@@ -1000,7 +1003,7 @@ const erfStoer=(K,bild,ab,o,oe,c0,d1,d2)=>{ const D=bild.dir, f=Number.isFinite(
   if(!W) return {zugeordnet:0, neu:0, L:-1, grund:Zo.mehrdeutig.length ? 'stoer mehrdeutig' : 'stoer ohne Wand'};
   b.L=W.id; W.beob.push(b.id); buchen(K, W, b); K.bilder.get(bild.k).schluessel=true;
   return {zugeordnet:1, neu:0, L:W.id, grund:'stoer zugeordnet'}; };
-G.lmErfassung=(karte,bildErg,o={})=>{ const K=karte, bild=bildErg, oe={...DEF.erfassung, ...(o.erfassung||{})}; zustand(K);
+G.lmErfassung=(karte,bildErg,o={})=>{ const K=karte, bild=bildErg, oe={...lmO(karte, 'erfassung'), ...(o.erfassung||{})}; zustand(K);
   const ab=abVon(K, bild, o), r=rahmenVon(K, ab), A=K.abschnitte[ab], g=r===-1 ? (A ? G.gBei(A, bild.t) : null) : EINS;
   if(!K.bilder.has(bild.k)) K.bilder.set(bild.k, {t:bild.t, ab, ep:bild.ep, c:[bild.camTo[12], bild.camTo[13], bild.camTo[14]], camTo:Array.from(bild.camTo), f:bild.f, schluessel:false});
   if(!g) return {zugeordnet:0, neu:0, L:-1, grund:'ohne g'};

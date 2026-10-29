@@ -40,3 +40,19 @@ Auftrag von Tobias: Gyro mit Gier-Raster, „unklare Bereiche“ mit Rückkehr (
 
 ## Folge
 Der wirksamste Hebel für „mehr Daten müssen verbessern“ sitzt in der Zuordnung nach dem Einbinden (Höhe, Tor 10 gegen 5 cm, feste Kettenabschnitte), nicht in einem neuen Sensor. Er lässt sich an den Präfixläufen messen.
+
+## Zuordnung nach dem Einbinden: Schalter und Messung (29.10., nachmittags)
+Gebaut hinter Schaltern, Vorgabe unverändert (aus): `karte.lm = {neu, erfassung, zusammen}` überschreibt die M5-Vorgaben je Lauf (`lmO` in raumskizze-landmarken.js, Option `lm` in M10). Neu ist `neu.hoeheEigen`: Erfassungen werden beim Neuzuordnen auf der Deckenhöhe des eigenen Abschnitts (`hLok.hC + ty`) gehoben statt auf der globalen `hC`. Die Schwellen `zusammen.drhoMax` (Vorgabe 0,05) und `erfassung.drho` (0,10) lassen sich ebenfalls je Lauf setzen. Messung: T1 auf 50/70/100 % der Aufnahme, 5 Aufnahmen, Skript `scratchpad/wr/zu/lauf.sh` und `sum.mjs`. Zahlen am Ende (100 %), Vorgabe → Variante:
+
+| | frei (von Beob) | Doppelwände | Wände | Außenring-Ecken (Wahrheit 14) | Editdistanz |
+|---|---|---|---|---|---|
+| A6, hoehe + drhoMax 0,15 | 61 → 5 (138) | 5 → 8 | 16 → 23 | 12 → 14 | 3 → 3 |
+| A7 | 51 → 32 (275) | 52 → 19 | 65 → 59 | 33 → 41 | 18 → 25 |
+| A8 | 157 → 42 (192) | 1 → 4 | 8 → 22 | 4 → 14 | 10 → 3 |
+| B1600 | 41 → 3 (161) | 6 → 7 | 23 → 26 | 14 → 23 | – |
+| B1714 | 147 → 60 (195) | 0 → 4 | 9 → 32 | 13 → 23 | – |
+
+- Die Höhe allein bringt die verlorenen Erfassungen zurück (frei sinkt auf ein Fünftel bis ein Zehntel), erzeugt aber Doppelwände (A6 5 → 28, B1714 0 → 12). Erst mit größerem Zusammenführ-Tor (0,15 m) und Zuordnungs-Tor sinken sie wieder.
+- **Gemischtes Ergebnis, daher nicht eingeschaltet:** A6 und vor allem A8 (Außenring 4 → 14 Ecken, Editdistanz 10 → 3, monoton über 50/70/100 %) werden besser. A7 (Editdistanz 18 → 25) und B1600/B1714 (Ecken des Außenrings 13–14 → 23) werden schlechter. Die übrigen Doppelwände in A7 liegen 20–27 cm auseinander im selben Abschnitt, also keine Frage der Schwelle.
+- `erfassung.minNutzer` ändert nichts am Ring: Die Ringbildung (M7 `umriss`) nimmt die zusätzlichen einzelnen Wände mit. Der nächste Hebel liegt dort (Wände mit einer einzigen Erfassung nicht zu Ringecken machen), nicht in M5.
+- Die T2-Werte (Passung, IoU, „Beob gehoben“) sind hier nicht entscheidbar (Mehrdeutigkeit, A7 „Maßstab nicht gültig“) und wurden nicht verwertet.
