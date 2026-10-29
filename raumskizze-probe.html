@@ -9697,17 +9697,22 @@ function messStart(){
 // den Fokus und gibt ihn nicht zurueck (crbug 568009418, behoben in M157). Dann liefert Gyroscope stumm nichts (ab M153 auch
 // devicemotion), ohne 'error'. Ein Tippen ins Overlay holt den Fokus vermutlich zurueck. Darum: Fokus und Sichtbarkeit protokollieren
 // und nach IMU_STEHT s ohne Gyro-Wert einmal um ein Tippen bitten (imuWache).
-const IMU_G={g:null, start:null, letzt:null, steht:false}, IMU_STEHT=1.5;
+const IMU_G={g:null, start:null, letzt:null, steht:false, off:null}, IMU_STEHT=1.5;
 const imuFokus=e=>ev('fokus', {an:e.type==='focus', hat:document.hasFocus ? document.hasFocus() : null});
 const imuSicht=()=>ev('sichtbar', {zustand:document.visibilityState});
 function imuStart(){
   addEventListener('devicemotion', onImu);
   addEventListener('focus', imuFokus); addEventListener('blur', imuFokus); if(document.addEventListener) document.addEventListener('visibilitychange', imuSicht);
-  Object.assign(IMU_G, {start:now(), letzt:null, steht:false, fehlerGemeldet:false});
+  Object.assign(IMU_G, {start:now(), letzt:null, steht:false, fehlerGemeldet:false, off:null});
   ev('imu-start', {fokus:document.hasFocus ? document.hasFocus() : null, sichtbar:document.visibilityState, gyroscope:typeof Gyroscope==='function'});
   if(typeof Gyroscope==='function'){
     try{ const g=new Gyroscope({frequency:60});
-      g.addEventListener('reading', ()=>{ if(g.timestamp==null) return; REC.imu.push({q:'gyro', t:+((g.timestamp-T0)/1000).toFixed(4), ta:now(), ts:+g.timestamp.toFixed(3),
+      g.addEventListener('reading', ()=>{ if(g.timestamp==null) return;
+        // Gyroscope.timestamp ist am Pixel (Chrome 156) auf die Geraetelaufzeit bezogen, nicht auf den Seitenstart (Aufnahme 29.10.: ts ~ 2.8e8 ms).
+        // Passt (ts - T0) nicht zu now() (> 2 s daneben), t = ts/1000 + kleinster bisheriger Versatz (now - ts/1000), ts bleibt roh.
+        const tn=now(), tp=(g.timestamp-T0)/1000; let tg=tp;
+        if(Math.abs(tp-tn)>2){ const o=tn-g.timestamp/1000; IMU_G.off=IMU_G.off==null ? o : Math.min(IMU_G.off, o); tg=g.timestamp/1000+IMU_G.off; }
+        REC.imu.push({q:'gyro', t:+tg.toFixed(4), ta:tn, ts:+g.timestamp.toFixed(3),
         w:[+g.x.toFixed(5), +g.y.toFixed(5), +g.z.toFixed(5)]}); REC.imuN++; LOG.mess.gyro++;
         const t=now(); if(IMU_G.steht){ IMU_G.steht=false; ev('imu-weiter', {luecke:+(t-(IMU_G.letzt ?? IMU_G.start)).toFixed(2), fokus:document.hasFocus ? document.hasFocus() : null}); }
         IMU_G.letzt=t; });

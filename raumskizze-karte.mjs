@@ -225,7 +225,13 @@ const ZUORDNUNGEN=(()=>{ const out=[], P=[[0,1,2],[0,2,1],[1,0,2],[1,2,0],[2,0,1
 // (dt <= 0,1 s, gleiche Epoche). Rueckgabe {psi, quelle, zuordnung, rest (rad, Median), n} oder null.
 export function imuGier(A, posen, o={}){
   const D2R=Math.PI/180, I=A.imu || [], hMax=o.maxLuecke ?? 0.05;
-  let S=I.filter(x=>x && x.q==='gyro' && Array.isArray(x.w) && Number.isFinite(x.t)).map(x=>({t:x.t, w:x.w})), quelle='gyro';
+  // Gyroscope.timestamp ist am Pixel (Chrome 156) auf die Geraetelaufzeit bezogen (ts ~ 2.8e8 ms), nicht auf den Seitenstart wie
+  // devicemotion: t der Aufnahme liegt dann Tage neben der Posenzeit. Dann t = ts/1000 + kleinster Versatz (ta - ts/1000) = Eingang
+  // abzueglich der kleinsten Verzoegerung (Aufnahme 29.10., 6194 Werte, ~51 Hz). Passt t schon zu ta, bleibt es.
+  const G0=I.filter(x=>x && x.q==='gyro' && Array.isArray(x.w) && Number.isFinite(x.t));
+  let gOff=null; { const d=G0.filter(x=>Number.isFinite(x.ta) && Number.isFinite(x.ts)).map(x=>Math.abs(x.t-x.ta)).sort((p,q)=>p-q);
+    if(d.length>=10 && d[d.length>>1]>1) gOff=Math.min(...G0.filter(x=>Number.isFinite(x.ta) && Number.isFinite(x.ts)).map(x=>x.ta-x.ts/1000)); }
+  let S=G0.map(x=>({t:gOff!=null && Number.isFinite(x.ts) ? x.ts/1000+gOff : x.t, w:x.w})), quelle='gyro';
   if(S.length<10){ S=I.filter(x=>x && !x.q && Array.isArray(x.rr) && x.rr.every(Number.isFinite) && Number.isFinite(x.t)).map(x=>({t:x.t, w:[x.rr[1]*D2R, x.rr[2]*D2R, x.rr[0]*D2R]})); quelle='devicemotion'; }
   if(S.length<10 || posen.length<3) return null;
   S.sort((a,b)=>a.t-b.t);

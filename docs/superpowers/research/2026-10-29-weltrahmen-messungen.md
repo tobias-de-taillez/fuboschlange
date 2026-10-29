@@ -71,3 +71,20 @@ Schalter `umrissEingabe.minBeob` (M7, Vorgabe 0 = aus; M10-Option `umrissEingabe
 - `minBeob 3` holt von den Zusatzecken von `hz15` den größten Teil zurück (B1600 23 → 15, B1714 23 → 19, A7 41 → 38), ohne die Gewinne in A6 und A8 anzutasten. Allein, ohne `hz15`, bringt es wenig und schadet in A6 (`minBeob 3`: Editdistanz 3 → 6, nur 9 Ecken).
 - Gegenüber der Vorgabe bleiben A7 (Editdistanz 18 → 24) und B1714 (13 → 19 Ecken) schlechter. In A7 wird die Karte auch in der Vorgabe mit mehr Daten schlechter (Editdistanz 6 → 11 → 18); das ist kein Fehler der neuen Schalter, sondern der Abschnittsdrift dort.
 - **Entscheidung:** nicht als Vorgabe eingeschaltet. Es gewinnen A6 und A8 deutlich, es verlieren A7 und B1714 moderat; für eine Vorgabe fehlt eine Aufnahme mehr, auf der die Kombination bestätigt wird. Die nächste Wohnküchen-Aufnahme mit `?karte=1` entscheidet das.
+
+## Erste Aufnahme mit echtem Gyro (29.10., Stand 15, Chrome 156, Pixel 9 Pro, 121 s)
+- **Der Gyro kommt in AR an:** `imu-start` mit Fokus, kein `imu-steht`. 6194 Gyroscope-Werte (51 Hz, keine Lücke über 100 ms, 19 zwischen 50 und 100 ms) und 6812 devicemotion-Werte (60 Hz). Die Fokus-Falle (crbug 568009418) trat bei dieser Aufnahme nicht auf.
+- **Fund:** `Gyroscope.timestamp` bezieht sich am Pixel auf die Gerätelaufzeit (ts ≈ 2,8·10⁸ ms), nicht auf den Seitenstart wie bei devicemotion. Das `t` der Aufnahme lag deshalb Tage neben der Posenzeit, T1 meldete „ohne verwertbaren Gyro“. Behoben in T1 (`imuGier`: t = ts/1000 + kleinster Versatz ta − ts/1000, wenn t nicht zu ta passt) und in der Seite (Stand 16, gleiche Regel).
+- **Gyro gegen ARCore:** Rest je Zeile Median 0,09° / p90 0,30° (566 Zeilen), Achsen-Zuordnung [[0,0,-1],[0,1,0],[1,0,0]], Zeitversatz 170 ms. Die Drehung stimmt also über 100 ms mit ARCore überein.
+- **Prüfstand mit dem echten Gyro** (simulierter Bruch, Wahrheit = Einheit; Gyro-Brücke + gedämpfte Vorhersage gegen heute):
+
+| | Treffer (≤ 10 cm, ≤ 2°) | Gier Median | Wände Median / p90 |
+|---|---|---|---|
+| alle 20 Fenster, heute | 1 | 16,9° | 49,6 / 163,6 cm |
+| alle 20 Fenster, Gyro | 7 | 2,9° | 30,3 / 91,5 cm |
+| sauber 12 Fenster, heute | 3 | 16,9° | 51,7 / 123,0 cm |
+| sauber 12 Fenster, Gyro | 7 | 1,2° | 6,4 / 91,5 cm |
+
+- Die Gyro-Brücke trägt am echten Gerät: Der Gierfehler fällt von 17° auf 1–3°, der Wandfehler im Median auf 6–30 cm. Das bestätigt die nachgebildeten Zahlen der Nacht vom 27.10. (19–34 cm) und ist keine Obergrenze mehr. Offen bleibt das p90 (92 cm).
+- **Die Brücke ist offline, nicht live.** Der Karten-Worker nutzt `imuPsi` noch nicht (nur T1). Nächster Schritt: `imuPsi` im Hauptfaden berechnen und an den Worker geben.
+- Diese Aufnahme enthielt wenig echte Brüche (zwei `tracking-verloren`, sechs Schnitte, alle mit Gyro abgedeckt, davon fünf ohne Lücke), die Karte selbst ändert sich kaum (IoU 0,20 → 0,21). Der Gewinn zeigt sich am Prüfstand, nicht an der Gesamtkarte.
