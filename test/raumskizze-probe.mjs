@@ -1172,7 +1172,7 @@ const geraetBau=()=>{
     const ctx2d=cv=>new Proxy({canvas:cv, createImageData:(w, h)=>({data:new Uint8ClampedArray(w*h*4), width:w, height:h}), measureText:()=>({width:0}),
       drawImage:()=>{ if(cv.id==='arCanvas') stat.segZeichnen++; }}, {get:(ob, k)=>k in ob ? ob[k] : typeof k==='string' ? ()=>{} : undefined});
     const els=new Map();
-    const mkEl=id=>{ const e={id, textContent:id && scripts[id]!=null ? scripts[id] : '', className:'', disabled:false, checked:id==='auto', value:'', style:{}, width:300, height:150, children:[],
+    const mkEl=id=>{ const e={id, textContent:id && scripts[id]!=null ? scripts[id] : '', className:'', disabled:false, checked:id==='auto' || id==='imuAn', value:'', style:{}, width:300, height:150, children:[],
       classList:{s:new Set(), add(...c){ c.forEach(x=>this.s.add(x)); }, remove(...c){ c.forEach(x=>this.s.delete(x)); }, toggle(c, an){ if(an===undefined) an=!this.s.has(c); if(an) this.s.add(c); else this.s.delete(c); }, contains(c){ return this.s.has(c); }},
       appendChild(c){ this.children.push(c); return c; }, append(...c){ this.children.push(...c); }, replaceChildren(...c){ this.children=c; },
       addEventListener(t, f){ (this.h || (this.h={}))[t]=f; }, removeEventListener(){}, scrollIntoView(){}, click(){ if(this.onclick) this.onclick(); }, remove(){},
@@ -1303,15 +1303,16 @@ if(alt){
   const cache=new Map(), DAUER=22, ANSICHT=[[3,'btnAnsicht'],[3.1,'btnAnsicht'],[3.2,'btnAnsicht']];
   const basis={cache, dauer:DAUER, klicks:ANSICHT, imu:true, gyro:true, rausch:0.5, video:true};
   const tG=performance.now();
-  const r5=await geraet(alt, basis), r6=await geraet(probe, basis), rk=await geraet(probe, {...basis, query:'karte=1'});
+  const r5=await geraet(alt, basis), r6=await geraet(probe, {...basis, query:'imu=0'}), rk=await geraet(probe, {...basis, query:'karte=1&imu=0'});   // Stand 15: IMU ist Vorgabe, imu=0 gibt das Verhalten von Stand 5
   const rm=await geraet(probe, {...basis, query:'mess=1', klicks:[...ANSICHT, [6,'btnMarke'], [21,'btnMarke']]});
-  const kurz={cache, dauer:8, klicks:ANSICHT, rausch:0.5, query:'karte=1', video:true};
+  const kurz={cache, dauer:8, klicks:ANSICHT, rausch:0.5, query:'karte=1&imu=0', video:true};
   const rf1=await geraet(probe, {...kurz, bild:'wirftAussen'}), rf2=await geraet(probe, {...kurz, bild:'schweigt'}), rf3=await geraet(probe, {...kurz, bild:'wirftInnen'}), rl=await geraet(probe, {...kurz, bildMs:400});
-  const kb=await geraet(probe, {...kurz, query:'karte=1&quelle=beide'});
+  const kb=await geraet(probe, {...kurz, query:'karte=1&quelle=beide&imu=0'});
   // ri - karte=1&imu=1 (Doku 12.8): Sensoren wie im Messmodus, ohne Mess-Worker; rs - ohne Fokus, Gyro erst ab 5 s (IMU-Wache)
   const ri=await geraet(probe, {...kurz, query:'karte=1&imu=1', imu:true, gyro:true});
   const rs=await geraet(probe, {...kurz, query:'karte=1&imu=1', imu:true, gyro:true, ohneFokus:true, gyroAb:5});
   const rx=await geraet(probe, {...kurz, query:'karte=1&imu=1', imu:true, gyro:true, gyroFehler:true});
+  const rv=await geraet(probe, {...kurz, query:'karte=1', imu:true, gyro:true});   // Stand 15: ohne imu-Parameter ist der Haken auf der Startseite (Vorgabe an) massgebend
   const kf1=await geraet(probe, {...kurz, karte:'wirftAussen'}), kf2=await geraet(probe, {...kurz, karte:'schweigt'}), kf3=await geraet(probe, {...kurz, karte:'wirftInnen'});
   // Nachbesserung: rz - Video und Tiefe kosten Zeit (die Uhr laeuft in encode und getDepthInformation weiter, wie am
   // Pixel); rg - die Seite ist schon 50 s offen, die Sitzung laeuft ueber die Minutengrenze (zwei volle Lesungen),
@@ -1533,6 +1534,7 @@ if(alt){
       chk('karte=1&imu=1 mit Gyroscope-Fehler: einmal imu-fehler und der Hinweis auf die Website-Einstellung, kein Tipp-Hinweis', fe.length===1 && /NotAllowedError/.test(fe[0].msg) && hin.length===1
         && !E.some(e=>e.type==='imu-steht') && !E.some(e=>e.type==='hinweis' && /aufs Kamerabild tippen/.test(e.text||'')), fe[0] ? fe[0].msg : '–'); }
     // gleiche Dauer und Klicks wie rf2 nicht (andere Bild-Attrappe), darum nur: Sitzung meldet den Schalter, es gibt Erfassungen
+    chk('Stand 15: ohne imu-Parameter nimmt die Seite den Gyro auf (Haken Vorgabe an): schalter.imu, imu.jsonl, imu=0 schaltet aus', man(rv).schalter.imu===true && man(rv).dateien.includes('imu.jsonl') && man(rk).schalter.imu===false, `${man(rv).imu ? man(rv).imu.zeilen : '–'} Zeilen`);
     chk('karte=1&imu=1: LOG.session.imu gesetzt (karte=1 allein false), Erfassungen da', ri.P.LOG.obs.length>0 && ri.P.LOG.session.imu===true && rk.P.LOG.session.imu===false, `${ri.P.LOG.obs.length} Erfassungen`); }
   chk('mess=1: Manifest v2 mit mess true, imu.jsonl und messung.jsonl; kein Bild-Worker', Mm && Mm.mess===true && Mm.dateien.includes('imu.jsonl') && Mm.dateien.includes('messung.jsonl') && !rm.stat.worker.includes('bild'));
   // --- Nachbesserung 1: Auftrag, bild.jsonl und segmente.bin tragen das t der Zeile, nicht die Zeit beim Senden

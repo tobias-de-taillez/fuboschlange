@@ -138,6 +138,7 @@
   <input id="hoehe" type="number" step="1" min="1500" max="6000" placeholder="z. B. 2550" inputmode="numeric">
   <div class="hint" style="margin-top:8px">Automatisch geht es auch ohne: Die Höhe kommt dann aus der Parallaxe – zwischendurch ein paar Schritte gehen hilft. Mit Laser-Wert wird sie zur Kreuzprobe. Von Hand ist sie nötig.</div>
   <label class="chk"><input type="checkbox" id="auto" checked> <span>Automatisch: Boden und Kanten von selbst – einfach mit dem Fadenkreuz die Deckenkante entlangschwenken</span></label>
+  <label class="chk"><input type="checkbox" id="imuAn" checked> <span>Gyro und Bewegungssensoren mitschneiden (für die Verbindung der Abschnitte nach ARCore-Brüchen; geht in die Aufnahme, wenn „Video mitschneiden“ an ist)</span></label>
   <label class="chk"><input type="checkbox" id="rec"> <span>Video mitschneiden (10 Bilder/s, mit Tiefe) – für Tests am Rechner. Bleibt auf dem Telefon, bis du „Aufnahme sichern“ tippst.</span></label>
 </div>
 
@@ -9020,7 +9021,8 @@ const FARBEN_KLAR=Q.get('farben')==='klar';
 const KARTE=Q.get('karte')==='1', MESS=Q.get('mess')==='1';
 // ?imu=1 (Doku 12.8): Gyroscope und devicemotion in imu.jsonl wie im Messmodus, ohne Mess-Worker und Messanker. Die Drehung
 // ueber eine Ortungsluecke kennt sonst niemand (Pruefstand: Gier der Kette nach einer Pause im Median 15-20° daneben).
-const IMU=MESS || Q.get('imu')==='1';
+// Stand 15: Vorgabe AN (Haken auf der Startseite, merkt sich die Wahl); ?imu=0 schaltet aus, ?imu=1 erzwingt an. Gelesen wird beim AR-Start.
+let IMU=MESS || Q.get('imu')!=='0';
 // Stand 7 (9.3): mit ?karte=1 laeuft dazu der Karten-Worker. ?quelle= waehlt seine Eingaenge wie --quelle in T1; Vorgabe
 // 'erfassungen' (der einzige Weg mit Ergebnis gegen die Wahrheit, Doku 12.5), 'segmente'/'beide' fuer die Rechenzeit am Pixel (11.2).
 const KARTE_QUELLE=['segmente', 'beide'].includes(Q.get('quelle')) ? Q.get('quelle') : 'erfassungen', KARTE_BILDER=KARTE && KARTE_QUELLE!=='erfassungen';
@@ -11579,6 +11581,7 @@ async function recListLast(){
 
 // ------------------------------------------------------- Sitzung
 async function startAR(){
+  IMU=MESS || (Q.get('imu')==='1') || (Q.get('imu')!=='0' && !!($('imuAn') && $('imuAn').checked));
   const raw=$('hoehe').value.trim(), hmm=parseFloat(raw.replace(',', '.'));
   if(raw && !(hmm>=1500 && hmm<=6000)){
     $('startHint').textContent=`Raumhöhe „${raw}“ ist ungültig – in mm eingeben (1500–6000), z. B. 2550. Leer lassen für nur Stufe 0.`;
@@ -11923,6 +11926,9 @@ $('dlLog').onclick=()=>{
 };
 // Messmodus: Video an, sonst schreibt er keine Tiefe (ohne karte=1 nur je Videobild).
 $('rec').checked=MESS || (()=>{ try{ return localStorage.getItem(REC_PREF)==='1'; }catch(e){ return false; } })();
+const IMU_PREF='raumskizze.imu';
+$('imuAn').checked=Q.get('imu')==='0' ? false : Q.get('imu')==='1' || MESS || (()=>{ try{ return localStorage.getItem(IMU_PREF)!=='0'; }catch(e){ return true; } })();
+$('imuAn').onchange=()=>{ try{ localStorage.setItem(IMU_PREF, $('imuAn').checked ? '1' : '0'); }catch(e){} };
 $('rec').onchange=()=>{ try{ localStorage.setItem(REC_PREF, $('rec').checked ? '1' : '0'); }catch(e){} };
 if(!('VideoEncoder' in window)){ $('rec').checked=false; $('rec').disabled=true; }
 recListLast();
@@ -12024,7 +12030,7 @@ if(Q.has('debug')) globalThis.PROBE={S, LOG, computeResult, showResult, requestS
   BW, bildSenden, onBild, drawSegmente, epocheFort, recEbenen, messAn, messMarke, messLesen, messBild, KARTE, MESS, TIEFE_ANF, REC_COLS,
   KW, kwBild, kwZeile, onKarte, karteAnzeige, drawKarte, KARTE_QUELLE};
 $('start').disabled=true;
-$('stand').textContent=standText()+(KARTE ? ` · karte=1 (Karte, Quelle ${KARTE_QUELLE})` : '')+(MESS ? ' · Messmodus' : IMU ? ' · IMU' : '')+(TIEFE_ANF ? ` · Tiefe ${TIEFE_ANF}` : '');
+$('stand').textContent=standText()+(KARTE ? ` · karte=1 (Karte, Quelle ${KARTE_QUELLE})` : '')+(MESS ? ' · Messmodus' : $('imuAn') && $('imuAn').checked ? ' · IMU' : '')+(TIEFE_ANF ? ` · Tiefe ${TIEFE_ANF}` : '');
 stage0();
 })();
 </script>
