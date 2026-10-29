@@ -7969,8 +7969,10 @@ const ML_DEF={H:null, quelle:'segmente', arbeit:{iter:3, lin:2, relin:20000, reg
   skala:'fest', umriss:true, umrissJede:2, reg:true, tiefe:0, ebenen:0, ohne:[], ohneAb:[], warteMax:1.0, loseNach:30, loseErledigt:10,
   proj:null, w:287, h:640, sPxErf:2, kopfRaster:1e6, topoRunden:3, topoDauer:3, verlaufMax:60, hypRunden:3, orakel:null, uhr:null,
   ausgleich:null,   // weitere Optionen fuer G.lmAusgleich (M6), z. B. {bodenKette:false}
-  umrissEingabe:null,   // Optionen fuer G.umrissEingabe (M7), z. B. {minBeob:2}
-  lm:null,   // Ueberschreibungen fuer M5 {neu, erfassung, zusammen}, z. B. {neu:{hoeheEigen:true}} (karte.opt.lm)
+  // Stand 14 (Messung 29.10., Doku 2026-10-29-weltrahmen-messungen.md): Erfassungen auf der Deckenhoehe des eigenen Abschnitts neu zuordnen,
+  // Zusammenfuehr- und Erfassungstor 0,15 m, Einzelwaende (< 3 Beob) bilden keine Ringecken. Ausschalten: lm {} bzw. umrissEingabe {}.
+  umrissEingabe:{minBeob:3},   // Optionen fuer G.umrissEingabe (M7)
+  lm:{neu:{hoeheEigen:true}, zusammen:{drhoMax:0.15}, erfassung:{drho:0.15}},   // Ueberschreibungen fuer M5 {neu, erfassung, zusammen} (karte.opt.lm)
   kanten:null,   // Bildkanten {liste, min, tolP, tolPsiDeg, partner} (mlKanteMit, 12.8); null = aus
   verbunden:{sP:0.05, sY:1*Math.PI/180}, locker:{max:0.08, psi:1.5*Math.PI/180}, lose:{max:0.20, zurueck:0.15},
   // Kern 1.3; dH: Hoehenbedingung mit Laser-H (19.2 Z5)
