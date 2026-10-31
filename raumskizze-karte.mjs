@@ -23,7 +23,8 @@
 // 12 Zeichen); --stand ordner nimmt die Moduldateien aus einem festgehaltenen Stand (z. B. Kopie fuer J1), --datei M10=pfad
 // einzelne Dateien (Vergleich alt gegen neu).
 // Epochen offline wie F2 (karte/fixtures/erzeuge-f2.mjs): +1 je Zeile mit geaendertem T oder mit einem Bruch
-// seit der vorigen Zeile, hoechstens +1 je Zeile. Bild k = k-tes v >= 0, Breite 287 (Polsterspalte weg),
+// seit der vorigen Zeile, hoechstens +1 je Zeile. Videobild k = k-tes v >= 0 (nachspiel; --segmente geraet schlaegt dagegen
+// nach der Zustandsspalte k nach, siehe bildSegment), Breite 287 (Polsterspalte weg),
 // flipY je Zeit aus den Ereignissen y-spiegel, proj aus dem Manifest. Erfassungen ohne undone (und mit
 // --erfassungen app ohne suspect, wie der Pool der App), ep der naechsten Zeile.
 // Wiederholbarkeit (10.9): keine Uhr und kein Zufall in Entscheidungen; Zufall nur ueber G.KG.rnd(--seed).
@@ -179,6 +180,10 @@ export function segmenteLesen(buf){
     m.set(k, {k, t, w, h, roh}); }
   return m;
 }
+
+// Segmente des Bilds x der Zeitleiste: segmente.bin ist nach dem Bildauftrag k des Geraets geschluesselt (= kz), nicht nach
+// dem Videobild v (x.k); mit v traf der Nachschlag ein falsches Bild (Flur 31.10.: v == k in 0 von 1663 Zeilen).
+export const bildSegment=(seg, x)=>seg.get(x.kz);
 
 // ------------------------------------------------ Aufnahme -> Eingaenge
 const m4q=(p,[x,y,z,w])=>[1-2*(y*y+z*z), 2*(x*y+z*w), 2*(x*z-y*w), 0,  2*(x*y-z*w), 1-2*(x*x+z*z), 2*(y*z+x*w), 0,
@@ -436,8 +441,11 @@ function weglassenPlan(G, o, t0, t1){
 }
 const uhrMit=v=>{ if(v==null) return null; const p=globalThis.performance; let n=0; return ()=>p.now()*(1+v)+1000*v+(n++)*v; };
 // Zeitleiste: Eingaenge in Sitzungszeit; bei gleichem t erst Ereignisse/Brueche, dann Pose, Bild, Erfassung.
-function zeitleiste(G, A, posen, erf, o){
+// Bild-Eintraege tragen zwei Schluessel: k = v (Videobild, fuer Video und --runden) und kz = Zustandsspalte k (Bildauftrag
+// des Geraets = Zeilenindex), nach der segmente.bin geschluesselt ist; ohne Spalte k (alte Aufnahmen) ist das der Zeilenindex.
+export function zeitleiste(G, A, posen, erf, o){
   const L=[]; let s=0; const add=(t, ord, x)=>L.push({t, ord, s:s++, ...x});
+  const kzu=i=>A.C && A.C.k!=null && Number.isFinite(A.rows[i][A.C.k]) ? A.rows[i][A.C.k] : i;
   for(const b of A.breaks||[]) add(b.t, 0, {art:'ereignis', ev:{...b, typ:'bruch'}});
   if(A.art==='sitzung') for(const e of A.ereignisse) add(e.t, 0, {art:'ereignis', ev:{...e, typ:e.typ || e.type}});
   else for(const e of A.events||[]){ if(!Number.isFinite(e.t) || e.type==='y-spiegel') continue;
@@ -446,7 +454,7 @@ function zeitleiste(G, A, posen, erf, o){
   posen.forEach((p,i)=>add(p.t, 1, {art:'pose', i}));
   if(o.quelle!=='erfassungen'){
     if(A.art==='sitzung') A.bilder.forEach((x,i)=>add(x.bildErg.t, 2, {art:'bild', i, k:x.bildErg.k}));
-    else posen.forEach((p,i)=>{ if(p.v>=0) add(p.t, 2, {art:'bild', i, k:p.v}); }); }
+    else posen.forEach((p,i)=>{ if(p.v>=0) add(p.t, 2, {art:'bild', i, k:p.v, kz:kzu(i)}); }); }
   if(o.quelle!=='segmente') erf.forEach((e,i)=>add(e.t, 3, {art:'erf', i}));
   if(A.art!=='sitzung' && !o.ohne.includes('tiefe')) (A.tiefe||[]).forEach((d,i)=>add(d.t, 2, {art:'tiefe', i}));
   if(A.art!=='sitzung' && !o.ohne.includes('ebenen')) (A.ebenen||[]).forEach((e,i)=>{ const t=Array.isArray(e) ? e[0] : e.t; if(Number.isFinite(t)) add(t, 2, {art:'ebene', i}); });
@@ -538,7 +546,7 @@ export async function laufen(G, A, o0={}){
         else { b=s.bildErg; if(o.mitWahr) b.wahr=s.wahr; } }
       else { const p=posen[x.i];
         const camTo=G.m4mul(G.m4inv(G.gMat(G.gAusT(p.T))), m4q(p.pose.slice(0, 3), p.pose.slice(3))), fy=flipAt(p.t);
-        if(seg){ const s=seg.get(x.k); if(!s){ info.bildFehlt++; continue; }
+        if(seg){ const s=bildSegment(seg, x); if(!s){ info.bildFehlt++; continue; }
           // --sichtfeld < 1: Geraete-Segmente (px des vollen Bilds) aufs Fenster beschneiden, dann wie bisher
           const roh=fen ? s.roh.map(r=>segmentBeschneiden(r, fen, info.sichtfeld.seg)).filter(Boolean) : s.roh;
           // lmVerschmelzen braucht ein volles BildErgebnis (camTo, proj, w, h, flipY; P-B Befund 6), nicht die Ausgabe von lmSegmente
