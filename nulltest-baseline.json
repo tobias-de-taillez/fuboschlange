@@ -1,0 +1,131 @@
+{
+  "werkzeug": "raumskizze-nulltest.mjs",
+  "version": 1,
+  "erzeugt": "2026-10-31",
+  "stand": "f8c9490",
+  "node": "v26.12.1",
+  "aufnahme": "aufnahme-2026-10-31T16-25-49-246Z-lauf0-video.tar",
+  "eingaben": {
+    "tar": {
+      "datei": "aufnahme-2026-10-31T16-25-49-246Z-lauf0-video.tar",
+      "sha256": "a9e48b61d430889d"
+    },
+    "protokoll": {
+      "datei": "raumskizze-protokoll-2026-10-31T16-25-49-246Z.json",
+      "sha256": "46a8b60414c01036"
+    },
+    "wahrheit": {
+      "datei": "wahrheit-flur.json",
+      "sha256": "369bcfc6f32f0e0e"
+    }
+  },
+  "befehl": "node raumskizze-karte.mjs <aufnahme.tar> --protokoll <protokoll.json> --wahrheit <wahrheit-flur.json> --quelle erfassungen --ohne tiefe,ebenen --karte '{\"schnitt\":{\"gyroBruecke\":true,\"vorhersage\":\"gedaempft\"}}'",
+  "hinweis": "Aus einem echten T1-Lauf erzeugt (scripts/raumskizze-nulltest.sh --baseline-schreiben), nicht von Hand. T1 ist wiederholbar: Toleranzen sind Bedeutungsgrenzen, kein Rauschen. Neu schreiben nur mit Begruendung im Commit.",
+  "kennzahlen": {
+    "iou": 0.760673,
+    "eckenMedian": 3.83124,
+    "eckenP90": 7.753411,
+    "mehrdeutigkeit": 1.960915,
+    "zugeordnet": 6,
+    "wandtreffer": 4,
+    "doppelwaende": 0,
+    "ungueltigeRinge": 0,
+    "beobMedian": 4.668736
+  },
+  "info": {
+    "eckenKarte": 17,
+    "flaeche": 14.110409,
+    "flaechenfehler": -0.151415,
+    "landmarken": 18,
+    "n1": 0,
+    "hoeheFehler": 18.77601
+  },
+  "toleranzen": {
+    "iou": {
+      "abs": 0.02,
+      "richtung": "hoeher",
+      "einheit": "",
+      "pflicht": {
+        "min": 0.76,
+        "quelle": "Konzept 3.1: IoU >= 0,76"
+      },
+      "begruendung": "Flaeche des Aussenrings ~17 m2; 0,02 sind ~0,3 m2, etwa eine um 5 cm verschobene 7-m-Wand. Darunter sieht es der Nutzer nicht"
+    },
+    "eckenMedian": {
+      "abs": 1,
+      "richtung": "niedriger",
+      "einheit": "cm",
+      "pflicht": {
+        "max": 4,
+        "quelle": "Konzept 3.1: Median <= 4 cm"
+      },
+      "begruendung": "Messgenauigkeit der Karte ~3-5 cm (Beob-Median 4,7 cm); +1 cm ist die Aufloesung, ab der ein Eingriff Ecken wirklich verschiebt"
+    },
+    "eckenP90": {
+      "abs": 2,
+      "richtung": "niedriger",
+      "einheit": "cm",
+      "begruendung": "p90 liegt bei nur 6 zugeordneten Ecken nahe am Maximum und schwankt staerker als der Median: doppelte Toleranz"
+    },
+    "mehrdeutigkeit": {
+      "abs": 0.3,
+      "richtung": "hoeher",
+      "einheit": "",
+      "begruendung": "1,0 hiesse: zweitbeste Lage genauso gut (Spiegelung/Drehung offen). Fallen bis 1,66 bei 1,96 heisst noch klar eindeutig"
+    },
+    "zugeordnet": {
+      "abs": 1,
+      "richtung": "hoeher",
+      "einheit": "",
+      "begruendung": "Zuordnung ist ganzzahlig und haengt an der 15-cm-Schwelle; eine Ecke mehr oder weniger ist die kleinste Aenderung"
+    },
+    "wandtreffer": {
+      "abs": 0,
+      "richtung": "hoeher",
+      "einheit": "",
+      "begruendung": "jede verlorene Wand ist ein sichtbarer Fehler im gesunden Raum; Toleranz 0 (bewusst lockern, wenn ein Schritt es begruendet)"
+    },
+    "doppelwaende": {
+      "abs": 0,
+      "richtung": "niedriger",
+      "einheit": "",
+      "begruendung": "Doppelte Landmarken auf einer Wand sind der Fehler, den Zusammenfuehren verhindern soll; im gesunden Raum 0 und soll 0 bleiben"
+    },
+    "ungueltigeRinge": {
+      "abs": 0,
+      "richtung": "niedriger",
+      "einheit": "",
+      "pflicht": {
+        "max": 0,
+        "quelle": "Konzept 3.1: 0 ungueltige Ringe sichtbar"
+      },
+      "begruendung": "ein kreuzender oder verworfener Ring ist nie hinnehmbar"
+    },
+    "beobMedian": {
+      "abs": 1,
+      "richtung": "niedriger",
+      "einheit": "cm",
+      "begruendung": "Rohgenauigkeit der Erfassungen gegen die Wahrheit, vor jeder Ausgleichung; +1 cm ist ~20 % des Medians"
+    }
+  },
+  "nochNichtVerfuegbar": [
+    {
+      "id": "verdachtswaende",
+      "name": "Verdachtswaende",
+      "soll": "0",
+      "braucht": "Schrank-/Stuck-Erkennung (P6, AP Verdachtswand)"
+    },
+    {
+      "id": "peilabweichung",
+      "name": "Ecken mit Peilabweichung > 3 Grad",
+      "soll": "<= 1 von 20",
+      "braucht": "Eckenpeilung (P1/P6)"
+    },
+    {
+      "id": "vertauschteEckenpaare",
+      "name": "vertauschte Eckenpaare",
+      "soll": "0",
+      "braucht": "Eckenzuordnung ueber Abschnitte (P1)"
+    }
+  ]
+}
