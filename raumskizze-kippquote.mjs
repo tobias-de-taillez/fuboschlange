@@ -3,7 +3,7 @@
 // (obs ohne undone/suspect), jede Teilmenge wird ausgewertet mit
 //   alt   G.solveSweepAuto (die Auswertung der Seite, mit G.rueckkehr als Rundenbruch, H wie live) und
 //   karte T1 raumskizze-karte.mjs laufen() auf derselben Teilmenge (--quelle erfassungen, Gyro-Bruecke wie live),
-//         Umriss = Export der Karte; Hauptumriss siehe haupt().
+//         Umriss = Export der Karte (verwirft M8 den Ring, der Aussenring des Stands, als "ohne Export" gezaehlt); Hauptumriss siehe haupt().
 // Beide Auswertungen sehen dieselbe Teilmenge: ein Zug je Lauf aus G.KG.rnd(seed), NICHT T1 --weglassen (anderer Zufallsstrom,
 // laesst zudem Bilder weg). Kennzahlen je Aufnahme und Auswertung gegen den Volllauf derselben Auswertung:
 //   K1  gleiche Eckenzahl und Flaeche +-5 %          K3  gleiche zyklische Links-/Rechts-Folge der Ecken
@@ -105,11 +105,13 @@ export function rechnerAlt(G, h){
     if(!r || !r.corners || r.corners.length<3) return null;
     return ring(r.corners.map(c=>Array.isArray(c) ? c : [c.x ?? c[0], c.y ?? c[1]]), {H:r.H, rueckkehr:!!lap}); };
 }
-// Karte: T1 laufen() auf A mit den Erfassungen obs; Umriss = Export (mm -> m). folge: Eckenzahl je Runde (Aussenring) fuers Online-Nachspiel.
+// Karte: T1 laufen() auf A mit den Erfassungen obs; Umriss = Export (mm -> m). Verwirft die Ringpruefung (M8) den Aussenring, gibt es
+// keinen Export; dann zaehlt der Aussenring des letzten Stands (ohneExport: true), damit kreuzende Ringe als ungueltig sichtbar werden,
+// statt als "kein Ergebnis" zu verschwinden. folge: Aussenring je Runde fuers Online-Nachspiel.
 export function rechnerKarte(G, A, o){
+  const aus=r=>{ const R0=r.stand && r.stand.ringe && r.stand.ringe.find(x=>x.art==='aussen'); return R0 && R0.pts && R0.pts.length>=3 ? R0.pts : null; };
   return async (obs, opt={})=>{ const lauf=await T1.laufen(G, {...A, P:{...A.P, obs}}, o);
-    const ex=lauf.export && lauf.export.pts ? lauf.export.pts.map(p=>[p.x/1000, p.y/1000]) : null, R=ring(ex, {H:lauf.hLaser ?? null});
-    const aus=r=>{ const R0=r.stand && r.stand.ringe && r.stand.ringe.find(x=>x.art==='aussen'); return R0 && R0.pts && R0.pts.length>=3 ? R0.pts : null; };
+    const ex=lauf.export && lauf.export.pts ? lauf.export.pts.map(p=>[p.x/1000, p.y/1000]) : null, st=ex ? null : aus(lauf.letzte), R=ring(ex || st, {H:lauf.hLaser ?? null, ohneExport:!ex && !!st});
     if(opt.folge) return {...(R || {n:0, gueltig:false}), runden:lauf.runden.map(r=>({t:r.stand.t, P:aus(r)}))};
     return R; };
 }
@@ -129,8 +131,8 @@ export async function onlineAlt(rechne, obs, o={}){ const a=o.onlineStart ?? DEF
 // voll: ring | null, laeufe: (ring | null)[]; wahr: {n, nHaupt} | null
 export function kennzahlen(voll, laeufe, wahr=null, o={}){
   const N=laeufe.length, tolA=o.flaecheTol ?? DEF.flaecheTol, sw=o.iouSchwelle ?? DEF.iouSchwelle, mit=laeufe.filter(Boolean);
-  const k={N, ohneErgebnis:mit.length===N ? 0 : N-mit.length,
-    voll:voll ? {n:voll.n, A:r2(voll.A), gueltig:voll.gueltig, einfach:voll.einf, drehsumme:Math.round(voll.ts), hauptN:voll.haupt.n, hauptA:r2(voll.haupt.A)} : null,
+  const k={N, ohneErgebnis:mit.length===N ? 0 : N-mit.length, ohneExport:mit.filter(r=>r.ohneExport).length,
+    voll:voll ? {n:voll.n, A:r2(voll.A), gueltig:voll.gueltig, einfach:voll.einf, drehsumme:Math.round(voll.ts), hauptN:voll.haupt.n, hauptA:r2(voll.haupt.A), ohneExport:!!voll.ohneExport} : null,
     ungueltig:wilson(mit.filter(r=>!r.gueltig).length, N),
     eckenzahlen:Object.entries(laeufe.reduce((c, r)=>{ const e=r ? r.n : 0; c[e]=(c[e]||0)+1; return c; }, {})).sort((a,b)=>b[1]-a[1]||a[0]-b[0]).map(([e, c])=>e+'x'+c).join(' '),
     hauptEckenzahlen:Object.entries(mit.reduce((c, r)=>{ c[r.haupt.n]=(c[r.haupt.n]||0)+1; return c; }, {})).sort((a,b)=>b[1]-a[1]||a[0]-b[0]).map(([e, c])=>e+'x'+c).join(' ')};
@@ -155,12 +157,13 @@ export function wahrheitEcken(datei){ const W=T2.wahrheitLaden(datei), P=W.ringe
 // rechne: async obs -> ring | null; obs: Erfassungen; o: {laeufe, weglassen, seed, G, wahr, online}
 export async function kippquote(rechne, obs, o={}){
   const L=o.laeufe ?? DEF.laeufe, p=o.weglassen ?? DEF.weglassen, seed=o.seed ?? DEF.seed, G=o.G;
-  const voll=await rechne(obs, {folge:true}), laeufe=[], gestrichen=[];
+  const voll0=await rechne(obs, {folge:true}), laeufe=[], gestrichen=[];
+  const voll=voll0 && voll0.P ? voll0 : null;   // die Karte liefert ohne Ring nur die Runden (voll0.runden) fuers Online-Nachspiel
   for(let i=0;i<L;i++){ const m=zugMaske(G, seed, i, obs.length, p), sub=obs.filter((x, j)=>m[j]); gestrichen.push(obs.length-sub.length); laeufe.push(await rechne(sub)); }
   const K=kennzahlen(voll, laeufe, o.wahr || null, o);
   K.gestrichen={min:Math.min(...gestrichen), max:Math.max(...gestrichen), median:median(gestrichen)};
   // Online-Nachspiel: Alt rechnet Praefixe (o.online), Karte nimmt die Runden des Volllaufs
-  const seq=o.online ? await o.online(rechne, obs, voll) : null;
+  const seq=o.online ? await o.online(rechne, obs, voll0) : null;
   if(seq) K.online=onlineKennzahlen(seq);
   return {voll, laeufe, kennzahlen:K};
 }
@@ -184,12 +187,12 @@ export function tabelle(R){
   L.push(`Kippquote ${k.quelle} · ${k.nObs} Erfassungen, ${k.weglassen*100} % weg, ${k.laeufe} Läufe, Seed ${k.seed} · H ${k.h}`);
   for(const nm of ['alt', 'karte']){ const E=R[nm]; if(!E) continue; const K=E.kennzahlen, v=K.voll;
     L.push(`\n${nm==='alt' ? 'Alte Auswertung (G.solveSweepAuto)' : 'Karte (T1, Export)'}`);
-    L.push(`  Volllauf: ${v ? `${v.n} Ecken, ${v.A} m², Hauptumriss ${v.hauptN} Ecken ${v.hauptA} m², ${v.gueltig ? 'gültig' : 'UNGÜLTIG (Drehsumme '+v.drehsumme+'°, '+(v.einfach ? 'einfach' : 'kreuzend')+')'}` : 'kein Ring'}`);
+    L.push(`  Volllauf: ${v ? `${v.n} Ecken, ${v.A} m², Hauptumriss ${v.hauptN} Ecken ${v.hauptA} m², ${v.gueltig ? 'gültig' : 'UNGÜLTIG (Drehsumme '+v.drehsumme+'°, '+(v.einfach ? 'einfach' : 'kreuzend')+')'}${v.ohneExport ? ', OHNE EXPORT (Ring von M8 verworfen, Stand-Ring gezählt)' : ''}` : 'kein Ring'}`);
     if(v){ L.push(`  K1 (Ecken + Fläche ±5 %)      ${pc(K.k1)}${v.gueltig ? '' : '   Achtung: Referenz ungültig, "stabil" heißt hier "gleich falsch"'}`);
       L.push(`  K3 (Links-/Rechts-Folge)      ${pc(K.k3)}`);
       L.push(`  KH (Hauptecken gleich)        ${pc(K.kh)}`);
       L.push(`  IoU gegen Volllauf            Median ${K.iou.median}, ≥ 0,9: ${pc(K.iou.anteil)}; Hauptumriss Median ${K.iouHaupt.median}, ≥ 0,9: ${pc(K.iouHaupt.anteil)}`); }
-    L.push(`  ungültige Ringe               ${pc(K.ungueltig)}${K.ohneErgebnis ? `; ohne Ergebnis ${K.ohneErgebnis}` : ''}`);
+    L.push(`  ungültige Ringe               ${pc(K.ungueltig)}${K.ohneErgebnis ? `; ohne Ergebnis ${K.ohneErgebnis}` : ''}${K.ohneExport ? `; ohne Export (Ring von M8 verworfen, Stand-Ring gezählt) ${K.ohneExport}` : ''}`);
     L.push(`  Eckenzahlen (Läufe)           ${K.eckenzahlen} · Hauptecken ${K.hauptEckenzahlen}${K.gestrichen ? ` · gestrichen ${K.gestrichen.min}–${K.gestrichen.max} je Lauf` : ''}`);
     if(K.online) L.push(`  Online-Nachspiel (${K.online.runden} Runden): Wechsel der sichtbaren Eckenzahl roh ${K.online.wechselRoh}, nur gültige ${K.online.wechselNurGueltig}, mit 3er-Regel ${K.online.wechselMit3}; ungültig ${Math.round(100*K.online.ungueltigAnteil)} % der Runden`);
     if(K.richtigkeit){ const w=K.richtigkeit;
@@ -221,6 +224,6 @@ async function main(){
   if(a.json) console.log(JSON.stringify(R));
   if(a.aus){ const d=resolve(a.aus); mkdirSync(d, {recursive:true}); writeFileSync(join(d, 'kippquote.json'), JSON.stringify(R, null, 1)); writeFileSync(join(d, 'kippquote.txt'), txt+'\n'); console.log(`Ausgabe: ${d}/{kippquote.json, kippquote.txt}`); }
 }
-const vollJson=r=>r ? {n:r.n, A:r2(r.A), gueltig:r.gueltig, einfach:r.einf, drehsumme:Math.round(r.ts), hauptN:r.haupt.n, pts:r.P.map(p=>[r4(p[0]), r4(p[1])])} : null;
-const laufJson=r=>r ? {n:r.n, A:r2(r.A), gueltig:r.gueltig, hauptN:r.haupt.n} : null;
+const vollJson=r=>r ? {n:r.n, A:r2(r.A), gueltig:r.gueltig, einfach:r.einf, drehsumme:Math.round(r.ts), hauptN:r.haupt.n, ohneExport:!!r.ohneExport, pts:r.P.map(p=>[r4(p[0]), r4(p[1])])} : null;
+const laufJson=r=>r ? {n:r.n, A:r2(r.A), gueltig:r.gueltig, hauptN:r.haupt.n, ...(r.ohneExport ? {ohneExport:true} : {})} : null;
 if(process.argv[1] && fileURLToPath(import.meta.url)===resolve(process.argv[1])) main().catch(e=>{ console.error(e.stack || e.message); process.exit(1); });

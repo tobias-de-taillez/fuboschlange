@@ -80,6 +80,8 @@ chk('kennzahlen: KH zaehlt auch Fase und Acht (Hauptumriss 4 Ecken), nicht den f
 chk('kennzahlen: ungueltig = Acht (1 von 4), ohneErgebnis 1', kz.ungueltig.k===1 && kz.ohneErgebnis===1);
 chk('kennzahlen: IoU identisch 1, Fase ~0,99, Median ueber alle Laeufe (null zaehlt 0)', Math.abs(kz.iouLaeufe[0]-1)<1e-9 && kz.iouLaeufe[1]>0.98 && kz.iouLaeufe[3]===0, kz.iouLaeufe.join(' '));
 chk('kennzahlen: Richtigkeit getrennt (Eckenzahl = Wahrheit 4: identischer Lauf und Acht, nicht die Fase), Volllauf ohne Abweichung', kz.richtigkeit.eckenzahl.k===2 && kz.richtigkeit.voll.dn===0 && kz.richtigkeit.hauptEckenzahl.k===3);
+const kzE=K.kennzahlen(R(rechteck(6, 4)), [K.ring(rechteck(6, 4), {ohneExport:true}), K.ring(acht, {ohneExport:true}), R(rechteck(6, 4))]);
+chk('kennzahlen: Laeufe ohne Export (Ring von M8 verworfen, Stand-Ring gezaehlt) werden mitgezaehlt, kreuzender Stand-Ring ist ungueltig', kzE.ohneExport===2 && kzE.ungueltig.k===1 && kzE.ohneErgebnis===0);
 const kzUng=K.kennzahlen(R(acht), [R(acht), R(acht)]);
 chk('kennzahlen: ungueltiger Volllauf wird gemeldet (K1 = 100 % und trotzdem voll.gueltig false)', kzUng.k1.k===2 && kzUng.voll.gueltig===false && kzUng.voll.drehsumme===0);
 chk('tabelle: nennt K1/K3/KH, warnt bei ungueltigem Volllauf und zeigt die Richtigkeit',
@@ -125,6 +127,11 @@ chk('Kippquote ist empfindlich: 92 % weg gibt weniger K1 oder mehr Laeufe ohne E
 // Gegenprobe Richtigkeit/Stabilitaet getrennt: Wahrheit mit 8 Ecken -> stabil (K1 hoch), aber nicht richtig
 const kqW=K.kennzahlen(kq.voll, kq.laeufe, {n:8, nHaupt:8});
 chk('Richtigkeit getrennt von Stabilitaet: stabil (K1 >= 11/12) und doch 0 Laeufe mit der (falschen) Wahrheits-Eckenzahl 8', kqW.k1.k>=11 && kqW.richtigkeit.eckenzahl.k===0 && kqW.richtigkeit.voll.dn===-2);
+
+// Auswerter ohne Ring (Karte ohne Export): kein Absturz, Volllauf null, nur die Runden fuers Online-Nachspiel bleiben
+{ const leer=await K.kippquote(async (ob, opt={})=>opt.folge ? {n:0, gueltig:false, runden:[{t:0, P:null}, {t:3, P:rechteck(3, 2)}]} : null, obsRaum, {G, laeufe:3, weglassen:0.05, seed:1, wahr:{n:6, nHaupt:6},
+    online:async (r0, ob, v)=>K.rundenFolge(v && v.runden, 1)});
+  chk('Auswerter ohne Ring: Volllauf null, 3 Laeufe ohne Ergebnis, Online-Folge aus den Runden, Richtigkeit 0', leer.voll===null && leer.kennzahlen.voll===null && leer.kennzahlen.ohneErgebnis===3 && leer.kennzahlen.online.runden===3 && leer.kennzahlen.richtigkeit.eckenzahl.k===0); }
 
 // ---------------------------------------------------------------- (b3) Karte-Auswertung an derselben Aufnahme (Zeilen: Kamera folgt den Erfassungen)
 { const SP2=['t', 'px', 'py', 'pz', 'qx', 'qy', 'qz', 'qw', 'Tpsi', 'Tx', 'Ty', 'Tz', 'flags', 'v', 'k'], C2=Object.fromEntries(SP2.map((k, i)=>[k, i])), rows2=[];
