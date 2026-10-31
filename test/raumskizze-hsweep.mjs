@@ -84,13 +84,16 @@ const nah=(a, b, e=1e-9)=>Math.abs(a-b)<=e;
   chk('kippquote: Blockfenster (3 s, Schritt 1 s, Beginn 0..17 = 18 Fenster), nur das erste verliert Beob 0', q.block.N===18 && q.block.k1===17, `N ${q.block.N} k1 ${q.block.k1}`);
   const q2=H.kippquote(G, pool, 2.5, {n:40, anteil:0.05, block:3, seed:7});
   chk('kippquote: wiederholbar bei gleichem Samen', JSON.stringify(q)===JSON.stringify(q2));
+  const gesehen=[]; const Gf={rueckkehr:(obs, h)=>{ gesehen.push(h); return null; }, solveSweepAuto:(obs, o)=>{ gesehen.push(Object.keys(o).sort().join()); return {corners:quad, H:2.71}; }};
+  const qf=H.kippquote(Gf, pool, null, {n:2, block:3});
+  chk('kippquote: H = null rechnet mit freier Höhe (H0, Hsigma, Rückkehr mit 2,55) und meldet den eigenen Schätzwert', gesehen[0]===2.55 && gesehen[1]==='H0,Hsigma' && qf.voll.H===2.71, gesehen.slice(0, 2).join(' '));
   const qe=H.kippquote({rueckkehr:()=>null, solveSweepAuto:()=>{ throw new Error('x'); }}, pool, 2.5);
   chk('kippquote: Auswertung wirft -> keine Vollauswertung, null statt Absturz', qe.voll===null && qe.zuf===null); }
 
 // ---- Auswertung: bestes H, Spiegelung, IoU-Verlust im Fenster, E1
 { const mk=(name, H0, iou, o={})=>({aufnahme:name, H:H0, fehler:null, ms:{gesamt:1},
-    k:{gueltig:true, gespiegelt:false, rot:0.1, iou, eMed:0.05+Math.abs(H0-2.6)*0.2, nZu:10, beobMed:0.04+Math.abs(H0-2.6)*0.2, verbMitWand:5, kameraMed:1.9, hLaserProtokoll:null, ...(o.k||{})},
-    nach:{skaliert:{iou:iou+0.02, gespiegelt:false, rot:0.1, ...(o.nach||{})}, eins:{iou, gespiegelt:false, rot:0.1}}, kipp:null});
+    k:{gueltig:true, gespiegelt:false, rot:0.1, zentrum:[1, 1], iou, eMed:0.05+Math.abs(H0-2.6)*0.2, nZu:10, beobMed:0.04+Math.abs(H0-2.6)*0.2, verbMitWand:5, kameraMed:1.9, hLaserProtokoll:null, ...(o.k||{})},
+    nach:{skaliert:{iou:iou+0.02, gespiegelt:false, rot:0.1, zentrum:[1, 1], mehr:2, ...(o.nach||{})}, eins:{iou, gespiegelt:false, rot:0.1, zentrum:[1, 1], mehr:2}}, kipp:null});
   const gitter=H.hGitter(2.3, 2.9, 0.05);
   // IoU haengt kaum von H ab (nach Skalierung): Verlust klein, bestes H bei 2,6 fuer alle Kriterien ausser verb/nach
   const Z=gitter.map(h=>mk('r1', h, 0.80-0.1*Math.abs(h-2.6)));
@@ -122,6 +125,12 @@ const nah=(a, b, e=1e-9)=>Math.abs(a-b)<=e;
   // Lage der Nachskalierungs-Passung: Drehung 90 Grad daneben zaehlt nicht (Passung nur des Exports landete woanders)
   const Zr=gitter.map(h=>mk('r8', h, 0.8-0.1*Math.abs(h-2.6), h===2.4 || h===2.8 ? {nach:{rot:0.1+Math.PI/2}} : {})), Sr=H.auswerten(Zr, {}, H.DEF)[0];
   chk('auswerten: Passung mit 90° anderer Lage wird nicht als IoU nach Skalierung gewertet (2,40 und 2,80 fehlen)', Sr.verlust.find(v=>v.H===2.4).iouNach===null && Sr.verlust.find(v=>v.H===2.8).iouNach===null && Sr.nFenster===7, `n ${Sr.nFenster}`);
+  // gleiche Drehung, aber 2 m verschoben (Nebenlage): zaehlt weder fuer das beste H noch als IoU nach Skalierung
+  const Zv=gitter.map(h=>mk('r11', h, 0.8-0.1*Math.abs(h-2.6), h===2.4 ? {k:{zentrum:[3, 1], gueltig:false, beobMed:0.0001}, nach:{zentrum:[3, 1]}} : {})), Sv=H.auswerten(Zv, {}, H.DEF)[0];
+  chk('auswerten: Nebenlage mit gleicher Drehung, 2 m verschoben, wird nicht gewertet (beste H bleibt 2,60; 2,40 ohne IoU nach)', Sv.best.beob===2.6 && Sv.verlust.find(v=>v.H===2.4).iouNach===null, JSON.stringify(Sv.best));
+  // IoU nach Skalierung mit mehrdeutiger Passung (Mehrd. nach < 1,2) zaehlt nicht
+  const Zn=gitter.map(h=>mk('r12', h, 0.8-0.1*Math.abs(h-2.6), h===2.5 ? {nach:{mehr:1.1}} : {})), Sn=H.auswerten(Zn, {}, H.DEF)[0];
+  chk('auswerten: Mehrd. nach < 1,2 -> keine IoU nach Skalierung bei diesem H', Sn.verlust.find(v=>v.H===2.5).iouNach===null && Sn.verlust.find(v=>v.H===2.55).iouNach!==null && Sn.nFenster===8, `n ${Sn.nFenster}`);
   // zu wenige eindeutige Laeufe: Streuung und Verlust unbelegt, nicht ok
   const Zu=gitter.map(h=>mk('r9', h, 0.8, h===2.6 || h===2.55 ? {} : {k:{gueltig:false, rot:2}})), Su=H.auswerten(Zu, {}, H.DEF)[0], Eu=H.e1Aussage([Su]);
   chk('E1: nur 2 eindeutige Läufe -> Streuung unbelegt, nicht „ok“', Su.streuung===null && Eu.zeilen[0].okStreuung==='unbelegt' && /^nicht entscheidbar/.test(Eu.urteil), Eu.urteil);

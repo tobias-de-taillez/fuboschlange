@@ -38,7 +38,7 @@ export const VERSION=1;
 export const DEF={von:2.30, bis:2.90, schritt:0.05, quelle:'erfassungen', ohne:['tiefe', 'ebenen'], wand:null, kipp:40, kippAnteil:0.05, kippBlock:3,
   karte:'{"schnitt":{"gyroBruecke":true,"vorhersage":"gedaempft"}}', jobs:Math.max(1, Math.min(4, Math.floor(availableParallelism()/2))), zeitgrenze:1800,
   // E1 (Konzepte, Abschnitt 4): Streuung des besten H <= +-0,15 m, IoU-Verlust <= 0,05 bei |delta|/Delta <= 0,3; M3 verlangt >= 3 Raeume
-  e1:{streuung:0.15, verlust:0.05, hebel:0.3, raeume:3, mindestPunkte:3, lageGrad:20}};
+  e1:{streuung:0.15, verlust:0.05, hebel:0.3, raeume:3, mindestPunkte:3, lageGrad:20, lageM:0.75}};
 const f1=x=>Number.isFinite(x) ? x.toFixed(1) : '–', f2=x=>Number.isFinite(x) ? x.toFixed(2) : x===Infinity ? '∞' : '–', f3=x=>Number.isFinite(x) ? x.toFixed(3) : '–';
 const cm=x=>Number.isFinite(x) ? (100*x).toFixed(1) : '–', pct=x=>Number.isFinite(x) ? (100*x).toFixed(0)+' %' : '–';
 export const schreibeJson=(datei, x)=>writeFileSync(datei, JSON.stringify(x, (k,v)=>v===Infinity ? 'Infinity' : v===-Infinity ? '-Infinity' : v, 1));
@@ -88,7 +88,7 @@ export const skaliereExport=(data, f)=>({...data, pts:data.pts.map(p=>({...p, x:
 const flaecheAbs=P=>{ let a=0; for(let i=0,j=P.length-1;i<P.length;j=i++) a+=P[j][0]*P[i][1]-P[i][0]*P[j][1]; return Math.abs(a/2); };
 // Ergebnis von G.solveSweepAuto auf n und Flaeche der Ecken; null, wenn es keine Ecken gibt
 export function signatur(s){ if(!s || !s.corners || s.corners.length<3) return null;
-  const P=s.corners.map(c=>Array.isArray(c) ? c : [c.x ?? c[0], c.y ?? c[1]]); return {n:P.length, A:flaecheAbs(P)}; }
+  const P=s.corners.map(c=>Array.isArray(c) ? c : [c.x ?? c[0], c.y ?? c[1]]); return {n:P.length, A:flaecheAbs(P), H:Number.isFinite(s.H) ? s.H : null}; }
 // K1 (Konzepte P4 1.2): gleiche Eckenzahl und Flaeche +-5 % gegenueber der Vollauswertung
 export const gleichK1=(s, s0, tol=0.05)=>!!(s && s0 && s.n===s0.n && Math.abs(s.A-s0.A)<=tol*s0.A);
 const lcg=seed=>{ let x=seed>>>0; return ()=>{ x=(Math.imul(x, 1664525)+1013904223)>>>0; return x/4294967296; }; };
@@ -96,8 +96,9 @@ const hist=a=>{ const h={}; for(const x of a) h[x]=(h[x]||0)+1; return Object.en
 // Alte Auswertung wie altPipeline mit festem H und Rueckkehrrunde wie in p4_kipp; rechne(obs) -> Signatur
 export function kippquote(G, pool, H, o={}){
   o={n:DEF.kipp, anteil:DEF.kippAnteil, block:DEF.kippBlock, seed:12345, ...o};
-  const rechne=obs=>{ if(obs.length<3) return null; try{ let lap=null; try{ lap=G.rueckkehr(obs, H); }catch(e){}
-    return signatur(G.solveSweepAuto(obs, lap ? {H, runde:{t:lap.t-0.01}} : {H})); }catch(e){ return null; } };
+  // H = null: freie Hoehe mit Vorwissen 2,55 +- 0,35 wie die App ohne Laser (p4_kipp: Rueckkehr mit 2,55)
+  const basis=H==null ? {H0:2.55, Hsigma:0.35} : {H}, rechne=obs=>{ if(obs.length<3) return null; try{ let lap=null; try{ lap=G.rueckkehr(obs, H ?? 2.55); }catch(e){}
+    return signatur(G.solveSweepAuto(obs, lap ? {...basis, runde:{t:lap.t-0.01}} : basis)); }catch(e){ return null; } };
   const s0=rechne(pool); if(!s0 || !pool.length) return {voll:null, zuf:null, block:null};
   const stat=runs=>({N:runs.length, k1:runs.filter(s=>gleichK1(s, s0)).length, ecken:hist(runs.map(s=>s ? s.n : 0))});
   const rnd=lcg(o.seed), Z=[]; for(let d=0;d<o.n;d++) Z.push(rechne(pool.filter(()=>rnd()>=o.anteil)));
@@ -113,12 +114,14 @@ export function t1Argv(a){
     ...(a.ohne && a.ohne.length ? ['--ohne', a.ohne.join(',')] : []), ...(a.karte ? ['--karte', a.karte] : [])];
 }
 const ringVon=(data)=>{ const E=T2.eingabeAus({data}); return E.ringe; };
+// Schwerpunkt des Exportrings im Rahmen der Wahrheit (Lage der Passung): trennt verschobene Nebenlagen, die dieselbe Drehung haben
+const zentrumVon=(data, T)=>{ const R=data ? ringVon(data) : []; return R.length && T ? T2.tf(T2.schwerpunkt(R[0].pts), T) : null; };
 // Kennzahlen aus T2-Ergebnis m und Lauf (ohne Nachskalierung und Kippquote)
 export function kennzahlen(lauf, m){
   const S=lauf.letzte.stand, a=m && !m.fehler && m.aussen && !m.aussen.fehlt ? m.aussen : null, p=m && m.passung ? m.passung : null;
   const gu=!!(p && p.verhaeltnis!=null && p.verhaeltnis>=1.2 && p.skala!=null), ab=S.abschnitte, g=m && m.beob && m.beob.gehoben && m.beob.gehoben.alle ? m.beob.gehoben.alle : null;
   return {iou:a ? a.iou : null, eMed:a ? a.eMed : null, eP90:a ? a.eP90 : null, flaeche:a ? a.A : null, flaecheWahr:a ? a.AT : null, nExp:a ? a.n : (lauf.export ? lauf.export.pts.length : 0),
-    nT:a ? a.nT : null, nZu:a ? a.zugeordnet.length : null, beobMed:g ? g.med : null, mehr:p ? p.verhaeltnis ?? null : null, gueltig:gu, gespiegelt:p ? !!p.gespiegelt : null, rot:p && p.T ? p.T.r : null,
+    nT:a ? a.nT : null, nZu:a ? a.zugeordnet.length : null, beobMed:g ? g.med : null, mehr:p ? p.verhaeltnis ?? null : null, gueltig:gu, gespiegelt:p ? !!p.gespiegelt : null, rot:p && p.T ? p.T.r : null, zentrum:zentrumVon(lauf.export, p && p.T),
     spiegelVh:p ? p.spiegelVerhaeltnis ?? null : null, abschnitte:ab.length, verbunden:ab.filter(x=>x.stufe==='verbunden').length, verbMitWand:ab.filter(x=>x.stufe==='verbunden' && x.mitWand).length,
     waendeGef:m && m.waende ? m.waende.gefunden : null, waendeWahr:m && m.waende ? m.waende.nWahr : null, export:!!lauf.export, hLaser:lauf.hLaser ?? null,
     hC:S.hoehen ? S.hoehen.hC ?? null : null, metrikFehler:m && m.fehler ? m.fehler : null};
@@ -133,14 +136,14 @@ export function nachLauf(data, m, wahrheit, opt, wand=null){
   const mp=vor===1 ? (m && !m.fehler && m.aussen && !m.aussen.fehlt ? m : null) : messen(vor);
   const Er=mp ? ringVon(data)[0] : null, kand=Er && mp.passung.T ? wandKandidaten(W.ringe[0], Er, mp.passung.T, vor) : [], nf=nachFaktor(kand, wand);
   const mit=f=>{ if(!(f>0)) return null; const mm=messen(f); return mm ? {iou:mm.aussen.iou, eMed:mm.aussen.eMed, nZu:mm.aussen.zugeordnet.length, flaeche:mm.aussen.A, mehr:mm.passung.verhaeltnis ?? null,
-    gespiegelt:!!mm.passung.gespiegelt, rot:mm.passung.T.r} : null; };
+    gespiegelt:!!mm.passung.gespiegelt, rot:mm.passung.T.r, zentrum:zentrumVon(f===1 ? data : skaliereExport(data, f), mm.passung.T)} : null; };
   return {...nf, vorskala:vor, kandidaten:kand, eins:mit(1), skaliert:mit(nf.fWand), median:mit(nf.fMedian)};
 }
 // auftrag: {id, aufnahme, src, protokoll, wahrheit, H, quelle, ohne, karte, wand, kipp, kippAnteil, kippBlock, dir}
 export async function einzelLauf(auftrag){
   const t0=performance.now(), d=resolve(auftrag.dir); mkdirSync(d, {recursive:true});
   const argv=t1Argv(auftrag), kopf={id:auftrag.id, aufnahme:auftrag.aufnahme, H:auftrag.H, version:VERSION, wahrheit:auftrag.wahrheit || null, argv, wand:auftrag.wand || null,
-    kippOpt:[auftrag.kipp, auftrag.kippAnteil, auftrag.kippBlock]};
+    kippOpt:[auftrag.kipp, auftrag.kippAnteil, auftrag.kippBlock, !!auftrag.kippVergleich]};
   try{
     const a=T1.argumente(argv), o=T1.optionenAus(a), {G, quellen, herkunft, pruef}=await T1.ladeSeite({});
     const A=T1.ladeQuelle(resolve(auftrag.src), {protokoll:auftrag.protokoll ? resolve(auftrag.protokoll) : null}), wahrheit=auftrag.wahrheit ? resolve(auftrag.wahrheit) : null;
@@ -152,13 +155,17 @@ export async function einzelLauf(auftrag){
     k.kameraMed=median(pool.map(x=>x.ra.o && x.ra.o[1])); k.hLaserProtokoll=A.hLaserMm ? A.hLaserMm/1000 : null; k.nPool=pool.length;
     // Nachskalierung; die Passung der skalierten Variante nur ueber den Export (iouExport = Faktor 1 als Vergleich)
     const nach=wahrheit && lauf.export ? nachLauf(lauf.export, m, wahrheit, opt, auftrag.wand) : null;
-    const tK=performance.now(), kipp=auftrag.kipp>0 && pool.length ? kippquote(G, pool, auftrag.H, {n:auftrag.kipp, anteil:auftrag.kippAnteil, block:auftrag.kippBlock}) : null;
+    const tK=performance.now(), ko={n:auftrag.kipp, anteil:auftrag.kippAnteil, block:auftrag.kippBlock}, kipp=auftrag.kipp>0 && pool.length ? kippquote(G, pool, auftrag.H, ko) : null;
+    // Vergleich zu festem H (P4-H2: hebt festes H die Quote?): freie Hoehe, und H auf den eigenen Schaetzwert festgehalten; gleicher Samen
+    let kippVergleich=null;
+    if(auftrag.kippVergleich && kipp){ const frei=kippquote(G, pool, null, ko), hEigen=frei.voll ? frei.voll.H : null;
+      kippVergleich={frei, hEigen, eigen:Number.isFinite(hEigen) ? kippquote(G, pool, hEigen, ko) : null}; }
     const msK=performance.now()-tK, msM=tK-tM;
     writeFileSync(join(d, 'bericht.txt'), T1.bericht(lauf, m, null, herkunft, quellen, pruef)+`\nZeit: Lauf ${(msLauf/1000).toFixed(1)} s, T2+Nachskalierung ${(msM/1000).toFixed(1)} s, Kipp ${(msK/1000).toFixed(1)} s (Node ${process.version})\n`);
     writeFileSync(join(d, 'export.json'), JSON.stringify(lauf.teilen));
-    const z={...kopf, k, nach, kipp, ms:{lauf:msLauf, metrik:msM, kipp:msK, gesamt:performance.now()-t0}, fehler:null};
+    const z={...kopf, k, nach, kipp, kippVergleich, ms:{lauf:msLauf, metrik:msM, kipp:msK, gesamt:performance.now()-t0}, fehler:null};
     schreibeJson(join(d, 'kennzahlen.json'), z); return z;
-  }catch(e){ const z={...kopf, k:null, nach:null, kipp:null, ms:{gesamt:performance.now()-t0}, fehler:e.stack || String(e)}; schreibeJson(join(d, 'kennzahlen.json'), z); return z; }
+  }catch(e){ const z={...kopf, k:null, nach:null, kipp:null, kippVergleich:null, ms:{gesamt:performance.now()-t0}, fehler:e.stack || String(e)}; schreibeJson(join(d, 'kennzahlen.json'), z); return z; }
 }
 
 // ------------------------------------------------ Auswertung
@@ -185,14 +192,15 @@ export function auswerten(zeilen, laser={}, o=DEF){
         b[key]=key==='ecken' ? argExtrem(Q.filter(z=>(z.k.nZu ?? 0)>=Math.max(3, 0.5*zuMax)), z=>z.k.eMed, dir) : argExtrem(Q, wert, dir);
       return b; };
     const best1=bestVon(zul), h1=best1.beob ?? best1.iou, z1=Number.isFinite(h1) ? zul.reduce((b, z)=>Math.abs(z.H-h1)<Math.abs(b.H-h1) ? z : b, zul[0]) : null, rRef=z1 ? z1.k.rot : null;
-    const lageOk=x=>x && x.gespiegelt===modal && Number.isFinite(rRef) && Number.isFinite(x.rot) && Math.abs(wrap(x.rot-rRef))<=o.e1.lageGrad*Math.PI/180;
+    const zRefZ=z1 ? z1.k.zentrum : null, lageOk=x=>x && x.gespiegelt===modal && Number.isFinite(rRef) && Number.isFinite(x.rot) && Math.abs(wrap(x.rot-rRef))<=o.e1.lageGrad*Math.PI/180
+      && !!zRefZ && !!x.zentrum && Math.hypot(x.zentrum[0]-zRefZ[0], x.zentrum[1]-zRefZ[1])<=o.e1.lageM;
     const zul2=Z.filter(z=>z.k && !z.fehler && lageOk(z.k)), best=zul2.length>=o.e1.mindestPunkte ? bestVon(zul2) : best1;
     const hKopf=best.beob ?? best.iou, werte=Object.values(best).filter(Number.isFinite), streuung=werte.length && zul2.length>=o.e1.mindestPunkte ? (Math.max(...werte)-Math.min(...werte))/2 : null;
     const lz=laser[name] ?? Z.map(z=>z.k && z.k.hLaserProtokoll).find(Number.isFinite) ?? null, Href=lz ?? hKopf;
     const cam=median(Z.map(z=>z.k && z.k.kameraMed)), Delta=Number.isFinite(Href) && Number.isFinite(cam) ? Href-cam : null;
     // IoU-Verlust nach Nachskalierung gegen den Gitterpunkt nahe Href. Die Passung nur des Exports kann bei falschem H in einer
     // anderen Lage landen; sie zaehlt nur mit gleicher Spiegelung und Drehung innerhalb o.e1.lageGrad der Lage des besten H.
-    const nachIou=z=>z.nach && lageOk(z.nach.skaliert) ? z.nach.skaliert.iou : null, nachIouOhne=z=>z.nach && lageOk(z.nach.eins) ? z.nach.eins.iou : null;
+    const nachIou=z=>z.nach && lageOk(z.nach.skaliert) && z.nach.skaliert.mehr>=1.2 ? z.nach.skaliert.iou : null, nachIouOhne=z=>z.nach && lageOk(z.nach.eins) ? z.nach.eins.iou : null;
     const mitIou=Z.filter(z=>Number.isFinite(nachIou(z))), refZ=Number.isFinite(Href) && mitIou.length ? mitIou.reduce((b, z)=>Math.abs(z.H-Href)<Math.abs(b.H-Href) ? z : b) : null, ref=refZ ? nachIou(refZ) : null;
     const verlust=Z.map(z=>{ const rel=Number.isFinite(Delta) ? (z.H-Href)/Delta : null, i=nachIou(z);
       return {H:z.H, rel, iouNach:i, iouOhne:nachIouOhne(z), verlust:Number.isFinite(ref) && Number.isFinite(i) ? ref-i : null, imFenster:Number.isFinite(rel) && Math.abs(rel)<=o.e1.hebel+1e-9}; });
@@ -228,8 +236,8 @@ export function tabelleMd(zeilen, S, E, kopf={}){
   for(const s of S){
     const Z=zeilen.filter(z=>z.aufnahme===s.name).sort((a, b)=>a.H-b.H), v=new Map(s.verlust.map(x=>[x.H, x]));
     L.push(`## ${s.name}`, '', `Laserhöhe ${s.laser!=null ? f3(s.laser)+' m' : 'unbekannt'}, Kamerahöhe (Median Strahlursprung) ${f2(s.kamera)} m, Δ = Href − Kamera = ${f2(s.Delta)} m (Href = ${s.laser!=null ? 'Laser' : 'bestes H nach Beob-Median'} ${f3(s.Href)} m).`,
-      `Eindeutig (Mehrd. ≥ 1,2): ${s.nEindeutig} von ${s.nLaeufe} Läufen${s.nFehler ? `, ${s.nFehler} Fehler` : ''}; in derselben Lage wie das eindeutige beste H (Spiegelung gleich, Drehung ≤ 20°): ${s.nLage}. Spiegelung: ${s.spiegelModal==null ? '–' : s.spiegelModal ? 'gespiegelt' : 'nicht gespiegelt'}${s.spiegelKonstant ? ', bleibt über alle eindeutigen H gleich' : s.nEindeutig ? `, WECHSELT bei H = ${s.spiegelAbweichend.join(', ')} (diese Läufe verworfen)` : ''}.`, '');
-    const K=['H m', 'Mehrd.', 'gesp.', 'Fläche m²', 'Ecken zu/Soll', 'IoU', 'Ecken Med cm', 'p90 cm', 'Beob Med cm', 'verb. mit Wand', 'Wände gef.', 'IoU Export', 'Faktor Wand', 'IoU nach (Wand)', 'IoU nach (Median)',
+      `Eindeutig (Mehrd. ≥ 1,2): ${s.nEindeutig} von ${s.nLaeufe} Läufen${s.nFehler ? `, ${s.nFehler} Fehler` : ''}; in derselben Lage wie das eindeutige beste H (Spiegelung gleich, Drehung ≤ 20°, Schwerpunkt ≤ 0,75 m): ${s.nLage}. Spiegelung: ${s.spiegelModal==null ? '–' : s.spiegelModal ? 'gespiegelt' : 'nicht gespiegelt'}${s.spiegelKonstant ? ', bleibt über alle eindeutigen H gleich' : s.nEindeutig ? `, WECHSELT bei H = ${s.spiegelAbweichend.join(', ')} (diese Läufe verworfen)` : ''}.`, '');
+    const K=['H m', 'Mehrd.', 'gesp.', 'Fläche m²', 'Ecken zu/Soll', 'IoU', 'Ecken Med cm', 'p90 cm', 'Beob Med cm', 'verb. mit Wand', 'Wände gef.', 'IoU Export', 'Faktor Wand', 'IoU nach (Wand)', 'Mehrd. nach', 'IoU nach (Median)',
       'δ/Δ', 'Verlust nach', 'Kipp zuf %', 'Kipp Block %', 'Lauf s', 'Fehler'];
     L.push(zl(K), '|'+'---|'.repeat(K.length));
     for(const z of Z){ const k=z.k, n=z.nach, x=v.get(z.H);
@@ -237,9 +245,11 @@ export function tabelleMd(zeilen, S, E, kopf={}){
       const kl=t=>k.gueltig ? t : '('+t+')', kp=q=>q && q.N ? (100*q.k1/q.N).toFixed(0) : '–';
       L.push(zl([f2(z.H), f2(k.mehr), k.gespiegelt==null ? '–' : k.gespiegelt ? 'ja' : 'nein', f1(k.flaeche), k.nZu!=null ? `${k.nZu}/${k.nT}` : '–', kl(f2(k.iou)), kl(cm(k.eMed)), kl(cm(k.eP90)), kl(cm(k.beobMed)),
         `${k.verbMitWand}/${k.abschnitte}`, k.waendeGef!=null ? `${k.waendeGef}/${k.waendeWahr}` : '–', n && n.eins ? f2(n.eins.iou) : '–', n && n.fWand ? f3(n.fWand)+(n.wand ? ' '+n.wand : '') : '–',
-        n && n.skaliert ? f2(n.skaliert.iou) : '–', n && n.median ? f2(n.median.iou) : '–', x && Number.isFinite(x.rel) ? (x.rel>=0 ? '+' : '')+x.rel.toFixed(2)+(x.imFenster ? '' : '*') : '–',
+        n && n.skaliert ? f2(n.skaliert.iou) : '–', n && n.skaliert ? f2(n.skaliert.mehr) : '–', n && n.median ? f2(n.median.iou) : '–', x && Number.isFinite(x.rel) ? (x.rel>=0 ? '+' : '')+x.rel.toFixed(2)+(x.imFenster ? '' : '*') : '–',
         x && Number.isFinite(x.verlust) ? f2(x.verlust) : '–', z.kipp ? kp(z.kipp.zuf) : '–', z.kipp ? kp(z.kipp.block) : '–', f1((z.ms.gesamt||0)/1000), k.metrikFehler ? 'T2: '+k.metrikFehler : ''])); }
-    L.push('', 'Eingeklammert: Passung nicht eindeutig (Mehrd. < 1,2). δ/Δ mit * liegt außerhalb des E1-Fensters (|δ|/Δ > 0,3).', '',
+    const kv=Z.map(z=>z.kippVergleich).find(Boolean), kq=q=>q && q.zuf ? `${(100*q.zuf.k1/q.zuf.N).toFixed(0)} % zufällig / ${(100*q.block.k1/q.block.N).toFixed(0)} % Block (Vollauswertung ${q.voll.n} Ecken, ${f1(q.voll.A)} m²)` : '–';
+    L.push('', 'Eingeklammert: Passung nicht eindeutig (Mehrd. < 1,2). δ/Δ mit * liegt außerhalb des E1-Fensters (|δ|/Δ > 0,3). IoU nach Skalierung zählt in der Auswertung nur mit Mehrd. nach ≥ 1,2 und in der Lage des besten H.', '',
+      kv ? `Kippquote K1 zum Vergleich (gleicher Samen): freie Höhe (Vorwissen 2,55 ± 0,35) ${kq(kv.frei)}; H auf den eigenen Schätzwert ${f2(kv.hEigen)} m festgehalten ${kq(kv.eigen)}.` : '',
       'Bestes H nach Kriterium: '+KRITERIEN.map(([key, text])=>`${text} ${s.best[key]!=null ? f2(s.best[key]) : '–'}`).join(' · ')+`. Streuung (halbe Spanne über die Kriterien) ±${f3(s.streuung)} m.`,
       `Bestes H (Beob-Median) − Laserhöhe: ${Number.isFinite(s.dHLaser) ? cm(s.dHLaser)+' cm' : 'n. b.'}. Größter IoU-Verlust nach Nachskalierung im Fenster |δ|/Δ ≤ 0,3: ${s.maxVerlust!=null ? f3(s.maxVerlust) : '–'} (${s.nFenster} Gitterpunkte, Bezug IoU nach bei H = ${f2(s.refH)}: ${f3(s.refIouNach)}).`, ''); }
   L.push('## Entscheid E1', '', `**${E.urteil}**`, '', zl(['Aufnahme', 'eindeutig / lagegleich', 'Streuung ±m', '|bestes H − Laser| m', 'max. IoU-Verlust', 'Gitterpunkte im Fenster', 'Streuung', 'IoU-Verlust', 'Spiegelung', 'Ergebnis']), '|'+'---|'.repeat(10));
@@ -251,9 +261,9 @@ export function tabelleMd(zeilen, S, E, kopf={}){
 // ------------------------------------------------ alle Laeufe
 export function auftraege(o){
   const L=[], gitter=hGitter(o.von, o.bis, o.schritt);
-  for(const au of o.aufnahmen) for(const H of gitter){ const id=`${au.name}-${hKey(H)}`;
+  for(const au of o.aufnahmen) for(const H of gitter){ const id=`${au.name}-${hKey(H)}`, erster=H===gitter[0];
     L.push({id, aufnahme:au.name, src:resolve(au.src), protokoll:au.protokoll ? resolve(au.protokoll) : null, wahrheit:au.wahrheit ? resolve(au.wahrheit) : (existsSync(T1.WAHRHEIT) ? T1.WAHRHEIT : null), H,
-      quelle:o.quelle, ohne:o.ohne, karte:o.karte, wand:o.wand, kipp:o.kipp, kippAnteil:o.kippAnteil, kippBlock:o.kippBlock, dir:join(resolve(o.aus), 'laeufe', id)}); }
+      quelle:o.quelle, ohne:o.ohne, karte:o.karte, wand:o.wand, kipp:o.kipp, kippAnteil:o.kippAnteil, kippBlock:o.kippBlock, kippVergleich:erster && o.kipp>0, dir:join(resolve(o.aus), 'laeufe', id)}); }
   return L;
 }
 export function kind(auftrag, zeitgrenzeS=DEF.zeitgrenze){
@@ -275,7 +285,7 @@ export async function hsweep(o0){
   const A=auftraege(o), zeilen=new Array(A.length), tA=performance.now();
   const alt=a=>{ const kz=join(a.dir, 'kennzahlen.json'); if(!existsSync(kz)) return null; let z; try{ z=leseJson(kz); }catch(e){ return null; }
     return !z.fehler && z.version===VERSION && JSON.stringify(z.argv)===JSON.stringify(t1Argv(a)) && (z.wahrheit ?? null)===(a.wahrheit ?? null) && (z.wand ?? null)===(a.wand ?? null)
-      && JSON.stringify(z.kippOpt)===JSON.stringify([a.kipp, a.kippAnteil, a.kippBlock]) ? z : null; };
+      && JSON.stringify(z.kippOpt)===JSON.stringify([a.kipp, a.kippAnteil, a.kippBlock, !!a.kippVergleich]) ? z : null; };
   let next=0, n=0;
   const arbeiter=async()=>{ while(next<A.length){ const i=next++, a=A[i], vorher=o.weiter || o.nurTabelle ? alt(a) : null;
     zeilen[i]=vorher || (o.nurTabelle ? {id:a.id, aufnahme:a.aufnahme, H:a.H, k:null, nach:null, kipp:null, ms:{gesamt:0}, fehler:'nicht gerechnet'} : await kind(a, o.zeitgrenze));
