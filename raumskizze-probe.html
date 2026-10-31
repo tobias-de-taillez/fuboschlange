@@ -9126,7 +9126,7 @@ const LOG={probe:'raumskizze-probe', stand:STAND, started:new Date().toISOString
 // Stand 28: LOG.rahmen - die Bezugswechsel (Ereignis, das den Rahmen der Erfassungen wechselt oder wieder zusammenfuehrt) mit
 // Zeit und, wo das Ereignis sie traegt, Betrag und Drehung des Sprungs (sonst null). Nur Protokoll: so kennen Nachspiel und
 // Kippquote die Rahmengrenzen, ohne die Auswertung zu aendern (S.frames/frameJumps bleiben dort, wo sie sind).
-const RAHMEN_EV=new Set(['bezug-sprung', 'bezug-ersatz', 'anker-neu', 'anker-ersetzt', 'anker-zurück']);
+const RAHMEN_EV=new Set(['bezug-sprung', 'bezug-ersatz', 'bezug-unplausibel', 'anker-neu', 'anker-ersetzt', 'anker-zurück']);
 const ev=(type,data={})=>{ const e={t:now(), type, ...data}; LOG.events.push(e);
   if(RAHMEN_EV.has(type) && LOG.rahmen) LOG.rahmen.push({t:e.t, grund:type, d:Number.isFinite(e.d) ? e.d : null, dpsiDeg:Number.isFinite(e.dpsiDeg) ? e.dpsiDeg : null});
   if(KW.w) kwEreignis(e); };
@@ -9657,10 +9657,11 @@ function kwBild(r){
   if(IMU) gyLive(z);
   kwVor(t); kwSenden({typ:'pose', zeile:z});
   // Erfassungen wie erfassungenAus: ohne undone und suspect, ep und camTo der naechsten Zeile (dieser)
+  // Stand 28: obs.an gibt es in jeder Sitzung, zum Karten-Worker geht es weiter nur im Messmodus (Worker-Eingabe unveraendert).
   for(;KW.nObs<LOG.obs.length;KW.nObs++){ const x=LOG.obs[KW.nObs];
     if(x.undone || !x.ra || !x.rb || x.suspect===true) continue;
     KW.erfId.set(x, KW.nErf); kwVor(x.t);
-    kwSenden({typ:'erfassung', erf:{t:x.t, ep:z.ep, ra:x.ra, rb:x.rb, id:KW.nErf++, camTo:camTo ? Array.from(camTo) : null, ndc:x.ndc || null, flipY:x.flipY ?? null, ...(x.an ? {an:x.an} : {})}}); }
+    kwSenden({typ:'erfassung', erf:{t:x.t, ep:z.ep, ra:x.ra, rb:x.rb, id:KW.nErf++, camTo:camTo ? Array.from(camTo) : null, ndc:x.ndc || null, flipY:x.flipY ?? null, ...(MESS && x.an ? {an:x.an} : {})}}); }
   if(KW.offen && t-KW.offen.t>KARTE_STILL && !KW.aus) karteAus('still');
 }
 function kwTakt(schluss){
@@ -12322,7 +12323,7 @@ $('btnClose').onclick=()=>{
 // Ergebnisanzeige im Desktop-Browser mit eingespeisten Beobachtungen).
 if(Q.has('debug')) globalThis.PROBE={S, LOG, computeResult, showResult, requestSolve, applySolution, drawMiniMap, slim, solveOpt, makeSolver,
   REC, recStart, recFrame, recStop, recTar, trackFrame, trkSeg, senkFrame,
-  BW, bildSenden, onBild, drawSegmente, epocheFort, recEbenen, messAn, messMarke, messLesen, messBild, KARTE, MESS, TIEFE_ANF, REC_COLS,
+  BW, bildSenden, onBild, drawSegmente, epocheFort, recEbenen, messAn, segN1s, now, messMarke, messLesen, messBild, KARTE, MESS, TIEFE_ANF, REC_COLS,
   KW, kwBild, kwZeile, onKarte, karteAnzeige, drawKarte, KARTE_QUELLE, autoBlock, arState};
 $('start').disabled=true;
 $('stand').textContent=standText()+(KARTE ? ` · Karte (Quelle ${KARTE_QUELLE})` : '')+(MESS ? ' · Messmodus' : $('imuAn') && $('imuAn').checked ? ' · IMU' : '')+(TIEFE_ANF ? ` · Tiefe ${TIEFE_ANF}` : '');

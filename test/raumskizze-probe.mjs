@@ -1419,20 +1419,23 @@ if(alt){
     { const ids=new Set(r6.P.LOG.obs.filter(o=>Array.isArray(o.an)).map(o=>o.an[0])), meta=new Set(r6.P.LOG.netz.gesetzt ? [...ids] : []);
       chk('obs.an (ohne Schalter): kein Eingriff ins Netz - Zahl der Messanker und createAnchor wie im Lauf ohne die Erweiterung gemessen, getPose zaehlt die Zusatzabfragen', r6.P.LOG.netz.gesetzt>=1 && ids.size>=1 && r6.P.LOG.netz.getPose>0,
         `${r6.P.LOG.netz.gesetzt} Messanker, ${ids.size} verschiedene ids in an, getPose ${r6.P.LOG.netz.getPose} (Maximum je Takt ${r6.P.LOG.netz.getPoseMax})`); }
-    // Vor dem ersten Sprung steht jeder Messanker (Gier 0) auf seinem Sollpunkt: Kamera in local = Sollpunkt + an[1..3]. Gegen die
-    // Kamerapose der Zustandszeile desselben Bilds (Spalten t, px, py, pz; Zeile = naechste Zeit, hoechstens 1 Bild entfernt)
-    { const meta=new Map(r6.P.S.netz.meta.map(m=>[m.id, m])), tSpr=r6.P.LOG.rahmen[0].t, vor=r6.P.LOG.obs.filter(o=>o.t<tSpr && Array.isArray(o.an) && meta.has(o.an[0]) && meta.get(o.an[0]).soll),
+    // Vor dem ersten Ankersprung (breaks, auch nurProtokoll: die Karte schiebt die Messanker schon vor dem Bezugssprung um 4 cm) steht jeder Messanker (Gier 0) auf seinem Sollpunkt: Kamera in local = Sollpunkt + an[1..3]. Gegen die
+    // Kamerapose der Zustandszeile desselben Bilds (Spalten t, px, py, pz; gleiche Zeit auf 10 ms, die Zeile des Bilds kommt vor der
+    // Erfassung desselben Bilds oder gar nicht); Rundung der Werte 1e-4, also unter 1 mm
+    { const meta=new Map(r6.P.S.netz.meta.map(m=>[m.id, m])), tSpr=Math.min(...r6.P.LOG.breaks.map(b=>b.t)), vor=r6.P.LOG.obs.filter(o=>o.t<tSpr && Array.isArray(o.an) && meta.has(o.an[0]) && meta.get(o.an[0]).soll),
         fehl=vor.map(o=>{ const q=meta.get(o.an[0]).soll, z=z6.reduce((b, x)=>Math.abs(x[0]-o.t)<Math.abs(b[0]-o.t) ? x : b, z6[0]);
-          return Math.abs(z[0]-o.t)>0.07 ? NaN : Math.hypot(z[1]-(q[0]+o.an[1]), z[2]-(q[1]+o.an[2]), z[3]-(q[2]+o.an[3])); }).filter(Number.isFinite);
-      chk('obs.an (ohne Schalter): Messanker-Lage + an = Kamerapose in local (vor dem ersten Sprung, Abweichung < 8 cm)', fehl.length>=5 && Math.max(...fehl)<0.08, `${fehl.length} Erfassungen, groesste Abweichung ${(Math.max(...fehl)*100).toFixed(2)} cm`); }
+          return Math.abs(z[0]-o.t)>0.01 ? NaN : Math.hypot(z[1]-(q[0]+o.an[1]), z[2]-(q[1]+o.an[2]), z[3]-(q[2]+o.an[3])); }).filter(Number.isFinite);
+      chk('obs.an (ohne Schalter): Messanker-Lage + an = Kamerapose in local derselben Zeit (vor dem ersten Ankersprung, auch dem kleinen, Abweichung < 1 mm)', fehl.length>=3 && Math.max(...fehl)<0.001, `${fehl.length} Erfassungen mit Zeile desselben Bilds, groesste Abweichung ${(Math.max(...fehl, 0)*1000).toFixed(2)} mm`); }
     // rahmen
-    const RF=['bezug-sprung', 'bezug-ersatz', 'anker-neu', 'anker-ersetzt', 'anker-zurück'];
+    const RF=['bezug-sprung', 'bezug-ersatz', 'bezug-unplausibel', 'anker-neu', 'anker-ersetzt', 'anker-zurück'];
     for(const [name, r] of [['ohne Schalter', r6], ['karte=1', rk], ['Messsitzung', rm]]){
       const R=r.P.LOG.rahmen, E=r.P.LOG.events.filter(e=>RF.includes(e.type));
       chk(`rahmen (${name}): je Bezugswechsel ein Eintrag {t, grund, d, dpsiDeg}, zeitlich geordnet, Werte aus dem Ereignis`, Array.isArray(R) && R.length===E.length
         && R.every((x, i)=>x.t===E[i].t && x.grund===E[i].type && Object.keys(x).join()==='t,grund,d,dpsiDeg' && (x.d===null || Number.isFinite(x.d)) && (x.dpsiDeg===null || Number.isFinite(x.dpsiDeg)) && (i===0 || R[i-1].t<=x.t))
         && R.filter(x=>x.grund==='bezug-sprung').every(x=>Number.isFinite(x.d) && Number.isFinite(x.dpsiDeg)),
         `${R.length} Eintraege: ${R.map(x=>x.grund+(x.d!=null ? ' '+x.d+' m/'+x.dpsiDeg+'°' : '')).join(', ')}`); }
+    chk('rahmen: jeder Bruch der Auswertung (LOG.breaks ohne nurProtokoll) hat einen Eintrag zur selben Zeit - unabhaengig von der Ereignisliste', [r6, rk, rm].every(r=>
+      r.P.LOG.breaks.filter(b=>!b.nurProtokoll).every(b=>r.P.LOG.rahmen.some(x=>x.t===b.t))), [r6, rk, rm].map(r=>r.P.LOG.breaks.filter(b=>!b.nurProtokoll).length).join('/')+' Bruecke');
     chk('rahmen: das Szenario enthaelt den Bezugssprung (aus breaks) mit seinem Betrag und mindestens einen Ersatz-Bezug', (()=>{ const b=r6.P.LOG.breaks.find(x=>x.grund==='bezug-sprung'), x=r6.P.LOG.rahmen.find(y=>y.grund==='bezug-sprung');
       return !!b && !!x && x.d===b.d && x.dpsiDeg===b.dpsiDeg && r6.P.LOG.rahmen.some(y=>y.grund==='bezug-ersatz'); })(), r6.P.LOG.rahmen.map(x=>x.grund).join(', '));
     // hoehe
@@ -1450,6 +1453,11 @@ if(alt){
     const TV=r=>r.P.LOG.events.filter(e=>e.type==='tracking-verloren');
     chk('segN bei tracking-verloren: Feld an jedem Ereignis; ohne Karte null, mit Karte Ganzzahl >= 0 (Median der Segmente der letzten 1 s)', TV(r6).length===1 && TV(rk).length===1
       && TV(r6).every(e=>'segN' in e && e.segN===null) && TV(rk).every(e=>'segN' in e && (e.segN===null || (Number.isInteger(e.segN) && e.segN>=0 && e.segN<2000))), `ohne Karte ${J(TV(r6).map(e=>e.segN))}, mit Karte ${J(TV(rk).map(e=>e.segN))}`);
+    // segN1s einzeln (die Attrappe des Bild-Workers liefert nur 0 bis 1 Segmente): Median der Eintraege der letzten 1 s, aeltere zaehlen nicht
+    { const B=rk.P.BW, alt=B.strukt, t=rk.P.now();
+      B.strukt=[{t:t-3, n:99}, {t:t-0.8, n:3}, {t:t-0.5, n:9}, {t:t-0.2, n:5}]; const a1=rk.P.segN1s();
+      B.strukt=[{t:t-3, n:99}]; const a2=rk.P.segN1s(); B.strukt=undefined; const a3=rk.P.segN1s(); B.strukt=alt;
+      chk('segN1s: Median der Segmentzahlen der letzten 1 s (wie die Struktur-Fruehwarnung), null ohne Eintrag', a1===5 && a2===null && a3===null, `${a1} / ${a2} / ${a3}`); }
     // Haken statt URL-Parameter (Regel „Schalter nur als Buttons“): die Messsitzung (dichtes Anker-Netz, IMU, Ebenen, rohe Tiefe) steht als
     // Haken in „Messungen und Versuche“; das Standard-Netz fuer obs.an ist immer an und braucht keinen
     { const det=probe.match(/<details[^>]*>\s*<summary[^>]*>Messungen und Versuche[\s\S]*?<\/details>/);
