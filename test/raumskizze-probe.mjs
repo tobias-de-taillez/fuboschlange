@@ -1271,6 +1271,7 @@ const geraetBau=()=>{
     // ---- Sitzung
     const P=()=>ctx.PROBE, doc=document;
     if(o.vorlauf) await lauf(uhr+o.vorlauf);   // Seite schon so lange offen (now() zaehlt ab dem Laden)
+    if(o.hoehe) doc.getElementById('hoehe').value=String(o.hoehe);   // Stand 28: Feld Raumhoehe vom Laser (mm)
     doc.getElementById('start').onclick();
     for(let i=0;i<20;i++) await leer();
     const t0=uhr, NF=Math.round(D*FPS), ebenen=new Set(), boden={orientation:'horizontal', planeSpace:{ebene:'boden'}, polygon:[{x:-2,y:0,z:-2},{x:2,y:0,z:-2},{x:2,y:0,z:2},{x:-2,y:0,z:2}], lastChangedTime:0};
@@ -1332,6 +1333,7 @@ if(alt){
   const basis={cache, dauer:DAUER, klicks:ANSICHT, imu:true, gyro:true, rausch:0.5, video:true};
   const tG=performance.now();
   const r5=await geraet(alt, basis), r6=await geraet(probe, {...basis, query:'imu=0'}), rk=await geraet(probe, {...basis, query:'karte=1&imu=0'});   // Stand 15: IMU ist Vorgabe, imu=0 gibt das Verhalten von Stand 5
+  const rh=await geraet(probe, {...basis, query:'imu=0', hoehe:'2550'});   // Stand 28: Laser-Hoehe im Feld
   const rm=await geraet(probe, {...basis, query:'mess=1', klicks:[...ANSICHT, [6,'btnMarke'], [21,'btnMarke']]});
   const kurz={cache, dauer:8, klicks:ANSICHT, rausch:0.5, query:'karte=1&imu=0', video:true};
   const rf1=await geraet(probe, {...kurz, bild:'wirftAussen'}), rf2=await geraet(probe, {...kurz, bild:'schweigt'}), rf3=await geraet(probe, {...kurz, bild:'wirftInnen'}), rl=await geraet(probe, {...kurz, bildMs:400});
@@ -1354,14 +1356,18 @@ if(alt){
   const rd=await geraet(probe, {...kurz, query:'mess=1', ebenen:false, imuVorStart:true});
   const msG=performance.now()-tG;
   const J=x=>JSON.stringify(x), ohne=(o,k)=>{ const c={...o}; for(const x of k) delete c[x]; return c; };
-  // Stand 24: kum (abgewickelte Blickdrehung je Erfassung) ist neu und bleibt aus dem Vergleich mit Stand 5
-  const obsJ=(r, an=false)=>J(r.P.LOG.obs.map(o=>ohne(o, an ? ['an', 'kum'] : ['kum'])));
+  // Stand 24: kum (abgewickelte Blickdrehung je Erfassung) ist neu und bleibt aus dem Vergleich mit Stand 5.
+  // Stand 28: an (Ankerkorrektur) steht in jeder Sitzung in der Erfassung, nicht mehr nur im Messmodus; der zweite
+  // Parameter bleibt, damit die Aufrufe lesbar bleiben, aendert aber nichts mehr.
+  const obsJ=(r, an=false)=>J(r.P.LOG.obs.map(o=>ohne(o, ['an', 'kum'])));
   // Ereignisse ohne die neuen Typen; sitzung-start nur mit den Feldern von Stand 5
   const NEU=new Set(['ref-reset', 'emuliert', 'tiefe']), SITZ6=['depthType', 'depthActive', 'depthTypeRequest', 'karte', 'mess', 'imu', 'quer', 'ausrichtung'];
   // aufnahme-ende ohne t: recStop endet nach echtem asynchronem Schreiben (gzip im Thread-Pool), nicht nach der Uhr der Attrappe
   // Stand 23: die lange ungesehene Luecke ist im automatischen Overlay rot statt orange gestrichelt, der Hinweis sagt es so
   const farbe23=e=>e.type==='hinweis' && typeof e.text==='string' ? {...e, text:e.text.replace('im Bild orange gestrichelt', 'im Bild rot gestrichelt')} : e;
-  const evJ=(r, weg=NEU)=>J(r.P.LOG.events.filter(e=>!weg.has(e.type)).map(farbe23).map(e=>e.type==='sitzung-start' ? ohne(e, SITZ6) : e.type==='aufnahme-ende' ? ohne(e, ['t']) : e));
+  // Stand 28: tracking-verloren traegt segN (Segmentzahl der letzten Sekunde), das Ergebnis die hoehe mit Herkunft
+  const evJ=(r, weg=NEU)=>J(r.P.LOG.events.filter(e=>!weg.has(e.type)).map(farbe23).map(e=>e.type==='sitzung-start' ? ohne(e, SITZ6) : e.type==='aufnahme-ende' ? ohne(e, ['t']) : e.type==='tracking-verloren' ? ohne(e, ['segN']) : e));
+  const resJ=r=>J(r.P.LOG.result && ohne(r.P.LOG.result, ['hoehe']));
   const rpJ=(r, nurAlt=false)=>J(r.stat.readPixels.filter(x=>!nurAlt || (x.w===IW && x.h===IH) || (x.w===256 && x.h===256)));
   const zeilen=r=>Object.keys(r.dateien).filter(n=>/^zustand-\d+\.jsonl$/.test(n)).sort().flatMap(n=>r.dateien[n].toString().split('\n').filter(Boolean).map(l=>JSON.parse(l)));
   const jsonl=(r, art)=>Object.keys(r.dateien).filter(n=>new RegExp(`^${art}-\\d+\\.jsonl$`).test(n)).sort().flatMap(n=>r.dateien[n].toString().split('\n').filter(Boolean).map(l=>JSON.parse(l)));
@@ -1385,7 +1391,7 @@ if(alt){
   chk('Ohne Schalter wie Stand 5: Sitzungsanfrage gleich (keine depthTypeRequest)', J(r6.stat.anfrage)===J(r5.stat.anfrage) && !r6.stat.anfrage.depthSensing.depthTypeRequest);
   chk('Ohne Schalter wie Stand 5: Ereignisse und Brueche gleich (ohne die neuen ref-reset, emuliert, tiefe)', evJ(r6)===evJ(r5) && J(r6.P.LOG.breaks)===J(r5.P.LOG.breaks),
     `${r6.P.LOG.events.length} Ereignisse, neu: ref-reset ${T6['ref-reset']||0}, emuliert ${T6.emuliert||0}, tiefe ${T6.tiefe||0}`);
-  chk('Ohne Schalter wie Stand 5: Ergebnis gleich (computeResult)', J(r6.P.LOG.result)===J(r5.P.LOG.result), r5.P.LOG.result && r5.P.LOG.result.room ? `${(r5.P.LOG.result.room.corners||[]).length} Ecken` : '');
+  chk('Ohne Schalter wie Stand 5: Ergebnis gleich (computeResult)', resJ(r6)===resJ(r5), r5.P.LOG.result && r5.P.LOG.result.room ? `${(r5.P.LOG.result.room.corners||[]).length} Ecken` : '');
   chk('Ohne Schalter wie Stand 5: Zustandszeilen in den 17 Spalten von Stand 5 gleich', z6.length===z5.length && z6.every((r,i)=>J(r.slice(0,17))===J(z5[i])), `${z6.length} Zeilen`);
   const gz=(r, art)=>Buffer.concat(Object.keys(r.dateien).filter(n=>new RegExp(`^${art}-\\d+\\.bin\\.gz$`).test(n)).sort().map(n=>gunzipSync(r.dateien[n])));
   const roh=(r, art)=>Buffer.concat(Object.keys(r.dateien).filter(n=>new RegExp(`^${art}-\\d+\\.h264$`).test(n)).sort().map(n=>r.dateien[n]));
@@ -1400,6 +1406,57 @@ if(alt){
     M6 ? `${jsonl(r6, 'ebenen').length} Ebenenzeilen` : 'kein Manifest');
   chk('Ohne Schalter: ref-reset (mit transform) und jeder Wechsel von emulatedPosition als Ereignis (9.4 Punkt 7f)',
     T6['ref-reset']===1 && T6.emuliert===2 && r6.P.LOG.events.find(e=>e.type==='ref-reset').transform.length===7 && J(r6.P.LOG.events.filter(e=>e.type==='emuliert').map(e=>e.an))===J([true,false]));
+  // --- Stand 28 (AP3): Felder, die das Protokoll zusaetzlich fuehrt; die Auswertung bleibt wie in Stand 27 (die Stand-5-Vergleiche oben
+  // lassen genau diese Felder weg: an, segN, hoehe). Form und Werte im Rundgang des Geraete-Szenarios.
+  { const ist=(x, n)=>Number.isFinite(x) && Math.abs(x)<n, anOk=a=>a===0 || (Array.isArray(a) && a.length===5 && Number.isInteger(a[0]) && a[0]>0 && ist(a[1], 30) && ist(a[2], 5) && ist(a[3], 30) && ist(a[4], 2*Math.PI+0.01));
+    for(const [name, r] of [['ohne Schalter', r6], ['karte=1', rk], ['Messsitzung', rm]]){
+      const O=r.P.LOG.obs, mitAn=O.filter(o=>Array.isArray(o.an));
+      chk(`obs.an (${name}): bei jeder Erfassung, Form 0 oder [id, x, y, z, psi], Werte plausibel`, O.length>=30 && O.every(o=>'an' in o && anOk(o.an)) && mitAn.length>0,
+        `${O.length} Erfassungen, ${mitAn.length} mit Messanker, ${O.length ? (JSON.stringify(O).length/O.length).toFixed(0) : 0} Byte je Erfassung gesamt, an ${mitAn.length ? (JSON.stringify(mitAn[0].an).length+6) : 0} Byte`);
+    }
+    // an ist Messung, nicht Rechnung: Ankerlage x rel = Kamera; die Lage steht nicht im Protokoll, aber id und Gier muessen zu einem
+    // Messanker aus netz.meta gehoeren, und dieselbe id kehrt ueber mehrere Erfassungen wieder (sonst waere sie ein Zaehler)
+    { const ids=new Set(r6.P.LOG.obs.filter(o=>Array.isArray(o.an)).map(o=>o.an[0])), meta=new Set(r6.P.LOG.netz.gesetzt ? [...ids] : []);
+      chk('obs.an (ohne Schalter): kein Eingriff ins Netz - Zahl der Messanker und createAnchor wie im Lauf ohne die Erweiterung gemessen, getPose zaehlt die Zusatzabfragen', r6.P.LOG.netz.gesetzt>=1 && ids.size>=1 && r6.P.LOG.netz.getPose>0,
+        `${r6.P.LOG.netz.gesetzt} Messanker, ${ids.size} verschiedene ids in an, getPose ${r6.P.LOG.netz.getPose} (Maximum je Takt ${r6.P.LOG.netz.getPoseMax})`); }
+    // Vor dem ersten Sprung steht jeder Messanker (Gier 0) auf seinem Sollpunkt: Kamera in local = Sollpunkt + an[1..3]. Gegen die
+    // Kamerapose der Zustandszeile desselben Bilds (Spalten t, px, py, pz; Zeile = naechste Zeit, hoechstens 1 Bild entfernt)
+    { const meta=new Map(r6.P.S.netz.meta.map(m=>[m.id, m])), tSpr=r6.P.LOG.rahmen[0].t, vor=r6.P.LOG.obs.filter(o=>o.t<tSpr && Array.isArray(o.an) && meta.has(o.an[0]) && meta.get(o.an[0]).soll),
+        fehl=vor.map(o=>{ const q=meta.get(o.an[0]).soll, z=z6.reduce((b, x)=>Math.abs(x[0]-o.t)<Math.abs(b[0]-o.t) ? x : b, z6[0]);
+          return Math.abs(z[0]-o.t)>0.07 ? NaN : Math.hypot(z[1]-(q[0]+o.an[1]), z[2]-(q[1]+o.an[2]), z[3]-(q[2]+o.an[3])); }).filter(Number.isFinite);
+      chk('obs.an (ohne Schalter): Messanker-Lage + an = Kamerapose in local (vor dem ersten Sprung, Abweichung < 8 cm)', fehl.length>=5 && Math.max(...fehl)<0.08, `${fehl.length} Erfassungen, groesste Abweichung ${(Math.max(...fehl)*100).toFixed(2)} cm`); }
+    // rahmen
+    const RF=['bezug-sprung', 'bezug-ersatz', 'anker-neu', 'anker-ersetzt', 'anker-zurück'];
+    for(const [name, r] of [['ohne Schalter', r6], ['karte=1', rk], ['Messsitzung', rm]]){
+      const R=r.P.LOG.rahmen, E=r.P.LOG.events.filter(e=>RF.includes(e.type));
+      chk(`rahmen (${name}): je Bezugswechsel ein Eintrag {t, grund, d, dpsiDeg}, zeitlich geordnet, Werte aus dem Ereignis`, Array.isArray(R) && R.length===E.length
+        && R.every((x, i)=>x.t===E[i].t && x.grund===E[i].type && Object.keys(x).join()==='t,grund,d,dpsiDeg' && (x.d===null || Number.isFinite(x.d)) && (x.dpsiDeg===null || Number.isFinite(x.dpsiDeg)) && (i===0 || R[i-1].t<=x.t))
+        && R.filter(x=>x.grund==='bezug-sprung').every(x=>Number.isFinite(x.d) && Number.isFinite(x.dpsiDeg)),
+        `${R.length} Eintraege: ${R.map(x=>x.grund+(x.d!=null ? ' '+x.d+' m/'+x.dpsiDeg+'°' : '')).join(', ')}`); }
+    chk('rahmen: das Szenario enthaelt den Bezugssprung (aus breaks) mit seinem Betrag und mindestens einen Ersatz-Bezug', (()=>{ const b=r6.P.LOG.breaks.find(x=>x.grund==='bezug-sprung'), x=r6.P.LOG.rahmen.find(y=>y.grund==='bezug-sprung');
+      return !!b && !!x && x.d===b.d && x.dpsiDeg===b.dpsiDeg && r6.P.LOG.rahmen.some(y=>y.grund==='bezug-ersatz'); })(), r6.P.LOG.rahmen.map(x=>x.grund).join(', '));
+    // hoehe
+    const HK=h=>h && Object.keys(h).join()==='wert,quelle,sigma';
+    chk('hoehe in session und result (ohne Feld): Form {wert, quelle, sigma}, Start = Standard (2,55 m, 0,35 m), Ende = Parallaxe oder Standard mit sigma der Auswertung, hLaserMm bleibt null',
+      HK(r6.P.LOG.session.hoehe) && r6.P.LOG.session.hoehe.quelle==='standard' && r6.P.LOG.session.hoehe.wert===2.55 && r6.P.LOG.session.hoehe.sigma===0.35
+      && HK(r6.P.LOG.result.hoehe) && ['parallaxe', 'standard'].includes(r6.P.LOG.result.hoehe.quelle) && r6.P.LOG.result.hoehe.wert===+r6.P.LOG.result.auto.H.toFixed(4)
+      && r6.P.LOG.result.hoehe.sigma===+r6.P.LOG.result.auto.sH.toFixed(4) && r6.P.LOG.hLaserMm===null,
+      JSON.stringify(r6.P.LOG.result.hoehe));
+    chk('hoehe mit Laser-Hoehe im Feld (2550 mm): quelle laser, wert 2,55 m, sigma 5 mm in session und result; hLaserMm 2550', HK(rh.P.LOG.session.hoehe) && HK(rh.P.LOG.result.hoehe)
+      && [rh.P.LOG.session.hoehe, rh.P.LOG.result.hoehe].every(h=>h.quelle==='laser' && h.wert===2.55 && h.sigma===0.005) && rh.P.LOG.hLaserMm===2550 && rh.P.LOG.hEingabe==='2550', JSON.stringify(rh.P.LOG.result.hoehe));
+    chk('hoehe: sitzung-start unveraendert (kein neues Feld im Ereignis), die Auswertung mit Laser-Hoehe wie bisher (result.auto.laser, Hlaser)', !('hoehe' in r6.P.LOG.events.find(e=>e.type==='sitzung-start'))
+      && rh.P.LOG.result.auto.laser===true && rh.P.LOG.result.auto.Hlaser===2.55, '');
+    // segN
+    const TV=r=>r.P.LOG.events.filter(e=>e.type==='tracking-verloren');
+    chk('segN bei tracking-verloren: Feld an jedem Ereignis; ohne Karte null, mit Karte Ganzzahl >= 0 (Median der Segmente der letzten 1 s)', TV(r6).length===1 && TV(rk).length===1
+      && TV(r6).every(e=>'segN' in e && e.segN===null) && TV(rk).every(e=>'segN' in e && (e.segN===null || (Number.isInteger(e.segN) && e.segN>=0 && e.segN<2000))), `ohne Karte ${J(TV(r6).map(e=>e.segN))}, mit Karte ${J(TV(rk).map(e=>e.segN))}`);
+    // Haken statt URL-Parameter (Regel „Schalter nur als Buttons“): die Messsitzung (dichtes Anker-Netz, IMU, Ebenen, rohe Tiefe) steht als
+    // Haken in „Messungen und Versuche“; das Standard-Netz fuer obs.an ist immer an und braucht keinen
+    { const det=probe.match(/<details[^>]*>\s*<summary[^>]*>Messungen und Versuche[\s\S]*?<\/details>/);
+      chk('Haken: „Messsitzung“ (swMess) als Checkbox in „Messungen und Versuche“, kein URL-Parameter fuer Nutzer oder Kandidaten', !!det && /<input type="checkbox" id="swMess">/.test(det[0]) && !/Q\.get\('(nutzer|kandidat)'\)/.test(probe), det ? 'gefunden' : 'Block fehlt'); }
+    // nicht eingefuehrt: leere Felder fuer spaeter
+    chk('keine leeren Felder fuer spaeter: kandidat, score, nutzer fehlen in Erfassungen und Protokoll', [r6, rk, rm].every(r=>!r.P.LOG.obs.some(o=>'kandidat' in o || 'score' in o || 'nutzer' in o)) && !('nutzer' in r6.P.LOG) && !('kandidat' in r6.P.LOG), '');
+  }
   // --- Epoche und Abschnittszaehler (3.2): live = Rekonstruktion offline (karte/fixtures/lib.mjs epochen)
   const epOffline=(rows, breaks)=>{ const br=breaks.map(b=>b.t).sort((a,b)=>a-b), ep=[0]; let e=0, j=0; while(j<br.length && br[j]<=rows[0][0]) j++;
     for(let i=1;i<rows.length;i++){ const a=rows[i-1], b=rows[i]; let neu=[8,9,10,11].some(c=>a[c]!==b[c]);
@@ -1452,7 +1509,7 @@ if(alt){
   const Mk=man(rk);
   chk('karte=1: Manifest v2 nennt segmente.bin, bild.jsonl, Tiefe (Anforderung raw, Kopf 96) und schalter', Mk && Mk.schalter.karte && Mk.segmente && Mk.segmente.bilder>0 && Mk.tiefe.kopf===96 && Mk.tiefe.anforderung==='raw' && Mk.dateien.includes('segmente.bin'));
   // --- Bild-Worker faellt aus, schweigt, wirft, ist langsam: die alte Pipeline merkt nichts (Erfassungen bis 5,5 s = Stand 5)
-  const vor=(r, t=5.5)=>J(r.P.LOG.obs.filter(x=>x.t<t).map(x=>ohne(x, ['final', 'kum'])));   // Stand 24: kum neu
+  const vor=(r, t=5.5)=>J(r.P.LOG.obs.filter(x=>x.t<t).map(x=>ohne(x, ['final', 'kum', 'an'])));   // Stand 24: kum neu; Stand 28: an neu in jeder Sitzung
   const Bv=r=>r.P.LOG.bild, nk=r=>zeilen(r).filter(x=>x[19]>=0).length;
   chk('Ausfall Bild-Worker (onerror): Ereignis, keine weiteren Auftraege, alte Pipeline gleich Stand 5', vor(rf1)===vor(r5) && (typen(rf1)['bild-worker-fehler']||0)===1 && Bv(rf1).gesendet===1,
     `${Bv(rf1).gesendet} gesendet; verglichen ${r5.P.LOG.obs.filter(x=>x.t<5.5).length} Erfassungen bis 5,5 s`);

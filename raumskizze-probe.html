@@ -9123,7 +9123,13 @@ const now=()=>+((performance.now()-T0)/1000).toFixed(3);
 // (mit Tipp-Zeiten), Erfassungen, Zeiten, Ebenen, Tracking, Ankerweg.
 const LOG={probe:'raumskizze-probe', stand:STAND, started:new Date().toISOString(), url:location.href,
   ua:navigator.userAgent, ds:DS, caps:{}, runs:[], ...freshRun()};
-const ev=(type,data={})=>{ const e={t:now(), type, ...data}; LOG.events.push(e); if(KW.w) kwEreignis(e); };
+// Stand 28: LOG.rahmen - die Bezugswechsel (Ereignis, das den Rahmen der Erfassungen wechselt oder wieder zusammenfuehrt) mit
+// Zeit und, wo das Ereignis sie traegt, Betrag und Drehung des Sprungs (sonst null). Nur Protokoll: so kennen Nachspiel und
+// Kippquote die Rahmengrenzen, ohne die Auswertung zu aendern (S.frames/frameJumps bleiben dort, wo sie sind).
+const RAHMEN_EV=new Set(['bezug-sprung', 'bezug-ersatz', 'anker-neu', 'anker-ersetzt', 'anker-zurück']);
+const ev=(type,data={})=>{ const e={t:now(), type, ...data}; LOG.events.push(e);
+  if(RAHMEN_EV.has(type) && LOG.rahmen) LOG.rahmen.push({t:e.t, grund:type, d:Number.isFinite(e.d) ? e.d : null, dpsiDeg:Number.isFinite(e.dpsiDeg) ? e.dpsiDeg : null});
+  if(KW.w) kwEreignis(e); };
 // Karten-Worker (Stand 7, ?karte=1): Zustand schon hier, weil ev() jedes Ereignis an ihn weitergibt (kwEreignis).
 const kwFrisch=()=>({w:null, an:false, zu:false, aus:null, vorher:null, nBr:0, nObs:0, nErf:0, erfId:new WeakMap(), tTakt:null, id:0, offen:null, ausgefallen:0,
   letzt:null, tStand:-1e9, standFehler:null, hinweis:null, schluss:null});
@@ -9291,7 +9297,7 @@ function capture(view, camTo){
   const dist=Math.hypot(mid[0]-camTo[12], mid[1]-camTo[14]);
   Object.assign(ob, {wall:S.walls.length-1, t:now(), tTap:tap, z:+L.z.toFixed(1), n:L.n, frac:+L.frac.toFixed(2),
     ndc:[L.A, L.B], cam:[camTo[12], camTo[13], camTo[14]], len:+len.toFixed(3), dist:+dist.toFixed(2),
-    good:L.good, flipY:S.flipY, ...(MESS ? {an:messAn(view.transform.matrix)} : {})});
+    good:L.good, flipY:S.flipY, an:anBeob(view.transform.matrix)});
   const cur=S.walls[S.walls.length-1];
   cur.push(ob);
   LOG.obs.push(ob);
@@ -9409,7 +9415,7 @@ function autoCapture(view, camTo){
   Object.assign(ob, {auto:true, t, z:+L.z.toFixed(1), n:L.n, frac:+L.frac.toFixed(2), ndc:[L.A, L.B], cam:pos,
     len:+Math.hypot(seg[1][0]-seg[0][0], seg[1][1]-seg[0][1]).toFixed(3), dist:+range.toFixed(2), good:true,
     flipY:S.flipY, speed:+(S.speed||0).toFixed(0), moved:Number.isFinite(moved) ? +moved.toFixed(3) : null,
-    turn:Number.isFinite(turn) ? +turn.toFixed(1) : null, Hlive:+H.toFixed(3), kum:+S.kum.toFixed(1), ...(MESS ? {an:messAn(view.transform.matrix)} : {})});
+    turn:Number.isFinite(turn) ? +turn.toFixed(1) : null, Hlive:+H.toFixed(3), kum:+S.kum.toFixed(1), an:anBeob(view.transform.matrix)});
   S.pool.push(ob);
   LOG.obs.push(ob);
   if(navigator.vibrate) navigator.vibrate(8);
@@ -10438,9 +10444,29 @@ function netzNaechster(p){
   return {id:best.id, Ta:[c,0,-sn,0, 0,1,0,0, sn,0,c,0, P[0],P[1],P[2],1]};
 }
 function messAn(m){
-  const a=MESS && m ? netzNaechster([m[12], m[13], m[14]]) : null; if(!a) return 0;
+  const a=MESS && m ? netzNaechster([m[12], m[13], m[14]]) : null; return a ? anVon(a, m) : 0;
+}
+function anVon(a, m){
   const rel=G.m4mul(G.m4inv(a.Ta), m);
   return [a.id, netzR(rel[12], 4), netzR(rel[13], 4), netzR(rel[14], 4), netzR(G.blickPlan(rel), 5)];
+}
+// Stand 28: obs.an in jeder Sitzung (Ankerkorrektur je Erfassung, Voraussetzung fuer --anker rel in T1). Im Messmodus wie
+// bisher aus der Lage aller Anker dieses Bilds; sonst aus dem Standard-Netz: Kandidaten nach der letzten Netzaufnahme
+// (hoechstens NETZ_TAKT alt, nur zum Auswaehlen), getPose nur fuer die naechsten NETZ_AN_N - das Netz selbst bleibt unberuehrt.
+// 0, wenn kein Messanker verfolgt ist (wie im Messmodus). Wirkt nur ins Protokoll, nie auf Bezug oder Auswertung.
+const NETZ_AN_N=3;
+function anBeob(m){
+  if(MESS) return messAn(m);
+  const N=S.netz, fr=S.xrFrame; if(!NETZ || !N || N.aus || !fr || !m) return 0;
+  const p=[m[12], m[13], m[14]], kand=[];
+  for(const e of N.net){ const l=N.lastP.get(e.id); if(l) kand.push({e, d:netzDist(l.P, p)}); }
+  kand.sort((x, y)=>x.d-y.d);
+  for(const {e} of kand.slice(0, NETZ_AN_N)){
+    const P=netzLage(fr, e.a); if(!Array.isArray(P)) continue;
+    const c=Math.cos(P[3]), sn=Math.sin(P[3]);
+    return anVon({id:e.id, Ta:[c,0,-sn,0, 0,1,0,0, sn,0,c,0, P[0],P[1],P[2],1]}, m);
+  }
+  return 0;
 }
 function messAnPunkt(p){
   const a=MESS && p ? netzNaechster(p) : null; if(!a) return 0;
@@ -10480,11 +10506,18 @@ function netzFrame(frame, pose){
   if(did){ LOG.timings.netz.push(+(performance.now()-t0).toFixed(2)); if(LOG.timings.netz.length>2000) LOG.timings.netz.shift(); }
 }
 
+// Stand 28: Segmentzahl des Bild-Workers, Median der letzten 1 s (dasselbe Mass wie die Struktur-Fruehwarnung, BW.strukt);
+// null ohne Karte oder ohne Bild-Ergebnis in dieser Sekunde. Steht bei 'tracking-verloren' (Konzept P1 H7).
+function segN1s(){
+  const W=(BW.strukt||[]).filter(x=>now()-x.t<1); if(!W.length) return null;
+  return W.map(x=>x.n).sort((a, b)=>a-b)[W.length>>1];
+}
+
 // ---------------------------------------------------------- Bild-Schleife
 function onFrame(t, frame){
   const session=frame.session, tFrame=performance.now();
   session.requestAnimationFrame(onFrame);
-  S.frame++; S.xrSeit++;
+  S.frame++; S.xrSeit++; S.xrFrame=frame;   // Stand 28: anBeob liest damit die Lage des naechsten Messankers
   if(S.lastT){ S.fps.push(1000/(t-S.lastT)); if(S.fps.length>60) S.fps.shift(); }
   S.lastT=t;
   const gl=S.gl, layer=session.renderState.baseLayer;
@@ -10501,7 +10534,7 @@ function onFrame(t, frame){
     if(S.closeT!=null){ S.closeT=null; S.closePending=true; ev('countdown-unterbrochen'); hint('Ortung verloren – der Abschluss wartet.', 'warn'); }
     if(!S.trackLost){ S.trackLost=true; S.gap={t:now(), v:S.lastView};
       const sus=S.phase==='waende' ? slideBeforeLoss(now()) : 0;
-      ev('tracking-verloren', sus ? {gleiten:sus} : {}); updateWallInfo(); }
+      ev('tracking-verloren', {...(sus ? {gleiten:sus} : {}), segN:segN1s()}); updateWallInfo(); }
     S.prevDir=null; S.prevT=null; S.prevLive=null; S.floorStable=null;
     S.speed=0; S.fastSince=null; S.slowSince=null;
     // Senkrechte live: senkFrame laeuft in der Luecke nicht (S.trackLost ist dort nie
@@ -11382,12 +11415,12 @@ function showButtons(){
 // Ein Durchlauf pro Sitzung; vorige Durchlaeufe wandern nach LOG.runs. Das
 // Protokoll liegt nach jeder Erfassung und am Sitzungsende auch im
 // localStorage - ein Neuladen oder ein Absturz der Seite verliert es nicht.
-const RUN_KEYS=['session','floor','events','obs','trk','trkN','result','timings','planes','depth','tracking','roiLuma','anchorPath','viewPath','breaks','hLaserMm','hEingabe','mode','netz','bild','mess','tiefe',
+const RUN_KEYS=['session','floor','events','obs','trk','trkN','result','timings','planes','depth','tracking','roiLuma','anchorPath','viewPath','breaks','rahmen','hLaserMm','hEingabe','mode','netz','bild','mess','tiefe',
   ...(KARTE ? ['karte'] : [])];
 function freshRun(){
   return {session:{}, floor:null, events:[], obs:[], trk:[], trkN:{}, result:null, timings:{roi:[], small:[], snap:[], solve:[], draw:[], rec:[], track:[], netz:[], senk:[],
             solveIn:[], bild:[], bildW:[], senkW:[], ...(KARTE ? {karte:[], karteAntwort:[], karteDraw:[]} : {})}, mode:null,
-          planes:[], depth:null, tracking:{ok:0, emulated:0, lost:0, anchorLost:0}, roiLuma:[], anchorPath:[], viewPath:[], breaks:[],
+          planes:[], depth:null, tracking:{ok:0, emulated:0, lost:0, anchorLost:0}, roiLuma:[], anchorPath:[], viewPath:[], breaks:[], rahmen:[],
           hLaserMm:null, hEingabe:null,
           // Anker-Netz: Zaehler fuer die Kosten (Lagen je Takt, gleichzeitige Anker); die Lagen selbst nur in REC.an.
           netz:{gesetzt:0, geloescht:0, fehl:0, max:0, takte:0, getPose:0, getPoseMax:0, befunde:{}, unterdrueckt:0},
@@ -11905,6 +11938,7 @@ async function startAR(){
     blendMode:session.environmentBlendMode || null, hitTest:!!S.hit, binding:!!S.binding,
   };
   ev('sitzung-start', LOG.session);
+  LOG.session.hoehe=hoeheStart();   // nach dem Ereignis: sitzung-start bleibt wie in Stand 27
   showButtons();
   if(!S.binding || (feats && !feats.includes('camera-access'))){
     hint('Kein Kamerazugriff gewährt – Kanten lassen sich nicht erfassen, nur Stufe 0.', 'bad');
@@ -11935,6 +11969,24 @@ function onEnd(){
   try{ showResult(computeResult()); $('result').scrollIntoView({behavior:'smooth', block:'start'}); }
   catch(e){ ev('ergebnis-fehler', {msg:String(e && e.message || e)}); $('startHint').textContent='Auswertung fehlgeschlagen – bitte das Protokoll sichern und schicken.'; }
   finally{ saveLog(); }
+}
+
+// Stand 28: Raumhoehe mit Herkunft (hLaserMm bleibt daneben). wert in m, sigma in m.
+//   laser     - das Feld #hoehe war ausgefuellt (Beschriftung 'vom Laser'; die Seite kann Laser und Eingabe nicht unterscheiden,
+//               'eingabe' bleibt fuer eine spaetere Unterscheidung reserviert); sigma 0,005 wie die Hoehenmessung in toRoomData
+//   standard  - nichts gemessen: Vorgabe der Auswertung (H0 2,55 m, sigma 0,35 m, wie solveOpt); am Ende auch, wenn die
+//               Kamera die Hoehe nicht bestimmen konnte (sol.Hfixed)
+//   parallaxe - aus der Kamera geschaetzt (sol.H, sigma sol.sH)
+// Beim Start (session.hoehe) gilt, was bekannt ist; am Ende (result.hoehe) das Ergebnis der Auswertung.
+function hoeheStart(){
+  return S.H ? {wert:S.H, quelle:'laser', sigma:0.005} : {wert:2.55, quelle:'standard', sigma:0.35};
+}
+function hoeheEnde(res){
+  if(S.H) return {wert:S.H, quelle:'laser', sigma:0.005};
+  const A=res.auto;
+  if(!A || !Number.isFinite(A.H)) return {wert:null, quelle:null, sigma:null};
+  const sg=Number.isFinite(A.sH) ? +A.sH.toFixed(4) : null;
+  return {wert:+A.H.toFixed(4), quelle:A.Hfixed ? 'standard' : 'parallaxe', sigma:sg};
 }
 
 // ----------------------------------------------------------- Ergebnis
@@ -11993,6 +12045,7 @@ function computeResult(){
       res.data=G.toRoomData(room.corners, H*1000);
     }
   }
+  res.hoehe=hoeheEnde(res);
   LOG.result=res;
   return res;
 }
