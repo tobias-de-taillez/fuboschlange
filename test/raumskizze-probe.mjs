@@ -1578,7 +1578,20 @@ if(alt){
       chk('Stand 17: Gyroscope-Zeitstempel auf Geraetelaufzeit (ts ~ 2.8e8 ms) werden auf Seitenzeit umgerechnet (t nahe ta, ts roh); mit Seitenzeit unveraendert',
         gb.length>=300 && gb.every(x=>Math.abs(x.t-x.ta)<0.2 && x.ts>2.8e8) && gi.every(x=>Math.abs(x.t-x.ta)<0.2 && x.ts<1e6), `${gb.length} Werte, max |t-ta| ${Math.max(...gb.map(x=>Math.abs(x.t-x.ta))).toFixed(3)} s`); }
     chk('Stand 17: Karte mit Gyro: Kalibrierung der Achsen versucht (imu-kalib im Protokoll), Karten-Worker bekommt die Bruecke (schnitt.gyroBruecke im Start)', rb.P.LOG.events.some(e=>e.type==='imu-kalib') && rb.stat.karteAn.some(m=>m.typ==='start' && m.schnitt && m.schnitt.gyroBruecke===true) && !rk.stat.karteAn.some(m=>m.typ==='start' && m.schnitt), (rb.P.LOG.events.find(e=>e.type==='imu-kalib')||{}).restDeg+'° Rest');
-    { const e=rr.P.LOG.events.find(x=>x.type==='rueckkehr'), nach=e ? rr.stat.solver.map(x=>JSON.parse(x.opt)).filter(x=>x.runde) : [];
+    // Stand 26: nach erkannter Rueckkehr und geschlossener Auswertung (ohne Countdown, z. B. nach einem Ortungsbruch) steht
+  // „Runde komplett“: keine Erfassung mehr (autoBlock), Zustandsbalken, Knopf „Weiter erfassen“; Rueckgaengig (offen) hebt es auf
+  { const P=rr.P, S=P.S, ev=()=>P.LOG.events.filter(x=>x.type==='runde-fertig').length, zu={walls:[{obs:[]}], labels:[], closed:true, area:31.4, warnings:[], turn:360, senk:null}, offen={...zu, closed:false};
+    const vorher=ev(); S.phase='waende'; S.auto=true; S.closeT=null; S.closePending=false; S.paused=false; S.speed=0; S.settleUntil=0; S.camV=0; S.weiter=false; S.fertig=null; S.lap={t:1};
+    P.applySolution(offen); const a0=!S.fertig && !P.autoBlock();
+    P.applySolution(zu); const a1=!!S.fertig && P.autoBlock()==='Fertig' && ev()===vorher+1;
+    P.applySolution(zu); const a2=ev()===vorher+1;
+    P.arState(); const a3=/Runde komplett/.test(rr.doc.getElementById('arState').textContent);
+    rr.doc.getElementById('btnPause').onclick(); const a4=S.weiter===true && !P.autoBlock() && P.LOG.events.some(x=>x.type==='runde-weiter') && rr.doc.getElementById('btnPause').textContent==='Pause';
+    P.applySolution(offen); S.weiter=false; P.applySolution(zu); const a5=!!S.fertig; P.applySolution(offen); const a6=!S.fertig;
+    S.lap=null; S.fertig=null; P.applySolution(zu); const a7=!S.fertig;
+    chk('Stand 26: Runde komplett (Rueckkehr + geschlossen): einmal Ereignis, keine Erfassung mehr, Zustandsbalken, „Weiter erfassen“ gibt frei, offen hebt auf, ohne Rueckkehr nie',
+      a0 && a1 && a2 && a3 && a4 && a5 && a6 && a7, [a0, a1, a2, a3, a4, a5, a6, a7].join(',')); }
+  { const e=rr.P.LOG.events.find(x=>x.type==='rueckkehr'), nach=e ? rr.stat.solver.map(x=>JSON.parse(x.opt)).filter(x=>x.runde) : [];
     chk('Stand 24: Rueckkehr im Rundgang erkannt (ab 300°), danach Auftraege mit Rundenbruch, Hinweis „Runde komplett“; rueckkehr=0 schaltet aus',
       e && e.deg>=300 && nach.length>0 && nach.every(x=>Math.abs(x.runde.t-(e.t-0.01))<1e-6) && rr.P.LOG.events.some(x=>x.type==='hinweis' && /Runde ist komplett/.test(x.text))
       && !r6.P.LOG.events.some(x=>x.type==='rueckkehr'), e ? `bei ${e.t} s, ${e.deg}°, ${nach.length} Auftraege mit Rundenbruch` : 'keine'); }

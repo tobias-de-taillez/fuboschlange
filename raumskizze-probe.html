@@ -9355,6 +9355,7 @@ const canArm=()=>S.auto && S.phase==='waende' && !S.paused && !S.closeDone && !S
 // der Live-Linie und den Hinweis.
 function autoBlock(){
   if(S.paused) return 'Pause';
+  if(S.fertig && !S.weiter) return 'Fertig';   // Stand 26: Runde komplett und Raum geschlossen - nichts mehr erfassen
   if(S.closeT!=null) return 'Abschluss';
   if(S.speed>AUTO_MAX_SPEED) return 'zu schnell';
   if(now()<(S.settleUntil||0)) return 'Tracking beruhigt sich';
@@ -10058,7 +10059,15 @@ function applySolution(r){
       hint(/zwischen \d+ und \d+ fehlt/.test(miss) ? 'Hier fehlt noch eine Wand – im Bild rot gestrichelt. Dorthin schwenken.'
         : /ungesehen/.test(miss) ? `Ein Stück Wand bis zur Ecke ist noch ungesehen – im Bild ${FARBEN_KLAR || S.auto ? 'rot' : 'orange'} gestrichelt. Dorthin schwenken.` : miss, 'warn'); }
   }
-  if(r.closed && S.breaks.length && !S.warned.closeManual){ S.warned.closeManual=true; ev('geschlossen-nach-bruch');
+  // Stand 26 (Aufnahme 14:10: Skizze bei 68,7 s sauber geschlossen, dann 50 s weiter geschwenkt, zwei Ortungssprünge machten
+  // daraus den Umriss aus den Wandenden): Runde erkannt UND Auswertung geschlossen und kein Countdown (der laeuft nur ohne Bruch)
+  // - fester Zustand, keine weiteren Erfassungen, bis der Nutzer „Weiter erfassen“ waehlt oder schliesst.
+  if(!r.closed) S.fertig=null;
+  else if(S.lap && S.closeT==null && !S.closePending && S.phase==='waende' && !S.fertig && !S.weiter){
+    S.fertig={t:now()}; ev('runde-fertig', {walls:r.walls.length, area:r.area!=null ? +r.area.toFixed(1) : null});
+    if(navigator.vibrate) navigator.vibrate([40, 60, 40]);
+    hint('Runde komplett, Raum geschlossen – „Raum schließen“ tippen. Noch etwas erfassen: „Weiter erfassen“.'); }
+  if(r.closed && S.breaks.length && !S.fertig && !S.warned.closeManual){ S.warned.closeManual=true; ev('geschlossen-nach-bruch');
     hint('Raum geschlossen – nach der Ortungslücke aber bitte selbst prüfen und „Raum schließen“ tippen.', 'warn'); }
   if(r.Hfixed && !S.H && S.pool.length>=30 && !S.warned.hFixed){
     S.warned.hFixed=true; ev('höhe-unbestimmt');
@@ -10869,6 +10878,7 @@ function arState(){
     else if(S.subst) { cls='sub'; txt=S.jumpHold ? 'Ortung gesprungen – die Lage wird noch abgeglichen.' : 'Ortung wieder da – die Lage wird noch abgeglichen.'; }
     // Abschluss aus den Wandenden: kein Countdown, der einmalige Hinweis wird von
     // Tempo-/Haltungs-Hinweisen ueberschrieben - hier steht es, solange es gilt.
+    else if(S.fertig && !S.weiter) { cls='ends'; txt='Runde komplett, Raum geschlossen – „Raum schließen“ tippen. Noch etwas erfassen: „Weiter erfassen“.'; }
     else if(S.auto && S.sol && S.sol.closed && !autoClosed(S.sol)) { cls='ends'; txt='Umriss aus den Wandenden – endet nicht von selbst. Ecken im Bild prüfen, dann „Raum schließen“ tippen.'; }
   }
   if(cls==='stop'){
@@ -11327,7 +11337,7 @@ function updateWallInfo(){
       ? deNum(`Schwenk · ${done} Wände · ${S.pool.length} Kanten · ${rej} verworfen` + (sol && sol.closed ? (autoClosed(sol) ? ' · geschlossen' : ' · Umriss aus Wandenden') : S.lap ? ' · Runde komplett' : '')
         + h + (S.paused ? ' · PAUSE' : ''))
       : '';
-    $('btnPause').textContent=S.closeT!=null || S.closePending ? 'Noch nicht fertig' : S.paused ? 'Weiter' : 'Pause';
+    $('btnPause').textContent=S.fertig && !S.weiter ? 'Weiter erfassen' : S.closeT!=null || S.closePending ? 'Noch nicht fertig' : S.paused ? 'Weiter' : 'Pause';
     $('btnUndo').textContent=S.pool.length ? 'Rückgängig' : 'Boden neu';
     $('btnClose').disabled=done<3;
     return;
@@ -11803,7 +11813,7 @@ async function startAR(){
     planes:null, depth:null, trackLost:false, closed:false, endArm:0, fps:[], lastT:0, frame:0, warned:{},
     aspectWarn:false});
   // Stand 24: Rueckkehr zur Anfangswand (G.rueckkehr) - abgewickelte Blickdrehung je Bild, erkannte Rueckkehr und ihre Erfassung
-  Object.assign(S, {kum:0, kumAz:null, lap:null, lapOb:null});
+  Object.assign(S, {kum:0, kumAz:null, lap:null, lapOb:null, fertig:null, weiter:false});
   // Stand 6: Epoche, Zeilenzaehler, Signale, Messmodus
   Object.assign(S, {ep:0, epT:null, epBr:0, poseSprungN:0, xrSeit:0, zeile:null, emul:false, tiefeAn:null, markeReq:false, markeN:0, mess:null});
   const canvas=document.createElement('canvas');
@@ -12182,6 +12192,8 @@ $('btnNext').onclick=()=>{
   updateWallInfo();
 };
 $('btnPause').onclick=()=>{
+  // Stand 26: nach „Runde komplett“ heisst der Knopf „Weiter erfassen“ - die Erfassung laeuft wieder, der Zustand bleibt aus
+  if(S.fertig && !S.weiter){ S.weiter=true; ev('runde-weiter'); hint('Weiter schwenken.'); updateWallInfo(); return; }
   // Pause hebt auch den Abschluss-Countdown auf: weiter erfassen, dann
   // selbst mit „Raum schließen“ beenden.
   // „Noch nicht fertig“ gilt auch, wenn der Countdown gerade wegen
@@ -12244,7 +12256,7 @@ $('btnClose').onclick=()=>{
 if(Q.has('debug')) globalThis.PROBE={S, LOG, computeResult, showResult, requestSolve, applySolution, drawMiniMap, slim, solveOpt, makeSolver,
   REC, recStart, recFrame, recStop, recTar, trackFrame, trkSeg, senkFrame,
   BW, bildSenden, onBild, drawSegmente, epocheFort, recEbenen, messAn, messMarke, messLesen, messBild, KARTE, MESS, TIEFE_ANF, REC_COLS,
-  KW, kwBild, kwZeile, onKarte, karteAnzeige, drawKarte, KARTE_QUELLE};
+  KW, kwBild, kwZeile, onKarte, karteAnzeige, drawKarte, KARTE_QUELLE, autoBlock, arState};
 $('start').disabled=true;
 $('stand').textContent=standText()+(KARTE ? ` · Karte (Quelle ${KARTE_QUELLE})` : '')+(MESS ? ' · Messmodus' : $('imuAn') && $('imuAn').checked ? ' · IMU' : '')+(TIEFE_ANF ? ` · Tiefe ${TIEFE_ANF}` : '');
 stage0();
