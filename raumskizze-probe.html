@@ -9712,8 +9712,12 @@ const imuSicht=()=>ev('sichtbar', {zustand:document.visibilityState});
 // Gyro live (Stand 17): imuPsi je Zeile wie T1 imuGier (raumskizze-karte.mjs, Doku 12.8). Achsen-Zuordnung und Zeitversatz werden einmal aus
 // den ersten ~300 verfolgten Zeilenpaaren geschaetzt (kleinste Abweichung gegen ARCore), danach je neue Zeile die Aenderung des Plan-Blicks
 // aus dem Gyro (nullte Ordnung, Abtastwert hoechstens hMax s vor sich). Ohne Zuordnung oder bei Aussetzern bleibt imuPsi weg: dann keine Bruecke.
-const GYL={t:[], w:[], M:null, d:0, a:null, paare:[], rest:null, hMax:0.05, versuche:0, n:0, nan:0};
-const gyReset=()=>{ Object.assign(GYL, {t:[], w:[], M:null, d:0, a:null, paare:[], rest:null, versuche:0, n:0, nan:0}); };
+const GYL={t:[], w:[], M:null, d:0, a:null, paare:[], rest:null, hMax:0.05, versuche:0, n:0, nan:0, fehl:[], verworfen:0};
+const gyReset=()=>{ Object.assign(GYL, {t:[], w:[], M:null, d:0, a:null, paare:[], rest:null, versuche:0, n:0, nan:0, fehl:[], verworfen:0}); };
+// Kalibrierung nur aus Paaren mit Drehung (>= GY_MIN_DEG Plan-Blick je Zeile): bei Ruhe passen alle 24 Zuordnungen (Aufnahme 31.10.: Rest 0,04 Grad
+// mit anderer Zuordnung als T1 ueber die ganze Aufnahme). Gleichwertige Zuordnungen (Achsen ohne Drehanteil) sind unschaedlich; verlangt wird,
+// dass der Rest klein gegen die Drehung ist: Median des Fehlers <= GY_REL * Median |Drehung| und <= GY_SCHWELLE.
+const GY_MIN_DEG=0.4, GY_REL=0.25, GY_SCHWELLE=0.02, GY_PAARE=[40, 100, 200, 400, 800];
 const gyMul=(a,b)=>[a[3]*b[0]+a[0]*b[3]+a[1]*b[2]-a[2]*b[1], a[3]*b[1]-a[0]*b[2]+a[1]*b[3]+a[2]*b[0], a[3]*b[2]+a[0]*b[1]-a[1]*b[0]+a[2]*b[3], a[3]*b[3]-a[0]*b[0]-a[1]*b[1]-a[2]*b[2]];
 const gyExp=(w, dt)=>{ const th=Math.hypot(w[0], w[1], w[2])*dt; if(th<1e-12) return [w[0]*dt/2, w[1]*dt/2, w[2]*dt/2, 1]; const sn=Math.sin(th/2)/(th/dt); return [w[0]*sn, w[1]*sn, w[2]*sn, Math.cos(th/2)]; };
 const gyBlick=q=>Math.atan2(-(1-2*(q[0]*q[0]+q[1]*q[1])), -2*(q[0]*q[2]+q[1]*q[3]));
@@ -9734,21 +9738,28 @@ function gyKalib(){
   const P=GYL.paare, arc=([a, b])=>{ const dd=gyBlick(b.pose.slice(3, 7))-gyBlick(a.pose.slice(3, 7)); return Math.atan2(Math.sin(dd), Math.cos(dd)); };
   const fehler=(M, d)=>{ const f=[]; for(const pr of P){ const v=gyZeile(M, pr[0], pr[1], d); if(Number.isFinite(v)) f.push(Math.abs(v-arc(pr))); }
     if(f.length<20) return null; f.sort((x, y)=>x-y); return {med:f[f.length>>1], n:f.length}; };
-  const wahl=d=>{ let best=null; for(let z=0;z<GY_ZUORD.length;z++){ const e=fehler(GY_ZUORD[z], d); if(e && (!best || e.med<best.med)) best={z, ...e}; } return best; };
+  const wahl=d=>{ let best=null, zweit=Infinity; for(let z=0;z<GY_ZUORD.length;z++){ const e=fehler(GY_ZUORD[z], d); if(!e) continue;
+      if(!best || e.med<best.med){ if(best) zweit=Math.min(zweit, best.med); best={z, ...e}; } else zweit=Math.min(zweit, e.med); } if(best) best.zweit=zweit; return best; };
   let best=wahl(0); if(!best){ ev('imu-kalib', {gut:false, grund:'zu wenige Paare mit lueckenlosem Gyro', paare:P.length, werte:GYL.t.length}); return false; }
   let dBest=0, eBest=best.med; for(let j=-25;j<=25;j++){ const d=j/100, e=fehler(GY_ZUORD[best.z], d); if(e && e.med<eBest-1e-12){ eBest=e.med; dBest=d; } }
   if(dBest!==0){ const b2=wahl(dBest); if(b2) best=b2; }
-  ev('imu-kalib', {zuordnung:GY_ZUORD[best.z], versatz:dBest, restDeg:+(best.med*180/Math.PI).toFixed(3), paare:best.n, gut:best.med<0.02});
-  if(best.med>=0.02) return false;   // > 1,1 Grad Rest: Zuordnung unbrauchbar (Gyro stumm oder Zeitbasis falsch), spaeter neu
+  const dr=P.map(arc).map(Math.abs).sort((x, y)=>x-y), eindeutig=best.med<=GY_REL*dr[dr.length>>1];   // 'eindeutig' = Rest klein gegen die Drehung
+  ev('imu-kalib', {zuordnung:GY_ZUORD[best.z], versatz:dBest, restDeg:+(best.med*180/Math.PI).toFixed(3), drehDeg:+(dr[dr.length>>1]*180/Math.PI).toFixed(3), paare:best.n, gut:best.med<GY_SCHWELLE && eindeutig});
+  if(best.med>=GY_SCHWELLE || !eindeutig) return false;   // > 1,1 Grad Rest: Zuordnung unbrauchbar (Gyro stumm oder Zeitbasis falsch), spaeter neu
   GYL.M=GY_ZUORD[best.z]; GYL.d=dBest; GYL.rest=best.med; return true; }
 // je PoseZeile z (aufsteigende Zeit): imuPsi setzen, sobald die Zuordnung steht
 function gyLive(z){
   const a=GYL.a; GYL.a=z; if(!a || !GYL.t.length) return;
   if(!GYL.M){
-    if(z.t-a.t<=0.105 && a.ep===z.ep && GYL.paare.length<300) GYL.paare.push([a, z]);
-    if(GYL.versuche<3 && GYL.paare.length>=[40, 150, 300][GYL.versuche]){ GYL.versuche++; gyKalib(); }   // schlechter Rest: mit mehr Paaren noch zweimal
+    if(z.t-a.t<=0.105 && a.ep===z.ep && GYL.paare.length<GY_PAARE[GY_PAARE.length-1]){ const dd=gyBlick(z.pose.slice(3, 7))-gyBlick(a.pose.slice(3, 7));
+      if(Math.abs(Math.atan2(Math.sin(dd), Math.cos(dd)))>=GY_MIN_DEG*Math.PI/180) GYL.paare.push([a, z]); }
+    if(GYL.versuche<GY_PAARE.length && GYL.paare.length>=GY_PAARE[GYL.versuche]){ GYL.versuche++; gyKalib(); }   // nicht gut/eindeutig: mit mehr Paaren erneut
     return; }
-  const v=gyZeile(GYL.M, a, z, GYL.d); if(Number.isFinite(v)){ z.imuPsi=v; GYL.n++; } else GYL.nan++; }
+  const v=gyZeile(GYL.M, a, z, GYL.d); if(Number.isFinite(v)){ z.imuPsi=v; GYL.n++;
+    // Ueberwachung: verfolgte Zeilen (dt <= 0,105 s, gleiche Epoche) gegen ARCore; Median der letzten 60 > 1,1 Grad -> Zuordnung verwerfen, neu kalibrieren
+    if(z.t-a.t<=0.105 && a.ep===z.ep){ const dd=gyBlick(z.pose.slice(3, 7))-gyBlick(a.pose.slice(3, 7)); GYL.fehl.push(Math.abs(v-Math.atan2(Math.sin(dd), Math.cos(dd)))); if(GYL.fehl.length>60) GYL.fehl.shift();
+      if(GYL.fehl.length>=60){ const f=[...GYL.fehl].sort((x, y)=>x-y); if(f[30]>GY_SCHWELLE){ ev('imu-kalib-verworfen', {medianDeg:+(f[30]*180/Math.PI).toFixed(3)}); GYL.M=null; GYL.paare=[]; GYL.versuche=0; GYL.fehl=[]; GYL.verworfen++; } } } }
+  else GYL.nan++; }
 function imuStart(){
   gyReset();
   addEventListener('devicemotion', onImu);
