@@ -109,8 +109,8 @@
   #arBottom { position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 12px;
               padding-bottom: max(12px, env(safe-area-inset-bottom));
               background: rgba(0,0,0,.8); }
-  #arBottom .row { grid-template-columns: 1fr 1fr 1fr; }
-  #arBottom #arBtnsWand2 { grid-template-columns: 1fr 1fr 1fr 1fr; }
+  /* Stand 23: so viele Spalten wie sichtbare Knoepfe (ausgeblendete zaehlen nicht) */
+  #arBottom .row { grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); }
   #arBottom button { padding: 14px 6px; font-size: 15px; }
   #arWall { font-size: 13px; margin-bottom: 6px; font-variant-numeric: tabular-nums; }
   /* Mini-Grundriss: was der Schwenk bisher ergeben hat. Steht in #arBottom und
@@ -122,6 +122,28 @@
   #arRec { position: absolute; right: 10px; bottom: calc(100% + 150px); padding: 3px 8px; border-radius: 6px;
            background: rgba(0,0,0,.65); color: #f87171; font: 700 12px/1.4 system-ui, sans-serif;
            font-variant-numeric: tabular-nums; pointer-events: none; }
+  /* Stand 23 (Rueckmeldung 31.10.: im Querformat blieben 42 % der Hoehe fuers Kamerabild): Messwerte und die
+     Pruef-Knoepfe (Ansicht, y-Spiegel) erst nach Antippen der Kopfzeile; Kopf- und Fussleiste durchscheinender. */
+  #arTop { background: rgba(0,0,0,.6); cursor: pointer; }
+  #arBottom { background: rgba(0,0,0,.6); }
+  #ar:not(.mitStats) #arStats, #ar:not(.mitStats) #btnFlip, #ar:not(.mitStats) #btnFlip2,
+  #ar:not(.mitStats) #btnAnsicht { display: none; }
+  #arStatsAuf { font-size: 11px; color: rgba(255,255,255,.6); }
+  #ar.mitStats #arStatsAuf { display: none; }
+  /* Querformat: Kopfzeile schmal und nur so breit, dass sie die Knopfspalte frei laesst; Knoepfe als Spalte rechts
+     ueber die ganze Hoehe, Grundriss und REC links daneben. Das Fadenkreuz in der Bildmitte bleibt frei. */
+  @media (orientation: landscape) {
+    #arTop { padding: 28px 176px 6px 12px; background: linear-gradient(rgba(0,0,0,.65), rgba(0,0,0,.35)); }
+    #arHint { margin-top: 2px; font-size: 14px; }
+    #arState { margin-top: 4px; padding: 4px 8px; font-size: 14px; }
+    #arBottom { left: auto; top: 0; width: 164px; padding: 28px 8px 8px;
+                padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+    #arBottom .row { grid-template-columns: 1fr; gap: 6px; margin-top: 6px; }
+    #arBottom button { padding: 9px 6px; font-size: 14px; }
+    #arWall { font-size: 12px; margin-bottom: 2px; }
+    #ar #miniMap { right: calc(100% + 8px); bottom: 8px; width: 104px; height: 104px; }
+    #arRec { right: calc(100% + 8px); bottom: 120px; white-space: nowrap; }
+  }
 </style>
 
 <h1>Raumskizze per Kamera</h1>
@@ -155,7 +177,7 @@
   </details>
   <button id="dlLast" class="ghost hidden" style="margin-top:8px">Protokoll vom letzten Seitenaufruf (JSON)</button>
   <button id="dlRecLast" class="ghost hidden" style="margin-top:8px">Letzte Aufnahme sichern</button>
-  <div class="hint" style="margin-top:8px">Automatisch: (1) Kurz auf freien Boden halten – der Boden setzt sich selbst. (2) Fadenkreuz langsam an der Kante zwischen Wand und Decke entlangführen, einmal rundum, ruhig auch hinter Schränken weiter. Die Reihenfolge ist egal, ein paar Schritte zwischendurch helfen. Telefon auf Brusthöhe. (3) Zurück an der ersten Wand schließt sich der Raum. Steht oben blau „Umriss aus den Wandenden“, endet es nicht von selbst: Ecken prüfen, dann „Raum schließen“. Im Bild: grün unterlegt heißt „die Kante liegt, wo die Skizze sie erwartet“, orange unterlegt „hier weicht sie ab – dort noch einmal entlang“. Grüne senkrechte Linien sind erkannte Kanten bis zur Decke, die eine Ecke der Skizze bestätigen. An der noch unsichersten Wand steht „näher ran“ – dort näher herangehen. Rot gestrichelt fehlt noch etwas.</div>
+  <div class="hint" style="margin-top:8px">Automatisch: (1) Kurz auf freien Boden halten – der Boden setzt sich selbst. (2) Fadenkreuz langsam an der Kante zwischen Wand und Decke entlangführen, einmal rundum, ruhig auch hinter Schränken weiter. Die Reihenfolge ist egal, ein paar Schritte zwischendurch helfen. Telefon auf Brusthöhe. (3) Zurück an der ersten Wand schließt sich der Raum. Steht oben blau „Umriss aus den Wandenden“, endet es nicht von selbst: Ecken prüfen, dann „Raum schließen“. Im Bild: Die weiße Linie ist die Skizze, die dünnen hellblauen Striche sind die Kanten, die gerade im Bild erkannt werden – liegen sie auf der weißen Linie, passt die Skizze dort. Grüne senkrechte Linien bestätigen eine Ecke. An der noch unsichersten Wand steht „näher ran“. Rot gestrichelt fehlt noch etwas – dorthin schwenken.</div>
   <div class="hint" style="margin-top:8px">Von Hand: „Boden setzen“, je Wand „Kante erfassen“ (am besten zweimal aus verschiedenem Abstand), „Nächste Wand“ der Reihe nach, zum Schluss „Raum schließen“.</div>
 </div>
 
@@ -181,6 +203,7 @@
   <div id="cross"></div>
   <div id="arTop">
     <div id="arStats"></div>
+    <div id="arStatsAuf">Messwerte: antippen</div>
     <div id="arState" class="hidden"></div>
     <div id="arHint"></div>
   </div>
@@ -9627,6 +9650,7 @@ function karteSchluss(){
 // Querfehler aus G.fehlerband (M6) in F0: dort ist s um b = u·t(g⁻¹) gegen den Bezug verschoben (wie G.zuBezug).
 // Je Wand Lage der gesehenen Stuecke, der Verlaengerungen (je KARTE_VERL m) mit Band (±2σ⊥, nur bis KARTE_BAND_MAX)
 // und der Bodenlinie; je Ecke das Lot. Gezeichnet wird nur, solange die Epoche des Stands die laufende ist.
+const KARTE_FEHLT_MIN=0.3;
 function karteAnzeige(stand, kopf){
   const A=stand.abschnitte, lauf=A[A.length-1], D={runde:stand.runde, ep:kopf.epoche, lokal:false, waende:[], ecken:[], hinweise:(stand.hinweise||[]).map(h=>h.code)};
   if(!lauf) return D;
@@ -9645,15 +9669,20 @@ function karteAnzeige(stand, kopf){
     const auf=(s, d)=>{ const p=P(s); return [p[0]+d*n[0], p[1]+d*n[1]]; };
     D.waende.push({id:w.id, kandidat:w.zustand==='kandidat', sigma:sig((s0+s1)/2), yT, yF, seen:seen.map(v=>[P(v[0]), P(v[1])]),
       verl:[[P(stuetz[0]), P(s0)], [P(s1), P(stuetz[3])]], band:band ? [1, -1].map(d=>stuetz.slice(1).map((s,j)=>[auf(stuetz[j], 2*d*sg[j]), auf(s, 2*d*sg[j+1])])).flat() : null,
-      boden:(w.boden||[]).map(iv).filter(gut).map(v=>[P(v[0]), P(v[1])]), spann:[P(s0), P(s1)]}); });
+      boden:(w.boden||[]).map(iv).filter(gut).map(v=>[P(v[0]), P(v[1])]), spann:[P(s0), P(s1)], fehlt:[],
+      u, s0, s1, P}); });
   if(B) for(const E of B.ecken){ if(!E.p || !E.p.every(Number.isFinite)) continue;
-    D.ecken.push({p:E.p, senk:!!E.senk, sigma:E.cov ? Math.sqrt(Math.max(E.cov[0], E.cov[2])) : Infinity, yC, yF}); }
+    D.ecken.push({p:E.p, senk:!!E.senk, sigma:E.cov ? Math.sqrt(Math.max(E.cov[0], E.cov[2])) : Infinity, yC, yF});
+    // Stand 23: was an den Waenden dieser Ecke zwischen gesehenem Ende und Ecke ungesehen ist (rot gestrichelt)
+    for(const id of E.waende || []){ const w=D.waende.find(x=>x.id===id); if(!w) continue; const sE=w.u[0]*E.p[0]+w.u[1]*E.p[1];
+      if(sE>w.s1+KARTE_FEHLT_MIN) w.fehlt.push([w.P(w.s1), w.P(sE)]); else if(sE<w.s0-KARTE_FEHLT_MIN) w.fehlt.push([w.P(sE), w.P(w.s0)]); } }
+  for(const w of D.waende){ delete w.u; delete w.s0; delete w.s1; delete w.P; }
   return D;
 }
 const karteFarbe=(()=>{ const m=new Map(); return (col, a)=>{ const k=col+a; if(!m.has(k)){ const h=col.replace('#', ''), v=[0, 2, 4].map(i=>parseInt(h.slice(i, i+2), 16));
   m.set(k, `rgba(${v.join(',')},${a})`); } return m.get(k); }; })();
 const KOV={kandidat:{color:'rgba(255,255,255,.75)', w:1.5, dash:[4,6]}, boden:{color:'rgba(255,255,255,.6)', w:1.5}, bodenOffen:{color:'rgba(255,255,255,.45)', w:1, dash:[3,6]},
-  lotSenk:{color:'#4ade80', w:2.5}, lot:{color:'rgba(255,255,255,.85)', w:1.5, dash:[5,5]},
+  lotSenk:{color:'#4ade80', w:2}, lot:{color:'rgba(255,255,255,.85)', w:1.5, dash:[5,5]},
   wand:(()=>{ const m=new Map(); return s=>{ const col=wallColor({sRho:s}); if(!m.has(col)) m.set(col, {seen:{color:col, w:3}, verl:{color:col, w:1.5, dash:[6,6]},
     band:{color:karteFarbe(col, 0.45), w:1}}); return m.get(col); }; })()};
 // Je XR-Bild: die vorberechnete Anzeige projizieren (Budget drawKarte p99 <= 1,5 ms, 9.6). true, wenn gezeichnet.
@@ -9664,21 +9693,18 @@ function drawKarte(c, proj, camTo, px, dpr){
   const t0=performance.now(), batch=new Map(), Y=(p,y)=>[p[0], y, p[1]];
   const seg=(st,A,B)=>{ const s=G.projectSegment(proj, camTo, A, B); if(!s) return; let b=batch.get(st); if(!b) batch.set(st, b=[]); b.push(px(s[0]), px(s[1])); };
   const a0=c.globalAlpha; if(D.lokal) c.globalAlpha=0.5;
+  // Stand 23: je Wand eine duenne Linie (gesehene Stuecke), rot gestrichelt nur, was bis zur Ecke noch ungesehen ist; ohne
+  // Verlaengerungen, Fehlerband und Bodenlinien (Rueckmeldung 31.10.: zu viele Striche). Lote duenn, gruen wo bestaetigt.
   for(const w of D.waende){
-    const st=w.kandidat ? null : KOV.wand(w.sigma);
-    for(const [a,b] of w.boden) seg(KOV.boden, Y(a, w.yF), Y(b, w.yF));
-    if(!w.boden.length) seg(KOV.bodenOffen, Y(w.spann[0], w.yF), Y(w.spann[1], w.yF));
-    if(w.band && st) for(const [a,b] of w.band) seg(st.band, Y(a, w.yT), Y(b, w.yT));
-    for(const [a,b] of w.verl) seg(st ? st.verl : KOV.kandidat, Y(a, w.yT), Y(b, w.yT));
-    for(const [a,b] of w.seen) seg(st ? st.seen : KOV.kandidat, Y(a, w.yT), Y(b, w.yT)); }
-  for(const e of D.ecken) seg(e.senk ? KOV.lotSenk : KOV.lot, Y(e.p, e.yF), Y(e.p, e.yC));
+    for(const [a,b] of w.seen) seg(w.kandidat ? KOV.kandidat : OV.duenn.seen, Y(a, w.yT), Y(b, w.yT));
+    for(const [a,b] of w.fehlt) seg(OV.fehlt, Y(a, w.yT), Y(b, w.yT)); }
+  for(const e of D.ecken) seg(e.senk ? KOV.lotSenk : OV.duenn.lot, Y(e.p, e.yF), Y(e.p, e.yC));
   for(const [st,pts] of batch){ c.strokeStyle=st.color; c.lineWidth=st.w*dpr; c.setLineDash(st.dash ? st.dash.map(x=>x*dpr) : []);
     c.beginPath(); for(let i=0;i<pts.length;i+=2){ c.moveTo(pts[i][0],pts[i][1]); c.lineTo(pts[i+1][0],pts[i+1][1]); } c.stroke(); }
   c.setLineDash([]);
   // Ecke an der Decke: Punkt, bei σ > 5 cm mit Ring
   for(const e of D.ecken){ const q=G.project(proj, camTo, Y(e.p, e.yC)); if(!q) continue; const p=px(q);
-    c.fillStyle=e.senk ? '#4ade80' : '#ffffff'; c.beginPath(); c.arc(p[0], p[1], 3*dpr, 0, 2*Math.PI); c.fill();
-    if(e.sigma>0.05){ c.strokeStyle='rgba(255,255,255,.8)'; c.lineWidth=1.5*dpr; c.beginPath(); c.arc(p[0], p[1], 8*dpr, 0, 2*Math.PI); c.stroke(); } }
+    c.fillStyle=e.senk ? '#4ade80' : '#ffffff'; c.beginPath(); c.arc(p[0], p[1], 3*dpr, 0, 2*Math.PI); c.fill(); }
   c.globalAlpha=a0;
   LOG.timings.karteDraw.push(+(performance.now()-t0).toFixed(2)); if(LOG.timings.karteDraw.length>2000) LOG.timings.karteDraw.shift();
   return true;
@@ -9965,7 +9991,7 @@ function applySolution(r){
     // ergaenzte Wand rot gestrichelt, lange ungesehene Luecke orange gestrichelt, bei ?farben=klar rot).
     if(miss && S.lastMiss!==mk){ S.lastMiss=mk; ev('wand-fehlt', {msg:miss});
       hint(/zwischen \d+ und \d+ fehlt/.test(miss) ? 'Hier fehlt noch eine Wand – im Bild rot gestrichelt. Dorthin schwenken.'
-        : /ungesehen/.test(miss) ? `Ein Stück Wand bis zur Ecke ist noch ungesehen – im Bild ${FARBEN_KLAR ? 'rot' : 'orange'} gestrichelt. Dorthin schwenken.` : miss, 'warn'); }
+        : /ungesehen/.test(miss) ? `Ein Stück Wand bis zur Ecke ist noch ungesehen – im Bild ${FARBEN_KLAR || S.auto ? 'rot' : 'orange'} gestrichelt. Dorthin schwenken.` : miss, 'warn'); }
   }
   if(r.closed && S.breaks.length && !S.warned.closeManual){ S.warned.closeManual=true; ev('geschlossen-nach-bruch');
     hint('Raum geschlossen – nach der Ortungslücke aber bitte selbst prüfen und „Raum schließen“ tippen.', 'warn'); }
@@ -10923,6 +10949,11 @@ function senkFrame(){
 const OV={piece:{color:'#60a5fa', w:4}, pieceLast:{color:'#facc15', w:4}, pieceOther:{color:'rgba(156,163,175,.8)', w:3}, fit:{color:'rgba(255,255,255,.4)', w:1.5},
   under:{color:'rgba(0,0,0,.5)', w:5}, vert:{color:'rgba(255,255,255,.85)', w:1.5},
   virt:{color:'#f87171', w:2.5, dash:[8,6]}, gapBig:{color:'#f97316', w:2.5, dash:[3,5]},
+  // Stand 23 (automatisch): Modell eine duenne weisse Linie, rot gestrichelt nur, was fehlt (ergaenzte Wand, lange ungesehene Luecke)
+  duenn:{seen:{color:'rgba(255,255,255,.9)', w:2}, gap:{color:'rgba(255,255,255,.5)', w:1, dash:[6,6]}, lot:{color:'rgba(255,255,255,.7)', w:1.5}},
+  fehlt:{color:'#f87171', w:2.5, dash:[8,6]},
+  // Kanten des aktuellen Bilds (drawKantenJetzt): duenn und ohne Historie; Deckenkanten hell, Senkrechte und Bodenkanten blasser
+  jetzt:{O:{color:'rgba(165,243,252,.9)', w:1.5}, V:{color:'rgba(255,255,255,.45)', w:1}, U:{color:'rgba(255,255,255,.35)', w:1}},
   gapMax:0.8,     // wie gapMax der Abdeckungspruefung: laenger ungesehen haelt den Abschluss auf
   hiMin:0.02,     // hervorheben erst ab gelb
   hiPx:60,        // ... und nur, was mindestens so lang (CSS-px) im Bild liegt
@@ -10988,6 +11019,22 @@ function drawAnsicht(c, cw, ch){
 // die Ansicht an ist) und alle ELSED-Segmente desselben Bilds, Farbe nach Klasse: senkrecht blau,
 // waagerecht Richtung 1 rot, Richtung 2 gruen (rechtwinklige Klasse man), sonst waagerecht hell, verworfen
 // grau und duenn. Bild und Segmente hinken dem Kamerabild 100-300 ms nach, liegen aber aufeinander.
+// Stand 23: alle Kanten des juengsten Bild-Worker-Ergebnisses (BW.letzt, etwa jedes 3. XR-Bild) duenn ins Kamerabild, ohne
+// Historie. Die Segmente hinken 100-300 ms nach; ihre Endstrahlen werden darum mit der Pose des Quellbilds in die Welt gedreht und
+// mit der aktuellen Pose als Richtung (unendlich fern) projiziert: beim Schwenken (Drehung) bleiben sie auf der Kante, nur
+// Ortsbewegung in der Wartezeit verschiebt sie (Zentimeter). Verworfene (X) bleiben weg. Aelter als KJ_FRISCH s oder aus
+// einem anderen Bodenbezug (kF) zeigt nichts.
+const KJ_FRISCH=0.6;
+function drawKantenJetzt(c, proj, camTo, px, dpr){
+  const r=BW.letzt; if(!r || !r.a || !r.a.camTo || now()-r.a.t>KJ_FRISCH || r.a.kF!==S.frames.length) return;
+  const SG=G.KG.SEG, KL=G.KG.KL, A=r.a.camTo, o=[camTo[12], camTo[13], camTo[14]], wege={O:[], V:[], U:[]};
+  const ende=(x, y)=>{ const n=G.pixToNdc(x, y, r.w, r.h, r.flipY), ray=G.ray(proj, A, n[0], n[1]); if(!ray) return null;
+    return G.project(proj, camTo, [o[0]+50*ray.d[0], o[1]+50*ray.d[1], o[2]+50*ray.d[2]]); };
+  for(let i=0;i<r.n;i++){ const k=r.cls[i], art=k===KL.O ? 'O' : k===KL.V ? 'V' : k===KL.U ? 'U' : null; if(!art) continue;
+    const j=i*SG, a=ende(r.seg[j], r.seg[j+1]), b=ende(r.seg[j+2], r.seg[j+3]); if(a && b) wege[art].push(px(a), px(b)); }
+  for(const art of ['U', 'V', 'O']){ const w=wege[art], st=OV.jetzt[art]; if(!w.length) continue;
+    c.strokeStyle=st.color; c.lineWidth=st.w*dpr; c.beginPath(); for(let i=0;i<w.length;i+=2){ c.moveTo(w[i][0], w[i][1]); c.lineTo(w[i+1][0], w[i+1][1]); } c.stroke(); }
+}
 const SEG_STIL=[{color:'rgba(156,163,175,.55)', w:1}, {color:'#3b82f6', w:2.5}, {color:'#ef4444', w:2.5}, {color:'#22c55e', w:2.5}, {color:'#e5e7eb', w:2}];
 function drawSegmente(c, cw, ch){
   const r=BW.letzt; if(!r) return;
@@ -11032,8 +11079,10 @@ function drawOverlay(view, camTo){
     const H=S.auto ? Hnow(camTo[13]) : S.H, last=S.walls.length-1;
     // Erfasste Stuecke nur aus dem jetzigen Bezugsrahmen: nach einem Sprung des
     // Bodenankers (Protokoll 3: 3,5 m, 91°) lagen die frueheren ganz woanders.
+    // Stand 23: nur noch von Hand - automatisch zeigte die Historie Striche, die mit jeder Drift oder neuen Ortung neben
+    // der Kante lagen (Rueckmeldung 31.10.: „man erkennt nicht mehr, was man scannen will“); dort stehen die Kanten des aktuellen Bilds
     const tF=S.frames.length ? S.frames[S.frames.length-1] : -Infinity;
-    S.walls.forEach((obs,wi)=>{
+    if(!S.auto) S.walls.forEach((obs,wi)=>{
       for(const ob of obs){
         if(ob.t<tF) continue;
         const l=G.liftObs(ob, H);
@@ -11053,9 +11102,7 @@ function drawOverlay(view, camTo){
       // Nach einem Sprung des Bodenankers, solange der neue Rahmen nicht angeschlossen ist,
       // sind seine Erfassungen keiner Wand zugeordnet ('anderer Bezug') - grau zeigen, was
       // seit dem Sprung erfasst ist, statt nichts.
-      if(S.frames.length && !liveModel()){ const lab=S.sol && S.sol.labels || [];
-        S.pool.forEach((ob,i)=>{ if(ob.t<tF || typeof lab[i]==='number') return; const l=G.liftObs(ob, H);
-          if(l) seg3b(OV.pieceOther, [l[0][0],H,l[0][1]], [l[1][0],H,l[1][1]]); }); }
+      if(S.phase==='waende') drawKantenJetzt(c, proj, camTo, px, dpr);
       flush();
       // Das geschaetzte Modell, wie es JETZT im Bild liegen muss: jede Wand als Linie auf
       // Deckenhoehe zwischen ihren Ecken, je Ecke eine Senkrechte vom Boden zur Decke.
@@ -11069,9 +11116,6 @@ function drawOverlay(view, camTo){
       const M=liveModel(), Hm=S.sol && S.sol.H, Y=(p,y)=>[p[0],y,p[1]];
       if(M && Hm>0 && !karteZeigt){
         if(S.subst) c.globalAlpha=0.5;   // Ersatzbezug: Lage um einen unbekannten Sprung unsicher
-        for(const r of M.rows) if(r.seen) seg3b(OV.under, Y(r.seen[0],Hm), Y(r.seen[1],Hm));
-        for(const v of M.verts) seg3b(OV.under, Y(v.p,0), Y(v.p,Hm));
-        flush();
         // Stufe 2: die gemessene Kante je verfolgter Wand (trackFrame), mehrere Waende zugleich -
         // das gemessene Stueck (trkSeg: so weit die Messungen sie getragen haben, hoechstens die
         // Modellwand; im Bild gekappt) als Band unter der Modelllinie: gruen = passt, orange =
@@ -11081,7 +11125,7 @@ function drawOverlay(view, camTo){
         // 'returned'; im Ring aus den Wandenden steht sie an Stelle senk.first). Die Lage ist
         // die der juengsten Messung, die die Anzeige traegt (TRK_FRESH), auf Deckenhoehe im
         // Kamerarahmen - sie gleitet beim Schwenken mit dem Bild.
-        if(S.trkW && S.trkW.length){
+        if(!S.auto && S.trkW && S.trkW.length){   // Stand 23: automatisch zeigen die Kanten des aktuellen Bilds, ob die Linie sitzt
           const k0=S.sol.senk && S.sol.senk.byEnds ? S.sol.senk.first : 0;
           const w0=!S.sol.returned && S.sol.walls[k0], tNow=now(), a0=c.globalAlpha;
           c.lineCap='round';
@@ -11096,11 +11140,11 @@ function drawOverlay(view, camTo){
         }
         for(const r of M.rows){
           if(r.virtual){ seg3b(OV.virt, Y(r.span[0],Hm), Y(r.span[1],Hm)); continue; }
-          const st=OV.wall(r.sRho);
+          const st=S.auto ? OV.duenn : OV.wall(r.sRho);
           if(r.seen) seg3b(st.seen, Y(r.seen[0],Hm), Y(r.seen[1],Hm));
-          for(const [a,b,len] of r.gaps) seg3b(len>OV.gapMax ? OV.gapBig : st.gap, Y(a,Hm), Y(b,Hm));
+          for(const [a,b,len] of r.gaps) if(len>OV.gapMax || !S.auto) seg3b(len>OV.gapMax ? (S.auto ? OV.fehlt : OV.gapBig) : st.gap, Y(a,Hm), Y(b,Hm));
         }
-        for(const v of M.verts) seg3b(v.virtual ? OV.virt : OV.vert, Y(v.p,0), Y(v.p,Hm));
+        for(const v of M.verts) seg3b(v.virtual ? OV.virt : S.auto ? OV.duenn.lot : OV.vert, Y(v.p,0), Y(v.p,Hm));
         flush();
         // Erkannte Senkrechte (senkFrame), mehrere zugleich: je gezeigter ein Lot vom Boden
         // zur Decke am Grundrisspunkt (Peilung des juengsten Funds bis zur Modellwand bzw.
@@ -11143,8 +11187,8 @@ function drawOverlay(view, camTo){
         if(keep && keep.r.sRho>=0.8*best.r.sRho) best=keep;
         S.hiLine=best ? lineOf(best.r) : null;
         if(best){
-          const col=FARBEN_KLAR ? '#ffffff' : wallColor(best.r), m=[(best.a[0]+best.b[0])/2, (best.a[1]+best.b[1])/2];
-          line(best.a, best.b, 'rgba(0,0,0,.6)', 9); line(best.a, best.b, col, 5);
+          const col=FARBEN_KLAR || S.auto ? '#ffffff' : wallColor(best.r), m=[(best.a[0]+best.b[0])/2, (best.a[1]+best.b[1])/2];
+          if(S.auto){ line(best.a, best.b, 'rgba(0,0,0,.5)', 5); line(best.a, best.b, col, 3); } else { line(best.a, best.b, 'rgba(0,0,0,.6)', 9); line(best.a, best.b, col, 5); }
           const txt='näher ran';   // ohne Zahl: sRho unterschaetzt den wahren Fehler etwa 2- bis 3-fach (Monte-Carlo)
           c.font=`600 ${15*dpr}px system-ui, sans-serif`; c.textAlign='center'; c.textBaseline='bottom';
           c.lineWidth=4*dpr; c.strokeStyle='rgba(0,0,0,.8)'; c.strokeText(txt, m[0], m[1]-8*dpr);
@@ -12036,6 +12080,11 @@ recListLast();
 // --------------------------------------------------------- Knoepfe
 // Tipps auf Knoepfe sollen keine XR-select-Ereignisse ausloesen.
 $('arBottom').addEventListener('beforexrselect', e=>e.preventDefault());
+// Stand 23: Kopfzeile antippen blendet Messwerte und Pruef-Knoepfe ein und aus (gemerkt je Geraet)
+const STATS_PREF='raumskizze.messwerte';
+$('arTop').addEventListener('beforexrselect', e=>e.preventDefault());
+try{ if(localStorage.getItem(STATS_PREF)==='1') $('ar').classList.add('mitStats'); }catch(e){}
+$('arTop').addEventListener('click', ()=>{ const an=$('ar').classList.toggle('mitStats'); try{ localStorage.setItem(STATS_PREF, an ? '1' : '0'); }catch(e){} });
 $('start').onclick=()=>{ $('start').disabled=true; startAR().finally(()=>{ if(!S.session) $('start').disabled=false; }); };
 $('btnBoden').onclick=()=>{ S.floorReq=true; ev('tap-boden'); };
 const flip=()=>{ S.flipY=!S.flipY; ev('y-spiegel', {an:S.flipY}); };

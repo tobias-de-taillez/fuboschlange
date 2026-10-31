@@ -1109,7 +1109,7 @@ const geraetBau=()=>{
     let uhr=1000; const aufg=[]; let seq=0;
     const plane=(due, fn, wk=null, kosten=0)=>aufg.push({due, seq:seq++, fn, wk, kosten});
     const leer=()=>new Promise(r=>setImmediate(r));
-    const stat={readPixels:[], createAnchor:[], worker:[], hoerer:{}, gyro:0, anfrage:null, solver:[], bildAn:[], bildVon:[], messVon:[], karteAn:[], karteVon:[], fehler:[], getBufferSubData:0, segZeichnen:0};
+    const stat={readPixels:[], createAnchor:[], worker:[], hoerer:{}, gyro:0, anfrage:null, solver:[], bildAn:[], bildVon:[], messVon:[], karteAn:[], karteVon:[], fehler:[], getBufferSubData:0, segZeichnen:0, striche:{}};
     const lauf=async bis=>{
       for(;;){ let best=null, be=Infinity;
         for(const a of aufg){ const e=a.wk ? Math.max(a.due, a.wk.frei) : a.due; if(e<be || (e===be && best && a.seq<best.seq)){ be=e; best=a; } }
@@ -1179,8 +1179,10 @@ const geraetBau=()=>{
         for(let i=0;i<w*h;i++){ const v=g[i]; dst[4*i]=dst[4*i+1]=dst[4*i+2]=v; dst[4*i+3]=255; } }
       else dst.fill(128); };
     // ---- DOM
-    const ctx2d=cv=>new Proxy({canvas:cv, createImageData:(w, h)=>({data:new Uint8ClampedArray(w*h*4), width:w, height:h}), measureText:()=>({width:0}),
-      drawImage:()=>{ if(cv.id==='arCanvas') stat.segZeichnen++; }}, {get:(ob, k)=>k in ob ? ob[k] : typeof k==='string' ? ()=>{} : undefined});
+    // Stand 23: stroke() auf arCanvas je Farbe zaehlen (Kanten des aktuellen Bilds, rote Fehlt-Striche, Historie)
+    const ctx2d=cv=>{ const ob={canvas:cv, createImageData:(w, h)=>({data:new Uint8ClampedArray(w*h*4), width:w, height:h}), measureText:()=>({width:0}),
+      drawImage:()=>{ if(cv.id==='arCanvas') stat.segZeichnen++; }, stroke:()=>{ if(cv.id==='arCanvas'){ const k=String(ob.strokeStyle); stat.striche[k]=(stat.striche[k]||0)+1; } }};
+      return new Proxy(ob, {get:(ob, k)=>k in ob ? ob[k] : typeof k==='string' ? ()=>{} : undefined}); };
     const els=new Map();
     const mkEl=id=>{ const e={id, textContent:id && scripts[id]!=null ? scripts[id] : '', className:'', disabled:false, checked:id==='auto' || id==='imuAn' || id==='karteAn', value:'', style:{}, width:300, height:150, children:[],
       classList:{s:new Set(), add(...c){ c.forEach(x=>this.s.add(x)); }, remove(...c){ c.forEach(x=>this.s.delete(x)); }, toggle(c, an){ if(an===undefined) an=!this.s.has(c); if(an) this.s.add(c); else this.s.delete(c); }, contains(c){ return this.s.has(c); }},
@@ -1340,7 +1342,9 @@ if(alt){
   // Ereignisse ohne die neuen Typen; sitzung-start nur mit den Feldern von Stand 5
   const NEU=new Set(['ref-reset', 'emuliert', 'tiefe']), SITZ6=['depthType', 'depthActive', 'depthTypeRequest', 'karte', 'mess', 'imu', 'quer', 'ausrichtung'];
   // aufnahme-ende ohne t: recStop endet nach echtem asynchronem Schreiben (gzip im Thread-Pool), nicht nach der Uhr der Attrappe
-  const evJ=(r, weg=NEU)=>J(r.P.LOG.events.filter(e=>!weg.has(e.type)).map(e=>e.type==='sitzung-start' ? ohne(e, SITZ6) : e.type==='aufnahme-ende' ? ohne(e, ['t']) : e));
+  // Stand 23: die lange ungesehene Luecke ist im automatischen Overlay rot statt orange gestrichelt, der Hinweis sagt es so
+  const farbe23=e=>e.type==='hinweis' && typeof e.text==='string' ? {...e, text:e.text.replace('im Bild orange gestrichelt', 'im Bild rot gestrichelt')} : e;
+  const evJ=(r, weg=NEU)=>J(r.P.LOG.events.filter(e=>!weg.has(e.type)).map(farbe23).map(e=>e.type==='sitzung-start' ? ohne(e, SITZ6) : e.type==='aufnahme-ende' ? ohne(e, ['t']) : e));
   const rpJ=(r, nurAlt=false)=>J(r.stat.readPixels.filter(x=>!nurAlt || (x.w===IW && x.h===IH) || (x.w===256 && x.h===256)));
   const zeilen=r=>Object.keys(r.dateien).filter(n=>/^zustand-\d+\.jsonl$/.test(n)).sort().flatMap(n=>r.dateien[n].toString().split('\n').filter(Boolean).map(l=>JSON.parse(l)));
   const jsonl=(r, art)=>Object.keys(r.dateien).filter(n=>new RegExp(`^${art}-\\d+\\.jsonl$`).test(n)).sort().flatMap(n=>r.dateien[n].toString().split('\n').filter(Boolean).map(l=>JSON.parse(l)));
@@ -1420,6 +1424,12 @@ if(alt){
     to===TB.length && tOk && tn===zk.filter(r=>r[22]===1).length && [1, 0, -1].every(c=>tq.has(c)) && tEv.some(e=>!e.an && e.grund==='null') && tEv.some(e=>!e.an && e.grund==='fehler'),
     `${tn} Saetze, tq ${[...tq].join('/')}, Ereignisse ${tEv.map(e=>e.an ? 'an' : e.grund).join(',')}`);
   const mitLuma=rk.stat.bildVon.filter(m=>m.typ==='ergebnis' && m.luma).length, ansK=rk.P.LOG.events.filter(e=>e.type==='ansicht').map(e=>e.modus);
+  // Stand 23: automatisch keine Historie (blau #60a5fa, gelb #facc15) mehr, dafuer die Kanten des aktuellen Bilds (hellblau, nur mit Karte)
+  { const n=(r, f)=>r.stat.striche[f]||0, kj='rgba(165,243,252,.9)';
+    chk('Stand 23: automatisch keine Historie der Erfassungen im Bild (blau/gelb), mit und ohne Karte', [r6, rk].every(r=>!n(r, '#60a5fa') && !n(r, '#facc15') && !n(r, 'rgba(156,163,175,.8)')),
+      `r6 ${n(r6, '#60a5fa')}/${n(r6, '#facc15')}, rk ${n(rk, '#60a5fa')}/${n(rk, '#facc15')}`);
+    chk('Stand 23: mit Karte die Kanten des aktuellen Bilds duenn im Bild, ohne Karte nicht (kein Bild-Worker)', n(rk, kj)>20 && !n(r6, kj), `rk ${n(rk, kj)} Striche, r6 ${n(r6, kj)}`);
+    chk('Stand 23: Stand-5-Seite zeichnete die Historie noch (der Zaehler greift)', n(r5, '#60a5fa')+n(r5, '#facc15')>20, `${n(r5, '#60a5fa')}/${n(r5, '#facc15')}`); }
   chk('karte=1: Ansicht „Segmente“ (4. Ansicht) - der Worker liefert dann das Luma desselben Bilds, gezeichnet ohne Fehler', J(ansK)===J(['luma','gradient','segmente']) && mitLuma>50 && rk.stat.segZeichnen>50,
     `${mitLuma} Bilder mit Luma, ${rk.stat.segZeichnen} gezeichnet`);
   const Mk=man(rk);
