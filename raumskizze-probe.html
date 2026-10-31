@@ -140,6 +140,7 @@
   <label class="chk"><input type="checkbox" id="auto" checked> <span>Automatisch: Boden und Kanten von selbst – einfach mit dem Fadenkreuz die Deckenkante entlangschwenken</span></label>
   <label class="chk"><input type="checkbox" id="karteAn" checked> <span>Karte live berechnen (Karten-Worker mit Gyro-Brücke und Hinweisen zu unklaren Stellen; kostet Rechenzeit; wirkt nach dem Neuladen der Seite)</span></label>
   <label class="chk"><input type="checkbox" id="imuAn" checked> <span>Gyro und Bewegungssensoren mitschneiden (für die Verbindung der Abschnitte nach ARCore-Brüchen; geht in die Aufnahme, wenn „Video mitschneiden“ an ist)</span></label>
+  <label class="chk"><input type="checkbox" id="querAn"> <span>Querformat: AR quer starten (breiteres Kamerabild quer zur Wand, flacher in der Höhe; Telefon vor „AR starten“ quer drehen)</span></label>
   <label class="chk"><input type="checkbox" id="rec"> <span>Video mitschneiden (10 Bilder/s, mit Tiefe) – für Tests am Rechner. Bleibt auf dem Telefon, bis du „Aufnahme sichern“ tippst.</span></label>
 </div>
 
@@ -11661,11 +11662,18 @@ async function recListLast(){
 }
 
 // ------------------------------------------------------- Sitzung
+const QUER_PREF='raumskizze.quer', querGewuenscht=()=>!!($('querAn') && $('querAn').checked);
+const ausrichtung=()=>(typeof screen!=='undefined' && screen.orientation && screen.orientation.type) || (innerWidth>innerHeight ? 'landscape' : 'portrait');
 async function startAR(){
   IMU=MESS || (Q.get('imu')==='1') || (Q.get('imu')!=='0' && !!($('imuAn') && $('imuAn').checked));
   const raw=$('hoehe').value.trim(), hmm=parseFloat(raw.replace(',', '.'));
   if(raw && !(hmm>=1500 && hmm<=6000)){
     $('startHint').textContent=`Raumhöhe „${raw}“ ist ungültig – in mm eingeben (1500–6000), z. B. 2550. Leer lassen für nur Stufe 0.`;
+    return;
+  }
+  // Querformat (Stand 22, Doku 12.7): Chrome legt die Ausrichtung beim Sitzungsstart fest, darum wird nur im Querformat gestartet
+  if(querGewuenscht() && !ausrichtung().startsWith('landscape')){
+    $('startHint').textContent='Querformat ist angehakt: Telefon quer drehen (Automatisch drehen muss an sein), dann „AR starten“ tippen.';
     return;
   }
   // recStop des vorigen Laufs erst fertig schreiben lassen (hoechstens 2 s, unter der Frist
@@ -11758,7 +11766,7 @@ async function startAR(){
     domOverlay:session.domOverlayState ? session.domOverlayState.type : null,
     depthUsage:tryGet(()=>session.depthUsage), depthDataFormat:tryGet(()=>session.depthDataFormat),
     depthType:tryGet(()=>session.depthType), depthActive:tryGet(()=>session.depthActive), depthTypeRequest:TIEFE_ANF,
-    karte:KARTE, mess:MESS, imu:IMU,
+    karte:KARTE, mess:MESS, imu:IMU, quer:querGewuenscht(), ausrichtung:ausrichtung(),
     blendMode:session.environmentBlendMode || null, hitTest:!!S.hit, binding:!!S.binding,
   };
   ev('sitzung-start', LOG.session);
@@ -12019,6 +12027,8 @@ $('karteAn').onchange=()=>{ try{ localStorage.setItem(KARTE_PREF, $('karteAn').c
 const IMU_PREF='raumskizze.imu';
 $('imuAn').checked=Q.get('imu')==='0' ? false : Q.get('imu')==='1' || MESS || (()=>{ try{ return localStorage.getItem(IMU_PREF)!=='0'; }catch(e){ return true; } })();
 $('imuAn').onchange=()=>{ try{ localStorage.setItem(IMU_PREF, $('imuAn').checked ? '1' : '0'); }catch(e){} };
+$('querAn').checked=(()=>{ try{ return localStorage.getItem(QUER_PREF)==='1'; }catch(e){ return false; } })();
+$('querAn').onchange=()=>{ try{ localStorage.setItem(QUER_PREF, $('querAn').checked ? '1' : '0'); }catch(e){} };
 $('rec').onchange=()=>{ try{ localStorage.setItem(REC_PREF, $('rec').checked ? '1' : '0'); }catch(e){} };
 if(!('VideoEncoder' in window)){ $('rec').checked=false; $('rec').disabled=true; }
 recListLast();

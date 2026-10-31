@@ -55,7 +55,7 @@ const lookAt=(C,T)=>{
   return [r[0],r[1],r[2],0, u[0],u[1],u[2],0, -f[0],-f[1],-f[2],0, C[0],C[1],C[2],1];
 };
 // Hochformat wie am Telefon, in der Groesse, die die App liest (ds=640).
-const IW=288, IH=640, PROJ=perspective(62, IW/IH);
+let IW=288, IH=640, PROJ=perspective(62, IW/IH);
 
 // 1. Matrizen und Projektion
 {
@@ -241,6 +241,15 @@ const lookAtRoll=(C,T,deg)=>{
   return [...r2,0, ...u2,0, m[8],m[9],m[10],0, m[12],m[13],m[14],1];
 };
 
+// Querformat (Stand 22, Haken querAn): dieselben Standpunkte mit quer liegendem Bild (640x288, die Bildhoehe hat den Winkel
+// der Hochformat-Breite); jede Erfassung muss ihre Wand treffen wie im Hochformat
+{ const alt=[IW, IH, PROJ], fy=Math.atan(Math.tan(31*Math.PI/180)*288/640)*360/Math.PI;
+  IW=640; IH=288; PROJ=perspective(fy, IW/IH);
+  let n=0, ok=0, worst=0, worstOff=0;
+  try{ for(let i=0;i<NW;i++) viewsFor(i).forEach((cam, k)=>{ n++; const ob=capture(cam, render(cam, 7000+10*i+k)); if(!ob) return;
+      const e=obsErr(ob, i); worst=Math.max(worst, e.ang); worstOff=Math.max(worstOff, e.off); if(e.ang<2 && e.off<0.05) ok++; }); }
+  finally{ [IW, IH, PROJ]=alt; }
+  chk('Querformat: Kante je Standpunkt erfasst, richtige Wand (Winkel < 2°, Abstand < 5 cm)', ok===n, `${ok}/${n}, Winkel bis ${worst.toFixed(2)}°, Abstand bis ${(worstOff*100).toFixed(1)} cm`); }
 // Ganzer Rundgang mit mehreren Rauschfolgen: jede einzelne Erfassung muss
 // die richtige Wand treffen, nicht nur der Mittelwert.
 const SEEDS=[1,2,3,4];
@@ -1329,7 +1338,7 @@ if(alt){
   const J=x=>JSON.stringify(x), ohne=(o,k)=>{ const c={...o}; for(const x of k) delete c[x]; return c; };
   const obsJ=(r, an=false)=>J(r.P.LOG.obs.map(o=>an ? ohne(o, ['an']) : o));
   // Ereignisse ohne die neuen Typen; sitzung-start nur mit den Feldern von Stand 5
-  const NEU=new Set(['ref-reset', 'emuliert', 'tiefe']), SITZ6=['depthType', 'depthActive', 'depthTypeRequest', 'karte', 'mess', 'imu'];
+  const NEU=new Set(['ref-reset', 'emuliert', 'tiefe']), SITZ6=['depthType', 'depthActive', 'depthTypeRequest', 'karte', 'mess', 'imu', 'quer', 'ausrichtung'];
   // aufnahme-ende ohne t: recStop endet nach echtem asynchronem Schreiben (gzip im Thread-Pool), nicht nach der Uhr der Attrappe
   const evJ=(r, weg=NEU)=>J(r.P.LOG.events.filter(e=>!weg.has(e.type)).map(e=>e.type==='sitzung-start' ? ohne(e, SITZ6) : e.type==='aufnahme-ende' ? ohne(e, ['t']) : e));
   const rpJ=(r, nurAlt=false)=>J(r.stat.readPixels.filter(x=>!nurAlt || (x.w===IW && x.h===IH) || (x.w===256 && x.h===256)));
