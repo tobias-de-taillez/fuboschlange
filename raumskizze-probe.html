@@ -146,8 +146,12 @@
 <div class="card">
   <button id="start" disabled>AR starten</button>
   <div class="hint" id="startHint" style="margin-top:8px">Prüfe das Gerät …</div>
-  <div class="hint" style="margin-top:8px">Messungen (je eine eigene Sitzung): <a href="?ds=1920" style="color:inherit">Rechenzeit bei vollem Kamerabild</a> · <a href="?mess=1" style="color:inherit">Messsitzung</a> (Anker, IMU, Ebenen, rohe Tiefe)
-    · Karte (Stand 7): <a href="?karte=1&amp;imu=1" style="color:inherit">Karte aus den Erfassungen, mit Gyro</a> · <a href="?karte=1" style="color:inherit">ohne Gyro</a> · <a href="?karte=1&amp;quelle=beide" style="color:inherit">Rechenzeit der Karte mit Segmenten</a></div>
+  <details style="margin-top:8px"><summary class="hint">Messungen und Versuche (wirken nach dem Neuladen, bleiben gespeichert)</summary>
+    <label class="chk"><input type="checkbox" id="swDs"> <span>Volles Kamerabild auswerten (1920 statt 640 px lange Seite; misst die Rechenzeit, deutlich langsamer)</span></label>
+    <label class="chk"><input type="checkbox" id="swMess"> <span>Messsitzung (Anker, IMU, Ebenen, rohe Tiefe)</span></label>
+    <label class="chk"><span>Eingang der Karte</span> <select id="swQuelle"><option value="">Erfassungen (Vorgabe)</option><option value="beide">Erfassungen und Segmente (Rechenzeit)</option><option value="segmente">nur Segmente</option></select></label>
+    <div class="hint" id="swAktiv" style="margin-top:4px"></div>
+  </details>
   <button id="dlLast" class="ghost hidden" style="margin-top:8px">Protokoll vom letzten Seitenaufruf (JSON)</button>
   <button id="dlRecLast" class="ghost hidden" style="margin-top:8px">Letzte Aufnahme sichern</button>
   <div class="hint" style="margin-top:8px">Automatisch: (1) Kurz auf freien Boden halten – der Boden setzt sich selbst. (2) Fadenkreuz langsam an der Kante zwischen Wand und Decke entlangführen, einmal rundum, ruhig auch hinter Schränken weiter. Die Reihenfolge ist egal, ein paar Schritte zwischendurch helfen. Telefon auf Brusthöhe. (3) Zurück an der ersten Wand schließt sich der Raum. Steht oben blau „Umriss aus den Wandenden“, endet es nicht von selbst: Ecken prüfen, dann „Raum schließen“. Im Bild: grün unterlegt heißt „die Kante liegt, wo die Skizze sie erwartet“, orange unterlegt „hier weicht sie ab – dort noch einmal entlang“. Grüne senkrechte Linien sind erkannte Kanten bis zur Decke, die eine Ecke der Skizze bestätigen. An der noch unsichersten Wand steht „näher ran“ – dort näher herangehen. Rot gestrichelt fehlt noch etwas.</div>
@@ -9005,7 +9009,13 @@ postMessage({typ:'bereit'});
 'use strict';
 const G=globalThis.RAUMSKIZZE;
 const $=id=>document.getElementById(id);
-const Q=new URLSearchParams(location.search);
+// Stand 20: Einstellungen kommen aus den Haken und Auswahlen der Startseite (localStorage 'raumskizze.schalter', JSON); URL-Parameter
+// gelten nur noch intern (Tests, Entwicklung) und gehen vor. Aendern = speichern und neu laden (die Werte werden beim Laden gelesen).
+const SCHALTER_KEY='raumskizze.schalter', schalterLesen=()=>{ try{ const o=JSON.parse(localStorage.getItem(SCHALTER_KEY) || '{}'); return o && typeof o==='object' ? o : {}; }catch(e){ return {}; } };
+const Q=(()=>{ const q=new URLSearchParams(), u=new URLSearchParams(location.search);
+  for(const [k, v] of Object.entries(schalterLesen())) if(v!=null && v!=='') q.set(k, String(v));
+  for(const [k, v] of u) q.set(k, v);
+  return q; })();
 // Ziel des Links und lange Seite des verkleinerten Kamerabilds, beides per
 // URL ueberschreibbar: ?app=https://…/&ds=480
 const APP_URL=(Q.get('app') || 'https://raumaufmass.irazari-te.ch/').replace(/#.*$/,'');
@@ -11993,6 +12003,13 @@ $('dlLog').onclick=()=>{
 };
 // Messmodus: Video an, sonst schreibt er keine Tiefe (ohne karte=1 nur je Videobild).
 $('rec').checked=MESS || (()=>{ try{ return localStorage.getItem(REC_PREF)==='1'; }catch(e){ return false; } })();
+// Stand 20: Versuchs-Schalter der Startseite (statt URL-Parameter)
+{ const S0=schalterLesen(), setz=(k, v)=>{ const o=schalterLesen(); if(v==null || v==='') delete o[k]; else o[k]=v; try{ localStorage.setItem(SCHALTER_KEY, JSON.stringify(o)); }catch(e){} location.reload(); };
+  $('swDs').checked=S0.ds==='1920'; $('swDs').onchange=()=>setz('ds', $('swDs').checked ? '1920' : null);
+  $('swMess').checked=S0.mess==='1'; $('swMess').onchange=()=>setz('mess', $('swMess').checked ? '1' : null);
+  $('swQuelle').value=['beide', 'segmente'].includes(S0.quelle) ? S0.quelle : ''; $('swQuelle').onchange=()=>setz('quelle', $('swQuelle').value || null);
+  const an=[S0.ds==='1920' && 'volles Kamerabild', S0.mess==='1' && 'Messsitzung', S0.quelle && 'Karte mit '+S0.quelle].filter(Boolean);
+  $('swAktiv').textContent=an.length ? 'Aktiv: '+an.join(', ') : ''; }
 $('karteAn').checked=KARTE;
 $('karteAn').onchange=()=>{ try{ localStorage.setItem(KARTE_PREF, $('karteAn').checked ? '1' : '0'); }catch(e){} if(Q.get('karte')==='0' || Q.get('karte')==='1'){ const u=new URL(location.href); u.searchParams.delete('karte'); location.href=u.toString(); } else location.reload(); };
 const IMU_PREF='raumskizze.imu';
