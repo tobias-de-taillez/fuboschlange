@@ -1831,7 +1831,9 @@ G.solveSweepAuto=(obs,opt={})=>{
 // anderen Wand. Anfang = Erfassungen, bis der Blick erstmals startDeg vom ersten abweicht. Drehung je Erfassung aus ob.kum
 // (Grad, live je Bild abgewickelt), sonst aus der Blickrichtung der Erfassungen abgewickelt. Ergebnis: die erste Erfassung,
 // die trifft, {i, t, deg, ang, quer, ueber}, oder null.
-G.RK_DEF={startDeg:40, minDeg:300, maxDeg:8, quer:0.3, luecke:0.3};
+// Stand 25 (Aufnahme 13:30: Rueckkehr bei 359° mit 8,0° / 36 cm knapp verfehlt): 10° / 40 cm - an 10 Protokollen Rueckkehr in 6
+// statt 5, Treffer an anderen Waenden zwischen 120° und 300° unveraendert 1; ab 50 cm sind es 10.
+G.RK_DEF={startDeg:40, minDeg:300, maxDeg:10, quer:0.4, luecke:0.3};
 G.rueckkehr=(obs,H,opt={})=>{
   const o={...G.RK_DEF, ...opt}, D=Math.PI/180, L=[];
   if(!(H>0)) return null;
