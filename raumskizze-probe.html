@@ -9333,6 +9333,7 @@ function capture(view, camTo){
 const AUTO_MAX_MOVE=0.5;   // m/s Kamera im Bezug: schneller gleitet eher die Pose als der Nutzer
 const AUTO_MIN_DT=0.25, AUTO_MIN_MOVE=0.05, AUTO_MIN_TURN=3, AUTO_MAX_SPEED=60, SETTLE=0.6, COUNTDOWN=5, COUNTDOWN_JOG=10;
 const camDir=m=>[-m[8], -m[9], -m[10]];
+const HALT_DZ_MAX=4, STRUKTUR_N=6;   // Stand 27: Verstaerkung d/Δ, ab der der Haltungs-Hinweis kommt; Segmente je Bild, ab der die Struktur-Warnung kommt
 // Hoehe fuer alles Live: Laser, sonst die letzte Schaetzung, sonst 2,55 m.
 // Ohne Laser nie unter Kamera + 0,3 m (camY = Kamerahoehe ueber dem Boden):
 // darunter trifft kein Strahl mehr die Decke, nichts wird erfasst - und ohne
@@ -9392,6 +9393,7 @@ function autoCapture(view, camTo){
   const m=[(seg[0][0]+seg[1][0])/2, (seg[0][1]+seg[1][1])/2];
   const off=Math.abs(((m[0]-pl.seg[0][0])*v[1]-(m[1]-pl.seg[0][1])*v[0])/vl);
   const range=Math.hypot(m[0]-camTo[12], m[1]-camTo[14]);
+  S.lastRange={d:range, t:now()};   // Stand 27: Haltungs-Hinweis nennt den Abstand
   if(ang>3 || off>0.05+0.02*range) return;
   S.liveConfirmed=true;
   if(autoBlock()) return;
@@ -10838,18 +10840,30 @@ function onFrame(t, frame){
       if(S.speedWarn && S.speed<45){ S.slowSince=S.slowSince ?? now();
         if(now()-S.slowSince>1 && now()-S.speedWarnT>2){ S.speedWarn=false; S.slowSince=null; hint('Weiter langsam schwenken, Fadenkreuz auf der Kante.'); } }
       else S.slowSince=null; }
-    // Haltung: liegt die Decke weniger als 0,6 m ueber der Kamera, wird jeder
-    // Fehler beim Heben um d/Δ verstaerkt - eine Leiste 15 cm unter der
-    // Decke landet aus 2 m 1 m hinter der Wand (Protokolle 24.10.: Telefon
-    // 1,8-2,06 m hoch, Δ 0,35-0,65 m). Im Messaufbau, gleiche Raeume mit
-    // Kamera 1,3-1,5 statt 1,75-2,05 m: richtige Topologie 106 -> 192 von 300.
+    // Haltung (Stand 27): liegt die Decke weniger als 0,6 m ueber der Kamera, wird jeder Fehler beim Heben um d/Δ verstaerkt - eine
+    // Leiste 15 cm unter der Decke landet aus 2 m 1 m hinter der Wand (Protokolle 24.10.: Telefon 1,8-2,06 m hoch, Δ 0,35-0,65 m;
+    // im Messaufbau mit Kamera 1,3-1,5 statt 1,75-2,05 m: richtige Topologie 106 -> 192 von 300). Ein 1,95 m grosser Nutzer muss das
+    // Telefon auf ~1,9 m halten, um den Bildschirm zu sehen (Rueckmeldung 31.10.) - das Tiefer-halten-Gebot war darum Dauerlärm
+    // (4-5 Mal je Aufnahme). Jetzt der Hebel, den er hat: der Abstand zur Wand. Hinweis nur, wenn die Erfassung weiter weg lag als
+    // HALT_DZ_MAX·Δ (Verstaerkung d/Δ), mit der Zahl, bis zu der es noch stimmt.
     if(camTo && S.closeT==null && !S.paused){
       const Hh=S.H || (S.sol && !S.sol.Hfixed && S.sol.sH<0.1 ? S.sol.H : null);
       if(Hh){ const dl=Hh-camTo[13];
         if(dl<0.6){ S.lowSince=S.lowSince ?? now();
-          if(now()-S.lowSince>2 && now()-(S.lowHintT ?? -1e9)>20){ S.lowHintT=now(); ev('haltung-hoch', {delta:+dl.toFixed(2)});
-            hint(`Telefon tiefer halten – Brusthöhe, nicht über Kopf. Die Decke ist nur ${Math.round(dl*100)} cm über der Kamera, das macht die Skizze ungenau.`, 'warn'); } }
+          const la=S.lastRange, d=la && now()-la.t<3 ? la.d : null;
+          if(now()-S.lowSince>2 && d!=null && d/Math.max(dl, 0.15)>HALT_DZ_MAX && now()-(S.lowHintT ?? -1e9)>20){ S.lowHintT=now(); ev('haltung-hoch', {delta:+dl.toFixed(2), abstand:+d.toFixed(2)});
+            hint(`Du hältst hoch (Decke ${Math.round(dl*100)} cm über der Kamera) – dann bitte näher an die Wand: unter ${(HALT_DZ_MAX*Math.max(dl, 0.15)).toFixed(1).replace('.', ',')} m statt jetzt ${d.toFixed(1).replace('.', ',')} m.`, 'warn'); } }
         else if(dl>0.7) S.lowSince=null; } }
+    // Ortungs-Fruehwarnung (Stand 27): ARCore verliert die Ortung, wenn das Bild nur glatte weisse Flaeche zeigt. Gemessen an Aufnahme
+    // 31.10. 16:25 (Flur, Rohbau weiss) und 26.10. 17:14: 8 von 10 Verlusten nach Bildern im untersten Viertel an Kanten/Ecken
+    // (Perzentil 0-16 an Ecken; der laengste Verlust, 12 s, mit 0 Ecken). Mass: Segmente je Bild des Bild-Workers (BW.letzt.n);
+    // Median der letzten 1 s <= STRUKTUR_N: 5 von 5 Verlusten in der einen Aufnahme mit Segmentzahlen, 2 Fehlalarme in 188 s.
+    if(camTo && S.phase==='waende' && S.closeT==null && !S.paused && !S.trackLost && BW.letzt && BW.letzt.a){
+      const W=BW.strukt=(BW.strukt||[]).filter(x=>now()-x.t<1).concat(BW.letzt.a.t!==BW.struktT ? [{t:now(), n:BW.letzt.n}] : []);
+      BW.struktT=BW.letzt.a.t;
+      if(W.length>=6){ const m=W.map(x=>x.n).sort((a, b)=>a-b)[W.length>>1];
+        if(m<=STRUKTUR_N && now()-(S.strukturT ?? -1e9)>10){ S.strukturT=now(); ev('struktur-arm', {n:m});
+          hint('Hier ist alles glatt und weiß – die Ortung kann abreißen. Kurz auf etwas mit Struktur schwenken: Kante, Tür, Lampe, Schatten.', 'warn'); } } }
     if(KARTE && S.closeT==null && !S.paused) karteHinweis();
     if(IMU) imuWache();
   }
