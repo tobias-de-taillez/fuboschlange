@@ -8771,7 +8771,8 @@ const mlStand=(KZ, kopf, fehler)=>{
     ringe:U ? (U.ringe||[]).map(R=>({...R, pts:R.pts.map(p=>[p[0], p[1]]), waende:mlArr(R.waende), sup:mlArr(R.sup), hyp:mlArr(R.hyp)})) : [],
     kandidaten:U ? (U.kandidaten||[]).map(k=>({id:k.id, pts:k.pts, grund:k.grund})) : [], hypothesen:U ? (U.hypothesen||[]).map(b=>({...b})) : [],
     abschnitte:KZ.abschnitte.map(A=>({ab:A.ab, t0:A.t0, t1:A.t1, g:A.g ? {psi:A.g.psi, tx:A.g.tx, ty:A.g.ty, tz:A.g.tz} : null, sig:A.sig ? {...A.sig} : null,
-      stufe:A.stufe, w:A.w, mitWand:A.mitWand, knoten:mlKnotenListe(A), quelle:A.quelle || null, fest:!!A.fest})),
+      stufe:A.stufe, w:A.w, mitWand:A.mitWand, knoten:mlKnotenListe(A), quelle:A.quelle || null, fest:!!A.fest,
+      gyro:!!(KZ.schnitte[A.ab-1] && KZ.schnitte[A.ab-1].bindung && KZ.schnitte[A.ab-1].bindung.gyro)})),
     hoehen:{hC:KZ.hC, sHC:KZ.sHC, hF:KZ.hF, sHF:KZ.sHF, skala:KZ.skala, quelle:KZ.hoehen.quelle, q:KZ.hoehen.q},
     hinweise:[], arbeit:{...kopf.arbeit}, ms:{...kopf.ms}, abschluss:{bereit:false, fehlt:[], ausgeschlossen:[]}, fehler:fehler||null};
   stand.hinweise=mlHinweise(KZ, stand);
@@ -9605,7 +9606,7 @@ function onKarte(w, m){
   KW.ausgefallen=0;
   const S0=m.stand;
   if(S0.fehler && S0.fehler!==KW.standFehler && L.standFehler<3){ KW.standFehler=S0.fehler; L.standFehler++; ev('karte-stand-fehler', {runde:S0.runde, msg:S0.fehler}); }
-  L.letzte={runde:S0.runde, waende:S0.waende.length, ecken:S0.ecken.length, abschnitte:S0.abschnitte.map(a=>a.stufe), hinweise:(S0.hinweise||[]).map(h=>h.code)};
+  L.letzte={runde:S0.runde, waende:S0.waende.length, ecken:S0.ecken.length, abschnitte:S0.abschnitte.map(a=>a.stufe), quelle:S0.abschnitte.map(a=>a.quelle), gyro:S0.abschnitte.map(a=>a.gyro ? 1 : 0), hinweise:(S0.hinweise||[]).map(h=>h.code)};
   if(KW.aus && KW.aus!=='worker'){ KW.aus=null; ev('karte-wieder'); }
   try{ KW.letzt=karteAnzeige(S0, m.kopf); }
   catch(e){ KW.letzt=null; if(!S.warned.karteA){ S.warned.karteA=true; ev('karte-anzeige-fehler', {msg:String(e && e.message || e)}); } }
@@ -9770,6 +9771,8 @@ function gyLive(z){
     if(z.t-a.t<=0.105 && a.ep===z.ep){ const dd=gyBlick(z.pose.slice(3, 7))-gyBlick(a.pose.slice(3, 7)); GYL.fehl.push(Math.abs(v-Math.atan2(Math.sin(dd), Math.cos(dd)))); if(GYL.fehl.length>60) GYL.fehl.shift();
       if(GYL.fehl.length>=60){ const f=[...GYL.fehl].sort((x, y)=>x-y); if(f[30]>GY_SCHWELLE){ ev('imu-kalib-verworfen', {medianDeg:+(f[30]*180/Math.PI).toFixed(3)}); GYL.M=null; GYL.paare=[]; GYL.versuche=0; GYL.fehl=[]; GYL.verworfen++; } } } }
   else GYL.nan++; }
+// Protokoll (LOG.mess.gyLive, Stand 21): reicht ohne Aufnahme fuer die Frage, ob die Bruecke lief
+const gyStand=()=>({kalibriert:!!GYL.M, restDeg:GYL.rest!=null ? +(GYL.rest*180/Math.PI).toFixed(3) : null, versatz:GYL.d, zeilen:GYL.n, ohne:GYL.nan, verworfen:GYL.verworfen, paare:GYL.paare.length});
 function imuStart(){
   gyReset();
   addEventListener('devicemotion', onImu);
@@ -11278,6 +11281,7 @@ const STORE_KEY='raumskizze-probe.protokoll';
 // einmal je Durchlauf ein Ereignis und nach dem Ende ein sichtbarer Hinweis.
 let logVoll=false;
 function saveLog(){
+  if(IMU && LOG.mess) LOG.mess.gyLive=gyStand();
   try{ localStorage.setItem(STORE_KEY, JSON.stringify(LOG)); }
   catch(e){
     if(!logVoll){ logVoll=true; ev('protokoll-speicher-voll', {msg:String(e && e.name || e), laeufe:LOG.runs.length+1}); }

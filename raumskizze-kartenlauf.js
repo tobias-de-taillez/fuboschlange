@@ -874,7 +874,8 @@ const mlStand=(KZ, kopf, fehler)=>{
     ringe:U ? (U.ringe||[]).map(R=>({...R, pts:R.pts.map(p=>[p[0], p[1]]), waende:mlArr(R.waende), sup:mlArr(R.sup), hyp:mlArr(R.hyp)})) : [],
     kandidaten:U ? (U.kandidaten||[]).map(k=>({id:k.id, pts:k.pts, grund:k.grund})) : [], hypothesen:U ? (U.hypothesen||[]).map(b=>({...b})) : [],
     abschnitte:KZ.abschnitte.map(A=>({ab:A.ab, t0:A.t0, t1:A.t1, g:A.g ? {psi:A.g.psi, tx:A.g.tx, ty:A.g.ty, tz:A.g.tz} : null, sig:A.sig ? {...A.sig} : null,
-      stufe:A.stufe, w:A.w, mitWand:A.mitWand, knoten:mlKnotenListe(A), quelle:A.quelle || null, fest:!!A.fest})),
+      stufe:A.stufe, w:A.w, mitWand:A.mitWand, knoten:mlKnotenListe(A), quelle:A.quelle || null, fest:!!A.fest,
+      gyro:!!(KZ.schnitte[A.ab-1] && KZ.schnitte[A.ab-1].bindung && KZ.schnitte[A.ab-1].bindung.gyro)})),
     hoehen:{hC:KZ.hC, sHC:KZ.sHC, hF:KZ.hF, sHF:KZ.sHF, skala:KZ.skala, quelle:KZ.hoehen.quelle, q:KZ.hoehen.q},
     hinweise:[], arbeit:{...kopf.arbeit}, ms:{...kopf.ms}, abschluss:{bereit:false, fehlt:[], ausgeschlossen:[]}, fehler:fehler||null};
   stand.hinweise=mlHinweise(KZ, stand);
