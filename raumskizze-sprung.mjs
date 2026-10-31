@@ -125,12 +125,13 @@ export async function pruefen(G, A, W, o={}){
 
 // Summe: je Menge und Variante Anzahl besser/schlechter und mittlere Aenderung; Urteil nach P1 H3 fuer die Variante +C
 export function zusammenfassen(rows, op=DEF){
-  const Z={n:rows.length, auswertbar:{}, belastbar:rows.length>=op.belastbar, hinweis:`belastbar erst ab ${op.belastbar} Spruengen (hier ${rows.length}); ein Richtungsindiz, kein Beleg`};
+  const mitW=rows.filter(r=>r.mengen && Object.keys(r.mengen).length).length;
+  const Z={n:rows.length, mitWahrheit:mitW, auswertbar:{}, belastbar:mitW>=op.belastbar, hinweis:`belastbar erst ab ${op.belastbar} Spruengen mit Wahrheit (hier ${mitW} von ${rows.length}); ein Richtungsindiz, kein Beleg`};
   for(const mn of ['nachbar', 'rahmen']){ const ok=rows.filter(r=>r.mengen && r.mengen[mn] && r.mengen[mn].ok && r.mengen[mn].varianten.roh), V={};
     const namen=new Set(ok.flatMap(r=>Object.keys(r.mengen[mn].varianten))); namen.delete('roh');
     for(const nm of namen){ const d=ok.map(r=>r.mengen[mn].varianten[nm]).filter(v=>v && Number.isFinite(v.dMedCm)), dm=d.map(v=>v.dMedCm);
       V[nm]={n:d.length, besser:dm.filter(x=>x<0).length, schlechterUeber1cm:dm.filter(x=>x>op.besserCm).length, dMedMittel:dm.length ? dm.reduce((a, b)=>a+b, 0)/dm.length : NaN, dMedMedian:med(dm), lageGesprungen:d.filter(v=>!v.lageGleich).length};
-      const von=nm[0]==='+' ? 'H3' : null; if(von){ const n=d.length, drei=n>=4 ? 3 : Math.ceil(0.75*n); V[nm].h3={bedingung:`Median sinkt in mindestens ${drei} von ${n} und nie schlechter als ${op.besserCm} cm`, erfuellt:n>0 && V[nm].besser>=drei && V[nm].schlechterUeber1cm===0}; } }
+      const von=nm[0]==='+' ? 'H3' : null; if(von){ const n=d.length, drei=Math.ceil(0.75*n); V[nm].h3={bedingung:`Median sinkt in mindestens ${drei} von ${n} und nie schlechter als ${op.besserCm} cm`, erfuellt:n>0 && V[nm].besser>=drei && V[nm].schlechterUeber1cm===0}; } }
     Z.auswertbar[mn]={spruenge:ok.length, varianten:V}; }
   return Z;
 }
@@ -146,7 +147,10 @@ export function markdown(name, erg){
       if(!m.ok){ L.push(`| ${r.t} | ${r.grund} | ${r.befund ?? '–'} | ${ks} | ${mn} | ${m.nAlt}/${m.nNeu} | zu wenige Erfassungen | | |`); continue; }
       const vs=Object.entries(m.varianten).filter(([k])=>k!=='roh').map(([k, v])=>`${k} ${fm(v)} (${v && v.dMedCm>0 ? '+' : ''}${f1(v && v.dMedCm)})`);
       L.push(`| ${r.t} | ${r.grund} | ${r.befund ?? '–'} | ${ks} | ${mn} | ${m.nAlt}/${m.nNeu} | ${fm(m.varianten.roh)} | ${vs.filter(x=>x.startsWith('+')).join('; ') || '–'} | ${vs.filter(x=>x.startsWith('-')).join('; ') || '–'} |`); } }
-  const Z=erg.zusammenfassung; L.push('', `Summe: ${Z.n} Spruenge. ${Z.hinweis}.`);
+  return [...L, '', summeText(erg.zusammenfassung)].join('\n');
+}
+export function summeText(Z){
+  const L=[`Summe: ${Z.n} Spruenge. ${Z.hinweis}.`];
   for(const [mn, a] of Object.entries(Z.auswertbar)){ L.push(`- Menge ${mn}: ${a.spruenge} auswertbar`);
     for(const [nm, v] of Object.entries(a.varianten)) L.push(`  - ${nm}: besser ${v.besser}/${v.n}, schlechter > 1 cm ${v.schlechterUeber1cm}/${v.n}, Aenderung Median mittel ${f1(v.dMedMittel)} cm (Median ${f1(v.dMedMedian)}), Lage gesprungen ${v.lageGesprungen}${v.h3 ? `; H3 ${v.h3.erfuellt ? 'erfuellt' : 'NICHT erfuellt'} (${v.h3.bedingung})` : ''}`); }
   return L.join('\n');
@@ -165,6 +169,7 @@ async function main(){
   else { console.error('Aufruf: node raumskizze-sprung.mjs <aufnahme.tar> --protokoll p.json [--wahrheit w.json] [--H 2.6] [--aus ordner]'); process.exit(1); }
   for(const [n, tar, prot, wahr, H] of liste){ const r=await lauf(G, n, tar, prot, wahr, H); L.push(r); console.log(markdown(n, r)+'\n'); }
   const alle={n:L.reduce((s, r)=>s+r.rows.length, 0), mitWahrheit:L.reduce((s, r)=>s+r.rows.filter(x=>x.mengen && Object.keys(x.mengen).length).length, 0)};
+  const pool=zusammenfassen(L.flatMap(r=>r.rows)); alle.pool=pool; console.log('Alle Aufnahmen gemeinsam (nur Spruenge mit Wahrheit zaehlen als auswertbar)\n'+summeText(pool));
   console.log(`Alle Aufnahmen: ${alle.n} Spruenge, davon ${alle.mitWahrheit} mit Wahrheit; belastbar erst ab ${DEF.belastbar} Spruengen mit Wahrheit${alle.mitWahrheit>=DEF.belastbar ? '' : ' – noch nicht erreicht'}.`);
   if(a.aus){ const d=resolve(a.aus); mkdirSync(d, {recursive:true});
     writeFileSync(join(d, 'sprung.json'), JSON.stringify({version:VERSION, alle, aufnahmen:L}, (k, v)=>typeof v==='number' && !Number.isFinite(v) ? null : v, 1));
