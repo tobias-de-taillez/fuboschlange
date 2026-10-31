@@ -208,6 +208,7 @@ async function main(){
   if(nurProt && was!=='alt') throw new Error('--auswertung '+was+' braucht die Aufnahme (tar), nicht nur das Protokoll');
   const obs=erfassungenSauber(A.P && A.P.obs); if(!obs.length) throw new Error('keine Erfassungen im Protokoll');
   const h=hWahl(a, A.hLaserMm), o={laeufe:a.laeufe ? +a.laeufe : DEF.laeufe, weglassen:a.weglassen!=null ? +a.weglassen : DEF.weglassen, seed:a.seed!=null ? +a.seed : DEF.seed};
+  if(!(o.laeufe>=1) || !(o.weglassen>=0 && o.weglassen<1)) throw new Error('--laeufe >= 1 und --weglassen in [0, 1) noetig');
   const wahrheit=a.wahrheit ? resolve(a.wahrheit) : null; if(wahrheit) o.wahr=wahrheitEcken(wahrheit);
   const {G}=await T1.ladeSeite({}); o.G=G;
   const R={kopf:{werkzeug:'raumskizze-kippquote.mjs', version:VERSION, quelle:basename(src), nObs:obs.length, laeufe:o.laeufe, weglassen:o.weglassen, seed:o.seed, h:h.text, hModus:h.modus, wahrheit:o.wahr ? {...o.wahr} : null}};
