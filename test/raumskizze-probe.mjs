@@ -1094,7 +1094,8 @@ const geraetBau=()=>{
   const SZENARIO=SZ;
 
   return async function geraet(html, o={}){
-    const query='?debug'+(o.query ? '&'+o.query : ''), D=o.dauer ?? 26, FPS=30, dtF=1000/FPS;
+    const query='?debug'+(o.query ? '&'+o.query : '')+(/(^|&)karte=/.test(o.query||'') || o.karteDefault ? '' : '&karte=0'),   // Stand 18: Karte ist Vorgabe an; ohne karte=... laeuft der Test wie bisher ohne Karte
+       D=o.dauer ?? 26, FPS=30, dtF=1000/FPS;
     const scripts={}; for(const m of html.matchAll(/<script id="([^"]+)"[^>]*>([\s\S]*?)<\/script>/g)) scripts[m[1]]=m[2];
     let uhr=1000; const aufg=[]; let seq=0;
     const plane=(due, fn, wk=null, kosten=0)=>aufg.push({due, seq:seq++, fn, wk, kosten});
@@ -1172,7 +1173,7 @@ const geraetBau=()=>{
     const ctx2d=cv=>new Proxy({canvas:cv, createImageData:(w, h)=>({data:new Uint8ClampedArray(w*h*4), width:w, height:h}), measureText:()=>({width:0}),
       drawImage:()=>{ if(cv.id==='arCanvas') stat.segZeichnen++; }}, {get:(ob, k)=>k in ob ? ob[k] : typeof k==='string' ? ()=>{} : undefined});
     const els=new Map();
-    const mkEl=id=>{ const e={id, textContent:id && scripts[id]!=null ? scripts[id] : '', className:'', disabled:false, checked:id==='auto' || id==='imuAn', value:'', style:{}, width:300, height:150, children:[],
+    const mkEl=id=>{ const e={id, textContent:id && scripts[id]!=null ? scripts[id] : '', className:'', disabled:false, checked:id==='auto' || id==='imuAn' || id==='karteAn', value:'', style:{}, width:300, height:150, children:[],
       classList:{s:new Set(), add(...c){ c.forEach(x=>this.s.add(x)); }, remove(...c){ c.forEach(x=>this.s.delete(x)); }, toggle(c, an){ if(an===undefined) an=!this.s.has(c); if(an) this.s.add(c); else this.s.delete(c); }, contains(c){ return this.s.has(c); }},
       appendChild(c){ this.children.push(c); return c; }, append(...c){ this.children.push(...c); }, replaceChildren(...c){ this.children=c; },
       addEventListener(t, f){ (this.h || (this.h={}))[t]=f; }, removeEventListener(){}, scrollIntoView(){}, click(){ if(this.onclick) this.onclick(); }, remove(){},
@@ -1314,6 +1315,7 @@ if(alt){
   const rs=await geraet(probe, {...kurz, query:'karte=1&imu=1', imu:true, gyro:true, ohneFokus:true, gyroAb:5});
   const rx=await geraet(probe, {...kurz, query:'karte=1&imu=1', imu:true, gyro:true, gyroFehler:true});
   const rb=await geraet(probe, {...kurz, query:'karte=1&imu=1', imu:true, gyro:true, gyroBoot:true});   // Stand 17: Gyroscope-Zeitstempel auf Geraetelaufzeit
+  const rd1=await geraet(probe, {...kurz, query:'imu=0', karteDefault:true});   // Stand 18: Karte ohne karte-Parameter
   const rv=await geraet(probe, {...kurz, query:'karte=1', imu:true, gyro:true});   // Stand 15: ohne imu-Parameter ist der Haken auf der Startseite (Vorgabe an) massgebend
   const kf1=await geraet(probe, {...kurz, karte:'wirftAussen'}), kf2=await geraet(probe, {...kurz, karte:'schweigt'}), kf3=await geraet(probe, {...kurz, karte:'wirftInnen'});
   // Nachbesserung: rz - Video und Tiefe kosten Zeit (die Uhr laeuft in encode und getDepthInformation weiter, wie am
@@ -1540,6 +1542,7 @@ if(alt){
       chk('Stand 17: Gyroscope-Zeitstempel auf Geraetelaufzeit (ts ~ 2.8e8 ms) werden auf Seitenzeit umgerechnet (t nahe ta, ts roh); mit Seitenzeit unveraendert',
         gb.length>=300 && gb.every(x=>Math.abs(x.t-x.ta)<0.2 && x.ts>2.8e8) && gi.every(x=>Math.abs(x.t-x.ta)<0.2 && x.ts<1e6), `${gb.length} Werte, max |t-ta| ${Math.max(...gb.map(x=>Math.abs(x.t-x.ta))).toFixed(3)} s`); }
     chk('Stand 17: Karte mit Gyro: Kalibrierung der Achsen versucht (imu-kalib im Protokoll), Karten-Worker bekommt die Bruecke (schnitt.gyroBruecke im Start)', rb.P.LOG.events.some(e=>e.type==='imu-kalib') && rb.stat.karteAn.some(m=>m.typ==='start' && m.schnitt && m.schnitt.gyroBruecke===true) && !rk.stat.karteAn.some(m=>m.typ==='start' && m.schnitt), (rb.P.LOG.events.find(e=>e.type==='imu-kalib')||{}).restDeg+'° Rest');
+    chk('Stand 18: ohne karte-Parameter laeuft die Karte (Vorgabe an): Bild- und Karten-Worker, schalter.karte, karte.jsonl; karte=0 schaltet aus', man(rd1).schalter.karte===true && J(rd1.stat.worker)===J(['schaetzer','bild','karte']) && man(rd1).dateien.includes('karte.jsonl') && man(r6).schalter.karte===false && !r6.stat.karteAn.length, J(rd1.stat.worker));
     chk('Stand 15: ohne imu-Parameter nimmt die Seite den Gyro auf (Haken Vorgabe an): schalter.imu, imu.jsonl, imu=0 schaltet aus', man(rv).schalter.imu===true && man(rv).dateien.includes('imu.jsonl') && man(rk).schalter.imu===false, `${man(rv).imu ? man(rv).imu.zeilen : '–'} Zeilen`);
     chk('karte=1&imu=1: LOG.session.imu gesetzt (karte=1 allein false), Erfassungen da', ri.P.LOG.obs.length>0 && ri.P.LOG.session.imu===true && rk.P.LOG.session.imu===false, `${ri.P.LOG.obs.length} Erfassungen`); }
   chk('mess=1: Manifest v2 mit mess true, imu.jsonl und messung.jsonl; kein Bild-Worker', Mm && Mm.mess===true && Mm.dateien.includes('imu.jsonl') && Mm.dateien.includes('messung.jsonl') && !rm.stat.worker.includes('bild'));
