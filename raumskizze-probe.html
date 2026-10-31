@@ -1793,7 +1793,11 @@ const jumpMismatch=(al,k,ref,J,o={})=>{
   return ok ? null : `${Math.round(al.psi*180/Math.PI)}°/${d.toFixed(2)} m, gemessen ${soll}`;
 };
 G.solveSweepAuto=(obs,opt={})=>{
-  const {breaks, frames, frameJumps, ...o0}=opt;
+  const {breaks, frames, frameJumps, runde, ...o0}=opt;
+  // Stand 24: erkannte Rueckkehr zur Anfangswand (G.rueckkehr) als weicher Bruch zwischen den Runden: Gruppen der zweiten
+  // Runde duerfen mit den Waenden der ersten zusammengehen, obwohl ARCore bis dahin einige Grad und Dezimeter gedriftet ist
+  // (mergeChi2 nimmt die Bruchvarianz fuer Paare ueber die Grenze; prepSweep setzt dort ein Stuetzstellenpaar der Drift).
+  if(runde && Number.isFinite(runde.t)) o0.breaks=[{t:runde.t, sT:runde.sT??0.3, sDeg:runde.sDeg??6}];
   let use=obs, frameXf=null; const out=[], notes=[];
   if(frames && frames.length){
     const fs=[...frames].sort((a,b)=>a-b), fOf=t=>fs.filter(x=>x<=t).length, idx=new Map();
@@ -1819,6 +1823,40 @@ G.solveSweepAuto=(obs,opt={})=>{
   if(out.length && r.labels) out.forEach(i=>{ r.labels[i]='verworfen: anderer Bezug (nicht angeschlossen)'; });
   if(notes.length) r.warnings=[...notes, ...(r.warnings||[])];
   return r;
+};
+
+// Rueckkehr zur Anfangswand (Stand 24). Messung 31.10. an 9 Aufnahmen (Protokolle 25.-31.10.): nach >= 300° Blickdrehung
+// liegt eine Erfassung der Anfangswand in 6 von 9 Rundgaengen hoechstens 8° und 30 cm neben einer Erfassung vom Anfang
+// (12:41: bei 360°, 3° und 4 cm, statt erst nach der zweiten Runde); zwischen 70° und 300° gab es so keinen Treffer an einer
+// anderen Wand. Anfang = Erfassungen, bis der Blick erstmals startDeg vom ersten abweicht. Drehung je Erfassung aus ob.kum
+// (Grad, live je Bild abgewickelt), sonst aus der Blickrichtung der Erfassungen abgewickelt. Ergebnis: die erste Erfassung,
+// die trifft, {i, t, deg, ang, quer, ueber}, oder null.
+G.RK_DEF={startDeg:40, minDeg:300, maxDeg:8, quer:0.3, luecke:0.3};
+G.rueckkehr=(obs,H,opt={})=>{
+  const o={...G.RK_DEF, ...opt}, D=Math.PI/180, L=[];
+  if(!(H>0)) return null;
+  const lift=r=>{ if(!(Math.abs(r.d[1])>1e-6)) return null; const k=(H-r.o[1])/r.d[1]; return k>0 ? [r.o[0]+k*r.d[0], r.o[2]+k*r.d[2]] : null; };
+  let prev=null, kum=0;
+  obs.forEach((ob,i)=>{ if(!ob || !ob.ra || !ob.rb || ob.skip) return;
+    const az=Math.atan2(ob.ra.d[2]+ob.rb.d[2], ob.ra.d[0]+ob.rb.d[0]);
+    if(Number.isFinite(ob.kum)) kum=ob.kum*D; else if(prev!==null){ const d=az-prev; kum+=Math.atan2(Math.sin(d), Math.cos(d)); }
+    prev=az;
+    const a=lift(ob.ra), b=lift(ob.rb); if(!a || !b) return;
+    const len=Math.hypot(b[0]-a[0], b[1]-a[1]); if(!(len>0.05)) return;
+    L.push({i, t:ob.t, kum, a, b, u:[(b[0]-a[0])/len, (b[1]-a[1])/len], len}); });
+  if(L.length<2) return null;
+  const k0=L[0].kum, j=L.findIndex(x=>Math.abs(x.kum-k0)>o.startDeg*D), A=L.slice(0, j<0 ? L.length : j);
+  if(j<0) return null;
+  for(const x of L.slice(j)){ const deg=Math.abs(x.kum-k0)/D; if(deg<o.minDeg) continue;
+    let best=null;
+    for(const s of A){ const ang=Math.acos(Math.min(1, Math.abs(x.u[0]*s.u[0]+x.u[1]*s.u[1])))/D; if(ang>o.maxDeg) continue;
+      const n=[-s.u[1], s.u[0]], m=[(x.a[0]+x.b[0])/2, (x.a[1]+x.b[1])/2], quer=Math.abs((m[0]-s.a[0])*n[0]+(m[1]-s.a[1])*n[1]);
+      if(quer>o.quer) continue;
+      const p=q=>(q[0]-s.a[0])*s.u[0]+(q[1]-s.a[1])*s.u[1], ueber=Math.min(Math.max(p(x.a), p(x.b)), s.len)-Math.max(Math.min(p(x.a), p(x.b)), 0);
+      if(ueber<-o.luecke) continue;
+      const sc=ang/o.maxDeg+quer/o.quer; if(!best || sc<best.sc) best={sc, ang, quer, ueber}; }
+    if(best) return {i:x.i, t:x.t, deg:+deg.toFixed(1), ang:+best.ang.toFixed(2), quer:+best.quer.toFixed(3), ueber:+best.ueber.toFixed(2)}; }
+  return null;
 };
 
 // ------------------------------------------------------- Modell im Bild
@@ -9062,6 +9100,8 @@ const FARBEN_KLAR=Q.get('farben')==='klar';
 // ?karte=0 schaltet aus, ?karte=1 erzwingt an.
 const KARTE_PREF='raumskizze.karte', karteGespeichert=()=>{ try{ return localStorage.getItem(KARTE_PREF)!=='0'; }catch(e){ return true; } };
 const KARTE=Q.get('karte')==='1' || (Q.get('karte')!=='0' && karteGespeichert()), MESS=Q.get('mess')==='1';
+// Stand 24: Rueckkehr-Erkennung immer an; rueckkehr=0 nur fuer die Selbsttests (Vergleich mit Stand 5), keine Einstellung
+const RUECKKEHR=Q.get('rueckkehr')!=='0';
 // ?imu=1 (Doku 12.8): Gyroscope und devicemotion in imu.jsonl wie im Messmodus, ohne Mess-Worker und Messanker. Die Drehung
 // ueber eine Ortungsluecke kennt sonst niemand (Pruefstand: Gier der Kette nach einer Pause im Median 15-20° daneben).
 // Stand 15: Vorgabe AN (Haken auf der Startseite, merkt sich die Wahl); ?imu=0 schaltet aus, ?imu=1 erzwingt an. Gelesen wird beim AR-Start.
@@ -9306,7 +9346,7 @@ const Hnow=camY=>{
 // Faellen falsch, je Szenario 8-13 % - der Nutzer prueft und tippt selbst.
 const autoClosed=sol=>!!(sol && sol.closed && !(sol.senk && sol.senk.byEnds));
 // Darf der Abschluss-Countdown laufen? Eine Regel fuer alle Stellen.
-const canArm=()=>S.auto && S.phase==='waende' && !S.paused && !S.closeDone && !S.breaks.length && autoClosed(S.sol);
+const canArm=()=>S.auto && S.phase==='waende' && !S.paused && !S.closeDone && (!S.breaks.length || !!S.lap) && autoClosed(S.sol);
 // Darf jetzt erfasst werden? Liefert den Grund, wenn nicht - fuer die Farbe
 // der Live-Linie und den Hinweis.
 function autoBlock(){
@@ -9318,6 +9358,8 @@ function autoBlock(){
   return null;
 }
 function autoCapture(view, camTo){
+  { const d=camDir(camTo); if(Math.hypot(d[0], d[2])>0.2){ const az=Math.atan2(d[2], d[0]);
+      if(S.kumAz!=null){ const dd=az-S.kumAz; S.kum+=Math.atan2(Math.sin(dd), Math.cos(dd))*180/Math.PI; } S.kumAz=az; } }
   const L=S.live, t=now();
   S.liveConfirmed=false;
   if(!L || !L.good){ S.prevLive=null; return; }
@@ -9360,7 +9402,7 @@ function autoCapture(view, camTo){
   Object.assign(ob, {auto:true, t, z:+L.z.toFixed(1), n:L.n, frac:+L.frac.toFixed(2), ndc:[L.A, L.B], cam:pos,
     len:+Math.hypot(seg[1][0]-seg[0][0], seg[1][1]-seg[0][1]).toFixed(3), dist:+range.toFixed(2), good:true,
     flipY:S.flipY, speed:+(S.speed||0).toFixed(0), moved:Number.isFinite(moved) ? +moved.toFixed(3) : null,
-    turn:Number.isFinite(turn) ? +turn.toFixed(1) : null, Hlive:+H.toFixed(3), ...(MESS ? {an:messAn(view.transform.matrix)} : {})});
+    turn:Number.isFinite(turn) ? +turn.toFixed(1) : null, Hlive:+H.toFixed(3), kum:+S.kum.toFixed(1), ...(MESS ? {an:messAn(view.transform.matrix)} : {})});
   S.pool.push(ob);
   LOG.obs.push(ob);
   if(navigator.vibrate) navigator.vibrate(8);
@@ -9378,7 +9420,23 @@ function autoCapture(view, camTo){
 // mit gemessener Sprunggroesse (relokalisiert, yMin der neuen Bodenebene)
 // sinnvoll; bis dahin sperrt ein Bruch nur den Auto-Abschluss (canArm).
 // Echte Spruenge des Bodenankers gehen als Rahmengrenzen mit (opt.frames).
-function solveOpt(){ const o=S.H ? {H:S.H} : {H0:2.55, Hsigma:0.35}; if(S.frames && S.frames.length){ o.frames=S.frames.slice(); o.frameJumps=S.frameJumps.slice(); } return o; }
+function solveOpt(){ const o=S.H ? {H:S.H} : {H0:2.55, Hsigma:0.35}; if(S.frames && S.frames.length){ o.frames=S.frames.slice(); o.frameJumps=S.frameJumps.slice(); }
+  if(S.lap) o.runde={t:S.lap.t-0.01};   // Stand 24: zweite Runde darf mit der ersten zusammengehen (G.solveSweepAuto)
+  return o; }
+// Stand 24 (Rueckmeldung 31.10.: „du erkennst nicht, wann ich wieder an der Anfangswand ankomme“): je Auswertung pruefen, ob
+// eine Erfassung nach >= 300° Drehung auf einer Anfangswand liegt (G.rueckkehr). Dann ist die Runde komplett: Ereignis, Hinweis,
+// Rundenbruch an die Auswertung, Abschluss auch nach Ortungsbruechen, „Raum schließen“ ohne Rueckfrage. Faellt die Erfassung
+// weg (Rueckgaengig, verdaechtig), wird neu gesucht.
+function rueckkehrPruefen(){
+  if(!S.auto || !RUECKKEHR) return;
+  if(S.lapOb && !S.pool.includes(S.lapOb)){ S.lap=null; S.lapOb=null; ev('rueckkehr-zurueck'); }
+  if(S.lap) return;
+  const H=S.H || (S.sol && S.sol.H>0 ? S.sol.H : 2.55), r=G.rueckkehr(S.pool, H);
+  if(!r) return;
+  S.lap=r; S.lapOb=S.pool[r.i]; ev('rueckkehr', {...r, H:+H.toFixed(3)});
+  if(navigator.vibrate) navigator.vibrate([30, 40, 30]);
+  hint('Anfangswand wieder erreicht – die Runde ist komplett. Rot Gestricheltes noch nachholen, sonst „Raum schließen“ tippen.');
+}
 function slim(ob){ return {ra:ob.ra, rb:ob.rb, t:ob.t}; }
 function makeSolver(){
   try{
@@ -9395,6 +9453,7 @@ onmessage=e=>{ const {id,obs,opt}=e.data; let r=null, err=null; const t0=perform
 function requestSolve(){
   if(S.solveBusy){ S.solveDirty=true; return; }
   S.solveBusy=true; S.solveDirty=false; S.solveId=(S.solveId||0)+1;
+  rueckkehrPruefen();
   const msg={id:S.solveId, obs:S.pool.map(slim), opt:solveOpt(), n:S.pool.length};
   S.solveSent=performance.now();
   if(S.worker) S.worker.postMessage(msg);
@@ -9993,7 +10052,7 @@ function applySolution(r){
       hint(/zwischen \d+ und \d+ fehlt/.test(miss) ? 'Hier fehlt noch eine Wand – im Bild rot gestrichelt. Dorthin schwenken.'
         : /ungesehen/.test(miss) ? `Ein Stück Wand bis zur Ecke ist noch ungesehen – im Bild ${FARBEN_KLAR || S.auto ? 'rot' : 'orange'} gestrichelt. Dorthin schwenken.` : miss, 'warn'); }
   }
-  if(r.closed && S.breaks.length && !S.warned.closeManual){ S.warned.closeManual=true; ev('geschlossen-nach-bruch');
+  if(r.closed && S.breaks.length && !S.lap && !S.warned.closeManual){ S.warned.closeManual=true; ev('geschlossen-nach-bruch');
     hint('Raum geschlossen – nach der Ortungslücke aber bitte selbst prüfen und „Raum schließen“ tippen.', 'warn'); }
   if(r.Hfixed && !S.H && S.pool.length>=30 && !S.warned.hFixed){
     S.warned.hFixed=true; ev('höhe-unbestimmt');
@@ -11259,7 +11318,7 @@ function updateWallInfo(){
     const sol=S.sol, rej=sol ? sol.labels.filter(l=>typeof l==='string' && l.startsWith('verworfen')).length : 0;
     const h=sol && Number.isFinite(sol.H) ? ` · H ${S.H ? 'Laser' : sol.Hfixed ? 'unbestimmt' : '≈'+sol.H.toFixed(2)+' m'}` : '';
     $('arWall').textContent=S.phase==='waende'
-      ? deNum(`Schwenk · ${done} Wände · ${S.pool.length} Kanten · ${rej} verworfen` + (sol && sol.closed ? (autoClosed(sol) ? ' · geschlossen' : ' · Umriss aus Wandenden') : '')
+      ? deNum(`Schwenk · ${done} Wände · ${S.pool.length} Kanten · ${rej} verworfen` + (sol && sol.closed ? (autoClosed(sol) ? ' · geschlossen' : ' · Umriss aus Wandenden') : S.lap ? ' · Runde komplett' : '')
         + h + (S.paused ? ' · PAUSE' : ''))
       : '';
     $('btnPause').textContent=S.closeT!=null || S.closePending ? 'Noch nicht fertig' : S.paused ? 'Weiter' : 'Pause';
@@ -11737,6 +11796,8 @@ async function startAR(){
     floorFoundT:null, floorWarn:false, floorReq:false, capReq:false, live:null, camSize:null, small:null,
     planes:null, depth:null, trackLost:false, closed:false, endArm:0, fps:[], lastT:0, frame:0, warned:{},
     aspectWarn:false});
+  // Stand 24: Rueckkehr zur Anfangswand (G.rueckkehr) - abgewickelte Blickdrehung je Bild, erkannte Rueckkehr und ihre Erfassung
+  Object.assign(S, {kum:0, kumAz:null, lap:null, lapOb:null});
   // Stand 6: Epoche, Zeilenzaehler, Signale, Messmodus
   Object.assign(S, {ep:0, epT:null, epBr:0, poseSprungN:0, xrSeit:0, zeile:null, emul:false, tiefeAn:null, markeReq:false, markeN:0, mess:null});
   const canvas=document.createElement('canvas');
@@ -12158,12 +12219,12 @@ $('btnUndo').onclick=()=>{
 // Bei offenem Rundgang erst nachfragen: sonst wird die letzte Ecke still
 // geraten und geht so in den Export.
 $('btnClose').onclick=()=>{
-  if(S.auto && S.sol && !S.sol.closed && performance.now()-(S.closeArm||0)>4000){
+  if(S.auto && S.sol && !S.sol.closed && !S.lap && performance.now()-(S.closeArm||0)>4000){
     S.closeArm=performance.now(); const b=$('btnClose'), old=b.textContent; b.textContent='Trotzdem?';
     hint(S.sol.senk && S.sol.senk.byEnds ? 'Umriss aus den Wandenden, nicht bestätigt – nicht jede Ecke gesehen oder Erfassungen außerhalb (grau). Nochmal tippen = trotzdem so schließen.'
       : 'Der Rundgang ist noch offen – die Ecke zwischen letzter und erster Wand wird geraten. Nochmal tippen = trotzdem schließen.', 'warn');
     setTimeout(()=>{ b.textContent=old; }, 4000); return; }
-  S.closed=true; ev('raum-schließen', S.sol && !S.sol.closed ? {offen:true} : {}); end(); };
+  S.closed=true; ev('raum-schließen', {...(S.sol && !S.sol.closed ? {offen:true} : {}), ...(S.lap ? {runde:true} : {})}); end(); };
 // Protokoll der letzten Seitensitzung, falls die Seite neu geladen wurde.
 {
   let last=null; try{ last=localStorage.getItem(STORE_KEY); }catch(e){}

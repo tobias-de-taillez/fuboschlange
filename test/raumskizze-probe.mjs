@@ -602,6 +602,21 @@ const solveOK=(name,room,obs,opt={H:HT},tol=0.08)=>{
       `${two.closed ? 'geschlossen' : 'offen'} / ${four.closed ? 'geschlossen' : 'offen'}`);
 }
 {
+  // Stand 24: Rueckkehr zur Anfangswand (G.rueckkehr) nach einer Runde; mit Drift (zweite Runde 4° und 15 cm verschoben, wie
+  // ARCore am 31.10. 12:41: 3° und 5-27 cm) erkannt, ohne Rueckkehr nicht; mit Rundenbruch schliesst die Auswertung dann.
+  const RECT=[[0,0],[5,0],[5,4],[0,4]], all=sweepObs(RECT,62,{back:0}), R=rng(64);
+  const ret=j=>obsSeg(lookAt([1+0.4*j,1.5,1.6],[1+0.4*j,HT,0]),[0.8+0.4*j,HT,0],[1.3+0.4*j,HT,0],R);
+  const dreh=(ob,deg,dx,dz)=>{ const c=Math.cos(deg*Math.PI/180), sn=Math.sin(deg*Math.PI/180), p=v=>[c*v[0]-sn*v[2]+dx, v[1], sn*v[0]+c*v[2]+dz], d=v=>[c*v[0]-sn*v[2], v[1], sn*v[0]+c*v[2]];
+    return {...ob, ra:{o:p(ob.ra.o), d:d(ob.ra.d)}, rb:{o:p(ob.rb.o), d:d(ob.rb.d)}}; };
+  const mit=stamp([...all, ret(0), ret(1), ret(2), ret(3)]), ohne=stamp(all), drift=stamp([...all, ...[0,1,2,3].map(j=>dreh(ret(j), 4, 0.15, 0.1))]);
+  const a=G.rueckkehr(mit, HT), b=G.rueckkehr(ohne, HT), c=G.rueckkehr(drift, HT);
+  chk('Rueckkehr: nach einer Runde an der Anfangswand erkannt (ab 300°), ohne Rueckkehr nicht, mit 4° / 15 cm Drift auch',
+    a && a.i===all.length && a.deg>=300 && !b && c && c.i>=all.length, `${JSON.stringify(a)} / ${JSON.stringify(b)} / ${JSON.stringify(c)}`);
+  const s0=G.solveSweepAuto(drift, {H:HT}), s1=G.solveSweepAuto(drift, {H:HT, runde:{t:c.t-0.01}});
+  chk('Rueckkehr: mit Rundenbruch schliesst die Auswertung trotz Drift, ohne nicht', s1.closed && !s0.closed,
+    `ohne ${s0.closed ? 'zu' : 'offen'} ${s0.walls.length} Wände, mit ${s1.closed ? 'zu' : 'offen'} ${s1.walls.length} Wände`);
+}
+{
   // Flacher Knick (8°): eine Ecke, kein erfundener Mini-Versprung.
   const BEND=[[0,0],[3,0],[6,0.42],[6,4],[0,4]];
   const s=G.solveSweep(stamp(sweepObs(BEND,64,{k:8, back:2})),{H:HT});
@@ -1103,7 +1118,7 @@ const geraetBau=()=>{
   const SZENARIO=SZ;
 
   return async function geraet(html, o={}){
-    const query='?debug'+(o.query ? '&'+o.query : '')+(/(^|&)karte=/.test(o.query||'') || o.karteDefault ? '' : '&karte=0'),   // Stand 18: Karte ist Vorgabe an; ohne karte=... laeuft der Test wie bisher ohne Karte
+    const query='?debug'+(o.query ? '&'+o.query : '')+(/(^|&)karte=/.test(o.query||'') || o.karteDefault ? '' : '&karte=0')+(o.rueckkehr ? '' : '&rueckkehr=0'),   // Stand 24: Rueckkehr nur in den Laeufen, die sie pruefen   // Stand 18: Karte ist Vorgabe an; ohne karte=... laeuft der Test wie bisher ohne Karte
        D=o.dauer ?? 26, FPS=30, dtF=1000/FPS;
     const scripts={}; for(const m of html.matchAll(/<script id="([^"]+)"[^>]*>([\s\S]*?)<\/script>/g)) scripts[m[1]]=m[2];
     let uhr=1000; const aufg=[]; let seq=0;
@@ -1326,7 +1341,8 @@ if(alt){
   const rs=await geraet(probe, {...kurz, query:'karte=1&imu=1', imu:true, gyro:true, ohneFokus:true, gyroAb:5});
   const rx=await geraet(probe, {...kurz, query:'karte=1&imu=1', imu:true, gyro:true, gyroFehler:true});
   const rb=await geraet(probe, {...kurz, query:'karte=1&imu=1', imu:true, gyro:true, gyroBoot:true});   // Stand 17: Gyroscope-Zeitstempel auf Geraetelaufzeit
-  const rd1=await geraet(probe, {...kurz, query:'imu=0', karteDefault:true});   // Stand 18: Karte ohne karte-Parameter
+  const rd1=await geraet(probe, {...kurz, query:'imu=0', karteDefault:true});
+  const rr=await geraet(probe, {...basis, query:'imu=0', rueckkehr:true});   // Stand 24: Rueckkehr-Erkennung (Vorgabe an)   // Stand 18: Karte ohne karte-Parameter
   const rv=await geraet(probe, {...kurz, query:'karte=1', imu:true, gyro:true});   // Stand 15: ohne imu-Parameter ist der Haken auf der Startseite (Vorgabe an) massgebend
   const kf1=await geraet(probe, {...kurz, karte:'wirftAussen'}), kf2=await geraet(probe, {...kurz, karte:'schweigt'}), kf3=await geraet(probe, {...kurz, karte:'wirftInnen'});
   // Nachbesserung: rz - Video und Tiefe kosten Zeit (die Uhr laeuft in encode und getDepthInformation weiter, wie am
@@ -1338,7 +1354,8 @@ if(alt){
   const rd=await geraet(probe, {...kurz, query:'mess=1', ebenen:false, imuVorStart:true});
   const msG=performance.now()-tG;
   const J=x=>JSON.stringify(x), ohne=(o,k)=>{ const c={...o}; for(const x of k) delete c[x]; return c; };
-  const obsJ=(r, an=false)=>J(r.P.LOG.obs.map(o=>an ? ohne(o, ['an']) : o));
+  // Stand 24: kum (abgewickelte Blickdrehung je Erfassung) ist neu und bleibt aus dem Vergleich mit Stand 5
+  const obsJ=(r, an=false)=>J(r.P.LOG.obs.map(o=>ohne(o, an ? ['an', 'kum'] : ['kum'])));
   // Ereignisse ohne die neuen Typen; sitzung-start nur mit den Feldern von Stand 5
   const NEU=new Set(['ref-reset', 'emuliert', 'tiefe']), SITZ6=['depthType', 'depthActive', 'depthTypeRequest', 'karte', 'mess', 'imu', 'quer', 'ausrichtung'];
   // aufnahme-ende ohne t: recStop endet nach echtem asynchronem Schreiben (gzip im Thread-Pool), nicht nach der Uhr der Attrappe
@@ -1435,7 +1452,7 @@ if(alt){
   const Mk=man(rk);
   chk('karte=1: Manifest v2 nennt segmente.bin, bild.jsonl, Tiefe (Anforderung raw, Kopf 96) und schalter', Mk && Mk.schalter.karte && Mk.segmente && Mk.segmente.bilder>0 && Mk.tiefe.kopf===96 && Mk.tiefe.anforderung==='raw' && Mk.dateien.includes('segmente.bin'));
   // --- Bild-Worker faellt aus, schweigt, wirft, ist langsam: die alte Pipeline merkt nichts (Erfassungen bis 5,5 s = Stand 5)
-  const vor=(r, t=5.5)=>J(r.P.LOG.obs.filter(x=>x.t<t).map(x=>ohne(x, ['final'])));
+  const vor=(r, t=5.5)=>J(r.P.LOG.obs.filter(x=>x.t<t).map(x=>ohne(x, ['final', 'kum'])));   // Stand 24: kum neu
   const Bv=r=>r.P.LOG.bild, nk=r=>zeilen(r).filter(x=>x[19]>=0).length;
   chk('Ausfall Bild-Worker (onerror): Ereignis, keine weiteren Auftraege, alte Pipeline gleich Stand 5', vor(rf1)===vor(r5) && (typen(rf1)['bild-worker-fehler']||0)===1 && Bv(rf1).gesendet===1,
     `${Bv(rf1).gesendet} gesendet; verglichen ${r5.P.LOG.obs.filter(x=>x.t<5.5).length} Erfassungen bis 5,5 s`);
@@ -1561,7 +1578,11 @@ if(alt){
       chk('Stand 17: Gyroscope-Zeitstempel auf Geraetelaufzeit (ts ~ 2.8e8 ms) werden auf Seitenzeit umgerechnet (t nahe ta, ts roh); mit Seitenzeit unveraendert',
         gb.length>=300 && gb.every(x=>Math.abs(x.t-x.ta)<0.2 && x.ts>2.8e8) && gi.every(x=>Math.abs(x.t-x.ta)<0.2 && x.ts<1e6), `${gb.length} Werte, max |t-ta| ${Math.max(...gb.map(x=>Math.abs(x.t-x.ta))).toFixed(3)} s`); }
     chk('Stand 17: Karte mit Gyro: Kalibrierung der Achsen versucht (imu-kalib im Protokoll), Karten-Worker bekommt die Bruecke (schnitt.gyroBruecke im Start)', rb.P.LOG.events.some(e=>e.type==='imu-kalib') && rb.stat.karteAn.some(m=>m.typ==='start' && m.schnitt && m.schnitt.gyroBruecke===true) && !rk.stat.karteAn.some(m=>m.typ==='start' && m.schnitt), (rb.P.LOG.events.find(e=>e.type==='imu-kalib')||{}).restDeg+'° Rest');
-    chk('Stand 18: ohne karte-Parameter laeuft die Karte (Vorgabe an): Bild- und Karten-Worker, schalter.karte, karte.jsonl; karte=0 schaltet aus', man(rd1).schalter.karte===true && J(rd1.stat.worker)===J(['schaetzer','bild','karte']) && man(rd1).dateien.includes('karte.jsonl') && man(r6).schalter.karte===false && !r6.stat.karteAn.length, J(rd1.stat.worker));
+    { const e=rr.P.LOG.events.find(x=>x.type==='rueckkehr'), nach=e ? rr.stat.solver.map(x=>JSON.parse(x.opt)).filter(x=>x.runde) : [];
+    chk('Stand 24: Rueckkehr im Rundgang erkannt (ab 300°), danach Auftraege mit Rundenbruch, Hinweis „Runde komplett“; rueckkehr=0 schaltet aus',
+      e && e.deg>=300 && nach.length>0 && nach.every(x=>Math.abs(x.runde.t-(e.t-0.01))<1e-6) && rr.P.LOG.events.some(x=>x.type==='hinweis' && /Runde ist komplett/.test(x.text))
+      && !r6.P.LOG.events.some(x=>x.type==='rueckkehr'), e ? `bei ${e.t} s, ${e.deg}°, ${nach.length} Auftraege mit Rundenbruch` : 'keine'); }
+  chk('Stand 18: ohne karte-Parameter laeuft die Karte (Vorgabe an): Bild- und Karten-Worker, schalter.karte, karte.jsonl; karte=0 schaltet aus', man(rd1).schalter.karte===true && J(rd1.stat.worker)===J(['schaetzer','bild','karte']) && man(rd1).dateien.includes('karte.jsonl') && man(r6).schalter.karte===false && !r6.stat.karteAn.length, J(rd1.stat.worker));
     chk('Stand 15: ohne imu-Parameter nimmt die Seite den Gyro auf (Haken Vorgabe an): schalter.imu, imu.jsonl, imu=0 schaltet aus', man(rv).schalter.imu===true && man(rv).dateien.includes('imu.jsonl') && man(rk).schalter.imu===false, `${man(rv).imu ? man(rv).imu.zeilen : '–'} Zeilen`);
     chk('karte=1&imu=1: LOG.session.imu gesetzt (karte=1 allein false), Erfassungen da', ri.P.LOG.obs.length>0 && ri.P.LOG.session.imu===true && rk.P.LOG.session.imu===false, `${ri.P.LOG.obs.length} Erfassungen`); }
   chk('mess=1: Manifest v2 mit mess true, imu.jsonl und messung.jsonl; kein Bild-Worker', Mm && Mm.mess===true && Mm.dateien.includes('imu.jsonl') && Mm.dateien.includes('messung.jsonl') && !rm.stat.worker.includes('bild'));
