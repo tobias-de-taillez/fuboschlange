@@ -247,7 +247,7 @@ export function tabelleMd(zeilen, S, E, kopf={}){
         `${k.verbMitWand}/${k.abschnitte}`, k.waendeGef!=null ? `${k.waendeGef}/${k.waendeWahr}` : '–', n && n.eins ? f2(n.eins.iou) : '–', n && n.fWand ? f3(n.fWand)+(n.wand ? ' '+n.wand : '') : '–',
         n && n.skaliert ? f2(n.skaliert.iou) : '–', n && n.skaliert ? f2(n.skaliert.mehr) : '–', n && n.median ? f2(n.median.iou) : '–', x && Number.isFinite(x.rel) ? (x.rel>=0 ? '+' : '')+x.rel.toFixed(2)+(x.imFenster ? '' : '*') : '–',
         x && Number.isFinite(x.verlust) ? f2(x.verlust) : '–', z.kipp ? kp(z.kipp.zuf) : '–', z.kipp ? kp(z.kipp.block) : '–', f1((z.ms.gesamt||0)/1000), k.metrikFehler ? 'T2: '+k.metrikFehler : ''])); }
-    const kv=Z.map(z=>z.kippVergleich).find(Boolean), kq=q=>q && q.zuf ? `${(100*q.zuf.k1/q.zuf.N).toFixed(0)} % zufällig / ${(100*q.block.k1/q.block.N).toFixed(0)} % Block (Vollauswertung ${q.voll.n} Ecken, ${f1(q.voll.A)} m²)` : '–';
+    const kv=Z.map(z=>z.kippVergleich).find(Boolean), kq=q=>q && q.zuf && q.zuf.N && q.block.N ? `${(100*q.zuf.k1/q.zuf.N).toFixed(0)} % zufällig / ${(100*q.block.k1/q.block.N).toFixed(0)} % Block (Vollauswertung ${q.voll.n} Ecken, ${f1(q.voll.A)} m²)` : '–';
     L.push('', 'Eingeklammert: Passung nicht eindeutig (Mehrd. < 1,2). δ/Δ mit * liegt außerhalb des E1-Fensters (|δ|/Δ > 0,3). IoU nach Skalierung zählt in der Auswertung nur mit Mehrd. nach ≥ 1,2 und in der Lage des besten H.', '',
       kv ? `Kippquote K1 zum Vergleich (gleicher Samen): freie Höhe (Vorwissen 2,55 ± 0,35) ${kq(kv.frei)}; H auf den eigenen Schätzwert ${f2(kv.hEigen)} m festgehalten ${kq(kv.eigen)}.` : '',
       'Bestes H nach Kriterium: '+KRITERIEN.map(([key, text])=>`${text} ${s.best[key]!=null ? f2(s.best[key]) : '–'}`).join(' · ')+`. Streuung (halbe Spanne über die Kriterien) ±${f3(s.streuung)} m.`,
@@ -302,6 +302,7 @@ export async function hsweep(o0){
 
 // ------------------------------------------------ Kommandozeile
 const BOOL=new Set(['weiter', 'nur-tabelle', 'still']);
+const BEKANNT=new Set(['aufnahme', 'aus', 'von', 'bis', 'schritt', 'quelle', 'ohne', 'karte', 'wand', 'kipp', 'kipp-anteil', 'kipp-block', 'jobs', 'zeitgrenze', 'lauf']);
 // --aufnahme name=tar,protokoll,wahrheit[,laserhoehe m]: leere Felder erlaubt (name=tar,,wahrheit.json)
 export function aufnahmeAus(v){
   const m=String(v).match(/^([^=]+)=(.+)$/); if(!m) throw new Error('--aufnahme name=quelle[,protokoll[,wahrheit[,laserhoehe m]]], nicht '+v);
@@ -312,20 +313,31 @@ export function aufnahmeAus(v){
 export function argumente(argv){
   const a={aufnahmen:[]};
   for(let i=0;i<argv.length;i++){ const x=argv[i]; if(!x.startsWith('--')) throw new Error('unerwartetes Argument '+x);
-    let [k, v]=x.slice(2).split(/=(.*)/s); if(v===undefined && !BOOL.has(k)) v=argv[++i]; if(BOOL.has(k) && v===undefined) v=true;
+    let [k, v]=x.slice(2).split(/=(.*)/s); if(!BEKANNT.has(k) && !BOOL.has(k)) throw new Error('unbekannte Option --'+k); if(v===undefined && !BOOL.has(k)) v=argv[++i]; if(BOOL.has(k) && v===undefined) v=true;
     if(k==='aufnahme') a.aufnahmen.push(aufnahmeAus(v)); else a[k]=v; }
   const liste=v=>v==null ? null : String(v).split(',').map(s=>s.trim()).filter(Boolean), num=(v, d)=>v!=null ? +v : d;
   return {aufnahmen:a.aufnahmen, aus:a.aus, von:num(a.von, DEF.von), bis:num(a.bis, DEF.bis), schritt:num(a.schritt, DEF.schritt), quelle:a.quelle || DEF.quelle, ohne:a.ohne!=null ? liste(a.ohne) : DEF.ohne,
     karte:a.karte!=null ? (a.karte==='aus' ? null : String(a.karte)) : DEF.karte, wand:a.wand || null, kipp:num(a.kipp, DEF.kipp), kippAnteil:num(a['kipp-anteil'], DEF.kippAnteil), kippBlock:num(a['kipp-block'], DEF.kippBlock),
     jobs:num(a.jobs, DEF.jobs), zeitgrenze:num(a.zeitgrenze, DEF.zeitgrenze), weiter:!!a.weiter, nurTabelle:!!a['nur-tabelle'], still:!!a.still, lauf:a.lauf || null};
 }
+// Eingaben vor dem Start pruefen (sonst scheitern alle Kindprozesse einzeln und E1 meldet nur "nicht entscheidbar"); Wahrheit ist
+// Pflicht, damit eine Aufnahme nie unbemerkt gegen die Vorgabewahrheit der Wohnkueche (T1.WAHRHEIT) gemessen wird
+export function pruefeEingaben(o){
+  const namen=new Set();
+  for(const au of o.aufnahmen){ if(namen.has(au.name)) throw new Error(`Aufnahmename ${au.name} doppelt`); namen.add(au.name);
+    if(!existsSync(au.src)) throw new Error(`${au.name}: ${au.src} fehlt`);
+    if(au.protokoll && !existsSync(au.protokoll)) throw new Error(`${au.name}: Protokoll ${au.protokoll} fehlt`);
+    if(!au.wahrheit) throw new Error(`${au.name}: Wahrheitsdatei fehlt (--aufnahme name=tar,protokoll,wahrheit)`);
+    if(!existsSync(au.wahrheit)) throw new Error(`${au.name}: Wahrheit ${au.wahrheit} fehlt`); }
+}
 async function main(){
   const o=argumente(process.argv.slice(2));
   if(o.lauf){ const z=await einzelLauf(leseJson(resolve(o.lauf))); if(z.fehler){ console.error(z.fehler); process.exitCode=1; } else console.log(`${z.id}: ok, ${(z.ms.gesamt/1000).toFixed(1)} s`); return; }
   if(!o.aufnahmen.length || !o.aus){ console.error('Aufruf: node raumskizze-hsweep.mjs --aufnahme name=aufnahme.tar,protokoll.json,wahrheit.json[,laserhoehe m] [--aufnahme ...] --aus ordner [--von 2.30 --bis 2.90 --schritt 0.05] [--jobs 4] [--wand Q-R] [--kipp 40]'); process.exit(1); }
-  for(const au of o.aufnahmen) if(!existsSync(au.src)) throw new Error(`${au.name}: ${au.src} fehlt`);
+  pruefeEingaben(o);
   const r=await hsweep(o);
   console.log('\n'+r.md);
   console.log(`Ausgabe: ${resolve(o.aus)}/{hsweep.md, hsweep.json, laeufe/}`);
+  const nF=r.zeilen.filter(z=>z.fehler).length; if(nF){ console.error(`${nF} von ${r.zeilen.length} Läufen mit Fehler (laeufe/<id>/log.txt)`); if(nF===r.zeilen.length) process.exitCode=1; }
 }
 if(process.argv[1] && fileURLToPath(import.meta.url)===resolve(process.argv[1])) main().catch(e=>{ console.error(e.stack || e.message); process.exit(1); });

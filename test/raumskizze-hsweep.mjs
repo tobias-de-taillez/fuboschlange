@@ -143,6 +143,14 @@ const nah=(a, b, e=1e-9)=>Math.abs(a-b)<=e;
   const Mf=H.tabelleMd(Z, [S], E, {text:'Test'});
   chk('tabelleMd: Überschrift, Tabelle je Aufnahme und E1-Abschnitt', /^# H-Sweep/.test(Mf) && /## r1/.test(Mf) && /## Entscheid E1/.test(Mf) && Mf.includes('| 2.60 |')); }
 
+// Eingaben und Optionen
+{ const fehler=f=>{ try{ f(); return null; }catch(e){ return e.message; } }, hier=process.argv[1], au=(n, w)=>({name:n, src:hier, protokoll:null, wahrheit:w, laser:null});
+  chk('pruefeEingaben: gültige Eingabe ohne Fehler', fehler(()=>H.pruefeEingaben({aufnahmen:[au('a', hier)]}))===null);
+  chk('pruefeEingaben: fehlende Wahrheit (nicht angegeben) ist ein Fehler, keine stille Vorgabe', /Wahrheitsdatei fehlt/.test(fehler(()=>H.pruefeEingaben({aufnahmen:[au('a', null)]})) || ''));
+  chk('pruefeEingaben: Wahrheitsdatei existiert nicht', /fehlt/.test(fehler(()=>H.pruefeEingaben({aufnahmen:[au('a', '/gibt/es/nicht.json')]})) || ''));
+  chk('pruefeEingaben: doppelter Name', /doppelt/.test(fehler(()=>H.pruefeEingaben({aufnahmen:[au('a', hier), au('a', hier)]})) || ''));
+  chk('argumente: unbekannte Option (Tippfehler) ist ein Fehler', /unbekannte Option --jobbs/.test(fehler(()=>H.argumente(['--jobbs', '3'])) || '')); }
+
 console.log(out.join('\n'));
 console.log(ok ? '\nALLE CHECKS GRÜN' : '\nCHECKS ROT');
 process.exit(ok ? 0 : 1);
