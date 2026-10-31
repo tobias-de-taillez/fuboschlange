@@ -9346,7 +9346,9 @@ const Hnow=camY=>{
 // Faellen falsch, je Szenario 8-13 % - der Nutzer prueft und tippt selbst.
 const autoClosed=sol=>!!(sol && sol.closed && !(sol.senk && sol.senk.byEnds));
 // Darf der Abschluss-Countdown laufen? Eine Regel fuer alle Stellen.
-const canArm=()=>S.auto && S.phase==='waende' && !S.paused && !S.closeDone && (!S.breaks.length || !!S.lap) && autoClosed(S.sol);
+// Stand 24: Ortungsbrueche sperren den Selbst-Abschluss weiter, auch nach erkannter Rueckkehr (Review: ein ungemessener Sprung
+// entlang der Anfangswand bleibt sonst unentdeckt); nach der Rueckkehr schliesst der Nutzer mit einem Tipp, ohne Rueckfrage.
+const canArm=()=>S.auto && S.phase==='waende' && !S.paused && !S.closeDone && !S.breaks.length && autoClosed(S.sol);
 // Darf jetzt erfasst werden? Liefert den Grund, wenn nicht - fuer die Farbe
 // der Live-Linie und den Hinweis.
 function autoBlock(){
@@ -9427,9 +9429,10 @@ function solveOpt(){ const o=S.H ? {H:S.H} : {H0:2.55, Hsigma:0.35}; if(S.frames
 // eine Erfassung nach >= 300° Drehung auf einer Anfangswand liegt (G.rueckkehr). Dann ist die Runde komplett: Ereignis, Hinweis,
 // Rundenbruch an die Auswertung, Abschluss auch nach Ortungsbruechen, „Raum schließen“ ohne Rueckfrage. Faellt die Erfassung
 // weg (Rueckgaengig, verdaechtig), wird neu gesucht.
+function rueckkehrGueltig(){ if(S.lapOb && !S.pool.includes(S.lapOb)){ S.lap=null; S.lapOb=null; ev('rueckkehr-zurueck'); } }
 function rueckkehrPruefen(){
   if(!S.auto || !RUECKKEHR) return;
-  if(S.lapOb && !S.pool.includes(S.lapOb)){ S.lap=null; S.lapOb=null; ev('rueckkehr-zurueck'); }
+  rueckkehrGueltig();
   if(S.lap) return;
   const H=S.H || (S.sol && S.sol.H>0 ? S.sol.H : 2.55), r=G.rueckkehr(S.pool, H);
   if(!r) return;
@@ -9451,6 +9454,7 @@ onmessage=e=>{ const {id,obs,opt}=e.data; let r=null, err=null; const t0=perform
   }catch(e){ ev('worker-fehlt', {msg:String(e && e.message || e)}); return null; }
 }
 function requestSolve(){
+  rueckkehrGueltig();   // Rueckgaengig/verdaechtig: die Rueckkehr-Erfassung weg, dann auch die Runde (auch waehrend eine Auswertung laeuft)
   if(S.solveBusy){ S.solveDirty=true; return; }
   S.solveBusy=true; S.solveDirty=false; S.solveId=(S.solveId||0)+1;
   rueckkehrPruefen();
@@ -10052,7 +10056,7 @@ function applySolution(r){
       hint(/zwischen \d+ und \d+ fehlt/.test(miss) ? 'Hier fehlt noch eine Wand – im Bild rot gestrichelt. Dorthin schwenken.'
         : /ungesehen/.test(miss) ? `Ein Stück Wand bis zur Ecke ist noch ungesehen – im Bild ${FARBEN_KLAR || S.auto ? 'rot' : 'orange'} gestrichelt. Dorthin schwenken.` : miss, 'warn'); }
   }
-  if(r.closed && S.breaks.length && !S.lap && !S.warned.closeManual){ S.warned.closeManual=true; ev('geschlossen-nach-bruch');
+  if(r.closed && S.breaks.length && !S.warned.closeManual){ S.warned.closeManual=true; ev('geschlossen-nach-bruch');
     hint('Raum geschlossen – nach der Ortungslücke aber bitte selbst prüfen und „Raum schließen“ tippen.', 'warn'); }
   if(r.Hfixed && !S.H && S.pool.length>=30 && !S.warned.hFixed){
     S.warned.hFixed=true; ev('höhe-unbestimmt');
@@ -10810,7 +10814,7 @@ function onFrame(t, frame){
       if(left<=0){
         S.closeT=null;
         // Vor dem Ende noch einmal nachsehen: gilt der Abschluss noch?
-        if(autoClosed(S.sol)){ S.closeDone=true; S.closed=true; ev('raum-schließen-auto'); S.session.end().catch(()=>{}); }
+        if(canArm()){ S.closeDone=true; S.closed=true; ev('raum-schließen-auto'); S.session.end().catch(()=>{}); }
       } else hint(nv ? `Raum geschlossen – fertig in ${Math.ceil(left)} s. ${nv===1 ? 'Ein Versprung ist' : nv+' Versprünge sind'} ergänzt (rot gestrichelt) – echt? Sonst „Noch nicht fertig“ und dort noch einmal langsam schwenken.`
         : `Raum geschlossen – fertig in ${Math.ceil(left)} s. „Noch nicht fertig“ = weiter erfassen.`, nv ? 'warn' : '');
     } else if(camTo && !S.paused && S.speed>AUTO_MAX_SPEED){ S.fastSince=S.fastSince ?? now(); S.slowSince=null;
