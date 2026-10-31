@@ -361,11 +361,15 @@ async function main(){
   const a=T1.argumente(process.argv.slice(2)), art=a._[0], av=process.argv.slice(2), mehrere=av.flatMap((x, i)=>x==='--aufnahme' ? [av[i+1]] : []);
   // Art a darf mehrere Aufnahmen zusammenfassen: --aufnahme Name=tar,protokoll (wiederholbar)
   if(art==='a' && mehrere.length){ const o=optionen(a), {G}=await T1.ladeSeite({}), alle=[], R=[];
-    for(const s of mehrere){ const [n, rest]=s.split('='), [tar, prot]=rest.split(','), A=T1.ladeQuelle(resolve(tar), {protokoll:prot ? resolve(prot) : null}), r=await artA(G, A, o, n); alle.push(r); console.log(markdown(r)); R.push(...r.rows); }
+    for(const s of mehrere){ if(!s || !String(s).includes('=')) throw new Error('--aufnahme erwartet Name=tar,protokoll'); const [n, rest]=s.split('='), [tar, prot]=rest.split(','), A=T1.ladeQuelle(resolve(tar), {protokoll:prot ? resolve(prot) : null}), r=await artA(G, A, o, n); alle.push(r); console.log(markdown(r)); R.push(...r.rows); }
     const z=PS.zusammenfassung(R); console.log(`\nGesamt ${R.length} Fenster aus ${alle.length} Aufnahmen: Treffer ${z.treffer}, mittel ${z.mittel}, falsch ${z.falsch}, lose ${z.lose}, sonst ${z.sonst}; Lage Median ${cm(z.dPmed)} / p90 ${cm(z.dPp90)} cm; Gier Median ${f2(z.dPsiMed)} / p90 ${f2(z.dPsiP90)} Grad`);
     if(a.aus){ const d=resolve(a.aus); mkdirSync(d, {recursive:true}); writeFileSync(join(d, 'injektion-a-gesamt.json'), JSON.stringify({version:VERSION, optionen:o, aufnahmen:alle, gesamt:{fenster:R.length, ...z}}, (k, v)=>typeof v==='number' && !Number.isFinite(v) ? null : v, 1)); }
     return; }
-  if(art==='dsim'){ const {G}=await T1.ladeSeite({}), r=artDsim(G, optionen(a)); console.log(markdown(r)); return; }     // braucht weder Aufnahme noch Wahrheit
+  const ARTEN=['null', 'd', 'e', 'c', 'b', 'a', 'dsim', 'alle'];
+  if(art && !ARTEN.includes(art)) throw new Error(`Unbekannte Art "${art}"; erlaubt: ${ARTEN.join(', ')}`);
+  if(art==='dsim'){ const {G}=await T1.ladeSeite({}), r=artDsim(G, optionen(a)); console.log(markdown(r));
+    if(a.aus){ const d=resolve(a.aus); mkdirSync(d, {recursive:true}); writeFileSync(join(d, 'injektion-dsim.json'), JSON.stringify({version:VERSION, optionen:optionen(a), ergebnisse:[r]}, (k, v)=>typeof v==='number' && !Number.isFinite(v) ? null : v, 1)); writeFileSync(join(d, 'injektion-dsim.md'), markdown(r)+'\n'); }
+    return; }     // braucht weder Aufnahme noch Wahrheit
   const src=a._[1];
   if(!art || !src){ console.error('Aufruf: node raumskizze-injektion.mjs <null|d|e|c|b|a|alle> <aufnahme.tar> --protokoll p.json --wahrheit w.json [--H 2.416] [--aus ordner] ...'); process.exit(1); }
   const o=optionen(a), {G}=await T1.ladeSeite({}), A=T1.ladeQuelle(resolve(src), {protokoll:a.protokoll ? resolve(a.protokoll) : null});
@@ -382,4 +386,4 @@ async function main(){
     writeFileSync(join(d, `injektion-${art}.json`), JSON.stringify({version:VERSION, quelle:src, optionen:o, basis:base ? {n:base.n, H0:base.H0, deltaMed:base.deltaMed, abstandMed:base.abstandMed, frei:kurz(base.frei), fest:kurz(base.fest)} : null, ergebnisse:erg}, (k, v)=>typeof v==='number' && !Number.isFinite(v) ? null : v, 1));
     writeFileSync(join(d, `injektion-${art}.md`), erg.map(markdown).join('\n\n')+'\n'); console.log(`\nAusgabe: ${d}/injektion-${art}.{json,md}`); }
 }
-if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url)) main().catch(e=>{ console.error(e.stack || e.message); process.exit(1); });
+if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url)) main().catch(e=>{ console.error(e && e.code==='ENOENT' || /^(Unbekannte Art|--aufnahme)/.test(e && e.message) ? 'Fehler: '+e.message : (e.stack || e.message)); process.exit(1); });

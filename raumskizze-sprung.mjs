@@ -170,16 +170,16 @@ async function lauf(G, name, tar, prot, wahr, H){
 async function main(){
   const a=T1.argumente(process.argv.slice(2)), {G}=await T1.ladeSeite({}), L=[], liste=[];
   const av=process.argv.slice(2), mehrere=av.flatMap((x, i)=>x==='--aufnahme' ? [av[i+1]] : []);
-  if(mehrere.length){ for(const s of mehrere){ const [n, rest]=String(s).split('='), [tar, prot, wahr, H]=rest.split(','); liste.push([n, tar, prot, wahr, H ? +H : NaN]); } }
+  if(mehrere.length){ for(const s of mehrere){ if(!s || !String(s).includes('=')) throw new Error('--aufnahme erwartet Name=tar,protokoll,wahrheit,H'); const [n, rest]=String(s).split('='), [tar, prot, wahr, H]=rest.split(','); liste.push([n, tar, prot, wahr, H ? +H : NaN]); } }
   else if(a._[0]) liste.push([a.name || 'A', a._[0], a.protokoll, a.wahrheit, a.H!=null && a.H!==true ? +a.H : NaN]);
   else { console.error('Aufruf: node raumskizze-sprung.mjs <aufnahme.tar> --protokoll p.json [--wahrheit w.json] [--H 2.6] [--aus ordner]'); process.exit(1); }
   for(const [n, tar, prot, wahr, H] of liste){ const r=await lauf(G, n, tar, prot, wahr, H); L.push(r); console.log(markdown(n, r)+'\n'); }
   const alle={n:L.reduce((s, r)=>s+r.rows.length, 0), mitWahrheit:L.reduce((s, r)=>s+r.rows.filter(x=>x.mengen && Object.keys(x.mengen).length).length, 0)};
   const pool=zusammenfassen(L.flatMap(r=>r.rows)), flur=zusammenfassen(L.filter(r=>/^flur/.test(r.name)).flatMap(r=>r.rows)); alle.pool=pool; alle.flur=flur;
-  console.log('Nur Flur 16:25 (die einzige tragfaehige Wahrheit, Konzept 3.3)\n'+summeText(flur)+'\n\nAlle Aufnahmen gemeinsam (nur Spruenge mit Wahrheit zaehlen als auswertbar; Wohnkuechen-Wahrheit mehrdeutig 1,00-1,11, Zuordnung von 31.10. 08:47 nicht belegt)\n'+summeText(pool));
+  console.log((flur.n ? 'Nur Flur 16:25 (die einzige tragfaehige Wahrheit, Konzept 3.3)\n'+summeText(flur)+'\n\n' : '')+'Alle Aufnahmen gemeinsam (nur Spruenge mit Wahrheit zaehlen als auswertbar; Wohnkuechen-Wahrheit mehrdeutig 1,00-1,11, Zuordnung von 31.10. 08:47 nicht belegt)\n'+summeText(pool));
   console.log(`Alle Aufnahmen: ${alle.n} Spruenge, davon ${alle.mitWahrheit} mit Wahrheit; NICHT belastbar: verlangt sind >= ${DEF.belastbar} Spruenge aus der Provokationssitzung (R8), die es noch nicht gibt.`);
   if(a.aus){ const d=resolve(a.aus); mkdirSync(d, {recursive:true});
     writeFileSync(join(d, 'sprung.json'), JSON.stringify({version:VERSION, alle, aufnahmen:L}, (k, v)=>typeof v==='number' && !Number.isFinite(v) ? null : v, 1));
     writeFileSync(join(d, 'sprung.md'), L.map(r=>markdown(r.name, r)).join('\n\n')+'\n'); console.log(`Ausgabe: ${d}/sprung.{json,md}`); }
 }
-if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url)) main().catch(e=>{ console.error(e.stack || e.message); process.exit(1); });
+if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url)) main().catch(e=>{ console.error(e && e.code==='ENOENT' || /^--aufnahme/.test(e && e.message) ? 'Fehler: '+e.message : (e.stack || e.message)); process.exit(1); });
