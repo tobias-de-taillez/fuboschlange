@@ -27,7 +27,10 @@ import * as T2 from './raumskizze-metrik.mjs';
 import {starrePassung} from './raumskizze-injektion.mjs';
 
 export const VERSION=1;
-export const DEF={hFest:2.416, minErf:6, maxAbschnitt:60, verschmelzen:0.5, vorNachMax:{vor:60, nach:3}, besserCm:1.0, belastbar:12};
+// belastbar: mindestens 12 Spruenge mit Wahrheit UND eine Provokationssitzung (Messtag R8, Kamera 0,3/1/3/10 s abdecken). Die gibt es noch nicht,
+// darum meldet jede Summe belastbar = false, egal wie viele Spruenge zusammenkommen (Konzept 3.1 Punkt 4: "endgueltig erst mit >= 12 Spruengen aus
+// der Provokationssitzung"). mehrdeutig: T2-Gate fuer die Passung (Verhaeltnis zweitbeste/beste < 1,2 = mehrdeutig), solche Spruenge zaehlen nicht.
+export const DEF={hFest:2.416, minErf:6, maxAbschnitt:60, verschmelzen:0.5, vorNachMax:{vor:60, nach:3}, besserCm:1.0, belastbar:12, provokationssitzung:false, mehrdeutigUnter:1.2};
 const q=(a, p)=>{ const s=a.filter(Number.isFinite).sort((x, y)=>x-y); return s.length ? s[Math.min(s.length-1, Math.floor(p*s.length))] : NaN; };
 const med=a=>q(a, 0.5), cm=x=>Number.isFinite(x) ? (100*x).toFixed(1) : '–', f1=x=>Number.isFinite(x) ? x.toFixed(1) : '–';
 const D2R=Math.PI/180, wrap=a=>Math.atan2(Math.sin(a), Math.cos(a));
@@ -126,13 +129,16 @@ export async function pruefen(G, A, W, o={}){
 // Summe: je Menge und Variante Anzahl besser/schlechter und mittlere Aenderung; Urteil nach P1 H3 fuer die Variante +C
 export function zusammenfassen(rows, op=DEF){
   const mitW=rows.filter(r=>r.mengen && Object.keys(r.mengen).length).length;
-  const Z={n:rows.length, mitWahrheit:mitW, auswertbar:{}, belastbar:mitW>=op.belastbar, hinweis:`belastbar erst ab ${op.belastbar} Spruengen mit Wahrheit (hier ${mitW} von ${rows.length}); ein Richtungsindiz, kein Beleg`};
-  for(const mn of ['nachbar', 'rahmen']){ const ok=rows.filter(r=>r.mengen && r.mengen[mn] && r.mengen[mn].ok && r.mengen[mn].varianten.roh), V={};
+  const Z={n:rows.length, mitWahrheit:mitW, auswertbar:{}, belastbar:mitW>=op.belastbar && op.provokationssitzung === true,
+    hinweis:`NICHT belastbar: ${mitW} Spruenge mit Wahrheit (von ${rows.length}); verlangt sind >= ${op.belastbar} aus der Provokationssitzung (R8), die es noch nicht gibt; ein Richtungsindiz, kein Beleg`};
+  const klar=r=>{ const v=r.verhaeltnis; return v==null || v>=op.mehrdeutigUnter; };         // roh-Passung eindeutig?
+  for(const mn of ['nachbar', 'rahmen']){ const ok=rows.filter(r=>r.mengen && r.mengen[mn] && r.mengen[mn].ok && r.mengen[mn].varianten.roh).filter(r=>klar(r.mengen[mn].varianten.roh)), V={};
+    const mehrdeutig=rows.filter(r=>r.mengen && r.mengen[mn] && r.mengen[mn].ok && r.mengen[mn].varianten.roh && !klar(r.mengen[mn].varianten.roh)).length;
     const namen=new Set(ok.flatMap(r=>Object.keys(r.mengen[mn].varianten))); namen.delete('roh');
-    for(const nm of namen){ const d=ok.map(r=>r.mengen[mn].varianten[nm]).filter(v=>v && Number.isFinite(v.dMedCm)), dm=d.map(v=>v.dMedCm);
-      V[nm]={n:d.length, besser:dm.filter(x=>x<0).length, schlechterUeber1cm:dm.filter(x=>x>op.besserCm).length, dMedMittel:dm.length ? dm.reduce((a, b)=>a+b, 0)/dm.length : NaN, dMedMedian:med(dm), lageGesprungen:d.filter(v=>!v.lageGleich).length};
+    for(const nm of namen){ const alle=ok.map(r=>r.mengen[mn].varianten[nm]).filter(v=>v && Number.isFinite(v.dMedCm)), d=alle.filter(v=>v.lageGleich!==false), dm=d.map(v=>v.dMedCm);
+      V[nm]={n:d.length, ausgeschlossenLage:alle.length-d.length, besser:dm.filter(x=>x<0).length, schlechterUeber1cm:dm.filter(x=>x>op.besserCm).length, dMedMittel:dm.length ? dm.reduce((a, b)=>a+b, 0)/dm.length : NaN, dMedMedian:med(dm), lageGesprungen:d.filter(v=>!v.lageGleich).length};
       const von=nm[0]==='+' ? 'H3' : null; if(von){ const n=d.length, drei=Math.ceil(0.75*n); V[nm].h3={bedingung:`Median sinkt in mindestens ${drei} von ${n} und nie schlechter als ${op.besserCm} cm`, erfuellt:n>0 && V[nm].besser>=drei && V[nm].schlechterUeber1cm===0}; } }
-    Z.auswertbar[mn]={spruenge:ok.length, varianten:V}; }
+    Z.auswertbar[mn]={spruenge:ok.length, mehrdeutigAusgeschlossen:mehrdeutig, varianten:V}; }
   return Z;
 }
 
@@ -151,8 +157,8 @@ export function markdown(name, erg){
 }
 export function summeText(Z){
   const L=[`Summe: ${Z.n} Spruenge. ${Z.hinweis}.`];
-  for(const [mn, a] of Object.entries(Z.auswertbar)){ L.push(`- Menge ${mn}: ${a.spruenge} auswertbar`);
-    for(const [nm, v] of Object.entries(a.varianten)) L.push(`  - ${nm}: besser ${v.besser}/${v.n}, schlechter > 1 cm ${v.schlechterUeber1cm}/${v.n}, Aenderung Median mittel ${f1(v.dMedMittel)} cm (Median ${f1(v.dMedMedian)}), Lage gesprungen ${v.lageGesprungen}${v.h3 ? `; H3 ${v.h3.erfuellt ? 'erfuellt' : 'NICHT erfuellt'} (${v.h3.bedingung})` : ''}`); }
+  for(const [mn, a] of Object.entries(Z.auswertbar)){ L.push(`- Menge ${mn}: ${a.spruenge} auswertbar, ${a.mehrdeutigAusgeschlossen} wegen mehrdeutiger Passung (< 1,2) ausgeschlossen`);
+    for(const [nm, v] of Object.entries(a.varianten)) L.push(`  - ${nm}: besser ${v.besser}/${v.n}, schlechter > 1 cm ${v.schlechterUeber1cm}/${v.n}, Aenderung Median mittel ${f1(v.dMedMittel)} cm (Median ${f1(v.dMedMedian)}), Lage gesprungen und ausgeschlossen ${v.ausgeschlossenLage}${v.h3 ? `; H3 ${v.h3.erfuellt ? 'erfuellt' : 'NICHT erfuellt'} (${v.h3.bedingung})` : ''}`); }
   return L.join('\n');
 }
 
@@ -169,8 +175,9 @@ async function main(){
   else { console.error('Aufruf: node raumskizze-sprung.mjs <aufnahme.tar> --protokoll p.json [--wahrheit w.json] [--H 2.6] [--aus ordner]'); process.exit(1); }
   for(const [n, tar, prot, wahr, H] of liste){ const r=await lauf(G, n, tar, prot, wahr, H); L.push(r); console.log(markdown(n, r)+'\n'); }
   const alle={n:L.reduce((s, r)=>s+r.rows.length, 0), mitWahrheit:L.reduce((s, r)=>s+r.rows.filter(x=>x.mengen && Object.keys(x.mengen).length).length, 0)};
-  const pool=zusammenfassen(L.flatMap(r=>r.rows)); alle.pool=pool; console.log('Alle Aufnahmen gemeinsam (nur Spruenge mit Wahrheit zaehlen als auswertbar)\n'+summeText(pool));
-  console.log(`Alle Aufnahmen: ${alle.n} Spruenge, davon ${alle.mitWahrheit} mit Wahrheit; belastbar erst ab ${DEF.belastbar} Spruengen mit Wahrheit${alle.mitWahrheit>=DEF.belastbar ? '' : ' – noch nicht erreicht'}.`);
+  const pool=zusammenfassen(L.flatMap(r=>r.rows)), flur=zusammenfassen(L.filter(r=>/^flur/.test(r.name)).flatMap(r=>r.rows)); alle.pool=pool; alle.flur=flur;
+  console.log('Nur Flur 16:25 (die einzige tragfaehige Wahrheit, Konzept 3.3)\n'+summeText(flur)+'\n\nAlle Aufnahmen gemeinsam (nur Spruenge mit Wahrheit zaehlen als auswertbar; Wohnkuechen-Wahrheit mehrdeutig 1,00-1,11, Zuordnung von 31.10. 08:47 nicht belegt)\n'+summeText(pool));
+  console.log(`Alle Aufnahmen: ${alle.n} Spruenge, davon ${alle.mitWahrheit} mit Wahrheit; NICHT belastbar: verlangt sind >= ${DEF.belastbar} Spruenge aus der Provokationssitzung (R8), die es noch nicht gibt.`);
   if(a.aus){ const d=resolve(a.aus); mkdirSync(d, {recursive:true});
     writeFileSync(join(d, 'sprung.json'), JSON.stringify({version:VERSION, alle, aufnahmen:L}, (k, v)=>typeof v==='number' && !Number.isFinite(v) ? null : v, 1));
     writeFileSync(join(d, 'sprung.md'), L.map(r=>markdown(r.name, r)).join('\n\n')+'\n'); console.log(`Ausgabe: ${d}/sprung.{json,md}`); }

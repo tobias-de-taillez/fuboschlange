@@ -58,6 +58,17 @@ const {G}=await T1.ladeSeite({});
   chk('(a) dyFuerDelta: Median von Delta = Ziel', Math.abs(IN.medianUrsprungY(L)+dd-(2.6-0.64))<1e-12 && Math.abs(D.delta[0]-0.64)<1e-12);
 }
 
+{ // wirksame Hoehe und Eichung an P7 t11
+  const o=[0, 1.9, 0], mk=n=>Array.from({length:n}, (_, i)=>({t:i, ra:{o, d:[0.8, 0.4+0.01*i, 0.3]}, rb:{o, d:[0.2, 0.45, 0.9]}})), L=mk(30), M0=IN.injStuck(L, 2.6, {s:0}), M1=IN.injStuck(L, 2.6, {s:0.1});
+  chk('(a) erwartungHEff: ohne Einspritzung und gleiches H 0; Stuck s bei hInj = H0 gleich d*s/(Delta-s); ein tieferes hInj senkt den Versatz', IN.erwartungHEff(L, M0, 2.6, 2.6)===0 && Math.abs(IN.erwartungHEff(L, M1, 2.6, 2.6)-IN.erwartungVersatz(L, 2.6, 0.1).versatz)<1e-12 && IN.erwartungHEff(L, M1, 2.6, 2.55)<IN.erwartungHEff(L, M1, 2.6, 2.6));
+  const S=IN.injStuckStreu(L, 2.6, 0.1, 0.08, 5), S2=IN.injStuckStreu(L, 2.6, 0.1, 0.08, 5), s0=IN.injStuckStreu(L, 2.6, 0.1, 0, 5);
+  chk('(a) injStuckStreu: Seed wiederholbar, streut; Streuung 0 = fester Stuck', JSON.stringify([...S.values()])===JSON.stringify([...S2.values()]) && new Set([...S.values()].map(m=>m.ra.d[0])).size>20 && JSON.stringify([...s0.values()])===JSON.stringify([...M1.values()]));
+  const r=IN.artDsim(G, {}, 8), bei=n=>r.rows.find(x=>x.name.startsWith(n));
+  chk('(a) Eichung an P7 t11 (gleicher Schaetzer solveSweepAuto): ideal ~ 0, Rahmenversatz hebt H (5 cm < 10 cm), sigma 10 cm Bloecke zu 20 liegt bei +5 bis +20 cm',
+    Math.abs(bei('ideal').medianCm)<3 && bei('sigma 5 cm, Bloecke zu 20').medianCm>bei('ideal').medianCm+1 && bei('sigma 10 cm, Bloecke zu 20').medianCm>bei('sigma 5 cm, Bloecke zu 20').medianCm
+    && bei('sigma 10 cm, Bloecke zu 20').medianCm>5 && bei('sigma 10 cm, Bloecke zu 20').medianCm<20, r.rows.map(x=>x.name.slice(0, 14)+' '+x.medianCm.toFixed(1)).join(' | '));
+}
+
 // ---------------------------------------------------------------- (b) Ringe, Topologie, Umkehrung
 {
   const P=[[0, 0], [4, 0], [4, 3], [2, 3], [2, 1.5], [0, 1.5]], Pdreh=[...P.slice(2), ...P.slice(0, 2)], Prueck=[...P].reverse(), Ppos=P.map(p=>[p[0]*1.1, p[1]*1.1]);

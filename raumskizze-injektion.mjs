@@ -7,7 +7,8 @@
 //        [--t1 "--quelle erfassungen --ohne tiefe,ebenen --karte {...}"] [--seeds 5] [--sigma 5,10] [--e 0.1,0.2]
 //        [--s 5,10,15,20] [--delta 0.64,0.96] [--stuck 10] [--ausladung 8] [--wand W-V] [--n 10] [--w 1.3,4]
 //
-//   art: null  Nulltest (Einspritzung 0 ergibt Differenz 0, bitgleich)
+//   art: dsim  Eichung der Einspritzung d an P7 t11 (sauberer Rechteckraum, kein Aufnahme-Argument noetig: node raumskizze-injektion.mjs dsim)
+//        null  Nulltest (Einspritzung 0 ergibt Differenz 0, bitgleich)
 //        d     senkrechter Rahmenversatz N(0, sigma cm) je 10 Erfassungen (P7 t11)
 //        e     Hoehenfehler +-e m: die Erfassungsstrahlen werden mit falschem H gehoben (P7)
 //        c     Rundum-Stuck: alle Erfassungen s unter der Decke, festes und freies H (P6 H1)
@@ -39,7 +40,7 @@ export const DEF={t1:['--quelle', 'erfassungen', '--ohne', 'tiefe,ebenen', '--ka
   band:{lokal:[0.6, 1.4], faktor:[0.45, 0.75], hFaktor:[0.5, 2]}};
 
 const q=(a, p)=>{ const s=a.filter(Number.isFinite).sort((x, y)=>x-y); return s.length ? s[Math.min(s.length-1, Math.floor(p*s.length))] : NaN; };
-const med=a=>q(a, 0.5), cm=x=>Number.isFinite(x) ? (100*x).toFixed(1) : '–', f2=x=>Number.isFinite(x) ? x.toFixed(2) : '–', f3=x=>Number.isFinite(x) ? x.toFixed(3) : '–';
+const med=a=>q(a, 0.5), f1=x=>Number.isFinite(x) ? x.toFixed(1) : '–', cm=x=>Number.isFinite(x) ? (100*x).toFixed(1) : '–', f2=x=>Number.isFinite(x) ? x.toFixed(2) : '–', f3=x=>Number.isFinite(x) ? x.toFixed(3) : '–';
 
 // ------------------------------------------------ Zufall (mulberry32, eigener Strom je Aufruf)
 export function rng(seed){ let s=seed>>>0; const u=()=>{ s=(s+0x6D2B79F5)>>>0; let t=Math.imul(s^s>>>15, 1|s); t=(t+Math.imul(t^t>>>7, 61|t))^t; return ((t^t>>>14)>>>0)/4294967296; };
@@ -109,6 +110,32 @@ export function selbstpruefung(L, map, H0, {s=0, dy=0, auswahl=null}={}){
       const d=Math.hypot(P0[0]-r1.o[0], P0[2]-r1.o[2]), De=H0-r1.o[1], soll=s ? d*s/(De-s) : 0, ist=Math.hypot(P1[0]-P0[0], P1[2]-P0[2]);
       maxF=Math.max(maxF, Math.abs(ist-soll)); n++; } }
   return {maxFehler:maxF, n};
+}
+
+// Erwartung mit der WIRKSAMEN Hoehe: T1 hebt nicht mit H0, sondern mit hEff (das feste H ist ein weicher Vorgabewert, sigma 1,5 cm, und
+// zieht bei einer Stoerung mit). Median ueber die Strahlen von (Abstand des eingespritzten Strahls bei hInj) - (Abstand des Originals bei hBase).
+export function erwartungHEff(L, map, hBase, hInj, auswahl=null){
+  const v=[]; for(const ob of L){ const m=map.get(ob); if(!m || (auswahl && !auswahl.has(ob))) continue;
+    for(const [r0, r1] of [[ob.ra, m.ra], [ob.rb, m.rb]]){ const P0=trifft(r0, hBase), P1=trifft(r1, hInj); if(P0 && P1) v.push(Math.hypot(P1[0]-r1.o[0], P1[2]-r1.o[2])-Math.hypot(P0[0]-r0.o[0], P0[2]-r0.o[2])); } }
+  return med(v);
+}
+// Rundum-Stuck mit streuender Tiefe: s_i ~ N(sMittel, sSigma), nicht negativ, je Erfassung beide Strahlen gleich (die woertliche Lesart von "Streuung p")
+export function injStuckStreu(L, H0, sMittel, sSigma, seed){
+  const R=rng(seed), map=new Map(); for(const ob of L){ const s=Math.max(0, sMittel+sSigma*R.gauss()); map.set(ob, {ra:strahlNeu(ob.ra, H0, {s}), rb:strahlNeu(ob.rb, H0, {s})}); } return map;
+}
+// P7 t11 nachgebaut (Rechteckraum 5 x 4 m, wahres H, Kamera camH, Winkelrauschen, 160 Erfassungen), um die Einspritzung d gegen die Erwartung
+// der Konzepte (+4 / +10 cm bei Rahmenversatz 5 / 10 cm je 20 Erfassungen, Schaetzer G.solveSweepAuto) zu eichen. Rueckgabe Erfassungen {ra, rb, t}.
+export function t11Sim(G, seed, {Htrue=2.416, camH=1.9, noiseDeg=0.4, walk=0.5, N=160, Wd=5, Dp=4}={}){
+  const R=rng(seed), rnd=R.u, gauss=R.gauss, obs=[], nrm=v=>{ const l=Math.hypot(...v); return v.map(x=>x/l); };
+  for(let i=0;i<N;i++){
+    const ang=2*Math.PI*i/N*1.05, cx=walk*Math.cos(3*ang)*0.6+(rnd()-.5)*0.1, cz=walk*Math.sin(2*ang)*0.6+(rnd()-.5)*0.1, cy=camH+0.08*Math.sin(5*ang)+0.03*gauss();
+    const dx=Math.cos(ang), dz=Math.sin(ang); let tt=1e9;
+    for(const px of [Wd/2, -Wd/2]){ const t=(px-cx)/dx; if(t>0){ const z=cz+t*dz; if(Math.abs(z)<=Dp/2 && t<tt) tt=t; } }
+    for(const pz of [Dp/2, -Dp/2]){ const t=(pz-cz)/dz; if(t>0){ const x=cx+t*dx; if(Math.abs(x)<=Wd/2 && t<tt) tt=t; } }
+    const P=[cx+tt*dx, Htrue, cz+tt*dz], tang=[-dz, 0, dx], A=P.map((v, j)=>v+0.2*tang[j]), B=P.map((v, j)=>v-0.2*tang[j]);
+    const ray=Q=>{ let d=nrm([Q[0]-cx, Q[1]-cy, Q[2]-cz]); const e=noiseDeg*Math.PI/180; d=nrm([d[0]+e*gauss(), d[1]+e*gauss(), d[2]+e*gauss()]); return {o:[cx, cy, cz], d}; };
+    obs.push({ra:ray(A), rb:ray(B), t:i*0.5}); }
+  return obs;
 }
 
 // ------------------------------------------------ Wahrheit, starre Passung, Wandzuordnung
@@ -221,6 +248,17 @@ export async function artD(G, A, W, o, base){
   return {art:'d', erwartung:'freies H: H_hat steigt um etwa +4 cm (sigma 5) und +10 cm (sigma 10) [p7 t11, Simulation]; festes H: Wandversatz je Block d*dy/Delta', basis:{H:base.frei.H, hQuelle:base.frei.hQuelle}, rows};
 }
 
+// ------------------------------------------------ Art dsim: Eichung der Einspritzung d an P7 t11
+// Gleicher Aufbau wie t11.mjs (Rechteckraum, solveSweepAuto, H0 2,55 / sigma 0,35, 12 Laeufe), Rahmenversatz mit unserer Einspritzung statt dem
+// eingebauten dyBlock: stimmt das mit den +4 / +10 cm der Konzepte ueberein, dann ist die Einspritzung richtig und die echte Aufnahme weicht ab.
+export function artDsim(G, o, laeufe=12){
+  const H=2.416, rows=[], schaetze=(L)=>G.solveSweepAuto(L, {H0:2.55, Hsigma:0.35}).H;
+  for(const [name, sg, blk] of [['ideal', 0, 20], ['sigma 5 cm, Bloecke zu 20 (t11)', 0.05, 20], ['sigma 5 cm, Bloecke zu 10', 0.05, 10], ['sigma 10 cm, Bloecke zu 20 (t11)', 0.10, 20], ['sigma 10 cm, Bloecke zu 10', 0.10, 10]]){
+    const e=[]; for(let k=0;k<laeufe;k++){ const L=t11Sim(G, 100+k*17); const {map}=injRahmenVersatz(L, sg, 1+k, blk); e.push(schaetze(L.map(ob=>({...ob, ...map.get(ob)})))-H); }
+    rows.push({name, sigmaCm:100*sg, block:blk, medianCm:100*med(e), p10Cm:100*q(e, 0.1), p90Cm:100*q(e, 0.9), erwartungCm:sg===0.05 && blk===20 ? 4 : sg===0.10 && blk===20 ? 10 : sg===0 ? 1 : null}); }
+  return {art:'dsim', erwartung:'t11 (Konzept P7): ideal +1 cm, sigma 5 cm +4 cm, sigma 10 cm +10 cm (Fehler gegen wahres H, 12 Laeufe)', rows};
+}
+
 // ------------------------------------------------ Art e: Hoehenfehler
 export async function artE(G, A, W, o, base){
   const rows=[], da=deltaAbstand(base.L, base.H0), De=med(da.delta);
@@ -229,7 +267,10 @@ export async function artE(G, A, W, o, base){
     // Einzelstrahl-Faktor direkt aus den Strahlen: Median des Abstands bei H0+e gegen H0
     const f=[]; for(const ob of base.L) for(const rr of [ob.ra, ob.rb]){ const P0=trifft(rr, base.H0), P1=trifft(rr, base.H0+e); if(P0 && P1) f.push(Math.hypot(P1[0]-rr.o[0], P1[2]-rr.o[2])/Math.hypot(P0[0]-rr.o[0], P0[2]-rr.o[2])); }
     const einzel=med(f), wirk=cmp ? (cmp.skala-1)/(einzel-1) : NaN, ud=urteilBand(wirk, 0.6, [o.band.faktor[0]/0.6, o.band.faktor[1]/0.6]);
-    rows.push({e, einzelstrahlFaktor:einzel, einzelstrahlErwartung:1+e/De, skizzenSkala:cmp && cmp.skala, wirkfaktor:wirk, erwartungWirkfaktor:0.6, ...ud, deltaMed:De, hEff:r.H, topologieGleich:cmp && cmp.topologieGleich, ecken:r.frei && r.frei.ecken, eMed:r.frei && r.frei.eMed, flaecheRatio:cmp && cmp.flaecheRatio}); }
+    // wirksame Hoehe: das feste H ist ein weicher Vorgabewert (sigma 1,5 cm); Einzelstrahl-Faktor und Wirkfaktor auch mit hEff statt dem nominellen H0+e
+    const hB=base.fest.H, fe=[]; for(const ob of base.L) for(const rr of [ob.ra, ob.rb]){ const P0=trifft(rr, hB), P1=trifft(rr, r.H); if(P0 && P1) fe.push(Math.hypot(P1[0]-rr.o[0], P1[2]-rr.o[2])/Math.hypot(P0[0]-rr.o[0], P0[2]-rr.o[2])); }
+    const einzelEff=med(fe), wirkEff=cmp ? (cmp.skala-1)/(einzelEff-1) : NaN;
+    rows.push({e, einzelstrahlFaktor:einzel, einzelstrahlErwartung:1+e/De, skizzenSkala:cmp && cmp.skala, wirkfaktor:wirk, erwartungWirkfaktor:0.6, ...ud, hBasis:hB, einzelstrahlFaktorHEff:einzelEff, wirkfaktorHEff:wirkEff, zugeordnet:r.frei && r.frei.zugeordnet, iou:r.frei && r.frei.iou, deltaMed:De, hEff:r.H, topologieGleich:cmp && cmp.topologieGleich, ecken:r.frei && r.frei.ecken, eMed:r.frei && r.frei.eMed, flaecheRatio:cmp && cmp.flaecheRatio}); }
   return {art:'e', erwartung:'Einzelstrahl (Delta+e)/Delta; Skizzenmassstab folgt dem nur mit etwa 0,6 [p7 S2]; Form haelt |e|/Delta bis etwa 0,3', H0:base.H0, rows};
 }
 
@@ -239,12 +280,18 @@ export async function artC(G, A, W, o, base){
   const erw=erwartungVersatz(base.L, base.H0, s, 0);
   // untere Kante, festes H
   { const map=injStuck(base.L, base.H0, {s}), sp=selbstpruefung(base.L, map, base.H0, {s}), r=await messen(G, ersetzen(A, map), W, {...o, H:base.H0, T:base.fest.T}), cmp=ringVergleich(base.fest.ring, r.ring);
+    const erwE=erwartungHEff(base.L, map, base.fest.H, r.H);
     rows.push({variante:'untere Kante, festes H', s, selbstpruefungMaxFehlerM:sp.maxFehler, erwartetAussenM:erw.versatz, gemessenAussenM:cmp && cmp.aussen, ...urteilBand(cmp && cmp.aussen, erw.versatz, o.band.lokal),
+      erwartetHEffM:erwE, verhaeltnisHEff:cmp ? cmp.aussen/erwE : NaN, hBasis:base.fest.H, zugeordnet:r.frei && r.frei.zugeordnet, iou:r.frei && r.frei.iou,
       topologieGleich:cmp && cmp.topologieGleich, ecken:r.frei && r.frei.ecken, eMedFest:r.fest && r.fest.eMed, eMedBasis:base.fest.fest && base.fest.fest.eMed, flaecheRatio:cmp && cmp.flaecheRatio, hEff:r.H}); }
+  // streuende Tiefe s_i ~ N(s, p): die woertliche Lesart von "Streuung p = 8 cm" (P6 nennt p die Ausladung der oberen Kante, siehe naechste Zeilen)
+  { const map=injStuckStreu(base.L, base.H0, s, p, 11), r=await messen(G, ersetzen(A, map), W, {...o, H:base.H0}), cmp=ringVergleich(base.fest.ring, r.ring), erwE=erwartungHEff(base.L, map, base.fest.H, r.H);
+    rows.push({variante:'untere Kante, s ~ N(s, p), festes H', s, p, erwartetHEffM:erwE, gemessenAussenM:cmp && cmp.aussen, ...urteilBand(cmp && cmp.aussen, erwE, o.band.lokal), topologieGleich:cmp && cmp.topologieGleich, ecken:r.frei && r.frei.ecken, flaecheRatio:cmp && cmp.flaecheRatio,
+      zugeordnet:r.frei && r.frei.zugeordnet, iou:r.frei && r.frei.iou, hEff:r.H}); }
   // untere Kante, freies H: H_hat sinkt um s, die Waende bleiben
   { const map=injStuck(base.L, base.H0, {s}), r=await messen(G, ersetzen(A, map), W, {...o, H:null}), cmp=ringVergleich(base.frei.ring, r.ring), dH=r.H-base.frei.H;
     rows.push({variante:'untere Kante, freies H', s, erwartetDH:-s, gemessenDH:dH, ...urteilBand(dH, -s, o.band.hFaktor), erwartetAussenM:0, gemessenAussenM:cmp && cmp.aussen,
-      topologieGleich:cmp && cmp.topologieGleich, ecken:r.frei && r.frei.ecken, eMedFrei:r.frei && r.frei.eMed, eMedBasis:base.frei.frei && base.frei.frei.eMed, flaecheRatio:cmp && cmp.flaecheRatio, hEff:r.H, hBasis:base.frei.H}); }
+      topologieGleich:cmp && cmp.topologieGleich, ecken:r.frei && r.frei.ecken, zugeordnet:r.frei && r.frei.zugeordnet, iou:r.frei && r.frei.iou, eMedFrei:r.frei && r.frei.eMed, eMedBasis:base.frei.frei && base.frei.frei.eMed, flaecheRatio:cmp && cmp.flaecheRatio, hEff:r.H, hBasis:base.frei.H}); }
   // obere Kante (Ausladung p), festes H: Fehler p nach innen
   { const map=injStuck(base.L, base.H0, {p}), r=await messen(G, ersetzen(A, map), W, {...o, H:base.H0}), cmp=ringVergleich(base.fest.ring, r.ring);
     rows.push({variante:'obere Kante (Ausladung p), festes H', p, erwartetAussenM:-p, gemessenAussenM:cmp && cmp.aussen, ...urteilBand(cmp && cmp.aussen, -p, [0.5, 1.5]), topologieGleich:cmp && cmp.topologieGleich, ecken:r.frei && r.frei.ecken, flaecheRatio:cmp && cmp.flaecheRatio,
@@ -265,9 +312,9 @@ export async function artB(G, A, W, o, base){
     rows.push({delta, wand:wand.ids, nErfassungenWand:auswahl.size, kontrolle:{name:'Delta ohne Leiste gegen Original', dy, topologieGleich:cK && cK.topologieGleich, eckeMedM:cK && cK.eckeMed, kanteMedM:cK && cK.kanteMed, flaecheRatio:cK && cK.flaecheRatio}});
     // sCm 0,1 = Rauschboden: schon eine Leiste von 1 mm zeigt, wie stabil die Topologie des Basislaufs unter einer Mini-Stoerung ist
     for(const sc of [0.1, ...o.sCm]){ const s=sc/100, map=injStuck(base.L, base.H0, {s, dy}, auswahl), sp=selbstpruefung(base.L, map, base.H0, {s, dy, auswahl}),
-        r=await messen(G, ersetzen(A, map), W, {...o, H:base.H0}), cmp=ringVergleich(kontrolle.ring, r.ring), v=wandK(r), erw=erwartungVersatz(base.L, base.H0, s, dy, auswahl);
-      rows.push({delta, sCm:sc, wand:wand.ids, selbstpruefungMaxFehlerM:sp.maxFehler, erwartetM:erw.versatz, abstandM:erw.abstand, deltaMed:erw.delta, gemessenM:v && v.median, p10:v && v.p10, p90:v && v.p90,
-        ...urteilBand(v && v.median, erw.versatz, o.band.lokal), topologieGleich:cmp && cmp.topologieGleich, ecken:r.frei && r.frei.ecken, eckenBasis:kontrolle.frei && kontrolle.frei.ecken, eckeMaxM:cmp && cmp.eckeMax}); } }
+        r=await messen(G, ersetzen(A, map), W, {...o, H:base.H0}), cmp=ringVergleich(kontrolle.ring, r.ring), v=wandK(r), erw=erwartungVersatz(base.L, base.H0, s, dy, auswahl), erwE=erwartungHEff(base.L, map, kontrolle.H, r.H, auswahl);
+      rows.push({delta, sCm:sc, wand:wand.ids, selbstpruefungMaxFehlerM:sp.maxFehler, erwartetM:erw.versatz, erwartetHEffM:erwE, hKontrolle:kontrolle.H, hEff:r.H, abstandM:erw.abstand, deltaMed:erw.delta, gemessenM:v && v.median, p10:v && v.p10, p90:v && v.p90,
+        ...urteilBand(v && v.median, erw.versatz, o.band.lokal), verhaeltnisHEff:v ? v.median/erwE : NaN, zugeordnet:r.frei && r.frei.zugeordnet, iou:r.frei && r.frei.iou, topologieGleich:cmp && cmp.topologieGleich, ecken:r.frei && r.frei.ecken, eckenBasis:kontrolle.frei && kontrolle.frei.ecken, eckeMaxM:cmp && cmp.eckeMax}); } }
   return {art:'b', erwartung:'Wand um d*s/(Delta-s) nach hinten [P6 1.2]; Topologie bricht, sobald der Versatz die Nischentiefe (Flur 0,15-0,6 m) uebersteigt', wand:wand.ids, rows};
 }
 
@@ -285,11 +332,12 @@ export async function artA(G, A, o, name='A'){
 export function markdown(erg){
   const L=[`# Injektionstest (v${VERSION}) – Art ${erg.art}`, '', `Erwartung: ${erg.erwartung}`, ''];
   if(erg.fehler){ L.push('FEHLER '+erg.fehler); return L.join('\n'); }
-  if(erg.art==='null'){ L.push('| Fall | Strahlen bitgleich | Export bitgleich | Urteil |', '|---|---|---|---|'); for(const r of erg.rows) L.push(`| ${r.name} | ${r.strahlenBitgleich} | ${r.exportBitgleich} | ${r.urteil} |`); }
+  if(erg.art==='dsim'){ L.push('| Fall | Fehler gegen wahres H: Median [p10, p90] cm | Erwartung cm |', '|---|---|---|'); for(const r of erg.rows) L.push(`| ${r.name} | ${f1(r.medianCm)} [${f1(r.p10Cm)}, ${f1(r.p90Cm)}] | ${r.erwartungCm ?? '–'} |`); }
+  else if(erg.art==='null'){ L.push('| Fall | Strahlen bitgleich | Export bitgleich | Urteil |', '|---|---|---|---|'); for(const r of erg.rows) L.push(`| ${r.name} | ${r.strahlenBitgleich} | ${r.exportBitgleich} | ${r.urteil} |`); }
   else if(erg.art==='d'){ L.push('Zwei H-Schaetzer: Karte (M10, hC-hF) und alte Pipeline (G.solveSweepAuto, die der Seite/P7 zugrunde liegt).', '', '| sigma | Karte freies H: dH Median [p10, p90] cm | alt: dH Median [p10, p90] cm (Urteil) | Erwartung cm | Urteil Karte | festes H: Ecken-Fehler Median cm (Basis) | Wandhebel d*sigma/Delta cm | Topologie gleich fest / frei |', '|---|---|---|---|---|---|---|---|');
     for(const r of erg.rows) L.push(`| ${r.sigmaCm} cm | ${cm(r.freiesH.dHMedian)} [${cm(r.freiesH.dHp10)}, ${cm(r.freiesH.dHp90)}] | ${cm(r.altesH.dHMedian)} [${cm(r.altesH.dHp10)}, ${cm(r.altesH.dHp90)}] (${r.altesH.urteil}) | ${cm(r.freiesH.erwartung)} | ${r.freiesH.urteil} (${f2(r.freiesH.verhaeltnis)}x) | ${cm(r.festesH.eMedMedian)} (${cm(r.festesH.eMedBasis)}) | ${cm(r.festesH.wandHebelErwartungM)} | ${r.festesH.topologieGleich} / ${r.topologieFrei} |`); }
-  else if(erg.art==='e'){ L.push(`H0 ${erg.H0} m`, '', '| e | Einzelstrahl-Faktor (Erwartung) | Skizzenmassstab | Wirkfaktor (soll 0,6) | Urteil | Topologie gleich | Ecken | Ecken-Fehler cm |', '|---|---|---|---|---|---|---|---|');
-    for(const r of erg.rows) L.push(`| ${r.e>0 ? '+' : ''}${cm(r.e)} cm | ${f3(r.einzelstrahlFaktor)} (${f3(r.einzelstrahlErwartung)}) | ${f3(r.skizzenSkala)} | ${f2(r.wirkfaktor)} | ${r.urteil} | ${r.topologieGleich} | ${r.ecken} | ${cm(r.eMed)} |`); }
+  else if(erg.art==='e'){ L.push(`H0 ${erg.H0} m`, '', '| e | Einzelstrahl-Faktor (Erwartung) | Skizzenmassstab | Wirkfaktor (soll 0,6) | Wirkfaktor mit hEff | Urteil | Topologie gleich | Ecken (zugeordnet, IoU) | Ecken-Fehler cm |', '|---|---|---|---|---|---|---|---|---|');
+    for(const r of erg.rows) L.push(`| ${r.e>0 ? '+' : ''}${cm(r.e)} cm | ${f3(r.einzelstrahlFaktor)} (${f3(r.einzelstrahlErwartung)}) | ${f3(r.skizzenSkala)} | ${f2(r.wirkfaktor)} | ${f2(r.wirkfaktorHEff)} (hEff ${f3(r.hEff)} statt ${f3(r.hBasis+r.e)}) | ${r.urteil} | ${r.topologieGleich} | ${r.ecken} (${r.zugeordnet}, ${f2(r.iou)}) | ${cm(r.eMed)} |`); }
   else if(erg.art==='c'){ L.push('| Variante | Erwartung | gemessen | Urteil | Topologie gleich | weiteres |', '|---|---|---|---|---|---|');
     for(const r of erg.rows) L.push(`| ${r.variante} | ${r.erwartetDH!=null ? 'dH '+cm(r.erwartetDH)+' cm' : cm(r.erwartetAussenM)+' cm aussen'} | ${r.gemessenDH!=null ? 'dH '+cm(r.gemessenDH)+' cm; ' : ''}${cm(r.gemessenAussenM)} cm aussen | ${r.urteil} (${f2(r.verhaeltnis)}x) | ${r.topologieGleich} | Ecken ${r.ecken}, Flaeche x${f3(r.flaecheRatio)}${r.selbstpruefungMaxFehlerM!=null ? ', Selbstpruefung max '+cm(r.selbstpruefungMaxFehlerM)+' cm' : ''} |`); }
   else if(erg.art==='b'){ L.push(`Wand ${erg.wand}`, '', '| Delta | s | erwartet cm (d, Delta) | gemessen Median [p10, p90] cm | Urteil | Topologie gleich | Ecken (Kontrolle) | Selbstpruefung cm |', '|---|---|---|---|---|---|---|---|');
@@ -317,17 +365,18 @@ async function main(){
     const z=PS.zusammenfassung(R); console.log(`\nGesamt ${R.length} Fenster aus ${alle.length} Aufnahmen: Treffer ${z.treffer}, mittel ${z.mittel}, falsch ${z.falsch}, lose ${z.lose}, sonst ${z.sonst}; Lage Median ${cm(z.dPmed)} / p90 ${cm(z.dPp90)} cm; Gier Median ${f2(z.dPsiMed)} / p90 ${f2(z.dPsiP90)} Grad`);
     if(a.aus){ const d=resolve(a.aus); mkdirSync(d, {recursive:true}); writeFileSync(join(d, 'injektion-a-gesamt.json'), JSON.stringify({version:VERSION, optionen:o, aufnahmen:alle, gesamt:{fenster:R.length, ...z}}, (k, v)=>typeof v==='number' && !Number.isFinite(v) ? null : v, 1)); }
     return; }
+  if(art==='dsim'){ const {G}=await T1.ladeSeite({}), r=artDsim(G, optionen(a)); console.log(markdown(r)); return; }     // braucht weder Aufnahme noch Wahrheit
   const src=a._[1];
   if(!art || !src){ console.error('Aufruf: node raumskizze-injektion.mjs <null|d|e|c|b|a|alle> <aufnahme.tar> --protokoll p.json --wahrheit w.json [--H 2.416] [--aus ordner] ...'); process.exit(1); }
   const o=optionen(a), {G}=await T1.ladeSeite({}), A=T1.ladeQuelle(resolve(src), {protokoll:a.protokoll ? resolve(a.protokoll) : null});
   const wp=a.wahrheit ? resolve(a.wahrheit) : T2.WAHRHEIT, W=T2.wahrheitLaden(wp);
-  const arten=art==='alle' ? ['null', 'd', 'e', 'c', 'b', ...(a['mit-a'] ? ['a'] : [])] : [art], erg=[];
-  let base=null; const brauchtBasis=arten.some(x=>x!=='a');
+  const arten=art==='alle' ? ['null', 'dsim', 'd', 'e', 'c', 'b', ...(a['mit-a'] ? ['a'] : [])] : [art], erg=[];
+  let base=null; const brauchtBasis=arten.some(x=>x!=='a' && x!=='dsim');
   if(brauchtBasis){ base=await ausgang(G, A, W, o);
     console.log(`Basis: ${base.n} Erfassungen, H0 ${base.H0} m (fest), Delta Median ${f2(base.deltaMed)} m, Wandabstand Median ${f2(base.abstandMed)} m · frei: ${JSON.stringify(kurz(base.frei))} · fest: ${JSON.stringify(kurz(base.fest))}`); }
   for(const x of arten){ const t0=performance.now();
     const r=x==='null' ? await artNull(G, A, W, o, base) : x==='d' ? await artD(G, A, W, o, base) : x==='e' ? await artE(G, A, W, o, base) : x==='c' ? await artC(G, A, W, o, base)
-      : x==='b' ? await artB(G, A, W, o, base) : x==='a' ? await artA(G, A, o, a.name || 'A') : (()=>{ throw new Error('Art '+x); })();
+      : x==='dsim' ? artDsim(G, o) : x==='b' ? await artB(G, A, W, o, base) : x==='a' ? await artA(G, A, o, a.name || 'A') : (()=>{ throw new Error('Art '+x); })();
     r.sekunden=Math.round((performance.now()-t0)/100)/10; erg.push(r); console.log('\n'+markdown(r)); }
   if(a.aus){ const d=resolve(a.aus); mkdirSync(d, {recursive:true});
     writeFileSync(join(d, `injektion-${art}.json`), JSON.stringify({version:VERSION, quelle:src, optionen:o, basis:base ? {n:base.n, H0:base.H0, deltaMed:base.deltaMed, abstandMed:base.abstandMed, frei:kurz(base.frei), fest:kurz(base.fest)} : null, ergebnisse:erg}, (k, v)=>typeof v==='number' && !Number.isFinite(v) ? null : v, 1));
