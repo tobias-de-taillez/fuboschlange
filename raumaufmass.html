@@ -311,6 +311,7 @@
   .wrow .wn{font-size:12px;color:var(--muted)}
   .wrow .wn.sus{color:var(--bad);font-weight:600}
   .wrow .wn.todo{color:var(--todo)}
+  .wrow .wdev{opacity:.75;font-variant-numeric:tabular-nums}
   .wrow .wlen{text-align:right}
   .wrow .wlen.approx{color:var(--muted)}
   .wrow.worst{background:var(--bad-bg)}
@@ -11301,8 +11302,26 @@ function renderPanel(){
       if(!byPair.has(k)) byPair.set(k,{a:m.a,b:m.b,n:0,sus:false,unchecked:true});
       byPair.get(k).off=(byPair.get(k).off||0)+1;
     });
+    // Leise Rangliste: wo hat der Ausgleich am meisten nachgebessert? |v| in
+    // mm je Wand (Maximum ueber Wiederholungen), gereiht nach |v|/sigma, nur
+    // die drei groessten ab 1 mm. Exakte und ungepruefte Masse haben kein
+    // aussagekraeftiges v, verdaechtige sind schon rot - beide bleiben aussen vor.
+    const devTop=new Map();
+    if(M.an && M.an.v){
+      const dev=new Map();
+      act.forEach((m,i)=>{
+        if(m.fix || M.an.w[i]==null || suspects.has(i)) return;
+        const v=Math.abs(M.an.v[i]), k=wk(m.a,m.b), r=v/(m.sigma>0?m.sigma:C.SIGMA_DEF);
+        const d=dev.get(k);
+        if(!d || r>d.r) dev.set(k,{v,r});
+      });
+      [...dev.entries()].filter(([,d])=>d.v>=1).sort((x,y)=>y[1].r-x[1].r)
+        .slice(0,3).forEach(([k,d])=>devTop.set(k,d.v));
+    }
     const rowHtml=(a2,b2)=>{
       const e=byPair.get(wk(a2,b2));
+      const dv=devTop.get(wk(a2,b2));
+      const devHtml=dv==null ? '' : `<span class="wdev" title="Der Ausgleich weicht hier ${Math.round(dv)} mm vom gemessenen Wert ab \u2013 eine der größten Abweichungen im Raum">\u0394 ${Math.round(dv)} mm</span>`;
       const len=(M.fit && I[a2]!=null && I[b2]!=null)
         ? (ungefaehr && !(e&&e.n) ? '≈ ' : '')+fmtLenU(C.dist(P[I[a2]],P[I[b2]])) : '\u2014';
       // Nur Ausnahmen bekommen ein Wort: verdaechtig (rot) und ohne Mass.
@@ -11312,7 +11331,7 @@ function renderPanel(){
       const note = e&&e.sus ? '<span class="wn sus">verd\u00e4chtig</span>'
         : !cnt ? `<span class="wn todo">ohne Ma\u00df${e&&e.off?' \u00b7 '+e.off+' aus':''}</span>`
         : e&&e.fix ? `<span class="wn">exakt${cnt>1?' \u00b7 '+cnt+'\u00d7':''}</span>`
-        : cnt>1 ? `<span class="wn">${cnt}\u00d7 gemessen</span>` : '<span class="wn"></span>';
+        : cnt>1 ? `<span class="wn">${cnt}\u00d7 gemessen${devHtml?' \u00b7 ':''}${devHtml}</span>` : `<span class="wn">${devHtml}</span>`;
       return `<div class="wrow${e&&e.sus?' worst':''}" data-a="${a2}" data-b="${b2}">`
         +`<span class="wk">${a2}\u2013${b2}</span>${note}`
         +`<span class="wlen${!cnt?' approx':''}">${len}</span></div>`;
@@ -11320,12 +11339,16 @@ function renderPanel(){
     const wallRows=M.walls.map(([a2,b2])=>rowHtml(a2,b2)).join('');
     const diags=[...byPair.values()].filter(e=>!wallSet.has(wk(e.a,e.b)));
     const diagRows=diags.map(e=>rowHtml(e.a,e.b)).join('');
+    // Eingeklappt saehe man die groessten Abweichungen unter den Diagonalen
+    // nicht - die Zusammenfassung verraet deshalb leise, dass dort eine liegt.
+    const diagDev=Math.max(0, ...diags.map(e=>devTop.get(wk(e.a,e.b))||0));
+    const diagDevHtml=diagDev ? ` <span class="wdev">\u00b7 \u0394 ${Math.round(diagDev)} mm</span>` : '';
     // Diagonalen sind Kontrollmasse: eingeklappt, ausser eine ist verdaechtig.
     const diagAuf = diagOpen || diags.some(e=>e.sus);
     const wl=$('wl');
     $('wlcount').textContent = M.walls.length ? `${M.walls.length} Wände` : '';
     wl.innerHTML = (wallRows||diagRows)
-      ? wallRows + (diagRows?`<details id="diagbox"${diagAuf?' open':''}><summary class="wgrp">Diagonalen <small>${diags.length}</small></summary>${diagRows}</details>`:'')
+      ? wallRows + (diagRows?`<details id="diagbox"${diagAuf?' open':''}><summary class="wgrp">Diagonalen <small>${diags.length}${diagDevHtml}</small></summary>${diagRows}</details>`:'')
       : '<span style="color:var(--muted);font-size:12px">Noch keine W\u00e4nde.</span>';
     const db=$('diagbox'); if(db) db.ontoggle=()=>{ diagOpen=db.open; };
     wl.querySelectorAll('.wrow').forEach(row=>{
