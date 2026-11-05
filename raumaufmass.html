@@ -3268,14 +3268,35 @@ function leverage(gs){
 // Welche Koordinate von P1: eine Drehung um P0 aendert P1.y mit der Rate
 // (P1.x - P0.x). Liegt P1 senkrecht ueber P0, fixiert P1.y die Drehung gar
 // nicht und das System bliebe singulaer.
-function gaugeFixed(pts){
+// Welcher Punkt P1 ist: der am weitesten entfernte, mit P0 direkt gemessene
+// Punkt. Fest pts[1] zu nehmen ging schief, sobald P1 dicht an P0 liegt
+// (Dusche: A-B = 4 mm). Die Drehung des ganzen Raums hing dann an einem
+// 4-mm-Hebel, 1 mm an B drehte D um eine Viertelelle, und LM kroch 30
+// Schritte lang, ohne anzukommen. Nur Messpartner, damit bei unterbestimmten
+// Netzen kein loser Punkt festgenagelt wird und die Moden kippen. Ohne meas
+// bleibt es bei pts[1].
+function gaugePartner(pts, meas){
+  if(!meas) return 1;
+  const p0=pts[0], I=idx(pts);
+  let best=1, bd=-1;
+  activeMeas(meas).forEach(m=>{
+    const o = m.a===p0.id ? m.b : m.b===p0.id ? m.a : null;
+    const j=o==null ? null : I[o];
+    if(j==null || j===0) return;
+    const d=dist(p0, pts[j]);
+    if(d>bd){ bd=d; best=j; }
+  });
+  return best;
+}
+function gaugeFixed(pts, meas){
   if(pts.length<2) return [];
-  const dx=Math.abs(pts[1].x-pts[0].x), dy=Math.abs(pts[1].y-pts[0].y);
-  return [0, 1, dx>=dy ? 3 : 2];
+  const j=gaugePartner(pts, meas);
+  const dx=Math.abs(pts[j].x-pts[0].x), dy=Math.abs(pts[j].y-pts[0].y);
+  return [0, 1, dx>=dy ? 2*j+1 : 2*j];
 }
 
-function freeCols(pts){
-  const fx=new Set(gaugeFixed(pts)), out=[];
+function freeCols(pts, meas){
+  const fx=new Set(gaugeFixed(pts, meas)), out=[];
   for(let c=0;c<2*pts.length;c++) if(!fx.has(c)) out.push(c);
   return out;
 }
@@ -3298,7 +3319,7 @@ function scaleSketch(pts, meas){
 // genau dort, wo die Skizze sie hatte. Das ist gewollt.
 function solve(pts0, meas){
   let pts=scaleSketch(pts0, meas);
-  const free=freeCols(pts), nf=free.length, act=activeMeas(meas);
+  const free=freeCols(pts, meas), nf=free.length, act=activeMeas(meas);
   if(!nf || !act.length) return {pts, iters:0, converged:true};
   const cost=P=>residuals(P,meas).reduce((s,r)=>s+r*r,0);
   let lambda=1e-3, c0=cost(pts), it=0, converged=false;
@@ -3328,7 +3349,7 @@ function solve(pts0, meas){
 // (= welche Punkte noch wackeln) und Hebelwerte (= welche Messung pruefbar ist).
 function analyze(pts, meas){
   const act=activeMeas(meas), m=act.length, n=pts.length;
-  const free=freeCols(pts), nf=free.length;
+  const free=freeCols(pts, meas), nf=free.length;
   const Jfull=jacobian(pts,meas);
   const J=Jfull.map(r=>free.map(c=>r[c]));
   const gs=gramSchmidt(J, TOL_RANK);
@@ -14161,6 +14182,24 @@ globalThis.selfChecks=function(){
     chk('solve: Eingabe unveraendert', sketch[1].x===40);
   }
   {
+    // Echte Dusche vom 5.11.2026: A-B ist ein 4-mm-Versatz. Mit P1=pts[1]
+    // hing die Drehung des Raums an diesem Hebel, LM kroch 30 Schritte und
+    // meldete "nicht konvergiert" - bei einwandfreien Daten (sigma ~4 mm).
+    const P={A:[1522.9,2062.3],B:[1519.0,2060.5],C:[2664.8,2054.7],D:[2636.7,878.6],E:[2000.0,896.2],
+      F:[1765.8,1298.5],G:[971.8,1305.1],H:[806.7,1665.7],I:[1347.1,2061.9],J:[1783.5,1405.5],
+      K:[1932.6,1396.1],L:[1936.3,1544.7],M:[1786.6,1555.6]};
+    const pts=Object.entries(P).map(([id,[x,y]])=>({id,x,y}));
+    const meas=('JK150 KL150 LM150 MJ150 CD1176 DE638 FG792 GH398 HI671 IA177 AB1 BC1142 CE1331 '
+      +'LD968 LC890 LB665 AL665 GC1857 EJ553 JD1004 HJ1013 AF799 HL1135 CK987 CI1316 CF1175 '
+      +'FH1023 GB928 IF866 FD960 EF460 IG845 AK782 MD1090 MC1010 AD1623 BD1623 BE1257 AE1257 '
+      +'ID1755 ME696 KE509 KH1159 ME700 MD1088 BE1260 MB578 AM578').split(' ')
+      .map(s=>({a:s[0], b:s[1], d:+s.slice(2), sigma:5}));
+    chk('gauge: P1 ist der fernste Messpartner von P0 (D, nicht B)',
+       C.gaugeFixed(pts, meas)[2]>>1===C.idx(pts)['D']);
+    const r=C.solve(pts, meas);
+    chk('solve: Dusche mit 4-mm-Wand konvergiert', r.converged, r.iters);
+  }
+  {
     // Unterbestimmt: 4 Punkte, nur 2 Messungen. Muss zeichenbar bleiben.
     const sketch=[{id:'A',x:0,y:0},{id:'B',x:100,y:0},{id:'C',x:100,y:80},{id:'D',x:0,y:80}];
     const r=C.solve(sketch,[{a:'A',b:'B',d:4000},{a:'B',b:'C',d:3000}]);
@@ -14197,7 +14236,7 @@ globalThis.selfChecks=function(){
     // die Form-Checks unten waeren sonst kein Test, sondern nur Dekoration.
     chk('analyze: genau ein Mode-Vektor, Laenge 2n',
        an.modes.length===1 && an.modes.every(z=>z.length===n2));
-    const fixed=C.gaugeFixed(rect);
+    const fixed=C.gaugeFixed(rect, seiten);
     chk('analyze: Mode-Vektor ist 0 an den gepinnten Spalten',
        an.modes.every(z=>fixed.every(c=>z[c]===0)));
     const J=C.jacobian(rect,seiten);
