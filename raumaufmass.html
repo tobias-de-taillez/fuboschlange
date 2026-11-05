@@ -3167,9 +3167,13 @@ const activeMeas=meas=>meas.filter(m=>m.on!==false);
 // Dieselbe Groessenordnung wie ORTHO_WT, mit der LM hier nachweislich
 // konvergiert; 1e6 o. ae. ruiniert die Kondition.
 const FIX_WT=40;
-// wt: Gewicht fuer Hilfsstrecken (rechte Winkel, siehe orthoFit). fix: vom
-// Nutzer als exakt festgelegt. Sonst zaehlt jede Messung mit 1.
-const rowWt=m=>m.wt || (m.fix ? FIX_WT : 1);
+// Gewicht einer Zeile, normiert auf SIGMA_DEF: eine Lasermessung (5 mm)
+// zaehlt 1, eine Laufmessung (IMU, 200 mm) 1/40. Frueher ignorierte solve
+// sigma ganz - die Laufmessung zog so stark an der Form wie der Laser.
+// wt: Hilfsstrecken (rechte Winkel, siehe orthoFit) bringen ihr Gewicht
+// selbst mit. fix: vom Nutzer als exakt festgelegt, sigma/FIX_WT.
+const sigOf=m=>(Number.isFinite(m.sigma) && m.sigma>0) ? m.sigma : SIGMA_DEF;
+const rowWt=m=>m.wt || SIGMA_DEF/sigOf(m)*(m.fix ? FIX_WT : 1);
 
 // Festgelegte Winkel {a, c, b, deg}: der Winkel an Ecke c zwischen c-a und
 // c-b, ungerichtet 0..180 Grad (eine einspringende 270-Grad-Ecke ist also
@@ -14554,10 +14558,34 @@ globalThis.selfChecks=function(){
     const voll=[{a:'A',b:'B',d:4000},{a:'B',b:'C',d:3000},{a:'C',b:'D',d:4000},
                 {a:'D',b:'A',d:3010},{a:'A',b:'C',d:5000},{a:'B',b:'D',d:5000}];
     const sigma5=voll.map(m=>({...m, sigma:5}));
-    const sigma10=sigma5.map((m,i)=>i===3 ? {...m, sigma:10} : m);
+    // sigma geht seit der Gewichtung auch in die Hutmatrix ein: eine EINZELNE
+    // Messung mit doppeltem sigma verschiebt die Redundanzanteile, w halbiert
+    // sich dann nicht mehr glatt. Wohl aber, wenn ALLE sigma doppelt sind -
+    // dann bleibt die Geometrie gleich und nur der Massstab der Erwartung waechst.
+    const sigma10=sigma5.map(m=>({...m, sigma:10}));
     const w5=C.analyze(rect,sigma5).w, w10=C.analyze(rect,sigma10).w;
-    chk('analyze: sigma der Messung verdoppelt -> w dieser Messung halbiert',
-       near(w10[3], w5[3]/2, 1e-9));
+    chk('analyze: alle sigma verdoppelt -> jedes w halbiert',
+       w5.every((x,i)=>near(w10[i], x/2, 1e-9)));
+    const einzeln=sigma5.map((m,i)=>i===3 ? {...m, sigma:10} : m);
+    const an1=C.analyze(rect,einzeln), an0=C.analyze(rect,sigma5);
+    chk('analyze: groesseres sigma -> groesserer Redundanzanteil dieser Messung',
+       an1.red[3]>an0.red[3], an1.red[3]+' vs '+an0.red[3]);
+  }
+  // --- solve: sigma gewichtet (Laufmessung gegen Laser) ---
+  {
+    // Rechteck vollstaendig mit dem Laser gemessen, dazu eine Laufmessung
+    // (sigma 200) der Diagonale, 150 mm daneben. Vorher zog sie so stark wie
+    // ein Laserwert und verbog die Form um Dutzende Millimeter.
+    const rect=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:3000},{id:'D',x:0,y:3000}];
+    const laser=[{a:'A',b:'B',d:4000},{a:'B',b:'C',d:3000},{a:'C',b:'D',d:4000},
+                 {a:'D',b:'A',d:3000},{a:'A',b:'C',d:5000}].map(m=>({...m, sigma:5}));
+    const lauf={a:'B',b:'D',d:5150,sigma:200};
+    const r=C.solve(rect, laser.concat([lauf])), I=C.idx(r.pts);
+    const bd=C.dist(r.pts[I.B],r.pts[I.D]);
+    chk('solve: Laufmessung (sigma 200) verbiegt den Laser-Grundriss kaum', Math.abs(bd-5000)<1, bd);
+    const an=C.analyze(r.pts, laser.concat([lauf]));
+    chk('solve: Laufmessung traegt ihr Residuum selbst, ohne Ausreisser zu sein',
+       near(an.v[5],-150,2) && an.w[5]<1, an.v[5]+' / w '+an.w[5]);
   }
   // --- analyze: der Luegner-Fall (Spec-Test 3) ---
   {
