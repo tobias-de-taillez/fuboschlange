@@ -7166,9 +7166,10 @@ const netFails=()=>{
 
 // Festgelegte Werte, die der Ausgleich NICHT einhalten kann: zwei davon
 // widersprechen sich, oder alle uebrigen Maesse ziehen gemeinsam dagegen.
-// Grenzen: 1 mm bzw. 0,2 Grad - darunter ist "exakt" im Rahmen dessen, was
-// FIX_WT ueberhaupt verspricht.
-const FIX_TOL_MM=1, FIX_TOL_DEG=0.2;
+// Grenze 1 mm, auch fuer Winkel: als Versatz quer zum kuerzeren Schenkel.
+// Eine Gradgrenze meldete an der 4-mm-Stufe der Dusche einen Widerspruch fuer
+// 0,15 Grad - das sind dort 0,01 mm. Am Meterschenkel sind 1 mm 0,06 Grad.
+const FIX_TOL_MM=1;
 function fixVerletzt(){
   if(!M.an || !M.fit) return [];
   const out=[], act=C.activeMeas(M.meas), P=M.fit.pts;
@@ -7181,9 +7182,11 @@ function fixVerletzt(){
   } });
   paar.forEach((v,k)=>{ const [a,b]=k.split('|');
     out.push({txt:`${a}–${b} um ${v.toFixed(1).replace('.',',')} mm`, a, b}); });
+  const I=C.idx(P);
   C.angleRows(P, M.angs).forEach(g=>{
     const ist=C.angleDeg(P, g);
-    if(Math.abs(ist-g.deg)>FIX_TOL_DEG)
+    const leg=Math.min(C.dist(P[I[g.a]],P[I[g.c]]), C.dist(P[I[g.b]],P[I[g.c]]));
+    if(Math.abs(ist-g.deg)*Math.PI/180*leg>FIX_TOL_MM)
       out.push({txt:`Winkel ${g.c} ${fmtGrad(ist)}° statt ${fmtGrad(g.deg)}°`, c:g.c});
   });
   return out;
@@ -7632,6 +7635,12 @@ function recompute(){
   // gleich neu gebaut - ihr mouseleave feuert dann nie. Nur die offene
   // Masseingabe haelt ihr Highlight selbst (enterMeasurement setzt es neu).
   if(!entryPair) M.highlight=null;
+  // Ein festgelegter Winkel gehoert zu einer Ecke aus genau zwei Waenden.
+  // Kommt eine dritte Wand dazu, faellt eine weg oder wird die Wand geteilt,
+  // gilt er nicht mehr - und liesse sich im Ecken-Popup auch nicht mehr
+  // loesen. Undo bringt ihn zusammen mit der Wand zurueck (ein Snapshot).
+  M.angs=M.angs.filter(g=>{ const k=cornerOf(g.c);
+    return k && ((k.a===g.a&&k.b===g.b) || (k.a===g.b&&k.b===g.a)); });
   if(M.pts.length>=2 && C.activeMeas(M.meas).length){
     if(M.ortho && M.walls.length){
       const r=C.orthoFit(M.pts, M.walls, M.meas, ORTHO_TOL, M.angs);
@@ -11103,7 +11112,7 @@ function statusText(){
     let wi=-1, wv=0;
     M.an.v.forEach((vi,i)=>{ if(!act[i].fix && Math.abs(vi)>wv){ wv=Math.abs(vi); wi=i; } });
     return [wi>=0 && wv>=1
-      ? `Ausgleich kommt nicht zur Ruhe. Am weitesten daneben liegt ${act[wi].a}–${act[wi].b} (${wv.toFixed(0)} mm): nachmessen oder kurz ausschalten.`
+      ? `Ausgleich kommt nicht zur Ruhe. Am weitesten daneben liegt ${act[wi].a}–${act[wi].b} (${wv.toFixed(0)} mm): nachmessen oder den Wert löschen.`
       : 'Ausgleich kommt nicht zur Ruhe. Das Ergebnis ist nicht belastbar.','bad'];
   }
   const verl=fixVerletzt();
