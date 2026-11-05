@@ -11306,18 +11306,26 @@ function renderPanel(){
     // mm je Wand (Maximum ueber Wiederholungen), gereiht nach |v|/sigma, nur
     // die drei groessten ab 1 mm. Exakte und ungepruefte Masse haben kein
     // aussagekraeftiges v, verdaechtige sind schon rot - beide bleiben aussen vor.
-    const devTop=new Map();
+    // Dieselbe Groesse ordnet die Liste: verdaechtige zuerst, dann nach
+    // |v|/sigma absteigend, unpruefbare, exakte und ungemessene ans Ende
+    // (dort in Wandreihenfolge, die Sortierung ist stabil).
+    const dev=new Map(), devTop=new Map();
     if(M.an && M.an.v){
-      const dev=new Map();
       act.forEach((m,i)=>{
-        if(m.fix || M.an.w[i]==null || suspects.has(i)) return;
+        if(m.fix || M.an.w[i]==null) return;
         const v=Math.abs(M.an.v[i]), k=wk(m.a,m.b), r=v/(m.sigma>0?m.sigma:C.SIGMA_DEF);
         const d=dev.get(k);
         if(!d || r>d.r) dev.set(k,{v,r});
       });
-      [...dev.entries()].filter(([,d])=>d.v>=1).sort((x,y)=>y[1].r-x[1].r)
+      [...dev.entries()].filter(([k,d])=>d.v>=1 && !(byPair.get(k)||{}).sus)
+        .sort((x,y)=>y[1].r-x[1].r)
         .slice(0,3).forEach(([k,d])=>devTop.set(k,d.v));
     }
+    const rang=(a2,b2)=>{
+      const k=wk(a2,b2), e=byPair.get(k), d=dev.get(k);
+      return e&&e.sus ? Infinity : d ? d.r : -1;
+    };
+    const nachRang=(x,y)=>rang(y[0],y[1])-rang(x[0],x[1]) || 0;
     const rowHtml=(a2,b2)=>{
       const e=byPair.get(wk(a2,b2));
       const dv=devTop.get(wk(a2,b2));
@@ -11336,8 +11344,9 @@ function renderPanel(){
         +`<span class="wk">${a2}\u2013${b2}</span>${note}`
         +`<span class="wlen${!cnt?' approx':''}">${len}</span></div>`;
     };
-    const wallRows=M.walls.map(([a2,b2])=>rowHtml(a2,b2)).join('');
-    const diags=[...byPair.values()].filter(e=>!wallSet.has(wk(e.a,e.b)));
+    const wallRows=M.walls.map(w=>[w[0],w[1]]).sort(nachRang).map(([a2,b2])=>rowHtml(a2,b2)).join('');
+    const diags=[...byPair.values()].filter(e=>!wallSet.has(wk(e.a,e.b)))
+      .sort((x,y)=>nachRang([x.a,x.b],[y.a,y.b]));
     const diagRows=diags.map(e=>rowHtml(e.a,e.b)).join('');
     // Eingeklappt saehe man die groessten Abweichungen unter den Diagonalen
     // nicht - die Zusammenfassung verraet deshalb leise, dass dort eine liegt.
