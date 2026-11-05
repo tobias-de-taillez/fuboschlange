@@ -171,6 +171,15 @@
   #entryX,#wpopX{width:28px;padding:0;border:0;background:none;color:var(--muted)}
   #entryX:hover,#wpopX:hover{color:var(--ink);background:var(--hover)}
   #wpop{min-width:270px}
+  #cpop{min-width:230px}
+  #cpopHead{display:flex;align-items:baseline;gap:8px;margin-bottom:6px}
+  #cpopHead b{font-size:13px}
+  #cpopIst{color:var(--muted);font-size:12px;flex:1;font-variant-numeric:tabular-nums}
+  #cpopRow{display:flex;gap:6px;align-items:center}
+  #cpopVal{width:64px}
+  #cpopOk{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  #cpopX{width:28px;padding:0;border:0;background:none;color:var(--muted)}
+  #cpopHint{margin-top:6px;color:var(--muted);font-size:12px}
   #wpopHead{display:flex;align-items:baseline;gap:8px;margin-bottom:6px}
   #wpopHead b{font-size:13px}
   #wpopLen{color:var(--muted);font-size:12px;flex:1;font-variant-numeric:tabular-nums}
@@ -329,6 +338,8 @@
     box-shadow:0 6px 18px rgba(36,34,29,.16);pointer-events:none}
   .rowbtn{min-height:22px;padding:0 7px;font-size:12px}
   .rowbtn.del{border:0;background:none;color:var(--muted)}
+  .rowbtn.tog{display:inline-flex;align-items:center;gap:5px;border:0;background:none;color:var(--ink2)}
+  .rowbtn.tog[aria-pressed=true]{color:var(--accent);font-weight:600}
   .rowbtn.del:hover{color:var(--bad);background:var(--bad-bg)}
 
   /* Wände-Modus: Panel zeigt die Wand und ihre Oeffnungen. */
@@ -580,6 +591,16 @@
             <span id="imuMsg"></span>
           </div>
           <div id="wpopThick"></div>
+        </div>
+        <div id="cpop" class="popover" hidden>
+          <div id="cpopHead"><b id="cpopTitle"></b><span id="cpopIst"></span><button id="cpopX" aria-label="Schließen" title="Schließen (Esc)">✕</button></div>
+          <div id="cpopRow">
+            <span>Winkel</span>
+            <input id="cpopVal" inputmode="decimal" autocomplete="off" enterkeyhint="done"><span>°</span>
+            <button id="cpopOk">festlegen</button>
+            <button id="cpopFree" class="rowbtn" hidden>lösen</button>
+          </div>
+          <div id="cpopHint"></div>
         </div>
       </div>
       <footer id="statusbar">
@@ -3141,25 +3162,73 @@ const dist=(p,q)=>Math.hypot(p.x-q.x, p.y-q.y);
 const idx=pts=>{ const m={}; pts.forEach((p,i)=>m[p.id]=i); return m; };
 const activeMeas=meas=>meas.filter(m=>m.on!==false);
 
-function residuals(pts, meas){
+// Festgelegt ("exakt"): der Nutzer ist sich sicher. Statt einer harten
+// Nebenbedingung ein starkes Gewicht - sigma/FIX_WT = 0,125 mm bei 5 mm.
+// Dieselbe Groessenordnung wie ORTHO_WT, mit der LM hier nachweislich
+// konvergiert; 1e6 o. ae. ruiniert die Kondition.
+const FIX_WT=40;
+// wt: Gewicht fuer Hilfsstrecken (rechte Winkel, siehe orthoFit). fix: vom
+// Nutzer als exakt festgelegt. Sonst zaehlt jede Messung mit 1.
+const rowWt=m=>m.wt || (m.fix ? FIX_WT : 1);
+
+// Festgelegte Winkel {a, c, b, deg}: der Winkel an Ecke c zwischen c-a und
+// c-b, ungerichtet 0..180 Grad (eine einspringende 270-Grad-Ecke ist also
+// ebenfalls "90"). Getrennt von meas gefuehrt - alles, was meas liest,
+// erwartet eine Strecke a-b-d. Zeilen mit fehlendem Punkt fallen weg.
+function angleRows(pts, angs){
   const I=idx(pts);
-  // wt: Gewicht fuer Hilfsstrecken (rechte Winkel, siehe orthoFit). Echte
-  // Messungen tragen keins und zaehlen wie immer mit 1.
-  return activeMeas(meas).map(m=>(dist(pts[I[m.a]], pts[I[m.b]]) - m.d)*(m.wt||1));
+  return (angs||[]).filter(g=>g.on!==false && I[g.a]!=null && I[g.b]!=null && I[g.c]!=null);
+}
+// Residuum in Millimetern: Winkelfehler (rad) mal kuerzerem Schenkel - so
+// viel verschiebt der Winkelfehler den naeheren Nachbarpunkt quer. Damit
+// steht die Zeile auf derselben Skala wie eine Strecke und das Gewicht
+// FIX_WT bedeutet dasselbe.
+function angleGeom(pts, I, g){
+  const A=pts[I[g.a]], Cc=pts[I[g.c]], B=pts[I[g.b]];
+  const ux=A.x-Cc.x, uy=A.y-Cc.y, vx=B.x-Cc.x, vy=B.y-Cc.y;
+  const lu2=ux*ux+uy*uy||1e-9, lv2=vx*vx+vy*vy||1e-9;
+  const phi=Math.atan2(ux*vy-uy*vx, ux*vx+uy*vy);
+  const s=Math.min(Math.sqrt(lu2), Math.sqrt(lv2))*FIX_WT;
+  return {ux,uy,vx,vy,lu2,lv2,phi,s};
+}
+function angleRes(pts, I, g){
+  const G=angleGeom(pts, I, g);
+  return (Math.abs(G.phi)-g.deg*Math.PI/180)*G.s;
+}
+const angleDeg=(pts, g)=>Math.abs(angleGeom(pts, idx(pts), g).phi)*180/Math.PI;
+
+function residuals(pts, meas, angs){
+  const I=idx(pts);
+  const r=activeMeas(meas).map(m=>(dist(pts[I[m.a]], pts[I[m.b]]) - m.d)*rowWt(m));
+  angleRows(pts, angs).forEach(g=>r.push(angleRes(pts, I, g)));
+  return r;
 }
 
 // Zeile je Messung: d|xa-xb|/dxa = +u, d/dxb = -u, alles andere 0.
-function jacobian(pts, meas){
+// Winkel phi = arg(v) - arg(u), u=A-C, v=B-C: dphi/dA = (uy,-ux)/|u|^2,
+// dphi/dB = (-vy,vx)/|v|^2, dphi/dC = -(Summe). Fuer |phi| mal Vorzeichen.
+// Der Schenkelfaktor s gilt als konstant - am Ziel ist der Winkelfehler 0,
+// seine Ableitung faellt dort also weg.
+function jacobian(pts, meas, angs){
   const I=idx(pts), n=pts.length;
-  return activeMeas(meas).map(m=>{
+  const rows=activeMeas(meas).map(m=>{
     const a=I[m.a], b=I[m.b], pa=pts[a], pb=pts[b];
     const L=dist(pa,pb)||1e-9;   // ponytail: zwei deckungsgleiche Punkte sind
                                  // Eingabefehler, nicht Mathematik - nur kein NaN
     const ux=(pa.x-pb.x)/L, uy=(pa.y-pb.y)/L;
-    const row=new Array(2*n).fill(0), w=m.wt||1;
+    const row=new Array(2*n).fill(0), w=rowWt(m);
     row[2*a]=ux*w; row[2*a+1]=uy*w; row[2*b]=-ux*w; row[2*b+1]=-uy*w;
     return row;
   });
+  angleRows(pts, angs).forEach(g=>{
+    const G=angleGeom(pts, I, g), sg=(G.phi>=0?1:-1)*G.s;
+    const ax=G.uy/G.lu2*sg, ay=-G.ux/G.lu2*sg, bx=-G.vy/G.lv2*sg, by=G.vx/G.lv2*sg;
+    const row=new Array(2*n).fill(0), a=I[g.a], b=I[g.b], c=I[g.c];
+    row[2*a]+=ax; row[2*a+1]+=ay; row[2*b]+=bx; row[2*b+1]+=by;
+    row[2*c]-=ax+bx; row[2*c+1]-=ay+by;
+    rows.push(row);
+  });
+  return rows;
 }
 
 // Gauss-Jordan mit Spaltenpivotierung, mehrere rechte Seiten.
@@ -3317,15 +3386,15 @@ function scaleSketch(pts, meas){
 // gestellt ist - sonst waere das Ergebnis systematisch zur Skizze hin verzogen.
 // Bei unterbestimmten Netzen bleibt sie stehen und haelt die freien Richtungen
 // genau dort, wo die Skizze sie hatte. Das ist gewollt.
-function solve(pts0, meas){
+function solve(pts0, meas, angs){
   let pts=scaleSketch(pts0, meas);
   const free=freeCols(pts, meas), nf=free.length, act=activeMeas(meas);
-  if(!nf || !act.length) return {pts, iters:0, converged:true};
-  const cost=P=>residuals(P,meas).reduce((s,r)=>s+r*r,0);
+  if(!nf || !(act.length+angleRows(pts, angs).length)) return {pts, iters:0, converged:true};
+  const cost=P=>residuals(P,meas,angs).reduce((s,r)=>s+r*r,0);
   let lambda=1e-3, c0=cost(pts), it=0, converged=false;
   for(; it<30; it++){
-    const J=jacobian(pts,meas).map(r=>free.map(c=>r[c]));
-    const v=residuals(pts,meas);
+    const J=jacobian(pts,meas,angs).map(r=>free.map(c=>r[c]));
+    const v=residuals(pts,meas,angs);
     const N=matTmat(J), g=matTvec(J,v);
     let stepNorm=0, ok=false;
     for(let tries=0; tries<8 && !ok; tries++){
@@ -3347,27 +3416,39 @@ function solve(pts0, meas){
 
 // Eine Zerlegung, drei Antworten: Rang (= fehlende Messungen), Nullraum
 // (= welche Punkte noch wackeln) und Hebelwerte (= welche Messung pruefbar ist).
-function analyze(pts, meas){
+// angs: festgelegte Winkel. Sie zaehlen fuer Rang, Freiheitsgrade und Moden
+// mit (ein fester 90-Grad-Winkel ERSETZT eine Messung), die Arrays h, red,
+// v, w gelten aber nur fuer die m echten Messungen - deren Indizes laufen
+// ueberall im UI ueber activeMeas(meas). Die Winkelzeilen haengen hinten an,
+// ihre Residuen (gewichtet, mm) stehen in vc.
+// v ist ungewichtet in mm. Festgelegte Messungen bekommen w=null: wer
+// "exakt" sagt, will nicht hoeren, dass genau dieser Wert verdaechtig sei -
+// der Widerspruch landet bei den uebrigen.
+function analyze(pts, meas, angs){
   const act=activeMeas(meas), m=act.length, n=pts.length;
+  const mc=angleRows(pts, angs).length;
   const free=freeCols(pts, meas), nf=free.length;
-  const Jfull=jacobian(pts,meas);
+  const Jfull=jacobian(pts,meas,angs);
   const J=Jfull.map(r=>free.map(c=>r[c]));
   const gs=gramSchmidt(J, TOL_RANK);
   // Ohne aktive Messungen hat J null Zeilen - gramSchmidt kennt dann die Spalten-
   // zahl nicht und setzt k=0 statt nf (siehe dort). analyze kennt nf aber genau:
   // ohne jede Messung ist jede freie Koordinate ein Flex-Mode, der Nullraum also
   // die volle freie Dimension, nicht leer.
-  if(m===0) gs.k=nf;
+  if(m+mc===0) gs.k=nf;
   const rank=gs.rank;
   const dof=Math.max(0, nf-rank);
-  const redundancy=m-rank;
-  const h=leverage(gs);
+  const redundancy=m+mc-rank;
+  const hAll=leverage(gs);
+  const h=hAll.slice(0,m);
   const red=h.map(x=>Math.max(0, 1-x));
-  const v=residuals(pts,meas);
+  const vw=residuals(pts,meas,angs);
+  const v=act.map((mm,i)=>vw[i]/rowWt(mm));
+  const vc=vw.slice(m);
   const sigmaHat = redundancy>0
-    ? Math.sqrt(v.reduce((s,r)=>s+r*r,0)/redundancy)
+    ? Math.sqrt(vw.reduce((s,r)=>s+r*r,0)/redundancy)
     : null;
-  const w=act.map((mm,i)=> red[i]<TOL_RED
+  const w=act.map((mm,i)=> (mm.fix || red[i]<TOL_RED)
     ? null
     : Math.abs(v[i])/((mm.sigma??SIGMA_DEF)*Math.sqrt(red[i])));
   // Moden liegen in den freien Koordinaten - auf die vollen 2n aufblasen.
@@ -3377,7 +3458,7 @@ function analyze(pts, meas){
     free.forEach((c,i)=>f[c]=z[i]);
     return f;
   });
-  return {rank, dof, redundancy, h, red, v, w, sigmaHat, modes, free, n, m};
+  return {rank, dof, redundancy, h, red, v, vc, w, sigmaHat, modes, free, n, m};
 }
 
 // Die drei Starrbewegungen, Drehung um den Schwerpunkt (haelt sie unabhaengig
@@ -3406,7 +3487,7 @@ function trivialModes(pts){
 // X ist die gesuchte Pseudoinverse. Wuerde stattdessen das gepinnte System
 // invertiert, waeren die Ellipsen an P0 genagelt und wuechsen mit dem Abstand
 // davon - ein Artefakt der Eichung, nicht der Messqualitaet.
-function covariance(pts, meas, sigmaHat){
+function covariance(pts, meas, sigmaHat, angs){
   const n=pts.length, k=2*n;
   if(n<3) return null;
   const G=trivialModes(pts);
@@ -3416,7 +3497,7 @@ function covariance(pts, meas, sigmaHat){
   // waere darauf ein Zugriff auf undefined[j] - ausgerechnet im unterbestimmtesten
   // Fall, den es gibt, statt der vertraglich vorgesehenen null-Antwort.
   if(!activeMeas(meas).length) return null;
-  const N=matTmat(jacobian(pts,meas));
+  const N=matTmat(jacobian(pts,meas,angs));
   const A=Array.from({length:k+3},()=>new Array(k+3).fill(0));
   for(let i=0;i<k;i++) for(let j=0;j<k;j++) A[i][j]=N[i][j];
   for(let i=0;i<k;i++) for(let g=0;g<3;g++){ A[i][k+g]=G[g][i]; A[k+g][i]=G[g][i]; }
@@ -3616,7 +3697,7 @@ function pairMeasurable(pts, walls, poly, a, b){
 // Messungen pruefbar macht. Jeder Vorschlag traegt in `why`, aus welcher Phase
 // er stammt - ohne das stuenden hier fuenf Eintraege, waehrend die Statuszeile
 // "3 Messungen fehlen" meldet.
-function suggest(pts, walls, meas){
+function suggest(pts, walls, meas, angs){
   const poly=wallPolygon(pts,walls), I=idx(pts);
   const have=new Set(activeMeas(meas).map(m=>pairKey(m.a,m.b)));
   const cand=[], repeats=[];
@@ -3634,7 +3715,7 @@ function suggest(pts, walls, meas){
   const taken=new Set();
   let checkPhase=0;
   for(let guard=0; guard<2*pts.length; guard++){
-    const an=analyze(pts, work);
+    const an=analyze(pts, work, angs);
     let best=null, bestScore=0, why='bestimmt', bestRepeat=false;
     if(an.dof>0){
       for(const c of cand){
@@ -3649,12 +3730,14 @@ function suggest(pts, walls, meas){
     } else {
       if(checkPhase>=SUGGEST_CHECK_MAX) break;
       why='pruefbar';
-      const unchecked=a=>a.w.filter(x=>x===null).length;
+      // Festgelegte Werte bleiben immer ungeprueft (w=null) - zaehlen sie
+      // mit, kommt base nie auf 0 und jeder Vorschlag wirkt noetig.
+      const unchecked=a=>a.w.filter((x,i)=>x===null && !work[i].fix).length;
       const base=unchecked(an);
       if(base===0) break;
       for(const c of cand.concat(repeats)){
         if(taken.has(pairKey(c.a,c.b))) continue;
-        const gain=base-unchecked(analyze(pts, work.concat([virt(c)])));
+        const gain=base-unchecked(analyze(pts, work.concat([virt(c)]), angs));
         if(gain>bestScore){ bestScore=gain; best=c; bestRepeat=repeats.includes(c); }
       }
       checkPhase++;
@@ -3678,8 +3761,8 @@ function suggest(pts, walls, meas){
 // sie gemessen ist. Die Schenkel aendern sich beim Ausgleich - deshalb die
 // Diagonale ein paar Mal aus der neuen Lage nachfuehren.
 const ORTHO_CHI2=3.84, ORTHO_WT=40, ORTHO_W=3.29;   // W = Baardas Grenze, wie BAARDA_W0 im UI
-function orthoFit(pts, walls, meas, tolDeg){
-  const fit0=solve(pts, meas);
+function orthoFit(pts, walls, meas, tolDeg, angs){
+  const fit0=solve(pts, meas, angs);
   const loops=wallLoops(fit0.pts, walls);
   if(!loops) return {fit:fit0, ortho:[], rejected:[]};
   const act=activeMeas(meas);
@@ -3689,11 +3772,14 @@ function orthoFit(pts, walls, meas, tolDeg){
     return Math.abs(Math.atan2(u.x*v.y-u.y*v.x, u.x*v.x+u.y*v.y))*180/Math.PI; };
   const pseudo=(P,list)=>{ const I=idx(P); return list.map(([a,c,b])=>({a, b, wt:ORTHO_WT,
     d:Math.hypot(dist(P[I[a]],P[I[c]]), dist(P[I[b]],P[I[c]]))})); };
-  const solveWith=list=>{ let f=fit0; for(let k=0;k<3;k++) f=solve(f.pts, meas.concat(pseudo(f.pts,list))); return f; };
+  const solveWith=list=>{ let f=fit0; for(let k=0;k<3;k++) f=solve(f.pts, meas.concat(pseudo(f.pts,list)), angs); return f; };
   const corners=[];
   loops.forEach(L=>L.forEach((p,i)=>corners.push([L[(i+L.length-1)%L.length].id, p.id, L[(i+1)%L.length].id])));
   const base=chi(fit0.pts), ortho=[], rejected=[];
+  // Ecken mit festgelegtem Winkel entscheidet der Nutzer, nicht die 90-Grad-Annahme.
+  const fest=new Set(angleRows(fit0.pts, angs).map(g=>g.c));
   corners.forEach(k=>{
+    if(fest.has(k[1])) return;
     const ang=angleAt(fit0.pts,k);
     if(Math.abs(ang-90)>tolDeg) return;
     const inc=chi(solveWith([k]).pts)-base;
@@ -3706,7 +3792,7 @@ function orthoFit(pts, walls, meas, tolDeg){
   // durch die rechten Winkel neu ueber die Ausreissergrenze rutschen - sonst
   // meldet die Tabelle eine verdaechtige Messung, die es ohne gar nicht gibt.
   const limit=k=>k+1.645*Math.sqrt(2*k);
-  const maxW=P=>{ const a=analyze(P, meas); return Math.max(0, ...a.w.map(Math.abs)); };
+  const maxW=P=>{ const a=analyze(P, meas, angs); return Math.max(0, ...a.w.map(Math.abs)); };
   const w0=Math.max(ORTHO_W, maxW(fit0.pts));
   while(ortho.length && (chi(fit.pts)-base>limit(ortho.length) || maxW(fit.pts)>w0+1e-9)){
     let worst=0, wInc=-1;
@@ -3738,7 +3824,7 @@ function dragAlongModes(pts, modes, i, dx, dy){
   });
 }
 
-globalThis.CORE={ TOL_RANK, TOL_RED, TOL_MODE, SIGMA_DEF, SUGGEST_CHECK_MAX,
+globalThis.CORE={ TOL_RANK, TOL_RED, TOL_MODE, SIGMA_DEF, SUGGEST_CHECK_MAX, FIX_WT, rowWt, angleRows, angleDeg,
                   dist, idx, activeMeas, residuals, jacobian, luSolve, matTmat, matTvec,
                   gramSchmidt, nullSpace, leverage, gaugeFixed, freeCols, scaleSketch, solve, analyze,
                   trivialModes, covariance, ellipse, segCross, ringSelfIntersects, wallCrossesExisting,
@@ -5933,6 +6019,8 @@ globalThis.narrowCandidates=function(meas, v, cap){
     // Wiederholung inkonsistent, haette der w-Test laengst isoliert -
     // ein drittes Mal messen bringt nichts Neues.
     if(count.get(k)>=2) return;
+    // Festgelegt: der Nutzer ist sich sicher, nachmessen schlaegt man ihm nicht vor.
+    if(m.fix) return;
     out.push({a:m.a, b:m.b, av:Math.abs(v && v[i]!=null ? v[i] : 0)});
   });
   out.sort((p,q)=>q.av-p.av);
@@ -6436,7 +6524,7 @@ function spiegelWieVorlage(vorlage, pts){
   return pts.map(p=>({...p, x:2*cx-p.x}));
 }
 
-globalThis.untangle=function(pts, walls, meas, tries, seed){
+globalThis.untangle=function(pts, walls, meas, tries, seed, angs){
   const C=globalThis.CORE;
   const ring0=C.wallPolygonRing(pts, walls);
   // Entwirren permutiert EINEN Ring - mit Inseln gibt es mehrere.
@@ -6452,7 +6540,7 @@ globalThis.untangle=function(pts, walls, meas, tries, seed){
   const evalCand=(cand)=>{
     // Masse halten: solve() ist der Korrektor; ohne Messungen bleibt die
     // Lage wie vorgeschlagen.
-    const fit=act.length ? C.solve(cand, meas) : {pts:cand, converged:true};
+    const fit=act.length ? C.solve(cand, meas, angs) : {pts:cand, converged:true};
     const P=fit.pts;
     // Masshaltigkeit ist Pflicht: eine "entwirrte" Lage, die eingetragene
     // Werte verbiegt, waere eine Luege.
@@ -6483,7 +6571,7 @@ globalThis.untangle=function(pts, walls, meas, tries, seed){
   for(let t=0;t<(tries==null?24:tries);t++){
     const base=(best?best.P:pts).map(p=>({...p}));
     if(act.length){
-      const an=C.analyze(base, meas);
+      const an=C.analyze(base, meas, angs);
       if(an.modes.length){
         const amp=mean*0.35;
         an.modes.forEach(mo=>{
@@ -7067,8 +7155,39 @@ const GROSS_ERROR_SIGMA = 5; // Vielfaches von sigma, ab dem ein Residuum nicht 
 const netFails=()=>{
   if(!M.an || !(M.an.redundancy>0)) return false;
   const act=C.activeMeas(M.meas);
-  return globalTestFails(M.an.v, act.map(m=>m.sigma??C.SIGMA_DEF), M.an.redundancy);
+  // Festgelegte Werte mit ihrem kleinen sigma (sigma/FIX_WT), die Winkelzeilen
+  // stehen in vc schon gewichtet in mm und zaehlen mit SIGMA_DEF - genau so
+  // gingen sie in den Ausgleich ein.
+  const vc=M.an.vc||[];
+  return globalTestFails(M.an.v.concat(vc),
+    act.map(m=>(m.sigma??C.SIGMA_DEF)/(m.fix?C.FIX_WT:1)).concat(vc.map(()=>C.SIGMA_DEF)),
+    M.an.redundancy);
 };
+
+// Festgelegte Werte, die der Ausgleich NICHT einhalten kann: zwei davon
+// widersprechen sich, oder alle uebrigen Maesse ziehen gemeinsam dagegen.
+// Grenzen: 1 mm bzw. 0,2 Grad - darunter ist "exakt" im Rahmen dessen, was
+// FIX_WT ueberhaupt verspricht.
+const FIX_TOL_MM=1, FIX_TOL_DEG=0.2;
+function fixVerletzt(){
+  if(!M.an || !M.fit) return [];
+  const out=[], act=C.activeMeas(M.meas), P=M.fit.pts;
+  // Je Paar einmal - zwei festgelegte Werte derselben Strecke sind der
+  // haeufigste Fall und sollen nicht doppelt dastehen.
+  const paar=new Map();
+  act.forEach((m,i)=>{ if(m.fix && Math.abs(M.an.v[i])>FIX_TOL_MM){
+    const k=[m.a,m.b].sort().join('|');
+    paar.set(k, Math.max(paar.get(k)||0, Math.abs(M.an.v[i])));
+  } });
+  paar.forEach((v,k)=>{ const [a,b]=k.split('|');
+    out.push({txt:`${a}–${b} um ${v.toFixed(1).replace('.',',')} mm`, a, b}); });
+  C.angleRows(P, M.angs).forEach(g=>{
+    const ist=C.angleDeg(P, g);
+    if(Math.abs(ist-g.deg)>FIX_TOL_DEG)
+      out.push({txt:`Winkel ${g.c} ${fmtGrad(ist)}° statt ${fmtGrad(g.deg)}°`, c:g.c});
+  });
+  return out;
+}
 
 // Ellipsen sind in Wirklichkeit millimetergross, der Raum aber meterweise
 // gezeichnet - unskaliert verschwindet jede Ellipse unter dem Punktmarker.
@@ -7151,7 +7270,10 @@ const M={ pts:[], walls:[], meas:[], mode:'draw', sel:[], chain:null,
           // M.meas wie hmeas und opmeas: der Grundriss-Solver dieses Raums
           // darf sie nie als eigene Strecke lesen - ihr zweiter Punkt liegt
           // gar nicht in diesem Raum.
-          qmeas:[], quer:[], querHl:null, nahwaende:[], ring:[] };
+          qmeas:[], quer:[], querHl:null, nahwaende:[], ring:[],
+          // Festgelegte Eckwinkel {a,c,b,deg}. Getrennt von meas wie hmeas:
+          // alles, was meas liest, erwartet eine Strecke a-b-d.
+          angs:[] };
 // Eigene Ansicht der Wandansicht; wallUserView merkt, ob der Nutzer
 // gezoomt hat (dann kein automatisches Einpassen mehr).
 let wallUserView=false;
@@ -7222,6 +7344,7 @@ const serialize=()=>JSON.stringify({
   snapfit:M.snapfit,
   ortho:M.ortho || undefined,
   qmeas:M.qmeas.map(m=>({...m})),
+  angs:M.angs.length ? M.angs.map(g=>({...g})) : undefined,
   // Fliesenverlegung - fehlt bei Raeumen ohne Fliesen ganz.
   tiles:(M.tiles && (M.tiles.spec.set || M.tiles.items.length || M.tiles.joints.length || (M.tiles.wallJoints||[]).length)) ? M.tiles : undefined,
   idSeq, openSeq,
@@ -7260,6 +7383,8 @@ function deserialize(o){
   M.thick=(o.thick && typeof o.thick==='object') ? {...o.thick} : {};
   M.shared=(o.shared && typeof o.shared==='object') ? {...o.shared} : {};
   M.qmeas=Array.isArray(o.qmeas) ? o.qmeas.map(x=>({...x})) : [];
+  // Festgelegte Winkel: optional, kaputte Eintraege fallen einzeln weg.
+  M.angs=Array.isArray(o.angs) ? o.angs.filter(g=>g && g.a && g.b && g.c && isFinite(g.deg)).map(g=>({...g})) : [];
   // Fliesen: optional, fehlerhafte Eintraege fallen einzeln weg.
   M.tiles=globalThis.TILES.normTiles(o.tiles);
   // Gehoert zum Raum, nicht zur Sitzung: ein fertig eingemessener Raum darf
@@ -7509,10 +7634,10 @@ function recompute(){
   if(!entryPair) M.highlight=null;
   if(M.pts.length>=2 && C.activeMeas(M.meas).length){
     if(M.ortho && M.walls.length){
-      const r=C.orthoFit(M.pts, M.walls, M.meas, ORTHO_TOL);
+      const r=C.orthoFit(M.pts, M.walls, M.meas, ORTHO_TOL, M.angs);
       M.fit=r.fit; M.orthoInfo=r;
-    } else { M.fit=C.solve(M.pts, M.meas); M.orthoInfo=null; }
-    M.an=C.analyze(M.fit.pts, M.meas);
+    } else { M.fit=C.solve(M.pts, M.meas, M.angs); M.orthoInfo=null; }
+    M.an=C.analyze(M.fit.pts, M.meas, M.angs);
     const I=C.idx(M.pts);
     if(M.snapfit){
       // Skizze auf den Fit ziehen: solve() liefert frische Punkte in mm, M.pts
@@ -7542,7 +7667,7 @@ function recompute(){
     // BEWUSST der Fit, nicht viewPts(): ob zwei Ecken einander sehen, ist eine
     // Frage an den echten Raum. Die Skizze darf verzerrt sein - dann schlaegt
     // sie Strecken vor, die es in Wirklichkeit nicht gibt.
-    ? C.suggest(M.fit?M.fit.pts:M.pts, M.walls, M.meas) : [];
+    ? C.suggest(M.fit?M.fit.pts:M.pts, M.walls, M.meas, M.angs) : [];
   // Einmal je Aenderung berechnet, von Tabelle UND Plan konsumiert - die
   // Indizes zaehlen ueber activeMeas, wie an.w selbst.
   M.suspects = M.an ? computeSuspects(M.an.w, BAARDA_W0, TIE_TOL) : new Set();
@@ -7701,9 +7826,9 @@ function raumGuete(r){
   if(!Array.isArray(d.pts)||d.pts.length<3||!Array.isArray(d.meas)) return null;
   if(!C.activeMeas(d.meas).length) return {red:0, sugg:[]};
   try{
-    const fit=C.solve(d.pts, d.meas);
-    const an=C.analyze(fit.pts, d.meas);
-    return {red:an?an.redundancy:0, sugg:C.suggest(fit.pts, d.walls||[], d.meas)};
+    const fit=C.solve(d.pts, d.meas, d.angs);
+    const an=C.analyze(fit.pts, d.meas, d.angs);
+    return {red:an?an.redundancy:0, sugg:C.suggest(fit.pts, d.walls||[], d.meas, d.angs)};
   }catch(e){ return {red:0, sugg:[]}; }
 }
 // Schlussfehler je Ring, angereichert um die Raeume auf dem Weg und darum,
@@ -8139,6 +8264,7 @@ function redraw(){
   syncRotateBtn();
   if(entryPair) placeEntry();
   if(wpopPair) placeWpop();
+  syncCornerPop();
 }
 
 // ================= Zeichnung =================
@@ -8627,6 +8753,35 @@ function drawOrthoMarks(P, I, dpr){
   ctx.restore();
 }
 
+// Festgelegte Winkel: 90 Grad als Quadrat wie die gesetzten rechten Winkel,
+// sonst ein Bogen mit Gradzahl. In Akzentfarbe - das hat der Nutzer
+// bestimmt, nicht der Ausgleich.
+function drawFixAngles(P, I, dpr){
+  const rows=C.angleRows(P, M.angs);
+  if(!rows.length) return;
+  const r=13*dpr;
+  ctx.save(); ctx.strokeStyle=INK.accent; ctx.fillStyle=INK.accent; ctx.lineWidth=1.8*dpr;
+  ctx.font=`600 ${11*dpr}px ${CANVAS_FONT}`; ctx.textAlign='center';
+  rows.forEach(g=>{
+    const a=toScr(P[I[g.a]]), c=toScr(P[I[g.c]]), b=toScr(P[I[g.b]]);
+    const u=q=>{ const l=Math.hypot(q.x-c.x,q.y-c.y)||1; return {x:(q.x-c.x)/l, y:(q.y-c.y)/l}; };
+    const ua=u(a), ub=u(b);
+    ctx.beginPath();
+    if(Math.abs(g.deg-90)<1e-6){
+      ctx.moveTo(c.x+ua.x*r,c.y+ua.y*r); ctx.lineTo(c.x+(ua.x+ub.x)*r,c.y+(ua.y+ub.y)*r); ctx.lineTo(c.x+ub.x*r,c.y+ub.y*r);
+    } else {
+      // Bogen ueber den kleineren Winkel zwischen den Schenkeln.
+      const t0=Math.atan2(ua.y,ua.x), t1=Math.atan2(ub.y,ub.x);
+      let d=t1-t0; while(d>Math.PI) d-=2*Math.PI; while(d<-Math.PI) d+=2*Math.PI;
+      ctx.arc(c.x, c.y, r, t0, t0+d, d<0);
+      const tm=t0+d/2;
+      ctx.fillText(`${fmtGrad(g.deg)}°`, c.x+Math.cos(tm)*(r+12*dpr), c.y+Math.sin(tm)*(r+12*dpr)+4*dpr);
+    }
+    ctx.stroke();
+  });
+  ctx.restore();
+}
+
 function drawCanvas(){
   if(M.mode==='tiles'){ drawTilesView(); return; }
   const dpr=DPR();
@@ -8687,6 +8842,7 @@ function drawCanvas(){
     ctx.stroke();
   });
   drawOrthoMarks(P, I, dpr);
+  drawFixAngles(P, I, dpr);
   drawUnfolded(P, I, dpr);
   drawWallMarks(P, I, dpr);
   drawOpeningsOnPlan(P, I, dpr);
@@ -8786,7 +8942,8 @@ function drawCanvas(){
     const wert = susM ? susM.d
       : (M.fit && FI[m.a]!=null && FI[m.b]!=null) ? C.dist(FP[FI[m.a]],FP[FI[m.b]])
       : alle.reduce((s2,x)=>s2+x.d,0)/alle.length;
-    const txt=alle.length>1 ? `${fmtLen(wert)} (${alle.length}×)` : fmtLen(wert);
+    const txt=(alle.length>1 ? `${fmtLen(wert)} (${alle.length}×)` : fmtLen(wert))
+      + (alle.some(x=>x.fix) ? ' exakt' : '');
     labels.push({m, txt, sus, hl, prio: sus?0 : hl?1 : isWall?2 : 3});
   });
   labels.sort((x,y)=>x.prio-y.prio);
@@ -8850,7 +9007,7 @@ function drawCanvas(){
         if(Math.hypot(mo[2*i],mo[2*i+1])/nrm > C.TOL_MODE) moving[i]=true;
       });
     });
-    const cov=M.an.dof===0 ? C.covariance(P, M.meas, M.an.sigmaHat) : null;
+    const cov=M.an.dof===0 ? C.covariance(P, M.meas, M.an.sigmaHat, M.angs) : null;
     const ell = cov ? P.map((_,i)=> moving[i] ? null : C.ellipse(cov[i])) : null;
     // EIN Faktor aus ALLEN Ecken haelt die Ellipsen untereinander ehrlich,
     // auch wenn nur eine gezeigt wird.
@@ -9109,6 +9266,7 @@ function deletePoint(id){
   M.pts=M.pts.filter(p=>p.id!==id);
   M.walls=M.walls.filter(([a,b])=>a!==id&&b!==id);
   M.meas=M.meas.filter(m=>m.a!==id&&m.b!==id);
+  M.angs=M.angs.filter(g=>g.a!==id&&g.b!==id&&g.c!==id);
   M.sel=[];
   if(M.chain===id) M.chain=null;
   recompute();
@@ -9185,13 +9343,21 @@ function renderWallPopup(){
     if(sus) tr.className='worst';
     // Nur Ausnahmen bekommen eine Marke; "geprueft" je Zeile war Rauschen.
     // w (Baarda) steht nur bei Verdacht, mit Komma.
+    // Festgelegt heisst nicht ungeprueft-gelb: der Nutzer hat es so gewollt.
     const badge = m.on===false ? '<button class="badge">aus, einschalten</button>'
       : sus ? '<span class="badge suspect">verdächtig</span>'
-      : w==null ? '<span class="badge unchecked">ungeprüft</span>' : '';
+      : (w==null && !m.fix) ? '<span class="badge unchecked">ungeprüft</span>' : '';
     tr.innerHTML=`<td><input class="d" inputmode="decimal" value="${fmtLen(m.d)}"></td>`
       +`<td>${m.von==='nachbar' ? 'vom Nachbarn' : (sus && w!=null ? 'w '+fmtGrad(w) : '')}</td>`
       +`<td>${badge}</td>`
+      +`<td><button class="rowbtn tog fix" aria-pressed="${!!m.fix}" title="Exakt: dieses Maß gilt genau so, der Ausgleich verteilt Abweichungen auf die übrigen">exakt</button></td>`
       +`<td><button class="rowbtn del" title="Diesen Messwert löschen">×</button></td>`;
+    tr.querySelector('.fix').onclick=()=>{
+      snapshot();
+      if(m.fix) delete m.fix; else m.fix=true;
+      recompute();
+      renderWallPopup();
+    };
     const inp=tr.querySelector('.d');
     inp.onchange=()=>{
       const d=parseLen(inp.value);
@@ -9571,7 +9737,7 @@ cv.addEventListener('pointermove',e=>{
       for(let tryN=0; tryN<4 && !ok; tryN++, f/=2){
         const mv=C.dragAlongModes(vorher, M.an.modes, i, dx*f, dy*f);
         if(!mv) break;
-        const fit=C.solve(mv, M.meas);       // Korrektor: zurueck auf die Messungen
+        const fit=C.solve(mv, M.meas, M.angs);       // Korrektor: zurueck auf die Messungen
         if(!crossedBefore){
           const bad=crossingPairs(fit.pts);
           // Was die Bisektion verhindert, wird auch getoent - sonst waere
@@ -9799,10 +9965,75 @@ function tapPointMeasure(id){
   M.sel.push(id);
   if(M.sel.length===2){
     const [a,b]=M.sel; M.sel=[];
+    closeCornerPop();
     if(a===b){ render(); return; }
     openWallPopup(a,b);
-  } else render();
+  } else { openCornerPop(id); render(); }
 }
+
+// ================= Ecken-Popup: Winkel festlegen =================
+// Erster Tipp auf eine Ecke im Messen-Modus. Der zweite Tipp auf eine andere
+// Ecke oeffnet wie bisher die Diagonale - das Popup stoert dabei nicht, es
+// nimmt keinen Fokus und schliesst sich, sobald die Auswahl weg ist.
+let cpopId=null;
+// Eine Ecke im Sinne des Winkels: genau zwei Waende treffen sich.
+function cornerOf(id){
+  const nb=M.walls.filter(([x,y])=>x===id||y===id).map(([x,y])=>x===id?y:x);
+  return nb.length===2 ? {a:nb[0], c:id, b:nb[1]} : null;
+}
+const angOf=c=>M.angs.find(g=>g.c===c);
+function openCornerPop(id){
+  const k=cornerOf(id);
+  if(!k){ closeCornerPop(); return; }
+  cpopId=id;
+  const P=fitPts(), g=angOf(id);
+  const ist=C.idx(P)[k.a]!=null ? C.angleDeg(P, k) : null;
+  $('cpopTitle').textContent='Ecke '+id;
+  $('cpopIst').textContent = ist==null ? '' : (M.an && M.an.dof>0 ? '≈ ' : '')+fmtGrad(ist)+'° ausgeglichen';
+  // Vorschlag: was der Nutzer meistens meint. Nahe 90 -> 90, sonst die
+  // ausgeglichene Zahl gerundet; ein festgelegter Wert steht schon drin.
+  const vor = g ? g.deg : ist==null ? 90 : Math.abs(ist-90)<15 ? 90 : Math.round(ist);
+  $('cpopVal').value=fmtGrad(vor).replace(/,0$/,'');
+  $('cpopOk').textContent = g ? 'ändern' : 'festlegen';
+  $('cpopFree').hidden=!g;
+  $('cpopHint').textContent = g
+    ? `Fest auf ${fmtGrad(g.deg).replace(/,0$/,'')}°. Zweite Ecke antippen für eine Diagonale.`
+    : 'Exakt so festlegen, oder zweite Ecke antippen für eine Diagonale.';
+  $('cpop').hidden=false;
+  placeNear($('cpop'), id, id);
+}
+function closeCornerPop(){ cpopId=null; $('cpop').hidden=true; }
+function syncCornerPop(){
+  if(cpopId==null) return;
+  if(M.mode!=='measure' || M.sel.length!==1 || M.sel[0]!==cpopId || !cornerOf(cpopId)){ closeCornerPop(); return; }
+  placeNear($('cpop'), cpopId, cpopId);
+}
+function fixCornerAngle(){
+  const id=cpopId, k=id && cornerOf(id);
+  if(!k) return;
+  const deg=parseFloat(String($('cpopVal').value).replace(',','.'));
+  if(!(deg>0 && deg<=180)){ setHint('Winkel zwischen 0 und 180 Grad eingeben (einspringende Ecke: der Winkel zwischen den Wänden, also auch 90).'); return; }
+  snapshot();
+  M.angs=M.angs.filter(g=>g.c!==id).concat([{a:k.a, c:id, b:k.b, deg}]);
+  M.sel=[]; closeCornerPop();
+  recompute();
+  setHint(`Winkel an ${id} auf ${fmtGrad(deg).replace(/,0$/,'')}° festgelegt.`);
+}
+$('cpopOk').onclick=fixCornerAngle;
+$('cpopFree').onclick=()=>{
+  const id=cpopId; if(!id) return;
+  snapshot();
+  M.angs=M.angs.filter(g=>g.c!==id);
+  M.sel=[]; closeCornerPop();
+  recompute();
+  setHint(`Winkel an ${id} wieder frei.`);
+};
+$('cpopX').onclick=()=>{ M.sel=[]; closeCornerPop(); render(); };
+$('cpopVal').addEventListener('keydown',e=>{
+  e.stopPropagation();
+  if(e.key==='Enter') fixCornerAngle();
+  if(e.key==='Escape'){ M.sel=[]; closeCornerPop(); render(); }
+});
 
 // Zeichnen-Modus, Tipp ins Leere: neue Ecke, vom Kettenende sofort
 // angebunden. So entsteht der Raum in einem Durchgang - antippen, antippen,
@@ -10332,7 +10563,7 @@ document.querySelectorAll('#modes button[data-mode]').forEach(b=>{
 // nochmal druecken. Undo nimmt sie komplett zurueck.
 let untangleSeed=1;
 $('untangle').onclick=()=>{
-  const u=untangle(M.pts, M.walls, M.meas, 24, untangleSeed++);
+  const u=untangle(M.pts, M.walls, M.meas, 24, untangleSeed++, M.angs);
   if(u) snapshot();
   if(!u){
     setHint('Keine kreuzungsfreie Anordnung gefunden. Einige Ecken von Hand ziehen, dann erneut entwirren.');
@@ -10864,8 +11095,20 @@ function statusText(){
     if(!M.walls.length) return ['Ecken setzen; sie verbinden sich der Reihe nach.','prog'];
     return ['Skizze steht. Zum Messen eine Wand anklicken und das Maß eintippen.','prog'];
   }
-  if(M.fit && !M.fit.converged)
-    return ['Ausgleich nicht konvergiert. Das Ergebnis ist nicht belastbar.','bad'];
+  if(M.fit && !M.fit.converged){
+    // Nicht nur "nicht belastbar" - sagen, wo man anfaengt: beim Maß, das
+    // am weitesten neben der ausgeglichenen Form liegt (festgelegte zaehlen
+    // nicht, die stellt der Nutzer nicht in Frage).
+    const act=C.activeMeas(M.meas);
+    let wi=-1, wv=0;
+    M.an.v.forEach((vi,i)=>{ if(!act[i].fix && Math.abs(vi)>wv){ wv=Math.abs(vi); wi=i; } });
+    return [wi>=0 && wv>=1
+      ? `Ausgleich kommt nicht zur Ruhe. Am weitesten daneben liegt ${act[wi].a}–${act[wi].b} (${wv.toFixed(0)} mm): nachmessen oder kurz ausschalten.`
+      : 'Ausgleich kommt nicht zur Ruhe. Das Ergebnis ist nicht belastbar.','bad'];
+  }
+  const verl=fixVerletzt();
+  if(verl.length)
+    return [`Festgelegte Werte passen nicht zusammen: ${verl.map(x=>x.txt).join(', ')}. Einen davon lösen oder die übrigen Maße prüfen.`,'bad'];
   if(M.an.dof>0)
     return [`Noch ${M.an.dof} ${M.an.dof===1?'Messung':'Messungen'}, dann ist die Form eindeutig.`,'prog'];
   if(M.an.redundancy===0){
@@ -11037,6 +11280,7 @@ function renderPanel(){
       const e=byPair.get(k);
       e.n++;
       if(suspects.has(i)) e.sus=true;
+      if(m.fix) e.fix=true;
       if(!M.an || M.an.w[i]==null) e.unchecked=true;
     });
     M.meas.filter(m=>m.on===false).forEach(m=>{
@@ -11054,6 +11298,7 @@ function renderPanel(){
       const cnt=e?e.n:0;
       const note = e&&e.sus ? '<span class="wn sus">verd\u00e4chtig</span>'
         : !cnt ? `<span class="wn todo">ohne Ma\u00df${e&&e.off?' \u00b7 '+e.off+' aus':''}</span>`
+        : e&&e.fix ? `<span class="wn">exakt${cnt>1?' \u00b7 '+cnt+'\u00d7':''}</span>`
         : cnt>1 ? `<span class="wn">${cnt}\u00d7 gemessen</span>` : '<span class="wn"></span>';
       return `<div class="wrow${e&&e.sus?' worst':''}" data-a="${a2}" data-b="${b2}">`
         +`<span class="wk">${a2}\u2013${b2}</span>${note}`
@@ -14198,6 +14443,46 @@ globalThis.selfChecks=function(){
        C.gaugeFixed(pts, meas)[2]>>1===C.idx(pts)['D']);
     const r=C.solve(pts, meas);
     chk('solve: Dusche mit 4-mm-Wand konvergiert', r.converged, r.iters);
+    // Festgelegte Werte duerfen die Konvergenz nicht kosten (FIX_WT-Kondition).
+    const mf=meas.map(m=>['CD','BC','DE'].includes(m.a+m.b) ? {...m, fix:true} : m);
+    const rf=C.solve(pts, mf, [{a:'B',c:'C',b:'D',deg:90},{a:'C',c:'D',b:'E',deg:90}]);
+    chk('solve: Dusche mit 3 exakten Massen und 2 festen Winkeln konvergiert', rf.converged, rf.iters);
+  }
+  // --- Festgelegte Winkel und exakte Masse ---
+  {
+    const rect=[{id:'A',x:0,y:0},{id:'B',x:4100,y:50},{id:'C',x:3900,y:3100},{id:'D',x:-50,y:2900}];
+    const seiten=[{a:'A',b:'B',d:4000},{a:'B',b:'C',d:3000},{a:'C',b:'D',d:4000},{a:'D',b:'A',d:3000}];
+    const ang=[{a:'A',c:'B',b:'C',deg:90}];
+    chk('winkel: 4 Seiten -> 1 Messung fehlt', C.analyze(rect,seiten).dof===1);
+    chk('winkel: fester 90-Grad-Winkel ersetzt die fehlende Messung', C.analyze(rect,seiten,ang).dof===0);
+    const r=C.solve(rect,seiten,ang), I=C.idx(r.pts);
+    chk('winkel: konvergiert, ungemessene Diagonale kommt auf 5000',
+       r.converged && near(C.dist(r.pts[I.A],r.pts[I.C]),5000,0.05), C.dist(r.pts[I.A],r.pts[I.C]));
+    chk('winkel: 100 Grad werden exakt getroffen',
+       near(C.angleDeg(C.solve(rect,seiten,[{a:'A',c:'B',b:'C',deg:100}]).pts,{a:'A',c:'B',b:'C'}),100,0.01));
+    // Analytische Jacobi-Zeile gegen Differenzenquotient - am Zielwinkel,
+    // wo der als konstant genommene Schenkelfaktor nicht hineinspielt.
+    const g={a:'A',c:'B',b:'C',deg:C.angleDeg(rect,{a:'A',c:'B',b:'C'})};
+    const J=C.jacobian(rect,[],[g])[0];
+    let worst=0;
+    for(let k=0;k<8;k++){
+      const Q=rect.map(p=>({...p})), q=Q[k>>1];
+      if(k&1) q.y+=1e-4; else q.x+=1e-4;
+      worst=Math.max(worst, Math.abs(C.residuals(Q,[],[g])[0]/1e-4-J[k]));
+    }
+    chk('winkel: Jacobi-Zeile stimmt mit Differenzenquotient', worst<1e-3, worst);
+    chk('winkel: Eintrag mit fehlendem Punkt faellt still weg',
+       C.analyze(rect,seiten,[{a:'A',c:'X',b:'C',deg:90}]).dof===1);
+    // Exakt gegen widersprechende Wiederholung: der festgelegte Wert haelt,
+    // und er wird nie verdaechtigt - der Fehler landet bei der Wiederholung.
+    const ms=seiten.concat([{a:'A',b:'C',d:5000},{a:'B',b:'D',d:5000},{a:'A',b:'B',d:4030}]);
+    ms[0]={...ms[0], fix:true};
+    const rf=C.solve(rect,ms), an=C.analyze(rf.pts,ms), IF=C.idx(rf.pts);
+    chk('exakt: festgelegtes Mass haelt gegen eine Wiederholung',
+       near(C.dist(rf.pts[IF.A],rf.pts[IF.B]),4000,0.1), C.dist(rf.pts[IF.A],rf.pts[IF.B]));
+    chk('exakt: festgelegtes Mass hat w=null, die Wiederholung traegt den Fehler',
+       an.w[0]===null && an.w[6]>3, an.w[6]);
+    chk('exakt: v ist ungewichtet in mm', near(an.v[6],-30,0.5), an.v[6]);
   }
   {
     // Unterbestimmt: 4 Punkte, nur 2 Messungen. Muss zeichenbar bleiben.
