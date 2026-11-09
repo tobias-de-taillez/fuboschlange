@@ -1077,7 +1077,7 @@
       <dl>
         <dt>Prüfung</dt><dd>Meldet, was nicht geht (rot): Überlappungen, Schrank vor Tür oder Fenster, Fensterflügel gegen Armatur, Gerätetür gegen Insel, Zimmertür gegen Schrank oder Insel (im Plan bleibt die Tür am ersten Teil stehen, mit Winkel im Befund), Front in der Ecke verdeckt, Decke zu niedrig. Und Richtwerte (gelb): Schlauchweg von Spülmaschine und Festwasser-Kühlschrank zum Wasseranschluss (Wände-Tab), Gänge 1200 mm, Stuhlraum am Tisch, Abstellflächen, Spülmaschine neben der Spüle, Arbeitsdreieck. Ein Klick wählt das Teil; wo es eine eindeutige Abhilfe gibt (Vorfensterarmatur, Anschlag tauschen, Als Eckschrank, Als Dunstabzug), steht ein Knopf daneben.</dd>
         <dt>Maße und Abstände</dt><dd>Am gewählten Wandteil läuft die Maßkette bis zur Wand, die man an den Enden vor sich hat, bei Insel und Tisch zu allen vier Seiten. Ein Klick auf einen gestrichelt umrandeten Abstand öffnet ein Feld: Wert eintragen, Enter verschiebt das Teil (an der Wand den ganzen Block daneben).</dd>
-        <dt>Insel und Tisch</dt><dd>Drehen per Schieber im Panel (rastet an 0/45/90° und an schiefen Wänden ein, mit ⌥ frei) oder mit Q/E. Eine Insel, deren Stirnseite man an eine Wand zieht, dockt bündig an; ihre Auszüge gehen dann parallel zur Wand auf. „Tresen“ lässt die Platte hinten überstehen (NKBA: 38 cm bei 91 cm Höhe, 61 cm je Hocker). Die Tischplätze ergeben sich aus Länge und Breite (60 cm je Platz, Stirnseite ab 60 cm Breite), Seiten ohne Stuhlraum bleiben frei.</dd>
+        <dt>Insel und Tisch</dt><dd>Drehen per Schieber im Panel (rastet an 0/45/90° und an schiefen Wänden ein, mit ⌥ frei) oder mit Q/E. Eine Insel, deren Stirnseite man an eine Wand zieht, dockt bündig an; ihre Auszüge gehen dann parallel zur Wand auf. Zieht man eine Insel an eine andere, rastet sie bündig ein (gleiche Drehung oder quer dazu, an den Enden oder mittig, ⌥ frei); gleich hohe Inseln bekommen dann eine durchgehende Platte, auch über Eck. „Tresen“ lässt die Platte hinten überstehen (NKBA: 38 cm bei 91 cm Höhe, 61 cm je Hocker). Die Tischplätze ergeben sich aus Länge und Breite (60 cm je Platz, Stirnseite ab 60 cm Breite), Seiten ohne Stuhlraum bleiben frei.</dd>
         <dt>Offen (O)</dt><dd>Zeigt im Plan alle Schwenkbereiche und in 3D alle Türen, Auszüge und Gerätetüren offen, dazu offene Fensterflügel.</dd>
         <dt>Inhalt und Wege (W)</dt><dd>Je Schrank wählen, was darin liegt (Besteck, Teller, Gläser …). Daraus rechnet das Programm die Laufwege typischer Abläufe: Einkauf einräumen, Müll, Kochen, Snack zubereiten, Servieren, Tisch decken, Abräumen in die Spülmaschine, Spülmaschine ausräumen, Kaffee und Getränke. Ein Klick auf einen Ablauf zeichnet ihn ein. Der Eingang ist im Plan grün markiert; ein Klick auf eine andere Tür macht sie zum Eingang. „Optimal einräumen“ verteilt alle Inhalte so, dass die Wege zusammen am kürzesten sind – exakt gerechnet, dieselbe Küche ergibt immer dieselbe Einteilung; doppelt Eingeräumtes bleibt stehen. „Umsortieren“ schlägt einzelne Umzüge vor (Besteck und Messer nur in Schubladen, Müll bleibt an der Spüle). Ein Ablauf zählt erst, wenn alle seine Stationen da sind; die Häufigkeiten sind eine Annahme für vier Personen.</dd>
         <dt>Analyse (A)</dt><dd>Statt 3D rechts eine eigene Ansicht für die Wege. Oben die Summe in km/Jahr; „Referenz merken“ hält den Stand fest, danach zeigen Summe und Balken den Unterschied. „Abläufe im Vergleich“ stellt die Abläufe als Balken gegeneinander, je Jahr (Häufigkeit × Weg) oder je Durchgang: so sieht man, ob eine Aufteilung z. B. das Einräumen bevorzugt und das Kochen lang macht. Überfahren zeigt den Weg im Plan, Klick hält ihn. „Was steht wo“ zeigt je Station und Inhalt, welcher Ablauf ihn braucht und wo er liegt; Fehlendes ist rot. Im Plan liegt eine Heatmap: je dunkler, desto öfter läuft man dort. Ist ein Teil gewählt, zeigt „Verschieben und vergleichen“ die km/Jahr für jede Lage, an der es Platz hat (Insel und Tisch längs und quer); Klick in die Kurve setzt es dorthin, „Dorthin setzen“ nimmt das Optimum. Gerechnet in festen Schritten, gleiche Küche ergibt immer dasselbe Optimum; Lagen, die einen Weg versperren oder einen neuen Befund in der Prüfung bringen, zählen nicht (in der Kurve als Ring). In voller Zeile wird Tauschen mit gleich breiten Teilen vorgeschlagen. „Personen 2/3“: Gang nach NKBA mind. 1219 mm in der Prüfung und eine Liste, wo sich zwei gleichzeitige Abläufe begegnen (im Plan gelb). „Kind im Weg“ stellt ein Kind an den meistbelaufenen Punkt und rechnet alle Wege neu.</dd>
@@ -7043,9 +7043,76 @@ function worktops(E, K, G, fillers=[]){
     if(!r.cornerCut1 && b-r.s1>1 && b-r.s1<=150){ fillers.push({Wf:r.Wf, s0:r.s1, s1:b, w:b-r.s1, end:true}); r.s1=b; }
   });
   const tops=done.map(r=>({poly:polyOf(r), z0:D.workH-S.topT, z1:D.workH, len:r.s1-r.s0, depth:S.topD, ids:r.ids, Wf:r.Wf, s0:r.s0, s1:r.s1}));
-  // Inseln tragen ihre Platte selbst (ganzer Grundriss).
-  G.filter(g=>g.it.kind==='island').forEach(g=>tops.push({poly:g.foot||g.poly, z0:g.z1-S.topT, z1:g.z1, len:g.it.w, depth:g.d+(g.bar||0), ids:[g.it.id], island:true}));
+  // Inseln tragen ihre Platte selbst (ganzer Grundriss); bündig aneinander
+  // stehende Inseln eine gemeinsame (islandTops).
+  islandTops(G, S).forEach(t=>tops.push(t));
   return tops;
+}
+// Durchgehende Arbeitsplatte über Inseln, die bündig aneinanderstehen
+// (Wunsch: „Kücheninselstücke sollten aneinander snappen können“ –
+// „durchgehende Arbeitsplatte natürlich!“). Zusammen gehören Inseln gleicher
+// Höhe (±1 mm), deren Platten (samt Tresen-Überstand) sich entlang einer
+// Kante berühren: gegenläufige Kanten höchstens 2 mm auseinander, mind.
+// 20 mm gemeinsam, ohne Überlappung. Solche Platten liegen zwangsläufig
+// achsparallel zueinander; ihr Umriss entsteht auf dem Raster ihrer Kanten
+// (Rechtecke vereinigen, Randkanten verketten). Eintrag je Gruppe:
+// poly = Umriss (auch L/T, nicht konvex), parts = die Platten der einzelnen
+// Inseln (konvex, fürs 3D), edges = Umrisskanten ohne Fuge. Länge × Tiefe:
+// ist der Umriss ein Rechteck, dessen Seiten; sonst Summe der Längen ×
+// größte Tiefe (Material am Stück). Einzelne Inseln wie bisher.
+function topsTouch(A, B){
+  if(TL.convexOverlap(A, B, 1)) return false;
+  const eb=TL.edgesOf(B);
+  return TL.edgesOf(A).some(a=>eb.some(b=>{
+    if(dot(a.d,b.d)>-0.9999) return false;
+    if(Math.abs(dot(sub(b.a,a.a),a.n))>2 || Math.abs(dot(sub(b.b,a.a),a.n))>2) return false;
+    const la=len(sub(a.b,a.a)), t0=dot(sub(b.a,a.a),a.d), t1=dot(sub(b.b,a.a),a.d);
+    return Math.min(la, Math.max(t0,t1)) - Math.max(0, Math.min(t0,t1)) >= 20;
+  }));
+}
+function islandTops(G, S){
+  const I=G.filter(g=>g.it.kind==='island'), F=g=>g.foot||g.poly;
+  const up=I.map((_,i)=>i), root=i=>up[i]===i ? i : (up[i]=root(up[i]));
+  for(let i=0;i<I.length;i++) for(let j=i+1;j<I.length;j++)
+    if(Math.abs(I[i].z1-I[j].z1)<=1 && topsTouch(F(I[i]),F(I[j]))) up[root(j)]=root(i);
+  const groups=new Map();
+  I.forEach((g,i)=>{ const r=root(i); if(!groups.has(r)) groups.set(r,[]); groups.get(r).push(g); });
+  return [...groups.values()].map(grp=>{
+    const g0=grp[0];
+    if(grp.length===1) return {poly:F(g0), z0:g0.z1-S.topT, z1:g0.z1, len:g0.it.w, depth:g0.d+(g0.bar||0), ids:[g0.it.id], island:true};
+    const parts=grp.map(F), o=parts[0][0], a=unit(sub(parts[0][1],o)), b={x:-a.y, y:a.x};
+    const loc=p=>({x:dot(sub(p,o),a), y:dot(sub(p,o),b)}), wrl=(x,y)=>add(o, add(mul(a,x), mul(b,y)));
+    // Rasterlinien (Kanten bis 2 mm auseinander gelten als eine).
+    const lines=vs=>{ const s=[...vs].sort((p,q)=>p-q), out=[]; s.forEach(v=>{ const l=out[out.length-1]; if(l && v-l.v<=2){ l.n++; l.sum+=v; } else out.push({v, n:1, sum:v}); }); return out.map(l=>l.sum/l.n); };
+    const R=parts.map(P=>{ const q=P.map(loc); return {x0:Math.min(...q.map(p=>p.x)), x1:Math.max(...q.map(p=>p.x)), y0:Math.min(...q.map(p=>p.y)), y1:Math.max(...q.map(p=>p.y))}; });
+    const xs=lines(R.flatMap(r=>[r.x0,r.x1])), ys=lines(R.flatMap(r=>[r.y0,r.y1]));
+    const ix=v=>xs.reduce((k,x,i)=>Math.abs(x-v)<Math.abs(xs[k]-v)?i:k,0), iy=v=>ys.reduce((k,y,i)=>Math.abs(y-v)<Math.abs(ys[k]-v)?i:k,0);
+    const RI=R.map(r=>({i0:ix(r.x0), i1:ix(r.x1), j0:iy(r.y0), j1:iy(r.y1)}));
+    const full=(i,j)=>i>=0 && j>=0 && i<xs.length-1 && j<ys.length-1 && RI.some(r=>i>=r.i0 && i<r.i1 && j>=r.j0 && j<r.j1);
+    // Randkanten der Zellen, gegen den Uhrzeigersinn um die Fläche (im a/b-Rahmen).
+    const E_=[];
+    for(let i=0;i<xs.length-1;i++) for(let j=0;j<ys.length-1;j++){ if(!full(i,j)) continue;
+      if(!full(i,j-1)) E_.push([[i,j],[i+1,j]]);
+      if(!full(i+1,j)) E_.push([[i+1,j],[i+1,j+1]]);
+      if(!full(i,j+1)) E_.push([[i+1,j+1],[i,j+1]]);
+      if(!full(i-1,j)) E_.push([[i,j+1],[i,j]]); }
+    const key=v=>v[0]+','+v[1], from=new Map();
+    E_.forEach(e=>{ const k=key(e[0]); if(!from.has(k)) from.set(k,[]); from.get(k).push(e); });
+    const used=new Set(), rings=[];
+    E_.forEach(e0=>{ if(used.has(e0)) return; const ring=[]; let e=e0;
+      while(e && !used.has(e)){ used.add(e); ring.push(e[0]); e=(from.get(key(e[1]))||[]).find(x=>!used.has(x)); }
+      // Ecken ohne Richtungswechsel weglassen.
+      const n=ring.length, keep=ring.filter((v,k)=>{ const p=ring[(k+n-1)%n], q=ring[(k+1)%n];
+        return (v[0]-p[0])*(q[1]-v[1])-(v[1]-p[1])*(q[0]-v[0])!==0; });
+      if(keep.length>=3) rings.push(keep.map(v=>wrl(xs[v[0]], ys[v[1]]))); });
+    rings.sort((p,q)=>Math.abs(TL.polyArea(q))-Math.abs(TL.polyArea(p)));
+    const poly=rings[0]||parts[0], edges=rings.flatMap(r=>r.map((p,k)=>[p, r[(k+1)%r.length]]));
+    const rect=rings.length===1 && poly.length===4, sd=rect ? [len(sub(poly[1],poly[0])), len(sub(poly[2],poly[1]))] : null;
+    return {poly, parts, edges, z0:g0.z1-S.topT, z1:g0.z1,
+            len: rect ? Math.max(...sd) : grp.reduce((s,g)=>s+g.it.w,0),
+            depth: rect ? Math.min(...sd) : Math.max(...grp.map(g=>g.d+(g.bar||0))),
+            ids:grp.map(g=>g.it.id), island:true, joined:true};
+  });
 }
 
 // ---------- Layout = alles, was gezeichnet und geprüft wird ----------
@@ -7161,6 +7228,50 @@ function dockFree(E, K, it, tol){
       const u2=mul(Wf.n, -sg), c2=add(wpt(Wf,sAt,0), mul(Wf.n, it.w/2)), loc=TL.toLocal(E.F,c2);
       const rot=((Math.atan2(dot(u2,E.F.v), dot(u2,E.F.u))*180/Math.PI)%360+360)%360;
       best={q, x:loc.x, y:loc.y, rot:Math.round(rot*1000)/1000, wall:'die Wand'};
+    });
+  });
+  return best;
+}
+// Inseln aneinander einrasten (Wunsch: „Kücheninselstücke sollten aneinander
+// snappen können“). Kommt eine Seite der Insel it in Fangweite tol (mm) einer
+// Seite einer anderen Insel, übernimmt sie deren Drehung – oder um 90°
+// versetzt, je nachdem, was näher an der eigenen liegt (T/L), höchstens 35°
+// weg – und liegt bündig an: Platte an Platte, also samt Tresen-Überstand
+// (foot), der so nie in die Nachbarinsel ragt. Entlang der Kante rastet sie
+// an den Enden (Korpus oder Platte) bündig oder mittig ein, wenn das in
+// Fangweite liegt, sonst bleibt sie dort. Verworfen, wenn sie dann aus dem
+// Raum ragt oder ein anderes Teil überlappt. Die Drehung wird exakt
+// übernommen, damit die Kanten genau aufeinanderliegen (islandTops legt
+// dann eine Platte drüber).
+// -> {x, y, rot, q (Abstand vorher), with (id der Nachbarinsel), how} oder null.
+function snapIsland(E, K, it, tol){
+  if(it.kind!=='island' || !E.F) return null;
+  const others=K.items.filter(o=>o.kind==='island' && o.id!==it.id);
+  if(!others.length) return null;
+  const rest=K.items.filter(o=>o.id!==it.id).map(o=>geom(E,K,o)).filter(Boolean);
+  const angD=(p,q)=>{ const d=((p-q)%360+360)%360; return Math.min(d,360-d); };
+  const ext=(P,ax)=>{ const v=P.map(p=>dot(p,ax)); return [Math.min(...v), Math.max(...v)]; };
+  let best=null;
+  others.forEach(o=>{
+    const h=geom(E,K,o); if(!h) return;
+    let rot=null, dr=Infinity;
+    for(let k=0;k<4;k++){ const r=(((o.rot||0)+90*k)%360+360)%360, d=angD(r, it.rot||0); if(d<dr-1e-9){ dr=d; rot=r; } }
+    if(dr>35) return;
+    const m=geom(E,K,{...it, rot}); if(!m) return;
+    const HF=h.foot||h.poly, MF=m.foot||m.poly, cross=angD(rot, o.rot||0)%180>1;
+    [[h.u,h.n],[h.n,h.u]].forEach(([ax,tg], ai)=>{
+      const [h0,h1]=ext(HF,ax), [m0,m1]=ext(MF,ax);
+      [h1-m0, h0-m1].forEach(sh=>{
+        if(Math.abs(sh)>tol || (best && Math.abs(sh)>=best.q)) return;
+        const [ht0,ht1]=ext(HF,tg), [mt0,mt1]=ext(MF,tg), [hb0,hb1]=ext(h.poly,tg), [mb0,mb1]=ext(m.poly,tg);
+        let ts=0, td=tol;
+        [hb0-mb0, hb1-mb1, ht0-mt0, ht1-mt1, (hb0+hb1-mb0-mb1)/2].forEach(s=>{ if(Math.abs(s)<=td){ td=Math.abs(s); ts=s; } });
+        if(Math.min(ht1,mt1+ts)-Math.max(ht0,mt0+ts) < 20) return;      // nur Ecke an Ecke
+        const loc=TL.toLocal(E.F, add(m.c, add(mul(ax,sh), mul(tg,ts)))), t={...it, x:loc.x, y:loc.y, rot}, g=geom(E,K,t);
+        if(!g || !polyInRoom(E, g.foot||g.poly) || rest.some(x=>partsClash(g,x))) return;
+        best={q:Math.abs(sh), x:loc.x, y:loc.y, rot, with:o.id,
+              how: cross ? 'quer' : ai===0 ? 'längs' : 'Seite an Seite'};
+      });
     });
   });
   return best;
@@ -8447,7 +8558,12 @@ function scene(E, K, L, opts){
       P_(body(carcD), S.plinth, tz, tint(COL.carcass), id);
       if(open && g.env.length) openPlates(g).forEach(f=>P_(f.poly, f.z0, f.z1, tint(f.col||COL.front), id));
       else frontsOf(g, S.plinth, tz, D, S).forEach(f=>P_(f.poly, f.z0, f.z1, tint(it.dev==='dw'||it.dev==='hob'&&f.oven?COL.steel:COL.front), id));
-      if(it.kind==='island') P_(g.foot||g.poly, tz, wt, tint(COL.top), id);
+      // Gemeinsame Platte mehrerer Inseln: je Insel ihr Stück, Kanten nur am
+      // Umriss (am ersten Stück), damit zwischen den Stücken keine Fuge zu sehen ist.
+      const jt = it.kind==='island' && L.tops.find(t=>t.joined && t.ids.includes(id));
+      // Eine Farbe für die ganze gemeinsame Platte (Auswahl vor rot vor gelb).
+      const jtint=c=>jt.ids.some(i=>sel.has(i)) ? mix(c,COL.sel,0.35) : jt.ids.some(i=>bad.has(i)) ? mix(c,COL.bad,0.45) : jt.ids.some(i=>warn.has(i)) ? mix(c,[0.95,0.70,0.15],0.3) : c;
+      if(it.kind==='island') P_(g.foot||g.poly, tz, wt, jt ? jtint(COL.top) : tint(COL.top), id, jt ? (jt.ids[0]===id ? jt.edges : []) : true);
       if(it.dev==='sink'){
         P_(frameRect(g, 60, w-60, 90, d-90), wt, wt+2, COL.steel, id);
         const fp=faucetPoint(K,g), fh=it.faucetH!=null?it.faucetH:S.faucetH, r=18;
@@ -8912,6 +9028,7 @@ globalThis.KITCHEN={ FRIDGE, DOORT_LIM, SWINGS, swingOf, isCold, fzOf, hasHinge,
   nearestWall, planner, stations, flows, suggest, heatGrid, kidPoly, conflicts, PAIRS, sweep, placeOk, reachFactor, scene, frontsOf, stock, nameOf, inflate, polyInRoom, COL };
 Object.assign(globalThis.KITCHEN, { CORNER, CSHAPE, shapeOf, cornerBlind, cornerPlace, cornerType, crossAt, cornerWing });
 Object.assign(globalThis.KITCHEN, { PLAN_TXT, planLabels, stationLabel, stationBlock, contentCands, headCands, nomCm, devTag, dimFits, chartBox, rectIn });
+Object.assign(globalThis.KITCHEN, { snapIsland, islandTops, topsTouch, partsClash });
 })();
 </script>
 <script id="store">
@@ -19160,9 +19277,17 @@ function kitchenMove(e, g){
     // Insel nahe der Wand, ungefähr quer dazu: Stirnseite andocken.
     if(g.rot0==null) g.rot0=it.rot||0;
     it.rot=g.rot0;
-    const dk = e.altKey ? null : KX.dockFree(c.E, c.K, it, 24*DPR()/VIEW.s);
+    const tolS=24*DPR()/VIEW.s;
+    let dk = e.altKey ? null : KX.dockFree(c.E, c.K, it, tolS);
+    // An eine andere Insel einrasten; gewinnt, wenn näher als die Wand.
+    const si = e.altKey ? null : KX.snapIsland(c.E, c.K, it, tolS);
+    if(si && !(dk && Math.abs(dk.q)<=si.q)) dk=null;
+    const nb = si && !dk ? kitchenData().items.find(x=>x.id===si.with) : null;
     if(dk){ it.x=dk.x; it.y=dk.y; it.rot=dk.rot; setHintLive(`${nm(it)} an ${dk.wall} angedockt – Auszüge öffnen parallel zur Wand · ⌥ ohne Andocken`); }
-    else setHintLive(`${nm(it)} frei verschieben · Q/E dreht${it.kind==='island'?' · Stirnseite an eine Wand ziehen dockt an':''}`);
+    else if(si){ it.x=si.x; it.y=si.y; it.rot=si.rot;
+      const one = nb && Math.abs(KX.dims(c.K,it).z1-KX.dims(c.K,nb).z1)<=1;
+      setHintLive(`${nm(it)} an ${nb?nm(nb):'die Insel'} eingerastet (${si.how})${one?' – Arbeitsplatte läuft durch':''} · ⌥ ohne Einrasten`); }
+    else setHintLive(`${nm(it)} frei verschieben · Q/E dreht${it.kind==='island'?' · Stirnseite an eine Wand oder Seite an eine Insel ziehen rastet ein':''}`);
   } else {
     const nw=KX.nearestWall(c.E, w, g.qGrab, it.a?[it.a,it.b].sort().join('|'):null, it.w); if(!nw) return;
     const Wf=nw.Wf;
@@ -20027,7 +20152,9 @@ function buildGeom(c){
     const cx=Q.reduce((s,p)=>s+p.x,0)/n, cy=Q.reduce((s,p)=>s+p.y,0)/n;
     for(let i=0;i<n;i++){ const p=Q[i], q=Q[(i+1)%n], m={x:(p.x+q.x)/2-cx, y:(p.y+q.y)/2-cy};
       quad(tri, P3(p,pr.z0), P3(q,pr.z0), P3(q,pr.z1), P3(p,pr.z1), pr.col, 1, [m.x,0,m.y]);
-      if(pr.edge){ edge(P3(p,pr.z0),P3(q,pr.z0)); edge(P3(p,pr.z1),P3(q,pr.z1)); edge(P3(p,pr.z0),P3(p,pr.z1)); } }
+      if(pr.edge===true){ edge(P3(p,pr.z0),P3(q,pr.z0)); edge(P3(p,pr.z1),P3(q,pr.z1)); edge(P3(p,pr.z0),P3(p,pr.z1)); } }
+    // Kantenliste statt eigener Kanten (gemeinsame Inselplatte: nur der Umriss).
+    if(Array.isArray(pr.edge)) pr.edge.forEach(([p,q])=>{ edge(P3(p,pr.z0),P3(q,pr.z0)); edge(P3(p,pr.z1),P3(q,pr.z1)); edge(P3(p,pr.z0),P3(p,pr.z1)); });
   });
   // Boden (Ohrenschneiden, Inseln stehen als Pfeiler darauf) und Wände
   const ring=c.E.ring, fl=earcut(ring);
@@ -24407,6 +24534,71 @@ globalThis.selfChecks=function(){
         subs(0.3)==='Teller, Schüsseln|Gläser|Tassen' && subs(0.12)==='Teller|Gläser|Tassen' && subs(0.06)==='+3'
         && S.every((l,i)=>Math.abs(l.x-h.x)<0.5 && l.y>h.y && (!i || (l.y>S[i-1].y && l.r.y>=S[i-1].r.y+S[i-1].r.h))));
     }catch(err){ chk('kueche: Wunsch Zeilenumbruch ohne Ausnahme ('+err.message+')', false); }
+    // --- Feature insel-snap ---
+    // Inseln rasten aneinander ein, gleich hohe bekommen eine durchgehende
+    // Platte. Raum 4000 × 3000, Tür C–D (Zone x 2700–3600 ab y 2400).
+    try{
+      const isl=(id,x,y,rot,w,o)=>({id,kind:'island',x,y,rot,w,d:900,...(o||{})});
+      const snap=(items,id,tol=50)=>{ const K=KX.normKitchen({items}); return KX.snapIsland(E,K,K.items.find(i=>i.id===id),tol); };
+      // wie nach Speichern und Laden
+      const put=(items,id,s)=>JSON.parse(JSON.stringify(items.map(i=>i.id===id ? {...i, x:s.x, y:s.y, rot:s.rot} : i)));
+      const isTops=r=>r.L.tops.filter(t=>t.island), stTops=r=>KX.stock(r.K,r.L).tops.filter(t=>t.island);
+      const A=isl(1,1500,1500,0,1800);
+      // längs: Ende an Ende, 30 mm Luft, 20 mm versetzt, 3° schief
+      const B1=isl(2,3030,1520,3,1200), s1=snap([A,B1],2);
+      chk('kueche-insel: längs – Ende an Ende bündig, Drehung übernommen, Enden bündig',
+        !!s1 && s1.with===1 && s1.how==='längs' && s1.rot===0 && near(s1.x,3000,1e-6) && near(s1.y,1500,1e-6));
+      const r1=lay(put([A,B1],2,s1)), T1=isTops(r1);
+      chk('kueche-insel: längs – eine durchgehende Platte 3,00 × 0,90 m, Stückliste 1 Platte statt 2',
+        T1.length===1 && T1[0].ids.length===2 && near(T1[0].len,3000,0.01) && near(T1[0].depth,900,0.01) && T1[0].poly.length===4
+        && stTops(r1).length===1 && near(stTops(r1)[0].len,3000,0.01));
+      chk('kueche-insel: längs – Berührung ist keine Überlappung', !has(r1.F,/überlappen/));
+      const pr1=KX.scene(E,r1.K,r1.L,{}).prisms.filter(p=>Array.isArray(p.edge)), sg1=pr1.flatMap(p=>p.edge);
+      chk('kueche-insel: 3D – gemeinsame Platte ohne Fuge (Kanten nur am Umriss, keine bei x=2400)',
+        pr1.length===2 && sg1.length===4 && !sg1.some(([p,q])=>near(p.x,2400,1) && near(q.x,2400,1)));
+      const pr1s=KX.scene(E,r1.K,r1.L,{sel:new Set([2])}).prisms.filter(p=>Array.isArray(p.edge));
+      chk('kueche-insel: 3D – gemeinsame Platte in einer Farbe, auch wenn nur eine Insel gewählt ist',
+        pr1s.length===2 && pr1s[0].col.every((v,k)=>v===pr1s[1].col[k]) && pr1s[0].col.some((v,k)=>v!==pr1[0].col[k]));
+      // ungleich hoch: rastet ein, aber zwei Platten
+      const r1h=lay(put([A,{...B1,h:1050}],2,s1));
+      chk('kueche-insel: ungleich hohe Inseln – zwei Platten', isTops(r1h).length===2 && !has(r1h.F,/überlappen/));
+      // Seite an Seite: B oberhalb, 20 mm Luft, Fronten zeigen auf A
+      const B2=isl(2,1520,580,0,1800), s2=snap([A,B2],2);
+      chk('kueche-insel: Seite an Seite – Längsseiten bündig, Enden bündig',
+        !!s2 && s2.how==='Seite an Seite' && s2.rot===0 && near(s2.x,1500,1e-6) && near(s2.y,600,1e-6));
+      const r2=lay(put([A,B2],2,s2)), T2=isTops(r2);
+      chk('kueche-insel: Seite an Seite – eine Platte 1,80 × 1,80 m, keine Überlappung, Auszüge gegen die Nachbarinsel weiter gemeldet',
+        T2.length===1 && near(T2[0].len,1800,0.01) && near(T2[0].depth,1800,0.01) && !has(r2.F,/überlappen/) && has(r2.F,/Auszug von Insel 180 stößt an Insel 180/,'bad'));
+      // quer (T): Stiel 1200 auf 86° oberhalb der Insel, 20 mm Luft, 20 mm neben der Mitte
+      const A3=isl(1,1500,1800,0,1800), B3=isl(2,1480,730,86,1200), s3=snap([A3,B3],2);
+      chk('kueche-insel: quer (T) – 90° zur Nachbarinsel, mittig, bündig',
+        !!s3 && s3.how==='quer' && s3.rot===90 && near(s3.x,1500,1e-6) && near(s3.y,750,1e-6));
+      const r3=lay(put([A3,B3],2,s3)), T3=isTops(r3), sg3=KX.scene(E,r3.K,r3.L,{}).prisms.filter(p=>Array.isArray(p.edge)).flatMap(p=>p.edge);
+      chk('kueche-insel: T – eine Platte (T-Umriss, 8 Ecken), Stückliste 1 Platte mit Summenlänge 3,00 m, ohne Fuge',
+        T3.length===1 && T3[0].poly.length===8 && T3[0].parts.length===2 && near(T3[0].len,3000,0.01) && near(T3[0].depth,900,0.01)
+        && stTops(r3).length===1 && sg3.length===8 && !has(r3.F,/überlappen/));
+      // zu weit / zu schief: nicht einrasten
+      chk('kueche-insel: 100 mm Luft bei 50 mm Fangweite – kein Einrasten', snap([A,isl(2,3100,1500,0,1200)],2)===null);
+      chk('kueche-insel: 40° schief zur Nachbarinsel – kein Einrasten', snap([A,isl(2,3010,1500,50,1200)],2)===null);
+      chk('kueche-insel: ohne Nachbarinsel – kein Einrasten', snap([isl(2,3010,1500,0,1200)],2)===null);
+      // gedrehte Nachbarinsel (30°)
+      const A4=isl(1,1500,1300,30,1800), g4=KX.geom(E,KX.normKitchen({items:[A4]}),A4);
+      const c4={x:g4.c.x+g4.u.x*1525+g4.n.x*15, y:g4.c.y+g4.u.y*1525+g4.n.y*15}, B4=isl(2,c4.x,c4.y,33,1200), s4=snap([A4,B4],2);
+      const g4b=s4 && KX.geom(E,KX.normKitchen({items:[A4]}),{...B4, x:s4.x, y:s4.y, rot:s4.rot}), dc=g4b && {x:g4b.c.x-g4.c.x, y:g4b.c.y-g4.c.y};
+      chk('kueche-insel: gedrehte Nachbarinsel (30°) – Drehung exakt übernommen, Ende an Ende, Enden bündig',
+        !!s4 && s4.rot===30 && near(dc.x*g4.u.x+dc.y*g4.u.y,1500,1e-6) && near(dc.x*g4.n.x+dc.y*g4.n.y,0,1e-6));
+      const r4=lay(put([A4,B4],2,s4)), T4=isTops(r4);
+      chk('kueche-insel: gedreht – eine Platte 3,00 m, keine Überlappung', T4.length===1 && T4[0].poly.length===4 && near(T4[0].len,3000,0.01) && !has(r4.F,/überlappen/));
+      // Tresen: Überstand ragt nie in die Nachbarinsel; beide mit Tresen -> eine Platte samt Überstand
+      const Ab=isl(1,1500,1500,0,1800,{bar:381}), r5=lay(put([Ab,isl(2,3020,1500,0,1200,{bar:381})],2,snap([Ab,isl(2,3020,1500,0,1200,{bar:381})],2)));
+      chk('kueche-insel: Tresen längs – eine Platte 3,00 × 1,281 m', isTops(r5).length===1 && near(isTops(r5)[0].len,3000,0.01) && near(isTops(r5)[0].depth,1281,0.01));
+      const A6=isl(1,1500,900,0,1800), B6=isl(2,1500,2200,0,1800,{bar:381}), s6=snap([A6,B6],2), r6=s6 && lay(put([A6,B6],2,s6));
+      chk('kueche-insel: Tresen zur Nachbarinsel – Platte stößt an, Überstand ragt nicht hinein, Auszüge gegen den Tresen gemeldet',
+        !!s6 && near(s6.y,2181,1e-6) && !has(r6.F,/überlappen/) && isTops(r6).length===1 && has(r6.F,/Auszug von Insel 180 stößt an Insel 180/,'bad'));
+      // Einzelne Insel: Platte wie bisher (ein Eintrag, Korpus bzw. Tresen-Grundriss)
+      const r7=lay([A]);
+      chk('kueche-insel: einzelne Insel – Platte unverändert', isTops(r7).length===1 && !isTops(r7)[0].joined && isTops(r7)[0].poly===r7.L.byId.get(1).poly);
+    }catch(err){ chk('kueche-insel: ohne Ausnahme ('+err.message+')', false); }
   }
   return {ok, out};
 };
