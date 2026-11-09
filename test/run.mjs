@@ -10,7 +10,7 @@ const pick=id=>{
 // wirft der allererste Check mit "IMU is undefined", und keiner der übrigen
 // läuft. Der Block braucht kein DOM: alles, was ihn anfassen würde, hängt an
 // Event-Handlern, die hier nie feuern.
-new Function('"use strict";\n'+pick('vendor')+'\n'+pick('core')+'\n'+pick('tiles')+'\n'+pick('store')
+new Function('"use strict";\n'+pick('vendor')+'\n'+pick('core')+'\n'+pick('tiles')+'\n'+pick('kitchen')+'\n'+pick('store')
             +'\n'+pick('imu')+'\n'+pick('checks'))();
 const r=globalThis.selfChecks();
 console.log(r.out.join('\n'));
