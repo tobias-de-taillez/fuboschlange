@@ -6634,23 +6634,13 @@ globalThis.KITCHEN={ FRIDGE, DOORT_LIM, SWINGS, swingOf, isCold, fzOf, hasHinge,
 Object.assign(globalThis.KITCHEN, { CORNER, CSHAPE, shapeOf, cornerBlind, cornerPlace, cornerType, crossAt, cornerWing });
 Object.assign(globalThis.KITCHEN, { PLAN_TXT, planLabels, stationLabel, stationBlock, contentCands, headCands, nomCm, devTag, dimFits, chartBox, rectIn });
 Object.assign(globalThis.KITCHEN, { snapIsland, islandTops, topsTouch, partsClash });
-// Geruest Rest-Fixes (Anker, werden nach dem Zusammenfuehren entfernt)
+// Exporte der Rest-Fixes der Küchen-Review (je Gruppe eine Zeile)
 Object.assign(globalThis.KITCHEN, { ceilAt, ceilMin });
-//
 Object.assign(globalThis.KITCHEN, { placeOnWall, clipItem, cornerDrop, clearCorner, frontSet });
-//
 Object.assign(globalThis.KITCHEN, { dimCheck, dimInput, dimKey, dimResolve, wallReach, rayPoly, centroid });
-//
-Object.assign(globalThis.KITCHEN, { /* rest-platte */ });
-//
-Object.assign(globalThis.KITCHEN, { /* rest-pruef */ });
-//
 Object.assign(globalThis.KITCHEN, { standAt });
-//
 Object.assign(globalThis.KITCHEN, { specReset, reachDelta });
-//
 Object.assign(globalThis.KITCHEN, { ovenZ, DRAWER_TOP });
-//
 // --- Zustand der Bedienung: reine Regeln, hier statt in kitchen-ui, weil nur dieser Block im Selbsttest läuft ---
 // Schlüssel der Prüfliste im Panel: alles, was die Knöpfe zeigen und was ihre Handler beim Klick brauchen
 // (Teile-ids, Abhilfe samt Feldern). Nur Stufe und Text zu nehmen ließ nach einem Platztausch gleich benannter
@@ -6686,11 +6676,8 @@ function deferSave(run, delay, clock){
   return d;
 }
 Object.assign(globalThis.KITCHEN, { checksKey, selBoxKey, cornerBoxKey, controlOwnsKey, roomBound, deferSave });
-//
 Object.assign(globalThis.KITCHEN, { copySpot, sweepGaps, normUi, roleList, undoHint, DIM_NOTE });
-//
 Object.assign(globalThis.KITCHEN, { pillTouch });
-//
 })();
 </script>
 <script src="raum-geometrie.js"></script>
@@ -19919,8 +19906,7 @@ globalThis.selfChecks=function(){
       const r7=lay([A]);
       chk('kueche-insel: einzelne Insel – Platte unverändert', isTops(r7).length===1 && !isTops(r7)[0].joined && isTops(r7)[0].poly===r7.L.byId.get(1).poly);
     }catch(err){ chk('kueche-insel: ohne Ausnahme ('+err.message+')', false); }
-    // === Geruest fuer die Rest-Fixes: jede Gruppe fuellt NUR ihren Block (Anker, werden nach dem Zusammenfuehren entfernt) ===
-    // --- Rest-Fix decke ---
+    // --- Review-Fix Rest: decke ---
     try{
       // Decke mit Knickpunkten (Giebel, Kehle), 3D-Oberkante, Hängeschrank nie unter dem Boden.
       // hz: Eckhöhe h an allen Ecken plus Knicke [id, x ab A, Höhe] auf A–B (oder a,b).
@@ -19997,9 +19983,8 @@ globalThis.selfChecks=function(){
         chk('kueche: Spülmaschine und Backofen im Hochschrank von 1000 oder 1200 mm – "zu niedrig für das Gerät" rot',
           [['dw',1200],['dw',1000],['oven',1200],['oven',1000]].every(([d,h])=>{ const r=low(d,h); return r.length===1 && r[0].lvl==='bad'; }));
       }
-    }catch(err){ chk('kueche: Rest-Fix decke ohne Ausnahme ('+err.message+')', false); }
-    //
-    // --- Rest-Fix eck ---
+    }catch(err){ chk('kueche: Review-Fix Rest: decke ohne Ausnahme ('+err.message+')', false); }
+    // --- Review-Fix Rest: eck ---
     try{
       // Eckschränke und Türschwenk (Review-Befunde eck B1–B5). Eigene Räume, damit Fenster
       // und Tür des Testraums oben nicht stören; je Befund ein eigener Test, damit ein Fehler
@@ -20199,9 +20184,8 @@ globalThis.selfChecks=function(){
         const b=mk(), c=mk(); KX.clearCorner(b); KX.frontSet(c,'open'); c.front='door';
         return JSON.stringify(a)===s0 && a.corner===true && a.ctype==='L' && JSON.stringify(b)===JSON.stringify(c) && !('ctype' in b) && !('cEnd' in b);
       });
-    }catch(err){ chk('kueche: Rest-Fix eck ohne Ausnahme ('+err.message+')', false); }
-    //
-    // --- Rest-Fix masskette ---
+    }catch(err){ chk('kueche: Review-Fix Rest: eck ohne Ausnahme ('+err.message+')', false); }
+    // --- Review-Fix Rest: masskette ---
     try{
       // Maßkette und Wandabstände (Befunde C1-C7 der Gegenprüfung). Raum 4000 × 3000.
       const E0=KX.makeEnv(R.pts,R.walls,[],[]);
@@ -20357,9 +20341,8 @@ globalThis.selfChecks=function(){
         const P=[{x:0,y:0},{x:4,y:0},{x:4,y:2},{x:0,y:2}], c=KX.centroid(P);
         chk('kueche-masskette: centroid ist der Eckenmittelwert, eine Quelle für kitchen und kitchen-ui', near(c.x,2,1e-12) && near(c.y,1,1e-12));
       }
-    }catch(err){ chk('kueche: Rest-Fix masskette ohne Ausnahme ('+err.message+')', false); }
-    //
-    // --- Rest-Fix platte ---
+    }catch(err){ chk('kueche: Review-Fix Rest: masskette ohne Ausnahme ('+err.message+')', false); }
+    // --- Review-Fix Rest: platte ---
     try{
       // Umgebung ohne Fenster und Tür: ein Hochschrank bei x=1600 verdeckte sonst das Fenster der Prüfumgebung E.
       const EP=KX.makeEnv(R.pts,R.walls,[],[]);
@@ -20446,9 +20429,8 @@ globalThis.selfChecks=function(){
           [90,90.5].every(d=>bay(d,['A','B','C','D']).L.tops.every(t=>t.poly.length===4)) && topOn(bay(92,['A','B','C','D']).L,'A|B').poly.length===5
           && bay(120,['A','B','C','D'],1).L.tops.every(t=>t.poly.length===4));
       }
-    }catch(err){ chk('kueche: Rest-Fix platte ohne Ausnahme ('+err.message+')', false); }
-    //
-    // --- Rest-Fix pruef ---
+    }catch(err){ chk('kueche: Review-Fix Rest: platte ohne Ausnahme ('+err.message+')', false); }
+    // --- Review-Fix Rest: pruef ---
     try{
       // E1-E6 (Prüfregeln): Gang an der Plattenkante, mehrere Geräte einer Art,
       // Spüle-Kochfeld über die Platte, Tresen, Dreieck-Meldung. Eigene Räume:
@@ -20588,9 +20570,8 @@ globalThis.selfChecks=function(){
         chk('kueche-pruef: zwei Spülen an der Wand – ist eine mit 900 mm Platte vom Kochfeld getrennt, bleibt es still, auch wenn die andere daneben steht',
           zs([sk(1,0),hb(600),row(3,1200,900),sk(5,2100)])===null);
       }
-    }catch(err){ chk('kueche: Rest-Fix pruef ohne Ausnahme ('+err.message+')', false); }
-    //
-    // --- Rest-Fix wege ---
+    }catch(err){ chk('kueche: Review-Fix Rest: pruef ohne Ausnahme ('+err.message+')', false); }
+    // --- Review-Fix Rest: wege ---
     try{
       // F1: Start/Ziel in der Aufweitung eines Hindernisses zählte das Hindernis
       // für den ganzen Weg nicht (skip) - Wege liefen mitten durch Tisch, Schrank, Kind.
@@ -20669,9 +20650,8 @@ globalThis.selfChecks=function(){
         const z=T3([{id:1,kind:'base',dev:'sink',a:'A',b:'B',x:1700,w:600},{id:3,kind:'table',x:2000,y:1500,rot:0,w:3400,d:2800}]);
         chk('kueche-wege: Tisch an allen Seiten zugestellt – trotzdem ein Stand, an der Seite mit dem meisten Platz', !!z.side && z.sd.every(s=>!s.open) && z.side.room===Math.max(...z.sd.map(s=>s.room)));
       }
-    }catch(err){ chk('kueche: Rest-Fix wege ohne Ausnahme ('+err.message+')', false); }
-    //
-    // --- Rest-Fix inhalte ---
+    }catch(err){ chk('kueche: Review-Fix Rest: wege ohne Ausnahme ('+err.message+')', false); }
+    // --- Review-Fix Rest: inhalte ---
     try{
       // Meldung der Review-Gruppe „Inhalte“: G1 Fächer, G2 Anzahl je Fach, G3 Laden, G4 Küchenmaße zurücksetzen.
       // sf: eine fehlende Funktion oder Ausnahme macht nur diese Prüfung rot, nicht die übrigen.
@@ -20759,9 +20739,8 @@ globalThis.selfChecks=function(){
           KX.specReset(S);
           return Object.keys(S0).every(k=>k==='persons' ? S[k]===2 : S[k]===S0[k]) && S.entry==='o2'
             && KX.normKitchen({spec:{...S}}).spec.persons===2; }));
-    }catch(err){ chk('kueche: Rest-Fix inhalte ohne Ausnahme ('+err.message+')', false); }
-    //
-    // --- Rest-Fix 3d ---
+    }catch(err){ chk('kueche: Review-Fix Rest: inhalte ohne Ausnahme ('+err.message+')', false); }
+    // --- Review-Fix Rest: 3d ---
     try{
       // 3D „Fronten offen“, Ofen- und Schubladenhöhen. Jede Prüfung fängt eine
       // fehlende Funktion selbst ab (FAIL statt Abbruch des Blocks).
@@ -20812,9 +20791,8 @@ globalThis.selfChecks=function(){
           return !!o && !!e && near(o.z0-1.5,e.z0,0.01) && near(e.z0, KX.ovenZ(S.plinth,r.L.D.workH-S.topT), 1e-9);
         }) && lay3([herd]).L.G[0].env.find(x=>x.what==='Backofentür').z0===270 && KX.ovenZ(150,870)===270;
       });
-    }catch(err){ chk('kueche: Rest-Fix 3d ohne Ausnahme ('+err.message+')', false); }
-    //
-    // --- Rest-Fix zustand ---
+    }catch(err){ chk('kueche: Review-Fix Rest: 3d ohne Ausnahme ('+err.message+')', false); }
+    // --- Review-Fix Rest: zustand ---
     try{
       // Zustand der Bedienung (kitchen-ui läuft nicht im Selbsttest): die Regeln stehen als reine Funktionen im
       // kitchen-Block. Jeder Test schlägt bei fehlendem Helfer fehl statt zu werfen (sonst bliebe nur die Sammelzeile).
@@ -20888,9 +20866,8 @@ globalThis.selfChecks=function(){
           chk('kueche-zustand: speichern, das selbst cancel ruft (wie kitchenSave), läuft nicht doppelt', !!d && runs===1 && !d.pending && c.n()===0); }
         chk('kueche-zustand: ohne Vormerken tut flush nichts', fn('deferSave') && (()=>{ let runs=0; const d=KX.deferSave(()=>{ runs++; }, 400, clk()); return d.flush()===false && runs===0; })());
       }
-    }catch(err){ chk('kueche: Rest-Fix zustand ohne Ausnahme ('+err.message+')', false); }
-    //
-    // --- Rest-Fix bedienung ---
+    }catch(err){ chk('kueche: Review-Fix Rest: zustand ohne Ausnahme ('+err.message+')', false); }
+    // --- Review-Fix Rest: bedienung ---
     try{
       // (1) Duplizieren freier Teile (Insel, Tisch): die Kopie bleibt im Raum. Früher
       // n.x+=w+200 im Raumrahmen: ohne Platzprüfung, nicht in der Teilachse.
@@ -21014,9 +20991,8 @@ globalThis.selfChecks=function(){
         chk('kueche: Abläufe mit demselben K wie das Layout (App-Aufruf) = mit einer gleichwertigen Kopie (mindestens ein Ablauf vollständig)',
           fa.kmYear>0 && fa.complete>=1 && near(fa.kmYear,fb.kmYear,1e-9) && fa.complete===fb.complete);
       }
-    }catch(err){ chk('kueche: Rest-Fix bedienung ohne Ausnahme ('+err.message+')', false); }
-    //
-    // --- Rest-Fix etiketten ---
+    }catch(err){ chk('kueche: Review-Fix Rest: bedienung ohne Ausnahme ('+err.message+')', false); }
+    // --- Review-Fix Rest: etiketten ---
     try{
       // Führungslinien der Stationsetiketten (Nachprüfung der Etiketten-Fixes):
       // Segment gegen Segment statt nur Kasten, Ansatzpunkt am Kasten wählbar,
@@ -21122,8 +21098,7 @@ globalThis.selfChecks=function(){
         chk('kueche: Wegepunkt des Eingangs bleibt, wo er frei neben der Pille steht (auch schräg über der Ecke)',
           !t(100,83) && !t(160,100) && !t(151,85) && t(150,86));
       }
-    }catch(err){ chk('kueche: Rest-Fix etiketten ohne Ausnahme ('+err.message+')', false); }
-    //
+    }catch(err){ chk('kueche: Review-Fix Rest: etiketten ohne Ausnahme ('+err.message+')', false); }
   }
   return {ok, out};
 };
