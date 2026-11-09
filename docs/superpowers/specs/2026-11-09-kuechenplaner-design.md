@@ -108,6 +108,13 @@ Wunsch aus der Meldung M-20261109-134919-c2a193: Konfigurator für Eck-Unter- un
 | Planmaß quer | 650 (630–750) | 450 (390–500) |
 | Innen | UED Einlegeboden · UE Schubkasten + Tür · UEDSA Schwenkauszug | Einlegeboden(e) |
 
+**Über Eck und Diagonal** (Bauart im Konfigurator, Feld `ctype:'L'|'diag'`, `w` = Schenkellänge an beiden Wänden):
+
+- Unten: über Eck 80/90 mit zwei Türen (UE) oder Karussell (UEK), diagonal 80/90 mit einer Tür auf der Schräge (UED). Oben: über Eck 60/65/80/90 (WE, 2 Türen), diagonal 65 (WED65, Tür 394).
+- Das Teil hängt an seiner Wand und steht bündig in einer rechtwinkligen Innenecke. Der zweite Schenkel an der Nachbarwand ist ein eigener Eintrag in `L.G` (`wing:true`, gleiches `it`). Dadurch stimmen Platte, Kollision, Maßkette und Rastkanten dort ohne Sonderfälle. Stationen, Stauraum, Stückliste, Beschriftung und Auswahl zählen nur das Hauptteil (`byId` ohne wing).
+- Diagonal hat ein Fünfeck als Grundfläche (`foot`). Die Platte bekommt vor dem Eckfeld ein dreieckiges Eckstück (`patch`, nicht in der Stückliste).
+- Steht so ein Teil nicht bündig in einer passenden Ecke, gibt es einen roten Befund mit der Abhilfe „In die Ecke“. Nach dem Ziehen rastet es in die nähere Ecke der Wand.
+
 Quelle: nobilia Kurztypenliste (Halbeckschränke UED/UE/UEDSA, Wand-Eckschränke WE60-20/WE80-35/WE90-45). Planmaß längs = Planmaß quer + Tür (UE90-40: 1050, UE100-60: 1250).
 
 ## Prüfungen
@@ -194,7 +201,8 @@ Die Wände sind einseitig (Culling), deshalb verschwinden sie, wenn man von auß
 - Side by Side neben Möbeln: Bosch KAN93VIFP verlangt 50 mm Luft bei Möbeltiefe ≤ 650 und 53/96 mm bei 650–700. Das Modell braucht bei ≤ 600 keine Luft und liegt bei 650–700 etwa 15–20 mm darunter. Ein Side by Side bündig zwischen 58er Hochschränken bleibt deshalb ohne Befund.
 - Side by Side: Das Gefrierteil liegt immer links.
 - An stumpfen Ecken bleibt in der Arbeitsplatte eine kleine Dreieckslücke (keine Gehrung). Bei 1–2° Abweichung ist das unter 15 mm.
-- L-förmige Eckschränke über Eck (nobilia UE/UEK 80/90 mit 165°-Türen oder Karussell, Wand-Eckschrank 2 Türen) und Diagonal-Eckschränke (UED 80/90, WED65) fehlen. Das Modell kennt je Teil nur ein Rechteck an einer Wand; ein L über zwei Wände bräuchte zwei Körper je Teil.
+- Über Eck: Die beiden Türen schwenken im Modell je 90° um ihr äußeres Ende. Die echten 165°-Falttüren brauchen etwas anderen Platz im Eckfeld.
+- Über Eck und Diagonal gehen nur in rechtwinkligen Innenecken (±3°) und mit gleich langen Schenkeln.
 - Rückt ein Halbeckschrank von der Ecke ab, meldet die Platte den toten Winkel dahinter als „Passleiste“. Bei nobilia deckt das der Winkelpassstück-Bereich hinter der Querzeile ab, ein Bauteil ist es nicht.
 - Insel und Tisch rasten nicht ein.
 - Es gibt keinen Druck, keine Wandansicht von vorn und keine Auswahl in 3D.

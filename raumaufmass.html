@@ -6746,6 +6746,12 @@ function layout(E, K){
   G.filter(g=>shapeOf(g.it)).forEach(g=>{ const wg=cornerWing(E,K,g); if(wg){ cornerShape(g,wg); G.push(wg); } });
   G.forEach(g=>{ if(!g.wing) g.env=envelopes(K,g); });
   const fillers=[], tops=worktops(E,K,G,fillers);
+  // Diagonal-Eckschrank unten: die Platten der beiden Schenkel lassen vor dem
+  // Eckfeld ein Dreieck bis zur Schräge frei – als Eckstück ergänzen.
+  G.filter(g=>g.it.ctype==='diag' && g.it.kind==='base' && g.wingG).forEach(g=>{
+    const S=K.spec, at=g.wingG.at, t=S.topD, e=g.it.w+g.d+(S.topD-S.baseD)*Math.SQRT2-t;
+    if(e>t+1) tops.push({poly:[at(t,t), at(e,t), at(t,e)], z0:derived(S).workH-S.topT, z1:derived(S).workH, len:0, depth:0, ids:[g.it.id], patch:true});
+  });
   return {G, byId:new Map(G.filter(g=>!g.wing).map(g=>[g.it.id,g])), tops, fillers, orphans, D:derived(K.spec)};
 }
 
@@ -7897,7 +7903,7 @@ function stock(K, L){
   L.G.forEach(g=>{ const it=g.it; if(it.kind==='table' || g.wing) return;
     const k=`${nameOf(it)}|${it.kind}|${extraOf(it)}`; rows.set(k, (rows.get(k)||0)+1); });
   const list=[...rows].map(([k,n])=>({name:k.split('|')[0], extra:k.split('|')[2]||'', n})).sort((p,q)=>p.name.localeCompare(q.name,'de'));
-  const tops=L.tops.filter(t=>!t.island).map(t=>({len:t.len, depth:t.depth}));
+  const tops=L.tops.filter(t=>!t.island && !t.patch).map(t=>({len:t.len, depth:t.depth}));
   return {list, tops, topSum:tops.reduce((s,t)=>s+t.len,0), fillers:(L.fillers||[]).map(f=>({w:f.w, corner:!!f.corner}))};
 }
 
@@ -21553,6 +21559,7 @@ globalThis.selfChecks=function(){
       const Kd=KX.normKitchen({items:[{...Lk, ctype:'diag', inner:undefined, hinge:'left'}]}), Ld=KX.layout(Kd.items.length?E:E,Kd), gd=Ld.byId.get(1);
       chk('kueche-eck: Diagonal – Fünfeck als Grundfläche, eine Tür auf der Schräge', gd.foot && gd.foot.length===5 && TILES.pointInRing({x:600,y:600},gd.foot) && gd.env.length===1 && near(gd.env[0].r,Math.SQRT2*320,1));
       chk('kueche-eck: Diagonal – Typ UED90', KX.cornerType(Kd.items[0])==='UED90');
+      chk('kueche-eck: Diagonal – Platte deckt das Dreieck vor dem Eckfeld, Stückliste ohne Eckstück', Ld.tops.some(t=>TILES.pointInRing({x:650,y:650},t.poly)) && KX.stock(Kd,Ld).tops.every(t=>t.len>0));
       // Hänge-Eckschrank über Eck 60×60: zweiter Schenkel ab Tiefe oben
       const Kw=KX.normKitchen({items:[{id:1,kind:'wall',corner:true,ctype:'L',front:'door',cEnd:0,a:'A',b:'D',x:0,w:600}]}), Lw=KX.layout(E,Kw), ww=Lw.G.find(h=>h.wing);
       chk('kueche-eck: Hänge-Eckschrank über Eck – Schenkel 370…600 an A–B', !!ww && near(ww.s0,370,0.5) && near(ww.s1,600,0.5) && KX.cornerType(Kw.items[0])==='WE60');
