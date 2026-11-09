@@ -72,7 +72,7 @@ Abgleich mit den Maßblättern:
 | KAN93VIFP Gefrierteil (W 387), 130° | 279 | 277 |
 | KAN93VIFP Kühlteil (W 515), 135° | 392 | 418 |
 
-- Auch die Bosch-Tabellen zur Nachbartiefe trifft das Modell: Neben Möbeln oder Platten ≤ 600 tief reichen wenige Millimeter, über 700 zählt es wie eine Wand.
+- Bosch-Tabellen zur Nachbartiefe: Beim French Door trifft das Modell sie. Neben Möbeln oder Platten ≤ 600 tief reichen wenige Millimeter (Bosch: 3 mm), über 700 zählt es wie eine Wand. Beim Side by Side verlangt Bosch auch neben ≤ 600 tiefen Möbeln 50 mm Luft, das Modell kommt dort ohne aus (siehe Bekannte Lücken).
 - Ein erster Ansatz mit der Achse an der Korpus-Ecke (Überstand bei 90° = t) war zu streng. Er meldete beim Side by Side mit 50 mm Luft neben einer 600er Platte nur 112°. Bosch erlaubt dort die volle Öffnung.
 
 **Prüfung (`leafReach`):**
@@ -173,6 +173,7 @@ Die Wände sind einseitig (Culling), deshalb verschwinden sie, wenn man von auß
 
 - Bei Flügeltüren fehlen die Griffe. Ganz offen liegt der seitliche Bedarf deshalb bis 26 mm unter dem Maßblatt (KAN93VIFP Kühlteil: 392 statt 418).
 - Die Flügelachse sitzt in der Mitte der Türdicke. Echte Scharniere weichen je Hersteller ab: Liebherr nennt laut Suchergebnis 13 mm Wandabstand mit Griffmulde und 57 mm mit Hebelgriff. Das PDF ließ sich nicht laden.
+- Side by Side neben Möbeln: Bosch KAN93VIFP verlangt 50 mm Luft bei Möbeltiefe ≤ 650 und 53/96 mm bei 650–700. Das Modell braucht bei ≤ 600 keine Luft und liegt bei 650–700 etwa 15–20 mm darunter. Ein Side by Side bündig zwischen 58er Hochschränken bleibt deshalb ohne Befund.
 - Side by Side: Das Gefrierteil liegt immer links.
 - An stumpfen Ecken bleibt in der Arbeitsplatte eine kleine Dreieckslücke (keine Gehrung). Bei 1–2° Abweichung ist das unter 15 mm.
 - Die Blendenbreite des Eckschranks richtet sich nach der Standardtiefe, nicht nach der tatsächlichen Tiefe der Querzeile.

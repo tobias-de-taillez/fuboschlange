@@ -6321,8 +6321,9 @@ const ang=v=>Math.atan2(v.y,v.x);
 // 45), bei 118° 254 (268) und 1105 tief ab Wand (1102); KAN93VIFP
 // Gefrierteil (W 387, t 79) bei 130° 279 (277), Kühlteil (W 515) bei 135°
 // 392 (418). Die Griffe fehlen im Modell, ganz offen liegt es darum bis
-// 26 mm unter dem Blatt. Die Nachbartabellen (Möbeltiefe ≤ 600 → wenige mm,
-// > 700 → wie Wand) trifft es.
+// 26 mm unter dem Blatt. Nachbartabellen: French Door trifft es (≤ 600 → 3 mm,
+// > 700 → wie Wand); beim Side by Side verlangt Bosch auch neben ≤ 600 tiefen
+// Möbeln 50 mm, das Modell braucht dort keine Luft (Griffe, Scharnier).
 function leaves(g){
   const fz=fzOf(g.it); if(!fz) return [];
   const {L:pl, R:pr}=frontLR(g), n=g.n, t=doorTOf(g.it), w=len(sub(pr,pl)), dir=unit(sub(pr,pl));
