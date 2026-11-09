@@ -524,19 +524,18 @@
   #mldbody .seg{display:flex;gap:0}
   #mldbody .seg button{border-radius:0;margin-left:-1px} #mldbody .seg button:first-child{border-radius:4px 0 0 4px;margin-left:0} #mldbody .seg button:last-child{border-radius:0 4px 4px 0}
   #mldbody .seg button[aria-pressed=true]{background:var(--accent-bg);color:var(--accent);border-color:var(--accent-line);position:relative}
-  #mldText{width:100%;min-height:120px;resize:vertical;font:inherit;padding:8px;border:1px solid var(--line);border-radius:4px;background:#fff;color:var(--ink)}
+  #mldText{width:100%;min-height:110px;resize:vertical;font:inherit;padding:8px;border:1px solid var(--line);border-radius:4px;background:#fff;color:var(--ink)}
   #mldKontakt{width:100%;height:28px;padding:0 8px;border:1px solid var(--line);border-radius:4px;background:#fff}
-  #mldbody label.f{display:grid;gap:4px;font-size:12px;color:var(--ink2)}
-  #mldShot{display:grid;grid-template-columns:200px minmax(0,1fr);gap:12px;align-items:start}
-  #mldShot img{width:200px;max-height:150px;object-fit:contain;background:var(--canvas);border:1px solid var(--line);border-radius:4px}
-  #mldShot p{margin:0 0 6px;font-size:12px;color:var(--ink2)}
-  #mldDsgvo{background:var(--warn-bg);border:1px solid #e6d3a8;border-radius:6px;padding:10px 12px;font-size:12px;color:var(--ink)}
-  #mldDsgvo b{display:block;margin-bottom:4px}
-  #mldDsgvo ul{margin:4px 0 6px;padding-left:18px} #mldDsgvo p{margin:4px 0}
-  #mldbody .chk{display:flex;gap:8px;align-items:flex-start;font-size:12px} #mldbody .chk input{margin-top:2px}
+  #mldShot{display:grid;grid-template-columns:160px minmax(0,1fr);gap:12px;align-items:start}
+  #mldShot img{width:160px;max-height:110px;object-fit:contain;background:var(--canvas);border:1px solid var(--line);border-radius:4px}
+  #mldShot p{margin:6px 0 0}
+  #mldbody .chk{display:flex;gap:8px;align-items:flex-start;font-size:12px;color:var(--ink2)} #mldbody .chk input{margin-top:2px}
+  #mldEinw{color:var(--ink)!important} #mldEinw a{color:var(--accent)}
   #mldMsg{font-size:12px;min-height:16px} #mldMsg.bad{color:var(--bad)} #mldMsg.good{color:var(--good)}
+  #mldToast{position:fixed;left:12px;bottom:76px;z-index:61;max-width:min(360px,calc(100vw - 24px));padding:8px 12px;font-size:12px;
+    background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--good);border-radius:6px;box-shadow:0 2px 10px rgba(36,34,29,.16);cursor:pointer}
   #mldfoot{display:flex;justify-content:flex-end;gap:8px;padding:10px 16px;border-top:1px solid var(--line2);position:sticky;bottom:0;background:var(--surface)}
-  @media print{ #mldFab,#mldwrap{display:none!important} }
+  @media print{ #mldFab,#mldwrap,#mldToast{display:none!important} }
 </style>
 
 <div id="app">
@@ -876,42 +875,28 @@
 </div>
 <div id="mldwrap" class="scrim" hidden>
   <div id="mldbox" class="dlg" role="dialog" aria-modal="true" aria-labelledby="mldTitle">
-    <div class="dlghead"><h2 id="mldTitle">Fehler oder fehlende Funktion melden</h2><button id="mldClose" class="ib" aria-label="Schließen" title="Schließen (Esc)"><svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg></button></div>
+    <div class="dlghead"><h2 id="mldTitle">Fehler oder Wunsch melden</h2><button id="mldClose" class="ib" aria-label="Schließen" title="Schließen (Esc)"><svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg></button></div>
     <div id="mldbody">
       <div class="seg" id="mldArt" role="group" aria-label="Art der Meldung">
-        <button data-art="fehler" aria-pressed="true">Fehler</button><button data-art="wunsch" aria-pressed="false">Funktion fehlt</button>
+        <button data-art="fehler" aria-pressed="true">Fehler</button><button data-art="wunsch" aria-pressed="false">Wunsch</button>
       </div>
-      <label class="f"><span id="mldTextLbl">Was ist passiert? Was hast du erwartet?</span>
-        <textarea id="mldText" maxlength="20000" placeholder="z. B. „Nach dem Löschen der Diagonale A–C springt die Ecke C nach links, obwohl …“"></textarea></label>
-      <label class="f">Kontakt für Rückfragen (freiwillig)
-        <input id="mldKontakt" type="text" maxlength="200" autocomplete="email" placeholder="E-Mail oder Telefon, leer lassen geht auch"></label>
+      <textarea id="mldText" maxlength="20000" aria-label="Beschreibung" placeholder="Was ist passiert, was hast du erwartet?"></textarea>
+      <input id="mldKontakt" type="text" maxlength="200" autocomplete="email" aria-label="Kontakt für Rückfragen (freiwillig)" placeholder="Kontakt für Rückfragen (freiwillig)">
       <div id="mldShot">
         <img id="mldImg" alt="Vorschau des Bildes, das mitgeschickt wird">
         <div>
-          <p id="mldImgNote">Bild der Zeichenfläche, so wie sie gerade aussieht.</p>
-          <label class="chk"><input type="checkbox" id="mldImgOn" checked>Bild mitsenden</label>
+          <label class="chk"><input type="checkbox" id="mldImgOn" checked><span id="mldImgNote">Bild mitsenden</span></label>
           <p><button id="mldWin" type="button" title="Der Browser fragt, was aufgenommen werden soll – diesen Tab wählen">Ganzes Fenster aufnehmen …</button></p>
         </div>
       </div>
-      <label class="chk" id="mldAlleRow"><input type="checkbox" id="mldAlle"><span id="mldAlleTxt">Auch die anderen Räume aus diesem Browser mitsenden</span></label>
-      <div id="mldDsgvo">
-        <b>Datenschutz: Das wird gesendet</b>
-        <ul>
-          <li>dein Text und, falls angegeben, dein Kontakt</li>
-          <li>das Bild oben (wenn angehakt)</li>
-          <li>der genaue Zustand der App: der geöffnete Raum mit allen Maßen, Öffnungen und Fliesen, dazu Ansicht, Auswahl, Rückgängig-Verlauf und Einstellungen, <span id="mldAlleLi">ohne die anderen Räume</span></li>
-          <li>technische Angaben: Browser, Betriebssystem, Fenstergröße, Sprache und die Fehlermeldungen der Seite seit dem Laden</li>
-        </ul>
-        <p><b style="display:inline">Wofür:</b> ausschließlich, um den Fehler nachzustellen und zu beheben. Keine Weitergabe, keine Auswertung zu anderen Zwecken.</p>
-        <p><b style="display:inline">Wo und wie lange:</b> auf dem Webserver dieser Seite (Hetzner, Deutschland), nicht öffentlich abrufbar. Der Entwickler holt die Meldung ab, dabei wird sie vom Server gelöscht; seine Arbeitskopie löscht er direkt nach dem Debugging. Wie bei jedem Seitenaufruf vermerkt der Server den Zugriff mit gekürzter IP-Adresse.</p>
-        <p><b style="display:inline">Rechtsgrundlage:</b> deine Einwilligung (Art. 6 Abs. 1 lit. a DSGVO). Sie ist freiwillig und jederzeit widerrufbar; für Auskunft oder vorzeitige Löschung genügt die Meldungsnummer, die nach dem Senden erscheint.</p>
-      </div>
-      <label class="chk"><input type="checkbox" id="mldOk">Ich bin einverstanden, dass diese Daten zum Debugging gesendet werden.</label>
+      <label class="chk" id="mldAlleRow" title="Nötig, wenn es um Nachbarräume oder das Gebäude geht"><input type="checkbox" id="mldAlle"><span id="mldAlleTxt">Auch die anderen Räume mitsenden</span></label>
+      <label class="chk" id="mldEinw"><input type="checkbox" id="mldOk"><span>Ich willige ein, dass Text, Bild und App-Zustand nur zur Fehlersuche gespeichert und danach gelöscht werden. <a href="datenschutz-meldung.html" target="_blank" rel="noopener">Datenschutz</a></span></label>
       <div id="mldMsg" role="status"></div>
     </div>
     <div id="mldfoot"><button id="mldCancel" type="button">Abbrechen</button><button id="mldSend" type="button" class="primary" disabled>Senden</button></div>
   </div>
 </div>
+<div id="mldToast" role="status" hidden></div>
 <dialog id="measDlg" aria-labelledby="mTitle">
   <form method="dialog" class="mhead"><h3 id="mTitle">Fliese einmessen</h3><button class="ib" aria-label="Schließen" value="x">×</button></form>
   <div class="mbody">
@@ -15029,23 +15014,19 @@ const msg=(t,cls='')=>{ const m=$('mldMsg'); m.textContent=t; m.className=cls; }
 function bildZeigen(){
   const b=bildFenster||bildPlan;
   $('mldImg').src=b||''; $('mldImg').hidden=!b;
-  $('mldImgNote').textContent = bildFenster ? 'Bild des ganzen Fensters.' : b
-    ? 'Bild der Zeichenfläche, so wie sie gerade aussieht.' : 'Kein Bild verfügbar.';
-}
-function alleSync(){
-  const on=$('mldAlle').checked;
-  $('mldAlleLi').textContent = on ? 'und dazu alle anderen Räume dieses Browsers' : 'ohne die anderen Räume';
+  $('mldImgOn').disabled=!b;
+  $('mldImgNote').textContent = bildFenster ? 'Bild des Fensters mitsenden' : b ? 'Bild mitsenden' : 'Kein Bild verfügbar';
 }
 function sendSync(){
   const b=$('mldSend');
   b.disabled = sendet || !$('mldOk').checked || !$('mldText').value.trim();
-  b.title = !$('mldText').value.trim() ? 'Erst oben beschreiben, worum es geht.'
-    : !$('mldOk').checked ? 'Erst unten die Einwilligung anhaken.' : '';
+  b.title = !$('mldText').value.trim() ? 'Erst beschreiben, worum es geht.'
+    : !$('mldOk').checked ? 'Erst die Einwilligung anhaken.' : '';
 }
 function artSetzen(a){
   art=a;
   for(const b of $('mldArt').querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.art===a));
-  $('mldTextLbl').textContent = a==='fehler' ? 'Was ist passiert? Was hast du erwartet?' : 'Welche Funktion fehlt dir, und wofür brauchst du sie?';
+  $('mldText').placeholder = a==='fehler' ? 'Was ist passiert, was hast du erwartet?' : 'Was fehlt dir, und wofür?';
 }
 function oeffnen(){
   if(!wrap.hidden) return;
@@ -15054,13 +15035,10 @@ function oeffnen(){
   $('mldWin').hidden=!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
   const n=andereRaeume();
   $('mldAlleRow').hidden = n===0;
-  $('mldAlleTxt').textContent = (n===1 ? 'Auch den anderen Raum' : `Auch die ${n} anderen Räume`)
-    + ' aus diesem Browser mitsenden – nötig, wenn es um Nachbarräume oder das Gebäude geht';
+  $('mldAlleTxt').textContent = n===1 ? 'Auch den anderen Raum mitsenden' : `Auch die ${n} anderen Räume mitsenden`;
   $('mldAlle').checked = n>0 && g(()=>neighbors.length>0,false);
-  alleSync();
   $('mldOk').checked=false; sendet=false; msg('');
-  $('mldSend').textContent='Senden'; $('mldCancel').textContent='Abbrechen';
-  for(const id of ['mldText','mldKontakt','mldArt','mldImgOn','mldAlle','mldOk','mldWin']) $(id).disabled=false;
+  $('mldSend').textContent='Senden';
   sendSync();
   wrap.hidden=false;
   $('mldText').focus();
@@ -15075,7 +15053,7 @@ $('mldCancel').onclick=schliessen;
 // zum Senden stehen).
 wrap.addEventListener('pointerdown',e=>{ if(e.target===wrap && !sendet && !$('mldText').value.trim()) schliessen(); });
 $('mldArt').onclick=e=>{ const b=e.target.closest('button'); if(b) artSetzen(b.dataset.art); };
-$('mldText').oninput=sendSync; $('mldOk').onchange=sendSync; $('mldAlle').onchange=alleSync;
+$('mldText').oninput=sendSync; $('mldOk').onchange=sendSync;
 $('mldImgOn').onchange=()=>{ $('mldImg').style.opacity=$('mldImgOn').checked?'':'.25'; };
 $('mldWin').onclick=async()=>{
   const b=await fensterBild();
@@ -15097,10 +15075,21 @@ wrap.addEventListener('keydown',e=>e.stopPropagation());
 for(const dlg of document.querySelectorAll('dialog')){
   const umzug=()=>{
     const ziel = dlg.open && dlg.matches(':modal') ? dlg : document.body;
-    if(fab.parentNode!==ziel){ ziel.appendChild(fab); ziel.appendChild(wrap); }
+    if(fab.parentNode!==ziel){ ziel.appendChild(fab); ziel.appendChild(wrap); ziel.appendChild($('mldToast')); }
   };
   new MutationObserver(umzug).observe(dlg,{attributes:true, attributeFilter:['open']});
 }
+
+// Nach dem Senden: Dialog zu, Felder leer, kurze Bestaetigung mit der
+// Meldungsnummer unten links (verschwindet von selbst oder per Klick).
+let toastT=0;
+function fertig(t){
+  sendet=false; $('mldText').value=''; $('mldKontakt').value=''; $('mldOk').checked=false;
+  schliessen();
+  const el=$('mldToast'); el.textContent=t; el.hidden=false;
+  clearTimeout(toastT); toastT=setTimeout(()=>{ el.hidden=true; }, 12000);
+}
+$('mldToast').onclick=()=>{ $('mldToast').hidden=true; };
 
 function alsDatei(payload){
   const a=document.createElement('a');
@@ -15128,18 +15117,12 @@ $('mldSend').onclick=async()=>{
     r=await fetch('bugreport.php',{method:'POST', headers:{'Content-Type':'application/json'}, body, credentials:'same-origin'});
     j=await r.json().catch(()=>null);
   }catch(e){ r=null; }
-  if(r && r.ok && j && j.ok){
-    msg(`Danke! Die Meldung ist angekommen. Meldungsnummer: ${j.id}`,'good');
-    for(const id of ['mldText','mldKontakt','mldImgOn','mldAlle','mldOk','mldWin']) $(id).disabled=true;
-    $('mldSend').textContent='Gesendet'; $('mldCancel').textContent='Schließen';
-    $('mldText').value=''; sendet=false; $('mldSend').disabled=true;
-    return;
-  }
+  if(r && r.ok && j && j.ok){ fertig(`Danke! Meldung ${j.id} ist angekommen.`); return; }
   sendet=false; $('mldSend').textContent='Senden'; sendSync();
   const live=/(^|\.)irazari-te\.ch$/.test(location.hostname);
   if(!live && (!r || [404,405,501].includes(r.status))){
     alsDatei(payload);
-    msg('Hier gibt es keinen Empfänger (lokale Fassung). Die Meldung wurde stattdessen als Datei gesichert.','good');
+    fertig('Lokale Fassung ohne Empfänger: Meldung als Datei gesichert.');
     return;
   }
   msg(j && j.fehler ? `Senden fehlgeschlagen: ${j.fehler}` : `Senden fehlgeschlagen${r?` (Status ${r.status})`:' (keine Verbindung)'}. Bitte später noch einmal versuchen.`,'bad');
