@@ -6754,7 +6754,10 @@ function doorReach(E, L){
       const th=s.dir0+s.sense*a*Math.PI/180, u={x:Math.cos(th), y:Math.sin(th)};
       const v={x:-s.sense*u.y, y:s.sense*u.x};        // zur Seite, in die das Blatt schwenkt
       const P0=s.angel, R=[P0, add(P0,mul(u,o.w)), add(add(P0,mul(u,o.w)),mul(v,ROOM_LEAF_T)), add(P0,mul(v,ROOM_LEAF_T))];
-      return L.G.find(g=>!g.wing && bandsMeet(band,g) && TL.convexOverlap(R, g.foot||g.poly, 1)) || null;
+      // Auch der zweite Schenkel eines Eckschranks über Eck (wing): das Hauptteil
+      // deckt dort nur seine eigene Wand, der Schenkel an der Nachbarwand ist ein
+      // eigener Eintrag (gleiches it, also gleicher Name und gleiche id).
+      return L.G.find(g=>bandsMeet(band,g) && TL.convexOverlap(R, g.foot||g.poly, 1)) || null;
     };
     let deg=0, hit=null;
     for(let a=2; a<=maxDeg; a+=2){ hit=blockedAt(a); if(hit) break; deg=a; }
@@ -6825,6 +6828,57 @@ function cornerPlace(E, K, L, it, Wf){
   const x = atS0 ? dist : Wf.L-dist-it.w;
   return fitsAt(E,K,L,it,Wf,x) ? Math.round(x*10)/10 : null;
 }
+// Stelle (und Breite) für ein neues Wandteil an der Wand Wf, ab near: die erste
+// freie Stelle, bei einem Eckschrank dort in der Eckenlage (cornerPlace). shrink:
+// passt die Breite nicht, die größte Rasterbreite, die passt – auch für sie wird
+// die Lage neu bestimmt (die Eckenlage hängt an der Breite: Blende + Querzeile).
+// {x, w} oder null; das Teil selbst bleibt unverändert.
+function placeOnWall(E, K, L, it, Wf, near, shrink){
+  const slot=t=>{ let x=freeSlot(E,K,L,t,Wf,near);
+    if(t.corner){ const xc=cornerPlace(E,K,L,{...t, x:x!=null?x:(near!=null?near:0)},Wf); if(xc!=null) x=xc; }
+    return x; };
+  let x=slot(it), w=it.w;
+  if(x==null && shrink){
+    const widths=(it.dev?DEV[it.dev].widths:it.corner?CORNER[it.kind].bodies:WIDTHS).filter(v=>v<it.w).sort((p,q)=>q-p);
+    for(const v of widths){ const xx=slot({...it, w:v}); if(xx!=null){ x=xx; w=v; break; } }
+  }
+  return x==null ? null : {x, w};
+}
+// Kopiervorlage (⌘C): das Teil ohne Lage (id, Wand, x, y) und ohne gesetzte Ecke.
+// cEnd gilt nur im Rahmen der Wand, an der es stand; an einer anderen Wand wäre
+// es die falsche Ecke und überstimmte den Zeiger (cornerAtS0).
+function clipItem(it){
+  const t=JSON.parse(JSON.stringify(it));
+  ['id','a','b','x','y','cEnd'].forEach(k=>{ delete t[k]; });
+  return t;
+}
+// Eckschrank nach dem Ablegen (kitchenUp). Mit snap (ohne ⌥) rastet ein Schrank
+// über Eck / diagonal bündig in die nähere Ecke der Wand ein. Sonst bleibt die Lage;
+// eine gesetzte Ecke (cEnd) folgt ihr nur, wenn er genau auf der Eckenlage der
+// anderen Ecke steht (Rastkante, ⌥ am Wandende) – cEnd ist relativ zur Wand, an der
+// er stand. Die Nähe taugt dafür nicht: an kurzen Wänden steht der Halbeckschrank
+// von der Ecke abgerückt (Blende hinter der Querzeile). {cEnd, x} oder null.
+function cornerDrop(E, K, L, it, Wf, snap){
+  if(!it.corner) return null;
+  if(it.ctype && snap){
+    const near=it.x <= Wf.L-it.x-it.w ? 0 : 1, x=cornerPlace(E,K,L,{...it, cEnd:near},Wf);
+    return x!=null ? {cEnd:near, x} : null;
+  }
+  if(it.cEnd==null) return null;
+  const on=e=>{ const x=cornerPlace(E,K,L,{...it, cEnd:e},Wf); return x!=null && Math.abs(x-it.x)<0.5; };
+  const o=1-it.cEnd;
+  return on(o) && !on(it.cEnd) ? {cEnd:o, x:it.x} : null;
+}
+// Eckschrank wieder zum normalen Schrank: alles weg, was nur ein Eckschrank hat
+// (Knopf „Normaler Schrank“, Front ≠ Drehtür, Bauart ohne Eckschrank). Sonst
+// bliebe in der Sitzung stehen, was nach dem Laden (normItem) fehlt.
+function clearCorner(t){
+  delete t.corner; delete t.door; delete t.cEnd; delete t.inner; delete t.ctype;
+  if(t.w>(t.kind==='wall'?900:1200)) t.w=600;
+}
+// Front wechseln: der Eckschrank hat nur die Drehtür, jede andere macht ihn zum
+// normalen Schrank.
+function frontSet(t, v){ t.front=v; if(v!=='door' && t.corner) clearCorner(t); }
 // Über Eck / Diagonal: der Korpus steht bündig in einer rechtwinkligen
 // Innenecke. Das Teil selbst ist das Rechteck an seiner Wand (Schenkel A,
 // mit dem Eckquadrat); der zweite Schenkel an der Nachbarwand wird ein
@@ -9032,7 +9086,7 @@ Object.assign(globalThis.KITCHEN, { snapIsland, islandTops, topsTouch, partsClas
 // Geruest Rest-Fixes (Anker, werden nach dem Zusammenfuehren entfernt)
 Object.assign(globalThis.KITCHEN, { /* rest-decke */ });
 //
-Object.assign(globalThis.KITCHEN, { /* rest-eck */ });
+Object.assign(globalThis.KITCHEN, { placeOnWall, clipItem, cornerDrop, clearCorner, frontSet });
 //
 Object.assign(globalThis.KITCHEN, { /* rest-masskette */ });
 //
@@ -18796,16 +18850,13 @@ function placeItem(c, it, world, label, shrink){
     }
     if(!Wf) return;
     it.a=Wf.a; it.b=Wf.b;
-    let x=KX.freeSlot(c.E,K,c.L,it,Wf,near);
-    // Eckschrank: in die nähere Ecke, Blende hinter die Querzeile.
-    if(it.corner){ const xc=KX.cornerPlace(c.E,K,c.L,{...it, x:x!=null?x:(near!=null?near:0)},Wf); if(xc!=null) x=xc; }
-    if(x==null && shrink){
-      // Kein Platz in Standardbreite: die größte Rasterbreite nehmen, die passt.
-      const widths=(it.dev?KX.DEV[it.dev].widths:it.corner?KX.CORNER[it.kind].bodies:KX.WIDTHS).filter(w=>w<it.w).sort((p,q)=>q-p);
-      for(const w of widths){ const t={...it,w}, xx=KX.freeSlot(c.E,K,c.L,t,Wf,near); if(xx!=null){ it.w=w; x=xx; msg=`Nur noch ${Math.round(w/10)} cm frei – ${label} ${Math.round(w/10)} gesetzt.`; break; } }
-    }
-    if(x==null){ K.seq--; setHint(`Kein freier Platz an dieser Wand für ${label}. ${shrink?'Auf eine andere Wand ziehen.':'Zeiger an eine andere Wand halten und noch einmal ⌘V.'}`); return false; }
-    it.x=x; KS.lastWall=[Wf.a,Wf.b];
+    // Erste freie Stelle; Eckschrank in die nähere Ecke, Blende hinter die
+    // Querzeile – auch wenn er nur geschrumpft passt (Lage je Breite).
+    const sl=KX.placeOnWall(c.E,K,c.L,it,Wf,near,shrink);
+    if(!sl){ K.seq--; setHint(`Kein freier Platz an dieser Wand für ${label}. ${shrink?'Auf eine andere Wand ziehen.':'Zeiger an eine andere Wand halten und noch einmal ⌘V.'}`); return false; }
+    // Kein Platz in Standardbreite: die größte Rasterbreite, die passt.
+    if(sl.w!==it.w){ it.w=sl.w; msg=`Nur noch ${Math.round(sl.w/10)} cm frei – ${label} ${Math.round(sl.w/10)} gesetzt.`; }
+    it.x=sl.x; KS.lastWall=[Wf.a,Wf.b];
   }
   snapshot();
   K.items.push(KX.normItem(it));
@@ -18818,7 +18869,7 @@ function placeItem(c, it, world, label, shrink){
 // (steht er nicht über dem Plan: neben das gewählte Teil). Meldung
 // M-20261109-140133-cc2275.
 function kitchenCopy(it){
-  const t=JSON.parse(JSON.stringify(it)); delete t.id; delete t.a; delete t.b; delete t.x; delete t.y;
+  const t=KX.clipItem(it);
   KS.clip=t; setHint(`${nm(it)} kopiert · ⌘V setzt es unter den Zeiger`);
 }
 function kitchenPaste(){
@@ -19334,14 +19385,16 @@ function kitchenUp(e, g){
   KS.drag=false;
   if(g.moved){
     const it=kitchenData().items.find(x=>x.id===g.id), c=kctx();
-    if(it && it.a && c && !(e && e.altKey)){
+    if(it && it.a && c){
+      const snap=!(e && e.altKey);
       // Krumme Werte vom Ziehen auf 10 mm runden – außer es ist eine
       // Rastkante (an schiefen Ecken ist die krumm und muss so bleiben).
-      const Wf=KX.wallFrame(c.E,it.a,it.b), cand=Wf ? KX.slotCandidates(c.E,c.K,c.L,it,Wf) : [];
-      if(Wf && !cand.some(x=>Math.abs(x-it.x)<0.5)){ const r=Math.max(0,Math.min(Wf.L-it.w, Math.round(it.x/10)*10)); if(KX.fitsAt(c.E,c.K,c.L,it,Wf,r) || !KX.fitsAt(c.E,c.K,c.L,it,Wf,it.x)) it.x=r; }
-      // Eckschrank über Eck / diagonal: in die nähere Ecke der neuen Wand.
-      if(Wf && it.corner && it.ctype){ const near=it.x <= Wf.L-it.x-it.w ? 0 : 1, x=KX.cornerPlace(c.E,c.K,c.L,{...it, cEnd:near},Wf);
-        if(x!=null){ it.cEnd=near; it.x=x; } }
+      // Mit ⌥ bleibt die Lage, wie sie ist.
+      const Wf=KX.wallFrame(c.E,it.a,it.b), cand=snap && Wf ? KX.slotCandidates(c.E,c.K,c.L,it,Wf) : [];
+      if(snap && Wf && !cand.some(x=>Math.abs(x-it.x)<0.5)){ const r=Math.max(0,Math.min(Wf.L-it.w, Math.round(it.x/10)*10)); if(KX.fitsAt(c.E,c.K,c.L,it,Wf,r) || !KX.fitsAt(c.E,c.K,c.L,it,Wf,it.x)) it.x=r; }
+      // Eckschrank: über Eck / diagonal in die nähere Ecke der neuen Wand; die
+      // gesetzte Ecke (Halbeck) folgt der Lage, auch mit ⌥ (dann ohne zu rücken).
+      if(Wf && it.corner){ const r=KX.cornerDrop(c.E,c.K,c.L,it,Wf,snap); if(r){ it.cEnd=r.cEnd; it.x=r.x; } }
     }
     kitchenSave(); return; }
   // Klick: wählen; erneuter Klick auf überlagerte Teile wechselt durch.
@@ -19659,8 +19712,8 @@ function renderSel(c){
   box.querySelectorAll('[data-fw]').forEach(b=>b.onclick=()=>edit(t=>{ if(b.dataset.fw==='1') t.water=true; else delete t.water; }));
   box.querySelectorAll('[data-oven]').forEach(b=>b.onclick=()=>edit(t=>{ if(b.dataset.oven==='0'){ t.noOven=true; t.front='drawer'; } else { delete t.noOven; delete t.store; } }));
   box.querySelectorAll('[data-swing]').forEach(b=>b.onclick=()=>edit(t=>{ t.swing=+b.dataset.swing; }));
-  box.querySelectorAll('[data-seg]').forEach(sg=>sg.querySelectorAll('button').forEach(b=>b.onclick=()=>edit(t=>{ t[sg.dataset.seg]=b.dataset.v;
-    if(sg.dataset.seg==='front' && b.dataset.v!=='door') delete t.corner; })));
+  box.querySelectorAll('[data-seg]').forEach(sg=>sg.querySelectorAll('button').forEach(b=>b.onclick=()=>edit(t=>{
+    if(sg.dataset.seg==='front') KX.frontSet(t, b.dataset.v); else t[sg.dataset.seg]=b.dataset.v; })));
   if($('kFau')) $('kFau').onchange=()=>edit(t=>{ const v=+$('kFau').value; if(v===kitchenData().spec.faucetH) delete t.faucetH; else t.faucetH=v; });
   // Hochschrank mit Gerät: je Fach ein Inhalt – was nicht mehr in ein freies
   // Fach passt, wird nicht eingetragen (sonst räumte fitStores es gleich aus).
@@ -19706,7 +19759,7 @@ function switchKind(t, kind){
   if(kind==='tall' && t.front==='drawer') t.front='door';
   if(kind!=='wall' && t.front==='flap') t.front = kind==='base' ? 'drawer' : 'door';
   if(t.corner){
-    const C=KX.CORNER[kind]; if(!C){ delete t.corner; delete t.door; delete t.ctype; delete t.cEnd; delete t.inner; }
+    const C=KX.CORNER[kind]; if(!C) KX.clearCorner(t);
     else {
       if(t.ctype){ const sh=KX.CSHAPE[kind][t.ctype]; if(sh){ t.w=sh.def; } else delete t.ctype; }
       if(!t.ctype){ t.w = kind==='wall' ? 782 : 1000; if(kind==='wall') t.door=350; else delete t.door; }
@@ -19794,7 +19847,7 @@ function renderCorner(c){
   }));
   if($('kCnInner')) $('kCnInner').onchange=()=>{ const v=$('kCnInner').value; cornerEdit(t=>{ if(v==='boden') delete t.inner; else t.inner=v; }, `Innen: ${INN[v]}`); };
   $('kCnPlace').onclick=()=>cornerEdit(t=>{ if(t.cEnd==null) t.cEnd=atS0?0:1; });
-  $('kCnOff').onclick=()=>{ const t=selItem(); if(!t) return; snapshot(); delete t.corner; delete t.door; delete t.cEnd; delete t.inner; delete t.ctype; if(t.w>(t.kind==='wall'?900:1200)) t.w=600; kitchenSave(); setHint('Wieder ein normaler Schrank.'); };
+  $('kCnOff').onclick=()=>{ const t=selItem(); if(!t) return; snapshot(); KX.clearCorner(t); kitchenSave(); setHint('Wieder ein normaler Schrank.'); };
 }
 function renderChecks(c){
   const F=c.F, nb=F.filter(f=>f.lvl==='bad').length, nw=F.filter(f=>f.lvl==='warn').length;
@@ -24630,7 +24683,116 @@ globalThis.selfChecks=function(){
     //
     // --- Rest-Fix eck ---
     try{
-      // TESTS-eck
+      // Eckschränke und Türschwenk (Review-Befunde eck B1–B5). Eigene Räume, damit Fenster
+      // und Tür des Testraums oben nicht stören; je Befund ein eigener Test, damit ein Fehler
+      // die übrigen nicht verdeckt.
+      const T=(n,f)=>{ try{ chk(n, !!f()); }catch(err){ chk(n+' ('+err.message+')', false); } };
+      const rE=(w,h,open)=>{ const Rr=rect(w,h); return KX.makeEnv(Rr.pts,Rr.walls,open||[],[]); };
+      const E0=rE(4000,3000);
+      // B1: doorReach prüft auch den zweiten Schenkel (wing) eines L-Eckschranks; das Hauptteil
+      // deckt dort nur seine eigene Wand.
+      T('kueche-eck: Zimmertür schwenkt nicht durch den zweiten Schenkel eines L-Eckschranks – 94°, nicht 114°', ()=>{
+        const rd=(hinge,ctype)=>{ const d={id:'o2',kind:'door',a:'A',b:'B',x:1000,w:900,y:0,h:2000,swing:{type:'turn',hinge,out:false}};
+          const E1=KX.makeEnv(R.pts,R.walls,[d],[]), K1=KX.normKitchen({items:[{id:1,kind:'base',corner:true,ctype,front:'door',cEnd:0,a:'A',b:'D',x:0,w:900}]}), L1=KX.layout(E1,K1);
+          return {rc:KX.doorReach(E1,L1).get('o2'), F:KX.check(E1,K1,L1), L:L1, s:globalThis.doorSwing(E1.pts,E1.walls,d)}; };
+        const l=rd('left','L'), dg=rd('left','diag'), lr=rd('right','L'), wg=l.L.G.find(h=>h.wing);
+        // unabhängige Probe: das Blatt (900 × 40) bei 96° liegt im zweiten Schenkel, bei 94° nicht
+        const leaf=a=>{ const s=l.s, th=s.dir0+s.sense*a*Math.PI/180, u={x:Math.cos(th),y:Math.sin(th)}, v={x:-s.sense*u.y,y:s.sense*u.x}, P0=s.angel;
+          const P1={x:P0.x+u.x*900,y:P0.y+u.y*900}; return [P0,P1,{x:P1.x+v.x*40,y:P1.y+v.y*40},{x:P0.x+v.x*40,y:P0.y+v.y*40}]; };
+        return !!wg && l.rc.deg===94 && l.rc.hit==='Eckschrank 90' && l.rc.hitId===1
+          && TILES.convexOverlap(leaf(96), wg.poly, 1) && !TILES.convexOverlap(leaf(94), wg.poly, 1)
+          && has(l.F,/Zimmertür geht 94° auf, dann stößt sie an Eckschrank 90/,'info')
+          && dg.rc.deg===94 && lr.rc.deg===lr.rc.maxDeg && !lr.rc.hit;      // diagonal wie bisher (Fünfeck), Angel rechts frei
+      });
+      // B2: ⌘C lässt die gesetzte Ecke weg – sie gilt nur an der Wand, an der der Schrank stand.
+      T('kueche-eck: Kopiervorlage ohne Lage und ohne gesetzte Ecke, tiefe Kopie', ()=>{
+        const o={id:7,kind:'base',corner:true,ctype:'L',inner:'karussell',front:'door',cEnd:1,a:'A',b:'B',x:3100,y:5,w:900,store:['toepfe']};
+        const c=KX.clipItem(o); c.store.push('putz');
+        return !['id','a','b','x','y','cEnd'].some(k=>k in c) && c.corner===true && c.ctype==='L' && c.inner==='karussell' && c.w===900
+          && o.cEnd===1 && o.id===7 && o.store.length===1;
+      });
+      T('kueche-eck: Einfügen setzt einen Eckschrank mit gesetzter Ecke B unter den Zeiger an Ecke A (Halbeck, über Eck, diagonal)', ()=>{
+        return [{w:1000},{ctype:'L',w:900},{ctype:'diag',w:900}].every(extra=>{
+          const o={id:1,kind:'base',corner:true,front:'door',cEnd:1,a:'A',b:'B',...extra}; o.x=4000-o.w;
+          const K2=KX.normKitchen({items:[o]}), L2=KX.layout(E0,K2), it={...KX.clipItem(K2.items[0]), id:K2.seq++};
+          const nw=KX.nearestWall(E0,{x:150,y:300},0,null,it.w), Wf=nw.Wf;          // Zeiger neben Ecke A an der Wand A–D
+          const nr=KX.snapX(E0,K2,L2,{...it,a:Wf.a,b:Wf.b},Wf,nw.s-it.w/2,140);
+          it.a=Wf.a; it.b=Wf.b;
+          const sl=KX.placeOnWall(E0,K2,L2,it,Wf,nr,false);
+          return Wf.key==='A|D' && !!sl && near(sl.x,0,0.5);
+        });
+      });
+      // B3: die gesetzte Ecke folgt dem Eckschrank an das andere Wandende (Rastkante).
+      T('kueche-eck: Halbeck mit gesetzter Ecke an die andere Ecke gezogen – Ecke folgt, Blende und Tür auf der richtigen Seite', ()=>{
+        const Wf=KX.wallFrame(E0,'A','B'), row=[{id:2,kind:'base',a:'B',b:'C',x:630,w:600,front:'drawer'},{id:3,kind:'base',a:'B',b:'C',x:1230,w:600,front:'drawer'}];
+        const K3=KX.normKitchen({items:[{id:1,kind:'base',corner:true,front:'door',cEnd:0,a:'A',b:'B',x:0,w:1000},...row]}), it=K3.items[0];
+        let L3=KX.layout(E0,K3);
+        const xB=KX.cornerPlace(E0,K3,L3,{...it,cEnd:1},Wf);          // die Rastkante, auf der kitchenMove einrastet
+        it.x=xB;
+        const r=KX.cornerDrop(E0,K3,L3,it,Wf,true);
+        if(!(near(xB,3000,0.5) && r && r.cEnd===1 && near(r.x,xB,0.01))) return false;
+        it.cEnd=r.cEnd; it.x=r.x; L3=KX.layout(E0,K3);
+        const g=L3.byId.get(1), cb=KX.cornerBlind(g,K3.spec), sx=g.env.flatMap(e=>e.poly.map(p=>p.x));
+        return !!cb && !cb.atS0 && Math.min(...sx)>=2990 && Math.max(...sx)<=3400;      // vor der Querzeile (nicht 3630…4000 dahinter)
+      });
+      T('kueche-eck: Halbeck an kurzer Wand – die gesetzte Ecke bleibt auf der eigenen Eckenlage und bei kleinem Zug, nur die andere Eckenlage ändert sie', ()=>{
+        const E4=rE(1200,3000), Wf=KX.wallFrame(E4,'A','B');
+        // UE100-50 an Ecke A: Blende 500 hinter der 580 tiefen Querzeile + 50 Passblende = 130 von der Ecke
+        const K4=KX.normKitchen({items:[{id:1,kind:'base',corner:true,front:'door',door:500,cEnd:0,a:'A',b:'B',x:0,w:1000},{id:2,kind:'base',a:'A',b:'D',x:630,w:600,front:'drawer'}]}), it=K4.items[0], L4=KX.layout(E4,K4);
+        const xA=KX.cornerPlace(E4,K4,L4,it,Wf), xB=KX.cornerPlace(E4,K4,L4,{...it,cEnd:1},Wf);
+        const at=(x,snap,pin)=>{ const t={...it,x}; if(pin===null) delete t.cEnd; return KX.cornerDrop(E4,K4,L4,t,Wf,snap); };
+        // Nähe zur Ecke zeigt hier auf B (Abstand 70 statt 130 mm), die Eckenlage nicht
+        const nearerB=Wf.L-xA-it.w < xA;
+        return near(xA,130,0.5) && near(xB,200,0.5) && nearerB
+          && at(xA,true)===null && at(xA-5,true)===null && at(xA,false)===null           // bleibt A
+          && (at(xB,true)||{}).cEnd===1 && near((at(xB,true)||{}).x,xB,0.01) && (at(xB,false)||{}).cEnd===1  // exakt auf B: folgt, auch mit ⌥
+          && at(xB,true,null)===null;                                                       // ohne gesetzte Ecke nichts zu tun
+      });
+      T('kueche-eck: Eckschrank über Eck nach dem Ziehen – bündig in die nähere Ecke, mit ⌥ bleibt die Lage', ()=>{
+        const Wf=KX.wallFrame(E0,'A','B'), K5=KX.normKitchen({items:[{id:1,kind:'base',corner:true,ctype:'L',front:'door',cEnd:0,a:'A',b:'B',x:3050,w:900}]}), it=K5.items[0], L5=KX.layout(E0,K5);
+        const r=KX.cornerDrop(E0,K5,L5,it,Wf,true), ra=KX.cornerDrop(E0,K5,L5,it,Wf,false);
+        return !!r && r.cEnd===1 && near(r.x,3100,0.5) && ra===null;
+      });
+      // B4: passt der Eckschrank nur geschrumpft, gilt die Eckenlage der kleineren Breite.
+      T('kueche-eck: Eckschrank aus der Leiste nur geschrumpft – Lage der kleineren Breite, Blende hinter der Querzeile', ()=>{
+        const items=[{id:1,kind:'base',a:'A',b:'D',x:630,w:600},{id:2,kind:'base',a:'A',b:'D',x:1230,w:600}];     // Querzeile an A–D
+        for(let x=960,i=3;x+600<=4000;x+=600,i++) items.push({id:i,kind:'base',a:'A',b:'B',x,w:600});             // Zeile A–B ab 960
+        const K6=KX.normKitchen({items}), L6=KX.layout(E0,K6), Wf=KX.wallFrame(E0,'A','B'), pre=KX.PRESETS.find(p=>p.key==='corner');
+        const it={id:K6.seq++, kind:pre.kind, w:pre.w, corner:true, front:'door', a:Wf.a, b:Wf.b};
+        const sl=KX.placeOnWall(E0,K6,L6,it,Wf,null,true);
+        if(!sl || sl.w!==900 || KX.placeOnWall(E0,K6,L6,it,Wf,null,false)!==null) return false;      // geschrumpft auf 90; Einfügen (ohne shrink) findet nichts
+        K6.items.push(KX.normItem({...it,w:sl.w,x:sl.x}));
+        const g=KX.layout(E0,K6).byId.get(it.id), cb=KX.cornerBlind(g,K6.spec);
+        return near(sl.x,30,0.5) && !!cb && cb.atS0 && !!g.cross && sl.x+cb.b>=g.cross.d+50-0.5;     // Tür beginnt 50 mm vor der Front der Querzeile
+      });
+      T('kueche-eck: Platz für die Standardbreite – Lage und Breite wie bisher (Eckschrank und normaler Schrank)', ()=>{
+        const Wf=KX.wallFrame(E0,'A','B'), K7=KX.normKitchen({items:[]}), L7=KX.layout(E0,K7);
+        const pre=KX.PRESETS.find(p=>p.key==='corner'), it={id:1, kind:pre.kind, w:pre.w, corner:true, front:'door'};
+        const a=KX.placeOnWall(E0,K7,L7,it,Wf,null,true), b=KX.placeOnWall(E0,K7,L7,it,Wf,3500,true);
+        // normaler Schrank, Zeile voll bis auf Lücken von 500 mm: größte Rasterbreite darunter, bei near
+        const fill=[{id:1,kind:'base',a:'A',b:'B',x:0,w:600}];
+        for(let x=1100,i=2;x+600<=4000;x+=600,i++) fill.push({id:i,kind:'base',a:'A',b:'B',x,w:600});
+        const K8=KX.normKitchen({items:fill}), L8=KX.layout(E0,K8);
+        const c=KX.placeOnWall(E0,K8,L8,{id:99,kind:'base',w:600,front:'drawer'},Wf,600,true);
+        return !!a && a.w===1000 && near(a.x,0,0.5) && !!b && b.w===1000 && near(b.x,3000,0.5) && !!c && c.w===500 && near(c.x,600,0.5);
+      });
+      // B5: Front ≠ Drehtür macht den Eckschrank vollständig zum normalen Schrank.
+      T('kueche-eck: Front auf Schubladen – keine Reste von Bauart, Ecke, Innenleben und Tür; Sitzung = nach dem Neuladen', ()=>{
+        return [{ctype:'diag',hinge:'left',w:900},{ctype:'L',inner:'karussell',w:900},{door:500,inner:'schub',w:1000},{kind:'wall',ctype:'diag',hinge:'left',w:650},{kind:'wall',door:350,w:782}].every(extra=>{
+          const t=KX.normKitchen({items:[{id:1,kind:'base',corner:true,front:'door',cEnd:0,a:'A',b:'D',x:0,...extra}]}).items[0];
+          KX.frontSet(t,'drawer');
+          const rl=KX.normItem(JSON.parse(JSON.stringify(t)));
+          const same=Object.keys(t).sort().join()===Object.keys(rl).sort().join();
+          KX.frontSet(t,'door');                                    // zurück auf Drehtür: ein normaler Schrank, auch ohne Anschlag
+          return same && !t.corner && !t.ctype && !('cEnd' in t) && !('inner' in t) && !('door' in t) && !KX.hasHinge(t);
+        });
+      });
+      T('kueche-eck: Front „Drehtür“ lässt den Eckschrank, wie er ist; „Normaler Schrank“ räumt genauso auf', ()=>{
+        const mk=()=>KX.normKitchen({items:[{id:1,kind:'base',corner:true,ctype:'L',inner:'karussell',front:'door',cEnd:1,a:'A',b:'D',x:0,w:900}]}).items[0];
+        const a=mk(), s0=JSON.stringify(a); KX.frontSet(a,'door');
+        const b=mk(), c=mk(); KX.clearCorner(b); KX.frontSet(c,'open'); c.front='door';
+        return JSON.stringify(a)===s0 && a.corner===true && a.ctype==='L' && JSON.stringify(b)===JSON.stringify(c) && !('ctype' in b) && !('cEnd' in b);
+      });
     }catch(err){ chk('kueche: Rest-Fix eck ohne Ausnahme ('+err.message+')', false); }
     //
     // --- Rest-Fix masskette ---
