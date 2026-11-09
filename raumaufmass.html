@@ -505,6 +505,7 @@
         <hr>
         <button id="filesave" role="menuitem">Als Datei sichern<kbd data-k="⌘S"></kbd></button>
         <button id="fileopen" role="menuitem">Datei öffnen …<kbd data-k="⌘O"></kbd></button>
+        <button id="dxfsave" role="menuitem" title="Grundriss als 2D-Skizze in mm für Shapr3D und andere CAD-Programme">Für CAD exportieren (DXF)</button>
         <button id="exp" role="menuitem">JSON kopieren</button>
         <button id="imp" role="menuitem" title="Raum-JSON aus der Zwischenablage als neuen Raum anlegen">JSON einfügen</button>
         <hr>
@@ -6323,6 +6324,136 @@ globalThis.swingLimit=function(pts, walls, ownWall, hinge, radius, dir0, sense){
   return Math.max(0, frei>0 ? frei-SWING_CLEAR : 0);
 };
 
+// Drehtuer im Grundriss: Angel, Startwinkel des geschlossenen Blatts,
+// Drehsinn und wie weit es frei schwingt. null fuer alles ohne Schwenk
+// (Fenster, Loch, Schiebetuer). Plan und DXF-Export teilen sich das, damit
+// die Tuer in Shapr3D genau so aufgeht wie auf dem Bildschirm.
+globalThis.doorSwing=function(pts, walls, o){
+  if(o.kind!=='door' || !o.swing || o.swing.type==='slide' || o.swing.type==='none') return null;
+  const C=globalThis.CORE, r=globalThis.openingWorld(pts, o.a, o.b, o);
+  if(!r) return null;
+  const links=o.swing.hinge==='left';
+  const angel=links?r.P:r.Q;
+  const dir0=Math.atan2(links?r.u.y:-r.u.y, links?r.u.x:-r.u.x);
+  // Nach innen heisst: auf die Seite, auf der die Raumflaeche liegt.
+  const poly=C.wallPolygon(pts, walls);
+  let sense=+1;
+  if(poly){
+    const probe={x:angel.x+r.n.x*10, y:angel.y+r.n.y*10};
+    const innen=C.pointInPoly(probe, poly);
+    // Kreuzprodukt u x n ist +1; das Blatt dreht zur Normalen hin,
+    // wenn sie nach innen zeigt (bzw. umgekehrt bei "nach aussen").
+    const zurNormalen = links ? +1 : -1;
+    sense = (innen !== !!o.swing.out) ? zurNormalen : -zurNormalen;
+  }
+  const max=globalThis.swingLimit(pts, walls, [o.a,o.b], angel, o.w, dir0, sense);
+  return {r, angel, dir0, sense, max};
+};
+
+// ================= DXF fuer CAD (Shapr3D) =================
+// Shapr3D liest DXF als 2D-Skizze: geschlossene Linienzuege werden dort zu
+// Flaechen, die man extrudiert. Deshalb nur LINE und ARC (Polylinien
+// machen in Shapr3D-Skizzen Aerger), jede Kante genau einmal und gemeinsame
+// Ecken ueber denselben Formatierer - sonst schliesst sich kein Zug.
+// Shapr3D macht aus JEDEM Layer eine eigene Skizze, und Flaechen entstehen
+// nur innerhalb einer Skizze (gemessen am Import). Darum liegen Innenkontur,
+// Inseln, Wandaussenkante und Tuerlaibungen zusammen auf GRUNDRISS: dort
+// werden Boden (mit Inseln als Loch), Inseln und die Wandstuecke zwischen
+// den Tueren je eine Flaeche. Das Tuerblatt hat einen eigenen Layer, sonst
+// zerschnitte sein Bogen die Bodenflaeche. WAND_ANGENOMMEN zeichnet die
+// Aussenkanten mit angenommener Dicke noch einmal nach - nur als Hinweis,
+// der Layer ist aus.
+// Bildschirm-y zeigt nach unten, DXF-y nach oben: y wird gespiegelt, sonst
+// kaeme der Raum seitenverkehrt an. Ursprung ist die linke untere Ecke der
+// Aussenkontur, Einheit mm ($INSUNITS 4).
+globalThis.roomDxf=function(pts, walls, thick, openings, name){
+  const C=globalThis.CORE;
+  const ring=C.wallPolygon(pts, walls);
+  if(!ring || ring.length<3) return null;
+  const bands=globalThis.wallBands(pts, walls, thick||{}, globalThis.THICK_DEFAULT);
+  if(bands.length!==ring.length) return null;
+  const aussen=bands.map(b=>b.oA);                 // Ecke i der Aussenkontur
+  const alle=[...ring, ...ring.holes.flat(), ...aussen];
+  const x0=Math.min(...alle.map(p=>p.x)), y1=Math.max(...alle.map(p=>p.y));
+  const f=v=>{ const s=v.toFixed(3); return s==='-0.000' ? '0.000' : s; };
+  const X=p=>f(p.x-x0), Y=p=>f(y1-p.y);
+  const ents=[], used=new Set();
+  const line=(lay,a,b)=>{
+    if(X(a)===X(b) && Y(a)===Y(b)) return;
+    used.add(lay);
+    ents.push(`0\nLINE\n8\n${lay}\n10\n${X(a)}\n20\n${Y(a)}\n30\n0.0\n11\n${X(b)}\n21\n${Y(b)}\n31\n0.0`);
+  };
+  const zug=(lay,R)=>R.forEach((p,i)=>line(lay,p,R[(i+1)%R.length]));
+  const key=(a,b)=>[a,b].sort().join('|');
+  const nr=Object.fromEntries(bands.map((b,i)=>[key(b.a,b.b), i]));
+  // Laibungen je Wand, als Lage entlang der Wand ab ihrer Innenecke iA.
+  // Innen- und Aussenkante werden an jeder Laibung GETEILT: Shapr3D soll
+  // keine T-Stoesse selbst verschneiden muessen, damit die Wandstuecke
+  // sicher eigene Flaechen werden.
+  const schnitte=bands.map(()=>[]);
+  (openings||[]).forEach(o=>{
+    const i=nr[key(o.a,o.b)], r=globalThis.openingWorld(pts, o.a, o.b, o);
+    if(i==null || !r) return;
+    const b=bands[i];
+    [r.P, r.Q].forEach(p=>{
+      const t=(p.x-b.iA.x)*b.u.x+(p.y-b.iA.y)*b.u.y;
+      if(t>0.5 && t<b.L-0.5) schnitte[i].push({t, innen:p, aussen:{x:p.x+b.n.x*b.t, y:p.y+b.n.y*b.t}});
+    });
+  });
+  schnitte.forEach(S=>S.sort((u,v)=>u.t-v.t));
+  bands.forEach((b,i)=>{
+    const S=schnitte[i], j=(i+1)%bands.length;
+    const innen=[ring[i], ...S.map(s=>s.innen), ring[j]];
+    // Aussenkante: Gehrungspunkte einmal je Ecke, damit Nachbarkanten exakt
+    // denselben Endpunkt bekommen.
+    const aus=[aussen[i], ...S.map(s=>s.aussen), aussen[j]];
+    for(let k=0;k+1<innen.length;k++){ line('GRUNDRISS', innen[k], innen[k+1]); line('GRUNDRISS', aus[k], aus[k+1]); }
+    S.forEach(s=>line('GRUNDRISS', s.innen, s.aussen));
+    if(b.assumed) line('WAND_ANGENOMMEN', aussen[i], aussen[j]);
+  });
+  ring.holes.forEach(h=>zug('GRUNDRISS', h));
+  const deg=a=>{ let d=a*180/Math.PI%360; if(d<0) d+=360; return f(d); };
+  (openings||[]).forEach(o=>{
+    if(nr[key(o.a,o.b)]==null) return;
+    const s=globalThis.doorSwing(pts, walls, o);
+    if(!s || !(s.max>0)) return;
+    const th1=s.dir0+s.sense*s.max;
+    line('TUERBLATT', s.angel, {x:s.angel.x+Math.cos(th1)*o.w, y:s.angel.y+Math.sin(th1)*o.w});
+    // Mit gespiegeltem y wird aus Winkel t der Winkel -t, und der Drehsinn
+    // kehrt sich um. DXF-Boegen laufen immer gegen den Uhrzeiger.
+    const [von,bis] = s.sense<0 ? [-s.dir0, -th1] : [-th1, -s.dir0];
+    used.add('TUERBLATT');
+    ents.push(`0\nARC\n8\nTUERBLATT\n10\n${X(s.angel)}\n20\n${Y(s.angel)}\n30\n0.0\n40\n${f(o.w)}\n50\n${deg(von)}\n51\n${deg(bis)}`);
+  });
+  // Farben nach ACI: Grundriss weiss/schwarz, Tuerblatt cyan, angenommene
+  // Wand hellgrau. Negative Farbe = Layer aus (DXF-Konvention).
+  const FARBE={GRUNDRISS:7, TUERBLATT:4, WAND_ANGENOMMEN:-9};
+  const layer=Object.keys(FARBE).filter(l=>used.has(l));
+  const w=[...aussen.map(p=>p.x-x0)], h=[...aussen.map(p=>y1-p.y)];
+  return [
+    '999', `Raumaufmass ${String(name||'').replace(/[\r\n]+/g,' ')} - Masse in mm`,
+    '0','SECTION','2','HEADER',
+    '9','$ACADVER','1','AC1009',
+    '9','$INSUNITS','70','4',
+    '9','$MEASUREMENT','70','1',
+    '9','$EXTMIN','10','0.000','20',f(Math.min(...h)),'30','0.0',
+    '9','$EXTMAX','10',f(Math.max(...w)),'20',f(Math.max(...h)),'30','0.0',
+    '0','ENDSEC',
+    '0','SECTION','2','TABLES',
+    '0','TABLE','2','LTYPE','70','1',
+    '0','LTYPE','2','CONTINUOUS','70','0','3','Solid line','72','65','73','0','40','0.0',
+    '0','ENDTAB',
+    '0','TABLE','2','LAYER','70',String(layer.length),
+    ...layer.flatMap(l=>['0','LAYER','2',l,'70','0','62',String(FARBE[l]),'6','CONTINUOUS']),
+    '0','ENDTAB',
+    '0','ENDSEC',
+    '0','SECTION','2','ENTITIES',
+    ents.join('\n'),
+    '0','ENDSEC',
+    '0','EOF',''
+  ].join('\n');
+};
+
 // ================= Abwicklung =================
 // Die Waende legen sich im Grundriss flach hin wie ein SCHATTEN, mit dem
 // Licht im Fokuspunkt: jeder Wandpunkt faellt radial vom Fokus weg, nicht
@@ -8568,21 +8699,7 @@ function drawOpeningsOnPlan(P, I, dpr){
       return;
     }
     // Drehtuer: Angel auf der Bandseite, Blatt so lang wie die Oeffnung.
-    const links=o.swing.hinge==='left';
-    const angel=links?r.P:r.Q;
-    const dir0=Math.atan2(links?r.u.y:-r.u.y, links?r.u.x:-r.u.x);
-    // Nach innen heisst: auf die Seite, auf der die Raumflaeche liegt.
-    const poly=C.wallPolygon(P, M.walls);
-    let sense=+1;
-    if(poly){
-      const probe={x:angel.x+r.n.x*10, y:angel.y+r.n.y*10};
-      const innen=C.pointInPoly(probe, poly);
-      // Kreuzprodukt u x n ist +1; das Blatt dreht zur Normalen hin,
-      // wenn sie nach innen zeigt (bzw. umgekehrt bei "nach aussen").
-      const zurNormalen = links ? +1 : -1;
-      sense = (innen !== !!o.swing.out) ? zurNormalen : -zurNormalen;
-    }
-    const max=swingLimit(P, M.walls, [o.a,o.b], angel, o.w, dir0, sense);
+    const {angel, dir0, sense, max}=doorSwing(P, M.walls, o);
     const a0=toScr(angel);
     const tipW={x:angel.x+Math.cos(dir0+sense*max)*o.w,
                 y:angel.y+Math.sin(dir0+sense*max)*o.w};
@@ -10963,6 +11080,19 @@ async function exportRoomAsFile(id){
   setHint(`Gespeichert als ${fname} (Downloads).`);
 }
 $('filesave').onclick=()=>{ if(currentRoom) exportRoomAsFile(currentRoom); };
+// DXF nimmt das AUSGEGLICHENE Aufmass des offenen Raums, nie die Skizze und
+// ohne Ansichtsdrehung - in Shapr3D soll stehen, was gemessen wurde.
+$('dxfsave').onclick=()=>{
+  const dxf=M.fit && roomDxf(M.fit.pts, M.walls, M.thick, M.openings, currentRoomName);
+  if(!dxf){ setHint('Für den DXF-Export braucht es einen geschlossenen, vermessenen Raum.'); return; }
+  const fname=`${slug(currentRoomName)}-${new Date().toISOString().slice(0,10)}.dxf`;
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([dxf],{type:'application/dxf'}));
+  a.download=fname;
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
+  setHint(`Exportiert als ${fname} (Downloads) – in Shapr3D über Importieren öffnen.`);
+};
 $('fileopen').onclick=()=>$('filepick').click();
 $('filepick').onchange=async()=>{
   const f=$('filepick').files[0];
@@ -15887,6 +16017,42 @@ globalThis.selfChecks=function(){
                const raus=sl(R,W,['A','B'],{x:1500,y:0},1000,0,-1);
                // nach aussen ist nichts im Weg -> voller Bogen
                return raus>=rein-1e-9 && raus>Math.PI-0.12; })());
+    }
+    // --- DXF-Export fuer Shapr3D ---
+    {
+      // L-Raum, asymmetrisch: der Fortsatz haengt unten rechts (Bildschirm,
+      // y nach unten). Tuer in A-B, Insel als Pfeiler.
+      const R=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:3000},
+               {id:'D',x:2500,y:3000},{id:'E',x:2500,y:1500},{id:'F',x:0,y:1500},
+               {id:'G',x:500,y:500},{id:'H',x:800,y:500},{id:'J',x:800,y:800}];
+      const W=[['A','B'],['B','C'],['C','D'],['D','E'],['E','F'],['F','A'],['G','H'],['H','J'],['J','G']];
+      const ops=[{id:'o1',kind:'door',a:'A',b:'B',x:1500,w:900,swing:{type:'turn',hinge:'left'}}];
+      const dxf=globalThis.roomDxf(R, W, {'A|B':175}, ops, 'Test');
+      const ents=dxf ? dxf.split('ENTITIES')[1] : '';
+      const lines=[...ents.matchAll(/LINE\n8\n(\w+)\n10\n(\S+)\n20\n(\S+)\n30\n0\.0\n11\n(\S+)\n21\n(\S+)/g)]
+        .map(m=>({lay:m[1], a:m[2]+','+m[3], b:m[4]+','+m[5]}));
+      chk('dxf: R12, mm und nur LINE/ARC',
+        !!dxf && dxf.includes('$ACADVER\n1\nAC1009') && dxf.includes('$INSUNITS\n70\n4')
+        && !/POLYLINE/.test(dxf) && !/\d,\d/.test(ents));
+      chk('dxf: Innenkontur, Insel, Wandaussenkante und Laibungen auf EINEM Layer, an den Laibungen geteilt',
+        // 6 + 3 + 6 Kanten, die Tuerwand innen und aussen an den beiden
+        // Laibungen geteilt (+4), dazu die Laibungen (+2). Laibungsenden
+        // treffen sich mit zwei Kantenstuecken: dreimal.
+        (()=>{ const n={}; lines.filter(l=>l.lay==='GRUNDRISS').forEach(l=>{ n[l.a]=(n[l.a]||0)+1; n[l.b]=(n[l.b]||0)+1; });
+               const v=Object.values(n);
+               return lines.filter(l=>l.lay==='GRUNDRISS').length===21 && v.filter(c=>c===2).length===15 && v.filter(c=>c===3).length===4; })());
+      chk('dxf: y gespiegelt - Ecke A (oben links am Schirm) liegt oben links im CAD',
+        // Ursprung: Aussenkante links (x=-240), oben am Schirm liegt C-D
+        // aussen bei y=3240 -> A wird (240, 3240), nicht (240, 175).
+        lines.some(l=>l.lay==='GRUNDRISS' && l.a==='240.000,3240.000' && l.b==='1740.000,3240.000')
+        && lines.some(l=>l.lay==='GRUNDRISS' && l.a==='2640.000,3240.000' && l.b==='4240.000,3240.000'));
+      chk('dxf: angenommene Dicken als ausgeschalteter Hinweis-Layer',
+        lines.filter(l=>l.lay==='WAND_ANGENOMMEN').length===5 && dxf.includes('LAYER\n2\nWAND_ANGENOMMEN\n70\n0\n62\n-9'));
+      chk('dxf: Tuerblatt und Bogen an der Angel',
+        lines.filter(l=>l.lay==='TUERBLATT').length===1
+        && /ARC\n8\nTUERBLATT\n10\n1740\.000\n20\n3240\.000\n30\n0\.0\n40\n900\.000/.test(ents));
+      chk('dxf: offener Raum -> kein Export',
+        globalThis.roomDxf(R, W.slice(0,4), {}, [], 'x')===null);
     }
     // --- Oeffnungen einmessen ---
     {
