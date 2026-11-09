@@ -9052,6 +9052,9 @@ function stationBlock(LP, pts, hits, dpr){
   (pts||[]).forEach(q=>LP.occupy({x:q.x-5*dpr, y:q.y-5*dpr, w:10*dpr, h:10*dpr, hard:true}));
   return LP;
 }
+// Berührt der Punkt q (Radius r) die Pille pl = {q: Mitte, w, h}, mit gap Luft?
+// Das Rechteck genügt; die Rundung der Pille zählt nicht (der Punkt weicht eher).
+const pillTouch=(q, pl, r, gap)=>Math.hypot(Math.max(Math.abs(q.x-pl.q.x)-pl.w/2, 0), Math.max(Math.abs(q.y-pl.q.y)-pl.h/2, 0))<r+gap;
 // Maßzahl nur, wenn ihr Kasten (w × h) in die Strecke p–q passt: seine
 // Ausdehnung entlang der Strecke, gemessen statt fester Pixelschwelle.
 const dimFits=(p,q,w,h,pad)=>{ const l=Math.hypot(q.x-p.x,q.y-p.y); if(!l) return false;
@@ -9095,7 +9098,7 @@ Object.assign(globalThis.KITCHEN, { /* rest-zustand */ });
 //
 Object.assign(globalThis.KITCHEN, { /* rest-bedienung */ });
 //
-Object.assign(globalThis.KITCHEN, { /* rest-etiketten */ });
+Object.assign(globalThis.KITCHEN, { pillTouch });
 //
 })();
 </script>
@@ -19172,13 +19175,18 @@ function entryMarks(c){
     return {o, i, on:cur===o, Wf, at:KX.wpt(Wf,m,300), P:KX.wpt(Wf,on.s0,0), Q:KX.wpt(Wf,on.s1,0),
             txt:`${o.kind==='door'?'Tür':'Durchgang'}${doors.length>1?' '+(i+1):''}`}; }).filter(Boolean);
 }
+// Pille einer Tür: Mitte q (Bildschirm), Text t, Größe w × h – eine Quelle fürs Zeichnen und für die Wege.
+function entryPill(m, dpr){
+  const q=toScr(m.at), t=m.on ? `Eingang · ${m.txt}` : m.txt;
+  return {q, t, w:kMeasure(t, {px:KX.PLAN_TXT.sub*dpr, weight:600})+12*dpr, h:17*dpr};
+}
 // top: nur die Pille des Eingangs noch einmal obenauf (nach den Wegen, deren
 // Punkt und Linienende sonst die Schrift verdecken) – ohne Belegt-Liste und Türbalken.
 function drawEntryLabels(c, dpr, LP, top){
   const ms=entryMarks(c).filter(m=>!top || m.on); if(!ms.length) return;
   ctx.save(); ctx.font=kFont({px:KX.PLAN_TXT.sub*dpr, weight:600}); ctx.textAlign='center'; ctx.textBaseline='middle';
   ms.forEach(m=>{
-    const q=toScr(m.at), t=m.on ? `Eingang · ${m.txt}` : m.txt, w=ctx.measureText(t).width+12*dpr, h=17*dpr;
+    const {q, t, w, h}=entryPill(m, dpr);
     LP && LP.occupy({x:q.x-w/2, y:q.y-h/2, w, h, hard:true});   // hart: kein Stationsetikett darüber
     if(m.on && !top){ const p=toScr(m.P), r=toScr(m.Q); ctx.strokeStyle=KINK.grp.ein; ctx.lineWidth=4*dpr; ctx.globalAlpha=.8;
       ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(r.x,r.y); ctx.stroke(); ctx.globalAlpha=1; }
@@ -19269,7 +19277,11 @@ function drawPaths(c, dpr, LP){
     ctx.strokeStyle=INK.wall; ctx.lineWidth=1.25*dpr; ctx.globalAlpha=0.85;   // Führungslinie: auch bei dpr 1 sichtbar
     B.forEach((b,i)=>{ if(!b || !b.lead) return; const q=St[i].q; ctx.beginPath(); ctx.moveTo(q.x,q.y); ctx.lineTo(b.lead.x,b.lead.y); ctx.stroke(); });
     ctx.globalAlpha=1;
-    St.forEach(({q})=>{ ctx.beginPath(); ctx.arc(q.x,q.y,4.5*dpr,0,2*Math.PI); ctx.fillStyle=KINK.grp[f.group]; ctx.fill(); });
+    // Der Punkt des Eingangs (kein eigenes Etikett: B[i] null) steht 150 mm hinter der Mitte der Pille und ragte
+    // als halbe Beule über ihren Rand: er entfällt, wo er die Pille berührt (3 px Luft), sonst bleibt er Wegmarke.
+    const pm=entryMarks(c).find(m=>m.on), pl=pm && entryPill(pm, dpr);
+    St.forEach(({q},i)=>{ if(!B[i] && pl && KX.pillTouch(q, pl, 4.5*dpr, 3*dpr)) return;
+      ctx.beginPath(); ctx.arc(q.x,q.y,4.5*dpr,0,2*Math.PI); ctx.fillStyle=KINK.grp[f.group]; ctx.fill(); });
     B.forEach(b=>{ if(!b) return;
       ctx.fillStyle='rgba(250,249,246,.92)'; ctx.fillRect(b.r.x, b.r.y, b.r.w, b.r.h);
       ctx.font=kFont(b.font); ctx.fillStyle=INK.wall; ctx.fillText(b.txt, b.r.x+4*dpr, b.r.y+b.r.h/2); });
@@ -24803,6 +24815,15 @@ globalThis.selfChecks=function(){
         const toScrD=p=>({x:(p.x*cd-p.y*snd)*sd*dd+589.6680780686438, y:(p.x*snd+p.y*cd)*sd*dd+532.8586620278656});
         const labD=KX.planLabels(Ld,{toScr:toScrD, dpr:dd, measure:m2}).labels.filter(l=>l.id===4);
         chk('kueche: Schritt 5 kürzt die Kopfzeile nicht (Hängeschrank bleibt „H 45“, kein „H“ mit „+4“)', labD.some(l=>l.role==='wall' && l.txt==='H 45'));
+      }
+      {
+        // Punkt des Eingangs gegen seine Pille: berührt er sie (mit 3 px Luft), entfällt er – früher ragte er als halbe
+        // Beule über den Rand. Pille 90 × 17 um (100,100): Rand x 55…145, y 91,5…108,5; Punkt r 4,5.
+        const pill={q:{x:100,y:100}, w:90, h:17}, t=(x,y)=>KX.pillTouch({x,y},pill,4.5,3);
+        chk('kueche: Wegepunkt des Eingangs entfällt unter der Pille, am Rand (halbe Beule) und mit weniger als 3 px Luft',
+          t(100,100) && t(100,91.5) && t(100,85) && t(150,100));
+        chk('kueche: Wegepunkt des Eingangs bleibt, wo er frei neben der Pille steht (auch schräg über der Ecke)',
+          !t(100,83) && !t(160,100) && !t(151,85) && t(150,86));
       }
     }catch(err){ chk('kueche: Rest-Fix etiketten ohne Ausnahme ('+err.message+')', false); }
     //
