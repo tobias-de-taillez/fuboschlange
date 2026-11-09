@@ -18382,7 +18382,7 @@ function flowRes(c){
   return KS.flowRes;
 }
 function drawPaths(c, dpr){
-  const R=flowRes(c), FL=FL||KS.hoverFlow||null;
+  const R=flowRes(c), FL=KS.flow||KS.hoverFlow||null;
   const show=R.flows.filter(f=>!FL || f.key===FL);
   show.forEach(f=>{
     const col=KINK.grp[f.group], hl=!!FL;
