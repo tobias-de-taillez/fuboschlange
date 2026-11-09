@@ -283,7 +283,9 @@ globalThis.normOpeningIds=function(openings, seq){
     let id;
     if(s && OPEN_ID_RE.test(s) && !used.has(s)) id=s;
     else { while(used.has('o'+seq)) seq++; id='o'+(seq++); }
-    used.add(id); map.set(o.id, id); o.id=id;
+    // Doppelte id (Fremdimport): die ERSTE Öffnung gewinnt, wie find() sie früher
+    // auflöste - sonst hängen Lagemaß, Nachbartür und Eingang an der zweiten.
+    used.add(id); if(!map.has(o.id)) map.set(o.id, id); o.id=id;
   });
   return {map, seq};
 };
