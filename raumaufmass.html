@@ -6874,6 +6874,26 @@ function faucetPoint(K, g){
   if(g.free) return add(g.c, mul(g.n, -g.d/2+90));
   return wpt(g.Wf, (g.s0+g.s1)/2, 90);
 }
+// Drehung freier Teile (Insel, Tisch) einrasten (Meldung
+// M-20261109-134710-38fb04): auf 0/45/90/…° im Raumrahmen und parallel bzw.
+// senkrecht zu jeder Wand (schiefe Wände). Winkel in Grad wie it.rot.
+function rotSnaps(E){
+  const out=[];
+  const put=(a,how)=>{ for(let k=0;k<4;k++){ const r=((a+90*k)%360+360)%360; if(!out.some(o=>Math.abs(o.rot-r)<0.05)) out.push({rot:r, how}); } };
+  if(E && E.F) E.wallsByKey.forEach(W=>{ const A=P(E,W.a), B=P(E,W.b); if(!A||!B) return;
+    const d=sub(B,A), a=Math.atan2(dot(d,E.F.v), dot(d,E.F.u))*180/Math.PI;
+    // Nur echt schiefe Wände: bis 3° ist es Messrauschen eines rechtwinkligen
+    // Raums (sonst rastet man bei 178° statt 180° ein), kurze Vorsprünge zählen nicht.
+    const m=((a%90)+90)%90; if(m>3 && m<87 && W.L>=500) put(m, `Wand ${W.a}–${W.b}`); });
+  put(0, 'rechtwinklig'); put(45, '45°');
+  return out;
+}
+function snapRot(E, deg, tol=4){
+  const v=((deg%360)+360)%360;
+  let best=null;
+  rotSnaps(E).forEach(o=>{ let d=Math.abs(o.rot-v); d=Math.min(d,360-d); if(d<=tol && (!best || d<best.d)) best={...o, d}; });
+  return best ? {rot:best.rot, how:best.how} : {rot:v, how:null};
+}
 // Tischplätze ergeben sich aus den Maßen (Meldung M-20261109-134530-c6a5ba):
 // 60 cm Gedeckbreite × 40 cm Tiefe je Platz – gängiger Planungswert
 // (Möbelhandel, Ratgeber; eine Norm mit dieser Zahl war nicht zu finden,
@@ -7465,7 +7485,7 @@ function storable(it){
 }
 globalThis.KITCHEN={ FRIDGE, DOORT_LIM, fzOf, doorTOf, leaves, leafRect, leafReach, leafReachSide, entries, storable, wallFaces, K_DEF, K_LIM, WIDTHS, KIND, DEV, FRONTS, PRESETS, CONTENTS, FLOWS, GROUPS, ROLE_LABEL, BODY_R,
   derived, normKitchen, normItem, isEmpty, makeEnv, wallFrame, wpt, geom, dims, layout, envelopes, frontLR, frontKind,
-  worktops, check, sashes, openingOn, faucetPoint, tableSides, tableSeats, seatPlan, slotCandidates, cornerStop, fitsAt, freeSlot, snapX,
+  worktops, check, sashes, openingOn, faucetPoint, tableSides, tableSeats, seatPlan, rotSnaps, snapRot, slotCandidates, cornerStop, fitsAt, freeSlot, snapX,
   nearestWall, planner, stations, flows, suggest, reachFactor, scene, frontsOf, stock, nameOf, inflate, polyInRoom, COL };
 })();
 </script>
@@ -16729,6 +16749,7 @@ function renderSel(c){
   if(key===KS.selKey && it===KS.selIt) return;
   KS.selKey=key; KS.selIt=it;
   if(KS.freeFor!==it.id){ KS.freeFor=it.id; KS.freeOpen=false; }
+  if(KS.rotDrag===it.id) return;                // Schieber wird gerade gezogen
   const fid = box.contains(document.activeElement) ? document.activeElement.id : null;
   const dev=it.dev?KX.DEV[it.dev]:null, fz=KX.fzOf(it);
   const widths = it.kind==='table' ? [800,1000,1200,1400,1600,1800,2000,2200] : it.kind==='island' ? [1200,1500,1800,2000,2400,2700] : it.corner ? KX.WIDTHS.filter(w=>w>=900) : fz ? fz.widths : dev ? dev.widths : KX.WIDTHS;
@@ -16779,12 +16800,18 @@ function renderSel(c){
     h+=`<div class="kgrp"><label>Inhalt</label><div class="kchips">${st.map(k=>{ const on=(it.store||[]).includes(k);
       return `<button data-store="${k}" aria-pressed="${on}">${escapeHtml(KX.CONTENTS.find(x=>x.key===k).label)}</button>`; }).join('')}</div></div>`;
   }
+  if(!it.a){
+    // Drehung sichtbar: Schieber (rastet beim Ziehen an 0/45/90° und an den
+    // Wänden, ⌥ frei), Zahl, Vierteldrehung. Tastatur: Q/E.
+    const r=Math.round(it.rot||0);
+    h+=`<div class="krow"><label>Drehung</label><input id="kR" inputmode="decimal" value="${r}"> °<button id="kR90" title="Um 90° drehen (Q/E: 15°, mit ⇧ 1°)">↻ 90°</button></div>`
+      +`<div class="krow"><label></label><input id="kRs" type="range" min="0" max="359" step="1" value="${r}" style="flex:1 1 auto;width:auto;padding:0;border:0" title="Ziehen rastet an 0/45/90° und an schiefen Wänden ein, mit ⌥ frei · Pfeiltasten 1°"></div>`;
+  }
   const custom=it.h!=null || it.z!=null || (it.d!=null && !KX.KIND[it.kind].free);
   h+=`<details id="kFree"${(custom||KS.freeOpen)?' open':''}><summary>Maße frei</summary><div class="tgrid">`
     +(tbl ? '' : `<label><span>${fz?'Tiefe mit Tür':'Tiefe'}</span><input id="kD" inputmode="decimal" value="${Math.round(d)}"> mm</label>`)
     +(it.kind==='base' ? '' : `<label><span>Höhe</span><input id="kH" inputmode="decimal" value="${Math.round(z1-z0)}"> mm</label>`)
     +(it.kind==='wall'?`<label><span>Unterkante</span><input id="kZ" inputmode="decimal" value="${Math.round(z0)}"> mm</label>`:'')
-    +(!it.a?`<label><span>Drehung</span><input id="kR" inputmode="decimal" value="${Math.round(it.rot||0)}"> °</label>`:'')
     +`</div><div class="trow"><button id="kStd">Standardmaße</button></div></details>`;
   h+=`<div class="trow"><button id="kDup" title="Gleiches Teil daneben (⌘D)">Duplizieren</button><button id="kDel" title="Entfernen (Entf)">Löschen</button></div>`;
   $('kSelBody').innerHTML=h;
@@ -16815,6 +16842,22 @@ function renderSel(c){
   num('kH',100,3000,(t,v)=>{ t.h=Math.round(v); });
   num('kZ',0,3000,(t,v)=>{ t.z=Math.round(v); });
   num('kR',-360,360,(t,v)=>{ t.rot=((v%360)+360)%360; });
+  if($('kR90')) $('kR90').onclick=()=>edit(t=>{ t.rot=(Math.round(t.rot||0)+90)%360; });
+  const rs=$('kRs');
+  if(rs){
+    // Live drehen ohne Panel-Neubau (der risse den Schieber mitten im Ziehen
+    // weg) und mit einem Rückgängig-Schritt je Geste.
+    const ptr=e=>{ KS.rotPtr = e.type!=='pointerup'; KS.rotAlt=e.altKey; };
+    rs.onpointerdown=ptr; rs.onpointermove=e=>{ if(KS.rotPtr) KS.rotAlt=e.altKey; }; rs.onpointerup=ptr;
+    rs.oninput=()=>{ const cur=selItem(); if(!cur) return;
+      if(KS.rotDrag!==cur.id){ snapshot(); KS.rotDrag=cur.id; }
+      let v=+rs.value, how=null;
+      if(KS.rotPtr && !KS.rotAlt){ const sn=KX.snapRot(kctx().E, v); v=sn.rot; how=sn.how; }
+      cur.rot=v; if($('kR')) $('kR').value=String(Math.round(v*10)/10).replace('.',',');
+      setHintLive(`Drehung ${String(Math.round(v*10)/10).replace('.',',')}°${how?` · eingerastet: ${how}`:''} · ⌥ frei`);
+      KS.ctxKey=''; redraw(); };
+    rs.onchange=()=>{ KS.rotDrag=null; KS.rotPtr=false; kitchenSave(); };
+  }
   $('kStd').onclick=()=>edit(t=>{ delete t.d; delete t.h; delete t.z; });
   $('kDup').onclick=()=>{ const t=selItem(); if(t) duplicate(t); };
   $('kDel').onclick=()=>{ const t=selItem(); if(t) removeItem(t); };
@@ -20432,6 +20475,12 @@ globalThis.selfChecks=function(){
       has(lay([{id:1,kind:'table',x:2000,y:1000,rot:0,w:1200,d:800}]).F, /hinter den Stühlen nur 600 mm/, 'bad'));
     chk('kueche: Plätze aus den Maßen (120×80: 4, 160×90: 6, 340×120: 12, 140×80: 4, 200×100: 6)',
       [[1200,800,4],[1600,900,6],[3400,1200,12],[1400,800,4],[2000,1000,6]].every(([w,d,n])=>{ const p=KX.seatPlan(w,d); return 2*p.long+2*p.end===n; }));
+    chk('kueche: Drehung rastet an 0/90° und an einer schiefen Wand ein, sonst frei',
+      (()=>{ const a=KX.snapRot(E, 92), b=KX.snapRot(E, 37); 
+        const Ek=KX.makeEnv([{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:3500,y:3000},{id:'D',x:0,y:3000}], [['A','B'],['B','C'],['C','D'],['D','A']], [], []);  // B–C schief
+        const wa=Math.atan2(3000,-500)*180/Math.PI, c=KX.snapRot(Ek, wa-2);
+        const Eq=KX.makeEnv([{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4050,y:3000},{id:'D',x:0,y:3000}], [['A','B'],['B','C'],['C','D'],['D','A']], [], []);  // 1° schief = Rauschen
+        return a.rot===90 && b.rot===37 && b.how===null && Math.abs(c.rot-wa)<1e-6 && /Wand/.test(c.how) && KX.snapRot(Eq, 88.5).rot===90; })());
     chk('kueche: alte gespeicherte Platzzahl wird ignoriert',
       KX.normKitchen({items:[{id:1,kind:'table',x:0,y:0,w:1200,d:800,seats:10}]}).items[0].seats===undefined);
     {
