@@ -3663,10 +3663,10 @@ function wallFrame(E, a, b){
 }
 const wpt=(Wf,s,q)=>({x:Wf.A.x+Wf.u.x*s+Wf.n.x*q, y:Wf.A.y+Wf.u.y*s+Wf.n.y*q});
 // Decke einer Wand: Oberkante als Polylinie aus Eckhöhen UND Knickpunkten
-// (Giebel, Kniestock) - wallShape, ceilingAt und ceilingMin aus dem store-Block,
+// (Giebel, Kniestock) - wallShape, ceilingAt und ceilingMin aus raum-geometrie.js,
 // dieselbe Quelle wie Öffnungsprüfung und Wandansicht, hier keine zweite
-// Deckenlogik. Der store-Block lädt NACH diesem Block: erst beim Aufruf über
-// globalThis (wie cornerHeights in makeEnv). Je Richtung a->b einmal gerechnet
+// Deckenlogik. raum-geometrie.js lädt NACH diesem Block: erst beim Aufruf über
+// globalThis. Je Richtung a->b einmal gerechnet
 // und in E gemerkt: s zählt ab a, und Teile stehen in beiden Richtungen.
 function ceilShape(E, a, b){
   const k=a+'|'+b;
@@ -4569,10 +4569,14 @@ function chainDims(E, L, g, K){
   // Zeile und wird dort verstellt (mit deren Sperren, z. B. dem Eckschrank im Block). Hier ist er Anker
   // wie das Wandende: kein Teil eines Blocks, und die Lücke daneben ist ein Wandabstand des Blocks.
   const hang=g.it.kind==='wall', isTall=r=>KIND[r.h.it.kind].band==='full';
-  const block=(at, dir)=>{ const ids=[]; let edge=at, pinned=false;
-    const seq = dir>0 ? row.filter(r=>r.s0>=at-1) : [...row].reverse().filter(r=>r.s1<=at+1);
+  // Nur die Hängezeile beginnt an der Lücke und hält vor dem Hochschrank an. Alle anderen Zeilen laufen wie bisher ab dem
+  // Zeilenanfang: ein Teil mit zweitem Schenkel sperrt den Block auch dann, wenn es die Lücke um 0,5 bis 1 mm überlappt.
+  const block=(at, dir)=>{ const ids=[]; let edge=hang ? at : null, pinned=false;
+    let seq = dir>0 ? row : [...row].reverse();
+    if(hang) seq = dir>0 ? seq.filter(r=>r.s0>=at-1) : seq.filter(r=>r.s1<=at+1);
     for(const r of seq){ const near = dir>0 ? r.s0 : r.s1;
-      if(Math.abs(near-edge)>1 || (hang && isTall(r))) break;
+      if(edge!=null && Math.abs(near-edge)>1) break;
+      if(hang && isTall(r)) break;
       if(r.h.wing || r.h.wingG) pinned=true;
       ids.push(r.h.it.id); edge = dir>0 ? r.s1 : r.s0; }
     return {ids, edge, pinned}; };
@@ -4624,8 +4628,10 @@ function freeDims(E, L, g){
     const r=TL.rayToRing(E.ring, o, n); if(r) t=r.t-2;
     // Bis zur Plattenkante der Zeile, nicht bis zum Korpus: so misst auch der Gang in check (NKBA
     // counter frontage). Sonst zeigte das Maß 1220, der Gang war 1200, und 1200 eingetragen meldete „1180“.
+    // Liegt der Strahlursprung schon in einem Teil samt Platte (die Kante dringt in die Platte der Zeile ein), ist der
+    // Abstand 0, wie check ihn meldet; rayPoly lieferte dort die Austrittsdistanz und die Platte würde übergangen.
     L.G.forEach(h=>{ if(h.it.id===g.it.id || h.it.kind==='wall') return;
-      frontage(L,h).forEach(P=>{ const x=rayPoly(o,n,P); if(x!=null && x-2<t){ t=x-2; wall=false; } }); });
+      frontage(L,h).forEach(P=>{ const x=inPolyTol(o,P) ? 0 : rayPoly(o,n,P); if(x!=null && x-2<t){ t=x-2; wall=false; } }); });
     out.push({p0:m, n, val:isFinite(t)?Math.max(0,t):null, wall});
   }
   out.forEach((d,i)=>{ if(d.val==null) return; d.p1=add(d.p0, mul(d.n,d.val));
@@ -4720,7 +4726,7 @@ function dimInput(E, K, edit, raw){
   return r.ok ? {kind:'ok', v} : {kind:r.why};
 }
 // Welches Maß ist gemeint? Das Maß selbst bleibt, seine Zahlen ändern sich:
-// Wandabstand der Kette = Wandecke und Seite, freies Teil = Teil und Richtung.
+// Wandabstand der Kette = Wandecke und Seite (in der Hängezeile bei der Lücke am Hochschrank dazu dessen id), freies Teil = Teil und Richtung.
 const dimKey=edit=>edit.ids ? `w|${edit.fa}|${edit.side}${edit.anchor!=null ? '|a'+edit.anchor : ''}` : `f|${edit.id}|${Math.round(edit.n.x*1000)}|${Math.round(edit.n.y*1000)}`;
 // Bei offenem Maßfeld liest der Klick auf ein anderes Maß seinen Treffer aus den
 // Maßen von vor dem Setzen. Gilt hier: derselbe Treffer, aus den frischen Maßen
@@ -5971,9 +5977,10 @@ function copySpot(E, K, L, n, gap){
   return null;
 }
 // Duplizieren eines Wandteils (Strg/Cmd+D): wie das Einfügen (clipItem, placeOnWall) neben das
-// Original. Ein Eckschrank über Eck / diagonal geht nur in eine freie rechtwinklige Innenecke:
-// die andere Ecke der Wand zuerst (die eigene ist besetzt), sonst gibt es keinen Platz. Mitten an
-// der Wand stünde er sofort rot. -> die Kopie (neue id, an der Wand des Originals) oder null.
+// Original. Ein Eckschrank über Eck / diagonal geht nur in eine freie rechtwinklige Innenecke mit
+// Platz für den zweiten Schenkel: die andere Ecke der Wand zuerst (die eigene ist besetzt), sonst
+// gibt es keinen Platz. Mitten an der Wand oder in einer schiefen Ecke stünde er sofort rot.
+// -> die Kopie (neue id, an der Wand des Originals) oder null.
 function dupOnWall(E, K, L, it, id){
   const Wf=wallFrame(E,it.a,it.b); if(!Wf) return null;
   const n={...clipItem(it), id, a:it.a, b:it.b};
@@ -5981,7 +5988,11 @@ function dupOnWall(E, K, L, it, id){
     const e0=it.cEnd!=null ? it.cEnd : (it.x<=Wf.L-it.x-it.w ? 0 : 1);
     for(const e of [1-e0, e0]){
       const c={...n, cEnd:e}, x=cornerPlace(E,K,L,c,Wf);
-      if(x!=null && fitsAt(E,K,L,c,Wf,x)){ c.x=x; return c; }
+      if(x==null || !fitsAt(E,K,L,c,Wf,x)) continue;
+      // Schiefe Ecke oder Reflexecke: kein zweiter Schenkel, fitsAt prüft dann nur den Korpus und check wäre rot.
+      const g=geom(E,K,{...c, x});
+      if(!g || !cornerWing(E,K,g)) continue;
+      c.x=x; return c;
     }
     return null;
   }
@@ -6436,7 +6447,7 @@ function planLabels(L, o){
   // Rand je Seite 1,5 px: zwei Kästen, die sich berühren, lassen 3 px Luft.
   const pad=3*dpr, box=(t,f,x,y)=>{ const w=o.measure(t,f)+pad, h=lh(f); return {x:x-w/2, y:y-h/2, w, h}; };
   const scr=g=>(g.outline||g.poly).map(o.toScr);
-  // Kern eines Kastens: nur die Schrift (Breite ohne Rand, Höhe 1 em statt
+  // Kern eines Kastens: nur die Schrift (Breite ohne Rand, Höhe 0,8 em statt
   // Zeilenhöhe). Letzte Stufe in schräger Ansicht (Gegenprüfung: bei 30° fiel
   // „120“ der Insel und „DA“ ganz weg, weil der achsparallele Kasten nicht
   // ins schräge Teil passt): dann muss nur der Kern im Teil liegen; frei
@@ -6619,9 +6630,6 @@ function stationLabel(LP, q, roles, o){
       if(Math.abs(pp)<1e-9){ if(qq<0) return false; continue; }
       const t=qq/pp; if(pp<0){ if(t>t1) return false; if(t>t0) t0=t; } else { if(t<t0) return false; if(t<t1) t1=t; } }
     return t1-t0>1e-6; };
-  // Zwei Strecken kreuzen sich echt (Endpunkte und Berührung zählen nicht).
-  const cr=(o,a,b)=>(a.x-o.x)*(b.y-o.y)-(a.y-o.y)*(b.x-o.x);
-  const cross=(a,b,c,d)=>cr(c,d,a)*cr(c,d,b)<0 && cr(a,b,c)*cr(a,b,d)<0;
   const dist=z=>Math.hypot(z.x-q.x, z.y-q.y);
   const EDGE=[[0,0],[.25,0],[.5,0],[.75,0],[1,0],[0,1],[.25,1],[.5,1],[.75,1],[1,1],[0,.25],[0,.5],[0,.75],[1,.25],[1,.5],[1,.75]];
   // Linie zum Kasten c: Ansatz am nächsten Punkt; kreuzt sie etwas, zählt auch
@@ -6633,7 +6641,7 @@ function stationLabel(LP, q, roles, o){
   const nX=c=>{ if(c.k<2) return {n:leads.filter(([a,b])=>segHits(a,b,c)).length, x:0};
     const z0=leadAt(c), n0=leads.filter(([a,b])=>segHits(a,b,c)).length;
     const R=LP.rects.filter(b=>!inR(q,b) && b.x<Math.max(q.x,c.x+c.w) && b.x+b.w>Math.min(q.x,c.x) && b.y<Math.max(q.y,c.y+c.h) && b.y+b.h>Math.min(q.y,c.y));
-    const at=z=>({n:n0+R.filter(b=>segHits(q,z,b)).length, x:leads.filter(([a,b])=>cross(q,z,a,b)).length, z});
+    const at=z=>({n:n0+R.filter(b=>segHits(q,z,b)).length, x:leads.filter(([a,b])=>C.segCross(q,z,a,b)).length, z});
     let best=at(z0);
     if(best.n+best.x>0) EDGE.forEach(([fx,fy])=>{ const z={x:c.x+c.w*fx, y:c.y+c.h*fy};
       if(dist(z)>dist(z0)+30*dpr || segHits(q,z,c)) return;
@@ -7086,11 +7094,11 @@ function recompute(){
 // ================= Raumbibliothek (Anbindung) =================
 
 function openRoom(id){
+  // Gehaltene Pfeil-/Dreh-Taste: das Vorgemerkte noch in den ALTEN Raum schreiben (currentRoom zeigt auf ihn, M hält
+  // seine Daten), und zwar vor dem Laden: öffnet man denselben Raum noch einmal, sieht auch er die Schritte.
+  if(typeof kitchenFlush==='function') kitchenFlush();
   const r=STORE.load(id);
   if(!r) return;
-  // Gehaltene Pfeil-/Dreh-Taste: das Vorgemerkte noch in den ALTEN Raum schreiben (currentRoom zeigt auf ihn,
-  // M hält seine Daten); danach gehört alles dem neuen.
-  if(typeof kitchenFlush==='function') kitchenFlush();
   currentRoom=id;
   currentRoomName=r.name;
   STORE.setCurrent(id);
@@ -14394,7 +14402,7 @@ function openDimEdit(hit0){
   dimEd={commit};
   inp.onkeydown=e=>{ e.stopPropagation(); if(e.key==='Enter'){ e.preventDefault(); commit(); } else if(e.key==='Escape'){ done=true; closeDimEdit(); } };
   inp.onblur=()=>commit();
-  setHint(`Abstand ${hit.edit.wall===false?'zum Nachbarteil':'zur Wand'} eintragen (${Math.ceil(hit.edit.min)}–${Math.floor(hit.edit.max)} mm), Enter setzt, Esc bricht ab`);
+  setHint(`Abstand ${hit.edit.anchor!=null?'zum Hochschrank':hit.edit.wall===false?'zum Nachbarteil':'zur Wand'} eintragen (${Math.ceil(hit.edit.min)}–${Math.floor(hit.edit.max)} mm), Enter setzt, Esc bricht ab`);
 }
 // Eingang im Plan (Meldung M-20261109-145947-e89ebf): Türen tragen dieselbe
 // Nummer wie die Auswahl im Panel, der Eingang ist grün markiert; ein Klick
@@ -14703,12 +14711,12 @@ function duplicate(it){
   if(it.a){
     // Wandteil wie beim Einfügen (⌘V): ein Eckschrank kommt in eine Ecke statt mitten an die Wand.
     n=KX.dupOnWall(c.E,K,c.L,it,K.seq++);
-    if(!n){ setHint('Daneben ist kein Platz frei.'); K.seq--; return; }
+    if(!n){ setHint(it.corner && it.ctype ? 'Keine freie Ecke an dieser Wand für eine Kopie.' : 'Daneben ist kein Platz frei.'); K.seq--; return; }
   } else {
     n={...it, id:K.seq++};
     if(n.store) n.store=[...n.store];
-    // Freies Teil (Insel, Tisch): daneben in seiner Achse, wo es im Raum steht
-    // und nichts überlappt - sonst wie bei Wandteilen kein Duplikat.
+    // Freies Teil (Insel, Tisch): daneben in seiner Achse, wo es im Raum steht, nichts
+    // überlappt und es nicht in einer Tür- oder Fensterzone steht - sonst kein Duplikat.
     const s=KX.copySpot(c.E,K,c.L,n);
     if(!s){ setHint('Daneben ist kein Platz frei.'); K.seq--; return; }
     n.x=s.x; n.y=s.y;
@@ -14860,9 +14868,11 @@ function renderSel(c){
   const key=KX.selBoxKey(it, c.K.spec, c.bad.has(it.id), VIEW.rot);   // mit Ansichtsdrehung (wallEnds)
   $('kSelInfo').textContent=nm(it)+wallTxt(it);
   if(key===KS.selKey && it===KS.selIt) return;
-  KS.selKey=key; KS.selIt=it;
   if(KS.freeFor!==it.id){ KS.freeFor=it.id; KS.freeOpen=false; }
-  if(KS.rotDrag===it.id) return;                // Schieber wird gerade gezogen
+  // Schieber wird gerade gezogen: kein Neubau, und der Schlüssel bleibt der alte, damit der nächste Render ihn nachholt
+  // (er stand schon auf dem neuen Stand, und das Panel, z. B. die Platzzahl am Tisch, blieb veraltet).
+  if(KS.rotDrag===it.id) return;
+  KS.selKey=key; KS.selIt=it;
   const fid = box.contains(document.activeElement) ? document.activeElement.id : null;
   const dev=it.dev?KX.DEV[it.dev]:null, fz=KX.fzOf(it);
   const widths = it.kind==='table' ? [800,1000,1200,1400,1600,1800,2000,2200] : it.kind==='island' ? [1200,1500,1800,2000,2400,2700] : it.corner ? KX.CORNER[it.kind].bodies : fz ? fz.widths : dev ? dev.widths : KX.WIDTHS;
@@ -15005,11 +15015,16 @@ function renderSel(c){
     // Pfeile am Regler: die Taste verbraucht er selbst (1°), jede Wiederholung löst input und change aus.
     // Wie bei den Pfeilen auf dem Plan: eine gehaltene Taste ist ein Rückgängig-Schritt und wird einmal beim
     // Loslassen gespeichert (nudgeSave), nicht je Wiederholung samt Panel-Neubau.
-    rs.onkeydown=()=>{ KS.rotKey=true; };
-    rs.onkeyup=()=>{ KS.rotKey=false; KS.rotDrag=null; };
+    // Nur Tasten, die der Regler selbst verbraucht (Pfeile, Pos1/Ende, Bild auf/ab), und nicht während die Maus
+    // zieht: ⌥ (frei drehen) oder eine andere Taste darf die Geste weder spalten noch mit der nächsten verschmelzen.
+    const own=e=>KX.controlOwnsKey(e.key,'INPUT','range');
+    rs.onkeydown=e=>{ if(own(e) && !KS.rotPtr) KS.rotKey=true; };
+    rs.onkeyup=e=>{ if(!own(e)) return;
+      KS.rotKey=false; KS.rotDrag=null;
+      if(!nudgeSave.pending) kitchenSave(); };      // Ruhe-Timer schon durch (Taste über 400 ms ohne Wiederholung): Speicher und Panel nachziehen
     rs.onblur=()=>{ KS.rotKey=false; KS.rotDrag=null; };
     rs.onchange=()=>{
-      if(KS.rotKey){ KS.ctxKey=''; nudgeSave.mark(); return; }
+      if(KS.rotKey && !KS.rotPtr){ KS.ctxKey=''; nudgeSave.mark(); return; }
       KS.rotDrag=null; KS.rotPtr=false; kitchenSave(); };
   }
   if($('kStd')) $('kStd').onclick=()=>edit(t=>{ delete t.d; delete t.h; delete t.z; });
@@ -21098,7 +21113,7 @@ globalThis.selfChecks=function(){
       // Segment gegen Segment statt nur Kasten, Ansatzpunkt am Kasten wählbar,
       // dichtere Richtungen. Mess-Stub 0,6 em, kleiner Plan um q=(300,300).
       const measure=(t,f)=>t.length*f.px*0.6, ovA=(a,b)=>Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x)>1e-3 && Math.min(a.y+a.h,b.y+b.h)-Math.max(a.y,b.y)>1e-3, hits=(a,b,R)=>{ for(let i=0;i<=400;i++){ const t=i/400, x=a.x+(b.x-a.x)*t, y=a.y+(b.y-a.y)*t; if(x>R.x && x<R.x+R.w && y>R.y && y<R.y+R.h) return true; } return false; };
-      const segX=(a,b,c,d)=>{ const cr=(o,p,q)=>(p.x-o.x)*(q.y-o.y)-(p.y-o.y)*(q.x-o.x); return cr(c,d,a)*cr(c,d,b)<0 && cr(a,b,c)*cr(a,b,d)<0; };
+      const segX=(a,b,c,d)=>globalThis.CORE.segCross(a,b,c,d);
       const q0={x:300,y:300}, o0={dpr:1, measure};
       const nearD=r=>Math.hypot(Math.min(Math.max(q0.x,r.x),r.x+r.w)-q0.x, Math.min(Math.max(q0.y,r.y),r.y+r.h)-q0.y);
       const mk=()=>{ const LP=CORE.labelPlacer(); LP.occupy({x:q0.x-5,y:q0.y-5,w:10,h:10,hard:true}); LP.occupy({x:q0.x-26,y:q0.y-26,w:52,h:52}); return LP; };   // Ringe 0/1 gesperrt
@@ -21177,6 +21192,11 @@ globalThis.selfChecks=function(){
         const toScrD=p=>({x:(p.x*cd-p.y*snd)*sd*dd+589.6680780686438, y:(p.x*snd+p.y*cd)*sd*dd+532.8586620278656});
         const labD=KX.planLabels(Ld,{toScr:toScrD, dpr:dd, measure:m2}).labels.filter(l=>l.id===4);
         chk('kueche: Schritt 5 kürzt die Kopfzeile nicht (Hängeschrank bleibt „H 45“, kein „H“ mit „+4“)', labD.some(l=>l.role==='wall' && l.txt==='H 45'));
+        // vier weitere Ansichten (Maßstab, Drehung in 64 Schritten), in denen die Sperre den Unterschied macht (ohne sie „H“ + „+4“)
+        const labAt=(s,k)=>{ const r=k*Math.PI*2/64, c=Math.cos(r), n=Math.sin(r);
+          return KX.planLabels(Ld,{toScr:p=>({x:(p.x*c-p.y*n)*s*dd+589.67, y:(p.x*n+p.y*c)*s*dd+532.86}), dpr:dd, measure:m2}).labels.filter(l=>l.id===4); };
+        chk('kueche: Schritt 5 kürzt die Kopfzeile auch in vier weiteren Ansichten nicht (Maßstab 0,088 bis 0,144), „H 45“ bleibt',
+          [[0.088,9],[0.092,57],[0.112,21],[0.144,62]].every(([s,k])=>labAt(s,k).some(l=>l.role==='wall' && l.txt==='H 45')));
       }
       {
         // Inhalt in schräger Ansicht rückt zur Seite, wo der waagerechte Schnitt des schrägen Teils unter der
@@ -21243,16 +21263,16 @@ globalThis.selfChecks=function(){
           // der frühere Weg (rechts daneben, 2900/700) stand in der Türzone: „steht vor einer Tür“, Zimmertür schlägt an
           const K3=KX.normKitchen({items:[K.items[0],{...K.items[0],id:2,x:2900,y:700}]}), F3=KX.check(E,K3,KX.layout(E,K3)).map(f=>f.txt);
           return near(s.x,1500,0.5) && near(s.y,1800,0.5) && !F2.some(x=>/steht vor einer Tür|Zimmertür schlägt an/.test(x)) && F3.some(x=>/steht vor einer Tür/.test(x)); });
-      T('kueche-gesamt: Kopie einer Insel – ist jede Lage in der Türzone oder belegt, gibt es keine (null)',
-        ()=>{ const E=rc(2600,1700,[{...door,x:900}]), K=KX.normKitchen({items:[{id:1,kind:'island',x:1300,y:850,rot:0,w:2000,d:1500}]});
-          return KX.copySpot(E,K,KX.layout(E,K),{...K.items[0],id:2})===null; });
+      T('kueche-gesamt: Kopie einer Insel – bleibt nur die Lage in der Türzone übrig (alle anderen außerhalb des Raums), gibt es keine (null), ohne Tür gibt es sie',
+        ()=>{ const E=rc(5000,2000,[door]), E0=rc(5000,2000), K=isl(), c={...K.items[0],id:2};
+          return KX.copySpot(E,K,KX.layout(E,K),c)===null && near((KX.copySpot(E0,K,KX.layout(E0,K),c)||{}).x,2900,0.5); });
       // Inselabstand (freeDims) und Gang (check) messen bis zur selben Kante: der Plattenkante der Zeile
       const fz=(y)=>{ const E=rc(5000,3500), K=KX.normKitchen({items:[{id:1,kind:'base',a:'A',b:'B',x:1000,w:1200},{id:2,kind:'island',x:1600,y,rot:0,w:1200,d:900}]});
         const L=KX.layout(E,K), side=KX.freeDims(E,L,L.byId.get(2)).find(d=>!d.wall && d.n.y<-0.5);
         return {E,K,L,side,gang:KX.check(E,K,L).map(f=>f.txt).filter(s=>/Gang vor Unterschrank|Vor Unterschrank/.test(s))}; };
       T('kueche-gesamt: Inselabstand zur Zeile – das Maß geht bis zur Plattenkante (1200), nicht bis zum Korpus (1220), und der Gang ist dann auch 1200: keine Meldung',
         ()=>{ const r=fz(2250); return !!r.side && near(r.side.val,1200,0.6) && r.gang.length===0; });
-      T('kueche-gesamt: Inselabstand – das Maß eingetragen (applyDim) trifft den Gang: 1180 gelb „1180 mm“, 1200 ohne Meldung, 1219 zu zweit gelb',
+      T('kueche-gesamt: Inselabstand – das Maß eingetragen (applyDim) trifft den Gang: 1180 gelb „1180 mm“, 1200 ohne Meldung',
         ()=>{ const r=fz(2250);
           const gang=(v)=>{ const K2=KX.normKitchen(JSON.parse(JSON.stringify(r.K))); const e=KX.freeDims(r.E,KX.layout(r.E,K2),KX.layout(r.E,K2).byId.get(2)).find(d=>!d.wall && d.n.y<-0.5).edit;
             if(!KX.applyDim(r.E,K2,e,v)) return null; return KX.check(r.E,K2,KX.layout(r.E,K2)).map(f=>f.txt).filter(s=>/Gang vor Unterschrank|Vor Unterschrank/.test(s)); };
@@ -21270,6 +21290,21 @@ globalThis.selfChecks=function(){
         ()=>{ const pts=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:1e15},{id:'D',x:0,y:3000}], wl=[['A','B'],['B','C'],['C','D'],['D','A']];
           const E=KX.makeEnv(pts,wl,[],[]), K=KX.normKitchen({items:[{id:1,kind:'base',a:'B',b:'C',x:306,w:600,front:'door'}]}), L=KX.layout(E,K);
           const D=KX.chainDims(E,L,L.G[0],K); return !!D && Array.isArray(D.segs) && D.segs.length>0; });
+      // Duplizieren in eine schiefe Ecke: kein zweiter Schenkel, die Kopie wäre rot - also kein Platz
+      T('kueche-gesamt: Duplizieren – die andere Ecke der Wand ist schief (kein zweiter Schenkel): kein Platz (null) statt einer roten Kopie',
+        ()=>{ const E=KX.makeEnv([{id:'A',x:0,y:0},{id:'B',x:5000,y:0},{id:'C',x:4700,y:3500},{id:'D',x:0,y:3500}],[['A','B'],['B','C'],['C','D'],['D','A']],[],[]);
+          const K=KX.normKitchen({items:[corner('L')]});
+          return KX.dupOnWall(E,K,KX.layout(E,K),K.items[0],2)===null && bads(E,K).length===0; });
+      // Inselabstand: dringt die Kante in die Platte der Zeile ein, ist der Abstand 0 (check: „nur 0 mm“), nicht der Korpusabstand
+      T('kueche-gesamt: Inselabstand – die Kante dringt in die Platte der Zeile ein: 0 statt des Korpusabstands 40; frei davor wie bisher',
+        ()=>{ const E=rc(5000,3500), mk=y=>{ const K=KX.normKitchen({spec:{topD:650},items:[{id:1,kind:'base',a:'A',b:'B',x:1000,w:1200},{id:2,kind:'island',x:1600,y,rot:0,w:1200,d:900}]});
+            const L=KX.layout(E,K); return {F:KX.check(E,K,L).map(f=>f.txt), d:KX.freeDims(E,L,L.byId.get(2)).find(x=>!x.wall && x.n.y<-0.5)}; };
+          const a=mk(1070), b=mk(1300); return !!a.d && a.d.val===0 && a.F.some(s=>/Vor Unterschrank 120 nur 0 mm Platz/.test(s)) && !!b.d && near(b.d.val,200,0.5); });
+      // Maßkette, Zeile ohne Hängeschränke: ein Nachbar, der den Eckschrank um 0,6 mm überlappt, bekommt kein Scheinfeld (der Block
+      // mit dem zweiten Schenkel bleibt gesperrt); nur die Hängezeile beginnt ihre Blöcke an der Lücke
+      T('kueche-gesamt: Maßkette – Nachbar mit 0,6 mm Überlappung am Eckschrank über Eck: kein Wandabstand-Feld, das den Nachbarn aus dem Block löst',
+        ()=>{ const E=rc(5000,3500), K=KX.normKitchen({items:[corner('L'),{id:2,kind:'base',a:'A',b:'B',x:899.4,w:600}]}), L=KX.layout(E,K);
+          const D=KX.chainDims(E,L,L.byId.get(2),K); return !!D && bads(E,K).length===0 && !D.segs.some(s=>s.edit && s.edit.ids.includes(2)); });
     }catch(err){ chk('kueche: Review-Fix Rest: gesamtpruefung ohne Ausnahme ('+err.message+')', false); }
   }
   return {ok, out};
