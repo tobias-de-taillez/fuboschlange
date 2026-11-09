@@ -371,6 +371,12 @@
   /* Wände-Modus: Panel zeigt die Wand und ihre Oeffnungen. */
   #wInfo{font-size:12px;color:var(--ink2);font-variant-numeric:tabular-nums;margin:-4px 0 8px}
   #wallops{display:grid;gap:2px;margin-bottom:8px}
+  #wHeights{display:grid;gap:3px;margin-bottom:10px;font-size:12px;font-variant-numeric:tabular-nums}
+  #wHeights .hrow{display:flex;gap:8px;align-items:center;min-height:26px}
+  #wHeights .hrow span:first-child{flex:1;color:var(--ink2)}
+  #wHeights .hrow b{font-weight:600}
+  #wHeights .ann{color:var(--muted);font-style:italic}
+  #wHeights button{min-height:24px;height:24px;padding:0 8px;font-size:12px}
   #wallops .orow{display:flex;gap:8px;align-items:center;min-height:26px;padding:0 6px;margin:0 -6px;
     border-radius:4px;cursor:pointer;font-variant-numeric:tabular-nums}
   #wallops .orow:hover{background:var(--hover)}
@@ -693,7 +699,7 @@
         <select id="wPick" title="Wand wählen"></select>
         <button id="wNext" class="tb" aria-label="Nächste Wand" title="Nächste Wand (→)">›</button>
         <i class="tsep"></i>
-        <button id="wHeight" class="tb" title="Raumhöhe eintragen; einzelne Ecken über ihre Kante im Bild">Höhe</button>
+        <button id="wHeight" class="tb" title="Höhe an der linken Ecke eintragen; die rechte Ecke und Knickpunkte im Panel">Höhe</button>
         <div id="wAdd" class="tg">
           <button data-add="door" class="tb">+ Tür</button>
           <button data-add="window" class="tb">+ Fenster</button>
@@ -801,6 +807,7 @@
       <section id="wallsec">
         <h3><span id="wallTitle">Wand</span></h3>
         <div id="wInfo"></div>
+        <div id="wHeights"></div>
         <div id="wallops"></div>
         <div id="opop" hidden>
           <div id="opopHead"><b id="opopTitle"></b><button id="opopX" aria-label="Auswahl aufheben" title="Auswahl aufheben (Esc)">✕</button></div>
@@ -984,7 +991,8 @@
       <h3><i>3</i>Wände</h3>
       <p>Erst verfügbar, wenn der Grundriss eindeutig ist, vorher wären Wandansichten erfunden. Hier pro Wand die Ansicht von innen, wie man im Raum davor steht: unter den Kanten stehen die Ecken und die anschließenden Wände, oben rechts zeigt ein Lageplan mit Pfeil, welche Wand es ist (Klick dort wählt eine andere). Mit ‹ › oder ← → geht es ringsum zur Wand rechts oder links daneben.</p>
       <dl>
-        <dt>Höhe</dt><dd>Raumhöhe eintragen. Einzelne abweichende Ecken über ihre Kante im Bild.</dd>
+        <dt>Höhe</dt><dd>Raumhöhe eintragen. Die erste gemessene Höhe gilt für alle Ecken; abweichende Ecken (Pultdach, Schräge) rechts im Panel unter <b>Höhe links / rechts</b> oder per Klick auf ihre Kante im Bild. Höhe 0 ist erlaubt: die Wand läuft dort spitz zu.</dd>
+        <dt>+ Knickpunkt</dt><dd>Für Giebel- und Kniestockwände: die Decke knickt zwischen den Ecken. Den Punkt im Bild ziehen, anklicken für seine Höhe, Rechtsklick löscht. Geht in die Wandansicht, die Öffnungsprüfung und den STEP-Export ein.</dd>
         <dt>+ Tür, + Fenster, + Loch</dt><dd>Gibt es auch im Grundriss (Zeichnen und Messen): Knopf, dann auf die Wand klicken. Dort ziehen verschiebt die Öffnung entlang der Wand, das Kärtchen daneben stellt Art, Band und Öffnungsrichtung. Hier in der Wandansicht: Öffnung auf die Wand setzen, dann Größe und Art wählen. Links und rechts gelten immer von innen gesehen. Unter <b>Lage einmessen</b> den Abstand von links, rechts, Boden oder Decke eintragen; erst dann liegt sie maßhaltig. Türen bekommen Band und Öffnungsrichtung.</dd>
         <dt>Abwicklung</dt><dd>Klappt die Wände mit Öffnungen im Grundriss nach außen und blendet Nachbarräume aus. Nur Ansicht.</dd>
       </dl>
@@ -8239,7 +8247,8 @@ const H_DEFAULT = 2500;   // uebliche Deckenhoehe, bis etwas gemessen ist
 // Ab dem zweiten abweichenden Wert zaehlt jede Ecke fuer sich, und
 // ungemessene erben den Mittelwert - als "angenommen", nicht als Messung.
 globalThis.cornerHeights=function(pts, meas){
-  const hm=(meas||[]).filter(m=>m.kind==='h' && m.on!==false && Number.isFinite(m.d) && m.d>0);
+  // Hoehe 0 ist zulaessig (Dreieckswand, Spitze in der Ecke) - nur negativ nicht.
+  const hm=(meas||[]).filter(m=>m.kind==='h' && m.on!==false && Number.isFinite(m.d) && m.d>=0);
   const byId=new Map();
   hm.forEach(m=>{
     if(!byId.has(m.at)) byId.set(m.at, []);
@@ -8248,8 +8257,11 @@ globalThis.cornerHeights=function(pts, meas){
   const mean=a=>a.reduce((s,x)=>s+x,0)/a.length;
   const gemessen=new Map();
   byId.forEach((v,k)=>gemessen.set(k, mean(v)));
-  const werte=[...gemessen.values()];
-  const fallback = werte.length ? mean(werte) : H_DEFAULT;
+  // Ungemessene Ecken erben die ZUERST gemessene Ecke: die erste Hoehe ist
+  // die Raumhoehe, jede weitere eine Abweichung an genau ihrer Ecke. Der
+  // fruehere Mittelwert gab bei A 2500 / B 2000 allen uebrigen Ecken
+  // stillschweigend 2250 - einen Wert, den niemand gemessen hat.
+  const fallback = hm.length ? gemessen.get(hm[0].at) : H_DEFAULT;
   const out={};
   pts.forEach(p=>{
     out[p.id] = gemessen.has(p.id)
@@ -8262,14 +8274,29 @@ globalThis.cornerHeights=function(pts, meas){
 // Die Wandflaeche als Polygon in Wandkoordinaten (x von Ecke a nach b,
 // y vom Boden). Trapez, weil die beiden Ecken verschieden hoch sein
 // koennen; bei Hoehe 0 an einer Seite ein Dreieck.
+// Knickpunkte der Oberkante (Giebel, Kniestock) stehen als {kind:'k', id,
+// a, b, x, d} in derselben Liste wie die Eckhoehen: x in mm ab Ecke a der
+// gespeicherten Richtung, d die Hoehe dort. cornerHeights liest nur kind
+// 'h', also bleiben Ecken und Knicke sauber getrennt.
+globalThis.wallKnicks=function(meas, a, b, L){
+  const k=[a,b].sort().join('|');
+  return (meas||[]).filter(m=>m.kind==='k' && m.on!==false && Number.isFinite(m.x)
+      && Number.isFinite(m.d) && m.d>=0 && [m.a,m.b].sort().join('|')===k)
+    .map(m=>({x:m.a===a ? m.x : L-m.x, y:m.d, id:m.id}))
+    .filter(p=>p.x>1 && p.x<L-1)
+    .sort((p,q)=>p.x-q.x);
+};
 globalThis.wallShape=function(pts, meas, a, b){
   const C=globalThis.CORE, I=C.idx(pts);
   if(I[a]==null||I[b]==null) return null;
   const L=C.dist(pts[I[a]], pts[I[b]]);
   const H=globalThis.cornerHeights(pts, meas);
   const ha=H[a]?H[a].h:H_DEFAULT, hb=H[b]?H[b].h:H_DEFAULT;
-  return {L, ha, hb,
-          poly:[{x:0,y:0},{x:L,y:0},{x:L,y:hb},{x:0,y:ha}],
+  const knicks=globalThis.wallKnicks(meas, a, b, L);
+  // Oberkante als Polylinie von a nach b; ohne Knick das bekannte Trapez.
+  const top=[{x:0,y:ha}, ...knicks.map(k=>({x:k.x,y:k.y})), {x:L,y:hb}];
+  return {L, ha, hb, top, knicks, hMax:Math.max(...top.map(p=>p.y)),
+          poly:[{x:0,y:0},{x:L,y:0}, ...top.slice().reverse()],
           gemessen:(H[a]&&H[a].gemessen)&&(H[b]&&H[b].gemessen)};
 };
 
@@ -8277,8 +8304,24 @@ globalThis.wallShape=function(pts, meas, a, b){
 // Decke schraeg, und genau daran muss sich eine Oeffnung messen lassen.
 globalThis.ceilingAt=function(shape, x){
   if(!shape || !(shape.L>0)) return shape?shape.ha:0;
-  const t=Math.max(0, Math.min(1, x/shape.L));
-  return shape.ha + (shape.hb-shape.ha)*t;
+  const T=shape.top || [{x:0,y:shape.ha},{x:shape.L,y:shape.hb}];
+  const u=Math.max(0, Math.min(shape.L, x));
+  for(let i=0;i<T.length-1;i++){
+    const p=T[i], q=T[i+1];
+    if(u<=q.x || i===T.length-2){
+      const t=q.x>p.x ? (u-p.x)/(q.x-p.x) : 0;
+      return p.y+(q.y-p.y)*Math.max(0,Math.min(1,t));
+    }
+  }
+  return T[T.length-1].y;
+};
+// Niedrigste Decke ueber [x0,x1]: an den Enden ODER an einem Knick dazwischen
+// (eine Kehle laege sonst unbemerkt unter einer Oeffnung).
+globalThis.ceilingMin=function(shape, x0, x1){
+  const f=globalThis.ceilingAt;
+  let m=Math.min(f(shape,x0), f(shape,x1));
+  (shape&&shape.top||[]).forEach(p=>{ if(p.x>x0 && p.x<x1) m=Math.min(m,p.y); });
+  return m;
 };
 
 // Passt die Oeffnung vollstaendig in die Wand? Geprueft wird gegen die
@@ -8288,9 +8331,7 @@ globalThis.openingFits=function(shape, op){
   if(!shape) return false;
   if(op.x<-1e-6 || op.y<-1e-6) return false;
   if(op.x+op.w > shape.L+1e-6) return false;
-  const oben=op.y+op.h;
-  return oben <= globalThis.ceilingAt(shape, op.x)+1e-6
-      && oben <= globalThis.ceilingAt(shape, op.x+op.w)+1e-6;
+  return op.y+op.h <= globalThis.ceilingMin(shape, op.x, op.x+op.w)+1e-6;
 };
 
 // Oeffnung in die Wand zwingen: waagerecht hart an die Kanten, senkrecht
@@ -8299,9 +8340,7 @@ globalThis.clampOpening=function(shape, op){
   const o={...op};
   o.w=Math.min(o.w, shape.L);
   o.x=Math.max(0, Math.min(shape.L-o.w, o.x));
-  const deckeLinks=globalThis.ceilingAt(shape, o.x);
-  const deckeRechts=globalThis.ceilingAt(shape, o.x+o.w);
-  const platz=Math.min(deckeLinks, deckeRechts);
+  const platz=globalThis.ceilingMin(shape, o.x, o.x+o.w);
   o.h=Math.min(o.h, platz);
   o.y=Math.max(0, Math.min(platz-o.h, o.y));
   return o;
@@ -8343,7 +8382,7 @@ globalThis.slideOpening=function(shape, op, ziel, others){
 globalThis.findFreeSpot=function(shape, op, others){
   if(globalThis.openingPlaceable(shape, op, others)) return op;
   const schritt=Math.max(50, op.w/4);
-  const hMax=Math.max(shape.ha, shape.hb);
+  const hMax=shape.hMax!=null ? shape.hMax : Math.max(shape.ha, shape.hb);
   for(let dy=0; dy<=hMax; dy+=Math.max(100, op.h/2)){
     for(const y of (dy===0?[op.y]:[op.y+dy, op.y-dy])){
       if(y<0) continue;
@@ -8361,10 +8400,13 @@ globalThis.findFreeSpot=function(shape, op, others){
 // Wandloch sitzen mittig im oberen Bereich.
 globalThis.defaultOpening=function(shape, kind){
   if(kind==='door'){
-    const w=Math.min(985, shape.L), h=Math.min(1985, Math.min(shape.ha,shape.hb));
-    return globalThis.clampOpening(shape, {kind, w, h, x:(shape.L-w)/2, y:0});
+    // Hoehe gegen die Decke UEBER der Tuer, nicht gegen die niedrigere Ecke:
+    // in einer Dreieckswand waere die sonst 0.
+    const w=Math.min(985, shape.L), x=(shape.L-w)/2;
+    const h=Math.min(1985, globalThis.ceilingMin(shape, x, x+w));
+    return globalThis.clampOpening(shape, {kind, w, h, x, y:0});
   }
-  const hMit=(shape.ha+shape.hb)/2;
+  const hMit=globalThis.ceilingAt(shape, shape.L/2);
   const w=shape.L*2/3, h=hMit/3;
   return globalThis.clampOpening(shape, {kind, w, h, x:(shape.L-w)/2, y:hMit*0.4});
 };
@@ -8705,9 +8747,27 @@ globalThis.roomSolids=function(pts, walls, thick, openings, hmeas){
   const solids=[], hinweise=[];
   const anBand=new Set(bands.map(b=>b.orig));
   (openings||[]).forEach(o=>{ if(!anBand.has(key(o.a,o.b))) hinweise.push(`Öffnung in ${o.a}-${o.b} liegt an einer Wandzunge – nicht ausgeschnitten`); });
+  const IP=globalThis.CORE.idx(pts);
   bands.forEach(b=>{
     const L=b.L, ha=hOf(b.a), hb=hOf(b.b);
-    const ceil=s=>ha+(hb-ha)*s/L;
+    // Knickpunkte dieser Wand in s-Lage (ab iA entlang b.u; die Wand kann
+    // andersherum laufen als m.a -> m.b, siehe Oeffnungen unten).
+    const kn=(hmeas||[]).filter(m=>m.kind==='k' && m.on!==false && Number.isFinite(m.x) && Number.isFinite(m.d)
+        && m.d>=0 && key(m.a,m.b)===b.orig && IP[m.a]!=null && IP[m.b]!=null)
+      .map(m=>{
+        const A=pts[IP[m.a]], B=pts[IP[m.b]], l=Math.hypot(B.x-A.x,B.y-A.y)||1;
+        const w={x:A.x+(B.x-A.x)*m.x/l, y:A.y+(B.y-A.y)*m.x/l};
+        return [(w.x-b.iA.x)*b.u.x+(w.y-b.iA.y)*b.u.y, m.d];
+      }).filter(([sk])=>sk>EPS && sk<L-EPS).sort((p,q)=>p[0]-q[0]);
+    const top=[[0,ha], ...kn, [L,hb]];
+    const ceil=s=>{
+      for(let i=0;i<top.length-1;i++){
+        const [s0,z0]=top[i], [s1,z1]=top[i+1];
+        if(s<=s1 || i===top.length-2) return z0+(z1-z0)*Math.max(0,Math.min(1,(s-s0)/((s1-s0)||1)));
+      }
+      return hb;
+    };
+    const ceilMin=(s0,s1)=>Math.min(ceil(s0), ceil(s1), ...kn.filter(([sk])=>sk>s0 && sk<s1).map(k=>k[1]));
     // Oeffnungen dieser Wand in s-Lage (die Wand kann andersherum laufen
     // als o.a -> o.b, und ein gekuerztes Band beginnt nicht an o.a;
     // projiziert wird auf b.u ab iA).
@@ -8723,7 +8783,7 @@ globalThis.roomSolids=function(pts, walls, thick, openings, hmeas){
       if(s1-s0<EPS) return;
       if(s0<EPS) s0=0; if(s1>L-EPS) s1=L;
       const z0=Math.max(0,o.y||0), z1=z0+o.h;
-      const unten=z0<EPS, oben=z1>=Math.min(ceil(s0),ceil(s1))-EPS;
+      const unten=z0<EPS, oben=z1>=ceilMin(s0,s1)-EPS;
       if(unten && z1<=EPS) return;
       ops.push({s0,s1,z0,z1,unten,oben,kind:o.kind});
     });
@@ -8752,6 +8812,16 @@ globalThis.roomSolids=function(pts, walls, thick, openings, hmeas){
         if(!nah(o.s0,sa)) R.push([o.s0,o.z0],[o.s0,ceil(o.s0)]); else R.push([sa,o.z0]);
       });
       if(!(obn.length && nah(obn[obn.length-1].s0,sa))) R.push([sa,ceil(sa)]);
+      // Knicke in die Oberkante: zwischen zwei Deckenpunkten, die von rechts
+      // nach links laufen (die Unterkante laeuft andersherum - so landet ein
+      // Knick nie im Boden, auch nicht bei Hoehe 0 an beiden Ecken).
+      const anDecke=p=>Math.abs(p[1]-ceil(p[0]))<EPS;
+      for(let i=R.length-1;i>=0;i--){
+        const p=R[i], q=R[(i+1)%R.length];
+        if(!(p[0]>q[0]+EPS && anDecke(p) && anDecke(q))) continue;
+        const dazu=kn.filter(([sk])=>sk<p[0]-EPS && sk>q[0]+EPS).sort((x,y)=>y[0]-x[0]);
+        R.splice(i+1, 0, ...dazu.map(k=>[k[0],k[1]]));
+      }
       const prof=R.filter((p,i)=>{ const q=R[(i+R.length-1)%R.length]; return !(nah(p[0],q[0])&&nah(p[1],q[1])); });
       const loecher=imStueck.filter(o=>!o.unten&&!o.oben)
         .map(o=>[[o.s0,o.z0],[o.s0,o.z1],[o.s1,o.z1],[o.s1,o.z0]]);
@@ -10324,7 +10394,7 @@ function recompute(){
   const gibt=id=>M.pts.some(p=>p.id===id);
   if((entryPair && !(gibt(entryPair.a)&&gibt(entryPair.b))) || (heightAt && !gibt(heightAt))
      || (crossPair && !gibt(crossPair.a))){
-    crossPair=null; entryPair=null; entryGuided=false; heightAt=null; opMeasEdge=null;
+    crossPair=null; entryPair=null; entryGuided=false; heightAt=null; knickAt=null; opMeasEdge=null;
     $('entry').hidden=true; M.highlight=null;
   }
   if(wpopPair && !(gibt(wpopPair.a)&&gibt(wpopPair.b))){ wpopPair=null; $('wpop').hidden=true; }
@@ -10794,7 +10864,7 @@ function enterCross(a, raum, b){
   const nb=neighbors.find(n=>n.id===raum);
   if(!nb) return;
   if(wpopPair) closeWallPopup();
-  entryPair=null; entryGuided=false; heightAt=null; opMeasEdge=null;
+  entryPair=null; entryGuided=false; heightAt=null; knickAt=null; opMeasEdge=null;
   crossPair={a, raum, b};
   M.highlight=null;
   $('entryLabel').textContent=`${a} ↔ ${b} in „${nb.name}“, durch die Tür`;
@@ -10965,7 +11035,7 @@ function currentShape(){
 }
 function wallFit(shape){
   if(!shape) return;
-  const hMax=Math.max(shape.ha, shape.hb)||1;
+  const hMax=(shape.hMax!=null ? shape.hMax : Math.max(shape.ha, shape.hb))||1;
   // Rand knapp halten - die Wand soll die Flaeche fuellen, nicht darin schweben.
   // Oben bleibt Platz fuer Titel und Lageplan, unten fuer Ecken und Nachbarn.
   const dpr=DPR(), pad=34*dpr;
@@ -11048,6 +11118,16 @@ function drawWallView(){
     }
     ctx.textAlign='start';
   });
+  // Knickpunkte: Griff (ziehen verschiebt, Klick fragt die Hoehe) und Hoehe.
+  shape.knicks.forEach(k=>{
+    const p=wToScr({x:k.x, y:k.y});
+    ctx.beginPath(); ctx.arc(p.x, p.y, 5.5*dpr, 0, 2*Math.PI);
+    ctx.fillStyle='#fff'; ctx.fill();
+    ctx.strokeStyle=knickAt===k.id ? INK.accent : INK.wall; ctx.lineWidth=2*dpr; ctx.stroke();
+    ctx.font=`${12*dpr}px system-ui`; ctx.textAlign='center'; ctx.fillStyle=INK.scale;
+    ctx.fillText(`${fmtM(k.y)} m`, p.x, p.y+22*dpr);
+  });
+  ctx.textAlign='start';
   // Ecken in Ansichtsreihenfolge: was links steht, steht links.
   const ecke=wallSidesView();
   const xl=Math.min(b0.x,b1.x), xr=Math.max(b0.x,b1.x), yb=b0.y;
@@ -11094,10 +11174,10 @@ function drawWallView(){
   // Hinweis nur, wenn er stimmt: EINE gemessene Hoehe fuer den ganzen Raum
   // ist der Normalfall, kein Mangel. Erst wenn verschiedene Hoehen im Spiel
   // sind und ausgerechnet diese Wand erbt, ist "geschaetzt" die Wahrheit.
-  const gem=M.hmeas.filter(m=>m.on!==false).length;
-  const hinweis = !gem ? 'Höhe angenommen. Kante anklicken zum Messen'
-    : (!shape.gemessen && new Set(M.hmeas.filter(m=>m.on!==false).map(m=>Math.round(m.d))).size>1)
-      ? 'Höhe dieser Wand geschätzt. Kante anklicken zum Messen' : '';
+  const ecken=M.hmeas.filter(m=>m.kind==='h' && m.on!==false);
+  const hinweis = !ecken.length ? 'Höhe angenommen. Kante anklicken zum Messen'
+    : (!shape.gemessen && new Set(ecken.map(m=>Math.round(m.d))).size>1)
+      ? 'Höhe dieser Wand übernommen (erste gemessene Ecke). Kante anklicken zum Messen' : '';
   if(hinweis){
     ctx.fillStyle=INK.mode; ctx.font=`${11.5*dpr}px system-ui`;
     ctx.fillText(hinweis, 14*dpr, 42*dpr);
@@ -12072,6 +12152,8 @@ let entryPair=null;
 // unten). Hier oben deklariert, weil closeEntry und der OK-Knopf sie
 // lesen und in der Datei frueher stehen.
 let heightAt=null;
+// Knickpunkt, dessen Hoehe gerade eingetippt wird (id eines kind:'k').
+let knickAt=null;
 // Kante, deren Abstand gerade eingetippt wird, und Zaehler fuer die
 // Messungs-IDs. Oben deklariert, weil closeEntry und der OK-Knopf sie
 // lesen und weiter vorn stehen (let ist bis zur Deklaration in der TDZ).
@@ -12092,7 +12174,7 @@ function enterMeasurement(a,b,guided=false){
   const P=viewPts(), I=C.idx(P);
   if(I[a]==null||I[b]==null) return;
   if(wpopPair) closeWallPopup();     // Eingabe und Wand-Popup nie gleichzeitig
-  heightAt=null; opMeasEdge=null; crossPair=null;
+  heightAt=null; knickAt=null; opMeasEdge=null; crossPair=null;
   entryPair={a,b}; entryGuided=guided;
   // Solange die Eingabe offen ist, zeigt der Plan die Strecke an - auf Touch
   // gibt es kein Hover, das das sonst uebernehmen wuerde.
@@ -12156,7 +12238,7 @@ function segRectHit(p,q,r){
 }
 function closeEntry(){
   crossPair=null;
-  entryPair=null; entryGuided=false; heightAt=null; opMeasEdge=null;
+  entryPair=null; entryGuided=false; heightAt=null; knickAt=null; opMeasEdge=null;
   $('entry').hidden=true;
   M.highlight=null;
   redraw();
@@ -12184,7 +12266,7 @@ function commitEntry(){
     setHint('Nichts mehr zu messen: Form bestimmt und geprüft.');
   }
 }
-$('entryOk').onclick=()=>{ if(opMeasEdge) commitOpMeasure(); else if(heightAt) commitHeight();
+$('entryOk').onclick=()=>{ if(knickAt) commitKnick(); else if(opMeasEdge) commitOpMeasure(); else if(heightAt) commitHeight();
                            else if(crossPair) commitCross(); else commitEntry(); };
 $('entryX').onclick=closeEntry;
 $('entryVal').addEventListener('keydown',e=>{
@@ -12194,7 +12276,7 @@ $('entryVal').addEventListener('keydown',e=>{
   if((e.ctrlKey||e.metaKey) && !e.altKey && (kk==='z'||kk==='y') && !$('entryVal').value){
     e.preventDefault(); closeEntry(); if(kk==='y'||e.shiftKey) doRedo(); else doUndo(); return;
   }
-  if(e.key==='Enter'){ if(opMeasEdge) commitOpMeasure(); else if(heightAt) commitHeight();
+  if(e.key==='Enter'){ if(knickAt) commitKnick(); else if(opMeasEdge) commitOpMeasure(); else if(heightAt) commitHeight();
                        else if(crossPair) commitCross(); else commitEntry(); }
   if(e.key==='Escape') closeEntry();
 });
@@ -12869,6 +12951,8 @@ cv.addEventListener('contextmenu',e=>{
   if(lastPtrType!=='mouse' || M.mode==='tiles' || M.mode==='kitchen') return;
   const d=evDev(e);
   if(M.mode==='wall'){
+    const kh=knickHit(d);
+    if(kh){ showPop(d.x,d.y,'Knick löschen?',()=>deleteKnick(kh.id)); return; }
     const ww=wToWall(d.x,d.y), o=openingAt(ww.x,ww.y);
     if(o){
       M.openSel=o.id; render();
@@ -13152,6 +13236,7 @@ function renderWallSection(){
   if(M.mode!=='wall') return;
   const s2=M.wallSel;
   $('wallTitle').textContent = s2 ? `Wand ${s2.a}–${s2.b}` : 'Wand';
+  renderWallHeights();
   const list=wallOpenings(), box=$('wallops');
   box.innerHTML = list.length
     ? list.map(o=>{
@@ -13188,14 +13273,17 @@ function insertOpening(kind, a, b, mitte){
   // Die Kern-Vorbelegung ist fuer Fenster 2/3 der Wandlaenge breit - neben
   // einer Tuer passte das fast nie. Uebliche Masse, auf die Wand begrenzt.
   if(kind!=='door'){
-    const hMin=Math.min(shape.ha, shape.hb)||2500;
     const [W0,H0,Y0]=kind==='window' ? [1000,1200,900] : [600,600,1200];
     vorschlag.w=Math.min(W0, shape.L*0.9);
+    vorschlag.x=Math.max(0, (shape.L-vorschlag.w)/2);
+    if(mitte!=null) vorschlag.x=Math.max(0, Math.min(shape.L-vorschlag.w, mitte-vorschlag.w/2));
+    // Platz unter der Decke GENAU dort - Schraege und Knicke eingerechnet.
+    const hMin=ceilingMin(shape, vorschlag.x, vorschlag.x+vorschlag.w);
     vorschlag.h=Math.min(H0, hMin*0.6);
     vorschlag.y=Math.max(0, Math.min(Y0, hMin-vorschlag.h-100));
-    vorschlag.x=Math.max(0, (shape.L-vorschlag.w)/2);
   }
   if(mitte!=null) vorschlag.x=Math.max(0, Math.min(shape.L-vorschlag.w, mitte-vorschlag.w/2));
+  if(kind==='door') Object.assign(vorschlag, clampOpening(shape, {...vorschlag, h:Math.min(1985, ceilingMin(shape, vorschlag.x, vorschlag.x+vorschlag.w))}));
   // Vorbelegung kann besetzt sein - dann moeglichst nah daneben einsetzen
   // statt uebereinander. Ist die Wand voll, ehrlich absagen.
   const andere=openingsOnWall(a,b);
@@ -13247,7 +13335,7 @@ function enterHeight(pointId){
   // Jeder Einstieg setzt ALLE Eingabezustaende zurueck: sonst gewinnt beim
   // OK ein liegengebliebenes opMeasEdge, und die Raumhoehe landet als
   // Lagemass einer Oeffnung.
-  entryPair=null; entryGuided=false; opMeasEdge=null; crossPair=null;
+  entryPair=null; entryGuided=false; opMeasEdge=null; crossPair=null; knickAt=null;
   heightAt=pointId;
   const vorhanden=M.hmeas.filter(m=>m.at===pointId && m.on!==false);
   $('entryLabel').textContent = vorhanden.length
@@ -13271,8 +13359,10 @@ function enterHeight(pointId){
 function commitHeight(){
   const inp=$('entryVal');
   const d=parseLen(inp.value);
-  if(!isFinite(d)||d<=0){ inp.classList.add('bad'); return; }
-  if(!zuKurzFrage(d,'niedrig',1000)) return;
+  if(!isFinite(d)||d<0){ inp.classList.add('bad'); return; }
+  // 0 ist erlaubt (Dreieckswand), aber eine Rueckfrage wert.
+  if(d===0 && !confirm('Höhe 0 an dieser Ecke: die Wand läuft hier spitz zu (Dreieck). So übernehmen?')) return;
+  if(d>0 && !zuKurzFrage(d,'niedrig',1000)) return;
   snapshot();
   M.hmeas.push({kind:'h', at:heightAt, d, sigma:C.SIGMA_DEF, on:true});
   heightAt=null;
@@ -13280,7 +13370,144 @@ function commitHeight(){
   recompute();
   setHint('Höhe übernommen.');
 }
-$('wHeight').onclick=()=>{ if(M.wallSel) enterHeight(M.wallSel.a); };
+$('wHeight').onclick=()=>{ if(M.wallSel) enterHeight(wallSidesView().left.id); };
+
+// ================= Knickpunkte der Oberkante =================
+// Giebel- und Kniestockwaende: die Decke laeuft nicht gerade von Ecke zu
+// Ecke. Ein Knick ist {kind:'k', id, a, b, x, d} in M.hmeas - x ab Ecke a
+// der gespeicherten Wandrichtung, d die gemessene Hoehe dort.
+let knickSeq=1;
+const knickById=id=>M.hmeas.find(m=>m.kind==='k' && m.id===id);
+function newKnickId(){
+  const used=new Set(M.hmeas.filter(m=>m.kind==='k').map(m=>m.id));
+  while(used.has('k'+knickSeq)) knickSeq++;
+  return 'k'+(knickSeq++);
+}
+// Wand-x (ab M.wallSel.a) <-> gespeichertes x des Knicks.
+const knickStoreX=(m, xw, L)=>m.a===M.wallSel.a ? xw : L-xw;
+// Passen alle Oeffnungen dieser Wand noch unter die Decke, wenn die
+// Hoehenliste so aussaehe? Eine Decke durch ein Fenster waere ein Widerspruch.
+function knickOk(hmeasNeu){
+  const sh=wallShape(fitPts(), hmeasNeu, M.wallSel.a, M.wallSel.b);
+  return !!sh && wallOpenings().every(o=>openingFits(sh, o));
+}
+function addKnick(){
+  const shape=currentShape();
+  if(!shape) return;
+  // In die groesste Luecke der Oberkante - dort stoert er am wenigsten.
+  let best=0, xw=shape.L/2;
+  shape.top.forEach((p,i)=>{ const q=shape.top[i+1]; if(q && q.x-p.x>best){ best=q.x-p.x; xw=(p.x+q.x)/2; } });
+  if(best<200){ setHint('Kein Platz für einen weiteren Knick.'); return; }
+  snapshot();
+  const m={kind:'k', id:newKnickId(), a:M.wallSel.a, b:M.wallSel.b, x:xw, d:ceilingAt(shape, xw), on:true};
+  M.hmeas.push(m);
+  recompute();
+  enterKnick(m.id);
+}
+function enterKnick(id){
+  const m=knickById(id), shape=currentShape();
+  if(!m || !shape) return;
+  if(wpopPair) closeWallPopup();
+  entryPair=null; entryGuided=false; opMeasEdge=null; crossPair=null; heightAt=null;
+  knickAt=id;
+  const xw=m.a===M.wallSel.a ? m.x : shape.L-m.x;
+  const e=wallSidesView(), links=curFlip() ? shape.L-xw : xw;
+  $('entryLabel').textContent=`Höhe am Knick, ${fmtLen(links)} ${unit} ab Ecke ${e.left.id}`;
+  const box=$('entry');
+  box.hidden=false; box.style.transform='';
+  if(isDesktop()){
+    const wrap=$('canvaswrap');
+    box.style.left=Math.max(8,(wrap.clientWidth-260)/2)+'px'; box.style.top='12px';
+  } else { box.style.left=box.style.top=''; }
+  const inp=$('entryVal'); inp.value=''; inp.classList.remove('bad'); inp.focus();
+  requestAnimationFrame(()=>{ if(knickAt) inp.focus(); });
+}
+function commitKnick(){
+  const inp=$('entryVal'), d=parseLen(inp.value), m=knickById(knickAt);
+  if(!m){ closeEntry(); return; }
+  if(!isFinite(d)||d<0){ inp.classList.add('bad'); return; }
+  if(!zuKurzFrage(d,'niedrig',1000)) return;
+  if(!knickOk(M.hmeas.map(x=>x===m ? {...x, d} : x))){
+    inp.classList.add('bad');
+    setHint('So niedrig läge die Decke in einer Öffnung. Erst die Öffnung verschieben oder verkleinern.');
+    return;
+  }
+  snapshot();
+  m.d=d;
+  knickAt=null;
+  $('entry').hidden=true;
+  recompute();
+  setHint('Knick übernommen. Ziehen verschiebt ihn, Rechtsklick löscht.');
+}
+function deleteKnick(id){
+  const m=knickById(id); if(!m) return;
+  if(!knickOk(M.hmeas.filter(x=>x!==m))){ setHint('Ohne diesen Knick läge die Decke in einer Öffnung.'); return; }
+  snapshot();
+  M.hmeas=M.hmeas.filter(x=>x!==m);
+  if(knickAt===id) closeEntry();
+  recompute();
+  setHint('Knick gelöscht · ⌘Z holt ihn zurück');
+}
+// Knick-Griff unter dem Zeiger (Geraetepixel).
+function knickHit(d){
+  const shape=currentShape();
+  if(!shape) return null;
+  for(const k of shape.knicks){
+    const p=wToScr({x:k.x, y:k.y});
+    if(Math.hypot(d.x-p.x, d.y-p.y)<=10*DPR()) return k;
+  }
+  return null;
+}
+let knickDrag=null;
+addEventListener('pointermove',e=>{
+  if(M.mode!=='wall' || !knickDrag) return;
+  if(!knickDrag.moved){
+    if(Math.hypot(e.clientX-knickDrag.x0, e.clientY-knickDrag.y0)<=TAP_SLOP) return;
+    knickDrag.moved=true;
+  }
+  const shape=currentShape(), m=knickById(knickDrag.id);
+  if(!shape || !m) return;
+  const d=evDev(e), w=wToWall(d.x,d.y);
+  // Nicht ueber die Nachbarn hinweg: die Oberkante bleibt eine Funktion von x.
+  const i=shape.top.findIndex(p=>p.x===(m.a===M.wallSel.a ? m.x : shape.L-m.x) && p.y===m.d);
+  const lo=(i>0 ? shape.top[i-1].x : 0)+50, hi=(i>=0 && i<shape.top.length-1 ? shape.top[i+1].x : shape.L)-50;
+  const xw=Math.max(lo, Math.min(hi, w.x));
+  const xs=knickStoreX(m, xw, shape.L);
+  if(!knickOk(M.hmeas.map(x=>x===m ? {...x, x:xs} : x))) return;
+  if(knickDrag.snap){ pushSnapshot(knickDrag.snap); knickDrag.snap=null; }
+  m.x=xs;
+  render();
+});
+addEventListener('pointerup',()=>{
+  if(!knickDrag) return;
+  const k=knickDrag; knickDrag=null;
+  if(k.moved) recompute(); else enterKnick(k.id);
+});
+// Panel: Hoehe je Kante und die Knicke dieser Wand, jeweils als Knopf.
+function renderWallHeights(){
+  const box=$('wHeights');
+  const shape=currentShape();
+  if(!shape || !M.wallSel){ box.innerHTML=''; return; }
+  const H=cornerHeights(fitPts(), M.hmeas), e=wallSidesView(), fl=curFlip();
+  const ecke=(seite, id)=>{
+    const h=H[id];
+    return `<div class="hrow"><span>Höhe ${seite} · Ecke ${escapeHtml(id)}</span>`
+      +`<b class="${h&&h.gemessen?'':'ann'}">${h?fmtM(h.h):'–'} m</b>`
+      +`<button data-h="${escapeHtml(id)}" title="Höhe an Ecke ${escapeHtml(id)} messen">messen</button></div>`;
+  };
+  const knicks=shape.knicks.map(k=>{
+    const ab=fl ? shape.L-k.x : k.x;
+    return `<div class="hrow"><span>Knick ${fmtM(ab)} m ab ${escapeHtml(e.left.id)}</span><b>${fmtM(k.y)} m</b>`
+      +`<button data-k="${escapeHtml(k.id)}" title="Höhe am Knick ändern">messen</button>`
+      +`<button data-kdel="${escapeHtml(k.id)}" title="Knick löschen">×</button></div>`;
+  });
+  box.innerHTML=ecke('links', e.left.id)+knicks.join('')+ecke('rechts', e.right.id)
+    +`<div class="hrow"><span></span><button id="wKnickAdd" title="Für Giebel- und Kniestockwände: die Decke knickt zwischen den Ecken">+ Knickpunkt</button></div>`;
+  box.querySelectorAll('button[data-h]').forEach(b=>{ b.onclick=()=>enterHeight(b.dataset.h); });
+  box.querySelectorAll('button[data-k]').forEach(b=>{ b.onclick=()=>enterKnick(b.dataset.k); });
+  box.querySelectorAll('button[data-kdel]').forEach(b=>{ b.onclick=()=>deleteKnick(b.dataset.kdel); });
+  $('wKnickAdd').onclick=addKnick;
+}
 
 // ================= Öffnungs-Einstellungen =================
 // Kataloge. Tueren folgen den Baurichtmassen (Rohbau = Tuerblatt zzgl.
@@ -13474,7 +13701,7 @@ document.querySelectorAll('.mbtn').forEach(b=>{
     const o=selectedOpening(); if(!o) return;
     // "von links" meint die Ansicht von innen; gespeichert wird die a-Seite.
     opMeasEdge=sideView(b.dataset.edge, curFlip());
-    heightAt=null; entryPair=null; entryGuided=false; crossPair=null;
+    heightAt=null; knickAt=null; entryPair=null; entryGuided=false; crossPair=null;
     $('entryLabel').textContent=`${OPEN_LABEL[o.kind]}: Abstand ${EDGE_LABEL[b.dataset.edge]}`;
     const box=$('entry');
     box.hidden=false; box.style.transform='';
@@ -13516,6 +13743,12 @@ cv.addEventListener('pointerdown',e=>{
   const d=evDev(e), w=wToWall(d.x,d.y);
   // Lageplan oben rechts liegt UEBER der Wand: er gewinnt.
   if(wallInsetClick(d)){ e.stopImmediatePropagation(); return; }
+  // Knick-Griff: ziehen verschiebt, Klick fragt die Hoehe ab.
+  const kh=knickHit(d);
+  if(kh){
+    knickDrag={id:kh.id, x0:e.clientX, y0:e.clientY, moved:false, snap:serialize()};
+    e.stopImmediatePropagation(); return;
+  }
   const o=openingAt(w.x,w.y);
   if(!o){
     // Senkrechte Wandkante angeklickt: das ist die Hoehe an genau dieser
@@ -13539,7 +13772,7 @@ function wallEdgeAt(w){
   const shape=currentShape();
   if(!shape) return null;
   const nah=12*DPR()/WV.s;
-  if(w.y<-nah || w.y>Math.max(shape.ha,shape.hb)+nah) return null;
+  if(w.y<-nah || w.y>(shape.hMax!=null?shape.hMax:Math.max(shape.ha,shape.hb))+nah) return null;
   if(Math.abs(w.x)<nah) return M.wallSel.a;
   if(Math.abs(w.x-shape.L)<nah) return M.wallSel.b;
   return null;
@@ -20363,9 +20596,38 @@ globalThis.selfChecks=function(){
       (()=>{ const H=ch(pts,[{kind:'h',at:'B',d:2620,on:true}]);
              return H.B.h===2620 && H.B.gemessen===true
                  && H.A.h===2620 && H.A.gemessen===false; })());
-    chk('wand: zwei verschiedene Hoehen -> je Ecke eigener Wert, Rest erbt Mittel',
+    // Meldung M-20261109-134000-cc7e70: die erste Hoehe ist die Raumhoehe,
+    // weitere sind Abweichungen an ihrer Ecke - kein erfundener Mittelwert.
+    chk('wand: zwei verschiedene Hoehen -> je Ecke eigener Wert, Rest erbt die ERSTE',
       (()=>{ const H=ch(pts,[{kind:'h',at:'A',d:2400,on:true},{kind:'h',at:'B',d:2600,on:true}]);
-             return H.A.h===2400 && H.B.h===2600 && near(H.C.h,2500,1e-9) && !H.C.gemessen; })());
+             return H.A.h===2400 && H.B.h===2600 && H.C.h===2400 && !H.C.gemessen; })());
+    chk('wand: Hoehe 0 an einer Ecke ist zulaessig (Dreieckswand)',
+      (()=>{ const H=ch(pts,[{kind:'h',at:'A',d:2500,on:true},{kind:'h',at:'B',d:0,on:true}]);
+             const s=ws(pts,[{kind:'h',at:'A',d:2500,on:true},{kind:'h',at:'B',d:0,on:true}],'A','B');
+             return H.B.h===0 && H.B.gemessen && s.hb===0 && near(globalThis.ceilingAt(s,2000),1250,1e-9); })());
+    {
+      // Giebelwand: Ecken 1000, First 3000 bei 1500 ab A. Gespeichert ab B
+      // (2500) - die Richtung des Knicks darf keine Rolle spielen.
+      const m=[{kind:'h',at:'A',d:1000,on:true},{kind:'k',id:'k1',a:'B',b:'A',x:2500,d:3000,on:true}];
+      const g=ws(pts,m,'A','B'), gr=ws(pts,m,'B','A');
+      chk('wand: Knick macht aus dem Trapez ein Fuenfeck, Richtung egal',
+        g.poly.length===5 && g.knicks.length===1 && near(g.knicks[0].x,1500,1e-9)
+        && near(gr.knicks[0].x,2500,1e-9) && g.hMax===3000);
+      chk('wand: Decke laeuft ueber den Knick (Giebel)',
+        near(globalThis.ceilingAt(g,1500),3000,1e-9) && near(globalThis.ceilingAt(g,750),2000,1e-9)
+        && near(globalThis.ceilingAt(g,2750),2000,1e-9) && near(globalThis.ceilingAt(g,4000),1000,1e-9));
+      chk('wand: Knick zaehlt nicht als Eckhoehe',
+        ch(pts,m).B.h===1000 && !ch(pts,m).B.gemessen);
+      chk('oeffnung: unter dem First passt eine Tuer, an der Traufe nicht',
+        globalThis.openingFits(g,{x:1000,y:0,w:900,h:2000}) && !globalThis.openingFits(g,{x:3000,y:0,w:900,h:2000}));
+      const kehle=ws(pts,[{kind:'h',at:'A',d:2500,on:true},{kind:'k',id:'k2',a:'A',b:'B',x:2000,d:1800,on:true}],'A','B');
+      chk('oeffnung: Kehle zwischen den Enden der Oeffnung wird erkannt',
+        !globalThis.openingFits(kehle,{x:1500,y:0,w:1000,h:2000})
+        && globalThis.clampOpening(kehle,{x:1500,y:0,w:1000,h:2000}).h<=1800+1e-6);
+      chk('oeffnung: Tuer-Vorbelegung in der Dreieckswand steht unter dem First',
+        (()=>{ const tri=ws(pts,[{kind:'h',at:'A',d:0,on:true},{kind:'k',id:'k3',a:'A',b:'B',x:2000,d:3000,on:true}],'A','B');
+               const o=globalThis.defaultOpening(tri,'door'); return o.h>1500 && globalThis.openingFits(tri,o); })());
+    }
     chk('wand: mehrere Messungen derselben Ecke werden gemittelt',
       (()=>{ const H=ch(pts,[{kind:'h',at:'A',d:2400,on:true},{kind:'h',at:'A',d:2410,on:true}]);
              return near(H.A.h,2405,1e-9); })());
@@ -20599,6 +20861,15 @@ globalThis.selfChecks=function(){
       const Sch=prep(ops,[{kind:'h',at:'A',d:2500,on:true},{kind:'h',at:'C',d:2200,on:true}]);
       chk('step: schraege Decke -> geschlossen, nicht-ebene Kopfflaechen zerlegt',
         Sch.length===4 && Sch.every(s=>s.dicht && s.eben) && Sch.some(s=>s.faces.some(F=>F[0].length===3)));
+      // Giebel in A-B (gespeichert andersherum) neben einer Tuer, Hoehe 0 an D.
+      const Sg=prep(ops,[{kind:'h',at:'A',d:2500,on:true},{kind:'k',id:'k1',a:'B',b:'A',x:1000,d:3500,on:true}]);
+      const ab=Sg.find(x=>/^Wand A-B/.test(x.name));
+      chk('step: Giebelwand mit Knick und Tuer bleibt geschlossen, First im Koerper',
+        Sg.length===4 && Sg.every(x=>x.dicht && x.eben && x.vol>0)
+        && ab && ab.verts.some(v=>near(v[2],3500,1e-6)) && ab.vol>(4000+4480)/2*240*2500-900*240*2000);
+      const S0=prep([],[{kind:'h',at:'A',d:2500,on:true},{kind:'h',at:'D',d:0,on:true}]);
+      chk('step: Hoehe 0 an einer Ecke -> Waende laufen spitz zu, bleiben geschlossen',
+        S0.length===4 && S0.every(x=>x.dicht && x.eben && x.vol>0));
       const Sv=prep([{id:'o1',kind:'hole',a:'A',b:'B',x:1500,y:0,w:900,h:2500},
                      {id:'o2',kind:'door',a:'B',b:'C',x:0,y:0,w:800,h:2000}],h25);
       chk('step: Oeffnung Boden bis Decke teilt die Wand, Tuer an der Ecke bleibt dicht',
