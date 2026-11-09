@@ -187,6 +187,13 @@
   #entryX,#wpopX{width:28px;padding:0;border:0;background:none;color:var(--muted)}
   #entryX:hover,#wpopX:hover{color:var(--ink);background:var(--hover)}
   #wpop{min-width:270px}
+  #oppl{min-width:230px;padding:8px 10px}
+  #opplHead{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+  #opplHead b{font-size:13px;flex:1}
+  #opplX{width:26px;height:24px;padding:0;border:0;background:none;color:var(--muted)}
+  #opplX:hover{color:var(--ink);background:var(--hover)}
+  #oppl .oprow{display:flex;align-items:center;gap:8px;margin-top:6px}
+  #oppl .oprow label{min-width:48px;font-size:12px;color:var(--ink2)}
   #cpop{min-width:230px}
   #cpopHead{display:flex;align-items:baseline;gap:8px;margin-bottom:6px}
   #cpopHead b{font-size:13px}
@@ -647,6 +654,12 @@
         <button id="unfold" class="tb tog" aria-pressed="false" title="Wände mit Öffnungen nach außen geklappt zeigen, Nachbarräume ausblenden"><span>Abwicklung</span></button>
         <button id="ellipses" class="tb tog" aria-pressed="false" title="Messgenauigkeit je Ecke als Ellipse zeigen">Genauigkeit</button>
       </div>
+      <div id="pAdd" class="tg" data-for="draw measure">
+        <i class="tsep"></i>
+        <button data-padd="door" class="tb tool" aria-pressed="false" title="Tür grob setzen: Knopf, dann auf die Wand klicken. Feinjustage in der Wandansicht">+ Tür</button>
+        <button data-padd="window" class="tb tool" aria-pressed="false" title="Fenster grob setzen: Knopf, dann auf die Wand klicken. Feinjustage in der Wandansicht">+ Fenster</button>
+        <button data-padd="hole" class="tb tool" aria-pressed="false" title="Wandloch grob setzen: Knopf, dann auf die Wand klicken">+ Loch</button>
+      </div>
       <div id="wallbar" class="tg" hidden>
         <button id="wPrev" class="tb" aria-label="Vorherige Wand" title="Vorherige Wand (←)">‹</button>
         <select id="wPick" title="Wand wählen"></select>
@@ -705,6 +718,16 @@
           </div>
         </div>
         <div id="pop" class="popover" hidden><span id="popLabel"></span><button id="popDel">Löschen</button></div>
+        <div id="oppl" class="popover" hidden>
+          <div id="opplHead"><b id="opplTitle"></b><button id="opplX" aria-label="Auswahl aufheben" title="Auswahl aufheben (Esc)">✕</button></div>
+          <div class="oprow" id="opplTypeRow"><label>Art</label><select id="opplType"></select></div>
+          <div class="oprow" id="opplSideRow"><label title="von innen gesehen">Band</label>
+            <div class="seg" id="opplHinge"><button data-h="left">links</button><button data-h="right">rechts</button></div></div>
+          <div class="oprow" id="opplDirRow"><label>Öffnet</label>
+            <div class="seg" id="opplDir"><button data-o="0">nach innen</button><button data-o="1">nach außen</button></div></div>
+          <div class="oprow"><button id="opplWall" title="Diese Wand in der Wandansicht öffnen: Größe, Höhe und Lage einmessen">Feinjustage in der Wandansicht</button></div>
+          <div class="oprow"><button id="opplDel">Löschen</button></div>
+        </div>
         <div id="wpop" class="popover" hidden>
           <div id="wpopHead"><b id="wpopTitle"></b><span id="wpopLen"></span><button id="wpopX" aria-label="Schließen" title="Schließen (Esc)">✕</button></div>
           <table id="wpopTbl"><tbody></tbody></table>
@@ -9905,6 +9928,8 @@ const DPR=()=>devicePixelRatio||1;
 // gedrehten Position gezeichnet, aber selbst nicht mitgedreht. Nicht
 // persistiert: eine Darstellungslaune wie Zoom und Pan.
 let VIEW={s:1, ox:0, oy:0, rot:0};
+// Grundriss-Werkzeug "Oeffnung setzen" (door|window|hole) und seine Vorschau.
+let planAdd=null, planGhost=null;
 // Zuletzt eingenordete Wand: bleibt beim Entwirren als Orientierung fix.
 // Hier oben deklariert, weil openRoom() sie zuruecksetzt und weiter oben
 // in der Datei steht (let ist bis zur Deklaration in der TDZ).
@@ -10657,6 +10682,7 @@ function redraw(){
   if(lastHover && (M.mode==='draw'||M.mode==='measure') && !gesture && !swim) hoverTarget=hoverAt(lastHover);
   else if(M.mode!=='draw' && M.mode!=='measure') hoverTarget=null;
   if(M.mode==='wall') drawWallView(); else drawCanvas();
+  syncOppl();
   syncRotateBtn();
   if(entryPair) placeEntry();
   if(wpopPair) placeWpop();
@@ -10718,9 +10744,27 @@ function drawScalebar(dpr){
 // Eigene Ansicht mit eigenem Massstab: die Wand wird eingepasst, x laeuft
 // von Ecke a nach b, y vom Boden nach oben. Auf dem Schirm zeigt y nach
 // unten - deshalb spiegelt wToScr die Hoehe.
-let WV={s:1, ox:0, oy:0};
-const wToScr=p=>({x:p.x*WV.s+WV.ox, y:WV.oy-p.y*WV.s});
-const wToWall=(sx,sy)=>({x:(sx-WV.ox)/WV.s, y:(WV.oy-sy)/WV.s});
+// Blick von innen: die Wand erscheint so, wie man sie aus dem Raum sieht.
+// Gespeichert bleibt x ab Ecke a; liegt a von innen gesehen RECHTS, spiegelt
+// die Ansicht (WV.flip). Vorher lief x stur in Zeichenrichtung - die
+// Aussenwaende eines im Uhrzeigersinn gezeichneten Raums sah man damit von
+// aussen, Inselwaende andersherum (Meldung M-20261109-134000-cc7e70).
+let WV={s:1, ox:0, oy:0, flip:false, L:0};
+const wToScr=p=>({x:(WV.flip?WV.L-p.x:p.x)*WV.s+WV.ox, y:WV.oy-p.y*WV.s});
+const wToWall=(sx,sy)=>{ const u=(sx-WV.ox)/WV.s; return {x:WV.flip?WV.L-u:u, y:(WV.oy-sy)/WV.s}; };
+// Liegt Ecke a von innen gesehen rechts? Innen ist die Seite gegen die
+// Aussennormale; wer nach aussen schaut, hat (-n.y, n.x) zur Rechten (y nach
+// unten wie auf dem Schirm).
+function wallFlip(a,b){
+  const P=fitPts(), I=C.idx(P);
+  if(I[a]==null||I[b]==null) return false;
+  const A=P[I[a]], B=P[I[b]], n=outerNormal(P, M.walls, a, b);
+  return (B.x-A.x)*n.y-(B.y-A.y)*n.x > 0;
+}
+const curFlip=()=>!!M.wallSel && wallFlip(M.wallSel.a, M.wallSel.b);
+// links/rechts der ANSICHT <-> gespeicherte Seite (left = Seite von Ecke a).
+// Selbstinvers: dieselbe Funktion uebersetzt in beide Richtungen.
+const sideView=(side,flip)=>!flip ? side : side==='left' ? 'right' : side==='right' ? 'left' : side;
 
 function currentShape(){
   if(!M.wallSel) return null;
@@ -10733,16 +10777,22 @@ function wallFit(shape){
   if(!shape) return;
   const hMax=Math.max(shape.ha, shape.hb)||1;
   // Rand knapp halten - die Wand soll die Flaeche fuellen, nicht darin schweben.
-  const pad=34*DPR();
-  const s=Math.min((cv.width-2*pad)/(shape.L||1), (cv.height-2*pad)/hMax);
-  WV={ s, ox:(cv.width-shape.L*s)/2, oy:(cv.height+hMax*s)/2 };
+  // Oben bleibt Platz fuer Titel und Lageplan, unten fuer Ecken und Nachbarn.
+  const dpr=DPR(), pad=34*dpr;
+  const oben=(wallInsetBox().h/dpr+30)*dpr, unten=62*dpr;
+  const hoch=Math.max(40*dpr, cv.height-oben-unten);
+  const s=Math.min((cv.width-2*pad)/(shape.L||1), hoch/hMax);
+  WV={ ...WV, s, ox:(cv.width-shape.L*s)/2, oy:oben+(hoch+hMax*s)/2 };
 }
 
 // Oeffnungen dieser Wand, in Anlegereihenfolge.
 function wallOpenings(){
   if(!M.wallSel) return [];
-  const k=[M.wallSel.a,M.wallSel.b].sort().join('|');
-  return M.openings.filter(o=>[o.a,o.b].sort().join('|')===k);
+  return openingsOnWall(M.wallSel.a, M.wallSel.b);
+}
+function openingsOnWall(a,b){
+  const k=wallKey(a,b);
+  return M.openings.filter(o=>wallKey(o.a,o.b)===k);
 }
 
 const OPEN_LABEL={door:'Tür', window:'Fenster', hole:'Loch'};
@@ -10764,6 +10814,8 @@ function drawWallView(){
   if(!cv.width||!cv.height) return;
   const shape=currentShape();
   if(!shape) return;
+  // Vor jeder Umrechnung: Spiegelung und Laenge dieser Wand.
+  WV.flip=curFlip(); WV.L=shape.L;
   if(!wallUserView) wallFit(shape);
   // Wandflaeche als Trapez - die Decke laeuft schraeg, wenn die beiden
   // Ecken verschieden hoch sind.
@@ -10777,17 +10829,19 @@ function drawWallView(){
   const b0=wToScr({x:0,y:0}), b1=wToScr({x:shape.L,y:0});
   ctx.lineWidth=4*dpr; ctx.beginPath();
   ctx.moveTo(b0.x,b0.y); ctx.lineTo(b1.x,b1.y); ctx.stroke();
-  // Oeffnungen
+  // Oeffnungen. Gespiegelt laeuft x auf dem Schirm andersherum - das
+  // Rechteck daher ueber min/max, nicht ueber "linke Ecke".
   wallOpenings().forEach(o=>{
-    const p=wToScr({x:o.x, y:o.y+o.h}), q=wToScr({x:o.x+o.w, y:o.y});
-    const w=q.x-p.x, h=q.y-p.y;
+    const p0=wToScr({x:o.x, y:o.y+o.h}), q0=wToScr({x:o.x+o.w, y:o.y});
+    const p={x:Math.min(p0.x,q0.x), y:p0.y};
+    const w=Math.abs(q0.x-p0.x), h=q0.y-p0.y;
     const sel=M.openSel===o.id;
     ctx.fillStyle = o.kind==='hole' ? '#e6e2d5' : '#fff';
     ctx.fillRect(p.x,p.y,w,h);
     ctx.strokeStyle = sel?INK.accent:INK.wall;
     ctx.lineWidth=(sel?3:2)*dpr;
     ctx.strokeRect(p.x,p.y,w,h);
-    drawOpeningSymbol(o,p.x,p.y,w,h,dpr);
+    drawOpeningSymbol(o,p.x,p.y,w,h,dpr,WV.flip);
     // Beschriftung nur, wenn sie hineinpasst - sonst ueberlagern sich die
     // Texte mehrerer Oeffnungen zu Unlesbarkeit (browser-gesehen).
     ctx.font=`${11*dpr}px system-ui`; ctx.textAlign='center';
@@ -10804,20 +10858,49 @@ function drawWallView(){
     }
     ctx.textAlign='start';
   });
+  // Ecken in Ansichtsreihenfolge: was links steht, steht links.
+  const ecke=wallSidesView();
+  const xl=Math.min(b0.x,b1.x), xr=Math.max(b0.x,b1.x), yb=b0.y;
   // Masse der Wand selbst
   ctx.fillStyle=INK.scale; ctx.font=`${12*dpr}px system-ui`; ctx.textAlign='center';
-  ctx.fillText(`${fmtM(shape.L)} m`, (b0.x+b1.x)/2, b0.y+20*dpr);
+  ctx.fillText(`${fmtM(shape.L)} m`, (xl+xr)/2, yb+20*dpr);
+  // Eckbuchstaben unter den Kanten, darunter die anschliessende Wand - so
+  // ist die Wand ohne Blick in den Grundriss verortet.
+  // Schmale Wand (Pfeiler, Laibung): Beschriftung nach AUSSEN, sonst laufen
+  // beide Ecken ineinander.
+  ctx.font=`${11.5*dpr}px system-ui`;
+  const breit=[ecke.left,ecke.right].map(e=>!e?0:Math.max(
+    ctx.measureText(e.nb?`‹ Wand ${e.nb.a}–${e.nb.b}`:'').width, 70*dpr));
+  const aussen = xr-xl < breit[0]+breit[1]+16*dpr;
+  [['left',xl,ecke.left],['right',xr,ecke.right]].forEach(([seite,x0,e])=>{
+    if(!e) return;
+    const links=seite==='left';
+    const x = aussen ? x0+(links?-8:8)*dpr : x0;
+    ctx.textAlign = links!==aussen ? 'left' : 'right';
+    ctx.font=`600 ${13*dpr}px system-ui`; ctx.fillStyle=INK.wall;
+    ctx.fillText(`Ecke ${e.id}`, x, yb+20*dpr);
+    if(e.nb){
+      ctx.font=`${11.5*dpr}px system-ui`; ctx.fillStyle=INK.scale;
+      ctx.fillText(seite==='left' ? `‹ Wand ${e.nb.a}–${e.nb.b}` : `Wand ${e.nb.a}–${e.nb.b} ›`, x, yb+38*dpr);
+    }
+  });
   // Hoehen INNEN beschriften: aussen wurden sie am Canvasrand
   // abgeschnitten, sobald die Wand die Flaeche gut ausnutzt.
+  ctx.font=`${12*dpr}px system-ui`; ctx.fillStyle=INK.scale;
+  const hL=WV.flip?shape.hb:shape.ha, hR=WV.flip?shape.ha:shape.hb;
   ctx.textAlign='left';
-  const hl=wToScr({x:0,y:shape.ha});
-  ctx.fillText(`${fmtM(shape.ha)} m`, hl.x+8*dpr, hl.y+16*dpr);
+  ctx.fillText(`${fmtM(hL)} m`, xl+8*dpr, yb-hL*WV.s+16*dpr);
   if(Math.abs(shape.ha-shape.hb)>1){
     ctx.textAlign='right';
-    const hr=wToScr({x:shape.L,y:shape.hb});
-    ctx.fillText(`${fmtM(shape.hb)} m`, hr.x-8*dpr, hr.y+16*dpr);
+    ctx.fillText(`${fmtM(hR)} m`, xr-8*dpr, yb-hR*WV.s+16*dpr);
   }
   ctx.textAlign='start';
+  // Titel: welche Wand, von wo gesehen.
+  ctx.fillStyle=INK.wall; ctx.font=`600 ${13*dpr}px system-ui`;
+  ctx.fillText(`Wand ${M.wallSel.a}–${M.wallSel.b}`, 14*dpr, 22*dpr);
+  const tw=ctx.measureText(`Wand ${M.wallSel.a}–${M.wallSel.b}`).width;
+  ctx.fillStyle=INK.scale; ctx.font=`${12*dpr}px system-ui`;
+  ctx.fillText('· von innen gesehen', 14*dpr+tw+6*dpr, 22*dpr);
   // Hinweis nur, wenn er stimmt: EINE gemessene Hoehe fuer den ganzen Raum
   // ist der Normalfall, kein Mangel. Erst wenn verschiedene Hoehen im Spiel
   // sind und ausgerechnet diese Wand erbt, ist "geschaetzt" die Wahrheit.
@@ -10827,14 +10910,110 @@ function drawWallView(){
       ? 'Höhe dieser Wand geschätzt. Kante anklicken zum Messen' : '';
   if(hinweis){
     ctx.fillStyle=INK.mode; ctx.font=`${11.5*dpr}px system-ui`;
-    ctx.fillText(hinweis, 14*dpr, 22*dpr);
+    ctx.fillText(hinweis, 14*dpr, 42*dpr);
   }
+  drawWallInset(dpr);
+}
+
+// Ecken der gewaehlten Wand in Ansichtsreihenfolge, je mit der Wand, die
+// dort anschliesst (sofern es genau eine gibt).
+function wallSidesView(){
+  if(!M.wallSel) return {};
+  const {a,b}=M.wallSel, k=wallKey(a,b);
+  const nb=id=>{
+    const w=M.walls.filter(([x,y])=>(x===id||y===id) && wallKey(x,y)!==k);
+    return w.length===1 ? {a:w[0][0], b:w[0][1]} : null;
+  };
+  const A={id:a, nb:nb(a)}, B={id:b, nb:nb(b)};
+  return curFlip() ? {left:B, right:A} : {left:A, right:B};
+}
+
+// ---- Lageplan in der Wandansicht ----
+// Klein oben rechts: der ganze Raum in der Drehung des Grundrisses, die
+// gewaehlte Wand in Akzentfarbe, ein Pfeil vom Raum aus auf sie. Ein Klick
+// auf eine andere Wand waehlt diese.
+let wallInsetHit=null;   // {box, segs:[{a,b,p,q}]} in Geraetepixeln
+function wallInsetBox(){
+  const dpr=DPR(), cw=cv.width/dpr;
+  const w=Math.max(120, Math.min(220, cw*0.26)), h=Math.round(w*0.68);
+  return {x:(cw-w-12)*dpr, y:12*dpr, w:w*dpr, h:h*dpr};
+}
+function drawWallInset(dpr){
+  wallInsetHit=null;
+  const P=fitPts(), I=C.idx(P);
+  if(!P.length || !M.walls.length) return;
+  const box=wallInsetBox();
+  // Drehung wie im Grundriss, damit der Lageplan wiedererkannt wird.
+  const c=Math.cos(VIEW.rot), s2=Math.sin(VIEW.rot);
+  const rot=p=>({x:p.x*c-p.y*s2, y:p.x*s2+p.y*c});
+  const R=P.map(rot);
+  const xs=R.map(p=>p.x), ys=R.map(p=>p.y);
+  const x0=Math.min(...xs), x1=Math.max(...xs), y0=Math.min(...ys), y1=Math.max(...ys);
+  const pad=16*dpr;
+  const s=Math.min((box.w-2*pad)/((x1-x0)||1), (box.h-2*pad)/((y1-y0)||1));
+  const ox=box.x+(box.w-(x1-x0)*s)/2, oy=box.y+(box.h-(y1-y0)*s)/2;
+  const map=p=>{ const r=rot(p); return {x:ox+(r.x-x0)*s, y:oy+(r.y-y0)*s}; };
+  ctx.save();
+  ctx.fillStyle='rgba(255,255,255,.92)'; ctx.strokeStyle='#d6d1c4'; ctx.lineWidth=1*dpr;
+  ctx.beginPath(); ctx.rect(box.x,box.y,box.w,box.h); ctx.fill(); ctx.stroke();
+  const segs=[];
+  const sel=M.wallSel ? wallKey(M.wallSel.a,M.wallSel.b) : null;
+  ctx.lineCap='round';
+  M.walls.forEach(([a,b])=>{
+    if(I[a]==null||I[b]==null) return;
+    const p=map(P[I[a]]), q=map(P[I[b]]);
+    segs.push({a,b,p,q});
+    if(wallKey(a,b)===sel) return;
+    const offen=openingsOnWall(a,b).length;
+    ctx.strokeStyle=offen?INK.scale:'#8a857a'; ctx.lineWidth=(offen?2:1.5)*dpr;
+    ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
+  });
+  if(sel){
+    const {a,b}=M.wallSel;
+    if(I[a]!=null && I[b]!=null){
+      const A=P[I[a]], B=P[I[b]], p=map(A), q=map(B);
+      ctx.strokeStyle=INK.accent; ctx.lineWidth=4*dpr;
+      ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
+      // Blickpfeil: aus dem Raum (gegen die Aussennormale) auf die Wandmitte.
+      const n=outerNormal(P, M.walls, a, b), m={x:(A.x+B.x)/2, y:(A.y+B.y)/2};
+      const tip=map(m), tail0=map({x:m.x-n.x, y:m.y-n.y});
+      const dx=tip.x-tail0.x, dy=tip.y-tail0.y, l=Math.hypot(dx,dy)||1;
+      const ux=dx/l, uy=dy/l, len=26*dpr, gap=5*dpr;
+      const t1={x:tip.x-ux*gap, y:tip.y-uy*gap}, t0={x:t1.x-ux*len, y:t1.y-uy*len};
+      ctx.lineWidth=2*dpr; ctx.strokeStyle=INK.accent; ctx.fillStyle=INK.accent;
+      ctx.beginPath(); ctx.moveTo(t0.x,t0.y); ctx.lineTo(t1.x,t1.y); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(t1.x,t1.y);
+      ctx.lineTo(t1.x-ux*8*dpr-uy*5*dpr, t1.y-uy*8*dpr+ux*5*dpr);
+      ctx.lineTo(t1.x-ux*8*dpr+uy*5*dpr, t1.y-uy*8*dpr-ux*5*dpr);
+      ctx.closePath(); ctx.fill();
+      // Eckbuchstaben der gewaehlten Wand, leicht nach aussen gerueckt.
+      ctx.font=`600 ${11*dpr}px system-ui`; ctx.textAlign='center'; ctx.fillStyle=INK.wall;
+      [[p,a],[q,b]].forEach(([S,id])=>{
+        const ax=S.x-tip.x, ay=S.y-tip.y, al=Math.hypot(ax,ay)||1;
+        ctx.fillText(id, S.x+ax/al*9*dpr, S.y+ay/al*9*dpr+4*dpr);
+      });
+    }
+  }
+  ctx.restore();
+  wallInsetHit={box, segs};
+}
+// Klick in den Lageplan: Wand unter dem Zeiger waehlen. true = verbraucht.
+function wallInsetClick(d){
+  const h=wallInsetHit;
+  if(!h) return false;
+  const {box}=h;
+  if(d.x<box.x || d.x>box.x+box.w || d.y<box.y || d.y>box.y+box.h) return false;
+  let best=null, bd=Infinity;
+  h.segs.forEach(sg=>{ const r=distToSeg(d, sg.p, sg.q); if(r.d<bd){ bd=r.d; best=sg; } });
+  if(best && bd<14*DPR()) pickWall(best.a, best.b);
+  return true;
 }
 
 // Aufrisssymbolik nach DIN-Praxis: Dreiecke, deren Spitze auf die
 // Bandseite zeigt. Durchgezogen = nach innen oeffnend, gestrichelt =
 // nach aussen. Fest verglast und Loch bekommen kein Symbol.
-function drawOpeningSymbol(o,x,y,w,h,dpr){
+function drawOpeningSymbol(o,x,y,w,h,dpr,flip){
   const t=o.swing&&o.swing.type;
   if(!t||t==='fix'||o.kind==='hole') return;
   ctx.save();
@@ -10844,7 +11023,8 @@ function drawOpeningSymbol(o,x,y,w,h,dpr){
     ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(bx,by); ctx.lineTo(cx,cy);
     ctx.closePath(); ctx.stroke();
   };
-  const links=o.swing.hinge==='left';
+  // hinge 'left' ist die Seite von Ecke a - gespiegelt liegt sie rechts.
+  const links=(o.swing.hinge==='left')!==!!flip;
   if(t==='turn'||t==='turntilt'){
     // Dreh: Spitze auf der Bandseite
     if(links) tri(x,y+h/2, x+w,y, x+w,y+h);
@@ -10966,6 +11146,211 @@ function drawOpeningsOnPlan(P, I, dpr){
     ctx.arc(a0.x, a0.y, Math.max(0, o.w*VIEW.s), dir0+VIEW.rot, dir0+sense*max+VIEW.rot, sense<0);
     ctx.stroke(); ctx.setLineDash([]);
   });
+}
+
+// ================= Öffnungen im Grundriss bearbeiten =================
+// Grob setzen schon im Plan (Meldung M-20261109-134000-cc7e70): Werkzeug
+// waehlen, auf die Wand klicken. Ziehen verschiebt entlang der Wand, das
+// Kaertchen stellt Art, Band und Richtung. Feinjustage (Groesse, Hoehe,
+// Einmessen) bleibt in der Wandansicht. Nur im eindeutig vermessenen Raum:
+// o.x sind Millimeter, auf einer blossen Skizze waere die Lage erfunden.
+const PLAN_ADD_W={door:985, window:1000, hole:600};
+const planMode=()=>M.mode==='draw'||M.mode==='measure';
+const planEditable=()=>planMode() && M.chain==null && wallTabReady();
+// Wand unter dem Zeiger ueber die GANZE Laenge (nearestWall laesst die Enden
+// fuer die Ecken frei - eine Tuer sitzt aber oft genau dort). t in mm ab a.
+function planWallAt(wx,wy){
+  const P=viewPts(), I=C.idx(P);
+  let best=null, bd=Infinity;
+  M.walls.forEach(([a,b])=>{
+    if(I[a]==null||I[b]==null) return;
+    const A=P[I[a]], B=P[I[b]], r=distToSeg({x:wx,y:wy}, A, B);
+    if(r.d<bd){ bd=r.d; best={a,b,t:r.t*C.dist(A,B)}; }
+  });
+  return (best && bd*VIEW.s < 2*WALL_R*DPR()) ? best : null;
+}
+// Oeffnung unter dem Zeiger: die Luecke in der Wand, bei Drehtueren auch
+// das Blatt.
+function planOpeningAt(wx,wy){
+  const P=viewPts(), p={x:wx,y:wy}, R=1.6*WALL_R*DPR()/VIEW.s;
+  let best=null, bd=Infinity;
+  M.openings.forEach(o=>{
+    const r=openingWorld(P, o.a, o.b, o);
+    if(!r) return;
+    let d=distToSeg(p, r.P, r.Q).d;
+    const sw=doorSwing(P, M.walls, o);
+    if(sw){
+      const tip={x:sw.angel.x+Math.cos(sw.dir0+sw.sense*sw.max)*o.w, y:sw.angel.y+Math.sin(sw.dir0+sw.sense*sw.max)*o.w};
+      d=Math.min(d, distToSeg(p, sw.angel, tip).d);
+    }
+    if(d<bd){ bd=d; best=o; }
+  });
+  return bd<R ? best : null;
+}
+// Lage entlang der Oeffnungswand (mm ab o.a) fuer einen Weltpunkt.
+function alongWall(o, w){
+  const P=viewPts(), I=C.idx(P);
+  if(I[o.a]==null||I[o.b]==null) return null;
+  const A=P[I[o.a]], B=P[I[o.b]], L=C.dist(A,B)||1;
+  return ((w.x-A.x)*(B.x-A.x)+(w.y-A.y)*(B.y-A.y))/L;
+}
+function planOpDrag(e, g){
+  const o=M.openings.find(x=>x.id===g.id);
+  if(!o) return;
+  if(g.snap){ pushSnapshot(g.snap); g.snap=null; }
+  const d=evDev(e), w=toWorld(d.x,d.y), t=alongWall(o, w);
+  if(t==null) return;
+  const shape=wallShape(fitPts(), M.hmeas, o.a, o.b);
+  if(!shape) return;
+  const andere=openingsOnWall(o.a,o.b).filter(x=>x.id!==o.id);
+  const m=slideOpening(shape, o, {x:t-g.gx, y:o.y}, andere);
+  o.x=m.x;
+  setHintLive(`${OPEN_LABEL[o.kind]}: ${fmtM(o.x)} m ab Ecke ${o.a}`);
+  render();
+}
+function setPlanAdd(kind){
+  if(kind && !wallTabReady()){
+    setHint('Öffnungen setzen geht, sobald der Grundriss eindeutig eingemessen ist.');
+    kind=null;
+  }
+  planAdd = planAdd===kind ? null : kind;
+  planGhost=null;
+  if(planAdd){ M.chain=null; M.openSel=null; }
+  document.querySelectorAll('#pAdd button').forEach(b=>b.setAttribute('aria-pressed', String(b.dataset.padd===planAdd)));
+  render();
+}
+document.querySelectorAll('#pAdd button').forEach(b=>{ b.onclick=()=>setPlanAdd(b.dataset.padd); });
+function planAddAt(e){
+  const d=evDev(e), w=toWorld(d.x,d.y), hit=planWallAt(w.x,w.y);
+  if(!hit){ setHint('Auf eine Wand klicken, um die Öffnung dort zu setzen.'); return; }
+  const kind=planAdd;
+  planAdd=null; planGhost=null;
+  document.querySelectorAll('#pAdd button').forEach(b=>b.setAttribute('aria-pressed','false'));
+  const o=insertOpening(kind, hit.a, hit.b, hit.t);
+  if(o) setHint(`${OPEN_LABEL[kind]} in Wand ${hit.a}–${hit.b} gesetzt · ziehen verschiebt · Feinjustage in der Wandansicht`);
+  else render();
+}
+// Vorschau beim Werkzeug: wo die Oeffnung landen wuerde.
+function drawPlanGhost(P, I, dpr){
+  if(!planAdd || !planGhost) return;
+  const {a,b,t}=planGhost;
+  if(I[a]==null||I[b]==null) return;
+  const A=P[I[a]], B=P[I[b]], L=C.dist(A,B)||1;
+  const w=Math.min(PLAN_ADD_W[planAdd], L*0.9);
+  const x0=Math.max(0, Math.min(L-w, t-w/2));
+  const u={x:(B.x-A.x)/L, y:(B.y-A.y)/L};
+  const p=toScr({x:A.x+u.x*x0, y:A.y+u.y*x0}), q=toScr({x:A.x+u.x*(x0+w), y:A.y+u.y*(x0+w)});
+  ctx.save();
+  ctx.strokeStyle=INK.accent; ctx.globalAlpha=.55; ctx.lineWidth=8*dpr; ctx.lineCap='butt';
+  ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
+  ctx.restore();
+}
+// Gewaehlte Oeffnung im Plan: Akzent auf Luecke und Blatt.
+function drawPlanOpSel(P, I, dpr){
+  if(!planMode() || M.openSel==null) return;
+  const o=M.openings.find(x=>x.id===M.openSel);
+  if(!o) return;
+  const r=openingWorld(P, o.a, o.b, o);
+  if(!r) return;
+  const p=toScr(r.P), q=toScr(r.Q);
+  ctx.save();
+  ctx.strokeStyle=INK.accent; ctx.lineWidth=5*dpr; ctx.lineCap='butt';
+  ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
+  ctx.restore();
+}
+// Kaertchen der gewaehlten Oeffnung im Plan. "links/rechts" wie in der
+// Wandansicht: von innen gesehen.
+function syncOppl(){
+  const box=$('oppl');
+  const o=planMode() && M.openSel!=null ? M.openings.find(x=>x.id===M.openSel) : null;
+  const r=o && openingWorld(viewPts(), o.a, o.b, o);
+  if(!o || !r || gesture && gesture.t==='planOp' && gesture.moved){ box.hidden=true; return; }
+  const fl=wallFlip(o.a,o.b);
+  $('opplTitle').textContent=`${OPEN_LABEL[o.kind]} ${Math.round(o.w)} × ${Math.round(o.h)} · Wand ${o.a}–${o.b}`;
+  const typen=TYPES[o.kind]||[];
+  $('opplTypeRow').hidden=!typen.length;
+  const t=o.swing&&o.swing.type;
+  if(typen.length) $('opplType').innerHTML=typen.map(([v,l])=>`<option value="${v}"${v===(t||'none')?' selected':''}>${l}</option>`).join('');
+  $('opplSideRow').hidden=!(t && HAS_HINGE.has(t));
+  $('opplDirRow').hidden=!(t && HAS_DIR.has(t));
+  $('opplHinge').querySelectorAll('button').forEach(b=>
+    b.setAttribute('aria-pressed', String(!!o.swing && sideView(o.swing.hinge,fl)===b.dataset.h)));
+  $('opplDir').querySelectorAll('button').forEach(b=>
+    b.setAttribute('aria-pressed', String(!!(o.swing&&o.swing.out)===(b.dataset.o==='1'))));
+  box.hidden=false;
+  // Neben die Oeffnung, auf die Raumseite - dort verdeckt es keine Wand.
+  const dpr=DPR(), wrap=$('canvaswrap');
+  const n=outerNormal(viewPts(), M.walls, o.a, o.b);
+  const mid={x:(r.P.x+r.Q.x)/2, y:(r.P.y+r.Q.y)/2};
+  const s=toScr(mid), s2=toScr({x:mid.x-n.x, y:mid.y-n.y});
+  const vx=s2.x-s.x, vy=s2.y-s.y, vl=Math.hypot(vx,vy)||1;
+  // Abstand: hinter dem Tuerbogen, sonst knapp neben der Wand. Die nahe
+  // KANTE des Kaertchens sitzt dort, nicht seine Mitte.
+  const sw=doorSwing(viewPts(), M.walls, o);
+  const gap=(sw ? o.w*VIEW.s/dpr : 0)+18;
+  const ax=s.x/dpr+vx/vl*gap, ay=s.y/dpr+vy/vl*gap;
+  const bw=box.offsetWidth, bh=box.offsetHeight;
+  let left, top;
+  if(Math.abs(vy)>=Math.abs(vx)){ left=ax-bw/2; top=vy>0 ? ay : ay-bh; }
+  else { top=ay-bh/2; left=vx>0 ? ax : ax-bw; }
+  box.style.left=Math.max(8, Math.min(wrap.clientWidth-bw-8, left))+'px';
+  box.style.top=Math.max(8, Math.min(wrap.clientHeight-bh-8, top))+'px';
+}
+const opplSel=()=>M.openings.find(x=>x.id===M.openSel)||null;
+$('opplX').onclick=()=>{ M.openSel=null; render(); };
+$('opplType').onchange=()=>{
+  const o=opplSel(); if(!o) return;
+  snapshot();
+  const t=$('opplType').value;
+  o.swing = t==='none' ? null : {type:t, hinge:(o.swing&&o.swing.hinge)||sideView('left', wallFlip(o.a,o.b)), out:!!(o.swing&&o.swing.out)};
+  recompute();
+};
+$('opplHinge').querySelectorAll('button').forEach(b=>{
+  b.onclick=()=>{ const o=opplSel(); if(!o||!o.swing) return;
+    snapshot(); o.swing.hinge=sideView(b.dataset.h, wallFlip(o.a,o.b)); recompute(); };
+});
+$('opplDir').querySelectorAll('button').forEach(b=>{
+  b.onclick=()=>{ const o=opplSel(); if(!o||!o.swing) return;
+    snapshot(); o.swing.out=b.dataset.o==='1'; recompute(); };
+});
+$('opplDel').onclick=()=>{
+  const o=opplSel(); if(!o) return;
+  snapshot();
+  M.openings=M.openings.filter(x=>x.id!==o.id);
+  M.opmeas=M.opmeas.filter(m=>m.op!==o.id);
+  M.openSel=null;
+  recompute();
+  setHint(`${OPEN_LABEL[o.kind]} gelöscht · ⌘Z holt sie zurück`);
+};
+// In die Wandansicht dieser Wand springen, Oeffnung bleibt gewaehlt.
+function openingToWallView(o){
+  const w=M.walls.find(([a,b])=>wallKey(a,b)===wallKey(o.a,o.b));
+  if(!w || !wallTabReady()) return;
+  setMode('wall');
+  if(M.mode!=='wall') return;
+  pickWall(w[0], w[1]);
+  M.openSel=o.id;
+  render();
+}
+$('opplWall').onclick=()=>{ const o=opplSel(); if(o) openingToWallView(o); };
+// Maus ueber dem Plan: Vorschau des Werkzeugs, Zeiger ueber Oeffnungen.
+// true = erledigt, die normale Hover-Logik (Ecken, Waende) laeuft nicht.
+function planHover(e){
+  const d=evDev(e), w=toWorld(d.x,d.y);
+  if(planAdd && planEditable()){
+    const g=planWallAt(w.x,w.y);
+    planGhost=g; redraw();
+    cv.style.cursor=g?'copy':'crosshair';
+    return true;
+  }
+  if(!planEditable() || hit(w.x,w.y)) return false;
+  const op=planOpeningAt(w.x,w.y);
+  if(!op) return false;
+  // Kein Wand-Ziel unter der Oeffnung: Entf soll nicht die Wand loeschen.
+  lastHover=null;
+  if(hoverTarget){ hoverTarget=null; redraw(); }
+  cv.style.cursor=M.opmeas.some(m=>m.op===op.id && m.on!==false) ? 'pointer' : 'move';
+  return true;
 }
 
 // ================= Wandkoerper im Grundriss =================
@@ -11228,7 +11613,9 @@ function drawCanvas(){
   drawFixAngles(P, I, dpr);
   drawUnfolded(P, I, dpr);
   drawWallMarks(P, I, dpr);
+  drawPlanOpSel(P, I, dpr);
   drawOpeningsOnPlan(P, I, dpr);
+  drawPlanGhost(P, I, dpr);
   drawDoorPluses(P, I, dpr);
   drawQuer(P, I, dpr);
   // Hervorgehobenes Paar breit unterlegen - VOR Messungen und Vorschlaegen,
@@ -12005,7 +12392,26 @@ cv.addEventListener('pointerdown',e=>{
   // Touchpad zoegert man beim Zielen - dort riss es den Zug ab.
   const touch=e.pointerType!=='mouse';
   const d=evDev(e), w=toWorld(d.x,d.y);
+  // Werkzeug "Oeffnung setzen": der Klick gehoert der Wand, auch nahe einer
+  // Ecke. Gesetzt wird beim Loslassen; ein Zug verschiebt die Ansicht.
+  if(planAdd && planEditable()){
+    gesture={t:'planAdd',x0:e.clientX,y0:e.clientY,lx:e.clientX,ly:e.clientY,moved:false,wall:null,popOpen};
+    return;
+  }
   const h=hit(w.x,w.y);
+  // Oeffnung im Plan: waehlen, ziehen verschiebt entlang der Wand. Ecken
+  // gewinnen (sonst kaeme man an eine Ecke neben einer Tuer nicht heran).
+  const op=(!h && planEditable()) ? planOpeningAt(w.x,w.y) : null;
+  if(planMode() && M.openSel!=null && (!op || op.id!==M.openSel)) M.openSel=null;
+  if(op){
+    M.openSel=op.id;
+    const t=alongWall(op, w);
+    const fest=M.opmeas.some(m=>m.op===op.id && m.on!==false);
+    gesture={t:'planOp',id:op.id,gx:(t==null?0:t-op.x),fest,x0:e.clientX,y0:e.clientY,lx:e.clientX,ly:e.clientY,
+             moved:false,snap:serialize(),popOpen};
+    render();
+    return;
+  }
   if(h){
     if(M.mode==='draw'){
       gesture={t:'point',id:h.id,x0:e.clientX,y0:e.clientY,lx:e.clientX,ly:e.clientY,
@@ -12080,6 +12486,7 @@ cv.addEventListener('pointermove',e=>{
     if(spaceHeld){ cv.style.cursor='grab'; return; }
     if(M.mode==='tiles'){ tilesHover(e); return; }
     if(M.mode==='kitchen'){ kitchenHover(e); return; }
+    if(e.pointerType==='mouse' && planMode() && planHover(e)) return;
     if(e.pointerType==='mouse' && M.mode!=='wall' && !swim) updateHover(e);
     return;
   }
@@ -12096,6 +12503,12 @@ cv.addEventListener('pointermove',e=>{
   }
   if(gesture.t==='tiles'){ tilesMove(e, gesture); return; }
   if(gesture.t==='kitchen'){ kitchenMove(e, gesture); return; }
+  if(gesture.t==='planOp'){
+    if(!gesture.moved) return;
+    // Eingemessen liegt sie, wo ihr Mass sie hinlegt (wie in der Wandansicht).
+    if(gesture.fest){ setHint('Lage ist eingemessen. In der Wandansicht Maß ändern oder löschen, dann ziehen.'); return; }
+    planOpDrag(e, gesture); return;
+  }
   if(gesture.t==='point' && gesture.moved){
     // Erste echte Bewegung dieses Zugs: jetzt erst den beim Druecken
     // gemerkten Vorzustand auf den Undo-Stapel legen.
@@ -12148,7 +12561,7 @@ cv.addEventListener('pointermove',e=>{
   }
   // Zug im Leeren - im Messen-Modus auch von einer Ecke aus, die sonst ein
   // toter Klick waere - verschiebt die Ansicht.
-  if((gesture.t==='bg' || gesture.t==='selpt') && gesture.moved){
+  if((gesture.t==='bg' || gesture.t==='selpt' || gesture.t==='planAdd') && gesture.moved){
     const dpr=DPR();
     viewPanBy((e.clientX-gesture.lx)*dpr, (e.clientY-gesture.ly)*dpr);
     gesture.lx=e.clientX; gesture.ly=e.clientY;
@@ -12168,6 +12581,15 @@ function endPointer(e){
   const g=gesture; gesture=null;
   if(!g){
     if(M.drag){ M.drag=null; M.dragMode=null; recompute(); }
+    return;
+  }
+  if(g.t==='planAdd'){
+    if(!g.moved && e.type!=='pointercancel') planAddAt(e); else render();
+    return;
+  }
+  if(g.t==='planOp'){
+    hintLive=false;
+    if(g.moved && !g.fest) recompute(); else render();
     return;
   }
   if(g.t==='pan'){
@@ -12265,6 +12687,12 @@ cv.addEventListener('contextmenu',e=>{
   if(h){
     const s=toScr(h);
     showPop(s.x,s.y,`Ecke ${h.id} löschen?`,()=>deletePoint(h.id));
+    return;
+  }
+  const op=planEditable() ? planOpeningAt(w.x,w.y) : null;
+  if(op){
+    M.openSel=op.id; render();
+    showPop(d.x,d.y,`${OPEN_LABEL[op.kind]} löschen?`,()=>{ M.openSel=op.id; $('opplDel').click(); });
     return;
   }
   const wall=nearestWall(w.x,w.y);
@@ -12478,7 +12906,33 @@ function pickWall(a,b){
   M.wallSel={a,b}; M.openSel=null; wallUserView=false;
   render();
 }
-function wallList(){ return M.walls.map(([a,b])=>({a,b})); }
+// Waende ringsum statt in Anlegereihenfolge: erst der Raum, dann jede Insel,
+// jeweils so gerichtet, dass "naechste" die Wand ist, die in der Ansicht
+// RECHTS anschliesst. Vorher sprang → quer durch Raum und Inseln.
+// {a,b} bleibt die gespeicherte Richtung; grp: 0 = Raum, 1.. = Insel.
+function wallList(){
+  const roh=M.walls.map(([a,b])=>({a,b,grp:0}));
+  const P=fitPts(), loops=C.wallLoops(P, M.walls);
+  if(!loops) return roh;
+  const byKey=new Map(M.walls.map(([a,b])=>[wallKey(a,b),{a,b}]));
+  const flaeche=L=>{ let s=0; for(let i=0,j=L.length-1;i<L.length;j=i++) s+=L[j].x*L[i].y-L[i].x*L[j].y; return Math.abs(s); };
+  const sortiert=[...loops].sort((p,q)=>flaeche(q)-flaeche(p));
+  const out=[], drin=new Set();
+  sortiert.forEach((L,g)=>{
+    let ids=L.map(p=>p.id);
+    const w0=byKey.get(wallKey(ids[0],ids[1]));
+    if(!w0) return;
+    // Rechte Ecke der ersten Wand von innen gesehen muss ids[1] sein.
+    const rechts=wallFlip(w0.a,w0.b) ? w0.a : w0.b;
+    if(rechts!==ids[1]) ids=[ids[0], ...ids.slice(1).reverse()];
+    ids.forEach((id,i)=>{
+      const w=byKey.get(wallKey(id, ids[(i+1)%ids.length]));
+      if(w && !drin.has(wallKey(w.a,w.b))){ drin.add(wallKey(w.a,w.b)); out.push({...w, grp:g}); }
+    });
+  });
+  roh.forEach(w=>{ if(!drin.has(wallKey(w.a,w.b))) out.push(w); });
+  return out;
+}
 
 function renderWallBar(){
   const bar=$('wallbar');
@@ -12486,12 +12940,16 @@ function renderWallBar(){
   if(bar.hidden) return;
   const list=wallList();
   const sel=$('wPick');
-  sel.innerHTML=list.map(w=>`<option value="${w.a}|${w.b}"${
-    M.wallSel&&M.wallSel.a===w.a&&M.wallSel.b===w.b?' selected':''}>Wand ${w.a}–${w.b}</option>`).join('');
+  const opt=w=>`<option value="${w.a}|${w.b}"${
+    M.wallSel&&M.wallSel.a===w.a&&M.wallSel.b===w.b?' selected':''}>Wand ${w.a}–${w.b}</option>`;
+  const gruppen=[...new Set(list.map(w=>w.grp))];
+  sel.innerHTML = gruppen.length>1
+    ? gruppen.map(g=>`<optgroup label="${g===0?'Raum':'Insel '+g}">${list.filter(w=>w.grp===g).map(opt).join('')}</optgroup>`).join('')
+    : list.map(opt).join('');
   const shape=currentShape();
-  const n=wallOpenings().length;
+  const e=wallSidesView();
   $('wInfo').textContent = shape
-    ? `${fmtM(shape.L)} m breit`
+    ? `${fmtM(shape.L)} m breit · von innen: links Ecke ${e.left.id}, rechts Ecke ${e.right.id}`
     : '';
 }
 // Panel im Wände-Modus: die gewaehlte Wand und ihre Oeffnungen. Ein Klick
@@ -12525,42 +12983,64 @@ const stepWall=d=>{
 $('wPrev').onclick=()=>stepWall(-1);
 $('wNext').onclick=()=>stepWall(1);
 
+// Oeffnung einsetzen - ein Weg fuer die Wandansicht (Knoepfe oben) und den
+// Grundriss (Werkzeug + Klick auf die Wand). mitte: Lage in mm ab Ecke a,
+// null = Vorbelegung. Liefert die neue Oeffnung oder null.
+function insertOpening(kind, a, b, mitte){
+  const shape=wallShape(fitPts(), M.hmeas, a, b);
+  if(!shape) return null;
+  const vorschlag=defaultOpening(shape, kind);
+  vorschlag.id='o'+openSeq;
+  // Die Kern-Vorbelegung ist fuer Fenster 2/3 der Wandlaenge breit - neben
+  // einer Tuer passte das fast nie. Uebliche Masse, auf die Wand begrenzt.
+  if(kind!=='door'){
+    const hMin=Math.min(shape.ha, shape.hb)||2500;
+    const [W0,H0,Y0]=kind==='window' ? [1000,1200,900] : [600,600,1200];
+    vorschlag.w=Math.min(W0, shape.L*0.9);
+    vorschlag.h=Math.min(H0, hMin*0.6);
+    vorschlag.y=Math.max(0, Math.min(Y0, hMin-vorschlag.h-100));
+    vorschlag.x=Math.max(0, (shape.L-vorschlag.w)/2);
+  }
+  if(mitte!=null) vorschlag.x=Math.max(0, Math.min(shape.L-vorschlag.w, mitte-vorschlag.w/2));
+  // Vorbelegung kann besetzt sein - dann moeglichst nah daneben einsetzen
+  // statt uebereinander. Ist die Wand voll, ehrlich absagen.
+  const andere=openingsOnWall(a,b);
+  let platz=null;
+  if(mitte!=null){
+    const schritt=Math.max(50, vorschlag.w/4);
+    for(let k=0; k*schritt<=shape.L && !platz; k++){
+      for(const x of k?[vorschlag.x+k*schritt, vorschlag.x-k*schritt]:[vorschlag.x]){
+        const c=clampOpening(shape, {...vorschlag, x});
+        if(openingPlaceable(shape, c, andere)){ platz=c; break; }
+      }
+    }
+  }
+  if(!platz) platz=findFreeSpot(shape, vorschlag, andere);
+  if(!platz){
+    setHint('Kein freier Platz mehr in dieser Wand. Erst Platz schaffen oder kleiner wählen.');
+    return null;
+  }
+  snapshot();
+  const o={...platz};
+  o.id='o'+(openSeq++);
+  o.kind=kind;
+  o.a=a; o.b=b;
+  // Vorbelegte Oeffnungsart: die in Deutschland uebliche, Band von innen
+  // gesehen links (gespeichert wird die a-Seite).
+  const band=sideView('left', wallFlip(a,b));
+  if(kind==='door') o.swing={type:'turn', hinge:band, out:false};
+  if(kind==='window') o.swing={type:'turntilt', hinge:band, out:false};
+  M.openings.push(o);
+  M.openSel=o.id;
+  recompute();
+  return o;
+}
 document.querySelectorAll('#wAdd button').forEach(b=>{
   b.onclick=()=>{
-    const shape=currentShape();
-    if(!shape) return;
+    if(!M.wallSel) return;
     const kind=b.dataset.add;
-    const vorschlag=defaultOpening(shape, kind);
-    vorschlag.id='o'+openSeq;
-    // Die Kern-Vorbelegung ist fuer Fenster 2/3 der Wandlaenge breit - neben
-    // einer Tuer passte das fast nie. Uebliche Masse, auf die Wand begrenzt.
-    if(kind!=='door'){
-      const hMin=Math.min(shape.ha, shape.hb)||2500;
-      const [W0,H0,Y0]=kind==='window' ? [1000,1200,900] : [600,600,1200];
-      vorschlag.w=Math.min(W0, shape.L*0.9);
-      vorschlag.h=Math.min(H0, hMin*0.6);
-      vorschlag.y=Math.max(0, Math.min(Y0, hMin-vorschlag.h-100));
-      vorschlag.x=Math.max(0, (shape.L-vorschlag.w)/2);
-    }
-    // Vorbelegung kann besetzt sein - dann daneben einsetzen statt
-    // uebereinander. Ist die Wand voll, ehrlich absagen.
-    const platz=findFreeSpot(shape, vorschlag, wallOpenings());
-    if(!platz){
-      setHint('Kein freier Platz mehr in dieser Wand. Erst Platz schaffen oder kleiner wählen.');
-      return;
-    }
-    snapshot();
-    const o={...platz};
-    o.id='o'+(openSeq++);
-    o.kind=kind;
-    o.a=M.wallSel.a; o.b=M.wallSel.b;
-    // Vorbelegte Oeffnungsart: die in Deutschland uebliche.
-    if(kind==='door') o.swing={type:'turn', hinge:'left', out:false};
-    if(kind==='window') o.swing={type:'turntilt', hinge:'left', out:false};
-    M.openings.push(o);
-    M.openSel=o.id;
-    recompute();
-    setHint(`${OPEN_LABEL[kind]} eingesetzt. Zum Positionieren ziehen.`);
+    if(insertOpening(kind, M.wallSel.a, M.wallSel.b, null))
+      setHint(`${OPEN_LABEL[kind]} eingesetzt. Zum Positionieren ziehen.`);
   };
 });
 // ================= Höhenmessung =================
@@ -12661,8 +13141,10 @@ function renderOpeningPopup(){
   $('opDirRow').hidden=!zeigtRichtung;
   $('opHinge').style.display=zeigtBand?'':'none';
   $('opDir').style.display=zeigtRichtung?'':'none';
+  // Knoepfe sprechen in der Ansicht von innen; gespeichert ist die a-Seite.
+  const fl=curFlip();
   $('opHinge').querySelectorAll('button').forEach(b=>
-    b.setAttribute('aria-pressed', String(o.swing&&o.swing.hinge===b.dataset.h)));
+    b.setAttribute('aria-pressed', String(!!o.swing && sideView(o.swing.hinge,fl)===b.dataset.h)));
   $('opDir').querySelectorAll('button').forEach(b=>
     b.setAttribute('aria-pressed', String(!!(o.swing&&o.swing.out)===(b.dataset.o==='1'))));
 }
@@ -12717,7 +13199,7 @@ $('opType').onchange=()=>{
 };
 $('opHinge').querySelectorAll('button').forEach(b=>{
   b.onclick=()=>{ const o=selectedOpening(); if(!o||!o.swing) return;
-    snapshot(); o.swing.hinge=b.dataset.h; recompute(); };
+    snapshot(); o.swing.hinge=sideView(b.dataset.h, curFlip()); recompute(); };
 });
 $('opDir').querySelectorAll('button').forEach(b=>{
   b.onclick=()=>{ const o=selectedOpening(); if(!o||!o.swing) return;
@@ -12780,7 +13262,7 @@ function renderOpeningMeasures(){
   $('opMeasList').innerHTML = liste.map(m=>{
     const schlecht=r&&r.verdacht.has(m.id);
     return `<div class="mrow${schlecht?' bad':''}" data-id="${m.id}">`
-      +`<span>${EDGE_LABEL[m.edge]}</span><span>${fmtM(m.d)} m</span>`
+      +`<span>${EDGE_LABEL[sideView(m.edge,curFlip())]}</span><span>${fmtM(m.d)} m</span>`
       +`${schlecht?'<span>verdächtig</span>':''}`
       +`<button data-del="${m.id}">×</button></div>`;
   }).join('');
@@ -12796,9 +13278,10 @@ function renderOpeningMeasures(){
 document.querySelectorAll('.mbtn').forEach(b=>{
   b.onclick=()=>{
     const o=selectedOpening(); if(!o) return;
-    opMeasEdge=b.dataset.edge;
+    // "von links" meint die Ansicht von innen; gespeichert wird die a-Seite.
+    opMeasEdge=sideView(b.dataset.edge, curFlip());
     heightAt=null; entryPair=null; entryGuided=false; crossPair=null;
-    $('entryLabel').textContent=`${OPEN_LABEL[o.kind]}: Abstand ${EDGE_LABEL[opMeasEdge]}`;
+    $('entryLabel').textContent=`${OPEN_LABEL[o.kind]}: Abstand ${EDGE_LABEL[b.dataset.edge]}`;
     const box=$('entry');
     box.hidden=false; box.style.transform='';
     if(isDesktop()){
@@ -12837,6 +13320,8 @@ cv.addEventListener('mousedown',e=>{ if(e.button===1) e.preventDefault(); });
 cv.addEventListener('pointerdown',e=>{
   if(M.mode!=='wall' || e.button!==0 || spaceHeld || (IS_MAC && e.ctrlKey)) return;
   const d=evDev(e), w=wToWall(d.x,d.y);
+  // Lageplan oben rechts liegt UEBER der Wand: er gewinnt.
+  if(wallInsetClick(d)){ e.stopImmediatePropagation(); return; }
   const o=openingAt(w.x,w.y);
   if(!o){
     // Senkrechte Wandkante angeklickt: das ist die Hoehe an genau dieser
@@ -12899,6 +13384,9 @@ const MODE_HINTS={
 // Zeichenzug oder ein Fliesen-Werkzeug erklaert sich selbst - und zwar
 // solange es aktiv ist, nicht nur vier Sekunden.
 function modeHint(){
+  if(planMode() && planAdd) return `${OPEN_LABEL[planAdd]} setzen: auf die Wand klicken · Esc bricht ab`;
+  if(planMode() && M.openSel!=null && M.openings.some(o=>o.id===M.openSel))
+    return 'Öffnung ziehen verschiebt sie entlang der Wand · Entf löscht · Esc hebt die Auswahl auf';
   if(M.mode==='draw' && M.chain!=null)
     return `Zug ab ${M.chain}: Klick setzt die nächste Ecke · Klick auf die erste schließt den Raum · Esc beendet den Zug`;
   if(M.mode==='tiles' && typeof TILE_TOOL_HINTS!=='undefined' && TILE_TOOL_HINTS[TS.tool]) return TILE_TOOL_HINTS[TS.tool]();
@@ -12938,13 +13426,15 @@ function setMode(mode){
   if(M.mode==='tiles' && mode!=='tiles'){ TS.sel.clear(); TS.tool='move'; TS.draft=null; TS.lines=[]; }
   M.mode=mode; M.sel=[];
   if(mode!=='draw') M.chain=null;
+  if(mode!=='draw' && mode!=='measure' && planAdd){ planAdd=null; planGhost=null;
+    document.querySelectorAll('#pAdd button').forEach(b=>b.setAttribute('aria-pressed','false')); }
   if(!$('entry').hidden && !(entryPair && mode==='measure')) closeEntry();
   if(wpopPair) closeWallPopup();
   hidePop();
   // Beim Betreten des Wände-Tabs die erste Wand waehlen, damit sofort
   // etwas zu sehen ist.
   if(mode==='wall' && !M.wallSel && M.walls.length){
-    M.wallSel={a:M.walls[0][0], b:M.walls[0][1]};
+    { const w0=wallList()[0]; M.wallSel={a:w0.a, b:w0.b}; }
     wallUserView=false;
   }
   // Beide Schwebeknoepfe erst mal weg; renderPanel entscheidet gleich, ob
@@ -13235,6 +13725,7 @@ function deleteTarget(){
   }
   if(M.mode==='kitchen') return typeof kitchenDeleteSel==='function' && kitchenDeleteSel();
   if(M.mode!=='draw' && M.mode!=='measure') return false;
+  if(M.openSel!=null && M.openings.some(o=>o.id===M.openSel)){ $('opplDel').click(); return true; }
   const h=hoverTarget; if(!h) return false;
   if(h.t==='seg') return false;      // Diagonalen loescht man im Wand-Popup, Wert fuer Wert
   hoverTarget=null;
@@ -13288,6 +13779,8 @@ addEventListener('keydown',e=>{
     if(wpopPair){ closeWallPopup(); return; }
     if(!$('entry').hidden){ closeEntry(); return; }   // auch Hoehe, Oeffnungslage, Querstrecke
     if(M.mode==='wall' && M.openSel!=null){ M.openSel=null; render(); return; }
+    if(planMode() && planAdd){ setPlanAdd(null); return; }
+    if(planMode() && M.openSel!=null){ M.openSel=null; render(); return; }
     if(M.sel.length){ M.sel=[]; render(); return; }
     if(M.chain){ M.chain=null; render(); return; }
   }
@@ -13643,7 +14136,7 @@ function renderPanel(){
     return;
   }
   if(M.mode==='wall' && !M.wallSel && M.walls.length){
-    M.wallSel={a:M.walls[0][0], b:M.walls[0][1]}; wallUserView=false;
+    { const w0=wallList()[0]; M.wallSel={a:w0.a, b:w0.b}; } wallUserView=false;
   }
   renderWallBar();
   renderOpeningPopup();
