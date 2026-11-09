@@ -73,4 +73,6 @@ Faustregel: jede Seite eine Subdomain mit eigenem Unterverzeichnis `public_html/
 - `irazari-te.ch`: Das Let's-Encrypt-Zertifikat deckt nur die Domain ohne `www.` ab. Eine zweite Beantragung mit www hat kein neues Zertifikat erzeugt. Wahrscheinlich das alte erst löschen und dann neu beantragen. HTTPS-Weiterleitung noch aus.
 - `public_html/` aufräumen (alter tenfinger-Build) oder dort eine eigene Startseite deployen. Dabei die Falle oben beachten.
 - Zusatzbenutzer `ebrh7y_0` löschen.
-- Impressum und Datenschutzerklärung für die Domain.
+- Impressum und Datenschutzerklärung für die Domain. Dabei auch den Datenschutzhinweis im Dialog „Fehler / Wunsch melden“ (`raumaufmass.html`, `#mldDsgvo`) um den Verantwortlichen mit Kontaktadresse ergänzen; bis dahin nennt er keinen (Entscheidung 2026-11-09).
+- Weblogs: Der Meldedialog sagt, der Server vermerkt Zugriffe mit gekürzter IP. Die Logs werden aber nie gelöscht. Löschfrist in konsoleH setzen (Einstellungen → Accountwartung → Eigene Regeln) oder den Text anpassen.
+- Meldungen aus „Fehler / Wunsch melden“ liegen in `~/raumaufmass-bugreports/` (außerhalb von `public_html`), Hinweismail-Adresse in `~/raumaufmass-bugreports/.benachrichtigung`. Abholen und auf dem Server löschen: `scripts/bugreports-abholen.sh`.
