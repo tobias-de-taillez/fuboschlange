@@ -1073,7 +1073,7 @@
       </dl>
 
       <h3><i>5</i>Küche</h3>
-      <p>Erst verfügbar, wenn der Grundriss eindeutig ist. Teile aus der Leiste oben auf eine Wand ziehen oder anklicken, geordnet nach Kalt (Kühl-, Gefrierschrank), Warm (Herd, Backofen im Hochschrank, Mikrowelle, Dunstabzug), Nass (Spüle, Spülmaschine), Stauraum (Schrank, Eckschrank, Insel) und Möbel (Tisch). Ob ein Schrank unten steht, hängt oder hoch ist, wählt man danach rechts unter „Bauart“; die Spülmaschine geht auch hoch eingebaut (Hüfthöhe), der Herd auch ohne Backofen (nur Kochfeld, darunter Schubladen). Sie rasten an Ecken (mit 5 cm Passblende), Nachbarn, Türen und mittig unter Fenstern ein; ein Klick setzt das Teil neben das gewählte, einen Hängeschrank darüber. Die Arbeitsplatte entsteht von selbst, auf der Insel samt Tresen-Überstand; Lücken bis 15 cm werden Passleisten. Die Lage steht im Panel als Zahl (ab Ecke … mm), die Maßkette im Plan. Die Standardmaße passen meist; rechts stellt man Breite, Front, Anschlag, Gerät und Inhalt ein, unter „Maße frei“ alles Übrige.</p>
+      <p>Erst verfügbar, wenn der Grundriss eindeutig ist. Teile aus der Leiste oben auf eine Wand ziehen oder anklicken, geordnet nach Kalt (Kühl-, Gefrierschrank), Warm (Herd, Backofen im Hochschrank, Mikrowelle, Dunstabzug), Nass (Spüle, Spülmaschine), Stauraum (Schrank, Eckschrank, Insel) und Möbel (Tisch). Ob ein Schrank unten steht, hängt oder hoch ist, wählt man danach rechts unter „Bauart“; die Spülmaschine geht auch hoch eingebaut (Hüfthöhe, mit Fächern darunter und darüber für Vorräte, Geschirr usw.), der Herd auch ohne Backofen (nur Kochfeld, darunter Schubladen). Sie rasten an Ecken (mit 5 cm Passblende), Nachbarn, Türen und mittig unter Fenstern ein; ein Klick setzt das Teil neben das gewählte, einen Hängeschrank darüber. Die Arbeitsplatte entsteht von selbst, auf der Insel samt Tresen-Überstand; Lücken bis 15 cm werden Passleisten. Die Lage steht im Panel als Zahl (ab Ecke … mm), die Maßkette im Plan. Die Standardmaße passen meist; rechts stellt man Breite, Front, Anschlag, Gerät und Inhalt ein, unter „Maße frei“ alles Übrige.</p>
       <dl>
         <dt>Prüfung</dt><dd>Meldet, was nicht geht (rot): Überlappungen, Schrank vor Tür oder Fenster, Fensterflügel gegen Armatur, Gerätetür gegen Insel, Zimmertür gegen Schrank oder Insel (im Plan bleibt die Tür am ersten Teil stehen, mit Winkel im Befund), Front in der Ecke verdeckt, Decke zu niedrig. Und Richtwerte (gelb): Schlauchweg von Spülmaschine und Festwasser-Kühlschrank zum Wasseranschluss (Wände-Tab), Gänge 1200 mm, Stuhlraum am Tisch, Abstellflächen, Spülmaschine neben der Spüle, Arbeitsdreieck. Ein Klick wählt das Teil; wo es eine eindeutige Abhilfe gibt (Vorfensterarmatur, Anschlag tauschen, Als Eckschrank, Als Dunstabzug), steht ein Knopf daneben.</dd>
         <dt>Maße und Abstände</dt><dd>Am gewählten Wandteil läuft die Maßkette bis zur Wand, die man an den Enden vor sich hat, bei Insel und Tisch zu allen vier Seiten. Ein Klick auf einen gestrichelt umrandeten Abstand öffnet ein Feld: Wert eintragen, Enter verschiebt das Teil (an der Wand den ganzen Block daneben).</dd>
@@ -6270,6 +6270,19 @@ function devZ(it, S){
   if(it.dev==='oven') return Math.max(S.plinth+300, D.workH-60);
   return null;
 }
+// Fächer der hoch eingebauten Spülmaschine (Meldung M-20261109-161527-05b8cd):
+// der Hochschrank hat unter dem Gerät (Sockel bis Gerät, wegen devZ immer
+// ≥ 300 mm) und darüber (Gerät bis Schrankoberkante) Platz für Vorräte,
+// Geschirr usw. Ein oberes Fach unter DW_ZONE_MIN zählt nicht (Blende).
+const DW_ZONE_MIN=250;
+function dwZones(it, S){
+  if(!(it.dev==='dw' && it.kind==='tall')) return [];
+  S=S||K_DEF;
+  const zd=devZ(it,S), z1=it.h!=null ? it.h : derived(S).tallTop;
+  const out=[{key:'unten', z0:S.plinth, z1:zd}];
+  if(z1-(zd+DW_H)>=DW_ZONE_MIN) out.push({key:'oben', z0:zd+DW_H, z1});
+  return out;
+}
 // Herd = Kochfeld mit Backofen darunter; noOven: nur Kochfeld, darunter
 // Schubladen (Meldung M-20261109-150755-4f921c, Backofen dann im Hochschrank).
 const ovenBelow=it=>it.dev==='hob' && it.kind==='base' && !it.noOven;
@@ -7776,6 +7789,8 @@ function reachFactor(K, g){
   const D=derived(K.spec), it=g.it, fk=frontKind(it);
   let z;
   if(it.kind==='wall') z=g.z0+150;
+  else if(it.dev==='dw' && it.kind==='tall'){   // Fächer über/unter dem Gerät: oben greifbarer als unten
+    const Z=dwZones(it,K.spec), f=Z[Z.length-1]; z=(f.z0+f.z1)/2; }
   else if(it.kind==='tall') z=1200;
   else z = fk==='drawer' ? D.workH-200 : 450;
   let h = z>=750 && z<=1450 ? 1 : (z>=400 && z<750) || (z>1450 && z<=1750) ? 1.3 : 2;
@@ -7842,15 +7857,15 @@ function flows(E, K, L, opts){
 function suggest(E, K, L, n=3){
   const base=flows(E,K,L);
   const pl=base.planner, memo=base.memo;
-  const noStore=g=>storable(g.it).length===0;
+  const noStore=g=>storable(g.it,K.spec).length===0;
   const cabinets=L.G.filter(g=>['base','wall','tall','island'].includes(g.it.kind) && !noStore(g) && !g.wing);
   const assign={};
   CONTENTS.forEach(c=>{ if(!c.fixed) assign[c.key]=L.G.filter(g=>!g.wing && (g.it.store||[]).includes(c.key)).map(g=>g.it.id); });
   // Müll und Putzmittel gehören an die Spüle (NKBA: ein Behälter dort).
   const pinned=(k,g)=>(k==='muell'||k==='putz') && g && g.it.dev==='sink';
   // Regeln wie im Panel (storable), dazu: Besteck und Messer nur in Schubladen.
-  const allowed=(c,g)=>storable(g.it).includes(c) && (!(c==='besteck'||c==='messer') || frontKind(g.it)==='drawer');
-  const cap=g=>g.it.kind==='tall' ? 3 : g.it.w>=800 ? 3 : g.it.w>=450 ? 2 : 1;
+  const allowed=(c,g)=>storable(g.it,K.spec).includes(c) && (!(c==='besteck'||c==='messer') || frontKind(g.it)==='drawer');
+  const cap=g=>storeCap(g.it,K.spec);
   const load=a=>{ const m=new Map(); Object.entries(a).forEach(([c,ids])=>ids.forEach(id=>m.set(id,(m.get(id)||[]).concat(c)))); return m; };
   // Bewertet werden auch halbe Abläufe, sonst zählt Einräumen erst, wenn alles da ist.
   const evalA=a=>flows(E,K,L,{assign:a, planner:pl, memo, partial:true}).cost;
@@ -7955,9 +7970,9 @@ function optimalStore(E, K, L){
   const base=flows(E,K,L), pl=base.planner, memo=base.memo;
   const evalA=a=>flows(E,K,L,{assign:a, planner:pl, memo, partial:true}).cost;
   const honest=a=>flows(E,K,L,{assign:a, planner:pl, memo});
-  const cabinets=L.G.filter(g=>['base','wall','tall','island'].includes(g.it.kind) && storable(g.it).length && !g.wing);
-  const allowed=(c,g)=>storable(g.it).includes(c) && (!(c==='besteck'||c==='messer') || frontKind(g.it)==='drawer');
-  const cap=g=>g.it.kind==='tall' ? 3 : g.it.w>=800 ? 3 : g.it.w>=450 ? 2 : 1;
+  const cabinets=L.G.filter(g=>['base','wall','tall','island'].includes(g.it.kind) && storable(g.it,K.spec).length && !g.wing);
+  const allowed=(c,g)=>storable(g.it,K.spec).includes(c) && (!(c==='besteck'||c==='messer') || frontKind(g.it)==='drawer');
+  const cap=g=>storeCap(g.it,K.spec);
   const keys=CONTENTS.filter(c=>!c.fixed).map(c=>c.key);
   const start={}; keys.forEach(k=>{ start[k]=L.G.filter(g=>!g.wing && (g.it.store||[]).includes(k)).map(g=>g.it.id); });
   const fixed=keys.filter(k=>start[k].length>1);
@@ -8252,8 +8267,10 @@ function frontsOf(g, z0, z1, D, S){
   }
   if(it.dev==='dw' && it.kind==='tall'){
     // Hoch eingebaute Spülmaschine: Gerätefront zwischen zwei Schranktüren.
-    const zd=S ? devZ(it,S) : z0+300;
-    plate(0,w,z0,zd); plate(0,w,zd,zd+DW_H,{dw:true}); plate(0,w,zd+DW_H,z1);
+    // Fächer darunter und darüber tragen Inhalte (dwZones); ist der Schrank
+    // niedriger als das Gerät, keine verkehrte Platte zeichnen.
+    const zd=S ? devZ(it,S) : z0+300, zt=Math.min(zd+DW_H, z1);
+    plate(0,w,z0,zd); plate(0,w,zd,zt,{dw:true}); if(z1>zt) plate(0,w,zt,z1);
     return out;
   }
   // Über Eck: am Hauptteil nur der freie Teil der Front (der Rest steht
@@ -8323,14 +8340,29 @@ function stock(K, L){
   return {list, tops, topSum:tops.reduce((s,t)=>s+t.len,0), fillers:(L.fillers||[]).map(f=>({w:f.w, corner:!!f.corner}))};
 }
 
-// Darf dieser Schrank Inhalte tragen, und welche?
-function storable(it){
+// Darf dieser Schrank Inhalte tragen, und welche? S (Küchenmaße) braucht nur
+// die hoch eingebaute Spülmaschine: ob es über dem Gerät ein Fach gibt.
+function storable(it, S){
   if(it.kind==='table') return [];
+  if(it.dev==='dw' && it.kind==='tall'){
+    // Fächer über und unter dem Gerät hinter Türen: kein Müll (der gehört
+    // an die Spüle), kein Besteck und keine Messer (nur in Schubladen).
+    // Ohne oberes Fach bleibt nur, was unten hingehört.
+    const lowOnly=dwZones(it,S).length<2;
+    return CONTENTS.filter(c=>!c.fixed && !['muell','besteck','messer'].includes(c.key)
+      && (!lowOnly || ['toepfe','vorrat','backen','putz'].includes(c.key))).map(c=>c.key);
+  }
   if(['dw','fridge','freezer','oven','mw','hood'].includes(it.dev) || ovenBelow(it)) return [];
   if(it.dev==='sink') return ['muell','putz'];
   return CONTENTS.filter(c=>!c.fixed && !(c.low && it.kind==='wall') && !(c.key==='muell' && it.kind!=='base' && it.kind!=='island')).map(c=>c.key);
 }
-globalThis.KITCHEN={ FRIDGE, DOORT_LIM, SWINGS, swingOf, isCold, fzOf, doorTOf, leaves, leafRect, leafReach, leafReachSide, entries, storable, wallFaces, K_DEF, K_LIM, WIDTHS, KIND, DEV, FRONTS, PRESETS, PGROUPS, CONTENTS, FLOWS, GROUPS, ROLE_LABEL, BODY_R,
+// Wie viele Inhalte ein Schrank beim Umsortieren / Optimal einräumen höchstens
+// bekommt. Die hoch eingebaute Spülmaschine: je Fach eins.
+function storeCap(it, S){
+  if(it.dev==='dw' && it.kind==='tall') return dwZones(it,S).length;
+  return it.kind==='tall' ? 3 : it.w>=800 ? 3 : it.w>=450 ? 2 : 1;
+}
+globalThis.KITCHEN={ FRIDGE, DOORT_LIM, SWINGS, swingOf, isCold, fzOf, doorTOf, leaves, leafRect, leafReach, leafReachSide, entries, storable, storeCap, dwZones, DW_ZONE_MIN, wallFaces, K_DEF, K_LIM, WIDTHS, KIND, DEV, FRONTS, PRESETS, PGROUPS, CONTENTS, FLOWS, GROUPS, ROLE_LABEL, BODY_R,
   derived, devZ, ovenBelow, DW_H, normKitchen, normItem, isEmpty, makeEnv, wallFrame, wpt, geom, dims, layout, envelopes, frontLR, frontKind,
   worktops, check, hoseCheck, alongWall, waterPts, HOSE, sashes, doorReach, optimalStore, hungarian, openingOn, faucetPoint, tableSides, tableSeats, seatPlan, rotSnaps, snapRot, chainDims, freeDims, applyDim, dockFree, barNkba, barSeats, BAR_SEAT_W, slotCandidates, cornerStop, fitsAt, freeSlot, snapX,
   nearestWall, planner, stations, flows, suggest, heatGrid, kidPoly, conflicts, PAIRS, sweep, placeOk, reachFactor, scene, frontsOf, stock, nameOf, inflate, polyInRoom, COL };
@@ -18744,7 +18776,7 @@ function renderSel(c){
     h+=`<div class="krow"><label>Bauart</label><div class="seg" id="kKind">${kinds.map(([v,l])=>`<button data-kind="${v}" aria-pressed="${String(it.kind===v)}">${l}</button>`).join('')}</div></div>`;
   }
   if(it.dev==='dw' && it.a)
-    h+=`<div class="krow"><label title="Hoch eingebaut: im Hochschrank, Unterkorb auf Hüfthöhe – kein Bücken beim Ein- und Ausräumen">Einbau</label><div class="seg" id="kKind">${[['base','unten'],['tall','hoch (Hüfthöhe)']].map(([v,l])=>`<button data-kind="${v}" aria-pressed="${String(it.kind===v)}">${l}</button>`).join('')}</div></div>`;
+    h+=`<div class="krow"><label title="Hoch eingebaut: im Hochschrank, Unterkorb auf Hüfthöhe – kein Bücken beim Ein- und Ausräumen. Die Fächer darunter und darüber nehmen Vorräte, Geschirr usw. auf (Inhalt).">Einbau</label><div class="seg" id="kKind">${[['base','unten'],['tall','hoch (Hüfthöhe)']].map(([v,l])=>`<button data-kind="${v}" aria-pressed="${String(it.kind===v)}">${l}</button>`).join('')}</div></div>`;
   if(it.dev==='hob' && it.kind==='base')
     h+=`<div class="krow"><label title="Ohne Backofen: nur Kochfeld, darunter Schubladen (Töpfe). Den Backofen dann im Hochschrank setzen (Leiste: Warm).">Backofen</label><div class="seg">${[['1','darunter'],['0','keiner (Schubladen)']].map(([v,l])=>`<button data-oven="${v}" aria-pressed="${String((it.noOven?'0':'1')===v)}">${l}</button>`).join('')}</div></div>`;
   h+=dimBlock(c, it, widths, Wsel);
@@ -18779,9 +18811,10 @@ function renderSel(c){
     const blk=sd.filter(s=>!s.open).length;
     h+=`<div class="krow"><label title="60 cm Gedeckbreite je Platz; Stirnseite ab 60 cm Breite, wenn an den Ecken 20 cm frei bleiben">Plätze</label><span id="kSeatsTxt"><b>${n}</b> <small>· lang ${lg.join(' + ')}${en.some(v=>v)?` · Stirn ${en.join(' + ')}`:''}${blk?` · ${blk} Seite${blk>1?'n':''} ohne Stuhlraum`:''}</small></span></div>`;
   }
-  const st=KX.storable(it);
+  const st=KX.storable(it, c.K.spec);
   if(st.length){
-    h+=`<div class="kgrp"><label>Inhalt</label><div class="kchips">${st.map(k=>{ const on=(it.store||[]).includes(k);
+    const dwF=it.dev==='dw' && it.kind==='tall' ? KX.dwZones(it,c.K.spec) : null;
+    h+=`<div class="kgrp"><label${dwF?` title="In den Fächern ${dwF.length>1?'unter und über':'unter'} der Spülmaschine (Türen). Besteck, Messer und Müll gehören in Schubladen bzw. an die Spüle.${dwF.length>1?'':' Über dem Gerät ist zu wenig Platz für ein Fach.'}"`:''}>Inhalt${dwF?` <small>${dwF.length>1?'unten und oben':'nur unten'}</small>`:''}</label><div class="kchips">${st.map(k=>{ const on=(it.store||[]).includes(k);
       return `<button data-store="${k}" aria-pressed="${on}">${escapeHtml(KX.CONTENTS.find(x=>x.key===k).label)}</button>`; }).join('')}</div></div>`;
   }
   if(it.kind==='island' && g){
@@ -18801,11 +18834,14 @@ function renderSel(c){
   // Verdrahtung. Die Handler holen das Teil zur Ereigniszeit (nach Undo
   // ist es ein anderes Objekt) und wirken erst nach dem Fokuswechsel, damit
   // der Neuaufbau den Fokus nicht verliert.
-  const edit=fn=>{ const cur=selItem(); if(!cur) return; snapshot(); fn(cur); kitchenSave(); };
+  // Hoch eingebaute Spülmaschine: wird der Schrank so niedrig, dass oben kein
+  // Fach bleibt, fällt weg, was nur dort hinpasste (Meldung M-20261109-161527-05b8cd).
+  const fitStore=t=>{ if(t.dev==='dw' && t.kind==='tall' && t.store){ const ok=KX.storable(t,kitchenData().spec); t.store=t.store.filter(x=>ok.includes(x)); if(!t.store.length) delete t.store; } };
+  const edit=fn=>{ const cur=selItem(); if(!cur) return; snapshot(); fn(cur); fitStore(cur); kitchenSave(); };
   const num=(id,lo,hi,fn)=>{ const el=$(id); if(!el) return; el.onchange=()=>{ const v=parseFloat(String(el.value).replace(',','.'));
     setTimeout(()=>{ if(!isFinite(v)||v<lo||v>hi){ setHint(`Ungültiger Wert (${lo}–${hi}).`); KS.selKey=''; render(); return; } edit(cur=>fn(cur,v)); }); }; };
   dimWire(box, c, it, Wsel, edit, num);
-  if($('kDev')) $('kDev').onchange=()=>edit(t=>{ const v=$('kDev').value; delete t.fz; delete t.doorT; delete t.gf; if(v){ t.dev=v; const dw=KX.DEV[v].widths; if(!dw.includes(t.w)) t.w=dw.includes(600)?600:dw[0]; t.store=(t.store||[]).filter(x=>KX.storable(t).includes(x)); if(!t.store.length) delete t.store; } else delete t.dev; });
+  if($('kDev')) $('kDev').onchange=()=>edit(t=>{ const v=$('kDev').value; delete t.fz; delete t.doorT; delete t.gf; if(v){ t.dev=v; const dw=KX.DEV[v].widths; if(!dw.includes(t.w)) t.w=dw.includes(600)?600:dw[0]; t.store=(t.store||[]).filter(x=>KX.storable(t,kitchenData().spec).includes(x)); if(!t.store.length) delete t.store; } else delete t.dev; });
   // Bauform: Breite und Maße auf die der Bauform zurücksetzen (Einbau 60 cm).
   box.querySelectorAll('[data-fz]').forEach(b=>b.onclick=()=>edit(t=>{ const v=b.dataset.fz;
     if(v){ t.fz=v; const f=KX.FRIDGE[v]; if(!f.widths.includes(t.w)) t.w=f.widths.reduce((b,w)=>Math.abs(w-t.w)<Math.abs(b-t.w)?w:b); }
@@ -18869,14 +18905,16 @@ function switchKind(t, kind){
       const inn = t.ctype ? KX.CSHAPE[kind][t.ctype].inner : C.inner; if(t.inner && !inn[t.inner]) delete t.inner;
     }
   }
-  if(t.store){ t.store=t.store.filter(x=>KX.storable(t).includes(x)); if(!t.store.length) delete t.store; }
+  const had=(t.store||[]).length;
+  if(t.store){ t.store=t.store.filter(x=>KX.storable(t,c.K.spec).includes(x)); if(!t.store.length) delete t.store; }
+  const lost=had-(t.store||[]).length;
   const Wf=KX.wallFrame(c.E,t.a,t.b);
   if(Wf){
     let x=KX.freeSlot(c.E,c.K,c.L,t,Wf,t.x);
     if(t.corner){ const xc=KX.cornerPlace(c.E,c.K,c.L,{...t, x:x!=null?x:t.x},Wf); if(xc!=null) x=xc; }
     if(x!=null) t.x=x;
   }
-  setHint(`${was} → ${nm(t)}${wallTxt(t)}`);
+  setHint(`${was} → ${nm(t)}${wallTxt(t)}${lost?` · ${lost} Inhalt${lost>1?'e':''} entfernt – passt hier nicht hinein`:''}`);
 }
 // ---------- Eckschrank-Konfigurator (Meldung M-20261109-134919-c2a193) ----------
 // Eigener Kasten über den übrigen Feldern, für Unter- und Hängeschränke an
@@ -22692,8 +22730,8 @@ globalThis.selfChecks=function(){
       const r=lay(items), O=KX.optimalStore(E,r.K,r.L), O2=KX.optimalStore(E,r.K,r.L);
       const base=KX.flows(E,r.K,r.L), ev=a=>KX.flows(E,r.K,r.L,{assign:a,planner:base.planner,memo:base.memo,partial:true}).cost;
       const g=id=>r.L.byId.get(id), drawer=id=>KX.frontKind(g(id).it)==='drawer';
-      let better=0; Object.keys(O.assign).forEach(c=>{ if(c==='muell'||c==='putz') return; r.L.G.forEach(h=>{ if(h.wing || !KX.storable(h.it).includes(c) || ((c==='besteck'||c==='messer') && !drawer(h.it.id))) return;
-        const a={...O.assign,[c]:[h.it.id]}, n=Object.values(a).flat().filter(x=>x===h.it.id).length, cap=h.it.kind==='tall'?3:h.it.w>=800?3:h.it.w>=450?2:1;
+      let better=0; Object.keys(O.assign).forEach(c=>{ if(c==='muell'||c==='putz') return; r.L.G.forEach(h=>{ if(h.wing || !KX.storable(h.it,r.K.spec).includes(c) || ((c==='besteck'||c==='messer') && !drawer(h.it.id))) return;
+        const a={...O.assign,[c]:[h.it.id]}, n=Object.values(a).flat().filter(x=>x===h.it.id).length, cap=KX.storeCap(h.it,r.K.spec);
         if(n<=cap && ev(a)<O.cost-1) better++; }); });
       chk('kueche: optimal einräumen – Kosten zerfallen je Inhalt (exakt), kein Einzelumzug besser, immer dieselbe Einteilung',
         Math.abs(O.cost-O.costSum)<1e-6*O.cost && better===0 && JSON.stringify(O.assign)===JSON.stringify(O2.assign) && O.completeAfter===KX.FLOWS.length);
@@ -22701,9 +22739,9 @@ globalThis.selfChecks=function(){
         drawer(O.assign.besteck[0]) && g(O.assign.muell[0]).it.dev==='sink' && !O.unplaced.length && O.better && O.placedAfter===Object.keys(O.assign).length);
       // Vorher alles eingeräumt (die optimale Einteilung), dazu Teller in
       // einem zweiten Schrank: Teller bleiben doppelt, Ergebnis nie schlechter.
-      const st=new Map(), cap=h=>h.it.kind==='tall'?3:h.it.w>=800?3:h.it.w>=450?2:1;
+      const st=new Map(), cap=h=>KX.storeCap(h.it,r.K.spec);
       Object.entries(O.assign).forEach(([k,ids])=>ids.forEach(id=>st.set(id,[...(st.get(id)||[]),k])));
-      const room=k=>r.L.G.find(h=>!h.wing && KX.storable(h.it).includes(k) && !O.assign[k].includes(h.it.id) && (st.get(h.it.id)||[]).length<cap(h));
+      const room=k=>r.L.G.find(h=>!h.wing && KX.storable(h.it,r.K.spec).includes(k) && !O.assign[k].includes(h.it.id) && (st.get(h.it.id)||[]).length<cap(h));
       const tw=room('teller').it.id; st.set(tw, [...(st.get(tw)||[]),'teller']);
       const dup=lay(items.map(it=>({...it, store:st.get(it.id)}))), Od=KX.optimalStore(E,dup.K,dup.L);
       chk('kueche: optimal einräumen – doppelt Eingeräumtes bleibt, Ergebnis nie schlechter als vorher',
@@ -23055,10 +23093,32 @@ globalThis.selfChecks=function(){
       chk('kueche: Stauraum in der Leiste nur Schrank, Eckschrank, Insel; Backofen im Hochschrank unter Warm',
         JSON.stringify(KX.PRESETS.filter(p=>p.pal!==false && p.grp==='stau').map(p=>p.key))==='["base","corner","island"]'
         && KX.PRESETS.some(p=>p.key==='oven' && p.pal!==false && p.grp==='warm'));
-      chk('kueche: Spülmaschine hoch im Hochschrank – Tür klappt auf Hüfthöhe, kein Stauraum',
+      chk('kueche: Spülmaschine hoch im Hochschrank – Tür klappt auf Hüfthöhe',
         (()=>{ const r=lay([{id:1,kind:'tall',dev:'dw',a:'D',b:'A',x:0,w:600}]); const e=r.L.G[0].env, S=r.K.spec, D=KX.derived(S);
           return r.K.items[0].dev==='dw' && e.length===1 && /Spülmaschinentür/.test(e[0].what) && e[0].z0===D.workH-400 && e[0].z0>S.plinth+300
-            && KX.storable(r.K.items[0]).length===0 && KX.nameOf(r.K.items[0])==='Spülmaschine hoch 60'; })());
+            && KX.nameOf(r.K.items[0])==='Spülmaschine hoch 60'; })());
+      // --- Fächer unter und über der hohen Spülmaschine (Meldung M-20261109-161527-05b8cd) ---
+      {
+        const S=KX.K_DEF, D=KX.derived(S), hi={kind:'tall',dev:'dw',a:'D',b:'A',x:0,w:600}, st=KX.storable(hi,S), Z=KX.dwZones(hi,S);
+        chk('kueche: Spülmaschine hoch – Fach unten (Sockel bis Gerät) und oben (Gerät bis Oberkante)',
+          Z.length===2 && Z[0].z0===S.plinth && Z[0].z1===KX.devZ(hi,S) && Z[1].z0===KX.devZ(hi,S)+KX.DW_H && Z[1].z1===D.tallTop);
+        chk('kueche: Spülmaschine hoch – Vorräte und Geschirr möglich, kein Müll, kein Besteck, keine Messer; unten eingebaut nichts',
+          ['vorrat','teller','tassen','glaeser','toepfe'].every(k=>st.includes(k)) && !st.some(k=>['muell','besteck','messer','kuehl'].includes(k))
+          && KX.storable({kind:'base',dev:'dw'},S).length===0 && KX.storeCap(hi,S)===2);
+        const low={...hi, h:1440}, Zl=KX.dwZones(low,S), stl=KX.storable(low,S);
+        chk('kueche: Spülmaschine hoch im niedrigen Hochschrank – nur das Fach unten, nur Untenzeug, keine verkehrte Front',
+          Zl.length===1 && KX.storeCap(low,S)===1 && !stl.includes('teller') && stl.includes('vorrat')
+          && [1440,1200].every(h=>{ const r=lay([{...hi,id:1,h}]), g=r.L.G[0]; return KX.frontsOf(g,S.plinth,g.z1,D,S).every(f=>f.z1>f.z0 && f.z1<=g.z1); }));
+        const K2=KX.normKitchen(JSON.parse(JSON.stringify(KX.normKitchen({items:[{...hi,id:1,store:['vorrat','teller']}]}))));
+        chk('kueche: Spülmaschine hoch – Inhalt bleibt nach Speichern/Laden, zählt als Station für die Wege',
+          JSON.stringify(K2.items[0].store)==='["vorrat","teller"]'
+          && (()=>{ const r=lay([{...hi,id:1,store:['teller']}]); return (KX.stations(E,r.K,r.L).teller||[]).some(x=>x.id===1); })());
+        const items=[{id:1,kind:'base',a:'A',b:'B',x:600,w:600,dev:'sink'},{id:2,kind:'tall',dev:'dw',a:'A',b:'B',x:1200,w:600},
+          {id:3,kind:'base',a:'A',b:'B',x:1800,w:600,dev:'hob'},{id:4,kind:'base',a:'B',b:'C',x:700,w:600},{id:5,kind:'tall',dev:'fridge',a:'B',b:'C',x:1300,w:600,store:['kuehl']}];
+        const r=lay(items), O=KX.optimalStore(E,r.K,r.L), inDw=Object.entries(O.assign).filter(([,ids])=>ids.includes(2)).map(([k])=>k);
+        chk('kueche: optimal einräumen – hohe Spülmaschine bekommt höchstens 2 Inhalte, nie Müll, Besteck oder Messer',
+          inDw.length<=2 && !inDw.some(k=>['muell','besteck','messer'].includes(k)));
+      }
       chk('kueche: Kochfeld ohne Backofen – Schubladen statt Backofentür, Töpfe darunter möglich, bleibt nach Import',
         (()=>{ const r=lay([{id:1,kind:'base',dev:'hob',a:'D',b:'A',x:0,w:600,noOven:true,front:'drawer'}]); const it=r.K.items[0], e=r.L.G[0].env;
           const mit=lay([{id:1,kind:'base',dev:'hob',a:'D',b:'A',x:0,w:600}]);
