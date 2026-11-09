@@ -8378,9 +8378,28 @@ function stock(K, L){
     const sh=shapeOf(it); if(sh) return [cornerType(it), it.ctype==='diag'?'Diagonal':'über Eck', it.inner==='karussell'?'Karussell':''].filter(Boolean).join(' · ');
     const cb=cornerBlind(L.byId.get(it.id)||{it}, K.spec);
     return [cornerType(it) || (cb ? `Tür ${Math.round((it.w-cb.b)/10)} cm` : ''), it.kind==='base' ? CORNER.base.inner[it.inner||'boden'] : ''].filter(Boolean).join(' · '); };
+  // Bestellmerkmale: eine Zeile fasst nur Teile zusammen, die sich gleich
+  // bestellen. Der Text nennt, was sie unterscheidet, und ist zugleich der
+  // Schlüssel – zwei Zeilen sehen also nie gleich aus. Front, wo man sie
+  // wählt (wie im Panel; beim Eckschrank steckt die Tür im Typ), Höhe und
+  // Tiefe als Abweichung vom Standard (wie dimSpec), Insel bei Geräten.
+  // Werte wie sie gelten (frontKind, dims): ausdrücklich gesetzter Standard
+  // zählt wie keine Angabe.
+  const cm=v=>String(Math.round(v)/10).replace('.',',');
+  const detailOf=it=>{
+    const fk=frontKind(it), cur=dims(K,it), std=dims(K,{...it, d:undefined, h:undefined, z:undefined});
+    const choose=fk && fk!=='flapdown' && !isCold(it) && it.dev!=='mw' && !(it.corner && fk==='door');
+    return [it.dev && it.kind==='island' ? 'Insel' : '',
+            choose ? FRONTS[fk] : '',
+            Math.abs((cur.z1-cur.z0)-(std.z1-std.z0))>0.5 ? `H ${cm(cur.z1-cur.z0)}` : '',
+            Math.abs(cur.d-std.d)>0.5 ? `T ${cm(cur.d)}` : '',
+            it.water ? 'Festwasser' : '',
+            extraOf(it)].filter(Boolean);
+  };
   L.G.forEach(g=>{ const it=g.it; if(it.kind==='table' || g.wing) return;
-    const k=`${nameOf(it)}|${it.kind}|${extraOf(it)}`; rows.set(k, (rows.get(k)||0)+1); });
-  const list=[...rows].map(([k,n])=>({name:k.split('|')[0], extra:k.split('|')[2]||'', n})).sort((p,q)=>p.name.localeCompare(q.name,'de'));
+    const name=nameOf(it), text=[`${name} cm`, ...detailOf(it)].join(' · '), k=`${it.kind}|${text}`;
+    const r=rows.get(k); if(r) r.n++; else rows.set(k, {name, extra:extraOf(it), text, n:1}); });
+  const list=[...rows.values()].sort((p,q)=>p.name.localeCompare(q.name,'de') || p.text.localeCompare(q.text,'de'));
   // Inselplatten mit (Meldung M-20261109-145755-b3f684), Tiefe samt Tresen-Überstand.
   const tops=[...L.tops.filter(t=>!t.island && !t.patch).map(t=>({len:t.len, depth:t.depth})),
               ...L.tops.filter(t=>t.island).map(t=>({len:t.len, depth:t.depth, island:true}))];
@@ -19317,7 +19336,7 @@ function renderAna(c){
 function renderStock(c){
   const S=KX.stock(c.K,c.L);
   $('kStock').innerHTML = S.list.length
-    ? `<table>${S.list.map(r=>`<tr><td>${escapeHtml(r.name)} cm</td><td>${r.n}×</td></tr>`).join('')}`
+    ? `<table>${S.list.map(r=>`<tr><td>${escapeHtml(r.text)}</td><td>${r.n}×</td></tr>`).join('')}`
       +S.tops.map((t,i)=>`<tr><td>${t.island?'Arbeitsplatte Insel':`Arbeitsplatte ${i+1}`}</td><td>${mTxt(t.len)} m × ${cmTxt(t.depth)} cm</td></tr>`).join('')
       +(S.fillers||[]).map(f=>`<tr><td>${f.corner?'Passblende Ecke':'Passleiste'}</td><td>${Math.round(f.w)} mm</td></tr>`).join('')+`</table>`
     : '<p class="tnote">Noch nichts geplant.</p>';
@@ -23273,6 +23292,38 @@ globalThis.selfChecks=function(){
         const E3=KX.makeEnv(R.pts,R.walls,[d3],[]), K=KX.normKitchen({items:[{id:1,kind:'tall',dev:'fridge',fz:'fd',a:'A',b:'B',x:250,w:900}]});
         chk('kueche: Flügel schlägt an die Zimmertür daneben', KX.check(E3,K,KX.layout(E3,K)).some(f=>/Flügel.*die Zimmertür/.test(f.txt)));
       }
+    }
+    // --- Review-Fix stueckliste ---
+    {
+      // Stückliste: nur bestellgleiche Teile in einer Zeile, jede Zeile sagt,
+      // worin sie sich unterscheidet (Front, Höhe, Tiefe, Insel, Eck-Typ).
+      const R5=rect(6000,5000), E5=KX.makeEnv(R5.pts,R5.walls,[],[]);
+      const st=items=>{ const K=KX.normKitchen({items}); return KX.stock(K,KX.layout(E5,K)).list; };
+      const row=(L,re)=>L.filter(r=>re.test(r.text));
+      const distinct=L=>new Set(L.map(r=>r.text)).size===L.length;
+      const B=st([{id:1,kind:'base',a:'A',b:'B',x:0,w:600,front:'drawer'},{id:2,kind:'base',a:'A',b:'B',x:600,w:600,front:'door'},
+                  {id:3,kind:'base',a:'A',b:'B',x:1200,w:600,front:'door',d:350},{id:4,kind:'base',a:'A',b:'B',x:1800,w:600}]);
+      chk('kueche: Stückliste trennt Unterschränke nach Front und Tiefe (Schubladen 2×, Drehtür, Drehtür T 35)',
+        B.length===3 && distinct(B) && row(B,/^Unterschrank 60 cm · Schubladen$/)[0]?.n===2
+        && row(B,/^Unterschrank 60 cm · Drehtür$/)[0]?.n===1 && row(B,/^Unterschrank 60 cm · Drehtür · T 35$/)[0]?.n===1);
+      const W=st([{id:1,kind:'wall',a:'A',b:'B',x:0,w:600},{id:2,kind:'wall',a:'A',b:'B',x:600,w:600,h:360},
+                  {id:3,kind:'wall',a:'A',b:'B',x:1200,w:600,h:KX.K_DEF.wallH},
+                  {id:4,kind:'tall',a:'C',b:'D',x:0,w:600,h:1400},{id:5,kind:'tall',a:'C',b:'D',x:600,w:600}]);
+      chk('kueche: Stückliste trennt Hänge- und Hochschränke nach Höhe, Standardhöhe ausdrücklich = ohne Angabe',
+        W.length===4 && distinct(W) && row(W,/^Hängeschrank 60 cm · Drehtür$/)[0]?.n===2 && row(W,/^Hängeschrank 60 cm · Drehtür · H 36$/)[0]?.n===1
+        && row(W,/^Hochschrank 60 cm · Drehtür · H 140$/)[0]?.n===1 && row(W,/^Hochschrank 60 cm · Drehtür$/)[0]?.n===1);
+      const S=st([{id:1,kind:'base',dev:'sink',a:'B',b:'C',x:0,w:600},{id:2,kind:'island',dev:'sink',x:3000,y:2500,rot:0,w:600,d:900}]);
+      chk('kueche: Stückliste – Spüle im Unterschrank und in der Insel sind zwei unterscheidbare Zeilen',
+        S.length===2 && distinct(S) && row(S,/^Spüle 60 cm .*Insel/).length===1);
+      const C=st([{id:1,kind:'base',a:'A',b:'B',x:0,w:1000,corner:true,front:'door',door:500},{id:2,kind:'base',a:'B',b:'C',x:0,w:600},
+                  {id:3,kind:'base',a:'A',b:'B',x:3000,w:1000,corner:true,front:'door',door:450},{id:4,kind:'base',a:'C',b:'D',x:3400,w:600},{id:5,kind:'base',a:'D',b:'A',x:2400,w:600}]);
+      chk('kueche: Stückliste zeigt Eck-Typ und Innenleben im Text (UED100-50 · Einlegeboden), zwei Eckschränke unterscheidbar',
+        distinct(C) && row(C,/^Eckschrank 100 cm · UED100-50 · Einlegeboden$/).length===1 && row(C,/^Eckschrank 100 cm · Tür 45 cm/).length===1
+        && C.every(r=>!r.extra || r.text.includes(r.extra)));
+      const F=st([{id:1,kind:'tall',dev:'fridge',a:'A',b:'B',x:0,w:600},{id:2,kind:'tall',dev:'fridge',a:'A',b:'B',x:700,w:600,water:true},
+                  {id:3,kind:'tall',dev:'fridge',fz:'fd',a:'C',b:'D',x:0,w:900}]);
+      chk('kueche: Stückliste – Kühlschrank mit Festwasser und French Door je eigene Zeile, ohne Front-Angabe',
+        F.length===3 && distinct(F) && row(F,/^Kühlschrank 60 cm$/).length===1 && row(F,/^Kühlschrank 60 cm · Festwasser$/).length===1 && row(F,/^French Door 90 cm$/).length===1);
     }
   }
   return {ok, out};
