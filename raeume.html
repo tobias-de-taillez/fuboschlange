@@ -1,0 +1,641 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Räume · Raumaufmaß</title>
+<style>
+  /* Startbildschirm der Werkzeugfamilie Raumaufmaß: Räume wiederfinden,
+     ordnen, öffnen. Gestaltung nach DESIGN.md und dem abgenommenen Prototyp
+     docs/superpowers/prototypes/raumaufmass-hauptweg.html (Token, Knöpfe,
+     Fokus, Raumzeile). Begriffe nach GLOSSARY.md. */
+  :root{
+    --paper:#ebe8e0; --surface:#faf9f6; --canvas:#f5f3ed; --floor:#fbfaf7;
+    --ink:#24221d; --ink2:#4b473e; --muted:#6f6a5e; --pencil:#a39d90;
+    --line:#d8d3c6; --line2:#e8e4da; --hover:#eeeae0; --press:#e4dfd3;
+    --accent:#c2410c; --accent-bg:#f9e7dc; --accent-line:#ebbda2;
+    --good:#1a6b34; --bad:#b3261e;
+    --font:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --ease:cubic-bezier(.16,1,.3,1);
+    color-scheme:light;
+  }
+  *{box-sizing:border-box}
+  [hidden]{display:none!important}
+  html,body{height:100%}
+  body{margin:0;font:13px/1.4 var(--font);background:var(--paper);color:var(--ink);
+    overflow:hidden;overscroll-behavior:none;-webkit-font-smoothing:antialiased;
+    font-variant-numeric:tabular-nums;caret-color:var(--accent);
+    scrollbar-color:var(--line) transparent;scrollbar-width:thin}
+  ::selection{background:var(--accent-bg);color:var(--ink)}
+  button{font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);
+    border-radius:4px;padding:0 10px;min-height:28px;cursor:pointer}
+  button:hover{background:var(--hover)} button:active{background:var(--press)}
+  button:disabled{opacity:.4;cursor:default;background:var(--surface)}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  button.primary:hover{background:#a8380a;border-color:#a8380a}
+  button.quiet{border-color:transparent;background:none;color:var(--ink2)}
+  button.quiet:hover{background:var(--hover);color:var(--ink)}
+  button.danger{color:var(--bad)}
+  input{font:inherit;color:var(--ink)}
+  input[type=text]{height:28px;padding:0 7px;border:1px solid var(--line);border-radius:4px;background:#fff;min-width:0}
+  input[type=text]:focus{outline:none;border-color:var(--accent)}
+  kbd{font:inherit;font-size:11px;color:var(--muted)}
+  h1,h2,h3,p{margin:0}
+  .ib{width:30px;height:30px;min-height:0;padding:0;display:inline-grid;place-items:center;border:0;
+    background:none;border-radius:4px;color:var(--ink2)}
+  .ib:hover{background:var(--hover);color:var(--ink)} .ib:disabled{opacity:.3;background:none}
+  svg.ic{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}
+  .sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
+
+  #app{height:100%;display:grid;grid-template-rows:44px minmax(0,1fr);min-width:860px}
+  /* Bis feststeht, ob es etwas zu listen gibt: nichts zeigen. Ein leerer
+     Speicher leitet sofort ins Raumaufmaß weiter, ohne dass die Leiste aufblitzt. */
+  body.lade #app{visibility:hidden}
+
+  /* ---------- Leiste ---------- */
+  #bar{display:flex;align-items:stretch;padding:0 8px 0 6px;background:var(--surface);border-bottom:1px solid var(--line)}
+  #bar .grp{display:flex;align-items:center;gap:8px}
+  #bar .sp{flex:1}
+  #brand{font-size:13px;font-weight:600;padding:0 8px}
+
+  /* ---------- Startbildschirm ---------- */
+  #home{overflow:auto;background:var(--paper);scrollbar-width:thin}
+  /* Unten Luft für den schwebenden Knopf „Fehler / Wunsch melden“. */
+  #homein{max-width:760px;margin:0 auto;padding:36px 24px 72px}
+  .geb{margin-top:28px} .geb:first-child{margin-top:0}
+  #home h2{font-size:20px;font-weight:600;letter-spacing:-.01em;margin:0 0 2px}
+  #home h2 + .rooms{margin-top:8px}
+  #home h3{font-size:12px;font-weight:400;color:var(--ink2);margin:14px 0 6px}
+  /* Name von Gebäude und Geschoss: Klick macht ihn an Ort und Stelle zum Feld.
+     Auf Papier trägt --hover nicht (es ist heller als --paper), deshalb --press. */
+  .nm{display:inline-block;vertical-align:top;max-width:100%;min-height:0;margin:0 0 0 -6px;padding:2px 6px;border:0;border-radius:4px;
+    background:none;color:inherit;letter-spacing:inherit;text-align:left;cursor:text;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .nm:hover,.nm:active{background:var(--press)}
+  input[type=text].nmedit{vertical-align:top;height:calc(1.4em + 4px);max-width:100%;margin:0 0 0 -6px;padding:0 5px;letter-spacing:inherit}
+
+  .rooms{list-style:none;margin:0;padding:0;background:var(--surface);border:1px solid var(--line);border-radius:6px}
+  .room{position:relative;display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;align-items:center;column-gap:4px;
+    padding:10px 8px 10px 12px;border-top:1px solid var(--line2)}
+  .room:first-child{border-top:0;border-radius:5px 5px 0 0} .room:last-child{border-radius:0 0 5px 5px} .room:only-child{border-radius:5px}
+  .room:hover{background:var(--hover)} .room:has(.auf:active){background:var(--press)}
+  /* Die Zeile öffnet den Raum: ein echter Knopf, dessen Fläche über die ganze
+     Zeile reicht. Die übrigen Bedienelemente liegen darüber. */
+  .room .auf{display:grid;grid-template-columns:64px minmax(0,1fr);align-items:center;gap:14px;min-height:44px;padding:0;border:0;border-radius:0;
+    background:none;text-align:left}
+  .room .auf::after{content:'';position:absolute;inset:0;border-radius:6px}
+  .room .auf:focus-visible{outline:none}
+  .room .auf:focus-visible::after{outline:2px solid var(--accent);outline-offset:-2px}
+  .room .has,.room > .ib,.room .confirm{position:relative;z-index:1}
+  .room svg.th{width:64px;height:44px}
+  .room svg.th path{fill:var(--floor);stroke:var(--ink);stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round}
+  .room svg.th path.pencil{stroke:var(--pencil);stroke-dasharray:3 3;fill:none}
+  .room svg.th circle{fill:var(--pencil)}
+  .room .tx{display:block;min-width:0}
+  .room .tx b{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .room .st{display:flex;align-items:center;gap:7px;min-width:0;color:var(--ink2);font-size:12px}
+  .room .st > span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .room .st::before{content:'';flex:none;width:7px;height:7px;border-radius:50%;background:var(--pencil)}
+  .room .st.good::before{background:var(--good)}
+  .room .st.warn::before{background:none;box-shadow:inset 0 0 0 1.5px var(--ink2)}
+  .room .st.bad{color:var(--bad)} .room .st.bad::before{background:var(--bad)}
+  .room .has{display:flex;gap:4px;margin-left:10px} .room .has button{min-height:26px;font-size:12px}
+  /* In der überfahrenen Zeile ist --hover schon der Grund: Knöpfe darin antworten mit --press. */
+  .room .has button:hover,.room > .ib:hover,.room > .ib[aria-expanded=true]{background:var(--press);color:var(--ink)}
+  .room > .ib{color:var(--pencil)} .room:hover > .ib,.room:focus-within > .ib{color:var(--ink2)}
+  .room .confirm{grid-column:1/-1;display:flex;align-items:center;gap:8px;padding:8px 0 2px;color:var(--ink2)}
+  .room .confirm span{margin-right:auto;overflow-wrap:anywhere}
+  /* Ein Raum ist angekommen (Datei, Link): die Zeile ist kurz markiert. */
+  .room.neu{animation:neu 2400ms linear}
+  @keyframes neu{0%,40%{background:var(--accent-bg)}100%{background:transparent}}
+  .leer{color:var(--ink2)}
+  #note{margin-top:28px;font-size:12px;color:var(--ink2)}
+
+  /* ---------- Menü am Raum: Gebäude und Geschoss ---------- */
+  .menu{position:fixed;z-index:30;min-width:232px;max-width:340px;max-height:calc(100vh - 16px);overflow:auto;padding:4px;background:var(--surface);
+    border:1px solid var(--line);border-radius:6px;box-shadow:0 6px 20px rgba(36,34,29,.14)}
+  .menu h3{font-size:11px;font-weight:600;color:var(--muted);padding:8px 8px 3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .menu button{display:flex;align-items:center;justify-content:space-between;gap:16px;width:100%;border:0;background:none;
+    text-align:left;padding:0 8px;border-radius:4px}
+  .menu button span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .menu button:hover{background:var(--hover)}
+  .menu button[aria-checked=true]::after{content:'';flex:none;width:6px;height:6px;border-radius:50%;background:var(--accent)}
+  .menu hr{border:0;border-top:1px solid var(--line2);margin:4px 0}
+
+  /* ---------- Hinweis an Ort und Stelle (Datei, Link, Speicher) ---------- */
+  #hinweis{position:fixed;z-index:20;top:52px;right:8px;width:min(400px,calc(100vw - 16px));display:grid;grid-template-columns:minmax(0,1fr) auto;
+    align-items:start;gap:8px;padding:10px 6px 12px 12px;background:var(--surface);border:1px solid var(--line);border-radius:6px;
+    box-shadow:0 4px 16px rgba(36,34,29,.14)}
+  #hinweis b{display:block;font-weight:600;overflow-wrap:anywhere}
+  #hinweis p{margin-top:2px;font-size:12px;color:var(--ink2)}
+  #hinweis .ib{margin:-4px 0}
+
+  @media (prefers-reduced-motion:reduce){
+    *{animation:none!important;transition:none!important}
+    .room.neu{background:var(--accent-bg)}
+  }
+</style>
+</head>
+<body class="lade">
+<div id="app">
+  <header id="bar">
+    <div class="grp"><h1 id="brand">Raumaufmaß</h1></div>
+    <div class="sp"></div>
+    <div class="grp">
+      <button id="dateiBtn">Datei öffnen <kbd data-k="open"></kbd></button>
+      <button id="neuBtn" class="primary">Neuer Raum</button>
+    </div>
+  </header>
+  <main id="home"><div id="homein"></div></main>
+</div>
+<input type="file" id="datei" accept=".json,application/json" hidden>
+<div id="hinweis" role="alert" hidden>
+  <div><b></b><p></p></div>
+  <button id="hinweisZu" class="ib" title="Schließen (Esc)" aria-label="Hinweis schließen"><svg class="ic" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+</div>
+<div id="ortmenu" class="menu" role="menu" aria-label="Gebäude und Geschoss" hidden></div>
+<div id="live" class="sr" role="status" aria-live="polite"></div>
+
+<!-- Geteilte Dateien der Familie (docs/adr/0001). raum-modell.js liefert
+     importProblem und idOrdinal: dieselbe Prüfung wie im Raumaufmaß. -->
+<script src="raum-fremd.js"></script>
+<script src="raum-kern.js"></script>
+<script src="raum-speicher.js"></script>
+<script src="raum-modell.js"></script>
+<script src="raum-haus.js"></script>
+
+<script id="zeile">
+"use strict";
+// Was eine Raumzeile aus einem Raumeintrag ableitet: Stand, Miniatur und
+// begonnene Folgewerkzeuge. DOM-frei, damit es in Node prüfbar ist
+// (test/raum-haus.mjs). Braucht: raum-kern.js (CORE.wallLoops).
+globalThis.RAUMZEILE=(function(){
+  const TOENE=['','warn','good','bad'];
+  const B=64, H=44, RAND=3;                     // Miniatur in der Raumzeile (DESIGN.md)
+
+  const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,
+    c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  // Fläche mit zwei Stellen und Dezimalkomma.
+  const fmt2=n=>Number(n).toFixed(2).replace('.',',');
+
+  const daten=r=>(r && r.data && typeof r.data==='object') ? r.data : {};
+  const ecken=(d,feld)=>(Array.isArray(d[feld]) ? d[feld] : [])
+    .filter(p=>p && typeof p.id==='string' && p.id && Number.isFinite(p.x) && Number.isFinite(p.y));
+  const waende=(d,pts)=>{
+    const ids=new Set(pts.map(p=>p.id));
+    return (Array.isArray(d.walls) ? d.walls : [])
+      .filter(w=>Array.isArray(w) && w.length===2 && w[0]!==w[1] && ids.has(w[0]) && ids.has(w[1]));
+  };
+  // Alle geschlossenen Wandzüge (der Raum und seine Inseln) oder null,
+  // solange irgendwo ein Zug offen ist. Dieselbe Frage wie im Raumaufmaß.
+  const zuege=(pts,walls)=>{
+    try{ return globalThis.CORE.wallLoops(pts, walls) || null; }catch(e){ return null; }
+  };
+  const aktiveMasse=d=>(Array.isArray(d.meas) ? d.meas : []).filter(m=>m && m.on!==false).length;
+  const flaeche=r=>(r && Number.isFinite(r.area)) ? fmt2(r.area)+' m²' : '';
+  // Der Stand, den das Raumaufmaß beim Speichern in den Eintrag schreibt:
+  // stand:{tone:''|'warn'|'good'|'bad', text}.
+  const gespeichert=r=>{
+    const s=r && r.stand;
+    if(!s || typeof s!=='object' || typeof s.text!=='string' || !s.text.trim()) return null;
+    return {tone:TOENE.includes(s.tone) ? s.tone : '', text:s.text.trim()};
+  };
+
+  // Stand der Zeile: {tone, text}. Gibt es den gespeicherten Stand, gilt er;
+  // bei „geprüft“ steht die Fläche dahinter. Fehlt er (ältere Einträge), sagt
+  // die Zeile nur, was die Daten selbst hergeben - ob ein alter Raum geprüft
+  // ist, weiß hier niemand, also behauptet es auch niemand.
+  function stand(r){
+    const s=gespeichert(r), fl=flaeche(r);
+    if(s) return {tone:s.tone, text:(s.tone==='good' && fl) ? s.text+' · '+fl : s.text};
+    const d=daten(r), pts=ecken(d,'pts'), n=pts.length;
+    if(!n) return {tone:'', text:'Noch leer'};
+    const skizze={tone:'', text:'Skizze, '+n+(n===1?' Ecke':' Ecken')};
+    if(!zuege(pts, waende(d,pts))) return skizze;
+    if(fl) return {tone:'warn', text:fl};
+    const m=aktiveMasse(d);
+    if(!m) return skizze;
+    return {tone:'warn', text:n+' Ecken, '+m+(m===1?' Maß':' Maße')};
+  }
+
+  // Begonnene Folgewerkzeuge. Fliesen- und Küchendaten liegen am Raum
+  // (raum-modell.js serialize): data.tiles.items sind die verlegten Fliesen,
+  // data.kitchen.items die aufgestellten Küchenteile. data.tiles allein
+  // genügt nicht - das Feld steht mit seinen Standardmaßen in jedem Raum,
+  // der einmal gespeichert wurde.
+  function hat(r){
+    const d=daten(r);
+    const teile=o=>!!(o && typeof o==='object' && Array.isArray(o.items) && o.items.length);
+    return {fliesen:teile(d.tiles), kueche:teile(d.kitchen)};
+  }
+
+  // Miniatur: {d, skizze, ecken}. d ist der Pfad im Feld 64 × 44 - bei
+  // geschlossenem Raum je Wandzug ein geschlossener Zug (mit fill-rule
+  // evenodd sind Inseln ausgespart), sonst jede Wand als eigene Strecke.
+  // skizze: gestrichelt in Bleistift statt Tinte. ecken: Ecken ohne Wand,
+  // als Punkte zu zeichnen.
+  function miniatur(r){
+    const d=daten(r), aufmass=ecken(d,'pts');
+    // Gestrichelt genau dann, wenn auch der Punkt der Zeile ein Bleistiftpunkt
+    // ist: noch kein Maß legt die Form fest.
+    // Das Raumaufmaß schreibt mit, ob die Form schon eindeutig ist: solange
+    // nicht, bleibt die Miniatur Bleistift, auch wenn schon Maße da sind.
+    const skizze=stand(r).tone==='' || !!(r && r.stand && r.stand.eindeutig===false);
+    // Solange der Raum nur skizziert ist, sieht man im Raumaufmaß die eigene
+    // Zeichnung (data.sketch), nicht die halb ausgeglichene Form.
+    const zeichnung=ecken(d,'sketch');
+    const pts=(skizze && zeichnung.length===aufmass.length && zeichnung.every((p,i)=>p.id===aufmass[i].id))
+      ? zeichnung : aufmass;
+    if(!pts.length) return {d:'', skizze, ecken:[]};
+    const walls=waende(d,pts);
+    const xs=pts.map(p=>p.x), ys=pts.map(p=>p.y);
+    const x0=Math.min(...xs), x1=Math.max(...xs), y0=Math.min(...ys), y1=Math.max(...ys);
+    const w=x1-x0, h=y1-y0;
+    const k=(w>0 || h>0) ? Math.min(w>0 ? (B-2*RAND)/w : Infinity, h>0 ? (H-2*RAND)/h : Infinity) : 0;
+    const P=p=>({x:B/2+(p.x-(x0+x1)/2)*k, y:H/2+(p.y-(y0+y1)/2)*k});
+    const t=p=>{ const q=P(p); return q.x.toFixed(1)+' '+q.y.toFixed(1); };
+    const loops=zuege(pts, walls);
+    const nach=new Map(pts.map(p=>[p.id,p]));
+    const pfad=loops
+      ? loops.map(L=>'M'+L.map(t).join('L')+'Z').join('')
+      : walls.map(([a,b])=>'M'+t(nach.get(a))+'L'+t(nach.get(b))).join('');
+    const anWand=new Set(walls.flat());
+    return {d:pfad, skizze, ecken:pts.filter(p=>!anWand.has(p.id)).map(P)};
+  }
+
+  return {stand, hat, miniatur, fmt2, esc};
+})();
+</script>
+
+<script id="start">
+"use strict";
+(function(){
+  const $=s=>document.querySelector(s);
+  const ZIEL='raumaufmass.html';
+  const Z=globalThis.RAUMZEILE, esc=Z.esc;
+  // Tastenbeschriftung nach Plattform, aus der gemeinsamen Tabelle (DESIGN.md).
+  const MAC=/Mac|iP(hone|ad)/.test(navigator.platform||navigator.userAgent);
+  const KEYS=MAC ? {undo:'⌘Z',redo:'⇧⌘Z',save:'⌘S',open:'⌘O',del:'⌫',zoom:'⌘'}
+                 : {undo:'Strg+Z',redo:'Strg+Y',save:'Strg+S',open:'Strg+O',del:'Entf',zoom:'Strg'};
+  document.querySelectorAll('[data-k]').forEach(e=>{ e.textContent=KEYS[e.dataset.k]; });
+
+  const VOLL='Der Speicher dieses Browsers ist voll oder gesperrt. Sichere Räume, die du nicht mehr täglich brauchst, im Raumaufmaß als Datei, lösche sie hier und versuche es erneut.';
+  const RAUMDATEI='Öffne eine Datei, die im Raumaufmaß mit „Als Datei sichern“ entstanden ist.';
+
+  // ---------- Zustand ----------
+  let RAEUME=[];                              // Raumeinträge aus dem gemeinsamen Speicher, neueste zuerst
+  let GLIED={gebaeude:[], einzeln:[]};        // dieselben Räume, gegliedert (raum-haus.js)
+  let frage=null;                             // id des Raums, dessen Zeile gerade nach dem Löschen fragt
+  let edit=null;                              // {art:'b'|'g', id, zurueck}: Name wird an Ort und Stelle bearbeitet
+  let neu=null, neuUhr=0;                     // id des gerade angekommenen Raums (Zeile ist markiert)
+  let menuRaum=null;                          // id des Raums, dessen Menü offen ist
+
+  // ---------- Hinweis und Ansage ----------
+  function zeigeHinweis(problem, abhilfe){
+    const h=$('#hinweis');
+    h.hidden=false;
+    h.querySelector('b').textContent=problem;
+    h.querySelector('p').textContent=abhilfe;
+  }
+  function schliesseHinweis(){ $('#hinweis').hidden=true; }
+  // Für Vorlesegeräte: was gerade geschehen ist. Sichtbar ist es an der Zeile selbst.
+  function sag(t){ const l=$('#live'); l.textContent=''; setTimeout(()=>{ l.textContent=t; }, 50); }
+
+  if(!globalThis.STORE || !globalThis.HAUS || !globalThis.CORE || !Z || typeof importProblem!=='function'){
+    document.body.classList.remove('lade');
+    zeigeHinweis('Die Seite ist unvollständig geladen.', 'Lade sie neu. Hilft das nicht, fehlen Dateien neben raeume.html.');
+    return;
+  }
+
+  // ---------- Daten ----------
+  function gliedere(){
+    let anlage=[];
+    try{ anlage=STORE.allRooms().map(r=>r.id); }catch(e){}
+    GLIED=HAUS.gliederung(RAEUME, anlage);
+  }
+  function laden(){
+    // Ein verbogener Eintrag darf die Seite nicht leer lassen: dann gilt die
+    // Liste als leer, und das Raumaufmaß übernimmt.
+    try{ RAEUME=STORE.list().map(l=>STORE.load(l.id)).filter(r=>r && typeof r.id==='string'); }
+    catch(e){ RAEUME=[]; }
+    gliedere();
+  }
+  const raum=id=>RAEUME.find(r=>r.id===id);
+  const nameVon=id=>{ const r=raum(id); return (r && r.name) || 'Unbenannt'; };
+  function ortVon(id){
+    for(const B of GLIED.gebaeude) for(const G of B.geschosse)
+      if(G.raeume.some(r=>r.id===id)) return {gebaeude:B, geschoss:G};
+    return null;
+  }
+  function weiter(){ location.replace(ZIEL); }
+
+  // ---------- Zeichnen ----------
+  const IC={
+    haus:'<svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 7.5 8 3l5.5 4.5M4 6.5V13h8V6.5M4 9.8h8"/></svg>',
+    weg:'<svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5"/></svg>',
+  };
+  function nameKnopf(art, o){
+    const id=esc(o.id);
+    if(edit && edit.art===art && edit.id===o.id)
+      return `<input type="text" class="nmedit" data-art="${art}" data-id="${id}" value="${esc(o.name)}" size="${Math.max(12, o.name.length+2)}" maxlength="80" autocomplete="off" spellcheck="false" aria-label="${art==='b'?'Name des Gebäudes':'Name des Geschosses'}">`;
+    return `<button class="nm" data-nm="${art}" data-id="${id}" data-fk="nm:${art}:${id}" title="${art==='b'?'Gebäude':'Geschoss'} umbenennen">${esc(o.name)}</button>`;
+  }
+  function zeile(r){
+    const id=esc(r.id), n=esc(r.name||'Unbenannt');
+    const st=Z.stand(r), mini=Z.miniatur(r), hat=Z.hat(r);
+    const bild=(mini.d ? `<path fill-rule="evenodd"${mini.skizze?' class="pencil"':''} d="${mini.d}"/>` : '')
+      + mini.ecken.map(p=>`<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="1.5"/>`).join('');
+    const werk=(k,t)=>`<button class="quiet" data-werk="${k}" data-fk="werk:${k}:${id}" aria-label="${t} von „${n}“">${t}</button>`;
+    return `<li class="room${neu===r.id?' neu':''}" data-room="${id}">
+      <button class="auf" data-auf data-fk="auf:${id}">
+        <svg class="th" viewBox="0 0 64 44" aria-hidden="true">${bild}</svg>
+        <span class="tx"><b>${n}</b><span class="sr">, </span><span class="st ${st.tone}"><span>${esc(st.text)}</span></span></span>
+      </button>
+      <span class="has">${hat.fliesen?werk('fliesen','Fliesenplan'):''}${hat.kueche?werk('kueche','Küche'):''}</span>
+      <button class="ib" data-ort data-fk="ort:${id}" aria-haspopup="menu" aria-expanded="false" title="Gebäude und Geschoss" aria-label="Gebäude und Geschoss für „${n}“">${IC.haus}</button>
+      <button class="ib" data-del data-fk="del:${id}" title="Raum löschen" aria-label="„${n}“ löschen">${IC.weg}</button>
+      ${frage===r.id ? `<div class="confirm" role="group" aria-label="Löschen bestätigen"><span>„${n}“ löschen? Das lässt sich nicht zurückholen.</span><button data-nein data-fk="nein:${id}">Abbrechen</button><button class="danger" data-ja data-fk="ja:${id}">Löschen</button></div>` : ''}
+    </li>`;
+  }
+  const fokus=fk=>{
+    const e=fk && document.querySelector('[data-fk="'+CSS.escape(fk)+'"]');
+    if(e) e.focus();
+    return !!e;
+  };
+  // Zeichnet alles neu. fk: welches Bedienelement danach den Fokus hat; ohne
+  // Angabe bleibt er, wo er war.
+  function render(fk){
+    const a=document.activeElement;
+    const merk=fk || (a && a.dataset && a.dataset.fk) || null;
+    const liste=rs=>'<ul class="rooms">'+rs.map(zeile).join('')+'</ul>';
+    let h='';
+    GLIED.gebaeude.forEach(B=>{
+      h+=`<section class="geb"><h2>${nameKnopf('b',B)}</h2>`;
+      B.geschosse.forEach(G=>{ h+=`<h3>${nameKnopf('g',G)}</h3>`+liste(G.raeume); });
+      h+='</section>';
+    });
+    if(GLIED.einzeln.length)
+      h+=`<section class="geb"><h2>${GLIED.gebaeude.length?'Einzelne Räume':'Räume'}</h2>${liste(GLIED.einzeln)}</section>`;
+    if(!RAEUME.length) h+='<p class="leer">Hier steht noch kein Raum.</p>';
+    h+=`<p id="note">${STORE.storageOk
+      ? 'Räume liegen nur in diesem Browser. Wichtige Aufmaße zusätzlich als Datei sichern.'
+      : 'Dieser Browser speichert hier nichts (privater Modus oder gesperrter Speicher). Was du anlegst, ist nach dem Schließen der Seite weg. Sichere Räume im Raumaufmaß als Datei.'}</p>`;
+    $('#homein').innerHTML=h;
+    const feld=$('#homein .nmedit');
+    if(edit && feld){ feld.focus(); feld.select(); }
+    else { edit=null; fokus(merk); }
+  }
+
+  // ---------- Öffnen, anlegen, löschen ----------
+  function oeffne(id, werkzeug){
+    STORE.setCurrent(id);
+    location.href=ZIEL+(werkzeug ? '#'+werkzeug : '');
+  }
+  function neuerRaum(){
+    const id=STORE.create('Neuer Raum');
+    if(!STORE.load(id)) return zeigeHinweis('Der Raum ließ sich nicht anlegen.', VOLL);
+    oeffne(id, '');
+  }
+  function loesche(id){
+    const name=nameVon(id);
+    const vorher=[...document.querySelectorAll('.auf')].map(b=>b.dataset.fk), i=vorher.indexOf('auf:'+id);
+    STORE.remove(id);
+    frage=null;
+    laden();
+    if(!RAEUME.length) return weiter();        // nichts mehr zu listen: das Raumaufmaß beginnt mit einem leeren Raum
+    const rest=vorher.filter(k=>k!=='auf:'+id);
+    render(rest[Math.min(Math.max(i,0), rest.length-1)]);
+    sag('„'+name+'“ gelöscht.');
+  }
+
+  // ---------- Datei und Link: immer ein neuer Raum ----------
+  // Wie importAsNewRoom im Raumaufmaß: erst vollständig prüfen, dann anlegen.
+  // Rückgabe {id} oder {fehler} oder {voll:true}.
+  function uebernimm(name, dataObj){
+    const problem=importProblem(dataObj);
+    if(problem) return {fehler:problem};
+    const data={...dataObj};
+    // Fremddateien ohne idSeq: aus den Ecken-ids zurückrechnen, sonst vergibt
+    // das Raumaufmaß später doppelte ids.
+    if(typeof data.idSeq!=='number')
+      data.idSeq=data.pts.reduce((mx,p)=>Math.max(mx, idOrdinal(p.id)+1), 0);
+    const id=STORE.create(name || 'Importierter Raum');
+    if(!STORE.save(id,{data}) || !STORE.load(id)){ STORE.remove(id); return {voll:true}; }
+    return {id};
+  }
+  // Der neue Raum steht in der Liste: Zeile zeigen, kurz markieren, Fokus darauf.
+  function angekommen(id, ansage){
+    schliesseHinweis();
+    frage=null;
+    laden();
+    neu=id;
+    clearTimeout(neuUhr);
+    neuUhr=setTimeout(()=>{
+      neu=null;
+      const z=document.querySelector('.room.neu');
+      if(z) z.classList.remove('neu');
+    }, 2400);
+    render('auf:'+id);
+    const z=document.querySelector('.room.neu');
+    if(z) z.scrollIntoView({block:'nearest'});
+    sag(ansage);
+  }
+  $('#datei').addEventListener('change', async ()=>{
+    const feld=$('#datei'), f=feld.files[0];
+    feld.value='';
+    if(!f) return;
+    let o=null, txt='';
+    try{ txt=await f.text(); }
+    catch(e){ return zeigeHinweis('„'+f.name+'“ lässt sich nicht lesen.', 'Prüfe, ob die Datei noch an ihrem Ort liegt, und öffne sie erneut.'); }
+    try{ o=JSON.parse(txt); }
+    catch(e){ return zeigeHinweis('„'+f.name+'“ ist keine Raumdatei.', RAUMDATEI); }
+    const name=(o && typeof o.name==='string' && o.name.trim()) ? o.name.trim() : f.name.replace(/\.json$/i,'');
+    const r=uebernimm(name, o);
+    if(r.fehler) return zeigeHinweis('„'+f.name+'“ ist keine Raumdatei: '+r.fehler, RAUMDATEI);
+    if(r.voll) return zeigeHinweis('„'+name+'“ ließ sich nicht speichern.', VOLL);
+    angekommen(r.id, '„'+name+'“ geöffnet und als eigener Raum gespeichert.');
+  });
+  // Kommt die Seite mit #raum=… an (auch als bloße Hash-Änderung im offenen
+  // Fenster): Raum dekodieren, als neuen Raum anlegen, Hash entfernen.
+  // Rückgabe: id des neuen Raums oder null.
+  function ausLink(){
+    if(!/^#raum=/.test(location.hash)) return null;
+    const geteilt=parseShareFragment(location.hash);
+    try{ history.replaceState(null,'',location.pathname+location.search); }catch(e){}
+    const BITTE='Lass dir den Link noch einmal schicken oder den Raum als Datei geben.';
+    if(!geteilt){ zeigeHinweis('Der Link ist unvollständig oder beschädigt.', BITTE); return null; }
+    const r=uebernimm(geteilt.name, geteilt.data);
+    if(r.fehler){ zeigeHinweis('Der Raum aus dem Link hat nicht die erwartete Form: '+r.fehler, BITTE); return null; }
+    if(r.voll){ zeigeHinweis('Der Raum aus dem Link ließ sich nicht speichern.', VOLL); return null; }
+    return r.id;
+  }
+  addEventListener('hashchange', ()=>{
+    const id=ausLink();
+    if(id) angekommen(id, '„'+nameVon(id)+'“ aus dem Link übernommen und als eigener Raum gespeichert.');
+  });
+
+  // ---------- Gebäude und Geschoss: Menü am Raum ----------
+  function schliesseMenu(zurueck){
+    if(!menuRaum) return;
+    const id=menuRaum;
+    menuRaum=null;
+    $('#ortmenu').hidden=true;
+    const k=document.querySelector('[data-fk="'+CSS.escape('ort:'+id)+'"]');
+    if(k){ k.setAttribute('aria-expanded','false'); if(zurueck) k.focus(); }
+  }
+  function oeffneMenu(id, knopf){
+    const m=$('#ortmenu'), ort=ortVon(id);
+    const punkt=(rolle, attr, text)=>`<button role="${rolle}" ${attr}><span>${esc(text)}</span></button>`;
+    let h='';
+    GLIED.gebaeude.forEach((B,i)=>{
+      h+=`<h3 id="om${i}">${esc(B.name)}</h3><div role="group" aria-labelledby="om${i}">`
+        +B.geschosse.map(G=>punkt('menuitemradio', `aria-checked="${!!(ort && ort.geschoss.id===G.id)}" data-m="g" data-id="${esc(G.id)}"`, G.name)).join('')
+        +'</div>';
+    });
+    if(GLIED.gebaeude.length) h+='<hr>';
+    if(ort) h+=punkt('menuitem', `data-m="neu-g" data-id="${esc(ort.gebaeude.id)}"`, 'Neues Geschoss in „'+ort.gebaeude.name+'“');
+    h+=punkt('menuitem', 'data-m="neu-b"', 'Neues Gebäude')+'<hr>'
+      +punkt('menuitemradio', `aria-checked="${!ort}" data-m="einzeln"`, 'Einzelner Raum');
+    m.innerHTML=h;
+    m.hidden=false;
+    // Unter den Knopf, rechtsbündig; fehlt unten der Platz, darüber.
+    const r=knopf.getBoundingClientRect(), w=m.offsetWidth, hh=m.offsetHeight;
+    let top=r.bottom+4;
+    if(top+hh>innerHeight-8) top=Math.max(8, r.top-4-hh);
+    m.style.left=Math.max(8, Math.min(r.right-w, innerWidth-w-8))+'px';
+    m.style.top=top+'px';
+    knopf.setAttribute('aria-expanded','true');
+    menuRaum=id;
+    (m.querySelector('[aria-checked=true]') || m.querySelector('button')).focus();
+  }
+  function menuWahl(t){
+    const id=menuRaum, d=t.dataset, schonDa=t.getAttribute('aria-checked')==='true', fk='ort:'+id;
+    schliesseMenu();
+    let ok=true;
+    if(d.m==='g'){ if(!schonDa) ok=HAUS.ordneZu(id, d.id); }
+    else if(d.m==='einzeln'){ if(!schonDa) ok=HAUS.loese(id); }
+    else if(d.m==='neu-b'){
+      // Das Gebäude entsteht sofort mit einem Namen, der passt, bis ein besserer
+      // getippt ist: das Namensfeld ist gleich offen.
+      const n=HAUS.neuesGebaeude(id);
+      ok=!!n;
+      if(n) edit={art:'b', id:n.gebaeude, zurueck:fk};
+    }
+    else if(d.m==='neu-g'){
+      const g=HAUS.neuesGeschoss(d.id, id);
+      ok=!!g;
+      if(g) edit={art:'g', id:g, zurueck:fk};
+    }
+    if(!ok) zeigeHinweis('Die Zuordnung ließ sich nicht speichern.', VOLL);
+    gliedere();
+    render(fk);
+  }
+  $('#ortmenu').addEventListener('keydown', e=>{
+    const punkte=[...$('#ortmenu').querySelectorAll('button')], i=punkte.indexOf(document.activeElement), n=punkte.length;
+    const k=e.key;
+    if(k==='ArrowDown' || k==='ArrowUp'){ e.preventDefault(); punkte[(i+(k==='ArrowDown'?1:n-1))%n].focus(); }
+    else if(k==='Home'){ e.preventDefault(); punkte[0].focus(); }
+    else if(k==='End'){ e.preventDefault(); punkte[n-1].focus(); }
+    else if(k==='Escape' || k==='Tab'){ e.preventDefault(); e.stopPropagation(); schliesseMenu(true); }
+  });
+  $('#home').addEventListener('scroll', ()=>schliesseMenu(), {passive:true});
+  addEventListener('resize', ()=>schliesseMenu());
+
+  // ---------- Gebäude und Geschoss umbenennen, an Ort und Stelle ----------
+  // Enter und Wegklicken übernehmen, Esc bricht ab. Getauscht wird nur das
+  // Feld gegen den Namen, nicht die ganze Liste: ein Klick, der das Feld
+  // verlässt, soll dort ankommen, wo er hinzielt.
+  function fertigName(ok, mitFokus){
+    if(!edit) return;
+    const e=edit, feld=$('#homein .nmedit'), v=feld ? feld.value.trim() : '';
+    edit=null;                                 // zuerst: das blur beim Tauschen darf nicht noch einmal übernehmen
+    let gespeichert=true;
+    if(ok && v) gespeichert=e.art==='b' ? HAUS.benenneGebaeude(e.id, v) : HAUS.benenneGeschoss(e.id, v);
+    gliedere();
+    const o=e.art==='b' ? GLIED.gebaeude.find(B=>B.id===e.id)
+                        : GLIED.gebaeude.flatMap(B=>B.geschosse).find(G=>G.id===e.id);
+    if(feld && o) feld.outerHTML=nameKnopf(e.art, o);
+    else render();
+    if(mitFokus) fokus(e.zurueck) || fokus('nm:'+e.art+':'+e.id);
+    if(!gespeichert) zeigeHinweis('Der Name ließ sich nicht speichern.', VOLL);
+  }
+  $('#homein').addEventListener('focusout', e=>{
+    if(edit && e.target.classList && e.target.classList.contains('nmedit')) fertigName(true, false);
+  });
+
+  // ---------- Klicks ----------
+  document.addEventListener('click', e=>{
+    const t=e.target.closest('button');
+    if(!t){ if(!e.target.closest('#ortmenu')) schliesseMenu(); return; }
+    if(t.closest('#ortmenu')) return menuWahl(t);
+    const offen=menuRaum;
+    schliesseMenu();
+    if(t.id==='neuBtn') return neuerRaum();
+    if(t.id==='dateiBtn') return $('#datei').click();
+    if(t.id==='hinweisZu') return schliesseHinweis();
+    const d=t.dataset;
+    if(d.nm){ edit={art:d.nm, id:d.id, zurueck:d.fk}; return render(); }
+    const z=t.closest('[data-room]'), id=z && z.dataset.room;
+    if(!id) return;
+    if('auf' in d) return oeffne(id, '');
+    if(d.werk) return oeffne(id, d.werk);
+    if('ort' in d){ if(offen!==id) oeffneMenu(id, t); return; }
+    if('del' in d){ frage=id; return render('nein:'+id); }
+    if('nein' in d){ frage=null; return render('del:'+id); }
+    if('ja' in d) return loesche(id);
+  });
+
+  // ---------- Tasten ----------
+  document.addEventListener('keydown', e=>{
+    const k=e.key, mod=e.metaKey||e.ctrlKey;
+    if(mod && !e.shiftKey && !e.altKey && k.toLowerCase()==='o'){
+      e.preventDefault();
+      if(edit) fertigName(true, false);
+      schliesseMenu();
+      return $('#datei').click();
+    }
+    if(e.target.classList && e.target.classList.contains('nmedit')){
+      if(k==='Enter'){ e.preventDefault(); fertigName(true, true); }
+      else if(k==='Escape'){ e.preventDefault(); fertigName(false, true); }
+      return;
+    }
+    if(k==='Escape'){
+      if(frage){ const id=frage; frage=null; return render('del:'+id); }
+      if(!$('#hinweis').hidden) return schliesseHinweis();
+      return;
+    }
+    // Von Zeile zu Zeile mit den Pfeiltasten; Tab erreicht zusätzlich die Knöpfe der Zeile.
+    if((k==='ArrowDown' || k==='ArrowUp') && !mod && e.target.matches && e.target.matches('.auf')){
+      const alle=[...document.querySelectorAll('.auf')], n=alle[alle.indexOf(e.target)+(k==='ArrowDown'?1:-1)];
+      e.preventDefault();
+      if(n) n.focus();
+    }
+  });
+
+  // ---------- Andere Fenster, Rückkehr über „Zurück“ ----------
+  function frisch(darfWeiter){
+    if(edit) return;                           // ein offenes Namensfeld nicht wegzeichnen
+    schliesseMenu();
+    laden();
+    if(frage && !raum(frage)) frage=null;
+    if(darfWeiter && !RAEUME.length && $('#hinweis').hidden) return weiter();
+    render();
+  }
+  addEventListener('storage', e=>{ if(e.key===null || /^raumaufmass(\.|$)/.test(e.key)) frisch(false); });
+  addEventListener('pageshow', e=>{ if(e.persisted) frisch(true); });
+
+  // ---------- Start ----------
+  // Reihenfolge wie im Raumaufmaß: Alt-Schlüssel migrieren, Link übernehmen,
+  // dann erst entscheiden, ob es etwas zu listen gibt.
+  STORE.migrate();
+  const ausDemLink=ausLink();
+  laden();
+  if(!RAEUME.length && $('#hinweis').hidden) return weiter();
+  document.body.classList.remove('lade');
+  if(ausDemLink) angekommen(ausDemLink, '„'+nameVon(ausDemLink)+'“ aus dem Link übernommen und als eigener Raum gespeichert.');
+  else render();
+})();
+</script>
+<script src="raum-meldung.js"></script>
+</body>
+</html>

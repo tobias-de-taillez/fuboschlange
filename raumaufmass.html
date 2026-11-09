@@ -6095,6 +6095,7 @@ Object.assign(globalThis.KITCHEN, { snapIsland, islandTops, topsTouch, partsClas
 </script>
 <script src="raum-geometrie.js"></script>
 <script src="raum-speicher.js"></script>
+<script src="raum-haus.js"></script>
 <script src="raum-modell.js"></script>
 <script src="raum-zeichnung.js"></script>
 
@@ -6665,6 +6666,13 @@ function createNeighborRoom(opId){
   // los will, loescht ihn in der Bibliothek; dann kommt auch das Plus zurueck.
   M.thick[k]=t;
   const id=STORE.create('Neuer Raum');
+  // Der Nachbarraum gehört ins selbe Geschoss wie der Raum, aus dem er
+  // entsteht. Steht der noch einzeln, wird aus beiden ein Gebäude.
+  if(globalThis.HAUS){
+    const ort=HAUS.ort(currentRoom);
+    const geschoss=ort ? ort.geschoss.id : (HAUS.neuesGebaeude(currentRoom, currentRoomName)||{}).geschoss;
+    if(geschoss) HAUS.ordneZu(id, geschoss);
+  }
   // Die Tuer ist der Anker der Verbindung, nicht die Wandecke: die Wand
   // kann in beiden Raeumen verschieden lang sein, die Tuer ist dasselbe
   // Bauteil. Beide Seiten merken sich deshalb IHRE Ablesung derselben Tuer.
@@ -7846,8 +7854,8 @@ function drawCanvas(){
     ctx.beginPath(); ctx.arc(x,y,4*dpr,0,7); ctx.fill();
   }
   if(M.drag && M.dragMode){
-    setHintLive({frei:'Skizze frei, noch keine Messung',
-      moden:'Ecke folgt den Messungen',
+    setHintLive({frei:'Skizze frei, noch kein Maß',
+      moden:'Ecke folgt den Maßen',
       starr:'Raum ist bestimmt: Ziehen verschiebt nur. Maß ändern statt ziehen.'}[M.dragMode]);
   }
   // Unsicherheiten - auf Abruf (Schalter "Genauigkeit") fuer alle Ecken,
@@ -9232,7 +9240,7 @@ function enterHeight(pointId){
   heightAt=pointId;
   const vorhanden=M.hmeas.filter(m=>m.at===pointId && m.on!==false);
   $('entryLabel').textContent = vorhanden.length
-    ? `Höhe an Ecke ${pointId}, bisher ${vorhanden.map(m=>fmtLen(m.d)).join(' · ')} ${unit}. Weiterer Wert:`
+    ? `Höhe an Ecke ${pointId}, bisher ${vorhanden.map(m=>fmtLen(m.d)).join(' · ')} ${unit}. Weiteres Maß:`
     : `Raumhöhe an Ecke ${pointId}`;
   const box=$('entry');
   box.hidden=false;
@@ -9560,13 +9568,13 @@ function renderOpeningMeasures(){
   if(!r || (!r.x.n && !r.y.n)){
     st.textContent='geschätzt, noch nicht eingemessen'; st.className='warn';
   } else if(tuer && r.x.n && !r.y.n){
-    st.textContent = r.verdacht.size ? 'eine Messung passt nicht' : r.x.n>1 ? 'eingemessen und geprüft' : 'eingemessen, ungeprüft';
+    st.textContent = r.verdacht.size ? 'ein Maß passt nicht' : r.x.n>1 ? 'eingemessen und geprüft' : 'eingemessen, ungeprüft';
     st.className = r.verdacht.size ? 'bad' : r.x.n>1 ? 'good' : 'warn';
   } else if(!r.x.n || !r.y.n){
     st.textContent=!r.x.n ? 'seitliche Lage fehlt' : 'Höhenlage fehlt';
     st.className='warn';
   } else if(r.verdacht.size){
-    st.textContent='eine Messung passt nicht'; st.className='bad';
+    st.textContent='ein Maß passt nicht'; st.className='bad';
   } else if(r.x.n>1 || r.y.n>1){
     const sh=[r.x.sigmaHat, r.y.sigmaHat].filter(v=>v!=null);
     st.textContent=sh.length ? `geprüft, ± ${Math.max(...sh).toFixed(1).replace('.',',')} mm` : 'geprüft';
@@ -9857,7 +9865,7 @@ $('ortho').onclick=()=>{
   recompute();
   const r=M.orthoInfo;
   setHint(!M.ortho ? 'Rechte Winkel aus: alle Ecken so, wie gemessen.'
-    : r ? `${r.ortho.length} Ecke(n) auf 90° gesetzt` + (r.rejected.length ? ` · ${r.rejected.length} bleiben, wie gemessen (die Messungen sprechen dagegen)` : '')
+    : r ? `${r.ortho.length} Ecke(n) auf 90° gesetzt` + (r.rejected.length ? ` · ${r.rejected.length} bleiben, wie gemessen (die Maße sprechen dagegen)` : '')
         : 'Rechte Winkel an: greifen, sobald gemessen ist.');
 };
 // Wandabwicklung: ein Schalter mit festem Namen - der Zustand steht in der
@@ -10340,7 +10348,7 @@ function statusText(){
     let wi=-1, wv=0;
     M.an.v.forEach((vi,i)=>{ if(!act[i].fix && Math.abs(vi)>wv){ wv=Math.abs(vi); wi=i; } });
     return [wi>=0 && wv>=1
-      ? `Ausgleich kommt nicht zur Ruhe. Am weitesten daneben liegt ${act[wi].a}–${act[wi].b} (${wv.toFixed(0)} mm): nachmessen oder den Wert löschen.`
+      ? `Ausgleich kommt nicht zur Ruhe. Am weitesten daneben liegt ${act[wi].a}–${act[wi].b} (${wv.toFixed(0)} mm): nachmessen oder das Maß löschen.`
       : 'Ausgleich kommt nicht zur Ruhe. Das Ergebnis ist nicht belastbar.','bad'];
   }
   const verl=fixVerletzt();
@@ -10355,15 +10363,15 @@ function statusText(){
     // einzelne Messung isoliert werden kann.
     const {ratio,v}=worstResidualRatio();
     if(ratio>GROSS_ERROR_SIGMA)
-      return [`Mindestens ein Maß ist falsch, größte Abweichung ${v.toFixed(0)} mm. Welches, zeigt erst eine Kontrollmessung.`,'bad'];
+      return [`Mindestens ein Maß ist falsch, größte Abweichung ${v.toFixed(0)} mm. Welches, zeigt erst ein Kontrollmaß.`,'bad'];
     return ['Form eindeutig, aber ungeprüft. Ein Kontrollmaß deckt Tippfehler auf.','warn'];
   }
   const txtS=M.an.sigmaHat.toFixed(1).replace('.',',');
   if(netFails())
     return M.suspects.size===1
-      ? ['Ein Maß passt nicht zu den übrigen (rot markiert). Nachmessen oder den Wert löschen.','bad']
-      : [`Die Maße streuen mehr als ± ${txtS} mm. Die Vorschläge unten grenzen den Fehler ein.`,'warn'];
-  return [`Geprüft · Messgenauigkeit ± ${txtS} mm`,'good'];
+      ? ['Ein Maß passt nicht zu den übrigen. Nachmessen oder das Maß löschen.','bad']
+      : [`Die Maße streuen mit ± ${txtS} mm mehr als erwartet. Die Vorschläge grenzen den Fehler ein.`,'warn'];
+  return [`Geprüft ± ${txtS} mm`,'good'];
 }
 
 // ================= Info-Kaestchen =================
@@ -10595,7 +10603,7 @@ function renderPanel(){
     const rowHtml=(a2,b2)=>{
       const e=byPair.get(wk(a2,b2));
       const dv=devTop.get(wk(a2,b2));
-      const devHtml=dv==null ? '' : `<span class="wdev" title="Der Ausgleich weicht hier ${Math.round(dv)} mm vom gemessenen Wert ab \u2013 eine der größten Abweichungen im Raum">\u0394 ${Math.round(dv)} mm</span>`;
+      const devHtml=dv==null ? '' : `<span class="wdev" title="Der Ausgleich weicht hier ${Math.round(dv)} mm vom Maß ab \u2013 eine der größten Abweichungen im Raum">\u0394 ${Math.round(dv)} mm</span>`;
       const len=(M.fit && I[a2]!=null && I[b2]!=null)
         ? (ungefaehr && !(e&&e.n) ? '≈ ' : '')+fmtLenU(C.dist(P[I[a2]],P[I[b2]])) : '\u2014';
       // Nur Ausnahmen bekommen ein Wort: verdaechtig (rot) und ohne Mass.
@@ -10605,7 +10613,7 @@ function renderPanel(){
       const note = e&&e.sus ? '<span class="wn sus">verd\u00e4chtig</span>'
         : !cnt ? `<span class="wn todo">ohne Ma\u00df${e&&e.off?' \u00b7 '+e.off+' aus':''}</span>`
         : e&&e.fix ? `<span class="wn">exakt${cnt>1?' \u00b7 '+cnt+'\u00d7':''}</span>`
-        : cnt>1 ? `<span class="wn">${cnt}\u00d7 gemessen${devHtml?' \u00b7 ':''}${devHtml}</span>` : `<span class="wn">${devHtml}</span>`;
+        : cnt>1 ? `<span class="wn">${cnt} Ma\u00dfe${devHtml?' \u00b7 ':''}${devHtml}</span>` : `<span class="wn">${devHtml}</span>`;
       return `<div class="wrow${e&&e.sus?' worst':''}" data-a="${a2}" data-b="${b2}">`
         +`<span class="wk">${a2}\u2013${b2}</span>${note}`
         +`<span class="wlen${!cnt?' approx':''}">${len}</span></div>`;
@@ -10642,10 +10650,10 @@ function renderPanel(){
   const why=$('why');
   let whyTxt='';
   if(suspects.size>1)
-    whyTxt='Mehrere Messungen sind gleich verdächtig. Erst eine weitere Messung trennt sie.';
+    whyTxt='Mehrere Maße sind gleich verdächtig. Erst ein weiteres Maß trennt sie.';
   else if(M.narrow.length)
     whyTxt=M.an && M.an.redundancy===1
-      ? 'Mit nur einer Kontrollmessung sind alle w gleich, der Fehler lässt sich keiner Messung zuordnen. Eine der vorgeschlagenen Strecken erneut messen grenzt ihn ein.'
+      ? 'Mit nur einem Kontrollmaß lässt sich der Fehler keinem Maß zuordnen. Eine der vorgeschlagenen Strecken erneut messen grenzt ihn ein.'
       : 'Die Streuung ist auffällig, aber kein einzelnes Maß sticht heraus. Eine der vorgeschlagenen Wiederholungen grenzt den Fehler ein.';
   why.textContent=whyTxt;
   why.style.display = whyTxt ? '' : 'none';
@@ -10944,7 +10952,7 @@ function standInfo(){
   return {tone: cls==='good' ? 'good' : cls==='bad' ? 'bad' : cls==='skizze' ? '' : 'warn',
           text, eindeutig, geprueft: cls==='good'};
 }
-function standKurz(){ const s=standInfo(); return {tone:s.tone, text:s.text}; }
+function standKurz(){ const s=standInfo(); return {tone:s.tone, text:s.text, eindeutig:s.eindeutig}; }
 // Die Statistik bleibt vollständig, liegt aber hinter dem Stand.
 function renderStandMore(){
   const box=$('standMore');
