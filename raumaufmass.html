@@ -3461,6 +3461,12 @@ const SUGGEST_CHECK_MAX = 3;  // Deckel der Vorschlaege zur Pruefbarkeit
 const dist=(p,q)=>Math.hypot(p.x-q.x, p.y-q.y);
 const idx=pts=>{ const m={}; pts.forEach((p,i)=>m[p.id]=i); return m; };
 const activeMeas=meas=>meas.filter(m=>m.on!==false);
+// Raumnamen, Öffnungs-ids usw. kommen vom Nutzer oder aus Dateien und landen
+// in innerHTML - einmal richtig entschaerfen statt an jeder Stelle nur die
+// spitze Klammer. Hier statt im UI-Block, damit Küche und Selbsttests es
+// ohne DOM nutzen können.
+const ESC={'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'};
+const escapeHtml=s=>String(s==null?'':s).replace(/[&<>"']/g, c=>ESC[c]);
 
 // Festgelegt ("exakt"): der Nutzer ist sich sicher. Statt einer harten
 // Nebenbedingung ein starkes Gewicht - sigma/FIX_WT = 0,125 mm bei 5 mm.
@@ -7887,6 +7893,13 @@ function entries(E){
   return E.openings.filter(o=>o.kind==='door' || (o.kind==='hole' && (o.y||0)<=50 && o.h>=1800))
     .sort((p,q)=>(p.kind==='door'?0:1)-(q.kind==='door'?0:1));
 }
+// Eingangs-Auswahl als <option>-Liste (renderWays). Hier statt im UI-Block,
+// damit der Selbsttest sie prüft: die ids stammen aus der Raumdatei (Import,
+// geteilter Link) und gehen escaped ins Attribut. Gewählt wie in stations().
+function entryOptions(doors, entry){
+  const cur=doors.find(o=>o.id===entry) || doors[0];
+  return doors.map((o,i)=>`<option value="${escapeHtml(o.id)}"${o===cur?' selected':''}>${o.kind==='door'?'Tür':'Durchgang'} ${i+1} (${Math.round(o.w/10)} cm)</option>`).join('');
+}
 // Gewicht je Station für das Umsortieren: wie gut greifbar (Blum-Ebenen,
 // NKBA 38–122 cm für Häufiges). Auszug unten schlägt Tür unten.
 function reachFactor(K, g, zone){
@@ -8526,7 +8539,7 @@ function storeCap(it, S){
   if(tallDev(it)) return devZones(it,S).length;
   return it.kind==='tall' ? 3 : it.w>=800 ? 3 : it.w>=450 ? 2 : 1;
 }
-globalThis.KITCHEN={ FRIDGE, DOORT_LIM, SWINGS, swingOf, isCold, fzOf, doorTOf, leaves, leafRect, leafReach, leafReachSide, entries, storable, storeCap, storeFits, fitStores, dwZones, devZones, devSegs, tallDev, DEV_H, LOW_ZONE_TOP, dwZoneFor, DW_ZONE_MIN, DW_LOW, wallFaces, K_DEF, K_LIM, WIDTHS, KIND, DEV, FRONTS, PRESETS, PGROUPS, CONTENTS, FLOWS, GROUPS, ROLE_LABEL, BODY_R,
+globalThis.KITCHEN={ FRIDGE, DOORT_LIM, SWINGS, swingOf, isCold, fzOf, doorTOf, leaves, leafRect, leafReach, leafReachSide, entries, entryOptions, storable, storeCap, storeFits, fitStores, dwZones, devZones, devSegs, tallDev, DEV_H, LOW_ZONE_TOP, dwZoneFor, DW_ZONE_MIN, DW_LOW, wallFaces, K_DEF, K_LIM, WIDTHS, KIND, DEV, FRONTS, PRESETS, PGROUPS, CONTENTS, FLOWS, GROUPS, ROLE_LABEL, BODY_R,
   derived, devZ, ovenBelow, DW_H, normKitchen, normItem, isEmpty, makeEnv, wallFrame, wpt, geom, dims, layout, envelopes, frontLR, frontKind,
   worktops, check, hoseCheck, alongWall, waterPts, HOSE, sashes, doorReach, optimalStore, hungarian, openingOn, faucetPoint, tableSides, tableSeats, seatPlan, rotSnaps, snapRot, chainDims, freeDims, applyDim, dockFree, barNkba, barSeats, BAR_SEAT_W, slotCandidates, cornerStop, fitsAt, freeSlot, snapX,
   nearestWall, planner, stations, flows, suggest, heatGrid, kidPoly, conflicts, PAIRS, sweep, placeOk, reachFactor, scene, frontsOf, stock, nameOf, inflate, polyInRoom, COL };
@@ -8927,6 +8940,25 @@ globalThis.clampOpening=function(shape, op){
 // zwei Fenster direkt nebeneinander mit gemeinsamem Pfosten sind ein
 // realer Fall, ein Millimeter Ueberlappung dagegen ein Fehler.
 const OVERLAP_EPS = 1;   // mm; darunter gilt es als Beruehrung, nicht als Ueberdeckung
+// Öffnungs-ids aus Dateien und geteilten Links: die App vergibt 'o'+Zahl,
+// Fremdimporte und Tests auch andere kurze Namen ('t2'). Was kein solcher
+// Name ist (Markup, Anführungszeichen, Leerzeichen, Listen, Objekte), wird
+// beim Laden neu vergeben - die id landet in Attributen und Auswahllisten.
+// Ohne id bleibt ohne id (aeltere Raeume). Aendert in place; map: alt -> neu,
+// damit deserialize() die Verweise (Lagemasse, Eingang, Nachbarwand) mitzieht.
+const OPEN_ID_RE=/^[\p{L}\p{N}_.:-]{1,64}$/u;
+globalThis.openingIdOk=id=>id==null || Number.isFinite(id) || (typeof id==='string' && OPEN_ID_RE.test(id));
+globalThis.normOpeningIds=function(openings, seq){
+  if(!(Number.isInteger(seq) && seq>0)) seq=openings.length+1;
+  const map=new Map(), used=new Set(openings.map(o=>o && o.id));
+  openings.forEach(o=>{
+    if(!o || typeof o!=='object' || globalThis.openingIdOk(o.id)) return;
+    while(used.has('o'+seq)) seq++;
+    const id='o'+(seq++);
+    used.add(id); map.set(o.id, id); o.id=id;
+  });
+  return {map, seq};
+};
 globalThis.openingsOverlap=function(a, b){
   return a.x + a.w > b.x + OVERLAP_EPS
       && b.x + b.w > a.x + OVERLAP_EPS
@@ -10486,10 +10518,7 @@ const INK = {
 const CANVAS_FONT='system-ui,-apple-system,"Segoe UI",Roboto,sans-serif';
 
 const $=id=>document.getElementById(id);
-// Raumnamen kommen vom Nutzer und landen in innerHTML - einmal richtig
-// entschaerfen statt an jeder Stelle nur die spitze Klammer.
-const ESC={'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'};
-const escapeHtml=s=>String(s==null?'':s).replace(/[&<>"']/g, c=>ESC[c]);
+// escapeHtml steht im core-Block (Grundlagen).
 
 // M.chain: letzter Punkt des aktiven Zeichenzugs. Tippen legt Ecken an und
 // verbindet sie sofort - den Raum "ablaufen" statt Punkte- und Wandmodus zu
@@ -10652,6 +10681,19 @@ function deserialize(o){
   if(typeof o.idSeq==='number') idSeq=o.idSeq;
   if(typeof o.openSeq==='number') openSeq=o.openSeq;
   else openSeq=M.openings.length+1;
+  // Öffnungs-ids, die keine sind (präparierte Datei oder Link), neu vergeben
+  // und die Verweise darauf mitziehen. Gültige Räume bleiben unverändert.
+  {
+    const r=globalThis.normOpeningIds(M.openings, openSeq);
+    if(r.map.size){
+      openSeq=r.seq;
+      const neu=id=>r.map.has(id) ? r.map.get(id) : id;
+      M.opmeas.forEach(m=>{ m.op=neu(m.op); });
+      for(const k of Object.keys(M.shared)){ const s=M.shared[k];
+        if(s && s.tuer && typeof s.tuer==='object') M.shared[k]={...s, tuer:{...s.tuer, op:neu(s.tuer.op)}}; }
+      if(M.kitchen.spec.entry!=null) M.kitchen.spec.entry=neu(M.kitchen.spec.entry);
+    }
+  }
   M.sel=[]; M.chain=null; M.drag=null; M.fit=null; M.an=null;
   M.wallSel=null; M.openSel=null;
   // Hier, nicht bei den Aufrufern: deserialize() ist der EINZIGE Weg, auf dem
@@ -19201,7 +19243,7 @@ function renderWays(c){
   if(box.dataset.key===key) return;
   box.dataset.key=key;
   let h='';
-  if(doors.length>1) h+=`<div class="krow" title="Die Nummer steht im Plan an der Tür; ein Klick auf die Tür im Plan wählt sie auch."><label>Eingang</label><select id="kEntry">${doors.map((o,i)=>`<option value="${o.id}"${(c.K.spec.entry||doors[0].id)===o.id?' selected':''}>${o.kind==='door'?'Tür':'Durchgang'} ${i+1} (${Math.round(o.w/10)} cm)</option>`).join('')}</select></div>`;
+  if(doors.length>1) h+=`<div class="krow" title="Die Nummer steht im Plan an der Tür; ein Klick auf die Tür im Plan wählt sie auch."><label>Eingang</label><select id="kEntry">${KX.entryOptions(doors, c.K.spec.entry)}</select></div>`;
   else if(!doors.length) h+=`<p class="tnote">Ohne Tür gibt es keinen Eingang: Einkauf und Müll fehlen. Tür im Modus Wände setzen.</p>`;
   Object.entries(KX.GROUPS).forEach(([gk,gl])=>{
     h+=`<div class="kflowgrp"><b style="color:${KINK.grp[gk]}">${gl}</b>`;
@@ -23575,6 +23617,24 @@ globalThis.selfChecks=function(){
                   {id:3,kind:'tall',dev:'fridge',fz:'fd',a:'C',b:'D',x:0,w:900}]);
       chk('kueche: Stückliste – Kühlschrank mit Festwasser und French Door je eigene Zeile, ohne Front-Angabe',
         F.length===3 && distinct(F) && row(F,/^Kühlschrank 60 cm$/).length===1 && row(F,/^Kühlschrank 60 cm · Festwasser$/).length===1 && row(F,/^French Door 90 cm$/).length===1);
+    }
+    // --- Review-Fix xss ---
+    {
+      // Präparierte Raumdatei: zweite Tür mit Markup als id (Eingangs-Auswahl in renderWays).
+      const bad='"></select><img src=x onerror=alert(1)>';
+      const d2={...door, id:bad, a:'A', b:'B', x:200};
+      const E2=KX.makeEnv(R.pts,R.walls,[door,d2],[]), doors=KX.entries(E2);
+      const h = typeof KX.entryOptions==='function' ? KX.entryOptions(doors, bad) : '';
+      chk('kueche: Eingangs-Auswahl escaped Öffnungs-ids aus Dateien (kein Markup)',
+        doors.length===2 && (h.match(/<option /g)||[]).length===2 && !/<img|<\/select/.test(h)
+        && h.includes(`value="${escapeHtml(bad)}" selected`) && h.includes('value="o2">'));
+      // Laden: unplausible ids neu vergeben (frei ab openSeq), gültige und fehlende bleiben.
+      const nOk=typeof globalThis.normOpeningIds==='function';
+      const ops=[{id:'o1'},{id:'t2'},{id:bad},{id:'o3'},{id:['<i>']},{id:'a b'},{kind:'door'},{id:7}];
+      const r = nOk ? globalThis.normOpeningIds(ops, 3) : null;
+      chk('kueche: Import ersetzt unplausible Öffnungs-ids, gültige bleiben',
+        nOk && ops.map(o=>o.id).join(',')==='o1,t2,o4,o3,o5,o6,,7' && r.map.get(bad)==='o4' && r.map.get('a b')==='o6'
+        && r.seq===7 && ops.every(o=>globalThis.openingIdOk(o.id)) && globalThis.normOpeningIds([{id:'o1'}], 2).map.size===0);
     }
   }
   return {ok, out};
