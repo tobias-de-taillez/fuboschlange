@@ -133,7 +133,7 @@ Quelle: nobilia Kurztypenliste (Halbeckschränke UED/UE/UEDSA, Wand-Eckschränke
 - Kochfeld unter einem Fenster, das sich öffnen lässt
 
 **warn (gelb)** heißt „Richtwert verfehlt“:
-- Gang unter 1200 (Fehler unter 900), von Plattenkante zu Plattenkante gemessen (NKBA Guideline 6); zu zweit kochen: 1219
+- Gang unter 1200 (Fehler unter 900), von Plattenkante zu Plattenkante gemessen (NKBA Guideline 6) und in ganzen mm verglichen: genau 1200 oder 900 mm lösen nichts aus. Zu zweit kochen: 1219. Eine Insel oder ein Tisch quer zur Zeile (45–135°), deren Kante in der Plattenkante steht, zählt als 0 mm (rot). Der Inselabstand der Maßkette misst bis zur selben Plattenkante.
 - Stuhlraum unter 813 (Fehler unter 750), gemessen vom Mittelstrahl jeder Tischseite
 - Tresen: Platz hinter den Hockern unter 813 (Fehler unter 750), entlang der ganzen Hockerkante
 - Halbeckschrank
@@ -167,7 +167,7 @@ Die Häufigkeiten sind eine **Annahme für 4 Personen**. Eine Primärquelle gibt
 
 ### Berechnung
 
-- **Stationen** liegen 350 mm vor der Frontmitte (NKBA misst ab Frontmitte).
+- **Stationen** liegen 350 mm vor der Front: bei einem Eckschrank über Eck oder diagonal vor dem Eckpunkt der Front, bei einem Halbeck mit Blende vor dem nutzbaren Teil, sonst vor der Frontmitte (NKBA misst ab Frontmitte). Auch die Arbeitsfläche steht an diesem Stand.
 - **Wege:** Hindernisse und Raum werden um 300 mm aufgeweitet (halbe Körperbreite). Auf dieser Fläche läuft ein Sichtbarkeitsgraph mit Dijkstra (Lozano-Pérez & Wesley 1979).
 - Start und Ziel werden in die begehbare Fläche gezogen. Gesperrte Wege werden rot gestrichelt angezeigt und zählen nicht zu den km.
 - Je Kette wählt eine DP die günstigsten Stationen.
@@ -190,9 +190,12 @@ Die Wände sind einseitig (Culling), deshalb verschwinden sie, wenn man von auß
 - **Lage und Bedienung:** Die Lage steht als Zahl im Panel, im Plan gibt es eine Maßkette. Pfeiltasten wirken an jeder Wand in Bildrichtung. Nach dem Ziehen wird auf 10 mm gerundet.
 - **Eckschrank als Typ** (Halbeck: Blende plus eine Tür). Die Platte schließt an U- und L-Ecken ohne Loch. Die Abstellfläche zählt die Querplatte mit.
 - **Dunstabzug als Gerät** (Neff: Elektro ab 430, Gas 650 mm). Hängeschränke brauchen Kopffreiheit über der Platte, mindestens 500 mm.
-- **Passleisten:** Lücken und Restmaße bis 150 mm werden zu Passleisten. Die Platte läuft darüber durch, die Leiste steht in der Stückliste.
+- **Passleisten:** Lücken und Restmaße bis 150 mm werden zu Passleisten. Die Platte läuft darüber durch, außer in der Lücke steht ein Hochschrank: dort endet die Platte (zwei Platten), und ein Rest neben dem Hochschrank wird Passleiste am Plattenende. Die Leiste steht in der Stückliste.
 - **Abhilfe-Knöpfe** an Befunden: Vorfensterarmatur, Anschlag tauschen, Als Eckschrank, Als Dunstabzug. Ein Knopf erscheint nur, wenn die Abhilfe auch wirkt.
 - **Wege ehrlich:** Ein Ablauf zählt nur vollständig.
+- **Duplizieren (Strg/Cmd+D):** Wandteile kommen wie beim Einfügen neben das Original. Ein Eckschrank über Eck oder diagonal geht in die andere Ecke der Wand (mit Platz für den zweiten Schenkel), sonst gibt es keinen Platz. Inseln und Tische kommen daneben in ihrer Achse, nicht in eine Tür- oder Fensterzone.
+- **Maßkette in der Hängezeile:** Der Hochschrank steht in der Kette, ist dort aber Anker wie das Wandende und wird nur in seiner eigenen Zeile verstellt. Die Lücke zwischen Hochschrank und Hängeschrank hat ein Feld, das die Hängeschränke daneben verstellt (bündig bis 0 mm).
+- **Gehaltene Taste:** Pfeile und Q/E speichern einmal beim Loslassen (oder nach 400 ms Ruhe), ein Rückgängig nimmt die ganze Bewegung zurück. Beim Raumwechsel wird das Vorgemerkte noch gespeichert. Am Drehregler gilt dasselbe für die Pfeiltasten.
 - **Einräumen:** Fehlende Inhalte räumt das Programm selbst ein. Danach wird netto umsortiert:
   - Zusammenhängende Umzüge werden nur gemeinsam übernommen.
   - Besteck und Messer kommen nur in Schubladen.
@@ -208,7 +211,7 @@ Die Wände sind einseitig (Culling), deshalb verschwinden sie, wenn man von auß
 - Über Eck: Die beiden Türen schwenken im Modell je 90° um ihr äußeres Ende. Die echten 165°-Falttüren brauchen etwas anderen Platz im Eckfeld.
 - Über Eck und Diagonal gehen nur in rechtwinkligen Innenecken (±3°) und mit gleich langen Schenkeln.
 - Rückt ein Halbeckschrank von der Ecke ab, meldet die Platte den toten Winkel dahinter als „Passleiste“. Bei nobilia deckt das der Winkelpassstück-Bereich hinter der Querzeile ab, ein Bauteil ist es nicht.
-- Inseln rasten nur aneinander ein (Platte an Platte, T- und L-Form, gemeinsame Arbeitsplatte), nicht an Wände oder Zeilen. Tische rasten nicht ein.
+- Inseln rasten beim Ziehen ein: die Stirnseite dockt bündig an eine Wand, wenn die Insel schon ungefähr quer dazu steht (ab 35°), die Seite an eine andere Insel (längs, Seite an Seite oder quer, die Drehung wird übernommen, Platte an Platte; bei gleicher Höhe läuft die Arbeitsplatte durch). ⌥ schaltet das Einrasten ab. Der Tisch rastet nicht ein.
 - Bei gestufter Inselplatte rechnet die Stückliste Gesamtlänge mal größte Tiefe, und bei vier oder mehr Inseln im Ring füllt der Plan die Lücke in der Mitte mit Platte.
 - Der Stuhlraum am Tisch misst nur den Mittelstrahl jeder Seite, der Tresen die ganze Hockerkante; eine enge Stelle neben der Mitte fällt am Tisch nicht auf.
 - Es gibt keinen Druck, keine Wandansicht von vorn und keine Auswahl in 3D.
