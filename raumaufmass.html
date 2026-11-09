@@ -3329,16 +3329,50 @@ const dwZones=devZones;                        // alter Name (Selbsttest, Panel)
 const DW_LOW=['toepfe','vorrat','backen','putz'];
 // Greifhöhe → Gewicht (NKBA 38–122 cm für Häufiges, Blum-Ebenen).
 const zReach=z=>z>=750 && z<=1450 ? 1 : (z>=400 && z<750) || (z>1450 && z<=1750) ? 1.3 : 2;
-// In welchem Fach ein Inhalt für die Wege liegt: Untenzeug unten, sonst das
-// besser greifbare Fach, das ihn nimmt (Spülmaschine: oben, Backofen und
-// Mikrowelle: unten). null, wenn es kein Fach gibt.
-function dwZoneFor(it, S, c){
+// Wie oft ein Inhalt in den Abläufen gebraucht wird (Gänge je Woche, Rückweg
+// doppelt) – dieselbe Rechnung wie beim optimalen Einräumen.
+const USE_MEMO=new Map();
+function contentUse(k){
+  if(!USE_MEMO.has(k)) USE_MEMO.set(k, FLOWS.reduce((s,F)=>s+(F.chains.flat().includes(k) ? F.f*(F.back?2:1) : 0),0));
+  return USE_MEMO.get(k);
+}
+// Was in der Belegung a ({inhalt:[ids]}) im Schrank id liegt.
+const heldIn=(a,id)=>Object.keys(a).filter(k=>a[k].includes(id));
+// In welchem Fach ein Inhalt für die Wege liegt. Allein: Untenzeug unten, sonst
+// das besser greifbare Fach, das ihn nimmt (Spülmaschine: oben, Backofen und
+// Mikrowelle: unten). Liegen mehrere im Schrank (list, sonst it.store), hat
+// jeder ein eigenes Fach wie in storeFits: wollen zwei dasselbe, bekommt der
+// häufiger gebrauchte das besser greifbare (EIGENE ANNAHME; gleichauf der
+// frühere in CONTENTS), der andere das übrige – gleich für jede Reihenfolge
+// der Liste. Passt die Liste nicht (zu viele, falsches Fach), zählt jeder
+// Inhalt allein. null, wenn es kein Fach gibt.
+function dwZoneFor(it, S, c, list){
   const all=devZones(it,S); if(!all.length) return null;
-  const Z=all.filter(z=>!z.only || z.only.includes(c));
-  if(Z.length<2) return Z[0] || all[0];
-  if(DW_LOW.includes(c)) return Z[0];
-  const m=z=>zReach((z.z0+z.z1)/2);
-  return m(Z[1])<m(Z[0]) ? Z[1] : m(Z[0])<m(Z[1]) ? Z[0] : Z[1];
+  const ok=(k,z)=>!z.only || z.only.includes(k), m=z=>zReach((z.z0+z.z1)/2);
+  const solo=k=>{
+    const Z=all.filter(z=>ok(k,z));
+    if(Z.length<2) return Z[0] || all[0];
+    if(DW_LOW.includes(k)) return Z[0];
+    return m(Z[1])<m(Z[0]) ? Z[1] : m(Z[0])<m(Z[1]) ? Z[0] : Z[1];
+  };
+  const had=list || it.store || [], ks=had.includes(c) ? had : [...had, c];
+  if(ks.length<2 || !storeFits(it,S,ks)) return solo(c);
+  // storeFits: höchstens zwei Inhalte in zwei Fächern.
+  const [a,b]=ks, za=solo(a), zb=solo(b);
+  if(za!==zb) return c===a ? za : zb;                    // jeder in sein Fach
+  const idx=k=>CONTENTS.findIndex(x=>x.key===k);
+  const [hi,lo]=[a,b].sort((p,q)=>contentUse(q)-contentUse(p) || idx(p)-idx(q));
+  const [best,worst]=m(all[1])<m(all[0]) ? [all[1],all[0]] : [all[0],all[1]];
+  const zHi=ok(hi,best) && ok(lo,worst) ? best : worst;
+  return c===hi ? zHi : zHi===best ? worst : best;
+}
+// Greifhöhe eines Umsortierens (Umzüge moves, Belegung vorher start, nachher
+// cur): Gewicht im Zielschrank nachher minus im Herkunftsschrank vorher. Das
+// Fach im Hochschrank mit Gerät folgt aus allem, was dort in der jeweiligen
+// Belegung liegt.
+function reachDelta(K, L, moves, start, cur){
+  const reach=(id,c,asg)=>{ const g=L.byId.get(id); return reachFactor(K, g, g && dwZoneFor(g.it,K.spec,c,heldIn(asg,id))); };
+  return moves.filter(m=>!m.place).reduce((a,m)=>a+reach(m.to,m.c,cur)-reach(m.from,m.c,start),0);
 }
 // Passt diese Liste von Inhalten in den Schrank? Normal: höchstens storeCap.
 // Hochschrank mit Gerät: je Fach ein Inhalt, und jeder in ein Fach, das ihn
@@ -3454,6 +3488,10 @@ const ROLE_LABEL={sink:'Spüle', dw:'Spülmaschine', hob:'Herd', kuehl:'Kühlsch
                   eingang:'Eingang', prep:'Arbeitsfläche', ...CLABEL};
 
 // ---------- Normalisieren (Import tolerant, wie normTiles) ----------
+// Schlüssel aus Dateien (kind, dev, front, fz, inner) nur gelten lassen, wenn
+// die Tabelle ihn selbst hat: „toString“, „constructor“, „__proto__“ träfen
+// sonst Object.prototype (wirft bei .kinds.includes, oder wird still übernommen).
+const ownKey=(T,k)=>typeof k==='string' && Object.prototype.hasOwnProperty.call(T,k);
 function normSpec(s){
   const o={...K_DEF};
   if(s && typeof s==='object'){
@@ -3464,8 +3502,14 @@ function normSpec(s){
   }
   return o;
 }
+// „Standard“ unter den Küchenmaßen: alle Maße aus K_DEF zurück. Personen
+// bleibt, das ist eine Annahme der Analyse und kein Maß (dort einzustellen).
+function specReset(S){
+  Object.keys(K_DEF).forEach(k=>{ if(k!=='persons') S[k]=K_DEF[k]; });
+  return S;
+}
 function normItem(o){
-  if(!o || typeof o!=='object' || !KIND[o.kind]) return null;
+  if(!o || typeof o!=='object' || !ownKey(KIND,o.kind)) return null;
   const it={id:o.id, kind:o.kind};
   if(KIND[o.kind].free){
     if(!fin(o.x)||!fin(o.y)) return null;
@@ -3478,21 +3522,21 @@ function normItem(o){
   if(fin(o.d)) it.d=clamp(o.d, 100, 3000);
   if(fin(o.h)) it.h=clamp(o.h, 100, 3000);
   if(fin(o.z)) it.z=clamp(o.z, 0, 3000);
-  if(o.dev && DEV[o.dev] && DEV[o.dev].kinds.includes(o.kind)) it.dev=o.dev;
-  if(FRONTS[o.front]) it.front=o.front;
+  if(ownKey(DEV,o.dev) && DEV[o.dev].kinds.includes(o.kind)) it.dev=o.dev;
+  if(ownKey(FRONTS,o.front)) it.front=o.front;
   if(o.hinge==='left'||o.hinge==='right') it.hinge=o.hinge;
   if(fin(o.faucetH)) it.faucetH=clamp(o.faucetH, 0, 600);
   if(o.noOven===true && it.dev==='hob' && it.kind==='base') it.noOven=true;
   if(o.water===true && it.dev==='fridge' && it.kind==='tall') it.water=true;
-  if(o.corner===true && CORNER[o.kind]){
+  if(o.corner===true && ownKey(CORNER,o.kind)){
     it.corner=true;
     if(fin(o.door)) it.door=clamp(o.door, 100, Math.max(100, it.w-50));
     if(o.cEnd===0 || o.cEnd===1) it.cEnd=o.cEnd;
     if(o.ctype==='L' || o.ctype==='diag'){ it.ctype=o.ctype; delete it.door; }
     const inn = it.ctype ? CSHAPE[o.kind][it.ctype].inner : CORNER[o.kind].inner;
-    if(typeof o.inner==='string' && inn[o.inner] && o.inner!=='boden') it.inner=o.inner;
+    if(ownKey(inn,o.inner) && o.inner!=='boden') it.inner=o.inner;
   }
-  if(COLD.has(it.dev) && it.kind==='tall' && FRIDGE[o.fz] && FRIDGE[o.fz].devs.includes(it.dev)){
+  if(COLD.has(it.dev) && it.kind==='tall' && ownKey(FRIDGE,o.fz) && FRIDGE[o.fz].devs.includes(it.dev)){
     it.fz=o.fz;
     if(fin(o.doorT)) it.doorT=clamp(o.doorT, DOORT_LIM[0], DOORT_LIM[1]);
     if(o.gf===true && it.fz==='free' && it.dev==='fridge') it.gf=true;
@@ -3507,7 +3551,7 @@ function normKitchen(o){
   const used=new Set();
   src.forEach(x=>{ const it=normItem(x); if(it) K.items.push(it); });
   K.items.forEach(it=>{ if(!(Number.isInteger(it.id) && it.id>0) || used.has(it.id)) it.id=null; else used.add(it.id); });
-  let seq=Math.max(0, ...used)+1;
+  let seq=1; used.forEach(v=>{ if(v>=seq) seq=v+1; });   // kein Math.max(...): zu viele Teile sprengten den Stapel
   K.items.forEach(it=>{ if(it.id==null){ it.id=seq++; } });
   K.seq=Math.max(seq, (o && Number.isInteger(o.seq)) ? o.seq : 0, 1);
   const fr=o && o.frame;
@@ -5287,7 +5331,7 @@ function flows(E, K, L, opts){
         const a=stops[i-1], b=stops[i];
         if(a.id!=null && a.id===b.id && a.role===b.role) continue;
         const r=route(a,b), k=F.back?2:1;
-        const rf=st=>{ if(!CKEY.has(st.role)) return 1; const g=L.byId.get(st.id); return reachFactor(K, g, g && dwZoneFor(g.it,K.spec,st.role)); };
+        const rf=st=>{ if(!CKEY.has(st.role)) return 1; const g=L.byId.get(st.id); return reachFactor(K, g, g && tallDev(g.it) ? dwZoneFor(g.it,K.spec,st.role,opts.assign && heldIn(opts.assign,st.id)) : null); };
         const hf=rf(a)*rf(b);
         legs.push({from:a.role, to:b.role, path:r.path, len:r.len, ok:r.ok});
         if(!r.ok){ blocked++; c+=50000*k; continue; }   // gesperrt: nicht in die Meter, aber teuer
@@ -5378,8 +5422,7 @@ function suggest(E, K, L, n=3){
   const par=new Map(), f=x=>{ while(par.get(x)!==x) x=par.get(x); return x; };
   out.forEach(m=>{ [m.from,m.to].forEach(x=>{ if(x!=null && !par.has(x)) par.set(x,x); }); if(m.from!=null) par.set(f(m.from), f(m.to)); });
   out.forEach(m=>{ m.grp=f(m.to); });
-  const reach=(id,c)=>{ const g=L.byId.get(id); return reachFactor(K, g, g && dwZoneFor(g.it,K.spec,c)); };
-  out.reachDelta=out.filter(m=>!m.place).reduce((a,m)=>a+reach(m.to,m.c)-reach(m.from,m.c),0);
+  out.reachDelta=reachDelta(K,L,out,start,cur);
   const hb=honest(start), ha=honest(cur);
   // Vergleichbar ist nur „nach dem Einräumen“ gegen „nach dem Umsortieren“
   // (Einräumen macht Abläufe erst vollständig, die Summe steigt dabei).
@@ -6170,7 +6213,7 @@ Object.assign(globalThis.KITCHEN, { /* rest-pruef */ });
 //
 Object.assign(globalThis.KITCHEN, { /* rest-wege */ });
 //
-Object.assign(globalThis.KITCHEN, { /* rest-inhalte */ });
+Object.assign(globalThis.KITCHEN, { specReset, reachDelta });
 //
 Object.assign(globalThis.KITCHEN, { /* rest-3d */ });
 //
@@ -14142,7 +14185,7 @@ function buildSpec(){
       kitchenSave();
     });
   });
-  $('kSpecReset').onclick=()=>{ const S=kitchenData().spec; snapshot(); Object.assign(S, KX.K_DEF); const n=KX.fitStores(kitchenData());
+  $('kSpecReset').onclick=()=>{ const S=kitchenData().spec; snapshot(); KX.specReset(S); const n=KX.fitStores(kitchenData());
     setHint('Küchenmaße auf Standard zurückgesetzt.'+(n?` ${n} Inhalt${n>1?"e":""} aus Hochschränken mit Gerät entfernt.`:'')); kitchenSave(); };
 }
 function renderSpec(c){
@@ -19701,7 +19744,92 @@ globalThis.selfChecks=function(){
     //
     // --- Rest-Fix inhalte ---
     try{
-      // TESTS-inhalte
+      // Meldung der Review-Gruppe „Inhalte“: G1 Fächer, G2 Anzahl je Fach, G3 Laden, G4 Küchenmaße zurücksetzen.
+      // sf: eine fehlende Funktion oder Ausnahme macht nur diese Prüfung rot, nicht die übrigen.
+      const sf=f=>{ try{ return !!f(); }catch(e){ return false; } };
+      const S0=KX.K_DEF, tDw={kind:'tall',dev:'dw',a:'D',b:'A',x:0,w:600}, tOv={...tDw,dev:'oven'}, tMw={...tDw,dev:'mw'};
+      const zk=(it,list,S)=>list.map(c=>KX.dwZoneFor({...it,store:list},S||S0,c).key);
+      // G1: dwZoneFor legte jeden Untenzeug-Inhalt ins untere Fach, ohne den anderen Inhalt zu sehen.
+      chk('kueche: hohe Spülmaschine – zwei Untenzeug-Inhalte liegen in verschiedenen Fächern, in jeder Reihenfolge gleich, der häufiger gebrauchte oben',
+        sf(()=>{ const a=zk(tDw,['vorrat','toepfe']), b=zk(tDw,['toepfe','vorrat']);
+          return KX.storeFits(tDw,S0,['vorrat','toepfe']) && a[0]==='unten' && a[1]==='oben' && b[0]==='oben' && b[1]==='unten'; }));
+      chk('kueche: Backofen und Mikrowelle hoch – zwei Inhalte liegen in verschiedenen Fächern (nicht beide im besser greifbaren), in jeder Reihenfolge gleich',
+        sf(()=>[tOv,tMw].every(it=>{ const a=zk(it,['teller','tassen']), b=zk(it,['tassen','teller']);
+          return a[0]!==a[1] && a[0]===b[1] && a[1]===b[0] && a[0]==='unten'; })));
+      chk('kueche: Hochschrank mit Gerät – wo storeFits passt, hat jeder Inhalt ein eigenes Fach, das ihn nimmt (alle Paare, Geräte, Höhen, Küchenmaße)',
+        sf(()=>{ const keys=KX.CONTENTS.map(c=>c.key); let n=0, bad=0;
+          [tDw,tOv,tMw].forEach(dev=>[undefined,1440,1700,2400].forEach(h=>[S0,{...S0,baseH:900},{...S0,plinth:100,tallH:2300}].forEach(S=>{
+            const it={...dev,h}, take=(c,z)=>!z.only || z.only.includes(c);
+            keys.forEach(a=>keys.forEach(b=>{ if(a>=b || !KX.storeFits(it,S,[a,b])) return; n++;
+              const za=KX.dwZoneFor(it,S,a,[a,b]), zb=KX.dwZoneFor(it,S,b,[a,b]), ya=KX.dwZoneFor(it,S,a,[b,a]), yb=KX.dwZoneFor(it,S,b,[b,a]);
+              if(!za || !zb || za.key===zb.key || !take(a,za) || !take(b,zb) || ya.key!==za.key || yb.key!==zb.key) bad++; })); })));
+          return n>20 && bad===0; }));
+      chk('kueche: hohe Spülmaschine – passt die Liste nicht (zu viele, zwei Geschirr-Inhalte), zählt jeder Inhalt allein; ein Inhalt allein bleibt wie bisher',
+        sf(()=>{ const t=zk(tDw,['teller','tassen']), u=zk(tDw,['vorrat','toepfe','backen']);
+          return !KX.storeFits(tDw,S0,['teller','tassen']) && t[0]==='oben' && t[1]==='oben' && u.every(k=>k==='unten')
+            && KX.dwZoneFor(tDw,S0,'vorrat').key==='unten' && KX.dwZoneFor(tDw,S0,'teller').key==='oben'
+            && KX.dwZoneFor({...tDw,store:['vorrat']},S0,'toepfe').key==='oben'           // ohne Eintrag: so, als käme er dazu
+            && KX.dwZoneFor({...tDw,store:['vorrat']},S0,'toepfe',['toepfe']).key==='unten'; }));      // list ersetzt it.store
+      {
+        // Die Wege zählen die Fächer: zwei Untenzeug-Inhalte in der hohen Spülmaschine kosten weniger als die Summe ihrer
+        // Einzelkosten (vorher gleich: beide wurden mit der Bodenhöhe gerechnet). Mit Belegung (assign) wie ohne.
+        const items=[{id:1,kind:'base',a:'A',b:'B',x:600,w:600,dev:'sink'},{id:2,kind:'tall',dev:'dw',a:'A',b:'B',x:1200,w:600},
+          {id:3,kind:'base',a:'A',b:'B',x:1800,w:600,dev:'hob'},{id:4,kind:'base',a:'B',b:'C',x:700,w:600},{id:5,kind:'tall',dev:'fridge',a:'B',b:'C',x:1300,w:600,store:['kuehl']}];
+        chk('kueche: Wege – zwei Untenzeug-Inhalte in der hohen Spülmaschine kosten weniger als die Summe der Einzelkosten (mit Belegung)',
+          sf(()=>{ const r=lay(items), base=KX.flows(E,r.K,r.L);
+            const ev=a=>KX.flows(E,r.K,r.L,{assign:a,planner:base.planner,memo:base.memo,partial:true}).cost;
+            const empty=Object.fromEntries(KX.CONTENTS.filter(c=>!c.fixed).map(c=>[c.key,[]])), E0=ev(empty), d=a=>ev({...empty,...a})-E0;
+            const both=d({toepfe:[2],vorrat:[2]}), single=d({toepfe:[2]})+d({vorrat:[2]});
+            return single>0 && both>0 && single-both>1; }));
+        chk('kueche: Wege – dasselbe aus den eingetragenen Inhalten (ohne Belegung), und beides rechnet gleich',
+          sf(()=>{ const cost=store=>{ const r=lay(items.map(it=>it.id===2 && store ? {...it,store} : it)); return KX.flows(E,r.K,r.L,{partial:true}).cost; };
+            const c0=cost(null), both=cost(['toepfe','vorrat'])-c0, single=(cost(['toepfe'])-c0)+(cost(['vorrat'])-c0);
+            const r=lay(items), base=KX.flows(E,r.K,r.L), empty=Object.fromEntries(KX.CONTENTS.filter(c=>!c.fixed).map(c=>[c.key,[]]));
+            const ev=a=>KX.flows(E,r.K,r.L,{assign:{...empty,...a},planner:base.planner,memo:base.memo,partial:true}).cost;
+            return single-both>1 && Math.abs((ev({toepfe:[2],vorrat:[2]})-ev({}))-both)<1e-6*Math.max(1,both); }));
+      }
+      // Umsortieren: reachDelta rechnet die Greifhöhe je Fach aus der Belegung vor und nach den Umzügen. Schubladenfach im
+      // Unterschrank 1,04; hohe Spülmaschine: Untenzeug unten 2, oben 1,3. Bei zwei Untenzeug-Inhalten bekommt der
+      // häufiger gebrauchte (Töpfe vor Vorräten vor Putzmitteln) das obere Fach.
+      chk('kueche: Umsortieren – die Greifhöhe in der hohen Spülmaschine kommt aus allem, was dort vor bzw. nach den Umzügen liegt',
+        sf(()=>{ const r=lay([{id:1,kind:'base',a:'A',b:'B',x:0,w:600,dev:'sink'},{id:2,kind:'tall',dev:'dw',a:'D',b:'A',x:800,w:600},{id:9,kind:'base',a:'B',b:'C',x:1700,w:600,front:'drawer'}]);
+          const rd=(moves,start,cur)=>KX.reachDelta(r.K,r.L,moves,start,cur), eq=(x,y)=>Math.abs(x-y)<1e-9;
+          return eq(rd([{c:'vorrat',from:2,to:9}], {vorrat:[2],putz:[2]}, {vorrat:[9],putz:[2]}), 1.04-1.3)      // Vorräte aus dem oberen Fach in die Schublade
+            && eq(rd([{c:'toepfe',from:9,to:2}], {toepfe:[9],vorrat:[2]}, {toepfe:[2],vorrat:[2]}), 1.3-1.04)  // Töpfe ins obere Fach, Vorräte bleiben unten
+            && eq(rd([{c:'vorrat',from:9,to:2}], {vorrat:[9]}, {vorrat:[2]}), 2-1.04)                          // allein im Fach: unten
+            && rd([{c:'toepfe',from:null,to:2,place:true}], {}, {toepfe:[2]})===0; }));
+      // G2 (Regressionsprüfung, auf main@5580aec schon behoben): fitStores kappt auch die Anzahl je Fach.
+      chk('kueche: hohe Spülmaschine – Küchenmaße ändern und Laden räumen Inhalte aus, die zusammen in kein Fach mehr passen (je Fach einer, der erste bleibt)',
+        sf(()=>{ const mk=(store,h)=>KX.normKitchen({items:[{...tDw,id:1,a:'A',b:'B',h,store}]});
+          const K1=mk(['toepfe','vorrat']); K1.spec.tallH=1300; const n1=KX.fitStores(K1), it1=K1.items[0];
+          const K2=mk(['toepfe','vorrat'],1400), K3=mk(['teller','tassen']), K4=mk(['teller','tassen','vorrat']);
+          return n1===1 && JSON.stringify(it1.store)==='["toepfe"]' && KX.storeFits(it1,K1.spec,it1.store)
+            && JSON.stringify(K2.items[0].store)==='["toepfe"]' && JSON.stringify(K3.items[0].store)==='["teller"]'
+            && JSON.stringify(K4.items[0].store)==='["teller","vorrat"]'; }));
+      // G3: Schlüssel aus der Datei, die Namen von Object.prototype tragen, ließen normItem werfen oder wurden still übernommen.
+      chk('kueche: Laden – Schlüssel wie „toString“, „constructor“, „__proto__“ werfen nicht, der kaputte Teil fällt einzeln weg, der Nachbarschrank bleibt',
+        sf(()=>{ const names=[...Object.getOwnPropertyNames(Object.prototype),'__proto__'], sib={id:9,kind:'base',a:'A',b:'B',x:700,w:600};
+          const cases=nm=>[{kind:nm,a:'A',b:'B',x:0},{kind:nm,x:0,y:0},{kind:'base',a:'A',b:'B',x:0,dev:nm},{kind:'tall',a:'A',b:'B',x:0,dev:nm},{kind:'base',a:'A',b:'B',x:0,front:nm},
+            {kind:'tall',dev:'fridge',a:'A',b:'B',x:0,fz:nm},{kind:'base',corner:true,a:'A',b:'B',x:0,inner:nm},{kind:'wall',corner:true,a:'A',b:'B',x:0,inner:nm},
+            {kind:'base',corner:true,ctype:'L',a:'A',b:'B',x:0,inner:nm},{kind:'base',corner:true,ctype:'diag',a:'A',b:'B',x:0,inner:nm}];
+          return names.every(nm=>cases(nm).every(o=>{ const K=KX.normKitchen(JSON.parse(JSON.stringify({items:[o,sib]})));
+            const mine=K.items.filter(i=>i.id!==9), kindBad=o.kind===nm;
+            return K.items.some(i=>i.id===9) && mine.length===(kindBad?0:1)
+              && !K.items.some(i=>[i.kind,i.dev,i.front,i.fz,i.inner].some(v=>names.includes(v))); })); }));
+      chk('kueche: Laden – gültige Schlüssel bleiben (Gerät, Front, Bauform, Eckschrank-Inneres) und zählen wie vorher',
+        sf(()=>{ const K=KX.normKitchen({items:[{id:1,kind:'base',a:'A',b:'B',x:0,w:600,dev:'sink',front:'door'},{id:2,kind:'tall',dev:'fridge',fz:'fd',a:'A',b:'B',x:700,w:900},
+          {id:3,kind:'base',corner:true,ctype:'L',inner:'karussell',a:'A',b:'B',x:1700,w:900},{id:4,kind:'base',corner:true,inner:'schub',a:'A',b:'B',x:2700,w:1000},{id:5,kind:'island',x:2000,y:1500,w:1200,front:'drawer'}]});
+          const g=id=>K.items.find(i=>i.id===id);
+          return K.items.length===5 && g(1).dev==='sink' && g(1).front==='door' && g(2).fz==='fd' && g(3).inner==='karussell' && g(4).inner==='schub' && g(5).kind==='island'; }));
+      chk('kueche: Laden – sehr viele Teile (200000) sprengen den Stapel nicht, die ids laufen weiter',
+        sf(()=>{ const items=[]; for(let i=1;i<=200000;i++) items.push({id:i,kind:'base',a:'A',b:'B',x:i}); const K=KX.normKitchen({items});
+          return K.items.length===200000 && K.seq===200001; }));
+      // G4: „Standard“ unter den Küchenmaßen setzte über K_DEF auch die Annahme der Analyse (Personen) zurück.
+      chk('kueche: Küchenmaße zurücksetzen – alle Maße auf Standard, Personen (Annahme der Analyse) und Eingang bleiben',
+        sf(()=>{ const S={...S0, plinth:100, baseH:760, baseD:600, topT:30, topD:650, wallH:600, wallD:320, tallH:2200, tallD:700, faucetH:100, persons:2, entry:'o2'};
+          KX.specReset(S);
+          return Object.keys(S0).every(k=>k==='persons' ? S[k]===2 : S[k]===S0[k]) && S.entry==='o2'
+            && KX.normKitchen({spec:{...S}}).spec.persons===2; }));
     }catch(err){ chk('kueche: Rest-Fix inhalte ohne Ausnahme ('+err.message+')', false); }
     //
     // --- Rest-Fix 3d ---
