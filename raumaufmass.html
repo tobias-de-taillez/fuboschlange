@@ -536,6 +536,10 @@
   .krow input{width:5em;height:26px;padding:0 6px;border:1px solid var(--line);border-radius:4px}
   .kgrp{margin:8px 0;font-size:12px} .kgrp>label{display:block;color:var(--ink2);margin-bottom:5px}
   .kchips{display:flex;flex-wrap:wrap;gap:4px}
+  #kCorner{border:1px solid var(--line);border-radius:6px;padding:4px 8px 6px;margin:4px 0 8px}
+  #kCorner .kchead{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:12px;margin:2px 0 2px}
+  #kCorner .kchead small,#kCorner .knote{color:var(--ink2);font-size:11px}
+  #kCorner .knote{margin:2px 0 4px}
   .kchips button{min-height:24px;padding:0 8px;font-size:12px;border-radius:12px}
   .kchips button[aria-pressed=true]{background:var(--ink);color:var(--surface);border-color:var(--ink)}
   #kFree{margin:8px 0;font-size:12px} #kFree summary{cursor:pointer;color:var(--ink2)} #kFree .tgrid{margin-top:8px}
@@ -842,6 +846,7 @@
         <p id="kEmpty"></p>
         <div id="kSelBox" hidden>
           <h3><span id="kSelInfo"></span><button id="kSelX" aria-label="Auswahl aufheben" title="Auswahl aufheben (Esc)">✕</button></h3>
+          <div id="kCorner" hidden></div>
           <div id="kSelBody"></div>
         </div>
         <div id="kCheckBox"><h3>Prüfung <small id="kCheckCount"></small></h3><div id="kChecks"></div></div>
@@ -6115,6 +6120,20 @@ const doorTOf=it=>{ const f=fzOf(it); return !f ? 0 : it.doorT!=null ? it.doorT 
 // Passblende an Innenecken: Griffe und Fronten stoßen sonst aneinander.
 const PASS=50;
 const FRONTS={ drawer:'Schubladen', door:'Drehtür', slide:'Schiebetür', flap:'Klappe', open:'offen' };
+// Eckschränke (Meldung M-20261109-134919-c2a193: Konfigurator für Unter- und
+// Hängeschrank). nobilia Typenliste 2026, Halbeckschränke: Korpus und Tür
+// stehen im Typnamen (UE100-50 = Korpus 1000, Tür 500), der Rest ist Blende
+// hinter der Querzeile. Planmaß quer 650 (630–750) unten, 450 (390–500)
+// oben; längs = Planmaß quer + Tür. Unten UED (Einlegeboden), UE
+// (Schubkasten + Tür), UEDSA (Schwenkauszug, 2 Holzschwenktablare); oben
+// WE60-20, WE80-35, WE90-45 mit Einlegeboden.
+// door fehlt = „passend“: Blende so breit wie Querzeile + Passblende.
+const CORNER={
+  base:{ bodies:[900,1000], doors:{900:[400,450], 1000:[500,600]}, plan:650, minDoor:300,
+         inner:{boden:'Einlegeboden', schub:'Schubkasten + Tür', schwenk:'Schwenkauszug'}, type:{boden:'UED', schub:'UE', schwenk:'UEDSA'} },
+  wall:{ bodies:[600,782,882], doors:{600:[200], 782:[350], 882:[450]}, plan:450, minDoor:150,
+         inner:{boden:'Einlegeboden'}, type:{boden:'WE'} },
+};
 const PRESETS=[
   {key:'base',  kind:'base', front:'drawer', w:600, label:'Unterschrank', tip:'Unterschrank mit Auszügen'},
   {key:'sink',  kind:'base', dev:'sink', front:'door', w:600, store:['muell','putz'], label:'Spüle', tip:'Spülenschrank mit Armatur'},
@@ -6122,6 +6141,7 @@ const PRESETS=[
   {key:'hob',   kind:'base', dev:'hob', front:'door', w:600, label:'Herd', tip:'Kochfeld mit Backofen darunter'},
   {key:'corner',kind:'base', corner:true, front:'door', w:1000, label:'Eckschrank', tip:'Halbeckschrank für die Innenecke: Blende hinter der Querzeile, Tür auf dem freien Teil'},
   {key:'wall',  kind:'wall', front:'door', w:600, label:'Hängeschrank', tip:'Hängeschrank'},
+  {key:'wcorner',kind:'wall', corner:true, front:'door', w:782, door:350, label:'Eckhängeschrank', tip:'Hänge-Eckschrank für die Innenecke (nobilia WE80-35): Blende hinter der Querzeile, Tür auf dem freien Teil'},
   {key:'hood',  kind:'wall', dev:'hood', front:'open', w:600, label:'Dunstabzug', tip:'Dunstabzug (Flachschirm im Hängeschrank) über dem Kochfeld'},
   {key:'tall',  kind:'tall', front:'door', w:600, label:'Hochschrank', tip:'Hochschrank'},
   {key:'fridge',kind:'tall', dev:'fridge', front:'door', hinge:'right', w:600, store:['kuehl'], label:'Kühlschrank', tip:'Kühlschrank im Hochschrank'},
@@ -6201,7 +6221,12 @@ function normItem(o){
   if(FRONTS[o.front]) it.front=o.front;
   if(o.hinge==='left'||o.hinge==='right') it.hinge=o.hinge;
   if(fin(o.faucetH)) it.faucetH=clamp(o.faucetH, 0, 600);
-  if(o.corner===true && o.kind==='base') it.corner=true;
+  if(o.corner===true && CORNER[o.kind]){
+    it.corner=true;
+    if(fin(o.door)) it.door=clamp(o.door, 100, Math.max(100, it.w-50));
+    if(o.cEnd===0 || o.cEnd===1) it.cEnd=o.cEnd;
+    if(typeof o.inner==='string' && CORNER[o.kind].inner[o.inner] && o.inner!=='boden') it.inner=o.inner;
+  }
   if(it.dev==='fridge' && it.kind==='tall' && FRIDGE[o.fz]){
     it.fz=o.fz;
     if(fin(o.doorT)) it.doorT=clamp(o.doorT, DOORT_LIM[0], DOORT_LIM[1]);
@@ -6381,12 +6406,55 @@ function frontKind(it){
   return it.front || (it.kind==='base'||it.kind==='island' ? 'drawer' : 'door');
 }
 // Eckschrank: welche Seite ist blind (zur nächsten Ecke), wie breit?
+// Unten wie oben (Hänge-Eckschrank). Mit Türbreite door ist die Blende der
+// Rest; sonst so breit wie die tatsächliche Querzeile (g.cross aus layout)
+// plus Passblende. cEnd legt die Ecke fest, sonst die nähere.
 function cornerBlind(g, S){
-  if(!g.it.corner || g.it.kind!=='base' || frontKind(g.it)!=='door' || g.it.w<600) return null;
-  const b=Math.min(g.it.w-300, S.baseD+PASS);
-  if(b<=0) return null;
-  const atS0 = g.free ? true : g.s0 <= g.Wf.L-g.s1;          // Ecke liegt näher an s0
-  return {b, atS0};
+  const it=g.it, C=CORNER[it.kind];
+  if(!it.corner || !C || frontKind(it)!=='door' || it.w<2*C.minDoor) return null;
+  const depth = g.cross ? g.cross.d : it.kind==='wall' ? S.wallD : S.baseD;
+  const b = it.door!=null ? it.w-it.door : Math.min(it.w-C.minDoor, depth+PASS);
+  if(!(b>0 && b<it.w)) return null;
+  return {b, atS0:cornerAtS0(g)};
+}
+// Liegt die Ecke des Eckschranks bei s0 (Ecke a) oder bei s1 (Ecke b)?
+const cornerAtS0=g=>g.free ? true : g.it.cEnd!=null ? g.it.cEnd===0 : g.s0 <= g.Wf.L-g.s1;
+// Querzeile an der Ecke: Teile im selben Höhenband an der Nachbarwand, die
+// direkt vor dem Eckschrank beginnen (Abstand zur Ecke bis Tiefe des
+// Eckschranks + Passblende) – sie stehen vor seiner Blende. Ihre Tiefe.
+function crossAt(E, K, G, g, atS0){
+  if(g.free) return null;
+  const id = atS0 ? g.Wf.a : g.Wf.b;
+  let best=null;
+  G.forEach(h=>{
+    if(h===g || h.free || h.Wf.key===g.Wf.key || !bandsMeet(g,h)) return;
+    if(h.Wf.a!==id && h.Wf.b!==id) return;
+    const atA = h.Wf.a===id, dist = atA ? h.s0 : h.Wf.L-h.s1;
+    if(dist > cornerStop(E,h.Wf,h.d,atA?0:1)+g.d+PASS+20) return;   // beginnt nicht vor dem Eckschrank
+    if(Math.abs(dot(h.n,g.n))>0.7) return;                       // keine Querwand
+    if(!best || h.d>best.d) best={d:h.d, id:h.it.id};
+  });
+  return best;
+}
+// Lage eines Eckschranks: Blende hinter der Querzeile, Tür frei davor
+// (Querzeile + Passblende). Ohne Querzeile bündig in die Ecke. null, wenn
+// es dort nicht passt.
+function cornerPlace(E, K, L, it, Wf){
+  if(!it.corner) return null;
+  const t={...it, a:Wf.a, b:Wf.b, x:it.x!=null?it.x:0}, g=geom(E,K,t); if(!g) return null;
+  const atS0=cornerAtS0(g), d=g.d, cr=crossAt(E,K,L.G.filter(h=>h.it.id!==it.id),g,atS0);
+  const g2={...g, cross:cr}, cb=cornerBlind(g2, K.spec);
+  const lo=cornerStop(E,Wf,d,atS0?0:1);
+  const dist = cr && cb ? Math.max(lo, cr.d+PASS-cb.b) : lo;
+  const x = atS0 ? dist : Wf.L-dist-it.w;
+  return fitsAt(E,K,L,it,Wf,x) ? Math.round(x*10)/10 : null;
+}
+// Typbezeichnung nach nobilia (UE100-50), wo Korpus und Tür einem Typ entsprechen.
+function cornerType(it){
+  const C=CORNER[it.kind]; if(!it.corner || !C) return null;
+  const doors=C.doors[Math.round(it.w)]||[];
+  if(it.door==null || !doors.includes(Math.round(it.door))) return null;
+  return `${C.type[it.inner||'boden']}${Math.round(it.w/10)}-${Math.round(it.door/10)}`;
 }
 function envelopes(K, g){
   const it=g.it, S=K.spec, D=derived(S), fk=frontKind(it), out=[];
@@ -6394,10 +6462,16 @@ function envelopes(K, g){
   const {L:pl, R:pr}=frontLR(g), n=g.n, w=it.w;
   const cb=cornerBlind(g,S);
   if(cb && fk==='door' && !g.free){
-    // Eine Tür auf dem freien Teil, Angel außen (weg von der Ecke).
-    const z0=g.z0+S.plinth, z1=D.workH-S.topT;
+    // Eine Tür auf dem freien Teil, Angel außen (weg von der Ecke). Unten
+    // mit Schubkasten (nobilia UE): Auszug oben, Tür darunter.
+    let z0 = it.kind==='wall' ? g.z0 : g.z0+S.plinth, z1 = it.kind==='wall' ? g.z1 : D.workH-S.topT;
     const sEdge = cb.atS0 ? g.s0+cb.b : g.s1-cb.b, sOut = cb.atS0 ? g.s1 : g.s0;
     const h=wpt(g.Wf,sOut,g.d), o=wpt(g.Wf,sEdge,g.d), r=Math.abs(sOut-sEdge);
+    if(it.inner==='schub' && it.kind==='base'){
+      const zd=z1-(z1-z0)*0.25, t=Math.min(g.d-60, 520);
+      out.push({what:'Auszug', poly:[o,h,add(h,mul(n,t)),add(o,mul(n,t))], z0:zd, z1, t, pl:o, pr:h, n, corner:true});
+      z1=zd;
+    }
     out.push({what:'Tür', poly:swing90(h, unit(sub(o,h)), n, r), z0, z1, hinge:h, side:'corner', r, along:unit(sub(o,h)), n});
     return out;
   }
@@ -6525,8 +6599,10 @@ function layout(E, K){
   // Teile in den kanonischen Wandrahmen bringen (ältere Daten, Importe):
   // gleiche Lage, nur von der anderen Ecke aus gemessen.
   K.items.forEach(it=>{ if(!it.a) return; const W=E.wallsByKey.get(wallKeyOf(it.a,it.b));
-    if(W && it.a!==W.a){ const Wf=wallFrame(E,W.a,W.b); if(Wf){ it.x=Wf.L-it.x-it.w; it.a=W.a; it.b=W.b; } } });
+    if(W && it.a!==W.a){ const Wf=wallFrame(E,W.a,W.b); if(Wf){ it.x=Wf.L-it.x-it.w; it.a=W.a; it.b=W.b; if(it.cEnd!=null) it.cEnd=1-it.cEnd; } } });
   K.items.forEach(it=>{ const g=geom(E,K,it); if(g) G.push(g); else orphans.push(it); });
+  // Eckschränke: Tiefe der Querzeile für die Blende (statt Standardtiefe).
+  G.forEach(g=>{ if(g.it.corner) g.cross=crossAt(E,K,G,g,cornerAtS0(g)); });
   G.forEach(g=>{ g.env=envelopes(K,g); });
   const fillers=[], tops=worktops(E,K,G,fillers);
   return {G, byId:new Map(G.map(g=>[g.it.id,g])), tops, fillers, orphans, D:derived(K.spec)};
@@ -6561,7 +6637,7 @@ function sashes(E, o){
 // Jeder Befund: {lvl:'bad'|'warn'|'info', ids, txt, at (Weltpunkt)}.
 // bad = geht so nicht (stößt an, passt nicht), warn = Richtwert verfehlt.
 const LEVEL_ORDER={bad:0, warn:1, info:2};
-const nameOf=it=>(fzOf(it)?fzOf(it).label:it.dev?DEV[it.dev].label:it.corner?'Eckschrank':KIND[it.kind].label)+' '+Math.round(it.w/10);
+const nameOf=it=>(fzOf(it)?fzOf(it).label:it.dev?DEV[it.dev].label:it.corner?(it.kind==='wall'?'Eckhängeschrank':'Eckschrank'):KIND[it.kind].label)+' '+Math.round(it.w/10);
 // Für Meldungen: mit Lage, damit klar ist, welcher der Unterschränke gemeint ist.
 const fmtM1=v=>(v/1000).toFixed(2).replace('.',',').replace(/0$/,'');
 const labelOf=it=>nameOf(it)+(it.a ? ` (${it.a}–${it.b}, ab ${fmtM1(it.x)} m)` : '');
@@ -6808,11 +6884,13 @@ function check(E, K, L){
           // Abhilfe: zum Eckschrank machen – an der Ecke stehen bleiben, zur
           // freien Seite wachsen. Nur anbieten, wenn das passt und etwas ändert.
           let toCorner=null;
-          if(g.it.kind==='base' && (!g.it.dev || g.it.dev==='sink') && !g.free){
-            const need=Math.ceil((b+300)/50)*50, W=Math.max(g.it.w, 1000, need), atS0=g.s0<=g.Wf.L-g.s1, x2=atS0 ? g.s0 : g.s1-W;
-            const t1={...g.it, w:W, corner:true, front:'door', a:g.Wf.a, b:g.Wf.b, x:x2};
-            const same = g.it.corner && frontKind(g.it)==='door' && g.it.w>=W;
-            if(!same && fitsAt(E,K,L,t1,g.Wf,x2)) toCorner={label: g.it.corner?'Eckschrank breiter':'Als Eckschrank', id:g.it.id, set:{corner:true, front:'door', w:W, a:g.Wf.a, b:g.Wf.b, x:Math.round(x2*10)/10}};
+          // Auch oben: Hänge-Eckschrank (Meldung M-20261109-134919-c2a193).
+          if((g.it.kind==='base' && (!g.it.dev || g.it.dev==='sink') || g.it.kind==='wall' && !g.it.dev) && !g.free){
+            const Cc=CORNER[g.it.kind], need=Math.ceil((b+Cc.minDoor)/50)*50, W=Math.max(g.it.w, g.it.kind==='wall'?782:1000, need), atS0=g.s0<=g.Wf.L-g.s1, x2=atS0 ? g.s0 : g.s1-W;
+            const t1={...g.it, w:W, corner:true, front:'door', a:g.Wf.a, b:g.Wf.b, x:x2}; delete t1.door;
+            const same = g.it.corner && frontKind(g.it)==='door' && g.it.w>=W && g.it.door==null;
+            const nmC = g.it.kind==='wall' ? 'Eckhängeschrank' : 'Eckschrank';
+            if(!same && fitsAt(E,K,L,t1,g.Wf,x2)) toCorner={label: g.it.corner?`${nmC} breiter`:`Als ${nmC}`, id:g.it.id, set:{corner:true, front:'door', w:W, a:g.Wf.a, b:g.Wf.b, x:Math.round(x2*10)/10}, del:['door']};
           }
           // Eckschrank: Blende deckt den verdeckten Teil? Dann ist alles richtig.
           const cb=cornerBlind(g,S);
@@ -7082,6 +7160,8 @@ function slotCandidates(E, K, L, it, Wf){
   const {d,z0,z1}=dims(K,it), w=it.w, c=[];
   const lo=cornerStop(E, Wf, d, 0), hi=Wf.L-cornerStop(E, Wf, d, 1);
   c.push(lo, hi-w);
+  // Eckschrank: Blende hinter der Querzeile, Tür davor (an beiden Enden).
+  if(it.corner) [0,1].forEach(e=>{ const x=cornerPlace(E,K,L,{...it, cEnd:e},Wf); if(x!=null) c.push(x); });
   const strip=[wpt(Wf,-1e5,0),wpt(Wf,1e5,0),wpt(Wf,1e5,d),wpt(Wf,-1e5,d)];
   L.G.forEach(g=>{
     if(g.it.id===it.id) return;
@@ -7573,8 +7653,11 @@ function frontsOf(g, z0, z1, D, S){
   const cb=S && !g.free ? cornerBlind(g,S) : null;
   if(cb && fk==='door'){
     // Halbeckschrank: Blende zur Ecke, eine Tür auf dem freien Teil
-    if(cb.atS0){ plate(0,cb.b,z0,z1,{blind:true}); plate(cb.b,w,z0,z1); }
-    else { plate(0,w-cb.b,z0,z1); plate(w-cb.b,w,z0,z1,{blind:true}); }
+    // (mit Schubkasten: Schubkastenfront oben über der Tür, Blende durchgehend).
+    const [f0,f1] = cb.atS0 ? [cb.b,w] : [0,w-cb.b];
+    plate(cb.atS0?0:w-cb.b, cb.atS0?cb.b:w, z0, z1, {blind:true});
+    if(it.inner==='schub' && it.kind==='base'){ const zd=z1-(z1-z0)*0.25; plate(f0,f1,zd,z1); plate(f0,f1,z0,zd); }
+    else plate(f0,f1,z0,z1);
     return out;
   }
   if(it.dev==='hood'){ plate(0,w,z0,z1); return out; }
@@ -7608,9 +7691,13 @@ function openPlates(g){
 // ---------- Stückliste ----------
 function stock(K, L){
   const rows=new Map();
+  // Eckschränke mit Typ und Innenleben (UE100-50 · Schubkasten + Tür).
+  const extraOf=it=>{ if(!it.corner || !CORNER[it.kind]) return '';
+    const cb=cornerBlind(L.byId.get(it.id)||{it}, K.spec);
+    return [cornerType(it) || (cb ? `Tür ${Math.round((it.w-cb.b)/10)} cm` : ''), it.kind==='base' ? CORNER.base.inner[it.inner||'boden'] : ''].filter(Boolean).join(' · '); };
   L.G.forEach(g=>{ const it=g.it; if(it.kind==='table') return;
-    const k=`${nameOf(it)}|${it.kind}`; rows.set(k, (rows.get(k)||0)+1); });
-  const list=[...rows].map(([k,n])=>({name:k.split('|')[0], n})).sort((p,q)=>p.name.localeCompare(q.name,'de'));
+    const k=`${nameOf(it)}|${it.kind}|${extraOf(it)}`; rows.set(k, (rows.get(k)||0)+1); });
+  const list=[...rows].map(([k,n])=>({name:k.split('|')[0], extra:k.split('|')[2]||'', n})).sort((p,q)=>p.name.localeCompare(q.name,'de'));
   const tops=L.tops.filter(t=>!t.island).map(t=>({len:t.len, depth:t.depth}));
   return {list, tops, topSum:tops.reduce((s,t)=>s+t.len,0), fillers:(L.fillers||[]).map(f=>({w:f.w, corner:!!f.corner}))};
 }
@@ -7626,6 +7713,7 @@ globalThis.KITCHEN={ FRIDGE, DOORT_LIM, fzOf, doorTOf, leaves, leafRect, leafRea
   derived, normKitchen, normItem, isEmpty, makeEnv, wallFrame, wpt, geom, dims, layout, envelopes, frontLR, frontKind,
   worktops, check, sashes, openingOn, faucetPoint, tableSides, tableSeats, seatPlan, rotSnaps, snapRot, chainDims, freeDims, applyDim, dockFree, barNkba, barSeats, BAR_SEAT_W, slotCandidates, cornerStop, fitsAt, freeSlot, snapX,
   nearestWall, planner, stations, flows, suggest, reachFactor, scene, frontsOf, stock, nameOf, inflate, polyInRoom, COL };
+Object.assign(globalThis.KITCHEN, { CORNER, cornerBlind, cornerPlace, cornerType, crossAt });
 })();
 </script>
 <script id="store">
@@ -16400,7 +16488,7 @@ function kitchenAdd(key, world){
   const pre=KX.PRESETS.find(p=>p.key===key); if(!pre) return;
   const K=c.K;
   const it={id:K.seq++, kind:pre.kind, w:pre.w};
-  ['front','dev','hinge','d','corner','fz','doorT'].forEach(k=>{ if(pre[k]!=null) it[k]=pre[k]; });
+  ['front','dev','hinge','d','corner','door','fz','doorT'].forEach(k=>{ if(pre[k]!=null) it[k]=pre[k]; });
   // Inhalte der Vorlage nur, wenn sie noch nirgends liegen (Müll an der Spüle).
   if(pre.store){ const st=pre.store.filter(s=>!K.items.some(o=>(o.store||[]).includes(s))); if(st.length) it.store=st; }
   let msg=null;
@@ -16431,9 +16519,11 @@ function kitchenAdd(key, world){
     if(!Wf) return;
     it.a=Wf.a; it.b=Wf.b;
     let x=KX.freeSlot(c.E,K,c.L,it,Wf,near);
+    // Eckschrank: in die nähere Ecke, Blende hinter die Querzeile.
+    if(it.corner){ const xc=KX.cornerPlace(c.E,K,c.L,{...it, x:x!=null?x:(near!=null?near:0)},Wf); if(xc!=null) x=xc; }
     if(x==null){
       // Kein Platz in Standardbreite: die größte Rasterbreite nehmen, die passt.
-      const widths=(it.dev?KX.DEV[it.dev].widths:KX.WIDTHS).filter(w=>w<it.w && (!it.corner || w>=900)).sort((p,q)=>q-p);
+      const widths=(it.dev?KX.DEV[it.dev].widths:it.corner?KX.CORNER[it.kind].bodies:KX.WIDTHS).filter(w=>w<it.w).sort((p,q)=>q-p);
       for(const w of widths){ const t={...it,w}, xx=KX.freeSlot(c.E,K,c.L,t,Wf,near); if(xx!=null){ it.w=w; x=xx; msg=`Nur noch ${Math.round(w/10)} cm frei – ${pre.label} ${Math.round(w/10)} gesetzt.`; break; } }
     }
     if(x==null){ K.seq--; setHint(`Kein freier Platz an Wand ${Wf.a}–${Wf.b} für ${pre.label}. Auf eine andere Wand ziehen.`); return; }
@@ -16467,6 +16557,7 @@ const ICONS={
   corner:'<path d="M3 24V10h24v14z"/><path d="M3 10l6-6h18v6M15 13v8"/><rect x="3" y="10" width="9" height="14" fill="currentColor" opacity=".18"/>',
   hood:'<path d="M5 4h20v7H5z"/><path d="M3 11h24l-2 4H5z"/><path d="M10 19c1 1.5 1 3 0 4.5M15 19c1 1.5 1 3 0 4.5M20 19c1 1.5 1 3 0 4.5" stroke-width="1"/>',
   wall:'<rect x="4" y="3" width="22" height="11"/><path d="M15 3v11M12 10v2M18 10v2"/><path d="M4 26h22" stroke-dasharray="2 2"/>',
+  wcorner:'<rect x="3" y="3" width="24" height="11"/><rect x="3" y="3" width="9" height="11" fill="currentColor" opacity=".18"/><path d="M19 9v2"/><path d="M3 26h24" stroke-dasharray="2 2"/>',
   tall:'<rect x="8" y="2" width="14" height="25"/><path d="M8 13h14M19 6v4M19 16v4"/>',
   fridge:'<rect x="8" y="2" width="14" height="25"/><path d="M8 11h14M10 5v3M10 14v4"/>',
   fridgeFD:'<rect x="4" y="2" width="22" height="25"/><path d="M15 2v15M4 17h22M4 22h22M12.5 7v5M17.5 7v5M13 19.5h4"/>',
@@ -16951,7 +17042,7 @@ function renderSel(c){
   if(KS.rotDrag===it.id) return;                // Schieber wird gerade gezogen
   const fid = box.contains(document.activeElement) ? document.activeElement.id : null;
   const dev=it.dev?KX.DEV[it.dev]:null, fz=KX.fzOf(it);
-  const widths = it.kind==='table' ? [800,1000,1200,1400,1600,1800,2000,2200] : it.kind==='island' ? [1200,1500,1800,2000,2400,2700] : it.corner ? KX.WIDTHS.filter(w=>w>=900) : fz ? fz.widths : dev ? dev.widths : KX.WIDTHS;
+  const widths = it.kind==='table' ? [800,1000,1200,1400,1600,1800,2000,2200] : it.kind==='island' ? [1200,1500,1800,2000,2400,2700] : it.corner ? KX.CORNER[it.kind].bodies : fz ? fz.widths : dev ? dev.widths : KX.WIDTHS;
   const std=widths.includes(Math.round(it.w));
   // Beim Tisch heisst w Laenge (die Seite mit den Plaetzen, 60 cm je Platz)
   // und d Breite (Abstand zwischen zwei Gegenuebersitzenden).
@@ -17069,6 +17160,64 @@ function renderSel(c){
   $('kDel').onclick=()=>{ const t=selItem(); if(t) removeItem(t); };
   if(fid && $(fid)){ $(fid).focus(); if($(fid).select) $(fid).select(); }
 }
+// ---------- Eckschrank-Konfigurator (Meldung M-20261109-134919-c2a193) ----------
+// Eigener Kasten über den übrigen Feldern, für Unter- und Hängeschränke an
+// der Wand: Ecke, Korpus, Tür (nobilia-Typen oder „passend“), Innenleben.
+// Jede Änderung setzt den Schrank neu an die Ecke: Blende hinter die
+// Querzeile, Tür davor frei.
+function cornerEdit(fn, msg){
+  const c=kctx(), cur=selItem(); if(!c || !cur) return;
+  snapshot(); fn(cur);
+  const Wf=KX.wallFrame(c.E,cur.a,cur.b), x=Wf ? KX.cornerPlace(c.E,c.K,c.L,cur,Wf) : null;
+  if(x!=null) cur.x=x;
+  kitchenSave();
+  setHint(x!=null ? (msg||'Eckschrank an die Ecke gesetzt') : 'So passt der Eckschrank nicht an die Ecke – Lage bleibt, Prüfung zeigt warum.');
+}
+// Eigene Segment-Attribute: renderSel verdrahtet alle [data-seg] im Auswahlkasten.
+const cseg=(name, opts, cur)=>`<div class="seg" data-cseg="${name}">${opts.map(([v,l])=>`<button data-v="${v}" aria-pressed="${String(v===cur)}">${l}</button>`).join('')}</div>`;
+function renderCorner(c){
+  const box=$('kCorner'), it=selItem(), g=it && c.L.byId.get(it.id), C=it && KX.CORNER[it.kind];
+  // Angeboten an Schränken nahe einer Ecke mit Querzeile; Eckschränke immer.
+  const nearCorner=()=>[true,false].some(a=>(a ? g.s0 : g.Wf.L-g.s1)<=1300 && KX.crossAt(c.E,c.K,c.L.G,g,a));
+  const can = !!(g && !g.free && C && (it.corner || !(it.dev && !(it.kind==='base' && it.dev==='sink')) && nearCorner()));
+  if(!can){ box.hidden=true; box.innerHTML=''; box.dataset.key=''; return; }
+  // Breite steht im Konfigurator (Korpus); die allgemeine Zeile ausblenden.
+  if(it.corner && $('kW')) $('kW').closest('.krow').hidden=true;
+  const key=JSON.stringify([it, c.key]);
+  if(box.dataset.key===key && !box.hidden) return;
+  box.dataset.key=key; box.hidden=false;
+  const nmC = it.kind==='wall' ? 'Eckhängeschrank' : 'Eckschrank';
+  if(!it.corner){
+    box.innerHTML=`<div class="kchead"><b>Ecke</b><button id="kCnOn" title="Halbeckschrank: Blende hinter der Querzeile, Tür auf dem freien Teil">Als ${nmC}</button></div>`;
+    $('kCnOn').onclick=()=>cornerEdit(t=>{ t.corner=true; t.front='door'; delete t.door; delete t.hinge;
+      if(!C.bodies.includes(Math.round(t.w))) t.w = t.kind==='wall' ? 782 : 1000; }, `Als ${nmC} an die Ecke gesetzt`);
+    return;
+  }
+  const cb=KX.cornerBlind(g, c.K.spec), atS0=cb ? cb.atS0 : g.s0<=g.Wf.L-g.s1;
+  const body=Math.round(it.w), doors=C.doors[body]||[];
+  const bOpts=C.bodies.map(v=>[String(v), cmTxt(v)]); if(!C.bodies.includes(body)) bOpts.push([String(body), cmTxt(body)]);
+  const dCur = it.door==null ? 'auto' : String(Math.round(it.door));
+  const dOpts=[['auto','passend'], ...doors.map(v=>[String(v), cmTxt(v)])]; if(it.door!=null && !doors.includes(Math.round(it.door))) dOpts.push([dCur, cmTxt(it.door)]);
+  const typ=KX.cornerType(it), dist=atS0 ? g.s0 : g.Wf.L-g.s1, cid=atS0 ? g.Wf.a : g.Wf.b;
+  let h=`<div class="kchead"><b>${nmC}</b><small>${typ?`nobilia ${typ}`:'Halbeckschrank'}</small></div>`
+    +`<div class="krow"><label>Ecke</label>${cseg('cEnd', [['0',`bei ${g.Wf.a}`],['1',`bei ${g.Wf.b}`]], atS0?'0':'1')}</div>`
+    +`<div class="krow"><label title="Korpusbreite">Korpus</label>${cseg('cBody', bOpts, String(body))} cm</div>`
+    +`<div class="krow"><label title="Türbreite – der Rest ist Blende hinter der Querzeile">Tür</label>${cseg('cDoor', dOpts, dCur)} cm</div>`;
+  if(it.kind==='base') h+=`<div class="krow"><label>Innen</label>${cseg('cInner', Object.entries(C.inner), it.inner||'boden')}</div>`;
+  h+= cb ? `<p class="knote">Blende ${cmTxt(cb.b)} cm zur Ecke ${cid}, Tür ${cmTxt(it.w-cb.b)} cm${g.cross?` · Querzeile ${Math.round(g.cross.d)} mm tief`:' · noch keine Querzeile'} · ${dist>0.5?`${Math.round(dist)} mm Abstand zur Ecke`:'bündig in der Ecke'}</p>`
+         : `<p class="knote">Zu schmal für Blende und Tür.</p>`;
+  h+=`<div class="trow"><button id="kCnPlace" title="Blende hinter die Querzeile, Tür davor frei">An die Ecke setzen</button><button id="kCnOff">Normaler Schrank</button></div>`;
+  box.innerHTML=h;
+  box.querySelectorAll('[data-cseg]').forEach(sg=>sg.querySelectorAll('button').forEach(b=>b.onclick=()=>{
+    const v=b.dataset.v, k=sg.dataset.cseg;
+    if(k==='cEnd') cornerEdit(t=>{ t.cEnd=+v; }, `Blende zur Ecke ${+v===0?g.Wf.a:g.Wf.b}`);
+    if(k==='cBody') cornerEdit(t=>{ t.w=+v; const ds=C.doors[+v]||[]; if(t.door!=null && !ds.includes(Math.round(t.door))) { if(ds.length) t.door=ds[ds.length-1]; else delete t.door; } });
+    if(k==='cDoor') cornerEdit(t=>{ if(v==='auto') delete t.door; else t.door=+v; });
+    if(k==='cInner') cornerEdit(t=>{ if(v==='boden') delete t.inner; else t.inner=v; }, `Innen: ${C.inner[v]}`);
+  }));
+  $('kCnPlace').onclick=()=>cornerEdit(t=>{ if(t.cEnd==null) t.cEnd=atS0?0:1; });
+  $('kCnOff').onclick=()=>{ const t=selItem(); if(!t) return; snapshot(); delete t.corner; delete t.door; delete t.cEnd; delete t.inner; kitchenSave(); setHint('Wieder ein normaler Schrank.'); };
+}
 function renderChecks(c){
   const F=c.F, nb=F.filter(f=>f.lvl==='bad').length, nw=F.filter(f=>f.lvl==='warn').length;
   $('kCheckCount').textContent = [nb?`${nb} geht nicht`:'', nw?`${nw} Hinweis${nw>1?'e':''}`:''].filter(Boolean).join(' · ');
@@ -17170,7 +17319,7 @@ function renderKitchenPanel(){
   $('kEmpty').hidden = c.K.items.length>0;
   $('kEmpty').innerHTML = `<b>Schrank aus der Leiste oben auf eine Wand ziehen</b> – oder anklicken, dann setzt er sich an die nächste freie Stelle. Standardmaße stimmen meist; Breite, Front und Inhalt stellt man rechts ein, wenn ein Teil gewählt ist.`;
   if(KS.drag) return;
-  renderSel(c); renderChecks(c); renderWays(c); renderStock(c);
+  renderSel(c); renderCorner(c); renderChecks(c); renderWays(c); renderStock(c);
   $('kClear').hidden=!c.K.items.length;
 }
 function kitchenLeave(){ KS.sel=null; KS.drag=false; document.body.classList.remove('k3d'); }
@@ -20606,6 +20755,39 @@ globalThis.selfChecks=function(){
       chk('kueche: L-Ecke mit Eckschrank und Passblende ohne Fehler', !F.some(f=>f.lvl==='bad'));
       chk('kueche: Querplatte läuft bis an die durchlaufende Platte (kein Loch)', L.tops.length===2 && L.tops.some(t=>near(t.s0,600,1)));
       chk('kueche: Eckschrank zeigt eine Blende und eine Tür', KX.envelopes(K,L.byId.get(1)).length===1);
+    }
+    // --- Eckschrank-Konfigurator (Meldung M-20261109-134919-c2a193) ---
+    {
+      const row=[{id:2,kind:'base',a:'A',b:'B',x:630,w:600},{id:3,kind:'base',a:'A',b:'B',x:1230,w:600}];
+      // nobilia UE100-50: Blende 500 hinter der 580 tiefen Querzeile + 50 Passblende -> 130 von der Ecke
+      const ue={id:1,kind:'base',corner:true,front:'door',door:500,inner:'schub',a:'A',b:'D',x:0,w:1000};
+      const K=KX.normKitchen({items:[ue,...row]}), L=KX.layout(E,K), Wf=KX.wallFrame(E,'A','D');
+      const x=KX.cornerPlace(E,K,L,K.items[0],Wf);
+      chk('kueche-eck: UE100-50 sitzt 130 mm von der Ecke (Blende hinter Querzeile + Passblende)', near(x,130,0.5));
+      const K2=KX.normKitchen({items:[{...ue, x},...row]}), L2=KX.layout(E,K2), F2=KX.check(E,K2,L2), g2=L2.byId.get(1);
+      chk('kueche-eck: so gesetzt keine roten Befunde', !F2.some(f=>f.lvl==='bad'));
+      chk('kueche-eck: Schubkasten + Tür = Auszug oben und Tür', (()=>{ const e=KX.envelopes(K2,g2); return e.length===2 && e[0].what==='Auszug' && e[1].what==='Tür' && e[0].z0>=e[1].z1-1; })());
+      chk('kueche-eck: Typname nach nobilia', KX.cornerType(K2.items[0])==='UE100-50' && KX.cornerType({kind:'wall',corner:true,w:782,door:350})==='WE78-35');
+      chk('kueche-eck: Stückliste nennt Typ und Innenleben', KX.stock(K2,L2).list.some(r=>/UE100-50/.test(r.extra) && /Schubkasten/.test(r.extra)));
+      // passend: Blende folgt der tatsächlichen Querzeile (400 tief -> 450)
+      const K3=KX.normKitchen({items:[{id:1,kind:'base',corner:true,front:'door',a:'A',b:'D',x:0,w:1000},{id:2,kind:'base',a:'A',b:'B',x:450,w:600,d:400}]}), L3=KX.layout(E,K3);
+      chk('kueche-eck: Blende „passend“ nimmt die Tiefe der Querzeile', near(KX.cornerBlind(L3.byId.get(1),K3.spec).b,450,0.5));
+      // Ecke fest: cEnd überlebt das Umdrehen in den kanonischen Wandrahmen
+      const K4=KX.normKitchen({items:[{id:1,kind:'base',corner:true,front:'door',cEnd:0,a:'D',b:'A',x:0,w:1000}]}); KX.layout(E,K4);
+      chk('kueche-eck: Ecke bleibt beim Umdrehen des Wandrahmens dieselbe', K4.items[0].a==='A' && K4.items[0].cEnd===1 && near(K4.items[0].x,2000,0.5));
+      const n=KX.normItem({id:1,kind:'wall',corner:true,door:350,inner:'quatsch',cEnd:1,a:'A',b:'B',x:0,w:782});
+      chk('kueche-eck: Hänge-Eckschrank bleibt beim Laden erhalten (Tür, Ecke; Unsinn weg)', n.corner===true && n.door===350 && n.cEnd===1 && !('inner' in n));
+    }
+    {
+      // Hänge-Eckschrank WE80-35 über Eck mit Hängeschrankzeile an A–B
+      const items=[{id:1,kind:'wall',corner:true,front:'door',door:350,a:'A',b:'D',x:0,w:782},{id:2,kind:'wall',a:'A',b:'B',x:420,w:600}];
+      const K=KX.normKitchen({items}), L=KX.layout(E,K), g=L.byId.get(1), cb=KX.cornerBlind(g,K.spec);
+      chk('kueche-eck: Hänge-Eckschrank hat Blende 432 zur Ecke A', cb && near(cb.b,432,0.5) && cb.atS0);
+      const env=KX.envelopes(K,g);
+      chk('kueche-eck: Hänge-Eckschrank – Tür in Hängeschrankhöhe', env.length===1 && env[0].what==='Tür' && env[0].z0>=g.z0-1 && env[0].z1<=g.z1+1);
+      chk('kueche-eck: Hänge-Eckschrank über Eck ohne rote Befunde', !KX.check(E,K,L).some(f=>f.lvl==='bad'));
+      const F=lay([{id:1,kind:'wall',a:'A',b:'D',x:0,w:600},{id:2,kind:'wall',a:'A',b:'B',x:420,w:600}]).F;
+      chk('kueche-eck: Hängeschränke über Eck – Abhilfe „Als Eckhängeschrank“', F.some(f=>f.fix && f.fix.set.corner && /Eckhängeschrank/.test(f.fix.label)));
     }
     {
       const F=lay([{id:1,kind:'base',dev:'hob',a:'A',b:'B',x:0,w:600},{id:2,kind:'wall',a:'A',b:'B',x:0,w:600}]).F;
