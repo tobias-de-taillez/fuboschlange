@@ -8003,8 +8003,6 @@ let opMeasEdge=null, opMeasSeq=1;
 // Baustelle heisst das: Chip antippen, dann nur noch messen, tippen, OK,
 // messen, tippen, OK, bis nichts mehr fehlt.
 let entryGuided=false;
-// Ziel ist der Schreibtisch: Popover sitzen immer an ihrer Strecke.
-const isDesktop=()=>true;
 
 // Mass fuer ein Paar eintragen. Einheit ist METER - die Tabelle zeigt Meter,
 // der Laser zeigt Meter, und die frueher hier verlangten Millimeter waren die
@@ -8033,16 +8031,6 @@ function enterMeasurement(a,b,guided=false){
 function placeEntry(){
   const box=$('entry');
   if(box.hidden) return;
-  if(!isDesktop()){
-    // Fixe Leiste am unteren Rand; die VisualViewport-Verschiebung hebt sie
-    // ueber die eingeblendete Tastatur (siehe Listener unten).
-    box.style.left=box.style.top='';
-    const vv=window.visualViewport;
-    box.style.transform = vv
-      ? `translateY(${-(innerHeight - vv.height - vv.offsetTop)}px)` : '';
-    return;
-  }
-  box.style.transform='';
   if(!entryPair) return;
   placeNear(box, entryPair.a, entryPair.b);
 }
@@ -8195,14 +8183,6 @@ function closeWallPopup(){
 function placeWpop(){
   const box=$('wpop');
   if(box.hidden) return;
-  if(!isDesktop()){
-    box.style.left=box.style.top='';
-    const vv=window.visualViewport;
-    box.style.transform = vv
-      ? `translateY(${-(innerHeight - vv.height - vv.offsetTop)}px)` : '';
-    return;
-  }
-  box.style.transform='';
   if(!wpopPair) return;
   placeNear(box, wpopPair.a, wpopPair.b);
 }
@@ -9245,11 +9225,7 @@ function enterHeight(pointId){
   box.hidden=false;
   box.style.left=box.style.top='';
   box.style.transform='';
-  if(isDesktop()){
-    const wrap=$('canvaswrap');
-    box.style.left=Math.max(8,(wrap.clientWidth-260)/2)+'px';
-    box.style.top='12px';
-  }
+  { const wrap=$('canvaswrap'); box.style.left=Math.max(8,(wrap.clientWidth-260)/2)+'px'; box.style.top='12px'; }
   const inp=$('entryVal');
   inp.value=''; inp.classList.remove('bad'); inp.focus();
   // Vom Zeichenflaechen-Klick aus nimmt die mousedown-Standardaktion den
@@ -9315,10 +9291,7 @@ function enterKnick(id){
   $('entryLabel').textContent=`Höhe am Knick, ${fmtLen(links)} ${unit} ab Ecke ${e.left.id}`;
   const box=$('entry');
   box.hidden=false; box.style.transform='';
-  if(isDesktop()){
-    const wrap=$('canvaswrap');
-    box.style.left=Math.max(8,(wrap.clientWidth-260)/2)+'px'; box.style.top='12px';
-  } else { box.style.left=box.style.top=''; }
+  { const wrap=$('canvaswrap'); box.style.left=Math.max(8,(wrap.clientWidth-260)/2)+'px'; box.style.top='12px'; }
   const inp=$('entryVal'); inp.value=''; inp.classList.remove('bad'); inp.focus();
   requestAnimationFrame(()=>{ if(knickAt) inp.focus(); });
 }
@@ -9605,10 +9578,7 @@ document.querySelectorAll('.mbtn').forEach(b=>{
     $('entryLabel').textContent=`${OPEN_LABEL[o.kind]}: Abstand ${EDGE_LABEL[b.dataset.edge]}`;
     const box=$('entry');
     box.hidden=false; box.style.transform='';
-    if(isDesktop()){
-      const wrap=$('canvaswrap');
-      box.style.left=Math.max(8,(wrap.clientWidth-260)/2)+'px'; box.style.top='12px';
-    } else { box.style.left=box.style.top=''; }
+    { const wrap=$('canvaswrap'); box.style.left=Math.max(8,(wrap.clientWidth-260)/2)+'px'; box.style.top='12px'; }
     const inp=$('entryVal'); inp.value=''; inp.classList.remove('bad'); inp.focus();
   };
 });
