@@ -526,6 +526,46 @@
   body.kitchenmode.k3d #cv{width:54%;right:auto}
   body.kitchenmode.k3d #cv3d{display:block}
   body:not(.kitchenmode.k3d) #k3dMsg{display:none}
+  /* Wege-Analyse (Meldungen M-20261109-151457-68b975, -151540-54f941): statt 3D rechts neben dem Plan */
+  #kAna{position:absolute;top:0;right:0;bottom:0;width:46%;display:none;overflow-y:auto;background:var(--surface);
+    border-left:1px solid var(--line);padding:12px 16px 24px;box-sizing:border-box;font-variant-numeric:tabular-nums}
+  body.kitchenmode.kana #cv{width:54%;right:auto}
+  body.kitchenmode.kana #kAna{display:block}
+  body.kitchenmode.kana #cv3d, body.kitchenmode.kana #k3dMsg{display:none}
+  #kAna h4{margin:16px 0 6px;font-size:12px;font-weight:600;color:var(--ink2);display:flex;align-items:baseline;gap:8px}
+  #kAna h4 small{font-weight:400;color:var(--muted)}
+  #kAna h4 .seg{margin-left:auto}
+  .ka-head{display:flex;gap:12px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap}
+  .ka-big{font-size:26px;font-weight:600;line-height:1.1}
+  .ka-big small{font-size:12px;font-weight:400;color:var(--muted)}
+  .ka-sub{font-size:12px;color:var(--ink2)}
+  .ka-ctl{display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:flex-end}
+  .ka-ctl label{font-size:12px;color:var(--ink2)}
+  .ka-bars{display:grid;grid-template-columns:auto 1fr auto;gap:3px 8px;align-items:center;font-size:12px}
+  .ka-bars .lb{white-space:nowrap;cursor:pointer}
+  .ka-bars .lb.on{font-weight:600}
+  .ka-bars .tr{position:relative;height:12px;cursor:pointer}
+  .ka-bars .br{position:absolute;left:0;top:0;bottom:0;border-radius:0 4px 4px 0}
+  .ka-bars .rf{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--ink)}
+  .ka-bars .vl{text-align:right;white-space:nowrap;color:var(--ink2)}
+  .ka-bars .vl em{font-style:normal;color:var(--muted)}
+  .ka-legend{display:flex;gap:12px;font-size:11px;color:var(--ink2);margin-top:6px;flex-wrap:wrap}
+  .ka-legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+  .ka-mx{border-collapse:collapse;font-size:11px}
+  .ka-mx th{font-weight:400;color:var(--muted);padding:0 2px}
+  .ka-mx th.v{writing-mode:vertical-rl;transform:rotate(180deg);height:74px;text-align:left;vertical-align:bottom}
+  .ka-mx td{padding:1px 4px;text-align:center;border-top:1px solid var(--line)}
+  .ka-mx td.r{text-align:left;white-space:nowrap;color:var(--ink)}
+  .ka-mx td.w{text-align:left;white-space:nowrap;color:var(--ink2);max-width:150px;overflow:hidden;text-overflow:ellipsis}
+  .ka-mx td.w.miss{color:var(--bad);font-weight:600}
+  .ka-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ink2)}
+  .ka-dot.miss{background:none;border:2px solid var(--bad);width:6px;height:6px}
+  .ka-chart{position:relative}
+  .ka-chart svg{width:100%;height:auto;display:block}
+  .ka-tip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:2px 6px;font-size:11px;white-space:nowrap;display:none}
+  .ka-row{display:flex;gap:8px;align-items:center;justify-content:space-between;font-size:12px;padding:2px 0}
+  .ka-note{font-size:11px;color:var(--muted);margin:4px 0}
+  .ka-heatlg{display:inline-block;width:60px;height:8px;border-radius:2px;vertical-align:middle;background:linear-gradient(90deg,rgba(109,40,217,.06),rgba(109,40,217,.6))}
   .kflow em.bad{color:var(--bad)}
   #k3dMsg{position:absolute;right:12px;top:12px;z-index:3;max-width:40%;padding:8px 10px;font-size:12px;
     background:var(--warn-bg);color:var(--warn);border:1px solid #e6d3a8;border-radius:6px}
@@ -723,6 +763,7 @@
         <button id="k3dBtn" class="tb tog" aria-pressed="false" title="3D-Ansicht neben dem Plan (V)">3D <kbd>V</kbd></button>
         <button id="kWayBtn" class="tb tog" aria-pressed="false" title="Laufwege der Abläufe im Plan zeigen (W)">Wege <kbd>W</kbd></button>
         <button id="kOpenBtn" class="tb tog" aria-pressed="false" title="Alle Türen, Auszüge und Gerätetüren offen zeigen (O)">Offen <kbd>O</kbd></button>
+        <button id="kAnaBtn" class="tb tog" aria-pressed="false" title="Wege-Analyse statt 3D: Heatmap im Plan, Abläufe im Vergleich, was fehlt, Verschieben und Optimieren, zu zweit kochen (A)">Analyse <kbd>A</kbd></button>
       </div>
     </div>
     <div id="histctl">
@@ -736,6 +777,7 @@
       <div id="canvaswrap">
         <canvas id="cv"></canvas>
         <canvas id="cv3d" aria-label="3D-Ansicht der Küche: ziehen dreht, Rechtsklick-Ziehen verschiebt, Rad zoomt, Doppelklick setzt zurück"></canvas>
+        <div id="kAna" aria-label="Wege-Analyse"></div>
         <div id="k3dMsg" hidden>Die 3D-Ansicht braucht WebGL2; dieser Browser bietet es nicht. Der Plan links funktioniert trotzdem.</div>
         <div id="empty">
           <p><b>Raum skizzieren:</b> jeder Klick setzt eine Ecke, der Reihe nach, so wie man den Raum abläuft. Genau muss die Skizze nicht sein. Ein Klick auf die erste Ecke schließt den Wandzug, danach werden die vorgeschlagenen Strecken gemessen.</p>
@@ -1028,6 +1070,7 @@
         <dt>Insel und Tisch</dt><dd>Drehen per Schieber im Panel (rastet an 0/45/90° und an schiefen Wänden ein, mit ⌥ frei) oder mit Q/E. Eine Insel, deren Stirnseite man an eine Wand zieht, dockt bündig an; ihre Auszüge gehen dann parallel zur Wand auf. „Tresen“ lässt die Platte hinten überstehen (NKBA: 38 cm bei 91 cm Höhe, 61 cm je Hocker). Die Tischplätze ergeben sich aus Länge und Breite (60 cm je Platz, Stirnseite ab 60 cm Breite), Seiten ohne Stuhlraum bleiben frei.</dd>
         <dt>Offen (O)</dt><dd>Zeigt im Plan alle Schwenkbereiche und in 3D alle Türen, Auszüge und Gerätetüren offen, dazu offene Fensterflügel.</dd>
         <dt>Inhalt und Wege (W)</dt><dd>Je Schrank wählen, was darin liegt (Besteck, Teller, Gläser …). Daraus rechnet das Programm die Laufwege typischer Abläufe: Einkauf einräumen, Müll, Kochen, Servieren, Tisch decken, Abräumen in die Spülmaschine, Spülmaschine ausräumen. Ein Klick auf einen Ablauf zeichnet ihn ein. Der Eingang ist im Plan grün markiert; ein Klick auf eine andere Tür macht sie zum Eingang. „Optimal einräumen“ verteilt alle Inhalte so, dass die Wege zusammen am kürzesten sind – exakt gerechnet, dieselbe Küche ergibt immer dieselbe Einteilung; doppelt Eingeräumtes bleibt stehen. „Umsortieren“ schlägt einzelne Umzüge vor (Besteck und Messer nur in Schubladen, Müll bleibt an der Spüle). Ein Ablauf zählt erst, wenn alle seine Stationen da sind; die Häufigkeiten sind eine Annahme für vier Personen.</dd>
+        <dt>Analyse (A)</dt><dd>Statt 3D rechts eine eigene Ansicht für die Wege. Oben die Summe in km/Jahr; „Referenz merken“ hält den Stand fest, danach zeigen Summe und Balken den Unterschied. „Abläufe im Vergleich“ stellt die Abläufe als Balken gegeneinander, je Jahr (Häufigkeit × Weg) oder je Durchgang: so sieht man, ob eine Aufteilung z. B. das Einräumen bevorzugt und das Kochen lang macht. Überfahren zeigt den Weg im Plan, Klick hält ihn. „Was steht wo“ zeigt je Station und Inhalt, welcher Ablauf ihn braucht und wo er liegt; Fehlendes ist rot. Im Plan liegt eine Heatmap: je dunkler, desto öfter läuft man dort. Ist ein Teil gewählt, zeigt „Verschieben und vergleichen“ die km/Jahr für jede Lage, an der es Platz hat (Insel und Tisch längs und quer); Klick in die Kurve setzt es dorthin, „Dorthin setzen“ nimmt das Optimum. Gerechnet in festen Schritten, gleiche Küche ergibt immer dasselbe Optimum; Lagen, die einen Weg versperren, zählen nicht. In voller Zeile wird Tauschen mit gleich breiten Teilen vorgeschlagen. „Personen 2/3“: Gang nach NKBA mind. 1219 mm in der Prüfung und eine Liste, wo sich zwei gleichzeitige Abläufe begegnen (im Plan gelb). „Kind im Weg“ stellt ein Kind an den meistbelaufenen Punkt und rechnet alle Wege neu.</dd>
         <dt>3D (V)</dt><dd>Ansicht neben dem Plan. Ziehen dreht, Rechts- oder ⇧-Ziehen verschiebt, Rad zoomt, Doppelklick setzt zurück. Wände, vor denen man steht, werden ausgeblendet.</dd>
       </dl>
 
@@ -6134,9 +6177,12 @@ const mm=v=>Math.round(v);
 // ---------- Standardmaße ----------
 // Tiefen MIT Front (Korpus 561 + Front 19). Arbeitsplatte 600 steht 20 vor.
 const K_DEF={ plinth:150, baseH:720, baseD:580, topT:40, topD:600,
-              wallH:720, wallD:370, tallH:2016, tallD:580, faucetH:250 };
+              wallH:720, wallD:370, tallH:2016, tallD:580, faucetH:250,
+              // Wie viele kochen gleichzeitig (Meldung M-20261109-151540-54f941):
+              // ab 2 gilt der NKBA-Gang für mehrere Köche (48″ = 1219 mm).
+              persons:1 };
 const K_LIM={ plinth:[0,300], baseH:[300,1200], baseD:[250,900], topT:[10,120], topD:[300,1200],
-              wallH:[200,1400], wallD:[150,700], tallH:[1000,2800], tallD:[250,900], faucetH:[0,600] };
+              wallH:[200,1400], wallD:[150,700], tallH:[1000,2800], tallD:[250,900], faucetH:[0,600], persons:[1,3] };
 // Arbeitshöhe = Sockel + Korpus + Platte; Hängeschränke schließen oben
 // bündig mit dem Hochschrank ab (eine Frontlinie), Unterkante folgt daraus.
 function derived(S){
@@ -6307,7 +6353,7 @@ const FLOWS=[
   {key:'abraeumen', group:'aus', label:'Abräumen in die Spülmaschine', f:21, chains:[['tisch','muell','dw']]},
   {key:'ausraeumen',group:'aus', label:'Spülmaschine ausräumen', f:5,
    chains:[['dw','teller'],['dw','besteck'],['dw','glaeser'],['dw','tassen'],['dw','toepfe']], back:true},
-  {key:'kaffee',    group:'aus', label:'Kaffee, Getränke', f:14, chains:[['tassen','tisch'],['glaeser','kuehl','tisch']]},
+  {key:'kaffee',    group:'aus', label:'Snacks, Kaffee, Getränke', f:14, chains:[['tassen','tisch'],['glaeser','kuehl','tisch']]},
 ];
 const GROUPS={ein:'Eingang', zub:'Zubereitung', aus:'Geschirr'};
 const ROLE_LABEL={sink:'Spüle', dw:'Spülmaschine', hob:'Herd', kuehl:'Kühlschrank', tisch:'Tisch',
@@ -7213,7 +7259,10 @@ function check(E, K, L){
       if(ta<300 && info.hit && !info.hit.free && !g.free && Math.abs(dot(g.n,info.hit.n))<0.7) continue;
       min=Math.min(min, ta); }
     if(!(w>0) || !isFinite(min)) return;
-    if(min<900) add_('bad',[g.it.id], `Vor ${nameOf(g.it)} nur ${mm(min)} mm Platz (Gang mind. 900, empfohlen 1200)`, g.frontMid);
+    // NKBA Guideline 6: Arbeitsgang 42″ (1067) für eine Person, 48″ (1219)
+    // für mehrere Köche.
+    if(min<900) add_('bad',[g.it.id], `Vor ${nameOf(g.it)} nur ${mm(min)} mm Platz (Gang mind. 900, empfohlen ${S.persons>=2?1219:1200})`, g.frontMid);
+    else if(S.persons>=2 && min<1219) add_('warn',[g.it.id], `Gang vor ${nameOf(g.it)} ${mm(min)} mm – zu zweit kochen: NKBA mind. 1219 mm`, g.frontMid);
     else if(min<1200) add_('warn',[g.it.id], `Gang vor ${nameOf(g.it)} ${mm(min)} mm – empfohlen 1200 mm (NKBA mind. 1067)`, g.frontMid);
   });
   // 8. Tisch: Stühle zurückschieben (NKBA: 813 ohne, 1118 mit Durchgang)
@@ -7593,9 +7642,11 @@ function inflate(poly, r){
   if(area(out)<area(poly)){ const o2=TL.insetRoom(ring, ()=>r); return o2.map(p=>({x:p.x,y:p.y})); }
   return out.map(p=>({x:p.x,y:p.y}));
 }
-function planner(E, L){
+function planner(E, L, extra){
   const room=TL.insetRoom(E.ring, ()=>BODY_R);
   const obs=L.G.filter(g=>g.it.kind!=='wall').map(g=>({id:g.it.id, poly:inflate(g.foot||g.poly, BODY_R)}));
+  // Zusätzliche Hindernisse (Kind im Weg): schon als Körper-Umriss.
+  (extra||[]).forEach((poly,i)=>obs.push({id:'x'+i, poly:inflate(poly, BODY_R)}));
   // Inseln des Raums sind schon in room.holes (nach außen aufgeweitet).
   const segs=[];
   TL.ringsOf(room).forEach(R=>R.forEach((p,i)=>segs.push([p,R[(i+1)%R.length],null])));
@@ -7927,6 +7978,103 @@ function optimalStore(E, K, L){
           cost:co, costStart:cs, costSum:E0+free.reduce((s,c)=>s+(assign[c].length && inFlow.has(c) ? evalA({...empty,[c]:assign[c]})-E0 : 0),0)};
 }
 
+// ---------- Wege-Analyse (Meldungen M-20261109-151457-68b975, -151540-54f941) ----------
+// Heatmap: wie oft wird wo gelaufen. Jeder Weg aller vollständigen Abläufe
+// zählt mit seiner Häufigkeit je Woche (Rückweg doppelt), aufgetragen auf
+// ein Raster (cell mm) und einmal 3×3 geglättet.
+function heatGrid(E, R, cell=100){
+  const P=TL.ringsOf(E.ring)[0]; let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
+  P.forEach(p=>{ x0=Math.min(x0,p.x); y0=Math.min(y0,p.y); x1=Math.max(x1,p.x); y1=Math.max(y1,p.y); });
+  const nx=Math.max(1,Math.ceil((x1-x0)/cell)), ny=Math.max(1,Math.ceil((y1-y0)/cell)), v=new Float32Array(nx*ny);
+  R.flows.forEach(f=>{ if(!f.complete) return; const k=f.f*(FLOWS.find(F=>F.key===f.key).back?2:1);
+    f.legs.forEach(l=>{ if(!l.ok) return; for(let i=1;i<l.path.length;i++){ const a=l.path[i-1], b=l.path[i], d=len(sub(b,a)), n=Math.max(1,Math.ceil(d/(cell/2)));
+      for(let j=0;j<n;j++){ const p=add(a,mul(sub(b,a),(j+0.5)/n)), ix=Math.floor((p.x-x0)/cell), iy=Math.floor((p.y-y0)/cell);
+        if(ix>=0 && iy>=0 && ix<nx && iy<ny) v[iy*nx+ix]+=k*d/n/1000; } } }); });
+  const w=new Float32Array(nx*ny);
+  for(let iy=0;iy<ny;iy++) for(let ix=0;ix<nx;ix++){ let s=0, c=0;
+    for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){ const x=ix+dx, y=iy+dy; if(x<0||y<0||x>=nx||y>=ny) continue; const q=(dx||dy)?((dx&&dy)?1:2):4; s+=v[y*nx+x]*q; c+=q; }
+    w[iy*nx+ix]=s/c; }
+  let max=0, at=null; for(let i=0;i<w.length;i++) if(w[i]>max){ max=w[i]; at={x:x0+(i%nx+0.5)*cell, y:y0+(Math.floor(i/nx)+0.5)*cell}; }
+  return {x0, y0, nx, ny, cell, v:w, max, peak:at};
+}
+// Kind im Weg: eine Scheibe (Ø 600) am meistbelaufenen Punkt – der
+// ungünstigste Ort, deterministisch aus der Heatmap.
+function kidPoly(p, r=300){ const out=[]; for(let i=0;i<8;i++){ const a=i*Math.PI/4; out.push({x:p.x+Math.cos(a)*r, y:p.y+Math.sin(a)*r}); } return out; }
+// Zu zweit in der Küche: welche Abläufe laufen gleichzeitig, und wo kommen
+// sich die beiden in die Quere? Begegnung = Wegstück, auf dem die andere
+// Person näher als zwei Körperbreiten (2 × 300 mm) läuft. EIGENE ANNAHME,
+// welche Abläufe gleichzeitig laufen.
+const PAIRS=[
+  {a:'kochen', b:'decken',   label:'Kochen + Tisch decken'},
+  {a:'kochen', b:'kaffee',   label:'Kochen + Getränke holen'},
+  {a:'kochen', b:'einkauf',  label:'Kochen + Einkauf einräumen'},
+  {a:'abraeumen', b:'kaffee',label:'Abräumen + Getränke holen'},
+];
+const MEET=2*BODY_R;
+function segDist(p, a, b){ const e=sub(b,a), l2=dot(e,e)||1, t=clamp(dot(sub(p,a),e)/l2,0,1); return len(sub(p,add(a,mul(e,t)))); }
+function conflicts(R){
+  const by=Object.fromEntries(R.flows.map(f=>[f.key,f]));
+  return PAIRS.map(P=>{
+    const A=by[P.a], B=by[P.b]; if(!A || !B || !A.complete || !B.complete) return {...P, ok:false, len:0, pts:[]};
+    const segB=[]; B.legs.forEach(l=>{ if(l.ok) for(let i=1;i<l.path.length;i++) segB.push([l.path[i-1],l.path[i]]); });
+    let m=0; const pts=[];
+    A.legs.forEach(l=>{ if(!l.ok) return; for(let i=1;i<l.path.length;i++){ const a=l.path[i-1], b=l.path[i], d=len(sub(b,a)), n=Math.max(1,Math.ceil(d/100));
+      for(let j=0;j<n;j++){ const p=add(a,mul(sub(b,a),(j+0.5)/n));
+        if(segB.some(([u,v])=>segDist(p,u,v)<MEET)){ m+=d/n; if(j%3===0) pts.push(p); } } } });
+    return {...P, ok:true, len:m, pts};
+  }).sort((p,q)=>q.len-p.len || (p.label<q.label?-1:1));
+}
+// Verschieben und vergleichen: das Teil id an allen zulässigen Lagen,
+// je Lage alle Abläufe neu (vollständige, ehrlich gezählt). Wandteile
+// entlang ihrer Wand (Schritt ≥ 50 mm), freie Teile (Insel, Tisch) längs
+// und quer ±1,5 m. Deterministisch: feste Schritte, Gleichstand → die
+// Lage näher an der jetzigen, dann die kleinere.
+function placeOk(E, K, L, t){
+  const g=geom(E,K,t); if(!g || !polyInRoom(E,g.foot||g.poly)) return false;
+  return !L.G.some(h=>h.it.id!==t.id && bandsMeet(g,h) && TL.convexOverlap(g.foot||g.poly, h.foot||h.poly, 1));
+}
+function sweep(E, K, L, id, opts){
+  opts=opts||{};
+  const it=K.items.find(x=>x.id===id); if(!it || it.corner) return null;
+  const evalAt=t=>{ const K2={...K, items:K.items.map(x=>x.id===id?t:x)}, L2=layout(E,K2), R=flows(E,K2,L2,opts.extra?{planner:planner(E,L2,opts.extra)}:undefined);
+    const by={}; Object.keys(GROUPS).forEach(k=>{ by[k]=R.flows.filter(f=>f.group===k && f.complete).reduce((a,f)=>a+f.week,0)*52/1e6; });
+    return {km:R.kmYear, by, complete:R.complete, blocked:R.flows.reduce((a,f)=>a+f.blocked,0)}; };
+  const axes=[];
+  if(!KIND[it.kind].free){
+    const Wf=wallFrame(E,it.a,it.b); if(!Wf) return null;
+    const step=Math.max(50, Math.ceil(Wf.L/60/10)*10), pts=[];
+    for(let x=0; x<=Wf.L-it.w+0.5; x+=step) if(fitsAt(E,K,L,it,Wf,x)) pts.push({v:x, ...evalAt({...it,x})});
+    if(!pts.some(p=>Math.abs(p.v-it.x)<1)) pts.push({v:it.x, ...evalAt(it)});
+    pts.sort((p,q)=>p.v-q.v);
+    axes.push({key:'wall', label:'Lage an der Wand', cur:it.x, pts});
+  } else if(E.F){
+    const r=(it.rot||0)*Math.PI/180, dirs=[['u','längs',{x:Math.cos(r),y:Math.sin(r)}],['n','quer',{x:-Math.sin(r),y:Math.cos(r)}]];
+    dirs.forEach(([k,lab,d])=>{ const pts=[];
+      for(let o=-1500;o<=1500;o+=100){ const t={...it, x:it.x+d.x*o, y:it.y+d.y*o}; if(o===0 || placeOk(E,K,L,t)) pts.push({v:o, ...evalAt(t)}); }
+      axes.push({key:k, label:`Verschieben ${lab}`, cur:0, pts, dir:d}); });
+  }
+  // Gesperrte Wege zählen nicht in die Meter – eine Lage, die einen Weg
+  // versperrt, sähe sonst kürzer aus. Nur Lagen mit den meisten
+  // vollständigen und den wenigsten gesperrten Abläufen kommen in Frage.
+  axes.forEach(a=>{ const mc=Math.max(...a.pts.map(q=>q.complete)), mb=Math.min(...a.pts.filter(q=>q.complete===mc).map(q=>q.blocked));
+    const ok=a.pts.filter(p=>p.complete===mc && p.blocked===mb);
+    a.best=ok.slice().sort((p,q)=>p.km-q.km || Math.abs(p.v-a.cur)-Math.abs(q.v-a.cur) || p.v-q.v)[0]||null; });
+  // In einer vollen Zeile ist kaum Platz zum Schieben: Plätze tauschen mit
+  // gleich breiten Teilen derselben Bauart (beide an die Stelle des anderen).
+  const swaps=[];
+  if(!KIND[it.kind].free){
+    const base=evalAt(it);
+    K.items.filter(o=>o.id!==id && !o.corner && o.kind===it.kind && o.w===it.w && o.a && !fzOf(o) && !fzOf(it)).forEach(o=>{
+      const t={...it, a:o.a, b:o.b, x:o.x}, u={...o, a:it.a, b:it.b, x:it.x};
+      const K2={...K, items:K.items.map(x=>x.id===id?t:x.id===o.id?u:x)}, L2=layout(E,K2), R=flows(E,K2,L2,opts.extra?{planner:planner(E,L2,opts.extra)}:undefined);
+      swaps.push({with:o.id, km:R.kmYear, d:R.kmYear-base.km, complete:R.complete, blocked:R.flows.reduce((a,f)=>a+f.blocked,0), ok:false});
+    });
+    swaps.forEach(x=>{ x.ok = x.complete>=base.complete && x.blocked<=base.blocked; });
+    swaps.sort((p,q)=>(q.ok-p.ok) || p.km-q.km || p.with-q.with);
+  }
+  return {id, axes, swaps};
+}
+
 // ---------- 3D-Szene ----------
 // Alles sind Prismen: konvexes Grundriss-Polygon von z0 bis z1, Farbe,
 // Kennung. Die UI legt daraus Dreiecke und Kanten.
@@ -8161,7 +8309,7 @@ function storable(it){
 globalThis.KITCHEN={ FRIDGE, DOORT_LIM, SWINGS, swingOf, isCold, fzOf, doorTOf, leaves, leafRect, leafReach, leafReachSide, entries, storable, wallFaces, K_DEF, K_LIM, WIDTHS, KIND, DEV, FRONTS, PRESETS, PGROUPS, CONTENTS, FLOWS, GROUPS, ROLE_LABEL, BODY_R,
   derived, devZ, ovenBelow, DW_H, normKitchen, normItem, isEmpty, makeEnv, wallFrame, wpt, geom, dims, layout, envelopes, frontLR, frontKind,
   worktops, check, hoseCheck, alongWall, waterPts, HOSE, sashes, doorReach, optimalStore, hungarian, openingOn, faucetPoint, tableSides, tableSeats, seatPlan, rotSnaps, snapRot, chainDims, freeDims, applyDim, dockFree, barNkba, barSeats, BAR_SEAT_W, slotCandidates, cornerStop, fitsAt, freeSlot, snapX,
-  nearestWall, planner, stations, flows, suggest, reachFactor, scene, frontsOf, stock, nameOf, inflate, polyInRoom, COL };
+  nearestWall, planner, stations, flows, suggest, heatGrid, kidPoly, conflicts, PAIRS, sweep, placeOk, reachFactor, scene, frontsOf, stock, nameOf, inflate, polyInRoom, COL };
 Object.assign(globalThis.KITCHEN, { CORNER, CSHAPE, shapeOf, cornerBlind, cornerPlace, cornerType, crossAt, cornerWing });
 })();
 </script>
@@ -14125,7 +14273,7 @@ const MODE_HINTS={
   measure:'Wand oder Strecke anklicken, Maß eintippen, Enter · zwei Ecken nacheinander für eine Diagonale',
   wall:'Öffnung ziehen verschiebt sie · Kante links oder rechts anklicken: Höhe dort · ←/→ nächste Wand',
   tiles:'Fliese aus der Leiste ziehen · ⇧+Ziehen: Rahmen · Q/E drehen · ⌘D Muster fortsetzen',
-  kitchen:'Schrank aus der Leiste ziehen oder klicken · V 3D · W Wege · O Fronten offen',
+  kitchen:'Schrank aus der Leiste ziehen oder klicken · V 3D · W Wege · O Fronten offen · A Analyse',
 };
 // Der Standardhinweis haengt am Zustand, nicht nur am Modus: ein laufender
 // Zeichenzug oder ein Fliesen-Werkzeug erklaert sich selbst - und zwar
@@ -17739,6 +17887,7 @@ $('tRuler').onclick=()=>rulerToggle();
 const KX=globalThis.KITCHEN;
 const KS={ sel:null, hover:null, hl:null, flow:null, lastWall:null, palDrag:null, drag:false,
   show3d:lsGet('raumaufmass.k3d','1')==='1', paths:lsGet('raumaufmass.kwege','1')==='1', open:false,
+  ana:lsGet('raumaufmass.kana','0')==='1', heat:true, anaMode:'week', ref:null, kid:false, anaKey:'', sw:null, swKey:'', swT:0,
   ctxKey:'', ctx:null, flowKey:'', flowRes:null, suggKey:'', sugg:null, selKey:'', clearArmed:null, clip:null, ptr:null };
 function lsGet(k,d){ try{ const v=localStorage.getItem(k); return v==null?d:v; }catch(e){ return d; } }
 function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
@@ -17958,6 +18107,12 @@ function drawKitchenView(){
   // Boden
   ctx.beginPath(); TILES.ringsOf(E.ring).forEach(R=>{ R.forEach((p,i)=>{ const q=toScr(p); i?ctx.lineTo(q.x,q.y):ctx.moveTo(q.x,q.y); }); ctx.closePath(); });
   ctx.fillStyle=KINK.floor; ctx.fill('evenodd');
+  // Heatmap (Analyse): unter allem anderen, eine Farbe von hell nach dunkel.
+  if(KS.ana && KS.heat && !KS.drag){ const H=anaHeat(c); if(H.max>0){ ctx.save(); ctx.clip('evenodd');
+    for(let iy=0;iy<H.ny;iy++) for(let ix=0;ix<H.nx;ix++){ const v=H.v[iy*H.nx+ix]/H.max; if(v<0.03) continue;
+      const a=toScr({x:H.x0+ix*H.cell, y:H.y0+iy*H.cell}), b=toScr({x:H.x0+(ix+1)*H.cell, y:H.y0+(iy+1)*H.cell});
+      ctx.fillStyle=`rgba(109,40,217,${(0.06+0.54*Math.pow(v,0.6)).toFixed(3)})`; ctx.fillRect(Math.min(a.x,b.x), Math.min(a.y,b.y), Math.abs(b.x-a.x)+0.5, Math.abs(b.y-a.y)+0.5); }
+    ctx.restore(); } }
   ctx.strokeStyle=INK.wall; ctx.lineWidth=2.5*dpr; ctx.stroke();
   drawOpeningsOnPlan(E.pts, E.I, dpr, KX.doorReach(E, L));
   drawEntryLabels(c, dpr);
@@ -18064,7 +18219,8 @@ function drawKitchenView(){
   // Befunde mit Ort: kleine Marke
   c.F.forEach(f=>{ if(!f.at || f.lvl==='info') return; const p=toScr(f.at);
     ctx.beginPath(); ctx.arc(p.x,p.y,4*dpr,0,2*Math.PI); ctx.fillStyle=f.lvl==='bad'?KINK.bad:KINK.warn; ctx.fill(); });
-  if(KS.paths && !KS.drag) drawPaths(c, dpr);
+  if((KS.paths || (KS.ana && KS.hoverFlow)) && !KS.drag) drawPaths(c, dpr);
+  if(KS.ana && !KS.drag) drawAnaMarks(c, dpr);
   // Vorschlag unter dem Zeiger: Pfeil vom alten zum neuen Schrank
   if(KS.hl){ const b=L.byId.get(KS.hl.to), a=KS.hl.from!=null ? L.byId.get(KS.hl.from) : (b && {c:add2(b.frontMid, mul2(b.n, 700))});
     if(a && b){ const p=toScr(a.c), q=toScr(b.c), d=unitV(sub2(q,p)), s=10*dpr;
@@ -18212,10 +18368,10 @@ function flowRes(c){
   return KS.flowRes;
 }
 function drawPaths(c, dpr){
-  const R=flowRes(c);
-  const show=R.flows.filter(f=>!KS.flow || f.key===KS.flow);
+  const R=flowRes(c), FL=FL||KS.hoverFlow||null;
+  const show=R.flows.filter(f=>!FL || f.key===FL);
   show.forEach(f=>{
-    const col=KINK.grp[f.group], hl=!!KS.flow;
+    const col=KINK.grp[f.group], hl=!!FL;
     ctx.strokeStyle=col; ctx.globalAlpha=hl?0.9:0.35; ctx.lineWidth=(hl?3:1.6)*dpr; ctx.lineJoin='round';
     f.legs.forEach(l=>{
       // Gesperrter Weg (Engstelle): rot gestrichelt als Luftlinie.
@@ -18230,8 +18386,8 @@ function drawPaths(c, dpr){
     ctx.globalAlpha=1; ctx.lineJoin='miter';
   });
   // Stationen des gezeigten Ablaufs beschriften
-  if(KS.flow){
-    const f=R.flows.find(x=>x.key===KS.flow); if(!f) return;
+  if(FL){
+    const f=R.flows.find(x=>x.key===FL); if(!f) return;
     const seen=new Map();
     f.legs.forEach(l=>{ [[l.from,l.path[0]],[l.to,l.path[l.path.length-1]]].forEach(([r,p])=>{ const k=Math.round(p.x)+','+Math.round(p.y); if(!seen.has(k)) seen.set(k,{p,r:new Set()}); seen.get(k).r.add(r); }); });
     ctx.font=`600 ${11*dpr}px ${CANVAS_FONT}`; ctx.textBaseline='middle';
@@ -18243,6 +18399,17 @@ function drawPaths(c, dpr){
   }
 }
 
+// Analyse im Plan: Kind im Weg (Scheibe an der Heatmap-Spitze) und zu
+// zweit die Stellen, an denen sich die Wege begegnen.
+function drawAnaMarks(c, dpr){
+  const kid=anaKid(c);
+  if(kid){ poly(kid.poly); ctx.fillStyle='rgba(201,138,26,.35)'; ctx.fill(); ctx.strokeStyle=KINK.warn; ctx.lineWidth=1.5*dpr; ctx.stroke();
+    const q=toScr(kid.p); ctx.font=`600 ${11*dpr}px ${CANVAS_FONT}`; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillStyle=INK.wall; ctx.fillText('Kind', q.x, q.y); ctx.textAlign='start'; ctx.textBaseline='alphabetic'; }
+  if((c.K.spec.persons||1)>=2){
+    const r=Math.max(3*dpr, KX.BODY_R*VIEW.s*0.5);
+    anaConfl(c).forEach(x=>x.pts.forEach(p=>{ const q=toScr(p); ctx.beginPath(); ctx.arc(q.x,q.y,r,0,2*Math.PI); ctx.fillStyle='rgba(201,138,26,.22)'; ctx.fill(); }));
+  }
+}
 // ---------- Zeiger ----------
 function hits(c, w){
   const pr={wall:0, tall:1, base:2, island:3, table:4};
@@ -18358,6 +18525,7 @@ function kitchenKey(e){
   if(lk==='v'){ toggle3d(); return true; }
   if(lk==='w'){ togglePaths(); return true; }
   if(lk==='o'){ toggleOpen(); return true; }
+  if(lk==='a'){ toggleAna(); return true; }
   if(!it) return false;
   if(k==='Escape'){ KS.sel=null; render(); return true; }
   if(k==='Delete' || k==='Backspace'){ e.preventDefault(); removeItem(it); return true; }
@@ -18412,11 +18580,14 @@ function removeItem(it){
 function toggle3d(){ KS.show3d=!KS.show3d; lsSet('raumaufmass.k3d',KS.show3d?'1':'0'); syncToggles(); render(); }
 function togglePaths(){ KS.paths=!KS.paths; lsSet('raumaufmass.kwege',KS.paths?'1':'0'); syncToggles(); render(); }
 function toggleOpen(){ KS.open=!KS.open; syncToggles(); render(); }
+function toggleAna(){ KS.ana=!KS.ana; lsSet('raumaufmass.kana',KS.ana?'1':'0'); KS.anaKey=''; syncToggles(); render(); }
 function syncToggles(){
   const set=(id,v)=>{ const b=$(id); if(b) b.setAttribute('aria-pressed',String(!!v)); };
-  set('k3dBtn',KS.show3d); set('kWayBtn',KS.paths); set('kOpenBtn',KS.open);
-  // Wege-Uebersicht im Panel nur, wenn "Wege" oben an ist (Meldung M-20261109-133312-e804a0).
-  { const wb=$('kWayBox'); if(wb) wb.hidden=!KS.paths; }
+  set('k3dBtn',KS.show3d); set('kWayBtn',KS.paths); set('kOpenBtn',KS.open); set('kAnaBtn',KS.ana);
+  // Wege-Uebersicht im Panel nur, wenn "Wege" oben an ist (Meldung M-20261109-133312-e804a0);
+  // mit Analyse steht alles rechts neben dem Plan, das Panel bleibt schlank.
+  { const wb=$('kWayBox'); if(wb) wb.hidden=!KS.paths || KS.ana; }
+  document.body.classList.toggle('kana', M.mode==='kitchen' && KS.ana);
   document.body.classList.toggle('kitchenmode', M.mode==='kitchen');
   document.body.classList.toggle('k3d', M.mode==='kitchen' && KS.show3d);
 }
@@ -18855,6 +19026,165 @@ function renderWays(c){
     Object.entries(O.assign).forEach(([k,ids])=>ids.forEach(id=>{ const t=items.find(it=>it.id===id); if(t) t.store=[...(t.store||[]),k]; }));
     kitchenSave(); setHint(`Optimal eingeräumt: ≈ ${km(O.kmAfter)} km/Jahr · ⌘Z nimmt es zurück`); };
 }
+// ---------- Wege-Analyse (Meldungen M-20261109-151457-68b975, -151540-54f941) ----------
+// Eigene Ansicht statt 3D: wenig Text, viel Information. Oben die Summe
+// (mit Referenz zum Vergleichen), darunter die Abläufe als Balken gegen-
+// einander, die Stationen als Matrix (was gesetzt ist, was fehlt), die
+// Kurve „gewähltes Teil verschieben“ mit exaktem Optimum und Tausch, und
+// zu zweit die Begegnungen. Die Heatmap liegt im Plan links.
+const FSHORT={einkauf:'Einkauf', muellraus:'Müll raus', kochen:'Kochen', servieren:'Servieren', decken:'Tisch decken', abraeumen:'Abräumen', ausraeumen:'Ausräumen', kaffee:'Snacks, Getränke'};
+const fmtKm=v=>v.toFixed(1).replace('.',',');
+const fmtD=v=>(v>0?'+':v<0?'−':'±')+Math.abs(v).toFixed(1).replace('.',',');
+function anaHeat(c){
+  const R=flowRes(c);
+  if(KS.heatKey!==c.key){ KS.heatKey=c.key; KS.heatG=KX.heatGrid(c.E,R); KS.kidR=null; KS.confl=null; }
+  return KS.heatG;
+}
+function anaKid(c){
+  const H=anaHeat(c); if(!KS.kid || !H.peak) return null;
+  if(!KS.kidR){ const P=KX.kidPoly(H.peak); KS.kidR={poly:P, p:H.peak, R:KX.flows(c.E,c.K,c.L,{planner:KX.planner(c.E,c.L,[P])})}; }
+  return KS.kidR;
+}
+function anaConfl(c){ anaHeat(c); if(!KS.confl) KS.confl=KX.conflicts(flowRes(c)); return KS.confl; }
+// Kurve fürs gewählte Teil: nach dem Ziehen und gedrosselt rechnen (je Lage
+// ein voller Durchlauf, ≈ 4 ms).
+function anaSweep(c){
+  const it=selItem(); if(!it || it.corner || KX.fzOf(it)&&false) return null;
+  const key=c.key+'|'+it.id+'|'+(KS.kid?1:0);
+  if(KS.swKey===key) return KS.sw;
+  if(KS.drag) return null;
+  clearTimeout(KS.swT);
+  KS.swT=setTimeout(()=>{ const cc=kctx(); if(!cc) return; const cur=selItem(); if(!cur) return;
+    const k2=cc.key+'|'+cur.id+'|'+(KS.kid?1:0); if(KS.swKey===k2) return;
+    const kid=anaKid(cc);
+    try{ KS.sw=KX.sweep(cc.E,cc.K,cc.L,cur.id, kid?{extra:[kid.poly]}:{}); }catch(err){ KS.sw=null; console.warn(err); }
+    KS.swKey=k2; KS.anaKey=''; render(); }, 120);
+  return 'pending';
+}
+function sweepSvg(ax, unit, from){
+  const W=520, H=150, pl=44, pr=12, pt=10, pb=26;
+  const P=ax.pts; if(P.length<2) return '';
+  const xs=P.map(p=>p.v), ys=P.map(p=>p.km);
+  let x0=Math.min(...xs), x1=Math.max(...xs), y0=Math.min(...ys), y1=Math.max(...ys);
+  if(y1-y0<0.2){ const m=(y0+y1)/2; y0=m-0.1; y1=m+0.1; }
+  const pad=(y1-y0)*0.12; y0-=pad; y1+=pad;
+  const X=v=>pl+(v-x0)/(x1-x0||1)*(W-pl-pr), Y=v=>pt+(1-(v-y0)/(y1-y0))*(H-pt-pb);
+  // Saubere Ticks
+  const tick=(a,b,n)=>{ const r=(b-a)/n, m=Math.pow(10,Math.floor(Math.log10(r))), st=[1,2,5,10].map(k=>k*m).find(k=>k>=r)||r; const out=[]; for(let v=Math.ceil(a/st)*st; v<=b+1e-9; v+=st) out.push(+v.toFixed(6)); return out; };
+  let g='';
+  tick(y0,y1,3).forEach(v=>{ g+=`<line x1="${pl}" x2="${W-pr}" y1="${Y(v)}" y2="${Y(v)}" stroke="#e7e3d8" stroke-width="1"/><text x="${pl-6}" y="${Y(v)+3.5}" text-anchor="end" font-size="10" fill="#7c766a">${String(+v.toFixed(2)).replace('.',',')}</text>`; });
+  tick(x0,x1,5).forEach(v=>{ g+=`<text x="${X(v)}" y="${H-8}" text-anchor="middle" font-size="10" fill="#7c766a">${unit(v)}</text>`; });
+  // Lücken (gesperrte Lagen) unterbrechen die Linie.
+  const step=Math.min(...P.slice(1).map((p,i)=>p.v-P[i].v));
+  let d='', prev=null; P.forEach(p=>{ const gap=prev && p.v-prev.v>step*1.5; d+=(prev&&!gap?'L':'M')+X(p.v).toFixed(1)+' '+Y(p.km).toFixed(1); prev=p; });
+  g+=`<path d="${d}" fill="none" stroke="#24221d" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  const bmin=Math.min(...P.map(p=>p.blocked||0));
+  P.filter(p=>(p.blocked||0)>bmin).forEach(p=>{ g+=`<circle cx="${X(p.v)}" cy="${Y(p.km)}" r="4" fill="#faf9f6" stroke="#b3261e" stroke-width="2"><title>Weg gesperrt</title></circle>`; });
+  const cur=P.find(p=>Math.abs(p.v-ax.cur)<1);
+  if(cur) g+=`<line x1="${X(cur.v)}" x2="${X(cur.v)}" y1="${pt}" y2="${H-pb}" stroke="#7c766a" stroke-width="1"/><circle cx="${X(cur.v)}" cy="${Y(cur.km)}" r="5" fill="#7c766a" stroke="#faf9f6" stroke-width="2"/><text x="${X(cur.v)+6}" y="${pt+9}" font-size="10" fill="#4b473e">jetzt</text>`;
+  if(ax.best && (!cur || Math.abs(ax.best.v-cur.v)>=1)) g+=`<circle cx="${X(ax.best.v)}" cy="${Y(ax.best.km)}" r="5" fill="#2e7d4f" stroke="#faf9f6" stroke-width="2"/><text x="${X(ax.best.v)}" y="${Y(ax.best.km)+16}" text-anchor="middle" font-size="10" fill="#24221d">Optimum</text>`;
+  g+=`<rect class="ka-hit" x="${pl}" y="${pt}" width="${W-pl-pr}" height="${H-pt-pb}" fill="transparent" style="cursor:crosshair"/><line class="ka-cross" x1="0" x2="0" y1="${pt}" y2="${H-pb}" stroke="#4b473e" stroke-width="1" visibility="hidden"/>`;
+  return `<div class="ka-chart" data-ax="${ax.key}" data-from="${from}"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${escapeHtml(ax.label)}: km pro Jahr je Lage">${g}</svg><div class="ka-tip"></div></div>`;
+}
+function renderAna(c){
+  const box=$('kAna'); if(!box) return;
+  if(!KS.ana || M.mode!=='kitchen'){ if(box.innerHTML) box.innerHTML=''; KS.anaKey=''; return; }
+  const R=flowRes(c), S=c.K.spec, it=selItem(), sw=anaSweep(c), kid=anaKid(c), persons=S.persons||1;
+  const key=JSON.stringify([c.key, KS.sel, KS.anaMode, KS.ref&&KS.ref.kmYear, KS.kid, KS.flow, KS.heat, sw===KS.sw?KS.swKey:String(sw)]);
+  if(KS.anaKey===key) return;
+  KS.anaKey=key;
+  const ref=KS.ref;
+  let h=`<div class="ka-head"><div><div class="ka-big">${fmtKm(R.kmYear)} <small>km/Jahr</small></div>`
+    +`<div class="ka-sub">${R.complete} von ${R.flows.length} Abläufen vollständig${ref?` · Referenz ${fmtKm(ref.kmYear)} (${fmtD(R.kmYear-ref.kmYear)})`:''}${kid?` · mit Kind im Weg ${fmtKm(kid.R.kmYear)} (${fmtD(kid.R.kmYear-R.kmYear)})${kid.R.flows.some(f=>f.blocked)?', Weg gesperrt':''}`:''}</div></div>`
+    +`<div class="ka-ctl"><label>Personen</label><div class="seg">${[1,2,3].map(n=>`<button data-pers="${n}" aria-pressed="${persons===n}" title="${n===1?'Eine Person kocht':n+' Personen gleichzeitig: Gang nach NKBA mind. 1219 mm, Begegnungen unten'}">${n}</button>`).join('')}</div>`
+    +`<button class="tog" data-kid aria-pressed="${KS.kid}" title="Ein Kind steht am meistbelaufenen Punkt (Heatmap-Spitze): wie viel länger werden die Wege, wird einer gesperrt?">Kind im Weg</button>`
+    +`<button class="tog" data-heat aria-pressed="${KS.heat}" title="Heatmap im Plan: wo wie oft gelaufen wird">Heatmap <span class="ka-heatlg"></span></button>`
+    +(ref?`<button data-ref="0" title="Vergleich beenden">Referenz löschen</button>`:`<button data-ref="1" title="Jetzigen Stand merken; danach zeigen Balken und Summe den Unterschied">Referenz merken</button>`)
+    +`</div></div>`;
+  // 1. Abläufe im Vergleich
+  const mode=KS.anaMode, val=f=>mode==='week' ? f.week*52/1e6 : f.m/1000;
+  const rows=R.flows.filter(f=>f.complete).sort((p,q)=>val(q)-val(p) || (p.key<q.key?-1:1));
+  const rv=f=>ref && ref.flows[f.key] ? (mode==='week' ? ref.flows[f.key].week*52/1e6 : ref.flows[f.key].m/1000) : null;
+  const mx=Math.max(1e-9, ...rows.map(val), ...rows.map(f=>rv(f)||0));
+  h+=`<h4>Abläufe im Vergleich <small>${mode==='week'?'km/Jahr (Häufigkeit × Weg)':'Meter je Durchgang'}</small>${seg('anaMode',[['week','je Jahr'],['run','je Durchgang']],mode)}</h4>`;
+  if(rows.length){
+    h+=`<div class="ka-bars">${rows.map(f=>{ const v=val(f), r=rv(f), on=KS.flow===f.key;
+      return `<span class="lb${on?' on':''}" data-fl="${f.key}">${escapeHtml(FSHORT[f.key]||f.label)}</span>`
+        +`<span class="tr" data-fl="${f.key}" title="${escapeHtml(f.label)}: ${f.f}× je Woche, ${fmtKm(f.m/1000)} m je Durchgang${f.blocked?' – Weg gesperrt':''}"><span class="br" style="width:${(v/mx*100).toFixed(1)}%;background:${KINK.grp[f.group]};opacity:${KS.flow&&!on?0.35:1}"></span>${r!=null?`<span class="rf" style="left:${(r/mx*100).toFixed(1)}%"></span>`:''}</span>`
+        +`<span class="vl">${mode==='week'?fmtKm(v):fmtKm(v)+' m'}${r!=null&&Math.abs(v-r)>=0.05?` <em>${fmtD(v-r)}</em>`:''}</span>`; }).join('')}</div>`
+      +`<div class="ka-legend">${Object.entries(KX.GROUPS).map(([k,l])=>`<span><i style="background:${KINK.grp[k]}"></i>${l}</span>`).join('')}${ref?'<span><i style="background:var(--ink);width:2px"></i>Referenz</span>':''}</div>`;
+  } else h+=`<p class="ka-note">Noch kein Ablauf vollständig – unten steht, was fehlt.</p>`;
+  // 2. Was steht wo – Stationen × Abläufe
+  const roles=[]; KX.FLOWS.forEach(F=>F.chains.flat().forEach(r=>{ if(!roles.includes(r)) roles.push(r); }));
+  const order=['eingang','tisch','sink','dw','hob','kuehl','prep'];
+  roles.sort((a,b)=>{ const ia=order.indexOf(a), ib=order.indexOf(b); return (ia<0?99:ia)-(ib<0?99:ib) || (KX.ROLE_LABEL[a]||a).localeCompare(KX.ROLE_LABEL[b]||b,'de'); });
+  const St=R.stations, nmId=id=>{ const t=c.K.items.find(x=>x.id===id); return t?nm(t):''; };
+  const missN=roles.filter(r=>!(St[r]||[]).length).length;
+  h+=`<h4>Was steht wo <small>${missN?`${missN} fehlt${missN>1?'en':''}`:'alles gesetzt'} · Inhalte rechts am Schrank wählen</small></h4>`;
+  h+=`<table class="ka-mx"><thead><tr><th></th><th></th>${KX.FLOWS.map(F=>`<th class="v" title="${escapeHtml(F.label)}">${escapeHtml(FSHORT[F.key]||F.label)}</th>`).join('')}</tr></thead><tbody>`
+    +roles.map(r=>{ const at=St[r]||[], miss=!at.length;
+      const where = miss ? 'fehlt' : r==='eingang' ? 'Tür' : [...new Set(at.map(x=>x.id).filter(x=>x!=null).map(nmId))].join(', ');
+      return `<tr><td class="r">${escapeHtml(KX.ROLE_LABEL[r]||r)}</td><td class="w${miss?' miss':''}" title="${escapeHtml(where)}">${escapeHtml(where)}</td>`
+        +KX.FLOWS.map(F=>F.chains.flat().includes(r) ? `<td><span class="ka-dot${miss?' miss':''}" title="${escapeHtml(F.label)} braucht ${escapeHtml(KX.ROLE_LABEL[r]||r)}${miss?' – fehlt':''}"></span></td>` : '<td></td>').join('')+'</tr>'; }).join('')
+    +`</tbody></table>`;
+  // 3. Verschieben und optimieren
+  h+=`<h4>Verschieben und vergleichen${it?` <small>${escapeHtml(nm(it))}</small>`:''}</h4>`;
+  if(!it) h+=`<p class="ka-note">Ein Teil im Plan wählen: die Kurve zeigt km/Jahr für jede Lage, an der es Platz hat. Klick in die Kurve setzt es dorthin.</p>`;
+  else if(it.corner) h+=`<p class="ka-note">Eckschränke bleiben in ihrer Ecke.</p>`;
+  else if(sw==='pending' || !sw) h+=`<p class="ka-note">Rechne …</p>`;
+  else {
+    sw.axes.forEach(ax=>{
+      const unit = ax.key==='wall' ? v=>fmtKm(v/1000).replace(/,0$/,'')+' m' : v=>(v>0?'+':'')+String(+(v/1000).toFixed(1)).replace('.',',')+' m';
+      if(ax.pts.length<2) h+=`<p class="ka-note">${escapeHtml(ax.label)}: kein freier Platz zum Schieben${sw.swaps&&sw.swaps.length?' – Tauschen unten':''}.</p>`;
+      else h+=`<div class="ka-note">${escapeHtml(ax.label)} · km/Jahr${ax.key==='wall'?' · Lage ab Wandanfang':''}${ax.pts.some(p=>p.blocked>Math.min(...ax.pts.map(q=>q.blocked)))?' · rote Ringe: dort wird ein Weg versperrt':''}</div>`+sweepSvg(ax, unit, ax.key);
+      const cur=ax.pts.find(p=>Math.abs(p.v-ax.cur)<1), b=ax.best;
+      if(b && cur && b.km<cur.km-0.05) h+=`<div class="ka-row"><span>Optimum ${unit(b.v)}: ${fmtKm(b.km)} km/Jahr (${fmtD(b.km-cur.km)})</span><button class="primary" data-opt="${ax.key}">Dorthin setzen</button></div>`;
+      else if(ax.pts.length>1) h+=`<div class="ka-row"><span>Liegt schon am kürzesten.</span></div>`;
+    });
+    const sws=(sw.swaps||[]).filter(x=>x.ok && x.d<-0.05).slice(0,3);
+    if(sws.length) h+=sws.map(x=>`<div class="ka-row"><span>Platz tauschen mit ${escapeHtml(nmId(x.with))}: ${fmtKm(x.km)} km/Jahr (${fmtD(x.d)})</span><button data-swap="${x.with}">Tauschen</button></div>`).join('');
+    else if(sw.swaps && sw.swaps.length) h+=`<p class="ka-note">Tauschen mit gleich breiten Teilen bringt nichts.</p>`;
+    h+=`<p class="ka-note">Gerechnet, nicht geschätzt: feste Schritte, bei Gleichstand die Lage nächst der jetzigen – dieselbe Küche ergibt immer dasselbe Optimum.${KS.kid?' Mit Kind im Weg gerechnet.':''}</p>`;
+  }
+  // 4. Zu zweit
+  if(persons>=2){
+    const C=anaConfl(c).filter(x=>x.ok), cm=Math.max(1,...C.map(x=>x.len));
+    h+=`<h4>Zu zweit in der Küche <small>Begegnungen: Wegstück, auf dem die andere Person näher als 60 cm läuft</small></h4>`;
+    h+= C.length ? `<div class="ka-bars">${C.map(x=>`<span class="lb">${escapeHtml(x.label)}</span><span class="tr" title="${escapeHtml(x.label)}: ${fmtKm(x.len/1000)} m je Durchgang im Weg"><span class="br" style="width:${(x.len/cm*100).toFixed(1)}%;background:#c98a1a"></span></span><span class="vl">${fmtKm(x.len/1000)} m</span>`).join('')}</div>`
+      +`<p class="ka-note">Im Plan gelb: wo es eng wird. Gang zu zweit nach NKBA mind. 1219 mm (steht in der Prüfung). Welche Abläufe gleichzeitig laufen, ist eine Annahme.</p>`
+      : `<p class="ka-note">Erst wenn Kochen und ein zweiter Ablauf vollständig sind.</p>`;
+  }
+  const st=box.scrollTop;
+  box.innerHTML=h; box.scrollTop=st;
+  // Verdrahtung
+  box.querySelectorAll('[data-pers]').forEach(b=>b.onclick=()=>{ const n=+b.dataset.pers, K=kitchenData(); if((K.spec.persons||1)===n) return; snapshot(); K.spec.persons=n; kitchenSave(); });
+  const kb=box.querySelector('[data-kid]'); if(kb) kb.onclick=()=>{ KS.kid=!KS.kid; KS.kidR=null; KS.swKey=''; render(); };
+  const hb=box.querySelector('[data-heat]'); if(hb) hb.onclick=()=>{ KS.heat=!KS.heat; render(); };
+  const rb=box.querySelector('[data-ref]'); if(rb) rb.onclick=()=>{ KS.ref = rb.dataset.ref==='1' ? {kmYear:R.kmYear, flows:Object.fromEntries(R.flows.map(f=>[f.key,{week:f.week,m:f.m}]))} : null; render(); };
+  box.querySelectorAll('[data-seg="anaMode"] button').forEach(b=>b.onclick=()=>{ KS.anaMode=b.dataset.v; render(); });
+  box.querySelectorAll('[data-fl]').forEach(el=>{
+    el.onclick=()=>{ KS.flow = KS.flow===el.dataset.fl ? null : el.dataset.fl; if(!KS.paths){ KS.paths=true; lsSet('raumaufmass.kwege','1'); syncToggles(); } render(); };
+    el.onmouseenter=()=>{ if(KS.flow) return; KS.hoverFlow=el.dataset.fl; redraw(); };
+    el.onmouseleave=()=>{ KS.hoverFlow=null; redraw(); }; });
+  const moveTo=(ax,p)=>{ const t=selItem(); if(!t) return; snapshot();
+    if(ax.key==='wall') t.x=p.v; else { const o=p.v-ax.cur; t.x+=ax.dir.x*o; t.y+=ax.dir.y*o; }
+    kitchenSave(); setHint(`${nm(t)} verschoben · ${fmtKm(p.km)} km/Jahr · ⌘Z nimmt es zurück`); };
+  box.querySelectorAll('[data-opt]').forEach(b=>b.onclick=()=>{ const ax=KS.sw&&KS.sw.axes.find(a=>a.key===b.dataset.opt); if(ax&&ax.best) moveTo(ax, ax.best); });
+  box.querySelectorAll('[data-swap]').forEach(b=>b.onclick=()=>{ const t=selItem(), o=kitchenData().items.find(x=>x.id===+b.dataset.swap); if(!t||!o) return;
+    snapshot(); const a={a:t.a,b:t.b,x:t.x}; t.a=o.a; t.b=o.b; t.x=o.x; o.a=a.a; o.b=a.b; o.x=a.x; kitchenSave(); setHint(`${nm(t)} und ${nm(o)} getauscht · ⌘Z nimmt es zurück`); });
+  box.querySelectorAll('.ka-chart').forEach(ch=>{
+    const ax=KS.sw && KS.sw.axes.find(a=>a.key===ch.dataset.ax); if(!ax) return;
+    const svg=ch.querySelector('svg'), hit=ch.querySelector('.ka-hit'), cr=ch.querySelector('.ka-cross'), tip=ch.querySelector('.ka-tip');
+    const near=e=>{ const r=svg.getBoundingClientRect(), vb=svg.viewBox.baseVal, x=(e.clientX-r.left)/r.width*vb.width;
+      const P=ax.pts, xs=P.map(p=>p.v), x0=Math.min(...xs), x1=Math.max(...xs), v=x0+(x-44)/(vb.width-56)*(x1-x0);
+      return {p:P.reduce((a,q)=>Math.abs(q.v-v)<Math.abs(a.v-v)?q:a), r, vb, X:q=>44+(q.v-x0)/(x1-x0||1)*(vb.width-56)}; };
+    hit.onmousemove=e=>{ const n=near(e); cr.setAttribute('x1',n.X(n.p)); cr.setAttribute('x2',n.X(n.p)); cr.setAttribute('visibility','visible');
+      tip.style.display='block'; tip.textContent=`${ax.key==='wall'?fmtKm(n.p.v/1000)+' m':(n.p.v>0?'+':'')+fmtKm(n.p.v/1000)+' m'}: ${fmtKm(n.p.km)} km/Jahr${n.p.blocked?' · Weg gesperrt':''}${n.p.complete<R.complete?' (Ablauf unvollständig)':''} · Klick setzt hierhin`;
+      tip.style.left=Math.min(n.X(n.p)/n.vb.width*n.r.width+8, n.r.width-200)+'px'; tip.style.top='4px'; };
+    hit.onmouseleave=()=>{ cr.setAttribute('visibility','hidden'); tip.style.display='none'; };
+    hit.onclick=e=>moveTo(ax, near(e).p);
+  });
+}
 function renderStock(c){
   const S=KX.stock(c.K,c.L);
   $('kStock').innerHTML = S.list.length
@@ -18876,11 +19206,11 @@ function renderKitchenPanel(){
   $('kEmpty').hidden = c.K.items.length>0;
   $('kEmpty').innerHTML = `<b>Schrank aus der Leiste oben auf eine Wand ziehen</b> – oder anklicken, dann setzt er sich an die nächste freie Stelle. Standardmaße stimmen meist; Breite, Front und Inhalt stellt man rechts ein, wenn ein Teil gewählt ist.`;
   if(KS.drag) return;
-  renderSel(c); renderCorner(c); renderChecks(c); renderWays(c); renderStock(c);
+  renderSel(c); renderCorner(c); renderChecks(c); renderWays(c); renderStock(c); renderAna(c);
   $('kClear').hidden=!c.K.items.length;
 }
-function kitchenLeave(){ KS.sel=null; KS.drag=false; document.body.classList.remove('k3d'); }
-$('k3dBtn').onclick=toggle3d; $('kWayBtn').onclick=togglePaths; $('kOpenBtn').onclick=toggleOpen;
+function kitchenLeave(){ KS.sel=null; KS.drag=false; document.body.classList.remove('k3d'); document.body.classList.remove('kana'); }
+$('k3dBtn').onclick=toggle3d; $('kWayBtn').onclick=togglePaths; $('kOpenBtn').onclick=toggleOpen; $('kAnaBtn').onclick=toggleAna;
 $('kSelX').onclick=()=>{ KS.sel=null; render(); };
 $('kClear').onclick=()=>{
   const K=kitchenData(), b=$('kClear'); if(!K.items.length) return;
@@ -19018,7 +19348,7 @@ function mat(){
 const dot3=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2], cross3=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
 const norm3=a=>{ const l=Math.hypot(...a)||1; return a.map(x=>x/l); };
 function mul4(A,B){ const o=new Array(16).fill(0); for(let c2=0;c2<4;c2++) for(let r=0;r<4;r++){ let s=0; for(let k=0;k<4;k++) s+=A[k*4+r]*B[c2*4+k]; o[c2*4+r]=s; } return o; }
-function k3dSchedule(){ if(G3.raf || !(M.mode==='kitchen' && KS.show3d)) return; G3.raf=requestAnimationFrame(()=>{ G3.raf=0; k3dDraw(); }); }
+function k3dSchedule(){ if(G3.raf || !(M.mode==='kitchen' && KS.show3d && !KS.ana)) return; G3.raf=requestAnimationFrame(()=>{ G3.raf=0; k3dDraw(); }); }
 function k3dDraw(){
   if(!(M.mode==='kitchen' && KS.show3d)) return;
   const c=kctx(); if(!c) return;
@@ -19081,7 +19411,7 @@ function kitchenHint(){
   const it=selItem();
   if(it) return it.a ? `${nm(it)}: ziehen schiebt an der Wand (⌥ ohne Einrasten) · ←/→ 1 cm, ⇧ 10 cm${hasHinge(it)?' · F Anschlag':''} · ⌘D daneben · ⌘C/⌘V kopieren · Entf löscht`
                      : `${nm(it)}: ziehen verschiebt · Q/E dreht 15° · Pfeile 1 cm · ⌘C/⌘V kopieren · Entf löscht`;
-  return 'Schrank aus der Leiste ziehen oder klicken · V 3D · W Wege · O Fronten offen';
+  return 'Schrank aus der Leiste ziehen oder klicken · V 3D · W Wege · O Fronten offen · A Analyse';
 }
 
 Object.assign(globalThis, { kitchenReady, kitchenDown, kitchenMove, kitchenUp, kitchenTap, kitchenHover, kitchenKey,
@@ -22712,6 +23042,38 @@ globalThis.selfChecks=function(){
       chk('kueche: hoch eingebaute Spülmaschine über dem Abfluss – Ablauf belüften',
         (()=>{ const Ew=KX.makeEnv(R.pts,R.walls,[win,door],[],[{id:'w1',a:'A',b:'B',x:300,y:450}]); const K=KX.normKitchen({items:[{id:1,kind:'tall',dev:'dw',a:'D',b:'A',x:0,w:600}]});
           return has(KX.check(Ew,K,KX.layout(Ew,K)),/belüften/,'info'); })());
+      {
+        // Wege-Analyse: eine kleine vollständige Küche (alle Abläufe)
+        const Ea=KX.makeEnv(R.pts,R.walls,[door],[]);
+        const Ka=KX.normKitchen({items:[
+          {id:1,kind:'base',dev:'sink',a:'A',b:'B',x:600,w:600,store:['muell']},{id:2,kind:'base',dev:'dw',a:'A',b:'B',x:1200,w:600},
+          {id:3,kind:'base',dev:'hob',a:'A',b:'B',x:2400,w:600},{id:4,kind:'base',a:'A',b:'B',x:1800,w:600,store:['besteck','messer']},
+          {id:5,kind:'tall',dev:'fridge',a:'B',b:'C',x:0,w:600},{id:6,kind:'wall',a:'A',b:'B',x:1800,w:600,store:['teller','glaeser']},
+          {id:7,kind:'base',a:'A',b:'B',x:3000,w:600,store:['toepfe','gewuerze']},{id:8,kind:'tall',a:'B',b:'C',x:600,w:600,store:['vorrat','tassen']},
+          {id:9,kind:'table',x:2000,y:2000,rot:0,w:1200,d:800}]});
+        const La=KX.layout(Ea,Ka), Ra=KX.flows(Ea,Ka,La), H=KX.heatGrid(Ea,Ra);
+        chk('kueche-analyse: Heatmap hat eine Spitze im Raum, alle Abläufe vollständig',
+          Ra.complete===Ra.flows.length && H.max>0 && H.peak && TILES.pointInRing(H.peak, TILES.ringsOf(Ea.ring)[0]));
+        const Rk=KX.flows(Ea,Ka,La,{planner:KX.planner(Ea,La,[KX.kidPoly(H.peak)])});
+        chk('kueche-analyse: Kind am meistbelaufenen Punkt macht die Wege länger oder sperrt einen', Rk.kmYear>Ra.kmYear || Rk.flows.some(f=>f.blocked));
+        const C=KX.conflicts(Ra);
+        chk('kueche-analyse: zu zweit – Begegnungen je Paar, absteigend sortiert, Kochen+Getränke begegnen sich',
+          C.length===KX.PAIRS.length && C.every((x,i)=>!i || C[i-1].len>=x.len) && C.find(x=>x.a==='kochen'&&x.b==='kaffee').len>0);
+        const s1=KX.sweep(Ea,Ka,La,9), s2=KX.sweep(Ea,Ka,La,9);
+        const ax=s1.axes[1];
+        chk('kueche-analyse: Verschieben der Insel/des Tischs – zwei Achsen, deterministisch, Optimum nie schlechter als jetzt, ohne gesperrte Wege',
+          s1.axes.length===2 && JSON.stringify(s1)===JSON.stringify(s2) && ax.best && ax.best.km<=ax.pts.find(p=>p.v===0).km+1e-9
+          && ax.best.blocked===Math.min(...ax.pts.filter(p=>p.complete===ax.best.complete).map(p=>p.blocked)));
+        const Kb={...Ka, items:Ka.items.map(it=>it.id===9?{...it, x:it.x+ax.dir.x*ax.best.v, y:it.y+ax.dir.y*ax.best.v}:it)};
+        const s3=KX.sweep(Ea,Kb,KX.layout(Ea,Kb),9);
+        chk('kueche-analyse: am Optimum gesetzt ist es dort das Optimum (Fixpunkt)', Math.abs(s3.axes[1].best.v)<1e-6);
+        const sw=KX.sweep(Ea,Ka,La,4);
+        chk('kueche-analyse: volle Zeile – Tauschen mit gleich breiten Unterschränken wird angeboten', sw.swaps.length>=2 && sw.swaps.every(x=>isFinite(x.km)));
+        const tight=[{id:1,kind:'base',a:'A',b:'B',x:0,w:600},{id:2,kind:'island',x:1000,y:2090,rot:180,w:1200,d:600}];
+        const one=lay(tight), two=lay(tight.map(x=>x)); two.K.spec.persons=2; const F2=KX.check(E,two.K,two.L);
+        chk('kueche: zu zweit gilt der Gang für mehrere Köche (NKBA 1219 mm)', !has(one.F,/mehrere|zu zweit/) && has(F2,/zu zweit kochen: NKBA mind\. 1219/,'warn')
+          && KX.normKitchen({spec:{persons:2}}).spec.persons===2 && KX.normKitchen({spec:{persons:9}}).spec.persons===3);
+      }
       chk('kueche: 60 mm neben der Wand – 96er Tür geht 90° auf, 140er nicht mehr (bad)',
         !has(lay([fd(60)]).F, /Flügel: geht nur/) && has(lay([{...fd(60), doorT:140}]).F, /Flügel: geht nur \d+° auf, die Wand/, 'bad'));
       chk('kueche: Side by Side 50 mm neben Unterschränken (Bosch: A ≤ 600 → 50 mm) – geht ganz auf',
