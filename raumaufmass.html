@@ -7775,7 +7775,17 @@ function planner(E, L, extra){
   obs.forEach(o=>o.poly.forEach((p,i)=>segs.push([p,o.poly[(i+1)%o.poly.length],o.id])));
   const nodes=[];
   const push=(p,owner)=>nodes.push({x:p.x,y:p.y,owner});
-  TL.ringsOf(room).forEach(R=>R.forEach(p=>push(p,null)));
+  // Raumecken liegen genau auf dem Rand - dort entscheidet pointInRoom
+  // zufällig, und einspringende Ecken (L-Raum, Pfeiler) fehlten als
+  // Umlenkpunkt. Darum 2 mm entlang der Winkelhalbierenden ins Innere,
+  // wie die Hindernisknoten; die Seite wählt der Punkttest selbst, so ist
+  // die Umlaufrichtung von Außenring und Löchern egal.
+  TL.ringsOf(room).forEach(R=>R.forEach((p,i)=>{
+    const u=unit(sub(R[(i+R.length-1)%R.length],p)), v=unit(sub(R[(i+1)%R.length],p));
+    let d=add(u,v); d=len(d)>1e-6 ? unit(d) : {x:-v.y, y:v.x};   // gestreckte Ecke: Normale
+    const q=[add(p,mul(d,2)), add(p,mul(d,-2))].find(q=>TL.pointInRoom(q, room));
+    if(q) push(q,null);
+  }));
   obs.forEach(o=>{ const c=centroid(o.poly); o.poly.forEach(p=>push(add(p, mul(unit(sub(p,c)),2)), o.id)); });
   const inObs=(p,skip)=>obs.find(o=>!skip.has(o.id) && TL.pointInRing(p,o.poly));
   const visible=(p,q,skip)=>{
@@ -23394,6 +23404,29 @@ globalThis.selfChecks=function(){
         const E3=KX.makeEnv(R.pts,R.walls,[d3],[]), K=KX.normKitchen({items:[{id:1,kind:'tall',dev:'fridge',fz:'fd',a:'A',b:'B',x:250,w:900}]});
         chk('kueche: Flügel schlägt an die Zimmertür daneben', KX.check(E3,K,KX.layout(E3,K)).some(f=>/Flügel.*die Zimmertür/.test(f.txt)));
       }
+    }
+    // --- Review-Fix wege ---
+    {
+      // Einspringende Raumecken sind Umlenkpunkte: vorher lagen sie genau auf
+      // dem Rand und pointInRoom warf sie je nach Lage weg (Umweg über die Ecke 300/300).
+      const envOf=(P,extra)=>{ const pts=P.map(([x,y],i)=>({id:String.fromCharCode(65+i),x,y}));
+        const ws=pts.map((p,i)=>[p.id,pts[(i+1)%pts.length].id]);
+        (extra||[]).forEach(([x,y],i)=>pts.push({id:'P'+i,x,y}));
+        if(extra) extra.forEach((_,i)=>ws.push(['P'+i,'P'+((i+1)%extra.length)]));
+        return KX.makeEnv(pts,ws,[],[]); };
+      const plOf=Ex=>KX.planner(Ex, KX.layout(Ex, KX.normKitchen({items:[]})));
+      const ideal=Math.hypot(2300,700)+Math.hypot(1700,1300);
+      const Ls=[[[0,0],[6000,0],[6000,2000],[3000,2000],[3000,4000],[0,4000]],
+                [[0,0],[6000,0],[6000,4000],[3000,4000],[3000,2000],[0,2000]]];
+      const rL=Ls.map(P=>plOf(envOf(P))).map((pl,k)=>k===0 ? pl.route({x:5000,y:1000},{x:1000,y:3000}) : pl.route({x:1000,y:1000},{x:5000,y:3000}));
+      chk('kueche: Weg im L-Raum geht über die Innenecke, in jeder Lage gleich lang (≈4544, nicht 7541)',
+        rL.every(r=>r.ok && Math.abs(r.len-ideal)<5 && r.path.length===3));
+      const Ep=envOf([[0,0],[5000,0],[5000,4000],[0,4000]], [[2300,1000],[2700,1000],[2700,3000],[2300,3000]]);
+      const room=TILES.insetRoom(Ep.ring,()=>300), plP=plOf(Ep);
+      const r1=plP.route({x:1000,y:1500},{x:4000,y:1500}), r2=plP.route({x:1000,y:2500},{x:4000,y:2500});
+      chk('kueche: Weg um einen Pfeiler nimmt die nahen Lochecken (≈3561 oben wie unten, nicht 5118)',
+        r1.ok && r2.ok && Math.abs(r1.len-(2*Math.hypot(1000,800)+1000))<8 && Math.abs(r1.len-r2.len)<1
+        && r1.path.slice(1,-1).every(p=>p.y<1000) && [...r1.path,...r2.path].every(p=>TILES.pointInRoom(p,room)));
     }
   }
   return {ok, out};
