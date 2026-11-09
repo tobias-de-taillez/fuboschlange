@@ -3387,6 +3387,19 @@ function storeFits(it, S, list){
 // Herd = Kochfeld mit Backofen darunter; noOven: nur Kochfeld, darunter
 // Schubladen (Meldung M-20261109-150755-4f921c, Backofen dann im Hochschrank).
 const ovenBelow=it=>it.dev==='hob' && it.kind==='base' && !it.noOven;
+// Herd: Unterkante der Backofentür. Der Ofen (DEV_H.oven) sitzt unter der
+// Platte, darunter bleibt eine flache Lade von mindestens OVEN_LOW (bei den
+// Standardmaßen genau diese 120 mm). EINE Quelle für Front (frontsOf) und
+// Prüfhülle (envelopes), wie devSegs beim Hochschrank.
+const OVEN_LOW=120;
+const ovenZ=(z0,z1)=>Math.max(z0+OVEN_LOW, z1-DEV_H.oven);
+// Schubladenfronten von unten nach oben: zwei hohe, OBEN die flache Lade
+// (Besteck, Messer) – wie der Schubkasten im Eckschrank (nobilia UE: Auszug
+// oben, Tür darunter). EINE Quelle für die Fronten (frontsOf) und die
+// gezogene Lade (envelopes, „Fronten offen“).
+const DRAWER_TOP=0.25;
+// French Door: Anteil der unteren der beiden Gefrierladen unter den Flügeln.
+const FD_LOW=0.45;
 const FRONTS={ drawer:'Schubladen', door:'Drehtür', slide:'Schiebetür', flap:'Klappe', open:'offen' };
 // Eckschränke (Meldung M-20261109-134919-c2a193: Konfigurator für Unter- und
 // Hängeschrank). nobilia Typenliste 2026, Halbeckschränke: Korpus und Tür
@@ -4020,7 +4033,7 @@ function envelopes(K, g){
     const sEdge = cb.atS0 ? g.s0+cb.b : g.s1-cb.b, sOut = cb.atS0 ? g.s1 : g.s0;
     const h=wpt(g.Wf,sOut,g.d), o=wpt(g.Wf,sEdge,g.d), r=Math.abs(sOut-sEdge);
     if(it.inner==='schub' && it.kind==='base'){
-      const zd=z1-(z1-z0)*0.25, t=Math.min(g.d-60, 520);
+      const zd=z1-(z1-z0)*DRAWER_TOP, t=Math.min(g.d-60, 520);
       out.push({what:'Auszug', poly:[o,h,add(h,mul(n,t)),add(o,mul(n,t))], z0:zd, z1, t, pl:o, pr:h, n, corner:true});
       z1=zd;
     }
@@ -4058,7 +4071,8 @@ function envelopes(K, g){
     });
     // French Door: Gefrierschubladen darunter, gerade ausgezogen
     // (Samsung RF28R6222WW: offen ≈ 480 vor der Türfront).
-    if(it.fz==='fd') out.push({what:'Auszug', poly:[pl,pr,add(pr,mul(n,480)),add(pl,mul(n,480))], z0:20, z1:zl0, t:480, pl, pr, n});
+    if(it.fz==='fd') out.push({what:'Auszug', poly:[pl,pr,add(pr,mul(n,480)),add(pl,mul(n,480))], z0:20, z1:zl0, t:480, pl, pr, n,
+                               zp:10+(zl0-10)*FD_LOW});   // obere Lade wie frontsOf (dort ab 10)
     return out;
   }
   const zf0=g.z0+(it.kind==='wall'?0:S.plinth), zf1=it.kind==='base' ? D.workH-S.topT : it.kind==='island' ? g.z1-S.topT : g.z1;
@@ -4070,7 +4084,8 @@ function envelopes(K, g){
     doors.forEach(([side,h,other,r])=>out.push({what:'Tür', poly:swing90(h, unit(sub(other,h)), n, r, deg), z0:zf0, z1:zf1, hinge:h, side, r, along:unit(sub(other,h)), n, deg}));
   } else if(fk==='drawer'){
     const t=Math.min(g.d-60, 520);
-    out.push({what:'Auszug', poly:[pl,pr,add(pr,mul(n,t)),add(pl,mul(n,t))], z0:zf0, z1:zf1, t, pl, pr, n});
+    out.push({what:'Auszug', poly:[pl,pr,add(pr,mul(n,t)),add(pl,mul(n,t))], z0:zf0, z1:zf1, t, pl, pr, n,
+              zp:zf1-(zf1-zf0)*DRAWER_TOP});   // gezogen: die oberste Lade (Hülle bleibt die ganze Front)
   } else if(fk==='flap'){
     if(it.kind!=='wall'){
       const t=Math.min(zf1-zf0, 450);
@@ -4081,7 +4096,7 @@ function envelopes(K, g){
     // Geschirrspüler 45/60: offen 1150/1200 ab Rückwand (BSH-Maßblatt),
     // also ≈ 600 vor der Front. Backofen ≈ 500.
     const t = it.dev==='dw' ? 600 : 500;
-    const zh = devZ(it,S)!=null ? devZ(it,S) : it.dev==='dw' ? S.plinth : S.plinth+120;
+    const zh = devZ(it,S)!=null ? devZ(it,S) : it.dev==='dw' ? S.plinth : ovenZ(zf0,zf1);
     out.push({what: it.dev==='dw'?'Spülmaschinentür':'Backofentür', poly:[pl,pr,add(pr,mul(n,t)),add(pl,mul(n,t))], z0:zh, z1:zh+80, dev:it.dev});
   }
   return out;
@@ -5682,6 +5697,9 @@ function scene(E, K, L, opts){
     const it=g.it, w=it.w, d=g.d, id=it.id;
     // Auswahl vor Befund: ein angeklicktes rotes Teil muss auffindbar sein.
     const tint=c=>sel.has(id) ? mix(c,COL.sel,0.35) : bad.has(id) ? mix(c,COL.bad,0.45) : warn.has(id) ? mix(c,[0.95,0.70,0.15],0.3) : c;
+    // „Fronten offen“: die Hüllen (openPlates) öffnen ihre Fronten, was keine
+    // Hülle öffnet (zu), bleibt als geschlossene Front stehen.
+    const shut=fr=>open && g.env.length ? fr.filter(f=>f.zu) : fr;
     // Zweiter Schenkel eines Eckschranks über Eck: Korpus, Sockel und Tür
     // (offen zeigt das Hauptteil beide Türen). Diagonal: das Fünfeck am
     // Hauptteil deckt ihn ganz.
@@ -5713,7 +5731,7 @@ function scene(E, K, L, opts){
       else P_(frameRect(g,50,w-50,50,d-50), 0, S.plinth, COL.plinth, id, false);
       P_(body(carcD), S.plinth, tz, tint(COL.carcass), id);
       if(open && g.env.length) openPlates(g).forEach(f=>P_(f.poly, f.z0, f.z1, tint(f.col||COL.front), id));
-      else frontsOf(g, S.plinth, tz, D, S).forEach(f=>P_(f.poly, f.z0, f.z1, tint(it.dev==='dw'||it.dev==='hob'&&f.oven?COL.steel:COL.front), id));
+      shut(frontsOf(g, S.plinth, tz, D, S)).forEach(f=>P_(f.poly, f.z0, f.z1, tint(it.dev==='dw'||it.dev==='hob'&&f.oven?COL.steel:COL.front), id));
       // Gemeinsame Platte mehrerer Inseln: je Insel ihr Stück, Kanten nur am
       // Umriss (am ersten Stück), damit zwischen den Stücken keine Fuge zu sehen ist.
       const jt = it.kind==='island' && L.tops.find(t=>t.joined && t.ids.includes(id));
@@ -5730,17 +5748,17 @@ function scene(E, K, L, opts){
       P_(body(carcD), g.z0, g.z1, tint(COL.wallCab), id);
       if(it.dev==='hood') P_(frameRect(g,10,w-10,10,d-10), g.z0-2, g.z0+30, COL.dark, id);
       if(open && g.env.length) openPlates(g).forEach(f=>P_(f.poly, f.z0, f.z1, tint(COL.front), id));
-      else frontsOf(g, g.z0, g.z1, D, S).forEach(f=>P_(f.poly, f.z0, f.z1, tint(COL.front), id));
+      shut(frontsOf(g, g.z0, g.z1, D, S)).forEach(f=>P_(f.poly, f.z0, f.z1, tint(COL.front), id));
     } else if(fzOf(it)){
       // Frei stehender Kühlschrank: Korpus ohne Sockel, Flügel so dick wie eingestellt.
       P_(frameRect(g,0,w,0,d-doorTOf(it)), 10, g.z1, tint(COL.fridge), id);
       if(open && g.env.length) openPlates(g).forEach(f=>P_(f.poly, f.z0, f.z1, tint(f.col||COL.fridge), id));
-      else frontsOf(g, 10, g.z1, D, S).forEach(f=>P_(f.poly, f.z0, f.z1, tint(COL.fridge), id));
+      shut(frontsOf(g, 10, g.z1, D, S)).forEach(f=>P_(f.poly, f.z0, f.z1, tint(COL.fridge), id));
     } else if(it.kind==='tall'){
       P_(frameRect(g,0,w,0,carcD-50), 0, S.plinth, COL.plinth, id, false);
       P_(frameRect(g,0,w,0,carcD), S.plinth, g.z1, tint(isCold(it)?COL.fridge:COL.carcass), id);
       if(open && g.env.length) openPlates(g).forEach(f=>P_(f.poly, f.z0, f.z1, tint(f.col||(isCold(it)?COL.fridge:COL.front)), id));
-      else frontsOf(g, S.plinth, g.z1, D, S).forEach(f=>P_(f.poly, f.z0, f.z1, tint(f.oven?COL.dark:f.dw?COL.steel:isCold(it)?COL.fridge:COL.front), id));
+      shut(frontsOf(g, S.plinth, g.z1, D, S)).forEach(f=>P_(f.poly, f.z0, f.z1, tint(f.oven?COL.dark:f.dw?COL.steel:isCold(it)?COL.fridge:COL.front), id));
     }
   });
   L.tops.filter(t=>!t.island).forEach(t=>P_(t.poly, t.z0, t.z1, COL.top, null));
@@ -5799,6 +5817,9 @@ function wallFaces(E, thick=120){
   return {quads, caps, tops};
 }
 // Fronten eines Teils als dünne Platten (geschlossen oder offen).
+// zu: bleibt in „Fronten offen“ geschlossen, weil keine Prüfhülle sie öffnet
+// (untere Laden, Lade unter dem Backofen, Blende zur Ecke). Alles andere ersetzt
+// scene dort durch die Hüllen (openPlates).
 function frontsOf(g, z0, z1, D, S){
   const it=g.it, w=it.w, d=g.d, out=[], t=19, gap=3;
   const plate=(a0,a1,zz0,zz1,extra)=>out.push({poly:frameRect(g, a0+gap/2, a1-gap/2, d-t, d), z0:zz0+gap/2, z1:zz1-gap/2, ...extra});
@@ -5806,15 +5827,17 @@ function frontsOf(g, z0, z1, D, S){
   if(fz){
     // Flügel in Türdicke; French Door mit Schubladen darunter.
     const T=doorTOf(it), wl=w*(fz.split||1), zl=it.fz==='fd' ? Math.min(fz.drawerZ, z1-300) : z0;
-    const leaf=(a0,a1,zz0,zz1)=>out.push({poly:frameRect(g, a0+gap/2, a1-gap/2, d-T, d), z0:zz0+gap/2, z1:zz1-gap/2});
+    const leaf=(a0,a1,zz0,zz1,extra)=>out.push({poly:frameRect(g, a0+gap/2, a1-gap/2, d-T, d), z0:zz0+gap/2, z1:zz1-gap/2, ...extra});
     if(fz.single){ const zg=Math.min(fz.gfZ, z1-400); if(it.gf){ leaf(0,w,z0,zg); leaf(0,w,zg,z1); } else leaf(0,w,z0,z1); return out; }
     leaf(0,wl,zl,z1); leaf(wl,w,zl,z1);
-    if(it.fz==='fd'){ const zm=z0+(zl-z0)*0.45; leaf(0,w,z0,zm); leaf(0,w,zm,zl); }
+    if(it.fz==='fd'){ const zm=z0+(zl-z0)*FD_LOW; leaf(0,w,z0,zm,{zu:true}); leaf(0,w,zm,zl); }
     return out;
   }
   if(ovenBelow(it)){
-    plate(0,w,z0,z0+(z1-z0)*0.25);
-    plate(0,w,z0+(z1-z0)*0.25,z1,{oven:true});
+    // Ofentür ab ovenZ (wie die Hülle), darunter die flache Lade.
+    const zo=ovenZ(z0,z1);
+    plate(0,w,z0,zo,{zu:true});
+    plate(0,w,zo,z1,{oven:true});
     return out;
   }
   if(tallDev(it)){
@@ -5841,15 +5864,17 @@ function frontsOf(g, z0, z1, D, S){
     // Halbeckschrank: Blende zur Ecke, eine Tür auf dem freien Teil
     // (mit Schubkasten: Schubkastenfront oben über der Tür, Blende durchgehend).
     const [f0,f1] = cb.atS0 ? [cb.b,w] : [0,w-cb.b];
-    plate(cb.atS0?0:w-cb.b, cb.atS0?cb.b:w, z0, z1, {blind:true});
-    if(it.inner==='schub' && it.kind==='base'){ const zd=z1-(z1-z0)*0.25; plate(f0,f1,zd,z1); plate(f0,f1,z0,zd); }
+    plate(cb.atS0?0:w-cb.b, cb.atS0?cb.b:w, z0, z1, {blind:true, zu:true});
+    if(it.inner==='schub' && it.kind==='base'){ const zd=z1-(z1-z0)*DRAWER_TOP; plate(f0,f1,zd,z1); plate(f0,f1,z0,zd); }
     else plate(f0,f1,z0,z1);
     return out;
   }
   if(it.dev==='hood'){ plate(0,w,z0,z1); return out; }
   if(fk==='drawer'){
-    const hs=[0.25,0.375,0.375]; let z=z0;
-    hs.forEach(h=>{ const z2=z+(z1-z0)*h; plate(0,w,z,z2); z=z2; });
+    // Unten zwei hohe, oben die flache Lade; die Prüfhülle (Auszug) zieht nur
+    // die oberste, die übrigen bleiben zu.
+    const hs=[(1-DRAWER_TOP)/2, (1-DRAWER_TOP)/2, DRAWER_TOP]; let z=z0;
+    hs.forEach((h,i)=>{ const z2=z+(z1-z0)*h; plate(0,w,z,z2, i<hs.length-1 ? {zu:true} : undefined); z=z2; });
   } else if(fk==='door' && w>600 && !isCold(it)){ plate(0,w/2,z0,z1); plate(w/2,w,z0,z1); }
   else if(fk==='slide'){ plate(0,w*0.55,z0,z1); out.push({poly:frameRect(g,w*0.45,w,d-2*t-2,d-t-2), z0:z0+2, z1:z1-2}); }
   else if(fk!=='open') plate(0,w,z0,z1);
@@ -5868,7 +5893,9 @@ function openPlates(g){
       const tip=add(e.hinge, mul(dv, e.r));
       out.push({poly:[e.hinge, tip, add(tip,mul(pv,t)), add(e.hinge,mul(pv,t))], z0:e.z0, z1:e.z1, col:e.dev==='mw'?COL.dark:undefined});
     } else if(e.what==='Auszug'){
-      const zm=e.z0+(e.z1-e.z0)*0.62;
+      // Gezogen wird die Lade ab zp (die oberste Front des Stapels, so hoch
+      // wie ihre geschlossene Front); ohne zp füllt sie die ganze Hülle.
+      const zm=e.zp!=null ? e.zp : e.z0;
       out.push({poly:[add(e.pl,mul(e.n,e.t-t)), add(e.pr,mul(e.n,e.t-t)), add(e.pr,mul(e.n,e.t)), add(e.pl,mul(e.n,e.t))], z0:zm, z1:e.z1});
       out.push({poly:[e.pl, e.pr, add(e.pr,mul(e.n,e.t-t)), add(e.pl,mul(e.n,e.t-t))], z0:zm, z1:zm+(e.z1-zm)*0.6, col:COL.carcass});
     } else out.push({poly:e.poly, z0:e.z0, z1:e.z0+20, col:e.dev==='dw'?COL.steel:COL.dark});
@@ -6215,7 +6242,7 @@ Object.assign(globalThis.KITCHEN, { /* rest-wege */ });
 //
 Object.assign(globalThis.KITCHEN, { specReset, reachDelta });
 //
-Object.assign(globalThis.KITCHEN, { /* rest-3d */ });
+Object.assign(globalThis.KITCHEN, { ovenZ, DRAWER_TOP });
 //
 Object.assign(globalThis.KITCHEN, { /* rest-zustand */ });
 //
@@ -14878,6 +14905,7 @@ function gl3(){
   if(G3.gl || G3.failed) return G3.gl;
   const gl=cv3.getContext('webgl2',{antialias:true, alpha:false});
   if(!gl){ G3.failed=true; $('k3dMsg').hidden=false; return null; }
+  if(gl.isContextLost()) return null;                 // bis webglcontextrestored: nichts bauen, nichts melden
   const sh=(t,src)=>{ const s=gl.createShader(t); gl.shaderSource(s,src); gl.compileShader(s); if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
   const p=gl.createProgram(); gl.attachShader(p,sh(gl.VERTEX_SHADER,VS)); gl.attachShader(p,sh(gl.FRAGMENT_SHADER,FS));
   gl.bindAttribLocation(p,0,'aP'); gl.bindAttribLocation(p,1,'aN'); gl.bindAttribLocation(p,2,'aC'); gl.linkProgram(p);
@@ -14886,6 +14914,13 @@ function gl3(){
   ['tri','wall','lin','glass'].forEach(k=>{ const vao=gl.createVertexArray(), buf=gl.createBuffer(); G3[k]={vao,buf}; });
   return gl;
 }
+// Kontextverlust (GPU-Wechsel, Ruhezustand, Speicherdruck): preventDefault,
+// sonst stellt der Browser den Kontext nie wieder her. Alles, was am alten
+// Kontext hing (Programm, Puffer, VAOs, Hochladeschlüssel), fällt weg; gl3()
+// baut es beim nächsten Zeichnen neu auf.
+const reset3=()=>{ G3.gl=G3.prog=G3.tri=G3.wall=G3.lin=G3.glass=null; G3.key=''; };
+cv3.addEventListener('webglcontextlost',e=>{ e.preventDefault(); reset3(); });
+cv3.addEventListener('webglcontextrestored',()=>{ reset3(); k3dSchedule(); });
 // Welt (x,y Grundriss, z Höhe) -> GL (X=x, Y=z, Z=y). Ohne Spiegelung:
 // von oben gesehen liegt X rechts und Z unten, wie im Plan.
 function buildGeom(c){
@@ -14942,6 +14977,10 @@ function earcut(R){
   const n=R.length, idx=[...Array(n).keys()], out=[];
   let A2=0; for(let i=0;i<n;i++){ const p=R[i], q=R[(i+1)%n]; A2+=p.x*q.y-q.x*p.y; }
   const sg=A2>0?1:-1, cr=(a,b,c2)=>((b.x-a.x)*(c2.y-a.y)-(b.y-a.y)*(c2.x-a.x))*sg;
+  // Zwei Ringpunkte auf derselben Stelle (Ecke doppelt, Stichwand): der zweite
+  // liegt auf einer Ohrecke und damit auf dem Rand, nicht im Ohr. Sonst
+  // verwirft jedes Ohr den Doppelgänger, und der Boden bleibt zum Teil leer.
+  const same=(p,q)=>Math.abs(p.x-q.x)<1e-6 && Math.abs(p.y-q.y)<1e-6;
   let guard=0;
   while(idx.length>3 && guard++<5000){
     let cut=false;
@@ -14950,6 +14989,7 @@ function earcut(R){
       if(cr(a,b,c2)<=1e-9) continue;
       let inside=false;
       for(const j of idx){ if(j===ia||j===ib||j===ic) continue; const p=R[j];
+        if(same(p,a)||same(p,b)||same(p,c2)) continue;
         if(cr(a,b,p)>=0 && cr(b,c2,p)>=0 && cr(c2,a,p)>=0){ inside=true; break; } }
       if(inside) continue;
       out.push([ia,ib,ic]); idx.splice(i,1); cut=true; break;
@@ -14998,7 +15038,10 @@ function k3dDraw(){
   if(!W||!H) return;
   if(cv3.width!==W || cv3.height!==H){ cv3.width=W; cv3.height=H; }
   if(G3.camFor!==currentRoom){ G3.camFor=currentRoom; camFit(c); }
-  const key=c.key+'|'+KS.sel+'|'+KS.open+'|'+KS.paths+'|'+KS.flow+'|'+(KS.paths?KS.flowKey:'');
+  // Erst die Wege rechnen: flowRes kann KS.flow zurücksetzen, der Schlüssel
+  // gilt dem Stand danach (sonst baut das nächste Bild noch einmal).
+  if(KS.paths) flowRes(c);
+  const key=c.key+'|'+KS.sel+'|'+KS.open+'|'+KS.paths+'|'+KS.flow;
   if(key!==G3.key){ G3.key=key; const g=buildGeom(c); upload(gl,'tri',g.tri); upload(gl,'wall',g.wall); upload(gl,'lin',g.lin); upload(gl,'glass',g.glass); }
   gl.viewport(0,0,W,H);
   gl.clearColor(0.96,0.953,0.93,1); gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
@@ -15045,7 +15088,8 @@ cv3.addEventListener('wheel',e=>{
   else cm.dist=Math.max(800, Math.min(60000, cm.dist*Math.exp(e.deltaY*(e.ctrlKey?0.01:0.0015))));
   k3dSchedule();
 },{passive:false});
-if(typeof ResizeObserver==='function') new ResizeObserver(()=>{ if(M.mode==='kitchen'){ G3.key=G3.key; k3dSchedule(); } }).observe(cv3);
+// Größe ändert die Geometrie nicht: k3dDraw passt Canvas und Viewport selbst an.
+if(typeof ResizeObserver==='function') new ResizeObserver(()=>{ if(M.mode==='kitchen') k3dSchedule(); }).observe(cv3);
 
 // Hinweis je Zustand (modeHint liest KITCHEN_HINT)
 function kitchenHint(){
@@ -19834,7 +19878,55 @@ globalThis.selfChecks=function(){
     //
     // --- Rest-Fix 3d ---
     try{
-      // TESTS-3d
+      // 3D „Fronten offen“, Ofen- und Schubladenhöhen. Jede Prüfung fängt eine
+      // fehlende Funktion selbst ab (FAIL statt Abbruch des Blocks).
+      const t3=(name,fn)=>{ let ok=false; try{ ok=!!fn(); }catch(e){ ok=false; } chk(name, ok); };
+      const lay3=(items,spec)=>{ const K=KX.normKitchen({items,spec}); return {K, L:KX.layout(E,K)}; };
+      const prs=(r,open,id=1)=>KX.scene(E,r.K,r.L,{open}).prisms.filter(p=>p.id===id);
+      const at3=(P,z0,z1)=>P.some(p=>near(p.z0,z0,0.01) && near(p.z1,z1,0.01));
+      const closed3=(r,g)=>KX.frontsOf(g, r.K.spec.plinth, r.L.D.workH-r.K.spec.topT, r.L.D, r.K.spec).slice().sort((p,q)=>p.z0-q.z0);
+      // wie weit ein Prisma vor die Front des Teils ragt (gezogene Lade, offene Tür)
+      const out3=(g,p)=>{ const n=g.n, f=g.front[0]; return Math.max(...p.poly.map(q=>(q.x-f.x)*n.x+(q.y-f.y)*n.y)); };
+      const drawer={id:1,kind:'base',a:'A',b:'B',x:0,w:600};
+      const ue={id:1,kind:'base',corner:true,front:'door',door:500,inner:'schub',a:'A',b:'D',x:0,w:1000};
+      const herd={id:1,kind:'base',dev:'hob',a:'A',b:'B',x:0,w:600};
+      const fd={id:1,kind:'tall',dev:'fridge',fz:'fd',a:'B',b:'C',x:500,w:900};
+      // H1: Fronten ohne Hülle verschwanden in „Fronten offen“.
+      t3('kueche-3d: Fronten offen – Schubladenstapel: untere Fronten bleiben zu, die oberste Lade ist gezogen und so hoch wie ihre Front', ()=>{
+        const r=lay3([drawer]), g=r.L.G[0], fr=closed3(r,g), P=prs(r,true);
+        return fr.length===3 && at3(P,fr[0].z0,fr[0].z1) && at3(P,fr[1].z0,fr[1].z1)
+          && P.some(p=>near(p.z0,fr[2].z0-1.5,0.01) && near(p.z1,fr[2].z1+1.5,0.01) && out3(g,p)>400);
+      });
+      t3('kueche-3d: Fronten offen – Halbeckschrank mit Schubkasten behält die Blende zur Ecke, die Lade ist ganz gezogen', ()=>{
+        const r=lay3([ue]), g=r.L.G[0], fr=closed3(r,g), bl=fr.find(f=>f.blind), dr=fr.find(f=>!f.blind && f.z0>400), P=prs(r,true);
+        return !!bl && !!dr && at3(P,bl.z0,bl.z1) && P.some(p=>near(p.z0,dr.z0-1.5,0.01) && near(p.z1,dr.z1+1.5,0.01) && out3(g,p)>400);
+      });
+      t3('kueche-3d: Fronten offen – Herd: die Lade unter dem Backofen bleibt zu, die Ofenklappe liegt auf ihrer Oberkante', ()=>{
+        const r=lay3([herd]), g=r.L.G[0], fr=closed3(r,g), P=prs(r,true), e=g.env.find(x=>x.what==='Backofentür');
+        return fr.length===2 && !!e && at3(P,fr[0].z0,fr[0].z1) && at3(P,e.z0,e.z0+20) && near(fr[0].z1+1.5,e.z0,0.01);
+      });
+      t3('kueche-3d: Fronten offen – French Door: untere Gefrierlade bleibt zu, die obere ist gezogen und so hoch wie ihre Front', ()=>{
+        const r=lay3([fd]), g=r.L.G[0], dr=KX.frontsOf(g,10,g.z1,r.L.D,r.K.spec).filter(f=>f.z1<1000).sort((p,q)=>p.z0-q.z0), P=prs(r,true);
+        return dr.length===2 && at3(P,dr[0].z0,dr[0].z1) && P.some(p=>near(p.z0,dr[1].z0-1.5,0.01) && near(p.z1,dr[1].z1+1.5,0.01) && out3(g,p)>400);
+      });
+      // Gegenprobe: Teile, die nur Hüllen haben (Hochschrank mit Gerät) oder keine (Schiebetür), zeichnen offen wie bisher nichts doppelt und nichts weniger.
+      t3('kueche-3d: Fronten offen – Hochschrank mit Gerät und Teil ohne Hülle bleiben wie sie waren (nichts doppelt, nichts fehlt)', ()=>{
+        return ['oven','dw','mw'].every(dev=>{ const r=lay3([{id:1,kind:'tall',dev,a:'B',b:'C',x:500,w:600}]); return prs(r,true).length===prs(r,false).length && prs(r,false).length===5; })
+          && (()=>{ const r=lay3([{id:1,kind:'base',front:'slide',a:'A',b:'B',x:0,w:900}]); return prs(r,true).length===prs(r,false).length; })();
+      });
+      // H6: die flache Lade oben, wie der Schubkasten im Eckschrank.
+      t3('kueche-3d: Schubladenstapel – oben die flache Lade (wie der Schubkasten im Eckschrank), unten zwei hohe', ()=>{
+        const r=lay3([drawer]), g=r.L.G[0], fr=closed3(r,g), h=f=>f.z1-f.z0, S=r.K.spec, D=r.L.D, hz=D.workH-S.topT-S.plinth;
+        const rc=lay3([ue]), gc=rc.L.G[0], sc=closed3(rc,gc).filter(f=>!f.blind && f.z0>400)[0];
+        return fr.length===3 && h(fr[2])<h(fr[1]) && near(h(fr[0]),h(fr[1]),0.01) && near(h(fr[2])+3,hz*KX.DRAWER_TOP,1e-6) && near(h(sc)+3,hz*KX.DRAWER_TOP,1e-6);
+      });
+      // H5: Ofenfront und Prüfhülle teilen sich eine Unterkante (Standard 270, wie die Hülle schon rechnete).
+      t3('kueche-3d: Herd – Ofenfront beginnt auf der Höhe der Backofentür-Hülle (Standard 270 mm, auch bei anderem Sockel und Korpus)', ()=>{
+        return [undefined, {plinth:100}, {plinth:200, baseH:780}, {baseH:900}].every(sp=>{
+          const r=lay3([herd],sp), g=r.L.G[0], S=r.K.spec, o=closed3(r,g).find(f=>f.oven), e=g.env.find(x=>x.what==='Backofentür');
+          return !!o && !!e && near(o.z0-1.5,e.z0,0.01) && near(e.z0, KX.ovenZ(S.plinth,r.L.D.workH-S.topT), 1e-9);
+        }) && lay3([herd]).L.G[0].env.find(x=>x.what==='Backofentür').z0===270 && KX.ovenZ(150,870)===270;
+      });
     }catch(err){ chk('kueche: Rest-Fix 3d ohne Ausnahme ('+err.message+')', false); }
     //
     // --- Rest-Fix zustand ---
