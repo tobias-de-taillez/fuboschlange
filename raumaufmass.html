@@ -1186,9 +1186,7 @@
         <dt>3D (V)</dt><dd>Ansicht neben dem Plan. Ziehen dreht, Rechts- oder ⇧-Ziehen verschiebt, Rad zoomt, Doppelklick setzt zurück. Wände, vor denen man steht, werden ausgeblendet.</dd>
       </dl>
 
-      <h3>Raum-Menü und Sichern</h3>
-      <p>Räume liegen nur im Browser. Wichtiges zusätzlich <b>Als Datei sichern</b> (⌘S). <b>Link kopieren</b> und <b>QR-Code</b> übertragen den Raum als Kopie aufs Handy. <b>Raum spiegeln</b> tauscht die Seite, Maße bleiben; mit Fliesen nicht möglich. <b>Raum leeren</b> fragt einmal nach. Rückgängig (⌘Z) gilt bis zum Raumwechsel.</p>
-      <p class="hnote">Alle Tasten und Mausgesten: Knopf „Tasten ?“ unten rechts.</p>
+      <p class="hnote">Rückgängig gilt bis zum Wechsel des Raums.</p>
     </div>
   </div>
 </div>
@@ -9748,7 +9746,7 @@ function setMode(mode){
         document.querySelector('#modes button[data-mode="wall"]'));
     return;
   }
-  if(mode==='measure' && TOOL==='aufmass' && !C.wallPolygonRing(M.pts, M.walls)){
+  if(mode==='measure' && TOOL==='aufmass' && !C.wallPolygonRing(M.pts, M.walls) && !M.meas.length){
     sag('Maße gibt es, sobald der Raum geschlossen ist.', document.querySelector('#modes button[data-mode="measure"]'));
     return;
   }
@@ -10452,6 +10450,7 @@ function renderPanel(){
   $('statustxt').textContent=txt;
   $('status').className=cls;
   $('roomname').textContent=currentRoomName;
+  document.title=(currentRoomName && currentRoomName!=='—' ? currentRoomName+' · ' : '')+(TOOLNAME[TOOL] || 'Raumaufmaß');
   // Der Wände-Tab bleibt gesperrt, solange der Grundriss nicht eindeutig
   // ist - vorher waeren Wandlaengen Skizzenpixel.
   // Gesperrte Reiter bleiben klickbar (aria-disabled): der Klick sagt, was
@@ -10914,7 +10913,7 @@ function setTool(tool, boot){
   else if(tool==='kueche') setMode('kitchen');
   // Im Raumaufmaß beginnt man dort, wo der Raum steht: offen in der Skizze,
   // geschlossen bei den Maßen.
-  else setMode(raumGeschlossen() ? 'measure' : 'draw');
+  else setMode((raumGeschlossen() || M.meas.length) ? 'measure' : 'draw');
 }
 $('toAufmass').onclick=()=>setTool('aufmass');
 
