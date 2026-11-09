@@ -6967,6 +6967,8 @@ function suggest(E, K, L, n=3){
     Object.entries(cur).forEach(([c,ids])=>{
       if(ids.length!==1) return;                      // nur eindeutig verortete Inhalte
       const from=ids[0];
+      // Müll und Putzmittel gehören an die Spüle (NKBA: ein Behälter dort).
+      const fg0=L.byId.get(from); if((c==='muell'||c==='putz') && fg0 && fg0.it.dev==='sink') return;
       cabinets.forEach(g=>{
         if(g.it.id===from || !allowed(c,g)) return;
         const there=ld.get(g.it.id)||[];
