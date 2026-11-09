@@ -6467,7 +6467,9 @@ function normSpec(s){
   const o={...K_DEF};
   if(s && typeof s==='object'){
     for(const k of Object.keys(K_DEF)) if(fin(s[k])) o[k]=clamp(s[k], K_LIM[k][0], K_LIM[k][1]);
-    if(typeof s.entry==='string') o.entry=s.entry;
+    // Zahl: Fremdimport mit numerischen Öffnungs-ids - deserialize macht
+    // daraus mit den ids einen String (remapOpeningRefs).
+    if(typeof s.entry==='string' || Number.isFinite(s.entry)) o.entry=s.entry;
   }
   return o;
 }
@@ -6549,6 +6551,18 @@ function anchorFrame(K, pts, walls, oldPts){
   }
   K.frame=nf;
   return nf;
+}
+// Ecke id wird gleich gelöscht (deletePoint, VOR dem Filtern): ist sie eine
+// Bezugsecke, freie Teile JETZT umhängen. Danach kennt keine Geometrie die
+// Ecke mehr – ein späterer Fit auch nicht –, „Rahmen behalten bis zur
+// Umrechnung“ hieße also: nie umrechnen, und bei der nächsten Umordnung
+// springen. Gerechnet wird im Fit; ohne Fit (alle Messungen aus) in der
+// Skizze: mit „Ausrichten“ ist sie der Fit, sonst die maßstäbliche Skizze
+// (scaleSketch) – genau bis auf deren Verzug, statt meterweit zu springen.
+function cornerDeleted(K, id, fitPts, sketchPts, walls){
+  if(!K || !K.frame || (K.frame.a!==id && K.frame.b!==id)) return K ? K.frame||null : null;
+  const old=fitPts||sketchPts;
+  return anchorFrame(K, sketchPts.filter(p=>p.id!==id), (walls||[]).filter(([a,b])=>a!==id && b!==id), old);
 }
 // Inhalte, die in einem Hochschrank mit Gerät nach den jetzigen Küchenmaßen
 // keinen Platz mehr haben (Schrank niedriger, oberes Fach weg), entfernen –
@@ -6763,6 +6777,10 @@ function frontKind(it){
   if(it.kind==='table' || it.dev==='hood') return null;
   return it.front || (it.kind==='base'||it.kind==='island' ? 'drawer' : 'door');
 }
+// Hat das Teil einen wählbaren Türanschlag (Panel „Anschlag“, Taste F,
+// Stückliste)? Hochschrank mit Gerät; Drehtür bis 60 cm (nicht L-Eck),
+// Kühlgerät oder Diagonal-Eck; Kühlgerät mit Gefrierteil nur einflüglig.
+const hasHinge=it=>tallDev(it) || frontKind(it)==='door' && (it.w<=600 && !(it.corner && it.ctype==='L') || isCold(it) || it.ctype==='diag') && (!fzOf(it) || fzOf(it).single);
 // Eckschrank: welche Seite ist blind (zur nächsten Ecke), wie breit?
 // Unten wie oben (Hänge-Eckschrank). Mit Türbreite door ist die Blende der
 // Rest; sonst so breit wie die tatsächliche Querzeile (g.cross aus layout)
@@ -7294,13 +7312,22 @@ function check(E, K, L){
   });
   // Hochschrank mit Gerät: Unterkante des Geräts (devZ) plus Gerätehöhe muss
   // in den Schrank passen; die Höhe ist ab 100 mm frei eingebbar. Abhilfe:
-  // Standardhöhe, wenn die reicht, sonst die nötige Höhe – nur unter der Decke.
+  // Standardhöhe, wenn die reicht, sonst die nötige Höhe – nur unter der Decke
+  // und nur, wenn der Schrank so hoch an dieser Stelle kein Fenster verdeckt
+  // (eigene Wand, Zone der Nachbarwand); sonst gäbe die Abhilfe gleich den
+  // nächsten roten Befund. Dann bleibt nur Verschieben. Türen zählen hier
+  // nicht: vor einer Tür ist der Schrank in jeder Höhe rot, eigener Befund.
+  const zonesW=E.openings.filter(o=>o.kind==='window').map(o=>openingZone(E,o)).filter(Boolean);
+  const blocksAt=(g,z1)=>{ const h={...g, z1};
+    return (!g.free && E.openings.some(o=>{ const on=o.kind==='window' && openingOn(E,o,g.Wf); return on && openingOwnHit(D,h,on); }))
+      || zonesW.some(z=>zoneHit(h,z)); };
   G.filter(g=>tallDev(g.it)).forEach(g=>{
     const sg=devSegs(g.it,S); if(sg.fits) return;
     const need=Math.ceil(sg.need/10)*10, ceil=g.free ? Infinity : Math.min(ceilAt(E,g.Wf,g.s0), ceilAt(E,g.Wf,g.s1));
-    const tgt=D.tallTop>=sg.need && D.tallTop<=ceil+1 ? D.tallTop : need;
-    const fix = tgt<=ceil+1 ? (tgt===D.tallTop ? {label:'Standardhöhe', id:g.it.id, set:{}, del:['h']} : {label:`${mm(need)} mm hoch`, id:g.it.id, set:{h:need}}) : null;
-    add_('bad',[g.it.id], `${nameOf(g.it)}: Hochschrank zu niedrig für das Gerät – ${mm(g.z1)} mm, gebraucht ${mm(sg.need)} mm (Gerät ${mm(DEV_H[g.it.dev])} mm ab ${mm(devZ(g.it,S))} mm)`, g.c, fix);
+    const ok=z1=>z1<=ceil+1 && !blocksAt(g,z1);
+    const fix = D.tallTop>=sg.need && ok(D.tallTop) ? {label:'Standardhöhe', id:g.it.id, set:{}, del:['h']}
+      : ok(need) ? {label:`${mm(need)} mm hoch`, id:g.it.id, set:{h:need}} : null;
+    add_('bad',[g.it.id], `${nameOf(g.it)}: Hochschrank zu niedrig für das Gerät – ${mm(g.z1)} mm, gebraucht ${mm(sg.need)} mm (Gerät ${mm(DEV_H[g.it.dev])} mm ab ${mm(devZ(g.it,S))} mm)${!fix && blocksAt(g,need) ? '; so hoch verdeckte er hier ein Fenster – verschieben' : ''}`, g.c, fix);
   });
   // Eckschrank über Eck / diagonal braucht eine rechtwinklige Innenecke,
   // bündig; sonst fehlt sein zweiter Schenkel. Abhilfe: in die Ecke setzen.
@@ -7778,10 +7805,14 @@ function cornerStop(E, Wf, d, end){
 // Überlappung (Tresen samt Überstand), Öffnungen an der eigenen Wand
 // (auch Brüstung unter der Platte), Zonen vor Öffnungen der Nachbarwände.
 // Decke, Fensterflügel, Zimmertür und Fronten prüft nur check.
+// Hochschrank mit Gerät, der zu niedrig ist (check: rot, Abhilfe höher):
+// mit der Höhe prüfen, die er braucht – sonst landet er unter einem Fenster,
+// das er so hoch, wie er gebaut werden muss, verdeckt.
 function fitsAt(E, K, L, it, Wf, x){
   if(!(x>=-1 && x+it.w<=Wf.L+1)) return false;          // nicht über das Wandende
-  const t={...it, a:Wf.a, b:Wf.b, x}, g=geom(E,K,t);
-  if(!g) return false;
+  const t={...it, a:Wf.a, b:Wf.b, x}, g0=geom(E,K,t);
+  if(!g0) return false;
+  const sg=devSegs(t,K.spec), g = sg && sg.need>g0.z1 ? {...g0, z1:sg.need} : g0;
   // Eckschrank über Eck / diagonal: auch der zweite Schenkel muss frei sein.
   const parts=[g];
   if(shapeOf(t)){ const wg=cornerWing(E,K,g); if(wg){ cornerShape(g,wg); parts.push(wg); } }
@@ -8572,13 +8603,16 @@ function stock(K, L){
   // wählt (wie im Panel; beim Eckschrank steckt die Tür im Typ), Höhe und
   // Tiefe als Abweichung vom Standard (wie dimSpec), Insel bei Geräten.
   // Werte wie sie gelten (frontKind, dims): ausdrücklich gesetzter Standard
-  // zählt wie keine Angabe.
+  // zählt wie keine Angabe. Türanschlag, wo er wählbar ist (hasHinge):
+  // rechts steht im Text, Standard links nicht – getrennt gezählt wird so
+  // trotzdem.
   const cm=v=>String(Math.round(v)/10).replace('.',',');
   const detailOf=it=>{
     const fk=frontKind(it), cur=dims(K,it), std=dims(K,{...it, d:undefined, h:undefined, z:undefined});
     const choose=fk && fk!=='flapdown' && !isCold(it) && it.dev!=='mw' && !(it.corner && fk==='door');
     return [it.dev && it.kind==='island' ? 'Insel' : '',
             choose ? FRONTS[fk] : '',
+            hasHinge(it) && it.hinge==='right' ? 'Anschlag rechts' : '',
             Math.abs((cur.z1-cur.z0)-(std.z1-std.z0))>0.5 ? `H ${cm(cur.z1-cur.z0)}` : '',
             Math.abs(cur.d-std.d)>0.5 ? `T ${cm(cur.d)}` : '',
             it.water ? 'Festwasser' : '',
@@ -8859,7 +8893,7 @@ function storeCap(it, S){
   if(tallDev(it)) return devZones(it,S).length;
   return it.kind==='tall' ? 3 : it.w>=800 ? 3 : it.w>=450 ? 2 : 1;
 }
-globalThis.KITCHEN={ FRIDGE, DOORT_LIM, SWINGS, swingOf, isCold, fzOf, doorTOf, leaves, leafRect, leafReach, leafReachSide, entries, entryOptions, storable, storeCap, storeFits, fitStores, dwZones, devZones, devSegs, tallDev, DEV_H, LOW_ZONE_TOP, dwZoneFor, DW_ZONE_MIN, DW_LOW, wallFaces, K_DEF, K_LIM, WIDTHS, KIND, DEV, FRONTS, PRESETS, PGROUPS, CONTENTS, FLOWS, GROUPS, ROLE_LABEL, BODY_R,
+globalThis.KITCHEN={ FRIDGE, DOORT_LIM, SWINGS, swingOf, isCold, fzOf, hasHinge, cornerDeleted, doorTOf, leaves, leafRect, leafReach, leafReachSide, entries, entryOptions, storable, storeCap, storeFits, fitStores, dwZones, devZones, devSegs, tallDev, DEV_H, LOW_ZONE_TOP, dwZoneFor, DW_ZONE_MIN, DW_LOW, wallFaces, K_DEF, K_LIM, WIDTHS, KIND, DEV, FRONTS, PRESETS, PGROUPS, CONTENTS, FLOWS, GROUPS, ROLE_LABEL, BODY_R,
   derived, devZ, ovenBelow, DW_H, normKitchen, normItem, isEmpty, anchorFrame, makeEnv, wallFrame, wpt, geom, dims, layout, envelopes, frontLR, frontKind,
   worktops, check, hoseCheck, alongWall, waterPts, HOSE, sashes, doorReach, optimalStore, hungarian, openingOn, faucetPoint, tableSides, tableSeats, seatPlan, rotSnaps, snapRot, chainDims, freeDims, applyDim, dockFree, barNkba, barSeats, BAR_SEAT_W, slotCandidates, cornerStop, fitsAt, freeSlot, snapX,
   nearestWall, planner, stations, flows, suggest, heatGrid, kidPoly, conflicts, PAIRS, sweep, placeOk, reachFactor, scene, frontsOf, stock, nameOf, inflate, polyInRoom, COL };
@@ -9267,18 +9301,50 @@ const OVERLAP_EPS = 1;   // mm; darunter gilt es als Beruehrung, nicht als Ueber
 // beim Laden neu vergeben - die id landet in Attributen und Auswahllisten.
 // Ohne id bleibt ohne id (aeltere Raeume). Aendert in place; map: alt -> neu,
 // damit deserialize() die Verweise (Lagemasse, Eingang, Nachbarwand) mitzieht.
+// Zahlen (Fremdimport) werden Strings: Auswahllisten und data-Attribute
+// liefern immer Strings, alle Vergleiche sind strikt. 7 -> '7', wenn frei,
+// sonst neu vergeben wie oben.
 const OPEN_ID_RE=/^[\p{L}\p{N}_.:-]{1,64}$/u;
-globalThis.openingIdOk=id=>id==null || Number.isFinite(id) || (typeof id==='string' && OPEN_ID_RE.test(id));
+globalThis.openingIdOk=id=>id==null || (typeof id==='string' && OPEN_ID_RE.test(id));
 globalThis.normOpeningIds=function(openings, seq){
   if(!(Number.isInteger(seq) && seq>0)) seq=openings.length+1;
-  const map=new Map(), used=new Set(openings.map(o=>o && o.id));
+  const map=new Map(), used=new Set(openings.filter(o=>o && typeof o.id==='string' && globalThis.openingIdOk(o.id)).map(o=>o.id));
   openings.forEach(o=>{
     if(!o || typeof o!=='object' || globalThis.openingIdOk(o.id)) return;
-    while(used.has('o'+seq)) seq++;
-    const id='o'+(seq++);
+    const s=Number.isFinite(o.id) ? String(o.id) : null;
+    let id;
+    if(s && OPEN_ID_RE.test(s) && !used.has(s)) id=s;
+    else { while(used.has('o'+seq)) seq++; id='o'+(seq++); }
     used.add(id); map.set(o.id, id); o.id=id;
   });
   return {map, seq};
+};
+// Verweise auf Öffnungs-ids nach normOpeningIds mitziehen: Lagemaße (op),
+// Nachbarwand (shared[*].tuer.op), Küchen-Eingang (kitchen.spec.entry).
+// Ein Eingang, der als Zahl ankam und auf keine Öffnung zeigt, wird String
+// wie alle ids. Aendert R in place (shared-Eintraege werden ersetzt).
+globalThis.remapOpeningRefs=function(R, map){
+  const neu=id=>map.has(id) ? map.get(id) : id;
+  (R.opmeas||[]).forEach(m=>{ if(m) m.op=neu(m.op); });
+  const sh=R.shared||{};
+  for(const k of Object.keys(sh)){ const s=sh[k];
+    if(s && s.tuer && typeof s.tuer==='object') sh[k]={...s, tuer:{...s.tuer, op:neu(s.tuer.op)}}; }
+  const sp=R.kitchen && R.kitchen.spec;
+  if(sp && sp.entry!=null){ const e=neu(sp.entry); sp.entry=typeof e==='string' ? e : String(e); }
+};
+// Lagemaß-ids: wie die Öffnungs-ids landen sie in data-Attributen (Lagemaß-
+// Liste). Fehlend, kein solcher Name (Markup, Zahl, Objekt) oder doppelt:
+// neu als 'om'+n. Der Zähler wurde nie gespeichert – aus den Daten nachziehen
+// (nach dem Laden begann er wieder bei om1, × löschte gleich zwei Maße).
+// Aendert in place, gibt den nächsten freien Zähler zurück.
+globalThis.normOpMeasIds=function(list, seq){
+  const num=id=>{ const m=/^om(\d+)$/.exec(typeof id==='string' ? id : ''); return m ? +m[1] : 0; };
+  seq=Math.max(Number.isInteger(seq) && seq>0 ? seq : 1, 1+Math.max(0, ...list.map(m=>num(m && m.id))));
+  const seen=new Set();
+  list.forEach(m=>{ if(!m || typeof m!=='object') return;
+    if(!(typeof m.id==='string' && OPEN_ID_RE.test(m.id)) || seen.has(m.id)) m.id='om'+(seq++);
+    seen.add(m.id); });
+  return seq;
 };
 globalThis.openingsOverlap=function(a, b){
   return a.x + a.w > b.x + OVERLAP_EPS
@@ -10974,15 +11040,9 @@ function deserialize(o){
   // Solver darf sie nie als Strecke lesen (jacobian erwartet a/b).
   M.hmeas=Array.isArray(o.hmeas) ? o.hmeas.map(x=>({...x})) : [];
   M.opmeas=Array.isArray(o.opmeas) ? o.opmeas.map(x=>({...x})) : [];
-  // Der Zaehler fuer Lagemass-IDs wurde nie gespeichert: nach dem Laden
-  // begann er wieder bei om1, und × loeschte gleich zwei Masse. Aus den
-  // Daten nachziehen und schon doppelte IDs neu vergeben.
-  {
-    const num=id=>{ const m=/^om(\d+)$/.exec(String(id)); return m?+m[1]:0; };
-    opMeasSeq=Math.max(typeof opMeasSeq==='number'?opMeasSeq:1, 1+Math.max(0,...M.opmeas.map(m=>num(m.id))));
-    const seen=new Set();
-    M.opmeas.forEach(m=>{ if(seen.has(m.id)) m.id='om'+(opMeasSeq++); seen.add(m.id); });
-  }
+  // Lagemass-IDs: Zaehler aus den Daten nachziehen, doppelte und unplausible
+  // (Markup aus Datei oder Link, Zahlen) neu vergeben.
+  opMeasSeq=globalThis.normOpMeasIds(M.opmeas, typeof opMeasSeq==='number'?opMeasSeq:1);
   // Wie die Oeffnungen optional: aeltere Raeume und Fremdimporte kennen
   // weder Dicke noch geteilte Wand.
   M.thick=(o.thick && typeof o.thick==='object') ? {...o.thick} : {};
@@ -11006,16 +11066,12 @@ function deserialize(o){
   else openSeq=M.openings.length+1;
   // Öffnungs-ids, die keine sind (präparierte Datei oder Link), neu vergeben
   // und die Verweise darauf mitziehen. Gültige Räume bleiben unverändert.
+  // Numerische ids (Fremdimport) werden Strings - die Eingangs-Auswahl und
+  // die data-Attribute liefern Strings, verglichen wird strikt.
   {
     const r=globalThis.normOpeningIds(M.openings, openSeq);
-    if(r.map.size){
-      openSeq=r.seq;
-      const neu=id=>r.map.has(id) ? r.map.get(id) : id;
-      M.opmeas.forEach(m=>{ m.op=neu(m.op); });
-      for(const k of Object.keys(M.shared)){ const s=M.shared[k];
-        if(s && s.tuer && typeof s.tuer==='object') M.shared[k]={...s, tuer:{...s.tuer, op:neu(s.tuer.op)}}; }
-      if(M.kitchen.spec.entry!=null) M.kitchen.spec.entry=neu(M.kitchen.spec.entry);
-    }
+    if(r.map.size) openSeq=r.seq;
+    globalThis.remapOpeningRefs(M, r.map);
   }
   M.sel=[]; M.chain=null; M.drag=null; M.fit=null; M.an=null;
   M.wallSel=null; M.openSel=null;
@@ -13279,6 +13335,9 @@ function hidePop(){ $('pop').hidden=true; }
 
 function deletePoint(id){
   snapshot();
+  // Bezugsecke der Küche: freie Teile vorher umrechnen - im Fit, ohne Fit
+  // (alle Messungen aus) in der Skizze. recompute() kann das nicht mehr.
+  globalThis.KITCHEN.cornerDeleted(M.kitchen, id, M.fit && M.fit.pts, M.pts, M.walls);
   M.pts=M.pts.filter(p=>p.id!==id);
   M.walls=M.walls.filter(([a,b])=>a!==id&&b!==id);
   M.meas=M.meas.filter(m=>m.a!==id&&m.b!==id);
@@ -14741,10 +14800,10 @@ function renderOpeningMeasures(){
   const liste=M.opmeas.filter(m=>m.op===o.id);
   $('opMeasList').innerHTML = liste.map(m=>{
     const schlecht=r&&r.verdacht.has(m.id);
-    return `<div class="mrow${schlecht?' bad':''}" data-id="${m.id}">`
+    return `<div class="mrow${schlecht?' bad':''}" data-id="${escapeHtml(m.id)}">`
       +`<span>${EDGE_LABEL[sideView(m.edge,curFlip())]}</span><span>${fmtM(m.d)} m</span>`
       +`${schlecht?'<span>verdächtig</span>':''}`
-      +`<button data-del="${m.id}">×</button></div>`;
+      +`<button data-del="${escapeHtml(m.id)}">×</button></div>`;
   }).join('');
   $('opMeasList').querySelectorAll('button[data-del]').forEach(b=>{
     b.onclick=()=>{
@@ -19074,7 +19133,7 @@ const dotV=(a,b)=>a.x*b.x+a.y*b.y;
 // Seitlicher Platzbedarf des weitesten Flügels ganz offen (mm).
 const fullReach=(c,it)=>{ const g=c.L.byId.get(it.id); return g ? Math.round(Math.max(0, ...KX.leaves(g).map(lf=>KX.leafReachSide(lf, lf.full*Math.PI/180)))) : 0; };
 // Hochschrank mit Gerät: Anschlag der Schranktüren darüber und darunter.
-const hasHinge=it=>KX.tallDev(it) || KX.frontKind(it)==='door' && (it.w<=600 && !(it.corner && it.ctype==='L') || KX.isCold(it) || it.ctype==='diag') && (!KX.fzOf(it) || KX.fzOf(it).single);
+const hasHinge=KX.hasHinge;                    // eine Quelle mit der Stückliste
 function kitchenMove(e, g){
   if(!g.moved) return;
   const c=kctx(); if(!c) return;
@@ -19635,25 +19694,26 @@ function renderWays(c){
   const O=KS.opt;
   if(O){
     const lines=Object.entries(O.assign).filter(([,ids])=>ids.length).map(([k,ids])=>`<li>${escapeHtml(KX.ROLE_LABEL[k])}: ${ids.map(id=>escapeHtml(nmId(id))).join(' und ')}</li>`).join('');
-    const dup=O.fixed.length ? ` Doppelt Eingeräumtes (${O.fixed.map(k=>escapeHtml(KX.ROLE_LABEL[k])).join(', ')}) bleibt, wie es ist.` : '';
+    const dup=O.fixed.length ? ` Doppelt Eingeräumtes (${O.fixed.map(k=>escapeHtml(KX.ROLE_LABEL[k])).join(' · ')}) bleibt, wie es ist.` : '';
     const gain = O.completeAfter>O.completeBefore ? ` Danach sind ${O.completeAfter} statt ${O.completeBefore} Abläufe vollständig.`
       : O.placedAfter>O.placedBefore ? ` Räumt ${O.placedAfter-O.placedBefore} Inhalt${O.placedAfter-O.placedBefore>1?'e':''} ein, die noch keinen Platz haben.`
       : O.violationsAfter.length<O.violations.length ? ' Räumt um, was gegen die Regeln liegt.'
       : O.kmAfter<O.kmBefore-0.05 ? ` ≈ ${km(O.kmBefore)} → ${km(O.kmAfter)} km/Jahr.` : ' Wege etwa gleich, aber besser greifbar.';
     // Regelverstöße der jetzigen Belegung nennen; was mangels Platz so bleibt
-    // (kept), ebenso - Optimal einräumen nimmt nie etwas heraus.
+    // (kept), ebenso - Optimal einräumen nimmt nie etwas heraus. Listen mit
+    // „ · “ wie planLabels: Inhaltsnamen enthalten selbst Kommas („Messer, Bretter“).
     const WHY={nicht:'gehört dort nicht hin', schublade:'braucht eine Schublade', fach:'passt nicht in dieses Fach'};
     const lbl=k=>escapeHtml(KX.ROLE_LABEL[k]), capOf=id=>{ const it=c.K.items.find(x=>x.id===id); return it ? KX.storeCap(it,c.K.spec) : 0; };
     const viol=O.violations.map(v=>v.c ? `${lbl(v.c)} in ${escapeHtml(nmId(v.id))} (${WHY[v.why]})`
-      : `${escapeHtml(nmId(v.id))} ${v.why==='voll' ? `zu voll (höchstens ${capOf(v.id)})` : '– Fächer passen nicht'}`).join(', ');
+      : `${escapeHtml(nmId(v.id))} ${v.why==='voll' ? `zu voll (höchstens ${capOf(v.id)})` : '– Fächer passen nicht'}`).join(' · ');
     const stay=[...O.kept.map(x=>x.c), ...O.dropped];
     if(O.same || !O.better) hs+=`<p class="tnote">${O.kept.length ? 'Optimal eingeräumt, soweit die Schränke es zulassen.' : 'Optimal eingeräumt – keine Einteilung hat kürzere Wege.'}${dup}</p>`;
     else hs+=`<div class="ksugghead"><b>Optimal einräumen</b><button id="kOpt" class="primary">Einräumen</button></div>`
       +`<p class="tnote">Jeder Inhalt dorthin, wo die Wege aller Abläufe zusammen am kürzesten sind.${gain} Gerechnet, nicht geschätzt: dieselbe Küche ergibt immer dieselbe Einteilung. Besteck und Messer in Schubladen, Töpfe unten, Müll und Putzmittel an der Spüle, Seltenes in die schlechter greifbaren Fächer.${dup}</p>`
       +`<details class="kopt"><summary>Einteilung ansehen</summary><ul>${lines}</ul></details>`;
-    if(O.violations.length) hs+=`<p class="tnote">Gegen die Regeln eingeräumt: ${viol}.${stay.length ? ` Bleibt, wo es ist, weil kein passender Platz frei ist: ${stay.map(lbl).join(', ')}. Weitere Schränke setzen.` : ''}</p>`;
+    if(O.violations.length) hs+=`<p class="tnote">Gegen die Regeln eingeräumt: ${viol}.${stay.length ? ` Bleibt, wo es ist, weil kein passender Platz frei ist: ${stay.map(lbl).join(' · ')}. Weitere Schränke setzen.` : ''}</p>`;
     const fresh=O.unplaced.filter(k=>!O.dropped.includes(k));
-    if(fresh.length) hs+=`<p class="tnote">Kein passender Schrank frei für: ${fresh.map(lbl).join(', ')}${fresh.length>1?' (Häufiges geht vor)':''}.</p>`;
+    if(fresh.length) hs+=`<p class="tnote">Kein passender Schrank frei für: ${fresh.map(lbl).join(' · ')}${fresh.length>1?' (Häufiges geht vor)':''}.</p>`;
   }
   if(S.length){
     hs+=`<div class="ksugghead"><b>${places.length?'Einräumen und umsortieren':'Umsortieren'}</b><button id="kSuggAll" class="primary">Alles übernehmen</button></div>`;
@@ -19664,7 +19724,7 @@ function renderWays(c){
     hs+=S.map((s,i)=>{ const n=S.filter(x=>x.grp===s.grp).length, lead=firstOf.get(s.grp)===i;
       return `<div class="ksugg${lead?'':' kdep'}"><span>${lead?'':'dazu: '}<b>${escapeHtml(KX.ROLE_LABEL[s.c])}</b> ${s.place?`einräumen: ${escapeHtml(nmId(s.to))}`:`von ${escapeHtml(nmId(s.from))} nach ${escapeHtml(nmId(s.to))}`}</span>${lead?`<button data-sg="${i}">${n>1?`Übernehmen (${n})`:'Übernehmen'}</button>`:''}</div>`; }).join('');
   }
-  if(S.unplaced && S.unplaced.length) hs+=`<p class="tnote">Kein passender Schrank frei für: ${S.unplaced.map(k=>escapeHtml(KX.ROLE_LABEL[k])).join(', ')}${S.unplaced.some(k=>k==='besteck'||k==='messer')?' (Besteck und Messer brauchen eine Schublade)':''}. Weitere Schränke setzen.</p>`;
+  if(S.unplaced && S.unplaced.length) hs+=`<p class="tnote">Kein passender Schrank frei für: ${S.unplaced.map(k=>escapeHtml(KX.ROLE_LABEL[k])).join(' · ')}${S.unplaced.some(k=>k==='besteck'||k==='messer')?' (Besteck und Messer brauchen eine Schublade)':''}. Weitere Schränke setzen.</p>`;
   $('kSugg').innerHTML=hs;
   // Überfahren zeigt den Umzug als Pfeil im Plan.
   $('kSugg').querySelectorAll('.ksugg').forEach((row,i)=>{
@@ -19677,7 +19737,7 @@ function renderWays(c){
     // Netto-Umzüge: erst alle herausnehmen, dann einräumen (Tausch geht so auf).
     list.forEach(s=>{ if(s.from!=null) take(s.c,s.from); });
     list.forEach(s=>put(s.c,s.to));
-    kitchenSave(); setHint(`${list.map(s=>KX.ROLE_LABEL[s.c]).join(', ')} ${list.length>1?'eingeräumt/umgeräumt':'übernommen'} · ⌘Z nimmt es zurück`); };
+    kitchenSave(); setHint(`${list.map(s=>KX.ROLE_LABEL[s.c]).join(' · ')} ${list.length>1?'eingeräumt/umgeräumt':'übernommen'} · ⌘Z nimmt es zurück`); };
   $('kSugg').querySelectorAll('[data-sg]').forEach(b=>b.onclick=()=>{ const g=S[+b.dataset.sg].grp; apply(S.filter(x=>x.grp===g)); });
   if($('kSuggAll')) $('kSuggAll').onclick=()=>apply(S);
   if($('kOpt')) $('kOpt').onclick=()=>{ KS.hl=null; snapshot();
@@ -19686,7 +19746,7 @@ function renderWays(c){
     items.forEach(it=>{ if(it.store){ it.store=it.store.filter(k=>!keys.has(k)); if(!it.store.length) delete it.store; } });
     Object.entries(O.assign).forEach(([k,ids])=>ids.forEach(id=>{ const t=items.find(it=>it.id===id); if(t) t.store=[...(t.store||[]),k]; }));
     const st=[...O.kept.map(x=>x.c), ...O.dropped].map(k=>KX.ROLE_LABEL[k]);
-    kitchenSave(); setHint(`Optimal eingeräumt: ≈ ${km(O.kmAfter)} km/Jahr${st.length?` · bleibt gegen die Regel: ${st.join(', ')}`:''} · ⌘Z nimmt es zurück`); };
+    kitchenSave(); setHint(`Optimal eingeräumt: ≈ ${km(O.kmAfter)} km/Jahr${st.length?` · bleibt gegen die Regel: ${st.join(' · ')}`:''} · ⌘Z nimmt es zurück`); };
 }
 // ---------- Wege-Analyse (Meldungen M-20261109-151457-68b975, -151540-54f941) ----------
 // Eigene Ansicht statt 3D: wenig Text, viel Information. Oben die Summe
@@ -24250,6 +24310,78 @@ globalThis.selfChecks=function(){
           s && s.lead && s.r.k===2 && !s.forced && !cross(q,s.lead,num) && (LP.leads||[]).length===1);
       }
     }catch(err){ chk('kueche: Review-Fix r2-ui ohne Ausnahme ('+err.message+')', false); }
+    // --- Review-Fix r2-daten ---
+    try{
+      // (1) Numerische Öffnungs-ids (Fremdimport): beim Laden zu Strings,
+      // alle Verweise (Lagemaß, Nachbartür, Eingang) ziehen mit. Die
+      // Eingangs-Auswahl liefert Strings – Tür 2 muss Tür 2 bleiben.
+      const nOk=typeof globalThis.normOpeningIds==='function', rOk=typeof globalThis.remapOpeningRefs==='function';
+      const d5={id:5,kind:'door',a:'C',b:'D',x:200,w:900,y:0,h:2000}, d7={id:7,kind:'door',a:'C',b:'D',x:2200,w:900,y:0,h:2000};
+      const ops=[d5,d7,{id:'9',kind:'window',a:'A',b:'B',x:0,w:600,y:900,h:1000},{id:9,kind:'window',a:'A',b:'B',x:1000,w:600,y:900,h:1000},{id:1e21}];
+      const room={openings:ops, opmeas:[{id:'om1',op:7},{id:'om2',op:9}], shared:{'A|B':{room:'r2',wall:['A','B'],tuer:{op:7}}},
+                  kitchen:KX.normKitchen({spec:{entry:7}})};
+      const r=nOk ? globalThis.normOpeningIds(ops, 3) : null;
+      if(rOk && r) globalThis.remapOpeningRefs(room, r.map);
+      chk('kueche: numerische Öffnungs-ids werden beim Laden Strings (frei: „7“, belegt: neu), Verweise ziehen mit',
+        nOk && rOk && ops.map(o=>o.id).join(',')==='5,7,9,o3,o4' && ops.every(o=>typeof o.id==='string')
+        && r.map.get(7)==='7' && r.map.get(9)==='o3' && room.opmeas.map(m=>m.op).join(',')==='7,o3'
+        && room.shared['A|B'].tuer.op==='7' && room.kitchen.spec.entry==='7');
+      const E1=KX.makeEnv(R.pts,R.walls,ops,[]), doors=KX.entries(E1), K1=room.kitchen, st=e=>KX.stations(E1,{...K1,spec:{...K1.spec,entry:e}},KX.layout(E1,K1)).eingang[0].p;
+      chk('kueche: Eingang „Tür 2“ aus der Auswahl (String) trifft Tür 2, auch nach numerischer id im Import',
+        doors.length===2 && KX.entryOptions(doors,'7').includes('value="7" selected') && Math.abs(st('7').x-st('5').x)>1000
+        && Math.abs(st(room.kitchen.spec.entry).x-st('7').x)<1e-6);
+      // (2) Bezugsecke gelöscht, ohne Fit (alle Messungen aus): in der Skizze umrechnen, nicht springen.
+      const cOk=typeof KX.cornerDeleted==='function';
+      const Q=[{id:'A',x:0,y:0},{id:'B',x:4000,y:300},{id:'C',x:4300,y:3000},{id:'D',x:500,y:3200},{id:'E',x:-300,y:1500}];
+      const QW=[['A','B'],['B','C'],['C','D'],['D','E'],['E','A']], Q2=Q.filter(p=>p.id!=='A'), QW2=[['B','C'],['C','D'],['D','E']];
+      const freeI=[{id:1,kind:'island',x:2000,y:1500,rot:20,w:1800,d:900},{id:2,kind:'table',x:1000,y:800,rot:0,w:1200,d:800}];
+      const polys=(E,K)=>KX.layout(E,K).G.filter(g=>g.free).sort((a,b)=>a.it.id-b.it.id).map(g=>g.poly);
+      const same=(P,Q_)=>P.length===Q_.length && P.every((p,i)=>p.length===Q_[i].length && p.every((q,j)=>Math.hypot(q.x-Q_[i][j].x, q.y-Q_[i][j].y)<0.5));
+      const Kc=KX.normKitchen({frame:{a:'A',b:'B'}, items:freeI}), Pc=polys(KX.makeEnv(Q,QW,[],[],[],Kc.frame),Kc);
+      if(cOk) KX.cornerDeleted(Kc, 'A', null, Q, QW);
+      chk('kueche: Bezugsecke ohne Fit gelöscht – freie Teile in der Skizze umgerechnet, Lage bleibt',
+        cOk && !!Kc.frame && Kc.frame.a==='B' && Kc.frame.b==='C' && same(Pc, polys(KX.makeEnv(Q,QW,[],[],[],Kc.frame),Kc)));
+      // (3) Lagemaß-ids aus Datei/Link: unplausible und doppelte neu, gültige bleiben.
+      const mOk=typeof globalThis.normOpMeasIds==='function';
+      const om=[{id:'om2'},{id:'"><img src=x onerror=alert(1)>'},{id:'om2'},{id:5},{id:'x1'},{}];
+      const seq=mOk ? globalThis.normOpMeasIds(om, 1) : 0;
+      chk('kueche: Lagemaß-ids beim Laden – Markup, Zahl, doppelt und fehlend neu vergeben, gültige bleiben',
+        mOk && om.map(m=>m.id).join(',')==='om2,om3,om4,om5,x1,om6' && seq===7 && globalThis.normOpMeasIds([{id:'om9'}], 2)===10);
+      // (5) Stückliste: Türanschlag unterscheidet die Bestellung (Standard links ohne Angabe).
+      const R5=rect(6000,5000), E5=KX.makeEnv(R5.pts,R5.walls,[],[]);
+      const stk=items=>{ const K=KX.normKitchen({items}); return KX.stock(K,KX.layout(E5,K)).list; };
+      const L5=stk([{id:1,kind:'tall',dev:'oven',a:'A',b:'B',x:0,w:600},{id:2,kind:'tall',dev:'oven',a:'A',b:'B',x:600,w:600,hinge:'right'},
+                    {id:3,kind:'tall',dev:'oven',a:'A',b:'B',x:1200,w:600,hinge:'left'},
+                    {id:4,kind:'base',front:'door',a:'C',b:'D',x:0,w:600},{id:5,kind:'base',front:'door',a:'C',b:'D',x:600,w:600,hinge:'right'},
+                    {id:6,kind:'base',front:'drawer',a:'C',b:'D',x:1200,w:600,hinge:'right'}]);
+      const n5=t=>(L5.find(r=>r.text===t)||{}).n;
+      chk('kueche: Stückliste trennt Anschlag rechts (Backofen hoch, Drehtür), Standard links ohne Angabe, Schubladen ohne Anschlag',
+        typeof KX.hasHinge==='function' && L5.length===5 && n5('Backofen hoch 60 cm')===2 && n5('Backofen hoch 60 cm · Anschlag rechts')===1
+        && n5('Unterschrank 60 cm · Drehtür')===1 && n5('Unterschrank 60 cm · Drehtür · Anschlag rechts')===1 && n5('Unterschrank 60 cm · Schubladen')===1);
+      // (6) Zu niedriger Backofen-Hochschrank: Platzieren rechnet mit der nötigen Höhe,
+      // die Abhilfe verdeckt kein Fenster.
+      const oven={id:2,kind:'tall',dev:'oven',w:600,h:1300}, need=KX.devSegs(oven,KX.K_DEF).need;
+      const six=sill=>{
+        const E6=KX.makeEnv(R.pts,R.walls,[{id:'o1',kind:'window',a:'A',b:'B',x:1500,w:1000,y:sill,h:900}],[]);
+        const K=KX.normKitchen({items:[]}), L=KX.layout(E6,K), Wf=KX.wallFrame(E6,'A','B');
+        const K2=KX.normKitchen({items:[{...oven,a:'A',b:'B',x:1700}]}), F=KX.check(E6,K2,KX.layout(E6,K2));
+        const low=F.find(f=>/Hochschrank zu niedrig/.test(f.txt));
+        return {fits:KX.fitsAt(E6,K,L,oven,Wf,1700), slot:KX.freeSlot(E6,K,L,oven,Wf,1700), low, win:F.some(f=>/verdeckt ein Fenster/.test(f.txt))};
+      };
+      const s14=six(1400), s15=six(1500);
+      chk('kueche: zu niedriger Backofen-Hochschrank – nicht unter ein Fenster, das er in nötiger Höhe verdeckte',
+        need>1400 && need<1500 && !s14.fits && s14.slot!=null && (s14.slot+600<=1501 || s14.slot>=2499) && s15.fits);
+      chk('kueche: Abhilfe „zu niedrig“ nur, wenn sie kein Fenster verdeckt (Standardhöhe → nötige Höhe → keine)',
+        !!s14.low && !s14.low.fix && /Fenster/.test(s14.low.txt) && !s14.win && !!s15.low && !!s15.low.fix && s15.low.fix.set.h===Math.ceil(need/10)*10 && !s15.win);
+      {
+        // Vor einer Tür: eigener Befund, die Höhen-Abhilfe bleibt Standardhöhe.
+        const E7=KX.makeEnv(R.pts,R.walls,[{id:'o1',kind:'door',a:'A',b:'B',x:1500,w:900,y:0,h:2000}],[]);
+        const K7=KX.normKitchen({items:[{...oven,a:'A',b:'B',x:1700}]}), F7=KX.check(E7,K7,KX.layout(E7,K7));
+        const low=F7.find(f=>/Hochschrank zu niedrig/.test(f.txt));
+        chk('kueche: zu niedriger Backofen-Hochschrank vor einer Tür – Türbefund, Abhilfe weiter Standardhöhe',
+          F7.some(f=>/steht vor einer Tür/.test(f.txt)) && !!low && !!low.fix && low.fix.label==='Standardhöhe' && !/verdeckte/.test(low.txt));
+      }
+    }catch(err){ chk('kueche: Review-Fix r2-daten ohne Ausnahme ('+err.message+')', false); }
   }
   return {ok, out};
 };
