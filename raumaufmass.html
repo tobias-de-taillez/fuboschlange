@@ -3646,11 +3646,10 @@ function makeEnv(pts, walls, openings, hmeas, water, frame){
       wallsByKey.set(ka+'|'+kb, {a:ka, b:kb, nIn, hole:ri>0, L:len(sub(b,a))});
     });
   });
-  const H=globalThis.cornerHeights ? globalThis.cornerHeights(pts, hmeas||[]) : {};
   const F=TL.frameOf(pts, walls, frame);
   // hmeas samt Knickpunkten ({kind:'k'}) bleibt in E: die Decke je Wand
-  // (ceilShape) entsteht daraus. H, die Höhe je Ecke, rechnet sie nicht mehr.
-  return {pts, walls, ring, I, wallsByKey, H, hmeas:hmeas||[], shapes:new Map(), F, openings:(openings||[]).filter(o=>o && o.a && o.b),
+  // (ceilShape) entsteht daraus.
+  return {pts, walls, ring, I, wallsByKey, hmeas:hmeas||[], shapes:new Map(), F, openings:(openings||[]).filter(o=>o && o.a && o.b),
           water:(water||[]).filter(w=>w && wallsByKey.has(wallKeyOf(w.a,w.b)))};
 }
 const P=(E,id)=>{ const i=E.I[id]; return i==null?null:E.pts[i]; };
@@ -4557,10 +4556,14 @@ function chainDims(E, L, g, K){
   // mit dem Hauptteil (wingG) wie mit dem zweiten Schenkel (wing): dann kein
   // Eingabefeld (sonst wanderte der Eckschrank aus der Ecke, bzw. das
   // Hauptteil an der anderen Wand mit).
-  const block=(from, dir)=>{ const ids=[]; let edge=null, pinned=false;
-    const seq = dir>0 ? row : [...row].reverse();
+  // Hängezeile: der Hochschrank steht in der Zeile (er belegt das Band), gehört aber zur unteren
+  // Zeile und wird dort verstellt (mit deren Sperren, z. B. dem Eckschrank im Block). Hier ist er Anker
+  // wie das Wandende: kein Teil eines Blocks, und die Lücke daneben ist ein Wandabstand des Blocks.
+  const hang=g.it.kind==='wall', isTall=r=>KIND[r.h.it.kind].band==='full';
+  const block=(at, dir)=>{ const ids=[]; let edge=at, pinned=false;
+    const seq = dir>0 ? row.filter(r=>r.s0>=at-1) : [...row].reverse().filter(r=>r.s1<=at+1);
     for(const r of seq){ const near = dir>0 ? r.s0 : r.s1;
-      if(edge!=null && Math.abs(near-edge)>1) break;
+      if(Math.abs(near-edge)>1 || (hang && isTall(r))) break;
       if(r.h.wing || r.h.wingG) pinned=true;
       ids.push(r.h.it.id); edge = dir>0 ? r.s1 : r.s0; }
     return {ids, edge, pinned}; };
@@ -4569,17 +4572,35 @@ function chainDims(E, L, g, K){
   if(row.length && first && first.gap && Math.abs(first.a-x0)<0.5){
     // Block ab Ecke-a-Seite: wandert mit +delta; Grenze ist das nächste Teil
     // dahinter oder das Wandende.
-    const B=block(0,1), nb=row.find(r=>!B.ids.includes(r.h.it.id) && r.s0>=B.edge-1);
+    const B=block(first.b,1), nb=row.find(r=>!B.ids.includes(r.h.it.id) && r.s0>=B.edge-1);
     const cur=first.b-first.a;
-    const ed=!B.pinned && fitEdit(E,K,L,{ids:B.ids, fa:Wf.a, side:0, cur, min:Math.max(0,lo-x0), max:cur+((nb?nb.s0:hi)-B.edge), wp:wpt(Wf,x0,qr)});
+    const ed=B.ids.length && !B.pinned && fitEdit(E,K,L,{ids:B.ids, fa:Wf.a, side:0, cur, min:Math.max(0,lo-x0), max:cur+((nb?nb.s0:hi)-B.edge), wp:wpt(Wf,x0,qr)});
     if(ed) first.edit=ed;
   }
   if(row.length && last && last.gap && Math.abs(last.b-x1)<0.5 && last!==first){
-    const B=block(0,-1), nb=[...row].reverse().find(r=>!B.ids.includes(r.h.it.id) && r.s1<=B.edge+1);
+    const B=block(last.a,-1), nb=[...row].reverse().find(r=>!B.ids.includes(r.h.it.id) && r.s1<=B.edge+1);
     const cur=last.b-last.a;
-    const ed=!B.pinned && fitEdit(E,K,L,{ids:B.ids, fa:Wf.a, side:1, cur, min:Math.max(0,x1-hi), max:cur+(B.edge-(nb?nb.s1:lo)), wp:wpt(Wf,x1,qr)});
+    const ed=B.ids.length && !B.pinned && fitEdit(E,K,L,{ids:B.ids, fa:Wf.a, side:1, cur, min:Math.max(0,x1-hi), max:cur+(B.edge-(nb?nb.s1:lo)), wp:wpt(Wf,x1,qr)});
     if(ed) last.edit=ed;
   }
+  // Lücke zwischen einem Hochschrank und den Hängeschränken daneben (Hängezeile): der Hochschrank ist der
+  // Anker, der Block der Hängeschränke wandert, bündig bis an ihn (min 0), sonst bis zum nächsten Teil.
+  if(hang) segs.forEach((sg, i)=>{
+    if(!sg.gap) return;
+    const tallSeg=s=>{ const r=s && s.part!=null && row.find(q=>q.h.it.id===s.part); return r && isTall(r) ? r : null; };
+    const aL=tallSeg(segs[i-1]), aR=tallSeg(segs[i+1]);
+    if(!aL===!aR) return;                                  // beidseits oder keiner: kein Block, kein Feld
+    const cur=sg.b-sg.a;
+    if(aL){
+      const B=block(sg.b,1), nb=row.find(r=>!B.ids.includes(r.h.it.id) && r.s0>=B.edge-1);
+      const ed=B.ids.length && !B.pinned && fitEdit(E,K,L,{ids:B.ids, fa:Wf.a, side:0, cur, min:0, max:cur+((nb?nb.s0:hi)-B.edge), wp:null, anchor:aL.h.it.id});
+      if(ed) sg.edit=ed;
+    } else {
+      const B=block(sg.a,-1), nb=[...row].reverse().find(r=>!B.ids.includes(r.h.it.id) && r.s1<=B.edge+1);
+      const ed=B.ids.length && !B.pinned && fitEdit(E,K,L,{ids:B.ids, fa:Wf.a, side:1, cur, min:0, max:cur+(B.edge-(nb?nb.s1:lo)), wp:null, anchor:aR.h.it.id});
+      if(ed) sg.edit=ed;
+    }
+  });
   return {Wf, xs, segs, x0, x1, q:Math.max(...row.map(r=>r.h.d))+260};
 }
 // Freies Teil: je Seite der Abstand nach außen bis Wand oder Teil. Weiter
@@ -4686,7 +4707,7 @@ function dimInput(E, K, edit, raw){
 }
 // Welches Maß ist gemeint? Das Maß selbst bleibt, seine Zahlen ändern sich:
 // Wandabstand der Kette = Wandecke und Seite, freies Teil = Teil und Richtung.
-const dimKey=edit=>edit.ids ? `w|${edit.fa}|${edit.side}` : `f|${edit.id}|${Math.round(edit.n.x*1000)}|${Math.round(edit.n.y*1000)}`;
+const dimKey=edit=>edit.ids ? `w|${edit.fa}|${edit.side}${edit.anchor!=null ? '|a'+edit.anchor : ''}` : `f|${edit.id}|${Math.round(edit.n.x*1000)}|${Math.round(edit.n.y*1000)}`;
 // Bei offenem Maßfeld liest der Klick auf ein anderes Maß seinen Treffer aus den
 // Maßen von vor dem Setzen. Gilt hier: derselbe Treffer, aus den frischen Maßen
 // (hits). null, wenn es ihn nicht mehr gibt.
@@ -4925,6 +4946,9 @@ function check(E, K, L){
         // Knapp vor einer Querzeile (Passblende in der Innenecke): Blindecke, kein
         // Gang. Der Abstand zählt ab der Korpusfront (tc + ov), wie bisher.
         if(tc+ov<300 && hit && cross(hit)) continue;
+        // Der Strahl beginnt 1 mm vor der Kante (o1): der Gang ist so viel länger. Ohne das stünde ein
+        // Gang von genau 1200 mm als „1199“ im Plan (gelb), genau 900 mm als „899“ (rot).
+        tc+=1;
       }
       min=Math.min(min, tc); }
     if(!(w>0) || !isFinite(min)) return;
@@ -5916,19 +5940,40 @@ function placeOk(E, K, L, t){
 // Original beim Überlappen zählt) steht daneben, in der eigenen Achse des Teils
 // (Drehung, wie die Achsen von sweep), mit gap mm Luft zur Platte samt Überstand.
 // Längs rechts, längs links, quer hinter, quer davor; genommen wird die erste Lage,
-// die im Raum liegt und nichts überlappt (placeOk). -> {x, y} im Raumrahmen oder
+// die im Raum liegt, nichts überlappt (placeOk) und nicht vor einer Tür oder einem
+// Fenster steht (Zone wie in check und fitsAt). -> {x, y} im Raumrahmen oder
 // null, wenn nirgends Platz ist. Der Versatz in F statt in der Teilachse ließ die
 // Kopie ganz aus dem Raum fallen.
 function copySpot(E, K, L, n, gap){
   const g=KIND[n.kind].free && geom(E,K,n); if(!g) return null;
   gap=gap==null ? 200 : gap;
+  const zones=E.openings.map(o=>openingZone(E,o)).filter(Boolean);
   const P=g.foot||g.poly, span=ax=>{ const v=P.map(p=>dot(p,ax)); return Math.max(...v)-Math.min(...v); };
   const r=(n.rot||0)*Math.PI/180, u={x:Math.cos(r), y:Math.sin(r)}, v={x:-Math.sin(r), y:Math.cos(r)};
   for(const [d,s] of [[u,span(g.u)],[mul(u,-1),span(g.u)],[v,span(g.n)],[mul(v,-1),span(g.n)]]){
     const t={...n, x:n.x+d.x*(s+gap), y:n.y+d.y*(s+gap)};
-    if(placeOk(E,K,L,t)) return {x:t.x, y:t.y};
+    if(placeOk(E,K,L,t) && !zones.some(z=>zoneHit(geom(E,K,t),z))) return {x:t.x, y:t.y};
   }
   return null;
+}
+// Duplizieren eines Wandteils (Strg/Cmd+D): wie das Einfügen (clipItem, placeOnWall) neben das
+// Original. Ein Eckschrank über Eck / diagonal geht nur in eine freie rechtwinklige Innenecke:
+// die andere Ecke der Wand zuerst (die eigene ist besetzt), sonst gibt es keinen Platz. Mitten an
+// der Wand stünde er sofort rot. -> die Kopie (neue id, an der Wand des Originals) oder null.
+function dupOnWall(E, K, L, it, id){
+  const Wf=wallFrame(E,it.a,it.b); if(!Wf) return null;
+  const n={...clipItem(it), id, a:it.a, b:it.b};
+  if(n.corner && n.ctype){
+    const e0=it.cEnd!=null ? it.cEnd : (it.x<=Wf.L-it.x-it.w ? 0 : 1);
+    for(const e of [1-e0, e0]){
+      const c={...n, cEnd:e}, x=cornerPlace(E,K,L,c,Wf);
+      if(x!=null && fitsAt(E,K,L,c,Wf,x)){ c.x=x; return c; }
+    }
+    return null;
+  }
+  const sl=placeOnWall(E,K,L,n,Wf,it.x+it.w,false);
+  if(!sl) return null;
+  n.x=sl.x; return n;
 }
 function sweep(E, K, L, id, opts){
   opts=opts||{};
@@ -6676,7 +6721,7 @@ function deferSave(run, delay, clock){
   return d;
 }
 Object.assign(globalThis.KITCHEN, { checksKey, selBoxKey, cornerBoxKey, controlOwnsKey, roomBound, deferSave });
-Object.assign(globalThis.KITCHEN, { copySpot, sweepGaps, normUi, roleList, undoHint, DIM_NOTE });
+Object.assign(globalThis.KITCHEN, { copySpot, dupOnWall, sweepGaps, normUi, roleList, undoHint, DIM_NOTE });
 Object.assign(globalThis.KITCHEN, { pillTouch });
 })();
 </script>
@@ -7029,6 +7074,9 @@ function recompute(){
 function openRoom(id){
   const r=STORE.load(id);
   if(!r) return;
+  // Gehaltene Pfeil-/Dreh-Taste: das Vorgemerkte noch in den ALTEN Raum schreiben (currentRoom zeigt auf ihn,
+  // M hält seine Daten); danach gehört alles dem neuen.
+  if(typeof kitchenFlush==='function') kitchenFlush();
   currentRoom=id;
   currentRoomName=r.name;
   STORE.setCurrent(id);
@@ -14636,14 +14684,15 @@ function kitchenKey(e){
 }
 function duplicate(it){
   const c=kctx(); if(!c) return;
-  const K=c.K, n={...it, id:K.seq++};
-  if(n.store) n.store=[...n.store];
+  const K=c.K;
+  let n;
   if(it.a){
-    const Wf=KX.wallFrame(c.E,it.a,it.b);
-    const x=Wf && KX.freeSlot(c.E,K,c.L,n,Wf,it.x+it.w);
-    if(x==null){ setHint('Daneben ist kein Platz frei.'); K.seq--; return; }
-    n.x=x;
+    // Wandteil wie beim Einfügen (⌘V): ein Eckschrank kommt in eine Ecke statt mitten an die Wand.
+    n=KX.dupOnWall(c.E,K,c.L,it,K.seq++);
+    if(!n){ setHint('Daneben ist kein Platz frei.'); K.seq--; return; }
   } else {
+    n={...it, id:K.seq++};
+    if(n.store) n.store=[...n.store];
     // Freies Teil (Insel, Tisch): daneben in seiner Achse, wo es im Raum steht
     // und nichts überlappt - sonst wie bei Wandteilen kein Duplikat.
     const s=KX.copySpot(c.E,K,c.L,n);
@@ -14939,7 +14988,15 @@ function renderSel(c){
       cur.rot=v; if($('kR')) $('kR').value=String(Math.round(v*10)/10).replace('.',',');
       setHintLive(`Drehung ${String(Math.round(v*10)/10).replace('.',',')}°${how?` · eingerastet: ${how}`:''} · ⌥ frei`);
       KS.ctxKey=''; redraw(); };
-    rs.onchange=()=>{ KS.rotDrag=null; KS.rotPtr=false; kitchenSave(); };
+    // Pfeile am Regler: die Taste verbraucht er selbst (1°), jede Wiederholung löst input und change aus.
+    // Wie bei den Pfeilen auf dem Plan: eine gehaltene Taste ist ein Rückgängig-Schritt und wird einmal beim
+    // Loslassen gespeichert (nudgeSave), nicht je Wiederholung samt Panel-Neubau.
+    rs.onkeydown=()=>{ KS.rotKey=true; };
+    rs.onkeyup=()=>{ KS.rotKey=false; KS.rotDrag=null; };
+    rs.onblur=()=>{ KS.rotKey=false; KS.rotDrag=null; };
+    rs.onchange=()=>{
+      if(KS.rotKey){ KS.ctxKey=''; nudgeSave.mark(); return; }
+      KS.rotDrag=null; KS.rotPtr=false; kitchenSave(); };
   }
   if($('kStd')) $('kStd').onclick=()=>edit(t=>{ delete t.d; delete t.h; delete t.z; });
   $('kDup').onclick=()=>{ const t=selItem(); if(t) duplicate(t); };
@@ -15602,6 +15659,8 @@ function kitchenHint(){
 Object.assign(globalThis, { kitchenReady, kitchenDown, kitchenMove, kitchenUp, kitchenTap, kitchenHover, kitchenKey,
   drawKitchenView, renderKitchenPanel, kitchenLeave, k3dSchedule, kitchenHint, kitchenData,
   kitchenDeleteSel:()=>{ const it=selItem(); if(!it) return false; removeItem(it); return true; },
+  // Vor dem Raumwechsel (openRoom, solange currentRoom noch der alte Raum ist): Vorgemerktes Speichern ausführen.
+  kitchenFlush:()=>{ nudgeSave.flush(); },
   // Raumwechsel (openRoom ruft das, wenn currentRoom schon der neue Raum ist, M aber noch den alten hält):
   // Vorgemerktes Speichern verwerfen statt hier zu schreiben, sonst landeten die alten Daten im neuen Raum.
   kitchenResetSession:()=>{ nudgeSave.cancel(); disarmClear(); Object.assign(KS, KX.roomBound()); G3.camFor=''; } });
@@ -20222,11 +20281,32 @@ globalThis.selfChecks=function(){
         const f=chain(E0,r2,2).segs[0];
         chk('kueche-masskette: Hochschrank neben dem Hängeschrank lässt sich nicht in ihn hineinschieben',
           !!f.edit && near(f.edit.min,600,0.5) && !KX.applyDim(E0,r2.K,f.edit,0) && r2.K.items[1].x===600 && badF(E0,r2).length===0);
-        // Hochschrank neben Unterschrank: aus der Kette des Hängeschranks heraus nicht in den Unterschrank
+        // Hängezeile: der Hochschrank ist Anker (wie das Wandende). Kein Feld verschiebt ihn dort - das tut seine eigene
+        // Zeile mit ihren Sperren; die Lücke am Hochschrank verstellt den Hängeschrank daneben, bündig bis an ihn.
         const r3=kl(E0,[{id:1,kind:'tall',a:'A',b:'B',x:600,w:600},{id:2,kind:'base',a:'A',b:'B',x:1200,w:600},{id:3,kind:'wall',a:'A',b:'B',x:1500,w:600}]);
-        const g=chain(E0,r3,3).segs[0];
-        chk('kueche-masskette: Hochschrank aus der Hängeschrank-Kette – nach links frei, nach rechts am Unterschrank gesperrt',
-          !!g.edit && g.edit.ids.length===1 && g.edit.ids[0]===1 && near(g.edit.min,0,0.5) && near(g.edit.max,g.edit.cur,0.5));
+        const g3=chain(E0,r3,3), gl=g3.segs.find(s=>s.gap && near(s.a,1200,0.5) && near(s.b,1500,0.5));
+        chk('kueche-masskette: Hängezeile – der Hochschrank ist Anker: kein Feld verschiebt ihn, die Lücke am Hochschrank verstellt den Hängeschrank (bündig bis 0)',
+          !g3.segs[0].edit && !g3.segs.some(s=>s.edit && s.edit.ids.includes(1)) && !!gl && !!gl.edit && gl.edit.ids.length===1 && gl.edit.ids[0]===3
+          && gl.edit.anchor===1 && near(gl.edit.cur,300,0.5) && near(gl.edit.min,0,0.5) && near(gl.edit.max,2200,0.5) && gl.edit.wp===null);
+        chk('kueche-masskette: Hängezeile – der Wert 0 an der Lücke setzt den Hängeschrank bündig an den Hochschrank, der bleibt stehen, ohne Befund',
+          KX.applyDim(E0,r3.K,gl.edit,0) && r3.K.items[2].x===1200 && r3.K.items[0].x===600 && badF(E0,r3).length===0);
+        // Nutzersicht-Befund (echte Küche): Dunstabzug neben dem Kühlschrank – das linke Feld verstellt den Dunstabzug, nicht den Kühlschrank
+        const rk=kl(E0,[{id:1,kind:'tall',a:'A',b:'B',x:1140,w:900},{id:10,kind:'wall',a:'A',b:'B',x:2490,w:600}]);
+        const ck=chain(E0,rk,10), lk=ck.segs.find(s=>s.gap && near(s.a,2040,0.5) && near(s.b,2490,0.5)), rl=ck.segs[ck.segs.length-1];
+        chk('kueche-masskette: Hängezeile – Dunstabzug neben dem Kühlschrank: links verstellt das Feld den Dunstabzug (450 mm zum Kühlschrank), das Wandende-Feld den Kühlschrank nicht',
+          !!lk && !!lk.edit && lk.edit.ids.length===1 && lk.edit.ids[0]===10 && near(lk.edit.cur,450,0.5) && !ck.segs[0].edit
+          && !!rl.edit && rl.edit.ids.length===1 && rl.edit.ids[0]===10);
+        chk('kueche-masskette: Hängezeile – Eingabe am Hochschrank schiebt nur den Dunstabzug (Kühlschrank bleibt), eine Lücke zum Hochschrank von 0 mm gibt es nicht mehr als Feld',
+          KX.applyDim(E0,rk.K,lk.edit,150) && rk.K.items[1].x===2190 && rk.K.items[0].x===1140 && !chain(E0,rk,10).segs.some(s=>s.gap && s.edit && s.edit.anchor===1 && s.b-s.a<1));
+        // Hochschrank im Block der unteren Zeile mit Eckschrank (dort gesperrt): auch aus der Hängezeile nicht verschiebbar
+        const rp=kl(E0,[{id:1,kind:'base',corner:true,ctype:'L',cEnd:0,a:'A',b:'B',x:0,w:900},{id:2,kind:'tall',a:'A',b:'B',x:900,w:600},{id:3,kind:'wall',a:'A',b:'B',x:1800,w:600}]);
+        chk('kueche-masskette: Hängezeile – ein Hochschrank neben dem Eckschrank (untere Zeile gesperrt) lässt sich aus der Hängezeile nicht verschieben',
+          !chain(E0,rp,3).segs.some(s=>s.edit && s.edit.ids.includes(2)) && !chain(E0,rp,3).segs.some(s=>s.edit && s.edit.ids.includes(1)));
+        // Mehrere Anker in einer Zeile: jedes Feld hat sein eigenes Maß (Schlüssel), auch nach dem Neuberechnen wiederzufinden
+        const rm=kl(E0,[{id:1,kind:'wall',a:'A',b:'B',x:300,w:600},{id:2,kind:'tall',a:'A',b:'B',x:1500,w:600},{id:3,kind:'wall',a:'A',b:'B',x:2400,w:600}]);
+        const cm=chain(E0,rm,1), hits=cm.segs.filter(s=>s.edit).map(s=>({edit:s.edit})), keys=hits.map(h=>KX.dimKey(h.edit));
+        chk('kueche-masskette: Hängezeile – vier Felder (Wandende, am Hochschrank je Seite, Wandende) haben vier verschiedene Schlüssel, dimResolve findet jedes wieder',
+          hits.length===4 && new Set(keys).size===4 && hits.every(h=>KX.dimResolve(hits,h)===h) && hits.map(h=>h.edit.ids[0]).join()==='1,1,3,3');
       }
       // C3: Querzeile der Nachbarwand und Türen begrenzen die Wandabstände, applyDim prüft mit fitsAt
       {
@@ -20518,7 +20598,7 @@ globalThis.selfChecks=function(){
         chk('kueche-pruef: Arbeitsdreieck – Schenkel 2720 mm steht als „2,72 m (zu lang)“, nicht als „2,7“ neben der Grenze 2,7',
           has(tri([0,2720,1360]),/Schenkel Spüle–Kochfeld 2,72 m \(zu lang\), Kochfeld–Kühlschrank 1,36 m, Kühlschrank–Spüle 1,36 m – NKBA: Summe ≤ 7,9 m, je Schenkel 1,2–2,7 m/,'warn'));
         chk('kueche-pruef: Arbeitsdreieck – Schenkel 2700 und 1200 mm (NKBA 2,7 und 1,2 m) bleiben ohne Befund', !has(tri([0,2700,1350]),/Arbeitsdreieck/) && !has(tri([0,2400,1200]),/Arbeitsdreieck/));
-        chk('kueche-pruef: Arbeitsdreieck – zu kurzer Schenkel (0,9 m) wird benannt', has(tri([0,1500,2100]),/Kochfeld–Kühlschrank 0,60 m \(zu kurz\)/,'warn'));
+        chk('kueche-pruef: Arbeitsdreieck – zu kurzer Schenkel (0,6 m) wird benannt', has(tri([0,1500,2100]),/Kochfeld–Kühlschrank 0,60 m \(zu kurz\)/,'warn'));
       }
       {
         // Nachtrag nach der Gegenprüfung: freie Teile quer zur Zeile, Grenzwerte in gedrehten Räumen
@@ -20540,7 +20620,13 @@ globalThis.selfChecks=function(){
         // Gang, Tresen, Tisch an ihren Grenzen
         const gr=(H,deg)=>lay2(rotE(4000,H,deg),[row(1,1000,1200),{id:2,kind:'base',a:'C',b:'D',x:1000,w:1200}]).F;
         chk('kueche-pruef: Gang im gedrehten Raum (17°): genau 1200 mm sind genug, 900 mm sind gelb und nicht rot',
-          !has(gr(2401,17),/Gang vor|nur \d+ mm Platz/) && !has(gr(2101,17),/nur \d+ mm Platz/,'bad') && has(gr(2101,17),/Gang vor Unterschrank 120 900 mm/,'warn'));
+          !has(gr(2400,17),/Gang vor|nur \d+ mm Platz/) && !has(gr(2100,17),/nur \d+ mm Platz/,'bad') && has(gr(2100,17),/Gang vor Unterschrank 120 900 mm/,'warn'));
+        chk('kueche-pruef: Gang – ein Millimeter unter der Grenze wird gemeldet (1199 gelb, 899 rot), kein Versatz des Strahls',
+          has(gr(2399,17),/Gang vor Unterschrank 120 1199 mm/,'warn') && has(gr(2099,17),/Vor Unterschrank 120 nur 899 mm Platz/,'bad'));
+        // Eine Zeile gegen die Wand, Plattentiefe 600: Gang = Raumtiefe − 600 (Nutzersicht-Befund: 1800 statt 1801 meldete „1199“)
+        const g1=(H,deg)=>lay2(rotE(4000,H,deg),[row(1,1000,1200)]).F;
+        chk('kueche-pruef: Gang vor einer Zeile bis zur Wand – 1200 mm genau ohne Meldung, 900 mm genau gelb, nicht rot (ungedreht und 17°)',
+          [0,17].every(d=>!has(g1(1800,d),/Gang vor|nur \d+ mm Platz/) && !has(g1(1500,d),/nur \d+ mm Platz/,'bad') && has(g1(1500,d),/Gang vor Unterschrank 120 900 mm/,'warn')));
         const bar750=deg=>lay2(rotE(4000,3000,deg),[{id:1,kind:'island',x:2000,y:1500,rot:180,w:1800,d:900,bar:300}]).F;
         const tab750=deg=>lay2(rotE(4000,3000,deg),[{id:1,kind:'table',x:2000,y:1850,rot:0,w:1600,d:800}]).F;
         chk('kueche-pruef: Tresen und Tisch – genau 750 mm hinter Hockern und Stühlen sind im gedrehten Raum (17°, 90°, 133°) gelb, nicht rot',
@@ -21099,6 +21185,54 @@ globalThis.selfChecks=function(){
           !t(100,83) && !t(160,100) && !t(151,85) && t(150,86));
       }
     }catch(err){ chk('kueche: Review-Fix Rest: etiketten ohne Ausnahme ('+err.message+')', false); }
+    // --- Review-Fix Rest: gesamtpruefung ---
+    try{
+      // Befunde der Gesamtprüfung nach dem Zusammenführen der Gruppen (Duplizieren, Kopie einer Insel).
+      const T=(n,f)=>{ try{ chk(n, !!f()); }catch(err){ chk(n+' ('+err.message+')', false); } };
+      const rc=(w,h,open)=>{ const Rr={pts:[{id:'A',x:0,y:0},{id:'B',x:w,y:0},{id:'C',x:w,y:h},{id:'D',x:0,y:h}], walls:[['A','B'],['B','C'],['C','D'],['D','A']]};
+        return KX.makeEnv(Rr.pts,Rr.walls,open||[],[]); };
+      const bads=(E,K)=>KX.check(E,K,KX.layout(E,K)).filter(f=>f.lvl==='bad').map(f=>f.txt);
+      const corner=(ctype,over)=>({id:1,kind:'base',corner:true,ctype,front:'door',cEnd:0,a:'A',b:'B',x:0,w:900,...over});
+      T('kueche-gesamt: Duplizieren – der frühere Weg (freie Stelle neben dem Original) stellt einen Eckschrank über Eck mitten an die Wand und ist rot',
+        ()=>{ const E=rc(5000,3500), K=KX.normKitchen({items:[corner('L')]}), Wf=KX.wallFrame(E,'A','B');
+          const x=KX.freeSlot(E,K,KX.layout(E,K),{...K.items[0],id:2},Wf,900), K2=KX.normKitchen({items:[K.items[0],{...K.items[0],id:2,x}]});
+          return x===900 && bads(E,K2).some(s=>/muss bündig in einer rechtwinkligen Innenecke stehen/.test(s)); });
+      T('kueche-gesamt: Duplizieren – Eckschrank über Eck / diagonal kommt in die andere Ecke der Wand und steht ohne Befund (Unter- und Hängeeckschrank)',
+        ()=>[['base','L'],['base','diag'],['wall','L'],['wall','diag']].every(([kind,ctype])=>{
+          const E=rc(5000,3500), K=KX.normKitchen({items:[corner(ctype,{kind})]});
+          const n=KX.dupOnWall(E,K,KX.layout(E,K),K.items[0],2);
+          if(!n || n.id!==2 || n.a!=='A' || n.b!=='B' || n.cEnd!==1 || n.ctype!==ctype || n.kind!==kind || !near(n.x,4100,0.5)) return false;
+          return bads(E,KX.normKitchen({items:[K.items[0],n]})).length===0; }));
+      T('kueche-gesamt: Duplizieren – steht der Eckschrank in der Ecke B, geht die Kopie in die Ecke A (gleiche Regel, andere Richtung)',
+        ()=>{ const E=rc(5000,3500), K=KX.normKitchen({items:[corner('L',{cEnd:1,x:4100})]});
+          const n=KX.dupOnWall(E,K,KX.layout(E,K),K.items[0],2);
+          return !!n && n.cEnd===0 && near(n.x,0,0.5) && bads(E,KX.normKitchen({items:[K.items[0],n]})).length===0; });
+      T('kueche-gesamt: Duplizieren – beide Ecken der Wand belegt: kein Platz (null) statt einer roten Kopie',
+        ()=>{ const E=rc(5000,3500), K=KX.normKitchen({items:[corner('L'),corner('L',{id:3,cEnd:1,x:4100})]});
+          return KX.dupOnWall(E,K,KX.layout(E,K),K.items[0],4)===null; });
+      T('kueche-gesamt: Duplizieren – normaler Schrank landet bündig neben dem Original (Front und Maße bleiben), tiefe Kopie',
+        ()=>{ const E=rc(5000,3500), K=KX.normKitchen({items:[{id:1,kind:'base',a:'A',b:'B',x:1000,w:600,front:'drawer'}]});
+          const n=KX.dupOnWall(E,K,KX.layout(E,K),K.items[0],2);
+          return !!n && n.id===2 && n.a==='A' && n.b==='B' && near(n.x,1600,0.5) && n.w===600 && n.front==='drawer' && n!==K.items[0] && !('cEnd' in n); });
+      T('kueche-gesamt: Duplizieren – am Wandende geht die Kopie auf die andere Seite des Originals, wie bisher die nächste freie Stelle',
+        ()=>{ const E=rc(5000,3500), K=KX.normKitchen({items:[{id:1,kind:'base',a:'A',b:'B',x:4400,w:600}]});
+          const n=KX.dupOnWall(E,K,KX.layout(E,K),K.items[0],2); return !!n && near(n.x,3800,0.5); });
+      // copySpot: Kopie einer Insel nicht in die Türzone (check meldet dort „steht vor einer Tür“)
+      const door={id:'o1',kind:'door',a:'A',b:'B',x:2400,w:900,y:0,h:2000,swing:{type:'turn',hinge:'left',out:false}};
+      const isl=()=>KX.normKitchen({items:[{id:1,kind:'island',x:1500,y:700,rot:0,w:1200,d:900}]});
+      T('kueche-gesamt: Kopie einer Insel ohne Tür in der Nähe – rechts daneben mit 200 mm Luft, wie bisher',
+        ()=>{ const E=rc(5000,3500), K=isl(), s=KX.copySpot(E,K,KX.layout(E,K),{...K.items[0],id:2}); return !!s && near(s.x,2900,0.5) && near(s.y,700,0.5); });
+      T('kueche-gesamt: Kopie einer Insel (copySpot) steht nicht in der Türzone – die nächste freie Lage quer dahinter, kein Befund zur Tür',
+        ()=>{ const E=rc(5000,3500,[door]), K=isl(), s=KX.copySpot(E,K,KX.layout(E,K),{...K.items[0],id:2});
+          if(!s) return false;
+          const K2=KX.normKitchen({items:[K.items[0],{...K.items[0],id:2,x:s.x,y:s.y}]}), F2=KX.check(E,K2,KX.layout(E,K2)).map(f=>f.txt);
+          // der frühere Weg (rechts daneben, 2900/700) stand in der Türzone: „steht vor einer Tür“, Zimmertür schlägt an
+          const K3=KX.normKitchen({items:[K.items[0],{...K.items[0],id:2,x:2900,y:700}]}), F3=KX.check(E,K3,KX.layout(E,K3)).map(f=>f.txt);
+          return near(s.x,1500,0.5) && near(s.y,1800,0.5) && !F2.some(x=>/steht vor einer Tür|Zimmertür schlägt an/.test(x)) && F3.some(x=>/steht vor einer Tür/.test(x)); });
+      T('kueche-gesamt: Kopie einer Insel – ist jede Lage in der Türzone oder belegt, gibt es keine (null)',
+        ()=>{ const E=rc(2600,1700,[{...door,x:900}]), K=KX.normKitchen({items:[{id:1,kind:'island',x:1300,y:850,rot:0,w:2000,d:1500}]});
+          return KX.copySpot(E,K,KX.layout(E,K),{...K.items[0],id:2})===null; });
+    }catch(err){ chk('kueche: Review-Fix Rest: gesamtpruefung ohne Ausnahme ('+err.message+')', false); }
   }
   return {ok, out};
 };
