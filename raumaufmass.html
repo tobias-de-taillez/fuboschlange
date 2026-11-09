@@ -889,8 +889,8 @@
           <p><button id="mldWin" type="button" title="Der Browser fragt, was aufgenommen werden soll – diesen Tab wählen">Ganzes Fenster aufnehmen …</button></p>
         </div>
       </div>
-      <label class="chk" id="mldAlleRow" title="Nötig, wenn es um Nachbarräume oder das Gebäude geht"><input type="checkbox" id="mldAlle"><span id="mldAlleTxt">Auch die anderen Räume mitsenden</span></label>
-      <label class="chk" id="mldEinw"><input type="checkbox" id="mldOk"><span>Ich willige ein, dass Text, Bild und App-Zustand nur zur Fehlersuche gespeichert und danach gelöscht werden. <a href="datenschutz-meldung.html" target="_blank" rel="noopener">Datenschutz</a></span></label>
+      <label class="chk" id="mldDatenRow" title="Ohne Zustand lässt sich der Fehler meist nicht nachstellen"><input type="checkbox" id="mldDaten" checked><span id="mldDatenTxt">App-Zustand mitsenden</span></label>
+      <label class="chk" id="mldEinw"><input type="checkbox" id="mldOk"><span>Ich willige ein, dass meine Meldung (Text und, wenn angehakt, Bild und App-Zustand) nur zur Fehlersuche gespeichert und danach gelöscht wird. <a href="datenschutz-meldung.html" target="_blank" rel="noopener">Datenschutz</a></span></label>
       <div id="mldMsg" role="status"></div>
     </div>
     <div id="mldfoot"><button id="mldCancel" type="button">Abbrechen</button><button id="mldSend" type="button" class="primary" disabled>Senden</button></div>
@@ -15034,9 +15034,9 @@ function oeffnen(){
   bildPlan=planBild(); bildFenster=null; bildZeigen();
   $('mldWin').hidden=!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
   const n=andereRaeume();
-  $('mldAlleRow').hidden = n===0;
-  $('mldAlleTxt').textContent = n===1 ? 'Auch den anderen Raum mitsenden' : `Auch die ${n} anderen Räume mitsenden`;
-  $('mldAlle').checked = n>0 && g(()=>neighbors.length>0,false);
+  $('mldDatenTxt').textContent = n===0 ? 'App-Zustand mitsenden (Raum, Ansicht, Browser)'
+    : `App-Zustand mitsenden, mit allen ${n+1} Räumen`;
+  $('mldDaten').checked=true;
   $('mldOk').checked=false; sendet=false; msg('');
   $('mldSend').textContent='Senden';
   sendSync();
@@ -15100,7 +15100,9 @@ function alsDatei(payload){
 }
 $('mldSend').onclick=async()=>{
   if($('mldSend').disabled) return;
-  const z=zustand($('mldAlle').checked);
+  // Ohne Zustand nur Stand und Zeit: der Empfaenger verlangt ein Objekt,
+  // und die Version braucht es, um den Text einzuordnen.
+  const z=$('mldDaten').checked ? zustand(true) : {stand:stand(), zeit:new Date().toISOString(), ohneDaten:true, undo:[], redo:[]};
   const payload={ v:1, art, text:$('mldText').value.trim(), kontakt:$('mldKontakt').value.trim()||null,
     einwilligung:true, bild:$('mldImgOn').checked ? (bildFenster||bildPlan) : null, zustand:z };
   // Obergrenze des Empfaengers ist 15 MB: notfalls zuerst den Rueckgaengig-
@@ -15110,7 +15112,7 @@ $('mldSend').onclick=async()=>{
     if(z.undo.length) z.undo.splice(0, Math.max(1, z.undo.length>>1)); else z.redo.length=0;
     z.undoGekuerzt=true; body=JSON.stringify(payload);
   }
-  if(body.length>14e6){ msg('Die Meldung ist zu groß (über 14 MB). Bild weglassen oder ohne die anderen Räume senden.','bad'); return; }
+  if(body.length>14e6){ msg('Die Meldung ist zu groß (über 14 MB). Bild oder App-Zustand weglassen.','bad'); return; }
   sendet=true; sendSync(); $('mldSend').textContent='Sendet …'; msg('');
   let r=null, j=null;
   try{
@@ -15139,6 +15141,7 @@ if(lokal && q){
     try{ o=await (await fetch(q,{cache:'no-store'})).json(); }
     catch(e){ setHintLive(`Meldung ${q} nicht lesbar: ${e.message}`); return; }
     const z=o && o.zustand;
+    if(z && z.ohneDaten){ setHintLive(`Meldung ${o.id||q} ohne App-Zustand, nichts nachzustellen: „${String(o.text||'').slice(0,200)}“`); return; }
     if(!z || !z.speicher){ setHintLive(`${q} ist keine Meldung.`); return; }
     if(!confirm(`Meldung ${o.id||q} nachstellen?\n\n„${String(o.text||'').slice(0,300)}“\n\nDas ersetzt ALLE Räume dieses Browsers (${location.host}) durch die aus der Meldung.`)) return;
     try{
