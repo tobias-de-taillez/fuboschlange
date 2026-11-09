@@ -694,69 +694,143 @@
     background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--good);border-radius:6px;box-shadow:0 2px 10px rgba(36,34,29,.16);cursor:pointer}
   #mldfoot{display:flex;justify-content:flex-end;gap:8px;padding:10px 16px;border-top:1px solid var(--line2);position:sticky;bottom:0;background:var(--surface)}
   @media print{ #mldFab,#mldwrap,#mldToast{display:none!important} }
+  /* =====================================================================
+     Werkzeugfamilie (DESIGN.md): Leiste mit Schritten, Menü, Stand, Karten.
+     Die Regeln stehen bewusst am Ende und überschreiben die ältere Leiste.
+     body[data-tool] sagt, welches Werkzeug diese Datei gerade ist:
+     aufmass (Skizze, Maße, Wände, Ausgabe), fliesen oder kueche.
+     ===================================================================== */
+  :root{ --pencil:#a39d90; --floor:#fbfaf7; --ease:cubic-bezier(.16,1,.3,1); }
+  ::selection{background:var(--accent-bg);color:var(--ink)}
+  body{caret-color:var(--accent);scrollbar-color:var(--line) transparent;scrollbar-width:thin}
+  ::placeholder{color:var(--muted);opacity:1;font-style:italic}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  button.primary:hover{background:#a8380a;border-color:#a8380a}
+
+  /* ---------- Leiste ---------- */
+  #roomctl{gap:4px;max-width:360px;padding-right:12px}
+  #backHome{display:flex;align-items:center;gap:3px;height:28px;padding:0 8px 0 4px;border-radius:4px;
+    color:var(--ink2);text-decoration:none;white-space:nowrap;flex:none}
+  #backHome:hover{background:var(--hover);color:var(--ink)}
+  #backHome svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+  #toolname{color:var(--ink2);white-space:nowrap;padding-left:10px;margin-left:4px;border-left:1px solid var(--line2)}
+  #modes .steparrow{width:16px;height:16px;align-self:center;margin:0 2px;flex:none;
+    stroke:var(--pencil);fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+  #modes button[hidden]{display:none}
+  body:not([data-tool=aufmass]) #modes{display:none}
+  body[data-tool=aufmass] #tools{border-left:0}
+  body[data-tool=aufmass] #statusbar{display:none}
+  #histctl{position:relative}
+  /* Menü: rechts, mit Gruppen. Eingeschaltetes trägt einen Punkt. */
+  .menu{left:auto;right:0;min-width:236px}
+  .menu h4{margin:0;padding:8px 10px 3px;font-size:11px;font-weight:600;color:var(--muted)}
+  .menu button[aria-pressed=true]::after{content:'';flex:none;width:6px;height:6px;border-radius:50%;
+    background:var(--accent);margin-left:auto}
+  body:not([data-tool=aufmass]) .menu .nurAufmass{display:none}
+  body[data-tool=aufmass] .menu .nurFolge{display:none}
+
+  /* ---------- Plan ---------- */
+  #fitview{position:absolute;right:10px;top:8px;z-index:4}
+  body.outmode #fitview{display:none}
+  #empty{display:none!important}
+  #sheets{position:absolute;inset:0;z-index:5;overflow:auto;padding:28px 0 48px;background:var(--paper);display:none}
+  body.outmode #sheets{display:block}
+  /* Rückmeldung erscheint dort, wo sie ausgelöst wurde */
+  #toast{position:fixed;left:50%;top:64px;translate:-50% -100%;z-index:60;max-width:min(520px,calc(100vw - 24px));
+    padding:7px 12px;background:var(--ink);color:#fff;border-radius:6px;font-size:12px;line-height:1.4;
+    pointer-events:none;opacity:0;transition:opacity .2s var(--ease)}
+  #toast.on{opacity:1}
+  .popover{box-shadow:0 4px 16px rgba(36,34,29,.14)}
+
+  /* ---------- Stand ---------- */
+  #status{cursor:pointer;padding:14px 16px}
+  #status:hover{background:var(--hover)}
+  #status:focus-visible{outline-offset:-2px}
+  #statustxt{align-items:flex-start;gap:9px}
+  #statustxt::before{margin-top:5px;transform:none;background:var(--pencil)}
+  #status.prog #statustxt::before,#status.warn #statustxt::before{background:none;box-shadow:inset 0 0 0 1.5px var(--ink2)}
+  #geo{border-top:0;margin:12px 0 0 17px;gap:12px}
+  #geo .kv{padding-top:0}
+  #geo .kv+.kv{padding-left:0;border-left:0}
+  #geo .ph{display:none}
+  #geo.in{animation:arrive .4s var(--ease)}
+  @keyframes arrive{from{opacity:0;transform:translateY(5px)}}
+  #standMore{padding:10px 16px 12px;border-bottom:1px solid var(--line);background:var(--canvas);font-size:12px}
+  #standFacts{display:grid;grid-template-columns:1fr auto;gap:4px 12px;margin:0 0 10px}
+  #standFacts dt{color:var(--ink2)}
+  #standFacts dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
+  #standFacts .hd{grid-column:1/-1;margin-top:6px;font-size:11px;font-weight:600;color:var(--muted)}
+  #ellipses{display:flex;align-items:center;gap:8px;min-height:24px;padding:0;border:0;background:none;color:var(--ink2);font-size:12px}
+  #ellipses:hover{background:none;color:var(--ink)}
+  #ellipses::before{content:'';flex:none;width:13px;height:13px;border:1px solid var(--muted);border-radius:3px;background:#fff}
+  #ellipses[aria-pressed=true]::before{background:var(--accent);border-color:var(--accent);box-shadow:inset 0 0 0 2px #fff}
+  #wallwarn,#nbwarn{background:var(--canvas);color:var(--ink2);padding:8px 16px}
+  body[data-tool=aufmass] section{padding:14px 16px 12px;border-bottom:0}
+  body[data-tool=aufmass] h3{font-size:11px;color:var(--muted);margin-bottom:6px}
+
+  /* ---------- Als Nächstes messen: ruhige Zeilen statt Chips ---------- */
+  body[data-tool=aufmass] #sugg .chips,body[data-tool=aufmass] #querlist .chips,
+  body[data-tool=aufmass] #nahlist .chips,body[data-tool=aufmass] #ringlist .chips{display:block}
+  body[data-tool=aufmass] button.sg{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;
+    min-height:32px;padding:0 2px;border:0;border-top:1px solid var(--line2);border-radius:0;background:none;
+    color:var(--ink);font-size:13px;text-align:left}
+  body[data-tool=aufmass] .chips button.sg:first-child{border-top:0}
+  body[data-tool=aufmass] button.sg:hover{background:var(--hover)}
+  body[data-tool=aufmass] button.sg small{font-size:12px;color:var(--muted)}
+  body[data-tool=aufmass] button.sg.cur{font-weight:600;color:var(--accent)}
+  body[data-tool=aufmass] #sugg .grp b{font-size:11px;font-weight:600;color:var(--muted);margin-bottom:2px}
+  #querlist .have{color:var(--ink2)}
+
+  /* ---------- Alle Strecken ---------- */
+  #wlbox summary{list-style:none;cursor:pointer;display:flex;justify-content:space-between;align-items:center;
+    min-height:30px;color:var(--ink2)}
+  #wlbox summary::-webkit-details-marker{display:none}
+  #wlbox summary small{margin-left:auto;margin-right:10px;font-size:12px;color:var(--muted)}
+  #wlbox summary::after{content:'';width:6px;height:6px;border-right:1.5px solid var(--muted);border-bottom:1.5px solid var(--muted);
+    rotate:45deg;margin-right:4px;transition:rotate .15s var(--ease)}
+  #wlbox[open] summary::after{rotate:225deg}
+  #why{margin:0 0 8px}
+  .wrow .wn.todo{color:var(--muted)}
+
+  /* ---------- Weiter ---------- */
+  #gosec{padding:6px 16px 16px}
+
+  /* ---------- Wände: die Karte der Wand liegt im Panel ---------- */
+  #wallTitle{font-size:13px;font-weight:600;color:var(--ink)}
+  #wallacts{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 10px}
+  #wAdd{display:flex;gap:4px;flex-wrap:wrap}
+
+  /* ---------- Ausgabe ---------- */
+  #outsec{display:none;padding:0!important}
+  body.outmode #panel > section:not(#outsec){display:none}
+  body.outmode #outsec{display:block}
+  body.outmode #gosec,body.outmode #wallwarn,body.outmode #nbwarn{display:none!important}
+  .intent{padding:16px 16px 14px;border-bottom:1px solid var(--line2)}
+  .intent h3{font-size:13px!important;font-weight:600;color:var(--ink)!important;margin-bottom:8px}
+  .intent label{display:flex;gap:8px;align-items:center;color:var(--ink2);margin-bottom:10px}
+  .intent .tr{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:38px;border-top:1px solid var(--line2)}
+  .intent .tr:first-of-type{border-top:0}
+  .intent .tr small{display:block;font-size:12px;color:var(--muted)}
+
 </style>
 
 <div id="app">
   <header id="topbar">
     <div id="roomctl">
-      <button id="roommenuBtn" class="ib" aria-haspopup="menu" aria-expanded="false" title="Raum: öffnen, sichern, teilen">
-        <svg viewBox="0 0 16 16"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/></svg>
-      </button>
-      <span id="roomname" title="Klicken zum Umbenennen">—</span>
-      <div id="roommenu" class="menu" role="menu" hidden>
-        <button id="lib" role="menuitem">Räume …</button>
-        <button id="roomNew" role="menuitem">Neuer Raum</button>
-        <hr>
-        <button id="filesave" role="menuitem">Als Datei sichern<kbd data-k="⌘S"></kbd></button>
-        <button id="fileopen" role="menuitem">Datei öffnen …<kbd data-k="⌘O"></kbd></button>
-        <button id="dxfsave" role="menuitem" title="Grundriss als 2D-Skizze in mm für Shapr3D und andere CAD-Programme">Für CAD exportieren (DXF)</button>
-        <button id="stepsave" role="menuitem" title="Wände als 3D-Körper in mm (mit Raumhöhen, Türen und Fenstern) für Shapr3D und andere CAD-Programme">Für CAD exportieren, 3D (STEP)</button>
-        <button id="exp" role="menuitem">JSON kopieren</button>
-        <button id="imp" role="menuitem" title="Raum-JSON aus der Zwischenablage als neuen Raum anlegen">JSON einfügen</button>
-        <hr>
-        <button id="sharelink" role="menuitem">Link kopieren</button>
-        <button id="shareqr" role="menuitem">QR-Code zeigen …</button>
-        <hr>
-        <button id="mirror" role="menuitem">Raum spiegeln</button>
-        <hr>
-        <button id="clr" role="menuitem" class="danger" title="Zweimal klicken: der erste Klick fragt nach">Raum leeren</button>
-        <hr>
-        <button id="mldMenu" role="menuitem">Fehler / Wunsch melden …</button>
-      </div>
+      <a id="backHome" href="raeume.html" title="Alle Räume"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg>Räume</a>
+      <span id="roomname" role="button" tabindex="0" title="Umbenennen">—</span>
+      <span id="toolname" hidden></span>
     </div>
-    <nav id="modes" aria-label="Modus">
-      <button data-mode="draw" aria-pressed="true" title="Zeichnen (1)"><i>1</i>Zeichnen</button>
-      <button data-mode="measure" aria-pressed="false" title="Messen (2)"><i>2</i>Messen</button>
+    <nav id="modes" aria-label="Schritte">
+      <button data-mode="draw" aria-pressed="true" title="Skizze (1)"><i>1</i>Skizze</button>
+      <button data-mode="measure" aria-pressed="false" title="Maße (2)"><i>2</i>Maße</button>
       <button data-mode="wall" aria-pressed="false" title="Wände (3)"><i>3</i>Wände</button>
-      <button data-mode="tiles" aria-pressed="false" title="Fliesen (4)"><i>4</i>Fliesen</button>
-      <button data-mode="kitchen" aria-pressed="false" title="Küche (5)"><i>5</i>Küche</button>
+      <svg class="steparrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M9 5l3 3-3 3"/></svg>
+      <button id="outTab" aria-pressed="false" title="Ausgabe (4)">Ausgabe</button>
+      <button data-mode="tiles" aria-pressed="false" hidden>Fliesen</button>
+      <button data-mode="kitchen" aria-pressed="false" hidden>Küche</button>
     </nav>
     <div id="tools">
-      <div class="tg" data-for="draw measure">
-        <button id="ortho" class="tb tog" aria-pressed="false" title="Ecken innerhalb ±2° auf 90° setzen, wo die Messungen das zulassen">90°</button>
-        <button id="snapfit" class="tb tog" aria-pressed="false">Maßhaltig</button>
-        <button id="unfold" class="tb tog" aria-pressed="false" title="Wände mit Öffnungen nach außen geklappt zeigen, Nachbarräume ausblenden"><span>Abwicklung</span></button>
-        <button id="ellipses" class="tb tog" aria-pressed="false" title="Messgenauigkeit je Ecke als Ellipse zeigen">Genauigkeit</button>
-      </div>
-      <div id="pAdd" class="tg" data-for="draw measure">
-        <i class="tsep"></i>
-        <button data-padd="door" class="tb tool" aria-pressed="false" title="Tür grob setzen: Knopf, dann auf die Wand klicken. Feinjustage in der Wandansicht">+ Tür</button>
-        <button data-padd="window" class="tb tool" aria-pressed="false" title="Fenster grob setzen: Knopf, dann auf die Wand klicken. Feinjustage in der Wandansicht">+ Fenster</button>
-        <button data-padd="hole" class="tb tool" aria-pressed="false" title="Wandloch grob setzen: Knopf, dann auf die Wand klicken">+ Loch</button>
-      </div>
-      <div id="wallbar" class="tg" hidden>
-        <button id="wPrev" class="tb" aria-label="Vorherige Wand" title="Vorherige Wand (←)">‹</button>
-        <select id="wPick" title="Wand wählen"></select>
-        <button id="wNext" class="tb" aria-label="Nächste Wand" title="Nächste Wand (→)">›</button>
-        <i class="tsep"></i>
-        <button id="wHeight" class="tb" title="Höhe an der linken Ecke eintragen; die rechte Ecke und Knickpunkte im Panel">Höhe</button>
-        <div id="wAdd" class="tg">
-          <button data-add="door" class="tb">+ Tür</button>
-          <button data-add="window" class="tb">+ Fenster</button>
-          <button data-add="hole" class="tb">+ Loch</button>
-          <button id="wWater" class="tb" title="Wasseranschluss (Eckventil und Abfluss) an diese Wand setzen – die Küche prüft daran die Schlauchlängen von Spülmaschine und Kühlschrank">+ Wasser</button>
-        </div>
-      </div>
       <div class="tg" data-for="tiles">
         <div id="tPalette" aria-label="Fliesenset dieses Raums"></div>
         <i class="tsep"></i>
@@ -778,6 +852,28 @@
     <div id="histctl">
       <button id="undo" class="ib" title="Rückgängig (⌘Z)"><svg viewBox="0 0 16 16"><path d="M5.5 3.5 2.5 6.5l3 3"/><path d="M2.5 6.5h7a4 4 0 0 1 0 8h-2"/></svg></button>
       <button id="redo" class="ib" title="Wiederherstellen (⇧⌘Z)"><svg viewBox="0 0 16 16"><path d="M10.5 3.5l3 3-3 3"/><path d="M13.5 6.5h-7a4 4 0 0 0 0 8h2"/></svg></button>
+      <button id="roommenuBtn" class="ib" aria-haspopup="menu" aria-expanded="false" title="Menü">
+        <svg viewBox="0 0 16 16"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/></svg>
+      </button>
+      <div id="roommenu" class="menu" role="menu" hidden>
+        <h4 class="nurAufmass">Raum</h4>
+        <button id="ortho" class="nurAufmass" role="menuitemcheckbox" aria-pressed="false" title="Ecken innerhalb ±2° auf 90° setzen, wo die Messungen das zulassen">Rechte Winkel annehmen</button>
+        <button id="mirror" class="nurAufmass" role="menuitem">Raum spiegeln</button>
+        <button id="clr" class="nurAufmass danger" role="menuitem">Raum leeren</button>
+        <hr class="nurAufmass">
+        <h4 class="nurAufmass">Ansicht</h4>
+        <button id="snapfit" class="nurAufmass" role="menuitemcheckbox" aria-pressed="false">Maßhaltig zeichnen</button>
+        <button id="unfold" class="nurAufmass" role="menuitemcheckbox" aria-pressed="false" title="Wände mit Öffnungen nach außen geklappt zeigen, Nachbarräume ausblenden"><span>Abwicklung</span></button>
+        <button id="rotate" class="nurAufmass" role="menuitem" title="Ansicht um 15° drehen, mit ⇧ zurück">Ansicht drehen</button>
+        <hr class="nurAufmass">
+        <h4>Weitergeben</h4>
+        <button id="filesave" role="menuitem">Als Datei sichern<kbd data-k="⌘S"></kbd></button>
+        <button id="sharelink" role="menuitem">Link kopieren</button>
+        <button id="shareqr" role="menuitem">QR-Code zeigen …</button>
+        <hr>
+        <button id="toAufmass" class="nurFolge" role="menuitem">Zum Raumaufmaß</button>
+        <button id="helpBtn" role="menuitem">Hilfe und Tasten<kbd data-k="?"></kbd></button>
+      </div>
     </div>
   </header>
 
@@ -788,13 +884,9 @@
         <canvas id="cv3d" aria-label="3D-Ansicht der Küche: ziehen dreht, Rechtsklick-Ziehen verschiebt, Rad zoomt, Doppelklick setzt zurück"></canvas>
         <div id="kAna" aria-label="Wege-Analyse"></div>
         <div id="k3dMsg" hidden>Die 3D-Ansicht braucht WebGL2; dieser Browser bietet es nicht. Der Plan links funktioniert trotzdem.</div>
-        <div id="empty">
-          <p><b>Raum skizzieren:</b> jeder Klick setzt eine Ecke, der Reihe nach, so wie man den Raum abläuft. Genau muss die Skizze nicht sein. Ein Klick auf die erste Ecke schließt den Wandzug, danach werden die vorgeschlagenen Strecken gemessen.</p>
-          <div class="helpcue"><div><strong>Neu hier? Erst die Hilfe ansehen.</strong><span>Zeichnen, messen, fliesen – Schritt für Schritt erklärt (Taste H)</span></div>
-            <svg viewBox="0 0 120 120" aria-hidden="true"><path d="M8 14 C 60 14, 96 44, 106 100"/><path d="M90 88 L106 108 L116 84"/></svg></div>
-        </div>
-        <button id="ring" title="Alle Ecken in Anlegereihenfolge zu einem geschlossenen Wandzug verbinden">Wandzug schließen</button>
-        <button id="untangle" title="Kreuzungsfreie Anordnung suchen; eingetragene Maße bleiben">Entwirren</button>
+        <div id="empty"></div>
+        <button id="fitview" class="ib" title="Ansicht einpassen (0)" aria-label="Ansicht einpassen"><svg viewBox="0 0 16 16"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></svg></button>
+        <div id="sheets" aria-label="Aufmaßblatt"></div>
         <div id="entry" class="popover" hidden>
           <div id="entryLabel"></div>
           <div id="entryRow">
@@ -843,23 +935,29 @@
       </div>
       <footer id="statusbar">
         <div id="hint"></div>
-        <button id="wheelBtn" class="sb"></button>
-        <i class="sbsep"></i>
-        <button id="rotate" class="sb" title="Ansicht um 15° drehen, mit ⇧ zurück">Drehung 0°</button>
-        <button id="fitview" class="sb" title="Ansicht einpassen (0, oder Doppelklick mit dem Mausrad)">Einpassen</button>
-        <i class="sbsep"></i>
-        <button id="keysBtn" class="sb" title="Tastenkürzel (?)">Tasten ?</button>
-        <button id="helpBtn" class="sb" title="Ablauf und Knöpfe erklärt (H)">Hilfe</button>
       </footer>
     </div>
 
     <aside id="panel">
-      <div id="status"><div id="statustxt">—</div><div id="geo"></div></div>
+      <div id="status" role="button" tabindex="0" aria-expanded="false" title="Einzelheiten zum Stand"><div id="statustxt">—</div><div id="geo"></div></div>
+      <div id="standMore" hidden>
+        <dl id="standFacts"></dl>
+        <button id="ellipses" aria-pressed="false" title="Messgenauigkeit je Ecke als Ellipse zeigen">Genauigkeit je Ecke im Plan zeigen</button>
+      </div>
       <div id="wallwarn"></div>
       <div id="nbwarn"></div>
       <section id="wallsec">
         <h3><span id="wallTitle">Wand</span></h3>
         <div id="wInfo"></div>
+        <div id="wallacts">
+          <button id="wHeight" title="Höhe an der linken Ecke eintragen; die rechte Ecke und Knickpunkte im Panel">Höhe</button>
+          <div id="wAdd">
+            <button data-add="door">Tür</button>
+            <button data-add="window">Fenster</button>
+            <button data-add="hole">Loch</button>
+            <button id="wWater" title="Wasseranschluss (Eckventil und Abfluss) an diese Wand setzen – die Küche prüft daran die Schlauchlängen von Spülmaschine und Kühlschrank">Anschluss</button>
+          </div>
+        </div>
         <div id="wHeights"></div>
         <div id="wallops"></div>
         <div id="opop" hidden>
@@ -983,16 +1081,47 @@
         <div id="querlist"></div>
       </section>
       <section id="wlsec">
-        <h3>Wände und Strecken <small id="wlcount"></small></h3>
-        <div id="wl">—</div>
         <div id="why"></div>
+        <details id="wlbox">
+          <summary>Alle Strecken <small id="wlcount"></small></summary>
+          <div id="wl">—</div>
+        </details>
       </section>
+      <section id="outsec">
+        <div class="intent">
+          <h3>Drucken</h3>
+          <label><input type="checkbox" id="outList">Liste aller Maße mitdrucken</label>
+          <button id="outPrint" class="primary">Aufmaßblatt drucken</button>
+        </div>
+        <div class="intent">
+          <h3>Weiter planen</h3>
+          <div class="tr"><div>Fliesenplan<small id="outTilesNote"></small></div><button id="outTiles">Öffnen</button></div>
+          <div class="tr"><div>Küchenplaner<small id="outKitchenNote"></small></div><button id="outKitchen">Öffnen</button></div>
+        </div>
+        <div class="intent">
+          <h3>Für CAD</h3>
+          <div class="tr"><div>DXF<small>Grundriss in mm</small></div><button id="dxfsave">Sichern</button></div>
+          <div class="tr"><div>STEP<small id="outStepNote">Wände als Körper</small></div><button id="stepsave">Sichern</button></div>
+        </div>
+      </section>
+      <div id="gosec" hidden><button id="goNext" class="primary"></button></div>
       <input id="filepick" type="file" accept=".json,application/json" hidden>
+      <!-- Bedienelemente der alten Leiste, deren Verdrahtung noch am Element hängt.
+           Unsichtbar; sie verschwinden mit dem Aufräumen der zugehörigen Funktionen. -->
+      <div id="altlast" hidden>
+        <button id="lib"></button><button id="roomNew"></button><button id="fileopen"></button>
+        <button id="exp"></button><button id="imp"></button><button id="mldMenu"></button>
+        <button id="wheelBtn"></button><button id="keysBtn"></button>
+        <div id="pAdd"><button data-padd="door"></button><button data-padd="window"></button><button data-padd="hole"></button></div>
+        <div id="wallbar"><button id="wPrev"></button><select id="wPick"></select><button id="wNext"></button></div>
+        <button id="ring"></button><button id="untangle"></button>
+      </div>
     </aside>
   </div>
 </div>
 
 <div id="tip" hidden></div>
+<div id="toast" role="status"></div>
 <div id="libwrap" class="scrim" hidden>
   <div id="libbox" class="dlg" role="dialog" aria-label="Räume">
     <div id="libhead" class="dlghead">
@@ -6256,6 +6385,9 @@ function northWall(a,b,force){
   render();
 }
 
+// Welches Werkzeug der Familie diese Seite gerade ist: 'aufmass' (Skizze,
+// Maße, Wände, Ausgabe), 'fliesen' oder 'kueche'. Siehe setTool().
+let TOOL='aufmass';
 function recompute(){
   const hadFit=!!M.fit;
   // Ecke der Küchen-Bezugsecken gelöscht: freie Teile im noch alten Fit auf
@@ -6338,7 +6470,7 @@ function recompute(){
   // kosten. Bewusst ohne Debounce: serialize() ist bei den hier realistischen
   // Groessen unter einer Millisekunde. VOR dem Ableiten der Nachbarlagen -
   // die lesen den Speicher und braeuchten sonst den Stand von vorhin.
-  if(currentRoom && !STORE.save(currentRoom, {data:JSON.parse(serialize()), area:polyAreaM2()})
+  if(currentRoom && !STORE.save(currentRoom, {data:JSON.parse(serialize()), area:polyAreaM2(), stand:standKurz()})
      && !recompute.quotaWarned){
     // Einmal warnen, nicht je Aenderung - aber nie still schlucken: sonst
     // ist ein 30-Minuten-Aufmass beim Reload weg, ohne dass es je ein
@@ -9624,21 +9756,32 @@ let hintTimer=null, hintLive=false;
 // Zustandshinweis zurueck. setHint(null) springt sofort dorthin.
 function setHint(txt){
   clearTimeout(hintTimer); hintTimer=null; hintLive=false;
+  if(TOOL==='aufmass'){ if(sagLive){ sagLive=false; sag(null); } if(txt!=null) sag(txt); return; }
   if(txt==null){ $('hint').textContent=$('hint').title=plat(modeHint()); return; }
   $('hint').textContent=$('hint').title=plat(txt);
   hintTimer=setTimeout(()=>{ hintTimer=null; $('hint').textContent=plat(modeHint()); }, 4000);
 }
 // Fuer den Live-Text waehrend eines Zugs: ohne Timeout. Das Ende des Zugs
 // (endPointer) gibt die Zeile wieder frei.
-function setHintLive(txt){ clearTimeout(hintTimer); hintTimer=null; hintLive=true; $('hint').textContent=plat(txt); }
+function setHintLive(txt){ clearTimeout(hintTimer); hintTimer=null; hintLive=true;
+  if(TOOL==='aufmass'){ sagLive=true; sag(txt, null, true); return; }
+  $('hint').textContent=plat(txt); }
 // Steht keine Meldung, folgt die Zeile dem Zustand (bei jedem render).
-function refreshHint(){ if(!hintTimer && !hintLive && !plusHover){ const t=plat(modeHint()); $('hint').textContent=t; $('hint').title=t; } }
+function refreshHint(){
+  if(TOOL==='aufmass'){ if(sagLive && !hintLive){ sagLive=false; sag(null); } return; }
+  if(!hintTimer && !hintLive && !plusHover){ const t=plat(modeHint()); $('hint').textContent=t; $('hint').title=t; } }
 
 function setMode(mode){
   if(mode==='wall' && !wallTabReady()){
-    setHint('Wandansichten erst, wenn die Form des Grundrisses eindeutig ist.');
+    sag('Wände gibt es, sobald die Form eindeutig ist.'+(M.an && M.an.dof>0 ? ' '+statusText()[0] : ''),
+        document.querySelector('#modes button[data-mode="wall"]'));
     return;
   }
+  if(mode==='measure' && TOOL==='aufmass' && !C.wallPolygonRing(M.pts, M.walls)){
+    sag('Maße gibt es, sobald der Raum geschlossen ist.', document.querySelector('#modes button[data-mode="measure"]'));
+    return;
+  }
+  closeOut();
   if(mode==='tiles' && !tilesReady()){
     setHint('Fliesen erst, wenn der Wandzug geschlossen und eingemessen ist.');
     return;
@@ -9840,7 +9983,7 @@ function openRoomMenu(on){
 $('roommenuBtn').onclick=()=>openRoomMenu($('roommenu').hidden);
 $('roommenu').addEventListener('click',e=>{ if(e.target.closest('button')) openRoomMenu(false); });
 addEventListener('pointerdown',e=>{
-  if(!$('roommenu').hidden && !e.target.closest('#roomctl')) openRoomMenu(false);
+  if(!$('roommenu').hidden && !e.target.closest('#histctl')) openRoomMenu(false);
 },true);
 $('roommenu').addEventListener('keydown',e=>{
   const items=[...$('roommenu').querySelectorAll('button')];
@@ -9967,8 +10110,7 @@ addEventListener('keydown',e=>{
   // Taste etwas veraendern, was man nicht sieht. Esc schliesst, ? auch.
   if(!$('libwrap').hidden || !$('qrwrap').hidden || !$('keyswrap').hidden || !$('helpwrap').hidden){
     if(e.key==='Escape'){ hidePop(); if(closeKeys()) return; if(closeHelp()) return; if(!$('qrwrap').hidden){ $('qrwrap').hidden=true; return; } closeLib(); }
-    else if(e.key==='?' && !$('keyswrap').hidden) toggleKeys();
-    else if(k==='h' && !$('helpwrap').hidden) toggleHelp();
+    else if((e.key==='?' || k==='h') && !$('helpwrap').hidden) toggleHelp();
     return;
   }
   // Rueckgaengig ⌘Z/Strg+Z; Wiederherstellen ⇧⌘Z, Strg+⇧Z und Strg+Y -
@@ -10003,6 +10145,7 @@ addEventListener('keydown',e=>{
     if(!$('qrwrap').hidden){ $('qrwrap').hidden=true; return; }
     if(!$('libwrap').hidden){ closeLib(); return; }
     if(wpopPair){ closeWallPopup(); return; }
+    if(OUT.on){ closeOut(); render(); return; }
     if(!$('entry').hidden){ closeEntry(); return; }   // auch Hoehe, Oeffnungslage, Querstrecke
     if(M.mode==='wall' && M.openSel!=null){ M.openSel=null; render(); return; }
     if(planMode() && planAdd){ setPlanAdd(null); return; }
@@ -10013,14 +10156,17 @@ addEventListener('keydown',e=>{
   if(M.mode==='tiles' && tilesKey(e)) return;
   if(M.mode==='kitchen' && typeof kitchenKey==='function' && kitchenKey(e)) return;
   if(mod || e.altKey) return;
-  if(e.key==='?'){ if(typeof toggleKeys==='function') toggleKeys(); return; }
-  if(k==='h'){ toggleHelp(); return; }
+  if(e.key==='?' || k==='h'){ toggleHelp(); return; }
   // Ansicht: 0 oder ⇧1 passt ein, + und − zoomen um die Bildmitte.
   if(e.key==='0' || (e.shiftKey && e.code==='Digit1')){ e.preventDefault(); fitActiveView(); return; }
   if(e.key==='+' || e.key==='='){ zoomCenter(1.25); return; }
   if(e.key==='-'){ zoomCenter(1/1.25); return; }
-  const mode=!e.shiftKey && {1:'draw',2:'measure',3:'wall',4:'tiles',5:'kitchen'}[e.key];
-  if(mode){ setMode(mode); return; }
+  if(TOOL==='aufmass' && !e.shiftKey && e.key.length===1 && '1234'.includes(e.key)){
+    if(e.key==='4') openOut(); else setMode({1:'draw',2:'measure',3:'wall'}[e.key]);
+    return;
+  }
+  // In der Ausgabe liegt kein Plan unter dem Zeiger: Löschen und Pfeile ruhen.
+  if(OUT.on) return;
   if(e.key==='Delete' || e.key==='Backspace'){ if(deleteTarget()) e.preventDefault(); return; }
   if(e.key.startsWith('Arrow')){
     e.preventDefault();
@@ -10256,10 +10402,11 @@ function statusText(){
   // Fortschritt ist neutral ('prog'). Gelb nur fuer "fertig, aber
   // ungeprueft" und auffaellige Streuung, Rot nur fuer echte Widersprueche -
   // eine Karte, die fast immer gelb ist, sagt nichts mehr.
-  if(M.pts.length<3) return ['Ecken setzen, mindestens drei.','prog'];
+  if(!M.pts.length) return ['Noch keine Ecke. Ein Klick in den Plan setzt die erste.','skizze'];
+  if(M.pts.length<3) return [M.pts.length===1 ? '1 Ecke gesetzt.' : M.pts.length+' Ecken gesetzt.','skizze'];
   if(!M.an){
-    if(!M.walls.length) return ['Ecken setzen; sie verbinden sich der Reihe nach.','prog'];
-    return ['Skizze steht. Zum Messen eine Wand anklicken und das Maß eintippen.','prog'];
+    if(!C.wallPolygonRing(M.pts, M.walls)) return [M.pts.length+' Ecken. Ein Klick auf die erste schließt den Raum.','skizze'];
+    return ['Raum geschlossen, noch kein Maß.','prog'];
   }
   if(M.fit && !M.fit.converged){
     // Nicht nur "nicht belastbar" - sagen, wo man anfaengt: beim Maß, das
@@ -10276,7 +10423,7 @@ function statusText(){
   if(verl.length)
     return [`Festgelegte Werte passen nicht zusammen: ${verl.map(x=>x.txt).join(', ')}. Einen davon lösen oder die übrigen Maße prüfen.`,'bad'];
   if(M.an.dof>0)
-    return [`Noch ${M.an.dof} ${M.an.dof===1?'Messung':'Messungen'}, dann ist die Form eindeutig.`,'prog'];
+    return [`Noch ${M.an.dof} ${M.an.dof===1?'Maß':'Maße'}, dann ist die Form eindeutig.`,'prog'];
   if(M.an.redundancy===0){
     // "Nicht pruefbar" gilt fuer die einzelne Messung, nicht fuers Netz:
     // passen die Messungen nicht zueinander, verteilt der Fit den Widerspruch
@@ -10385,7 +10532,7 @@ function renderPanel(){
     if(ft){ const ok=tilesReady(); ft.setAttribute('aria-disabled', String(!ok));
       ft.title = ok ? 'Fliesen (4)' : 'Fliesen (4): erst, wenn der Wandzug geschlossen und eingemessen ist'; }
     // Fliesen-Modus ohne gueltigen Grundriss (z.B. nach Rueckgaengig): raus.
-    if(M.mode==='tiles' && !tilesReady()){ setMode('draw'); return; }
+    if(M.mode==='tiles' && !tilesReady()){ setTool('aufmass'); return; }
     renderTilesPanel();
   }
   // Küche wie Wände: nur mit eindeutiger Form. Fällt sie weg, raus.
@@ -10394,7 +10541,7 @@ function renderPanel(){
     const ok=kitchenReady();
     if(kt){ kt.setAttribute('aria-disabled', String(!ok));
       kt.title = ok ? 'Küche (5)' : 'Küche (5): erst, wenn der Grundriss eindeutig eingemessen ist'; }
-    if(M.mode==='kitchen' && !ok){ setMode(M.walls.length?'measure':'draw'); setHint('Küche verlassen: die Form ist nicht mehr eindeutig.'); return; }
+    if(M.mode==='kitchen' && !ok){ setTool('aufmass'); sag('Küchenplaner verlassen: die Form ist nicht mehr eindeutig.'); return; }
     renderKitchenPanel();
   }
   // Wie bei den Fliesen: faellt die Bedingung weg (Raumwechsel, Rueckgaengig),
@@ -10559,7 +10706,8 @@ function renderPanel(){
     // Diagonalen sind Kontrollmasse: eingeklappt, ausser eine ist verdaechtig.
     const diagAuf = diagOpen || diags.some(e=>e.sus);
     const wl=$('wl');
-    $('wlcount').textContent = M.walls.length ? `${M.walls.length} Wände` : '';
+    $('wlcount').textContent = M.walls.length ? `${M.walls.length} Wände`+(diags.length?`, ${diags.length} ${diags.length===1?'Diagonale':'Diagonalen'}`:'') : '';
+    if(diags.some(e=>e.sus) || M.walls.some(([a2,b2])=>(byPair.get(wk(a2,b2))||{}).sus)) $('wlbox').open=true;
     wl.innerHTML = (wallRows||diagRows)
       ? wallRows + (diagRows?`<details id="diagbox"${diagAuf?' open':''}><summary class="wgrp">Diagonalen <small>${diags.length}${diagDevHtml}</small></summary>${diagRows}</details>`:'')
       : '<span style="color:var(--muted);font-size:12px">Noch keine W\u00e4nde.</span>';
@@ -10596,7 +10744,7 @@ function renderPanel(){
     const e=list.filter(s=>s.why===why2);
     if(!e.length) return '';
     return `<div class="grp"><b>${t}</b><div class="chips">`
-      + e.map(s=>`<button class="sg${s.repeat?' rep':''}" data-a="${s.a}" data-b="${s.b}">${s.a} ↔ ${s.b}${s.repeat?' nochmal':''}</button>`).join('')
+      + e.map(s=>`<button class="sg${s.repeat?' rep':''}" data-a="${s.a}" data-b="${s.b}"><span>${s.a}–${s.b}</span><small>${istWand(s.a,s.b)?'Wand':'Diagonale'}${s.repeat?' · nochmal':''}</small></button>`).join('')
       + '</div></div>';
   };
   // Eingrenzungs-Chips: Wiederholungen bereits gemessener Strecken, wenn
@@ -10605,16 +10753,16 @@ function renderPanel(){
   // noetig", waehrend der Status oben einen Fehler meldet - genau die
   // Sackgasse, in der ein Nutzer mit Redundanz 1 sonst landet.
   const narrowHtml=M.narrow.length
-    ? `<div class="grp"><b>Fehler eingrenzen, nochmals messen:</b><div class="chips">`
-      + M.narrow.map(s=>`<button class="sg rep" data-a="${s.a}" data-b="${s.b}">${s.a} ↔ ${s.b} nochmal</button>`).join('')
+    ? `<div class="grp"><b>Fehler eingrenzen, nochmals messen</b><div class="chips">`
+      + M.narrow.map(s=>`<button class="sg rep" data-a="${s.a}" data-b="${s.b}"><span>${s.a}–${s.b}</span><small>nochmal</small></button>`).join('')
       + '</div></div>'
     : '';
   // Vor der ersten Messung gibt es noch keine Vorschlaege - dann sind die
   // Waende selbst der Anfang (frueher stand hier nur ein Platzhalter).
   if(!M.an){
     if(C.wallPolygonRing(M.pts, M.walls) && M.walls.length)
-      sg.innerHTML='<div class="grp"><b>Mit einer Wand anfangen:</b><div class="chips">'
-        + M.walls.map(([a2,b2])=>`<button class="sg" data-a="${a2}" data-b="${b2}">${a2}–${b2}</button>`).join('')
+      sg.innerHTML='<div class="grp"><b>Mit einer Wand anfangen</b><div class="chips">'
+        + M.walls.map(([a2,b2])=>`<button class="sg" data-a="${a2}" data-b="${b2}"><span>${a2}–${b2}</span><small>Wand</small></button>`).join('')
         + '</div></div>';
     else sg.innerHTML='<span>Erst den Wandzug schließen.</span>';
   }
@@ -10626,13 +10774,14 @@ function renderPanel(){
     sg.innerHTML = M.an.dof>0
       ? '<span>Keine messbare Strecke bringt die Form weiter. Fehlt eine Wand im Zug?</span>'
       : '<span>Nichts mehr zu messen.</span>';
-  else sg.innerHTML = grp('Damit die Form eindeutig ist:','bestimmt')
+  else sg.innerHTML = grp('Damit die Form eindeutig ist','bestimmt')
                     + narrowHtml
-                    + grp('Zur Kontrolle:','pruefbar');
+                    + grp('Zur Kontrolle','pruefbar');
   sg.querySelectorAll('button.sg').forEach(b=>{
     b.onmouseenter=()=>{ M.highlight={a:b.dataset.a,b:b.dataset.b}; redraw(); };
     b.onmouseleave=()=>{ if(!entryPair){ M.highlight=null; redraw(); } };
     b.onclick=()=>enterMeasurement(b.dataset.a, b.dataset.b, true);
+    if(entryPair && wallKey(entryPair.a,entryPair.b)===wallKey(b.dataset.a,b.dataset.b)) b.classList.add('cur');
   });
 
   // --- Der Ring. Wenn ein Raum an zwei bereits liegende grenzt, ist seine
@@ -10725,6 +10874,9 @@ function renderPanel(){
   }
 
   if(wpopPair) renderWallPopup();
+  renderStandMore();
+  renderGo();
+  if(OUT.on) renderOut();
 }
 
 // ================= Daten =================
@@ -10819,7 +10971,10 @@ $('keysBtn').onclick=toggleKeys;
 $('keysclose').onclick=closeKeys;
 $('keyswrap').addEventListener('pointerdown',e=>{ if(e.target===$('keyswrap')) closeKeys(); });
 // Hilfe: der Ablauf in Worten, statisch im Markup.
-function toggleHelp(){ const w=$('helpwrap'); w.hidden=!w.hidden; }
+function toggleHelp(){ const w=$('helpwrap');
+  // Ein Nachschlage-Dialog: die Tastenliste steht unter dem Ablauf.
+  if(w.hidden){ renderKeys(); if($('keysbody').parentNode!==$('helpbody')) $('helpbody').appendChild($('keysbody')); }
+  w.hidden=!w.hidden; }
 function closeHelp(){ const w=$('helpwrap'); if(w.hidden) return false; w.hidden=true; return true; }
 $('helpBtn').onclick=toggleHelp;
 $('helpclose').onclick=closeHelp;
@@ -10845,11 +11000,161 @@ function syncRotateBtn(){
   const b=$('rotate');
   b.hidden = M.mode==='wall';
   const deg=Math.round(((VIEW.rot*180/Math.PI)%360+360)%360)%360;
-  b.textContent='Drehung '+deg+'°';
+  b.textContent = deg ? 'Ansicht drehen · '+deg+'°' : 'Ansicht drehen';
 }
 // Kuerzel und Tooltips in der Schreibweise der Plattform.
 document.querySelectorAll('kbd[data-k]').forEach(k=>{ k.textContent=plat(k.dataset.k); });
 document.querySelectorAll('[title]').forEach(el=>{ el.title=plat(el.title); });
+
+// ================= Werkzeugfamilie =================
+// Diese Datei ist drei Werkzeuge: das Raumaufmaß und, solange Fliesenplan und
+// Küchenplaner noch keine eigene Datei haben, auch diese beiden. Welches sie
+// gerade ist, steht in der Adresse (#fliesen, #kueche) und am body.
+const TOOLNAME={aufmass:'', fliesen:'Fliesenplan', kueche:'Küchenplaner'};
+const toolFromHash=()=>location.hash==='#fliesen' ? 'fliesen' : location.hash==='#kueche' ? 'kueche' : 'aufmass';
+const istWand=(a,b)=>M.walls.some(w=>wallKey(w[0],w[1])===wallKey(a,b));
+const raumGeschlossen=()=>!!C.wallPolygonRing(M.pts, M.walls);
+function setTool(tool, boot){
+  if(tool==='fliesen' && !tilesReady()){
+    tool='aufmass'; sag('Der Fliesenplan braucht einen geschlossenen, eingemessenen Raum.'); }
+  if(tool==='kueche' && !(typeof kitchenReady==='function' && kitchenReady())){
+    tool='aufmass'; sag('Der Küchenplaner braucht eine eindeutige Form.'); }
+  TOOL=tool; document.body.dataset.tool=tool;
+  $('toolname').hidden = tool==='aufmass';
+  $('toolname').textContent=TOOLNAME[tool];
+  const hash = tool==='fliesen' ? '#fliesen' : tool==='kueche' ? '#kueche' : '';
+  if(location.hash!==hash && !/^#raum=/.test(location.hash))
+    history.replaceState(null,'',location.pathname+location.search+hash);
+  closeOut();
+  $('hint').textContent='';
+  if(tool==='fliesen') setMode('tiles');
+  else if(tool==='kueche') setMode('kitchen');
+  // Im Raumaufmaß beginnt man dort, wo der Raum steht: offen in der Skizze,
+  // geschlossen bei den Maßen.
+  else setMode(raumGeschlossen() ? 'measure' : 'draw');
+}
+$('toAufmass').onclick=()=>setTool('aufmass');
+
+// ================= Rückmeldung am Ort =================
+// Es gibt keine Statuszeile mehr. Was eine Aktion zurückmeldet, erscheint
+// kurz dort, wo sie ausgelöst wurde: am Anker, über der offenen Karte oder am
+// Zeiger.
+let sagTimer=null, sagLive=false, lastPtr=null;
+addEventListener('pointerdown',e=>{ lastPtr={x:e.clientX, y:e.clientY, t:performance.now()}; }, true);
+function sag(txt, anker, bleibt){
+  const el=$('toast');
+  clearTimeout(sagTimer);
+  if(!txt){ el.classList.remove('on'); return; }
+  el.textContent=plat(txt);
+  const offen=[$('wpop'),$('cpop'),$('entry'),$('oppl')].find(x=>x && !x.hidden);
+  const r=anker ? anker.getBoundingClientRect() : null, box=offen ? offen.getBoundingClientRect() : null;
+  const nah=lastPtr && performance.now()-lastPtr.t<1500;
+  const imBox=box && nah && lastPtr.x>=box.left && lastPtr.x<=box.right && lastPtr.y>=box.top && lastPtr.y<=box.bottom;
+  let x, y, unter=false;
+  if(r){ x=r.left+r.width/2; y=r.bottom+10; unter=true; }
+  else if(box && (imBox || !nah)){ x=box.left+box.width/2; y=box.top-8; }
+  else if(nah){ x=lastPtr.x; y=lastPtr.y-16; }
+  else { const s=$('canvaswrap').getBoundingClientRect(); x=s.left+s.width/2; y=s.top+64; }
+  el.style.translate = unter ? '-50% 0' : '-50% -100%';
+  const halb=Math.min(520, innerWidth-24)/2+12;
+  el.style.left=Math.max(halb, Math.min(innerWidth-halb, x))+'px';
+  el.style.top=Math.max(unter ? 8 : 44, y)+'px';
+  el.classList.add('on');
+  if(!bleibt) sagTimer=setTimeout(()=>el.classList.remove('on'), 2600+Math.min(3200, txt.length*32));
+}
+
+// ================= Stand =================
+// Kurzform für den Speicher (der Startbildschirm zeigt sie) und fürs Blatt.
+function standInfo(){
+  const [text, cls]=statusText();
+  const eindeutig=!!(M.an && M.an.dof===0 && M.fit && M.fit.converged!==false);
+  return {tone: cls==='good' ? 'good' : cls==='bad' ? 'bad' : cls==='skizze' ? '' : 'warn',
+          text, eindeutig, geprueft: cls==='good'};
+}
+function standKurz(){ const s=standInfo(); return {tone:s.tone, text:s.text}; }
+// Die Statistik bleibt vollständig, liegt aber hinter dem Stand.
+function renderStandMore(){
+  const box=$('standMore');
+  $('status').setAttribute('aria-expanded', String(!box.hidden));
+  if(box.hidden) return;
+  const act=C.activeMeas(M.meas), aus=M.meas.length-act.length;
+  let h=`<dt>Maße eingetragen</dt><dd>${act.length}${aus?` · ${aus} aus`:''}</dd>`;
+  if(M.an){
+    const noetig=Math.max(0, act.length-M.an.redundancy);
+    h+=`<dt>Nötig für die Form</dt><dd>${M.an.dof>0 ? noetig+M.an.dof : noetig}</dd>`
+      +`<dt>Zur Kontrolle</dt><dd>${M.an.redundancy}</dd>`;
+    if(M.an.redundancy>0)
+      h+=`<dt title="Standardabweichung der Gewichtseinheit aus dem Ausgleich">Standardabweichung σ̂</dt><dd>${M.an.sigmaHat.toFixed(1).replace('.',',')} mm</dd>`;
+    const gr=act.map((m,i)=>({n:m.a+'–'+m.b, v:Math.abs(M.an.v[i]||0), fix:m.fix}))
+      .filter(x=>!x.fix && x.v>=0.5).sort((a,b)=>b.v-a.v).slice(0,4);
+    if(gr.length) h+=`<dt class="hd">Größte Abweichungen</dt>`
+      +gr.map(x=>`<dt>${escapeHtml(x.n)}</dt><dd>${x.v.toFixed(1).replace('.',',')} mm</dd>`).join('');
+    if(M.orthoInfo) h+=`<dt class="hd">Rechte Winkel angenommen</dt><dt>${escapeHtml(M.orthoInfo.ortho.join(', ')||'keine')}</dt><dd></dd>`;
+  }
+  $('standFacts').innerHTML=h;
+}
+function toggleStandMore(){ $('standMore').hidden=!$('standMore').hidden; renderStandMore(); }
+$('status').onclick=toggleStandMore;
+$('status').onkeydown=e=>{ if(e.key==='Enter' || e.key===' '){ e.preventDefault(); toggleStandMore(); } };
+
+// ================= Weiter =================
+// Der Weg durch den Raum hat eine Richtung; der nächste Schritt steht als
+// eine Hauptaktion unten im Panel, sobald er möglich ist.
+function renderGo(){
+  let ziel=null;
+  if(TOOL==='aufmass' && !OUT.on){
+    if(M.mode==='draw' && raumGeschlossen()) ziel=['measure','Weiter: Maße'];
+    else if(M.mode==='measure' && wallTabReady()) ziel=['wall','Weiter: Wände'];
+    else if(M.mode==='wall') ziel=['out','Weiter: Ausgabe'];
+  }
+  $('gosec').hidden=!ziel;
+  if(ziel){ $('goNext').textContent=ziel[1]; $('goNext').onclick=()=>ziel[0]==='out' ? openOut() : setMode(ziel[0]); }
+}
+
+// ================= Ausgabe =================
+// Kein eigener Modus: die Ausgabe legt sich über Plan und Panel, der Schritt
+// darunter bleibt, wie er war. So bleibt alles, was M.mode liest, unberührt.
+const OUT={on:false};
+function syncOutTab(){
+  $('outTab').setAttribute('aria-pressed', String(OUT.on));
+  document.querySelectorAll('#modes button[data-mode]').forEach(x=>
+    x.setAttribute('aria-pressed', String(!OUT.on && x.dataset.mode===M.mode)));
+}
+function openOut(){
+  if(TOOL!=='aufmass') return;
+  if(!raumGeschlossen()){ sag('Die Ausgabe gibt es, sobald der Raum geschlossen ist.', $('outTab')); return; }
+  closeEntry(); if(wpopPair) closeWallPopup(); hidePop();
+  OUT.on=true; document.body.classList.add('outmode');
+  syncOutTab(); renderPanel();
+  $('sheets').scrollTop=0;
+}
+function closeOut(){
+  if(!OUT.on) return;
+  OUT.on=false; document.body.classList.remove('outmode'); syncOutTab();
+}
+function renderOut(){
+  const sh=$('sheets');
+  if(typeof BLATT!=='undefined'){
+    if(!$('blattcss')){ const st=document.createElement('style'); st.id='blattcss'; st.textContent=BLATT.css; document.head.appendChild(st); }
+    sh.innerHTML=BLATT.html(BLATT.modell(), {mitMassliste:$('outList').checked});
+  }
+  const fl=tilesReady(), ku=typeof kitchenReady==='function' && kitchenReady();
+  const nFl=M.tiles && M.tiles.items ? M.tiles.items.length : 0, nKu=M.kitchen && M.kitchen.items ? M.kitchen.items.length : 0;
+  $('outTiles').disabled=!fl; $('outKitchen').disabled=!ku;
+  $('outTilesNote').textContent = !fl ? 'braucht einen geschlossenen, eingemessenen Raum' : nFl ? `${nFl} ${nFl===1?'Fliese':'Fliesen'} verlegt` : 'noch nicht begonnen';
+  $('outKitchenNote').textContent = !ku ? 'braucht eine eindeutige Form' : nKu ? `${nKu} ${nKu===1?'Teil':'Teile'} gestellt` : 'noch nicht begonnen';
+  $('outStepNote').textContent = 'Wände als Körper'+(M.hmeas.length ? '' : ' · Höhe angenommen');
+}
+$('outTab').onclick=()=>OUT.on ? null : openOut();
+$('outList').onchange=()=>renderOut();
+$('outPrint').onclick=()=>{
+  if(typeof BLATT==='undefined') return;
+  const r=BLATT.drucken({mitMassliste:$('outList').checked});
+  if(r && r.fehler) sag(r.fehler, $('outPrint'));
+};
+$('outTiles').onclick=()=>setTool('fliesen');
+$('outKitchen').onclick=()=>setTool('kueche');
+$('roomname').onkeydown=e=>{ if(e.key==='Enter' || e.key===' '){ e.preventDefault(); renameCurrentRoom(); } };
 
 // ================= Boot =================
 // Reihenfolge: migrieren -> Fragment-Import -> Raum laden -> UI aufbauen -
@@ -10870,6 +11175,7 @@ const bootMsg=importFromHash();
 addEventListener('hashchange',()=>{
   const msg=importFromHash();
   if(msg) setHint(msg);
+  else if(toolFromHash()!==TOOL) setTool(toolFromHash());
 });
 if(!currentRoom){
   // deserialize() wirft auf manuell verbogenen Storage-Daten - das darf
@@ -10883,15 +11189,19 @@ if(!currentRoom){
     }
   }catch(e){ currentRoom=null; }
   if(!currentRoom){
-    currentRoom=STORE.create('Mein erster Raum');
+    currentRoom=STORE.create('Neuer Raum');
     STORE.setCurrent(currentRoom);
-    currentRoomName='Mein erster Raum';
+    currentRoomName='Neuer Raum';
   }
 }
+TOOL=toolFromHash(); document.body.dataset.tool=TOOL;
 setMode('draw');
 syncSnapfitBtn();
 syncOrthoBtn();
 recompute();
+// Fliesen und Küche laden nach diesem Block; erst danach steht fest, ob das
+// gewünschte Werkzeug den Raum schon öffnen kann.
+addEventListener('DOMContentLoaded',()=>setTool(TOOL, true));
 // setHintLive statt setHint: Boot-Meldungen duerfen nicht nach vier
 // Sekunden verschwinden, bevor ueberhaupt jemand hingesehen hat - sie
 // stehen, bis die erste Aktion den Modus-Hinweis zurueckholt.
@@ -10992,7 +11302,7 @@ function jointOffsetsCached(){
 // der Solver muesste umsonst laufen.
 function tilesSave(){
   TS.cacheKey='';
-  if(currentRoom && !STORE.save(currentRoom, {data:JSON.parse(serialize()), area:polyAreaM2()}))
+  if(currentRoom && !STORE.save(currentRoom, {data:JSON.parse(serialize()), area:polyAreaM2(), stand:standKurz()}))
     setHint('Speichern fehlgeschlagen (Speicher voll?). Raum als Datei sichern.');
   render();
 }
@@ -13248,7 +13558,7 @@ function kitchenSave(){
   KS.ctxKey='';
   // Erstes freies Teil in einem neuen Raum: Bezugsecken jetzt festlegen.
   KX.anchorFrame(kitchenData(), M.pts, M.walls);
-  if(currentRoom && !STORE.save(currentRoom, {data:JSON.parse(serialize()), area:polyAreaM2()}))
+  if(currentRoom && !STORE.save(currentRoom, {data:JSON.parse(serialize()), area:polyAreaM2(), stand:standKurz()}))
     setHint('Speichern fehlgeschlagen (Speicher voll?). Raum als Datei sichern.');
   render();
 }

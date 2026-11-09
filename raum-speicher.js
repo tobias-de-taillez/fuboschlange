@@ -39,7 +39,7 @@ globalThis.STORE_FACTORY=function makeStore(storage){
       // denselben ISO-Zeitstempel - dann entscheidet die Array-Position:
       // rooms waechst per push, spaeterer Index heisst neuer.
       return readRooms()
-        .map((r,i)=>({id:r.id,name:r.name,updated:r.updated,area:r.area??null,_i:i}))
+        .map((r,i)=>({id:r.id,name:r.name,updated:r.updated,area:r.area??null,stand:r.stand??null,_i:i}))
         .sort((a,b)=>String(b.updated).localeCompare(String(a.updated)) || b._i-a._i)
         .map(({_i,...r})=>r);
     },
@@ -62,6 +62,9 @@ globalThis.STORE_FACTORY=function makeStore(storage){
       if(patch.name!==undefined) r.name=patch.name;
       if(patch.data!==undefined) r.data=patch.data;
       if(patch.area!==undefined) r.area=patch.area;
+      // Stand des Aufmaßes in Kurzform {tone,text}: der Startbildschirm zeigt
+      // ihn, ohne den Raum durchzurechnen.
+      if(patch.stand!==undefined) r.stand=patch.stand;
       // origin liegt bewusst NEBEN data: die Lage im Gebaeude gehoert nicht
       // zum Aufmass des Raums. Datei-Export, Link und Undo arbeiten ueber
       // data - die Verankerung darf dabei weder mitreisen noch verloren
