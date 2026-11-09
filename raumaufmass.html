@@ -604,6 +604,7 @@
   .kflow small{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
   .kflow em{font-style:normal;color:var(--warn)}
   #kSugg>b{display:block;font-size:12px;font-weight:600;color:var(--ink2);margin:10px 0 4px}
+  details.kopt{font-size:12px;color:var(--ink2);margin:0 0 6px} details.kopt summary{cursor:pointer} details.kopt ul{margin:4px 0 0;padding-left:18px}
   .ksugg{display:flex;gap:8px;align-items:center;font-size:12px;padding:4px 0;border-top:1px solid var(--line2)}
   .ksugg span{flex:1}
   .ksugg.kdep{padding-left:12px;border-top:0;color:var(--ink2)}
@@ -1018,13 +1019,13 @@
       </dl>
 
       <h3><i>5</i>Küche</h3>
-      <p>Erst verfügbar, wenn der Grundriss eindeutig ist. Teile aus der Leiste oben auf eine Wand ziehen oder anklicken: Unterschrank, Spüle, Spülmaschine, Herd, Eckschrank, Hängeschrank, Dunstabzug, Hochschrank, Kühlschrank, Backofen hoch, Insel, Tisch. Sie rasten an Ecken (mit 5 cm Passblende), Nachbarn, Türen und mittig unter Fenstern ein; ein Klick setzt das Teil neben das gewählte, einen Hängeschrank darüber. Die Arbeitsplatte entsteht von selbst, Lücken bis 15 cm werden Passleisten. Die Lage steht im Panel als Zahl (ab Ecke … mm), die Maßkette im Plan. Die Standardmaße passen meist; rechts stellt man Breite, Front, Anschlag, Gerät und Inhalt ein, unter „Maße frei“ alles Übrige.</p>
+      <p>Erst verfügbar, wenn der Grundriss eindeutig ist. Teile aus der Leiste oben auf eine Wand ziehen oder anklicken: Unterschrank, Spüle, Spülmaschine, Herd, Eckschrank, Hängeschrank, Dunstabzug, Hochschrank, Kühlschrank, Backofen hoch, Insel, Tisch. Sie rasten an Ecken (mit 5 cm Passblende), Nachbarn, Türen und mittig unter Fenstern ein; ein Klick setzt das Teil neben das gewählte, einen Hängeschrank darüber. Die Arbeitsplatte entsteht von selbst, auf der Insel samt Tresen-Überstand; Lücken bis 15 cm werden Passleisten. Die Lage steht im Panel als Zahl (ab Ecke … mm), die Maßkette im Plan. Die Standardmaße passen meist; rechts stellt man Breite, Front, Anschlag, Gerät und Inhalt ein, unter „Maße frei“ alles Übrige.</p>
       <dl>
-        <dt>Prüfung</dt><dd>Meldet, was nicht geht (rot): Überlappungen, Schrank vor Tür oder Fenster, Fensterflügel gegen Armatur, Gerätetür gegen Insel, Zimmertür gegen Schrank, Front in der Ecke verdeckt, Decke zu niedrig. Und Richtwerte (gelb): Gänge 1200 mm, Stuhlraum am Tisch, Abstellflächen, Spülmaschine neben der Spüle, Arbeitsdreieck. Ein Klick wählt das Teil; wo es eine eindeutige Abhilfe gibt (Vorfensterarmatur, Anschlag tauschen, Als Eckschrank, Als Dunstabzug), steht ein Knopf daneben.</dd>
+        <dt>Prüfung</dt><dd>Meldet, was nicht geht (rot): Überlappungen, Schrank vor Tür oder Fenster, Fensterflügel gegen Armatur, Gerätetür gegen Insel, Zimmertür gegen Schrank oder Insel (im Plan bleibt die Tür am ersten Teil stehen, mit Winkel im Befund), Front in der Ecke verdeckt, Decke zu niedrig. Und Richtwerte (gelb): Gänge 1200 mm, Stuhlraum am Tisch, Abstellflächen, Spülmaschine neben der Spüle, Arbeitsdreieck. Ein Klick wählt das Teil; wo es eine eindeutige Abhilfe gibt (Vorfensterarmatur, Anschlag tauschen, Als Eckschrank, Als Dunstabzug), steht ein Knopf daneben.</dd>
         <dt>Maße und Abstände</dt><dd>Am gewählten Wandteil läuft die Maßkette bis zur Wand, die man an den Enden vor sich hat, bei Insel und Tisch zu allen vier Seiten. Ein Klick auf einen gestrichelt umrandeten Abstand öffnet ein Feld: Wert eintragen, Enter verschiebt das Teil (an der Wand den ganzen Block daneben).</dd>
         <dt>Insel und Tisch</dt><dd>Drehen per Schieber im Panel (rastet an 0/45/90° und an schiefen Wänden ein, mit ⌥ frei) oder mit Q/E. Eine Insel, deren Stirnseite man an eine Wand zieht, dockt bündig an; ihre Auszüge gehen dann parallel zur Wand auf. „Tresen“ lässt die Platte hinten überstehen (NKBA: 38 cm bei 91 cm Höhe, 61 cm je Hocker). Die Tischplätze ergeben sich aus Länge und Breite (60 cm je Platz, Stirnseite ab 60 cm Breite), Seiten ohne Stuhlraum bleiben frei.</dd>
         <dt>Offen (O)</dt><dd>Zeigt im Plan alle Schwenkbereiche und in 3D alle Türen, Auszüge und Gerätetüren offen, dazu offene Fensterflügel.</dd>
-        <dt>Inhalt und Wege (W)</dt><dd>Je Schrank wählen, was darin liegt (Besteck, Teller, Gläser …). Daraus rechnet das Programm die Laufwege typischer Abläufe: Einkauf einräumen, Müll, Kochen, Servieren, Tisch decken, Abräumen in die Spülmaschine, Spülmaschine ausräumen. Ein Klick auf einen Ablauf zeichnet ihn ein. Fehlende Inhalte räumt das Programm selbst ein, „Umsortieren“ schlägt Umzüge vor, die Wege sparen (Besteck und Messer nur in Schubladen, Müll bleibt an der Spüle). Ein Ablauf zählt erst, wenn alle seine Stationen da sind; die Häufigkeiten sind eine Annahme für vier Personen.</dd>
+        <dt>Inhalt und Wege (W)</dt><dd>Je Schrank wählen, was darin liegt (Besteck, Teller, Gläser …). Daraus rechnet das Programm die Laufwege typischer Abläufe: Einkauf einräumen, Müll, Kochen, Servieren, Tisch decken, Abräumen in die Spülmaschine, Spülmaschine ausräumen. Ein Klick auf einen Ablauf zeichnet ihn ein. Der Eingang ist im Plan grün markiert; ein Klick auf eine andere Tür macht sie zum Eingang. „Optimal einräumen“ verteilt alle Inhalte so, dass die Wege zusammen am kürzesten sind – exakt gerechnet, dieselbe Küche ergibt immer dieselbe Einteilung; doppelt Eingeräumtes bleibt stehen. „Umsortieren“ schlägt einzelne Umzüge vor (Besteck und Messer nur in Schubladen, Müll bleibt an der Spüle). Ein Ablauf zählt erst, wenn alle seine Stationen da sind; die Häufigkeiten sind eine Annahme für vier Personen.</dd>
         <dt>3D (V)</dt><dd>Ansicht neben dem Plan. Ziehen dreht, Rechts- oder ⇧-Ziehen verschiebt, Rad zoomt, Doppelklick setzt zurück. Wände, vor denen man steht, werden ausgeblendet.</dd>
       </dl>
 
@@ -6489,7 +6490,10 @@ function leafReach(E, L, g, e, roomDoors, winSashes){
   const blockedAt=th=>{
     const R=leafRect(lf, th);
     if(!polyInRoom(E, R)) return 'die Wand';
-    for(const h of L.G){ if(h===g || !bandsMeet(band,h)) continue; if(TL.convexOverlap(R, h.poly, 2)) return labelOf(h.it); }
+    for(const h of L.G){ if(h===g || !bandsMeet(band,h)) continue;
+      // Insel/Tresen: auf Plattenhöhe zählt die ganze Platte mit Überstand.
+      const hp = h.foot && band.z1 > h.z1-60 ? h.foot : h.poly;
+      if(TL.convexOverlap(R, hp, 2)) return labelOf(h.it); }
     for(const t of tops){ if(bandsMeet(band,t) && TL.convexOverlap(R, t.poly, 2)) return 'die Arbeitsplatte'; }
     for(const s of (roomDoors||[])){ if(bandsMeet(band,s) && TL.convexOverlap(R, s.poly, 2)) return s.txt; }
     for(const s of (winSashes||[])){ if(bandsMeet(band,s) && TL.convexOverlap(R, s.poly, 2)) return s.txt; }
@@ -6501,6 +6505,30 @@ function leafReach(E, L, g, e, roomDoors, winSashes){
   // sonst endet die Suche bei 114° ohne Hindernis („null ist im Weg“).
   if(!hit && angle<lf.full){ hit=blockedAt(lf.full*Math.PI/180); if(!hit) angle=lf.full; }
   return {angle, hit};
+}
+// Zimmertüren: wie weit geht das Blatt auf, bis es an ein Küchenteil stößt?
+// (Meldung M-20261109-145411-a0f040: der Bogen lief durch die Insel.) Blatt
+// 40 mm dick auf der Schwenkseite, 2°-Schritte bis zum Anschlag, den
+// doorSwing an den Wänden findet. Je Tür {id, deg, maxDeg, hit, hitId}.
+const ROOM_LEAF_T=40;
+function doorReach(E, L){
+  const out=new Map();
+  if(!globalThis.doorSwing) return out;
+  E.openings.filter(o=>o.kind==='door').forEach(o=>{
+    const s=globalThis.doorSwing(E.pts, E.walls, o); if(!s) return;
+    const band={z0:o.y||0, z1:(o.y||0)+o.h}, maxDeg=Math.floor(s.max*180/Math.PI+1e-6);
+    const blockedAt=a=>{
+      const th=s.dir0+s.sense*a*Math.PI/180, u={x:Math.cos(th), y:Math.sin(th)};
+      const v={x:-s.sense*u.y, y:s.sense*u.x};        // zur Seite, in die das Blatt schwenkt
+      const P0=s.angel, R=[P0, add(P0,mul(u,o.w)), add(add(P0,mul(u,o.w)),mul(v,ROOM_LEAF_T)), add(P0,mul(v,ROOM_LEAF_T))];
+      return L.G.find(g=>!g.wing && bandsMeet(band,g) && TL.convexOverlap(R, g.foot||g.poly, 1)) || null;
+    };
+    let deg=0, hit=null;
+    for(let a=2; a<=maxDeg; a+=2){ hit=blockedAt(a); if(hit) break; deg=a; }
+    if(!hit && deg<maxDeg){ hit=blockedAt(maxDeg); if(!hit) deg=maxDeg; }
+    out.set(o.id, {id:o.id, deg, maxDeg, hit:hit?nameOf(hit.it):null, hitId:hit?hit.it.id:null, s});
+  });
+  return out;
 }
 function swing90(h, along, out, r, deg=90){
   const a0=ang(along), a1=ang(out);
@@ -7030,7 +7058,7 @@ function check(E, K, L){
     G.forEach(g=>{
       if(!g.free && g.Wf.key===Wf.key) return;
       if(!zMeet(g,on) || (o.kind==='window' && g.it.kind==='base' && g.z1<=on.z0)) return;
-      if(TL.convexOverlap(g.poly, rq, 1)) add_('bad',[g.it.id], `${nameOf(g.it)} steht vor ${o.kind==='window'?'einem Fenster':o.kind==='door'?'einer Tür':'einem Durchgang'} an der Nachbarwand`, g.c);
+      if(TL.convexOverlap(g.poly, rq, 1)) add_('bad',[g.it.id], `${nameOf(g.it)} steht vor ${o.kind==='window'?'einem Fenster':o.kind==='door'?'einer Tür':'einem Durchgang'}${g.free?'':' an der Nachbarwand'}`, g.c);
     });
   });
   // 4. Fensterflügel gegen Armatur, Hänge- und Hochschränke
@@ -7049,14 +7077,18 @@ function check(E, K, L){
     });
   }));
   // 5. Zimmertüren schlagen an
-  const roomDoors=[];
+  const roomDoors=[], reach=doorReach(E, L);
   E.openings.filter(o=>o.kind==='door').forEach(o=>{
     const s=globalThis.doorSwing ? globalThis.doorSwing(E.pts, E.walls, o) : null;
     if(!s) return;
     const env=sector(s.angel, o.w, s.dir0, s.dir0+s.sense*Math.min(s.max, Math.PI/2), 10);
     const leaf={z0:o.y||0, z1:(o.y||0)+o.h};
     roomDoors.push({poly:env, ...leaf, txt:'die Zimmertür'});
-    G.forEach(g=>{ if(bandsMeet(g,leaf) && TL.convexOverlap(g.foot||g.poly, env, 1)) add_('bad',[g.it.id], `Zimmertür schlägt an ${nameOf(g.it)}`, g.c); });
+    const rc=reach.get(o.id);
+    G.forEach(g=>{ if(bandsMeet(g,leaf) && TL.convexOverlap(g.foot||g.poly, env, 1))
+      add_('bad',[g.it.id], `Zimmertür schlägt an ${nameOf(g.it)}${rc && rc.hitId===g.it.id ? ` – geht nur ${rc.deg}° auf (mind. 90°)` : ''}`, g.c); });
+    // Über 90°: die Tür geht auf, schlägt aber weiter hinten an (Türstopper).
+    if(rc && rc.hit && rc.deg>=90) add_('info',[rc.hitId], `Zimmertür geht ${rc.deg}° auf, dann stößt sie an ${rc.hit} – Türstopper vorsehen`, (L.byId.get(rc.hitId)||{}).c);
   });
   // 6. Fronten: Gerätetüren, Auszüge, Drehtüren gegen andere Teile
   G.forEach(g=>g.env.forEach(e=>{
@@ -7729,6 +7761,81 @@ function suggest(E, K, L, n=3){
   out.assign=cur; out.unplaced=unplaced;
   return out;
 }
+// Optimal einräumen (Meldung M-20261109-150126-3b7705): jeder Inhalt in
+// genau einen Schrank, so dass die gewichteten Wege aller Abläufe minimal
+// sind - exakt und deterministisch, keine Heuristik. Das geht, weil jede
+// Kette in FLOWS höchstens EINEN Inhalt enthält: die Kosten zerfallen in
+// eine Summe je (Inhalt, Schrank), und das Ganze ist ein Zuordnungsproblem
+// mit Schrankkapazitäten (Ungarische Methode über Kapazitäts-Plätze).
+// Was der Nutzer bewusst doppelt eingeräumt hat (Teller in zwei Schränken),
+// bleibt stehen und belegt seine Plätze - doppelt ist der Weg kürzer, als
+// es eine Einzelzuordnung je sein kann. Damit ist die jetzige Einteilung
+// selbst eine zulässige Lösung, das Ergebnis also nie schlechter.
+// Regeln wie beim Umsortieren: storable, Besteck/Messer nur in Schubladen,
+// Müll und Putzmittel an die Spüle (wenn sie dort Platz haben). Inhalte ohne
+// Ablauf (Backbleche, Seltenes; Putzmittel) nehmen die schlechter
+// greifbaren Plätze und lassen die guten frei.
+function hungarian(C){
+  // C: n Zeilen × m Spalten, n ≤ m. Minimiert Σ C[i][p[i]]. (e-maxx, Potentiale)
+  const n=C.length, m=C[0].length, u=new Array(n+1).fill(0), v=new Array(m+1).fill(0), p=new Array(m+1).fill(0), way=new Array(m+1).fill(0);
+  for(let i=1;i<=n;i++){
+    p[0]=i; let j0=0; const minv=new Array(m+1).fill(Infinity), used=new Array(m+1).fill(false);
+    do{
+      used[j0]=true; const i0=p[j0]; let delta=Infinity, j1=0;
+      for(let j=1;j<=m;j++) if(!used[j]){
+        const cur=C[i0-1][j-1]-u[i0]-v[j];
+        if(cur<minv[j]){ minv[j]=cur; way[j]=j0; }
+        if(minv[j]<delta){ delta=minv[j]; j1=j; }
+      }
+      for(let j=0;j<=m;j++){ if(used[j]){ u[p[j]]+=delta; v[j]-=delta; } else minv[j]-=delta; }
+      j0=j1;
+    } while(p[j0]!==0);
+    do{ const j1=way[j0]; p[j0]=p[j1]; j0=j1; } while(j0);
+  }
+  const res=new Array(n).fill(-1);
+  for(let j=1;j<=m;j++) if(p[j]) res[p[j]-1]=j-1;
+  return res;
+}
+function optimalStore(E, K, L){
+  const base=flows(E,K,L), pl=base.planner, memo=base.memo;
+  const evalA=a=>flows(E,K,L,{assign:a, planner:pl, memo, partial:true}).cost;
+  const honest=a=>flows(E,K,L,{assign:a, planner:pl, memo});
+  const cabinets=L.G.filter(g=>['base','wall','tall','island'].includes(g.it.kind) && storable(g.it).length && !g.wing);
+  const allowed=(c,g)=>storable(g.it).includes(c) && (!(c==='besteck'||c==='messer') || frontKind(g.it)==='drawer');
+  const cap=g=>g.it.kind==='tall' ? 3 : g.it.w>=800 ? 3 : g.it.w>=450 ? 2 : 1;
+  const keys=CONTENTS.filter(c=>!c.fixed).map(c=>c.key);
+  const start={}; keys.forEach(k=>{ start[k]=L.G.filter(g=>!g.wing && (g.it.store||[]).includes(k)).map(g=>g.it.id); });
+  const fixed=keys.filter(k=>start[k].length>1);
+  const empty={}; keys.forEach(k=>{ empty[k]=fixed.includes(k) ? start[k] : []; });
+  const used=new Map(); fixed.forEach(k=>start[k].forEach(id=>used.set(id,(used.get(id)||0)+1)));
+  const free=keys.filter(k=>!fixed.includes(k));
+  const inFlow=new Set(); FLOWS.forEach(F=>F.chains.flat().forEach(r=>{ if(keys.includes(r)) inFlow.add(r); }));
+  const E0=evalA(empty), INF=1e15, UNPLACED=1e12;
+  const atSink=c=>(c==='muell'||c==='putz') && cabinets.some(g=>g.it.dev==='sink' && allowed(c,g));
+  const cost=(c,g)=>{
+    if(!allowed(c,g)) return INF;
+    if(atSink(c) && g.it.dev!=='sink') return 1e10;
+    const rf=reachFactor(K,g);
+    return inFlow.has(c) ? evalA({...empty,[c]:[g.it.id]})-E0 + rf : -rf;   // ohne Ablauf: lieber schlecht greifbar
+  };
+  const slots=[]; cabinets.forEach(g=>{ for(let k=used.get(g.it.id)||0;k<cap(g);k++) slots.push(g); });
+  const assign={}, unplaced=[];
+  fixed.forEach(k=>{ assign[k]=[...start[k]]; });
+  if(free.length){
+    const rows=free.map(c=>{ const byCab=new Map(cabinets.map(g=>[g.it.id, cost(c,g)]));
+      return [...slots.map(g=>byCab.get(g.it.id)), ...free.map(()=>UNPLACED)]; });
+    const pick=hungarian(rows);
+    free.forEach((c,i)=>{ const j=pick[i], g=j<slots.length ? slots[j] : null;
+      if(g && rows[i][j]<INF/2) assign[c]=[g.it.id]; else { assign[c]=[]; unplaced.push(c); } });
+  }
+  const same=keys.every(k=>JSON.stringify([...start[k]].sort())===JSON.stringify([...assign[k]].sort()));
+  const hb=honest(start), ha=honest(assign), cs=evalA(start), co=evalA(assign);
+  // Fehlt vorher ein Inhalt, zählt sein Weg nicht mit - Einräumen ist dann
+  // Fortschritt, auch wenn die Summe steigt.
+  const placedBefore=keys.filter(k=>start[k].length).length, placedAfter=keys.filter(k=>assign[k].length).length;
+  return {assign, unplaced, fixed, same, better: placedAfter>placedBefore || co<cs-1, placedBefore, placedAfter, kmBefore:hb.kmYear, kmAfter:ha.kmYear, completeBefore:hb.complete, completeAfter:ha.complete,
+          cost:co, costStart:cs, costSum:E0+free.reduce((s,c)=>s+(assign[c].length && inFlow.has(c) ? evalA({...empty,[c]:assign[c]})-E0 : 0),0)};
+}
 
 // ---------- 3D-Szene ----------
 // Alles sind Prismen: konvexes Grundriss-Polygon von z0 bis z1, Farbe,
@@ -7942,7 +8049,9 @@ function stock(K, L){
   L.G.forEach(g=>{ const it=g.it; if(it.kind==='table' || g.wing) return;
     const k=`${nameOf(it)}|${it.kind}|${extraOf(it)}`; rows.set(k, (rows.get(k)||0)+1); });
   const list=[...rows].map(([k,n])=>({name:k.split('|')[0], extra:k.split('|')[2]||'', n})).sort((p,q)=>p.name.localeCompare(q.name,'de'));
-  const tops=L.tops.filter(t=>!t.island && !t.patch).map(t=>({len:t.len, depth:t.depth}));
+  // Inselplatten mit (Meldung M-20261109-145755-b3f684), Tiefe samt Tresen-Überstand.
+  const tops=[...L.tops.filter(t=>!t.island && !t.patch).map(t=>({len:t.len, depth:t.depth})),
+              ...L.tops.filter(t=>t.island).map(t=>({len:t.len, depth:t.depth, island:true}))];
   return {list, tops, topSum:tops.reduce((s,t)=>s+t.len,0), fillers:(L.fillers||[]).map(f=>({w:f.w, corner:!!f.corner}))};
 }
 
@@ -7955,7 +8064,7 @@ function storable(it){
 }
 globalThis.KITCHEN={ FRIDGE, DOORT_LIM, SWINGS, swingOf, isCold, fzOf, doorTOf, leaves, leafRect, leafReach, leafReachSide, entries, storable, wallFaces, K_DEF, K_LIM, WIDTHS, KIND, DEV, FRONTS, PRESETS, PGROUPS, CONTENTS, FLOWS, GROUPS, ROLE_LABEL, BODY_R,
   derived, normKitchen, normItem, isEmpty, makeEnv, wallFrame, wpt, geom, dims, layout, envelopes, frontLR, frontKind,
-  worktops, check, sashes, openingOn, faucetPoint, tableSides, tableSeats, seatPlan, rotSnaps, snapRot, chainDims, freeDims, applyDim, dockFree, barNkba, barSeats, BAR_SEAT_W, slotCandidates, cornerStop, fitsAt, freeSlot, snapX,
+  worktops, check, sashes, doorReach, optimalStore, hungarian, openingOn, faucetPoint, tableSides, tableSeats, seatPlan, rotSnaps, snapRot, chainDims, freeDims, applyDim, dockFree, barNkba, barSeats, BAR_SEAT_W, slotCandidates, cornerStop, fitsAt, freeSlot, snapX,
   nearestWall, planner, stations, flows, suggest, reachFactor, scene, frontsOf, stock, nameOf, inflate, polyInRoom, COL };
 Object.assign(globalThis.KITCHEN, { CORNER, CSHAPE, shapeOf, cornerBlind, cornerPlace, cornerType, crossAt, cornerWing });
 })();
@@ -11392,7 +11501,9 @@ function drawUnfolded(P, I, dpr){
 // Oeffnungen im Grundriss: Blatt und Schwenkbogen. Der Bogen laeuft bis
 // kurz vor das naechste Hindernis (siehe swingLimit) statt pauschal 90
 // Grad - so ist ablesbar, wieviel Platz die Tuer wirklich braucht.
-function drawOpeningsOnPlan(P, I, dpr){
+// reach (nur Küche): je Tür-ID {deg, maxDeg} - das Blatt steht dann am
+// ersten Küchenteil, der Rest des Bogens rot (unter 90°) bzw. gelb.
+function drawOpeningsOnPlan(P, I, dpr, reach){
   if(!M.openings.length) return;
   M.openings.forEach(o=>{
     const r=openingWorld(P, o.a, o.b, o);
@@ -11406,14 +11517,25 @@ function drawOpeningsOnPlan(P, I, dpr){
       return;
     }
     // Drehtuer: Angel auf der Bandseite, Blatt so lang wie die Oeffnung.
-    const {angel, dir0, sense, max}=doorSwing(P, M.walls, o);
+    const {angel, dir0, sense, max:full}=doorSwing(P, M.walls, o);
+    const rc=reach && reach.get(o.id), stop=rc && rc.deg<rc.maxDeg;
+    const max=stop ? rc.deg*Math.PI/180 : full;
     const a0=toScr(angel);
     const tipW={x:angel.x+Math.cos(dir0+sense*max)*o.w,
                 y:angel.y+Math.sin(dir0+sense*max)*o.w};
     const t=toScr(tipW);
-    ctx.strokeStyle=INK.scale;
+    const hitCol = !stop ? null : rc.deg<90 ? '#b3261e' : '#c98a1a';   // KINK.bad / KINK.warn (Küchen-Skript)
+    ctx.strokeStyle= stop ? hitCol : INK.scale;
     ctx.lineWidth=2*dpr;
     ctx.beginPath(); ctx.moveTo(a0.x,a0.y); ctx.lineTo(t.x,t.y); ctx.stroke();
+    if(stop){
+      // Rest des Schwenkbereichs, den die Tür nicht erreicht.
+      ctx.strokeStyle=hitCol; ctx.globalAlpha=.55; ctx.lineWidth=1*dpr; ctx.setLineDash([2*dpr,4*dpr]);
+      ctx.beginPath();
+      ctx.arc(a0.x, a0.y, Math.max(0, o.w*VIEW.s), dir0+sense*max+VIEW.rot, dir0+sense*full+VIEW.rot, sense<0);
+      ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha=1;
+      ctx.strokeStyle=INK.scale;
+    }
     // Bogen. Der Grundriss spiegelt y NICHT (anders als die Wandansicht),
     // also gelten die Weltwinkel direkt - nur die Ansichtsdrehung kommt
     // dazu. Das counterclockwise-Flag folgt dem Drehsinn.
@@ -17645,7 +17767,8 @@ function drawKitchenView(){
   ctx.beginPath(); TILES.ringsOf(E.ring).forEach(R=>{ R.forEach((p,i)=>{ const q=toScr(p); i?ctx.lineTo(q.x,q.y):ctx.moveTo(q.x,q.y); }); ctx.closePath(); });
   ctx.fillStyle=KINK.floor; ctx.fill('evenodd');
   ctx.strokeStyle=INK.wall; ctx.lineWidth=2.5*dpr; ctx.stroke();
-  drawOpeningsOnPlan(E.pts, E.I, dpr);
+  drawOpeningsOnPlan(E.pts, E.I, dpr, KX.doorReach(E, L));
+  drawEntryLabels(c, dpr);
   // Fensterflügel nach innen (gestrichelt): sie schwenken über die Platte.
   E.openings.forEach(o=>KX.sashes(E,o).forEach(sa=>{
     ctx.setLineDash([4*dpr,3*dpr]); ctx.strokeStyle=KINK.sash; ctx.lineWidth=1.2*dpr;
@@ -17670,12 +17793,12 @@ function drawKitchenView(){
       ctx.setLineDash([5*dpr,3*dpr]);
     } else {
       if(g.foot && !g.outline){
-        // Tresen: Hocker unter dem Überstand, dann die Platte darüber.
+        // Tresen: Hocker unter dem Überstand; die Platte samt Überstand
+        // zeichnet der Plattendurchgang unten.
         const n=KX.barSeats(g), back=mul2(g.n,-1), a=g.foot[0], b=g.foot[1], along=unitV(sub2(b,a));
         for(let k=0;k<n;k++){ const t=(k+0.5)/n, m=add2(add2(a, mul2(sub2(b,a),t)), mul2(back,-80));
           const q=toScr(m); ctx.beginPath(); ctx.arc(q.x,q.y,Math.max(3*dpr,180*VIEW.s),0,2*Math.PI);
           ctx.fillStyle='rgba(75,71,62,.10)'; ctx.fill(); ctx.strokeStyle='rgba(75,71,62,.45)'; ctx.lineWidth=1*dpr; ctx.stroke(); }
-        poly(g.foot); ctx.fillStyle='rgba(220,199,163,.55)'; ctx.fill(); ctx.strokeStyle=KINK.topEdge; ctx.lineWidth=1*dpr; ctx.stroke();
       }
       poly(shp); ctx.fillStyle = it.kind==='tall' ? KINK.tall : KINK.base; ctx.fill();
     }
@@ -17694,13 +17817,14 @@ function drawKitchenView(){
     deviceSymbol(c,g,dpr);
   };
   G.filter(g=>g.it.kind!=='wall').forEach(drawItem);
-  L.tops.filter(t=>!t.island).forEach(t=>{ poly(t.poly); ctx.fillStyle='rgba(220,199,163,.55)'; ctx.fill(); ctx.strokeStyle=KINK.topEdge; ctx.lineWidth=1*dpr; ctx.stroke(); });
+  // Auch die Insel trägt eine Platte (Meldung M-20261109-145755-b3f684).
+  L.tops.forEach(t=>{ poly(t.poly); ctx.fillStyle='rgba(220,199,163,.55)'; ctx.fill(); ctx.strokeStyle=KINK.topEdge; ctx.lineWidth=1*dpr; ctx.stroke(); });
   // Passleisten: schmale schraffierte Streifen an der Front
   (L.fillers||[]).forEach(f=>{ poly([KX.wpt(f.Wf,f.s0,0),KX.wpt(f.Wf,f.s1,0),KX.wpt(f.Wf,f.s1,c.K.spec.baseD),KX.wpt(f.Wf,f.s0,c.K.spec.baseD)]);
     ctx.fillStyle='rgba(75,71,62,.28)'; ctx.fill(); });
   // Auswahl und Befunde der Unterschränke ÜBER der Platte nachziehen, sonst
   // verschluckt das Beige die Farbe.
-  G.filter(g=>g.it.kind==='base' && !g.wing).forEach(g=>{ const id=g.it.id, isSel=id===KS.sel, bad=c.bad.has(id), warn=c.warn.has(id);
+  G.filter(g=>(g.it.kind==='base'||g.it.kind==='island') && !g.wing).forEach(g=>{ const id=g.it.id, isSel=id===KS.sel, bad=c.bad.has(id), warn=c.warn.has(id);
     if(!(isSel||bad||warn)) return;
     poly(g.outline||g.poly); ctx.strokeStyle = isSel ? KINK.sel : bad ? KINK.bad : KINK.warn; ctx.lineWidth=(isSel||bad?2.4:1.6)*dpr; ctx.stroke();
     if(isSel){ ctx.fillStyle=KINK.selFill; ctx.fill(); } });
@@ -17825,6 +17949,36 @@ function openDimEdit(hit){
   inp.onblur=()=>commit();
   setHint(`Abstand ${hit.edit.wall===false?'zum Nachbarteil':'zur Wand'} eintragen (${Math.ceil(hit.edit.min)}–${Math.floor(hit.edit.max)} mm), Enter setzt, Esc bricht ab`);
 }
+// Eingang im Plan (Meldung M-20261109-145947-e89ebf): Türen tragen dieselbe
+// Nummer wie die Auswahl im Panel, der Eingang ist grün markiert; ein Klick
+// auf eine Tür macht sie zum Eingang. Etikett 300 mm vor der Türmitte.
+function entryMarks(c){
+  const doors=KX.entries(c.E), cur=doors.find(o=>o.id===c.K.spec.entry) || doors[0];
+  return doors.map((o,i)=>{ const Wf=KX.wallFrame(c.E,o.a,o.b), on=Wf&&KX.openingOn(c.E,o,Wf); if(!on) return null;
+    const m=(on.s0+on.s1)/2;
+    return {o, i, on:cur===o, Wf, at:KX.wpt(Wf,m,300), P:KX.wpt(Wf,on.s0,0), Q:KX.wpt(Wf,on.s1,0),
+            txt:`${o.kind==='door'?'Tür':'Durchgang'}${doors.length>1?' '+(i+1):''}`}; }).filter(Boolean);
+}
+function drawEntryLabels(c, dpr){
+  const ms=entryMarks(c); if(!ms.length) return;
+  ctx.font=`600 ${10.5*dpr}px ${CANVAS_FONT}`; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ms.forEach(m=>{
+    const q=toScr(m.at), t=m.on ? `Eingang · ${m.txt}` : m.txt, w=ctx.measureText(t).width+12*dpr, h=17*dpr;
+    if(m.on){ const p=toScr(m.P), r=toScr(m.Q); ctx.strokeStyle=KINK.grp.ein; ctx.lineWidth=4*dpr; ctx.globalAlpha=.8;
+      ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(r.x,r.y); ctx.stroke(); ctx.globalAlpha=1; }
+    ctx.fillStyle = m.on ? KINK.grp.ein : 'rgba(250,249,246,.92)';
+    ctx.beginPath(); ctx.roundRect ? ctx.roundRect(q.x-w/2, q.y-h/2, w, h, h/2) : ctx.rect(q.x-w/2, q.y-h/2, w, h); ctx.fill();
+    if(!m.on){ ctx.strokeStyle='rgba(75,71,62,.45)'; ctx.lineWidth=1*dpr; ctx.stroke(); }
+    ctx.fillStyle = m.on ? '#fff' : INK.scale; ctx.fillText(t, q.x, q.y);
+  });
+  ctx.textAlign='start'; ctx.textBaseline='alphabetic';
+}
+// Tür (Lücke oder Etikett) unter dem Zeiger, nur wenn es mehr als einen Eingang gibt.
+function entryAt(c, w){
+  const ms=entryMarks(c); if(ms.length<2) return null;
+  const R=14*DPR()/VIEW.s;
+  return ms.find(m=>distToSeg(w, m.P, m.Q).d<R || Math.hypot(w.x-m.at.x, w.y-m.at.y)<Math.max(R, 250)) || null;
+}
 function closeDimEdit(){ const e=$('kDimEd'); if(e) e.remove(); }
 // Wand anklicken (Meldung M-20261109-145224-3ebe3b): bei gewähltem Teil
 // öffnet ein Klick auf eine Wand das Abstandsmaß zu genau dieser Wand.
@@ -17913,6 +18067,10 @@ function kitchenDown(e){
   if(dh){ gesture={t:'kdim', moved:false, x0:e.clientX, y0:e.clientY}; setTimeout(()=>openDimEdit(dh)); return true; }
   const w=toWorld(d.x,d.y), hs=hits(c,w);
   if(!hs.length){
+    const en=entryAt(c,w);
+    if(en){ gesture={t:'kdim', moved:false, x0:e.clientX, y0:e.clientY};
+      if(!en.on){ snapshot(); c.K.spec.entry=en.o.id; kitchenSave(); }
+      setHint(`Eingang: ${en.txt} – von hier zählen Einkauf und Müll`); return true; }
     const wd=wallDimAt(c,w); if(!wd) return false;
     gesture={t:'kdim', moved:false, x0:e.clientX, y0:e.clientY};
     if(wd.hit) setTimeout(()=>openDimEdit(wd.hit));
@@ -18383,7 +18541,7 @@ function renderWays(c){
   if(box.dataset.key===key) return;
   box.dataset.key=key;
   let h='';
-  if(doors.length>1) h+=`<div class="krow"><label>Eingang</label><select id="kEntry">${doors.map((o,i)=>`<option value="${o.id}"${(c.K.spec.entry||doors[0].id)===o.id?' selected':''}>${o.kind==='door'?'Tür':'Durchgang'} ${i+1} (${Math.round(o.w/10)} cm)</option>`).join('')}</select></div>`;
+  if(doors.length>1) h+=`<div class="krow" title="Die Nummer steht im Plan an der Tür; ein Klick auf die Tür im Plan wählt sie auch."><label>Eingang</label><select id="kEntry">${doors.map((o,i)=>`<option value="${o.id}"${(c.K.spec.entry||doors[0].id)===o.id?' selected':''}>${o.kind==='door'?'Tür':'Durchgang'} ${i+1} (${Math.round(o.w/10)} cm)</option>`).join('')}</select></div>`;
   else if(!doors.length) h+=`<p class="tnote">Ohne Tür gibt es keinen Eingang: Einkauf und Müll fehlen. Tür im Modus Wände setzen.</p>`;
   Object.entries(KX.GROUPS).forEach(([gk,gl])=>{
     h+=`<div class="kflowgrp"><b style="color:${KINK.grp[gk]}">${gl}</b>`;
@@ -18410,6 +18568,21 @@ function renderWays(c){
   const km=v=>v.toFixed(1).replace('.',',');
   const places=S.filter(s=>s.place), moves=S.filter(s=>!s.place);
   let hs='';
+  // Optimal einräumen (Meldung M-20261109-150126-3b7705): exakt, deterministisch.
+  if(KS.optKey!==c.key){ KS.optKey=c.key; try{ KS.opt=KX.optimalStore(c.E,c.K,c.L); }catch(err){ KS.opt=null; console.warn(err); } }
+  const O=KS.opt;
+  if(O){
+    const lines=Object.entries(O.assign).filter(([,ids])=>ids.length).map(([k,ids])=>`<li>${escapeHtml(KX.ROLE_LABEL[k])}: ${ids.map(id=>escapeHtml(nmId(id))).join(' und ')}</li>`).join('');
+    const dup=O.fixed.length ? ` Doppelt Eingeräumtes (${O.fixed.map(k=>escapeHtml(KX.ROLE_LABEL[k])).join(', ')}) bleibt, wie es ist.` : '';
+    const gain = O.completeAfter>O.completeBefore ? ` Danach sind ${O.completeAfter} statt ${O.completeBefore} Abläufe vollständig.`
+      : O.placedAfter>O.placedBefore ? ` Räumt ${O.placedAfter-O.placedBefore} Inhalt${O.placedAfter-O.placedBefore>1?'e':''} ein, die noch keinen Platz haben.`
+      : O.kmAfter<O.kmBefore-0.05 ? ` ≈ ${km(O.kmBefore)} → ${km(O.kmAfter)} km/Jahr.` : ' Wege etwa gleich, aber besser greifbar.';
+    if(O.same || !O.better) hs+=`<p class="tnote">Optimal eingeräumt – keine Einteilung hat kürzere Wege.${dup}</p>`;
+    else hs+=`<div class="ksugghead"><b>Optimal einräumen</b><button id="kOpt" class="primary">Einräumen</button></div>`
+      +`<p class="tnote">Jeder Inhalt dorthin, wo die Wege aller Abläufe zusammen am kürzesten sind.${gain} Gerechnet, nicht geschätzt: dieselbe Küche ergibt immer dieselbe Einteilung. Besteck und Messer in Schubladen, Töpfe unten, Müll und Putzmittel an der Spüle, Seltenes in die schlechter greifbaren Fächer.${dup}</p>`
+      +`<details class="kopt"><summary>Einteilung ansehen</summary><ul>${lines}</ul></details>`;
+    if(O.unplaced.length) hs+=`<p class="tnote">Kein passender Schrank frei für: ${O.unplaced.map(k=>escapeHtml(KX.ROLE_LABEL[k])).join(', ')}.</p>`;
+  }
   if(S.length){
     hs+=`<div class="ksugghead"><b>${places.length?'Einräumen und umsortieren':'Umsortieren'}</b><button id="kSuggAll" class="primary">Alles übernehmen</button></div>`;
     if(moves.length && S.kmAfter<S.kmPlaced-0.05) hs+=`<p class="tnote">${places.length?'Nach dem Einräumen ':''}≈ ${km(S.kmPlaced)} → ${km(S.kmAfter)} km/Jahr (−${Math.round((1-S.kmAfter/S.kmPlaced)*100)} %)</p>`;
@@ -18435,12 +18608,17 @@ function renderWays(c){
     kitchenSave(); setHint(`${list.map(s=>KX.ROLE_LABEL[s.c]).join(', ')} ${list.length>1?'eingeräumt/umgeräumt':'übernommen'} · ⌘Z nimmt es zurück`); };
   $('kSugg').querySelectorAll('[data-sg]').forEach(b=>b.onclick=()=>{ const g=S[+b.dataset.sg].grp; apply(S.filter(x=>x.grp===g)); });
   if($('kSuggAll')) $('kSuggAll').onclick=()=>apply(S);
+  if($('kOpt')) $('kOpt').onclick=()=>{ KS.hl=null; snapshot();
+    const items=kitchenData().items, keys=new Set(Object.keys(O.assign));
+    items.forEach(it=>{ if(it.store){ it.store=it.store.filter(k=>!keys.has(k)); if(!it.store.length) delete it.store; } });
+    Object.entries(O.assign).forEach(([k,ids])=>ids.forEach(id=>{ const t=items.find(it=>it.id===id); if(t) t.store=[...(t.store||[]),k]; }));
+    kitchenSave(); setHint(`Optimal eingeräumt: ≈ ${km(O.kmAfter)} km/Jahr · ⌘Z nimmt es zurück`); };
 }
 function renderStock(c){
   const S=KX.stock(c.K,c.L);
   $('kStock').innerHTML = S.list.length
     ? `<table>${S.list.map(r=>`<tr><td>${escapeHtml(r.name)} cm</td><td>${r.n}×</td></tr>`).join('')}`
-      +S.tops.map((t,i)=>`<tr><td>Arbeitsplatte ${i+1}</td><td>${mTxt(t.len)} m × ${cmTxt(t.depth)} cm</td></tr>`).join('')
+      +S.tops.map((t,i)=>`<tr><td>${t.island?'Arbeitsplatte Insel':`Arbeitsplatte ${i+1}`}</td><td>${mTxt(t.len)} m × ${cmTxt(t.depth)} cm</td></tr>`).join('')
       +(S.fillers||[]).map(f=>`<tr><td>${f.corner?'Passblende Ecke':'Passleiste'}</td><td>${Math.round(f.w)} mm</td></tr>`).join('')+`</table>`
     : '<p class="tnote">Noch nichts geplant.</p>';
 }
@@ -21889,6 +22067,45 @@ globalThis.selfChecks=function(){
     }
     chk('kueche: Hängeschrank vorm Fenster wird gemeldet', has(lay([{id:1,kind:'wall',a:'A',b:'B',x:1600,w:600}]).F, /verdeckt ein Fenster/, 'bad'));
     chk('kueche: Schrank vor der Tür wird gemeldet', has(lay([{id:1,kind:'base',a:'C',b:'D',x:500,w:600}]).F, /vor der Tür|Zimmertür/, 'bad'));
+    // Meldung M-20261109-145411-a0f040: die Tür bleibt an der Insel stehen.
+    (()=>{ const isl=(x,y)=>lay([{id:1,kind:'island',x,y,rot:0,w:1200,d:600}]);
+      const r=isl(3100,2400), rc=KX.doorReach(E,r.L).get('o2'), far=KX.doorReach(E,isl(2000,1500).L).get('o2');
+      chk('kueche: Zimmertür bleibt an der Insel stehen (Winkel im Befund), frei geht sie ganz auf',
+        rc && rc.hitId===1 && rc.deg>0 && rc.deg<90 && has(r.F, new RegExp(`Zimmertür schlägt an Insel 120 – geht nur ${rc.deg}° auf`), 'bad')
+        && far && far.hit===null && far.deg===far.maxDeg && far.maxDeg>=90);
+      chk('kueche: freie Insel vor der Tür – ohne „an der Nachbarwand“', has(r.F, /^Insel 120 steht vor einer Tür$/, 'bad') && !has(r.F, /Insel.*Nachbarwand/));
+    })();
+    // Meldung M-20261109-145755-b3f684: die Insel hat eine Arbeitsplatte.
+    (()=>{ const r=lay([{id:1,kind:'base',a:'A',b:'B',x:0,w:600},{id:2,kind:'island',x:2000,y:1500,rot:0,w:1800,d:900,bar:381}]), S=KX.stock(r.K,r.L);
+      chk('kueche: Stückliste mit Inselplatte samt Tresen-Überstand', S.tops.length===2 && S.tops.some(t=>t.island && t.len===1800 && t.depth===1281) && S.tops.some(t=>!t.island && t.len===600)); })();
+    // Meldung M-20261109-150126-3b7705: optimal einräumen, exakt und deterministisch.
+    chk('kueche: jede Ablaufkette hat höchstens einen Inhalt (Voraussetzung für exaktes Einräumen)',
+      KX.FLOWS.every(F=>F.chains.every(ch=>new Set(ch.filter(x=>KX.CONTENTS.some(c=>c.key===x && !c.fixed))).size<=1)));
+    (()=>{ const items=[{id:1,kind:'tall',a:'A',b:'B',x:0,w:600,dev:'fridge'},{id:2,kind:'base',a:'A',b:'B',x:600,w:600},
+        {id:3,kind:'base',a:'A',b:'B',x:1200,w:600,dev:'sink'},{id:4,kind:'base',a:'A',b:'B',x:1800,w:600,dev:'dw'},
+        {id:5,kind:'base',a:'A',b:'B',x:2400,w:900,dev:'hob'},{id:6,kind:'base',a:'B',b:'C',x:700,w:600,front:'door'},
+        {id:7,kind:'wall',a:'A',b:'B',x:600,w:600},{id:8,kind:'tall',a:'B',b:'C',x:1300,w:600},
+        {id:9,kind:'table',x:1500,y:2200,rot:0,w:1400,d:800},{id:10,kind:'island',x:1800,y:1300,rot:0,w:1200,d:600,store:['besteck']}];
+      const r=lay(items), O=KX.optimalStore(E,r.K,r.L), O2=KX.optimalStore(E,r.K,r.L);
+      const base=KX.flows(E,r.K,r.L), ev=a=>KX.flows(E,r.K,r.L,{assign:a,planner:base.planner,memo:base.memo,partial:true}).cost;
+      const g=id=>r.L.byId.get(id), drawer=id=>KX.frontKind(g(id).it)==='drawer';
+      let better=0; Object.keys(O.assign).forEach(c=>{ if(c==='muell'||c==='putz') return; r.L.G.forEach(h=>{ if(h.wing || !KX.storable(h.it).includes(c) || ((c==='besteck'||c==='messer') && !drawer(h.it.id))) return;
+        const a={...O.assign,[c]:[h.it.id]}, n=Object.values(a).flat().filter(x=>x===h.it.id).length, cap=h.it.kind==='tall'?3:h.it.w>=800?3:h.it.w>=450?2:1;
+        if(n<=cap && ev(a)<O.cost-1) better++; }); });
+      chk('kueche: optimal einräumen – Kosten zerfallen je Inhalt (exakt), kein Einzelumzug besser, immer dieselbe Einteilung',
+        Math.abs(O.cost-O.costSum)<1e-6*O.cost && better===0 && JSON.stringify(O.assign)===JSON.stringify(O2.assign) && O.completeAfter===KX.FLOWS.length);
+      chk('kueche: optimal einräumen – Besteck in Schublade, Müll an der Spüle, alles eingeräumt, als Fortschritt erkannt',
+        drawer(O.assign.besteck[0]) && g(O.assign.muell[0]).it.dev==='sink' && !O.unplaced.length && O.better && O.placedAfter===Object.keys(O.assign).length);
+      // Vorher alles eingeräumt (die optimale Einteilung), dazu Teller in
+      // einem zweiten Schrank: Teller bleiben doppelt, Ergebnis nie schlechter.
+      const st=new Map(), cap=h=>h.it.kind==='tall'?3:h.it.w>=800?3:h.it.w>=450?2:1;
+      Object.entries(O.assign).forEach(([k,ids])=>ids.forEach(id=>st.set(id,[...(st.get(id)||[]),k])));
+      const room=k=>r.L.G.find(h=>!h.wing && KX.storable(h.it).includes(k) && !O.assign[k].includes(h.it.id) && (st.get(h.it.id)||[]).length<cap(h));
+      const tw=room('teller').it.id; st.set(tw, [...(st.get(tw)||[]),'teller']);
+      const dup=lay(items.map(it=>({...it, store:st.get(it.id)}))), Od=KX.optimalStore(E,dup.K,dup.L);
+      chk('kueche: optimal einräumen – doppelt Eingeräumtes bleibt, Ergebnis nie schlechter als vorher',
+        Od.fixed.includes('teller') && Od.assign.teller.length===2 && Od.assign.teller.includes(tw) && Od.cost<=Od.costStart+1);
+    })();
     chk('kueche: Überlappung gleicher Höhenlage wird gemeldet, Hängeschrank über Unterschrank nicht',
       has(lay([{id:1,kind:'base',a:'D',b:'A',x:0,w:600},{id:2,kind:'base',a:'D',b:'A',x:300,w:600}]).F, /überlappen/)
       && !has(lay([{id:1,kind:'base',a:'D',b:'A',x:0,w:600},{id:2,kind:'wall',a:'D',b:'A',x:0,w:600}]).F, /überlappen/));
