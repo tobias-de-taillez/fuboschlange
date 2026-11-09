@@ -506,6 +506,7 @@
         <button id="filesave" role="menuitem">Als Datei sichern<kbd data-k="⌘S"></kbd></button>
         <button id="fileopen" role="menuitem">Datei öffnen …<kbd data-k="⌘O"></kbd></button>
         <button id="dxfsave" role="menuitem" title="Grundriss als 2D-Skizze in mm für Shapr3D und andere CAD-Programme">Für CAD exportieren (DXF)</button>
+        <button id="stepsave" role="menuitem" title="Wände als 3D-Körper in mm (mit Raumhöhen, Türen und Fenstern) für Shapr3D und andere CAD-Programme">Für CAD exportieren, 3D (STEP)</button>
         <button id="exp" role="menuitem">JSON kopieren</button>
         <button id="imp" role="menuitem" title="Raum-JSON aus der Zwischenablage als neuen Raum anlegen">JSON einfügen</button>
         <hr>
@@ -6454,6 +6455,230 @@ globalThis.roomDxf=function(pts, walls, thick, openings, name){
   ].join('\n');
 };
 
+// ================= STEP fuer CAD (Shapr3D, 3D) =================
+// Waende als Volumenkoerper. Je Wand ein Koerper aus ihrem Profil in
+// Wandkoordinaten (s entlang der Innenkante ab Ecke iA, z vom Boden):
+// Decke je Ecke (cornerHeights), Fenster/Loecher als Durchbruch, Tueren ab
+// Boden als Aussparung von unten, Oeffnungen bis zur Decke als Aussparung
+// von oben; eine Oeffnung vom Boden bis zur Decke teilt die Wand in zwei
+// Koerper. Innen liegt das Profil auf der Innenkante, aussen auf der
+// Aussenkante; an den Raumecken sitzen die Aussenpunkte auf der Gehrung
+// (wallBands) - Nachbarwaende stossen dort exakt aneinander. Inseln werden
+// Pfeiler vom Boden bis zur Decke. Gleicher Ursprung und gleiche y-Spiegelung
+// wie das DXF, damit beide Dateien uebereinander liegen.
+globalThis.roomSolids=function(pts, walls, thick, openings, hmeas){
+  const C=globalThis.CORE;
+  const ring=C.wallPolygon(pts, walls);
+  if(!ring || ring.length<3) return null;
+  const bands=globalThis.wallBands(pts, walls, thick||{}, globalThis.THICK_DEFAULT);
+  if(bands.length!==ring.length) return null;
+  const H=globalThis.cornerHeights(pts, hmeas);
+  const alle=[...ring, ...ring.holes.flat(), ...bands.map(b=>b.oA)];
+  const x0=Math.min(...alle.map(p=>p.x)), y1=Math.max(...alle.map(p=>p.y));
+  const P3=(p,z)=>[p.x-x0, y1-p.y, z];
+  const add=(p,v,k)=>({x:p.x+v.x*k, y:p.y+v.y*k});
+  const key=(a,b)=>[a,b].sort().join('|');
+  const EPS=1;                                      // mm
+  const solids=[];
+  bands.forEach(b=>{
+    const L=b.L, ha=H[b.a].h, hb=H[b.b].h;
+    const ceil=s=>ha+(hb-ha)*s/L;
+    // Oeffnungen dieser Wand in s-Lage (die Wand kann andersherum laufen
+    // als o.a -> o.b; projiziert wird wie im DXF auf b.u ab iA).
+    const ops=[];
+    (openings||[]).forEach(o=>{
+      if(key(o.a,o.b)!==key(b.a,b.b)) return;
+      const r=globalThis.openingWorld(pts, o.a, o.b, o);
+      if(!r || !(o.h>0)) return;
+      const pr=p=>(p.x-b.iA.x)*b.u.x+(p.y-b.iA.y)*b.u.y;
+      let s0=Math.max(0,Math.min(pr(r.P),pr(r.Q))), s1=Math.min(L,Math.max(pr(r.P),pr(r.Q)));
+      if(s1-s0<EPS) return;
+      if(s0<EPS) s0=0; if(s1>L-EPS) s1=L;
+      const z0=Math.max(0,o.y||0), z1=z0+o.h;
+      const unten=z0<EPS, oben=z1>=Math.min(ceil(s0),ceil(s1))-EPS;
+      if(unten && z1<=EPS) return;
+      ops.push({s0,s1,z0,z1,unten,oben,kind:o.kind});
+    });
+    ops.sort((p,q)=>p.s0-q.s0);
+    // Durchgehende Oeffnungen teilen die Wand in Stuecke [a,b].
+    const stuecke=[]; let a=0;
+    ops.filter(o=>o.unten&&o.oben).forEach(o=>{ if(o.s0-a>EPS) stuecke.push([a,o.s0]); a=o.s1; });
+    if(L-a>EPS) stuecke.push([a,L]);
+    stuecke.forEach(([sa,sb],k)=>{
+      const imStueck=ops.filter(o=>!(o.unten&&o.oben) && o.s0>=sa-EPS && o.s1<=sb+EPS);
+      const nah=(x,y)=>Math.abs(x-y)<EPS;
+      // Profil gegen den Uhrzeiger (s nach rechts, z nach oben).
+      const R=[];
+      const unt=imStueck.filter(o=>o.unten), obn=imStueck.filter(o=>o.oben).reverse();
+      // unten links -> rechts
+      if(unt.length && nah(unt[0].s0,sa)) R.push([sa,unt[0].z1]); else R.push([sa,0]);
+      unt.forEach(o=>{
+        if(!nah(o.s0,sa)) R.push([o.s0,0],[o.s0,o.z1]);
+        if(!nah(o.s1,sb)) R.push([o.s1,o.z1],[o.s1,0]); else R.push([sb,o.z1]);
+      });
+      if(!(unt.length && nah(unt[unt.length-1].s1,sb))) R.push([sb,0]);
+      // oben rechts -> links
+      if(obn.length && nah(obn[0].s1,sb)) R.push([sb,obn[0].z0]); else R.push([sb,ceil(sb)]);
+      obn.forEach(o=>{
+        if(!nah(o.s1,sb)) R.push([o.s1,ceil(o.s1)],[o.s1,o.z0]);
+        if(!nah(o.s0,sa)) R.push([o.s0,o.z0],[o.s0,ceil(o.s0)]); else R.push([sa,o.z0]);
+      });
+      if(!(obn.length && nah(obn[obn.length-1].s0,sa))) R.push([sa,ceil(sa)]);
+      const prof=R.filter((p,i)=>{ const q=R[(i+R.length-1)%R.length]; return !(nah(p[0],q[0])&&nah(p[1],q[1])); });
+      const loecher=imStueck.filter(o=>!o.unten&&!o.oben)
+        .map(o=>[[o.s0,o.z0],[o.s0,o.z1],[o.s1,o.z1],[o.s1,o.z0]]);
+      // Profilpunkt -> innen/aussen in 3D. An einer echten Raumecke liegt der
+      // Aussenpunkt auf der Gehrung, an einem Schnitt senkrecht gegenueber.
+      const verts=[], idx=new Map();
+      const V=(p,z)=>{ const q=P3(p,z), kk=q.map(v=>v.toFixed(4)).join(','); if(!idx.has(kk)){ idx.set(kk,verts.length); verts.push(q); } return idx.get(kk); };
+      const innen=([s,z])=>V(add(b.iA,b.u,s),z);
+      const aussen=([s,z])=>{
+        const p= (s<EPS) ? b.oA : (s>L-EPS) ? b.oB : add(add(b.iA,b.u,s),b.n,b.t);
+        return V(p,z);
+      };
+      const faces=[];
+      const loops=[prof,...loecher];
+      faces.push(loops.map(l=>l.map(innen)));
+      faces.push(loops.map(l=>l.map(aussen).reverse()));
+      loops.forEach(l=>l.forEach((p,i)=>{
+        const q=l[(i+1)%l.length];
+        faces.push([[innen(q),innen(p),aussen(p),aussen(q)]]);
+      }));
+      solids.push({name:`Wand ${b.a}-${b.b}${stuecke.length>1?` (${k+1})`:''}`, verts, faces});
+    });
+  });
+  // Inseln: Pfeiler vom Boden bis zur Decke der jeweiligen Ecke.
+  ring.holes.forEach((h,k)=>{
+    const verts=[], n=h.length;
+    h.forEach(p=>verts.push(P3(p,0)));
+    h.forEach(p=>verts.push(P3(p,H[p.id].h)));
+    const faces=[[h.map((_,i)=>n-1-i)], [h.map((_,i)=>n+i)]];
+    h.forEach((_,i)=>{ const j=(i+1)%n; faces.push([[i,j,n+j,n+i]]); });
+    solids.push({name:`Insel ${k+1} (${h.map(p=>p.id).join('-')})`, verts, faces});
+  });
+  const g=pts.filter(p=>H[p.id].gemessen).length;
+  return {solids, hoehen:[...new Set(pts.map(p=>Math.round(H[p.id].h)))],
+          gemessen: g===pts.length ? 'alle' : g ? 'teils' : 'keine'};
+};
+
+// Geschlossene Polyeder -> STEP AP214 (ADVANCED_BREP aus ebenen Flaechen).
+// Kopf, Produktkette und mm-Kontext wie ein Export von Open CASCADE 7.8.
+// Invarianten, an denen handgeschriebenes STEP sonst scheitert: jede Kante
+// genau zweimal mit Gegensinn (geteilte Ecken ueber einen Schluessel),
+// Flaechen eben (sonst in Dreiecke zerlegt), Umlaufsinn nach aussen (aus
+// dem Vorzeichen des Volumens - die y-Spiegelung kehrt ihn um), REAL immer
+// mit Dezimalpunkt, Namen nur ASCII.
+globalThis.solidPrepare=function(sol){
+  const V=sol.verts;
+  const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]];
+  const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+  const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+  const newell=l=>{ const n=[0,0,0]; l.forEach((i,k)=>{ const p=V[i], q=V[l[(k+1)%l.length]];
+    n[0]+=(p[1]-q[1])*(p[2]+q[2]); n[1]+=(p[2]-q[2])*(p[0]+q[0]); n[2]+=(p[0]-q[0])*(p[1]+q[1]); }); return n; };
+  // Ohrenschneiden in der Ebene der groessten Normalenkomponente.
+  const ears=l=>{
+    const n=newell(l), ax=[0,1,2].reduce((m,i)=>Math.abs(n[i])>Math.abs(n[m])?i:m,0);
+    const [u,v]=[[1,2],[2,0],[0,1]][ax], sg=Math.sign(n[ax])||1;
+    const P=i=>[V[i][u],V[i][v]];
+    const cr=(a,b,c)=>((b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]))*sg;
+    const rest=[...l], out=[];
+    let schutz=0;
+    while(rest.length>3 && schutz++<1000){
+      let ok=false;
+      for(let i=0;i<rest.length;i++){
+        const a=rest[(i+rest.length-1)%rest.length], b=rest[i], c=rest[(i+1)%rest.length];
+        if(cr(P(a),P(b),P(c))<=1e-9) continue;
+        if(rest.some(x=>x!==a&&x!==b&&x!==c && cr(P(a),P(b),P(x))>=0 && cr(P(b),P(c),P(x))>=0 && cr(P(c),P(a),P(x))>=0)) continue;
+        out.push([a,b,c]); rest.splice(i,1); ok=true; break;
+      }
+      if(!ok) break;
+    }
+    out.push(rest);
+    return out;
+  };
+  const faces=[];
+  sol.faces.forEach(F=>{
+    const n=newell(F[0]), ln=Math.hypot(...n);
+    const p0=V[F[0][0]];
+    const eben=ln>0 && F.every(l=>l.every(i=>Math.abs(dot(sub(V[i],p0),n))/ln<1e-3));
+    if(eben || F.length>1) faces.push(F);
+    else ears(F[0]).forEach(t=>faces.push([t]));
+  });
+  // Volumen (Divergenzsatz ueber Faecher je Schleife); negativ -> umdrehen.
+  let vol=0;
+  faces.forEach(F=>F.forEach(l=>{ for(let k=1;k+1<l.length;k++) vol+=dot(V[l[0]],cross(V[l[k]],V[l[k+1]]))/6; }));
+  if(vol<0){ faces.forEach(F=>F.forEach(l=>l.reverse())); vol=-vol; }
+  // Kanten: jede gerichtete genau einmal, jede ungerichtete genau zweimal.
+  const ger=new Map();
+  faces.forEach(F=>F.forEach(l=>l.forEach((i,k)=>{ const j=l[(k+1)%l.length], kk=i+'>'+j; ger.set(kk,(ger.get(kk)||0)+1); })));
+  const dicht=[...ger].every(([kk,c])=>c===1 && ger.get(kk.split('>').reverse().join('>'))===1);
+  const eben=faces.every(F=>{ const n=newell(F[0]), ln=Math.hypot(...n), p0=V[F[0][0]];
+    return ln>0 && F.every(l=>l.every(i=>Math.abs(dot(sub(V[i],p0),n))/ln<1e-3)); });
+  return {name:sol.name, verts:V, faces, vol, dicht, eben, newell};
+};
+globalThis.stepFile=function(solids, name){
+  const ascii=s=>String(s||'').replace(/ä/g,'ae').replace(/ö/g,'oe').replace(/ü/g,'ue')
+    .replace(/Ä/g,'Ae').replace(/Ö/g,'Oe').replace(/Ü/g,'Ue').replace(/ß/g,'ss')
+    .replace(/[^\x20-\x7e]/g,'_').replace(/\\/g,'/').replace(/'/g,"''");
+  const R=v=>{ let s=(Math.abs(v)<5e-7?0:v).toFixed(6).replace(/0+$/,''); return s; };   // "2500." / "0.5"
+  const out=[]; let id=0;
+  const E=txt=>{ out.push(`#${++id}=${txt};`); return '#'+id; };
+  const pt=p=>E(`CARTESIAN_POINT('',(${p.map(R).join(',')}))`);
+  const dir=d=>{ const l=Math.hypot(...d); return E(`DIRECTION('',(${d.map(v=>R(v/l)).join(',')}))`); };
+  const apd=E(`APPLICATION_CONTEXT('core data for automotive mechanical design processes')`);
+  E(`APPLICATION_PROTOCOL_DEFINITION('international standard','automotive_design',2000,${apd})`);
+  const pc=E(`PRODUCT_CONTEXT('',${apd},'mechanical')`);
+  const nm=ascii(name)||'Raum';
+  const prod=E(`PRODUCT('${nm}','${nm}','Raumaufmass - Masse in mm',(${pc}))`);
+  const pdf=E(`PRODUCT_DEFINITION_FORMATION('','',${prod})`);
+  const pdc=E(`PRODUCT_DEFINITION_CONTEXT('part definition',${apd},'design')`);
+  const pd=E(`PRODUCT_DEFINITION('design','',${pdf},${pdc})`);
+  const pds=E(`PRODUCT_DEFINITION_SHAPE('','',${pd})`);
+  E(`PRODUCT_RELATED_PRODUCT_CATEGORY('part',$,(${prod}))`);
+  const mm=E(`( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) )`);
+  const rad=E(`( NAMED_UNIT(*) PLANE_ANGLE_UNIT() SI_UNIT($,.RADIAN.) )`);
+  const sr=E(`( NAMED_UNIT(*) SI_UNIT($,.STERADIAN.) SOLID_ANGLE_UNIT() )`);
+  const unc=E(`UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-03),${mm},'distance_accuracy_value','confusion accuracy')`);
+  const ctx=E(`( GEOMETRIC_REPRESENTATION_CONTEXT(3) GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((${unc})) GLOBAL_UNIT_ASSIGNED_CONTEXT((${mm},${rad},${sr})) REPRESENTATION_CONTEXT('Context #1','3D Context with UNIT and UNCERTAINTY') )`);
+  const ach=E(`AXIS2_PLACEMENT_3D('',${pt([0,0,0])},${dir([0,0,1])},${dir([1,0,0])})`);
+  const breps=solids.map(S=>{
+    const V=S.verts;
+    const vp=V.map(p=>E(`VERTEX_POINT('',${pt(p)})`));
+    const kanten=new Map();
+    const kante=(i,j)=>{
+      const kk=i<j?i+'|'+j:j+'|'+i;
+      if(!kanten.has(kk)){
+        const [a,b]=i<j?[i,j]:[j,i], d=[0,1,2].map(k=>V[b][k]-V[a][k]), l=Math.hypot(...d);
+        const ln=E(`LINE('',${pt(V[a])},${E(`VECTOR('',${dir(d)},${R(l)})`)})`);
+        kanten.set(kk, E(`EDGE_CURVE('',${vp[a]},${vp[b]},${ln},.T.)`));
+      }
+      return E(`ORIENTED_EDGE('',*,*,${kanten.get(kk)},${i<j?'.T.':'.F.'})`);
+    };
+    const faces=S.faces.map(F=>{
+      const n=S.newell(F[0]);
+      const p0=V[F[0][0]], p1=V[F[0][1]];
+      let r=[p1[0]-p0[0],p1[1]-p0[1],p1[2]-p0[2]];
+      const ln=Math.hypot(...n), nn=n.map(v=>v/ln), d=r[0]*nn[0]+r[1]*nn[1]+r[2]*nn[2];
+      r=r.map((v,k)=>v-d*nn[k]);
+      const ebene=E(`PLANE('',${E(`AXIS2_PLACEMENT_3D('',${pt(p0)},${dir(nn)},${dir(r)})`)})`);
+      const bounds=F.map((l,k)=>{
+        const el=E(`EDGE_LOOP('',(${l.map((i,m)=>kante(i,l[(m+1)%l.length])).join(',')}))`);
+        return E(`${k?'FACE_BOUND':'FACE_OUTER_BOUND'}('',${el},.T.)`);
+      });
+      return E(`ADVANCED_FACE('',(${bounds.join(',')}),${ebene},.T.)`);
+    });
+    return E(`MANIFOLD_SOLID_BREP('${ascii(S.name)}',${E(`CLOSED_SHELL('',(${faces.join(',')}))`)})`);
+  });
+  const rep=E(`ADVANCED_BREP_SHAPE_REPRESENTATION('${nm}',(${[ach,...breps].join(',')}),${ctx})`);
+  E(`SHAPE_DEFINITION_REPRESENTATION(${pds},${rep})`);
+  const t=new Date().toISOString().slice(0,19);
+  return ['ISO-10303-21;','HEADER;',
+    `FILE_DESCRIPTION(('Raumaufmass ${nm}'),'2;1');`,
+    `FILE_NAME('${nm}.step','${t}',(''),(''),'Raumaufmass','Raumaufmass','');`,
+    `FILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));`,
+    'ENDSEC;','DATA;', ...out, 'ENDSEC;','END-ISO-10303-21;',''].join('\n');
+};
+
 // ================= Abwicklung =================
 // Die Waende legen sich im Grundriss flach hin wie ein SCHATTEN, mit dem
 // Licht im Fokuspunkt: jeder Wandpunkt faellt radial vom Fokus weg, nicht
@@ -11092,6 +11317,23 @@ $('dxfsave').onclick=()=>{
   a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
   setHint(`Exportiert als ${fname} (Downloads) – in Shapr3D über Importieren öffnen.`);
+};
+// STEP: Waende als Koerper. Ungemessene Hoehen werden angenommen - das muss
+// der Hinweis sagen, sonst sieht die Wand in Shapr3D wie gemessen aus.
+$('stepsave').onclick=()=>{
+  const r=M.fit && roomSolids(M.fit.pts, M.walls, M.thick, M.openings, M.hmeas);
+  if(!r){ setHint('Für den STEP-Export braucht es einen geschlossenen, vermessenen Raum.'); return; }
+  const S=r.solids.map(solidPrepare);
+  if(!S.every(s=>s.dicht && s.eben && s.vol>0)){ setHint('STEP-Export: ein Wandkörper ist nicht geschlossen. Bitte Öffnungen prüfen.'); return; }
+  const step=stepFile(S, currentRoomName);
+  const fname=`${slug(currentRoomName)}-${new Date().toISOString().slice(0,10)}.step`;
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([step],{type:'application/step'}));
+  a.download=fname;
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
+  const h=r.hoehen.map(v=>v.toLocaleString('de-DE')).join(' / ');
+  setHint(`Exportiert als ${fname} (Downloads), ${S.length} Körper. Raumhöhe ${h} mm${r.gemessen==='keine'?' – angenommen, nicht gemessen':r.gemessen==='teils'?' – an ungemessenen Ecken angenommen':''}.`);
 };
 $('fileopen').onclick=()=>$('filepick').click();
 $('filepick').onchange=async()=>{
@@ -16053,6 +16295,37 @@ globalThis.selfChecks=function(){
         && /ARC\n8\nTUERBLATT\n10\n1740\.000\n20\n3240\.000\n30\n0\.0\n40\n900\.000/.test(ents));
       chk('dxf: offener Raum -> kein Export',
         globalThis.roomDxf(R, W.slice(0,4), {}, [], 'x')===null);
+    }
+    // --- STEP-Export: Waende als Koerper ---
+    {
+      // 4000 x 3000, Dicke 240 (Vorgabe), Hoehe 2500. Tuer 900 x 2000 in A-B,
+      // Fenster 1000 x 1200 auf 900 in B-C.
+      const R=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:3000},{id:'D',x:0,y:3000}];
+      const W=[['A','B'],['B','C'],['C','D'],['D','A']];
+      const h25=[{kind:'h',at:'A',d:2500,on:true}];
+      const ops=[{id:'o1',kind:'door',a:'A',b:'B',x:1500,y:0,w:900,h:2000},
+                 {id:'o2',kind:'window',a:'B',b:'C',x:1000,y:900,w:1000,h:1200}];
+      const prep=(o,hm)=>globalThis.roomSolids(R,W,{},o,hm).solids.map(globalThis.solidPrepare);
+      const S=prep(ops,h25), V=S.reduce((a,s)=>a+s.vol,0);
+      chk('step: jede Wand ein Koerper, geschlossen und eben',
+        S.length===4 && S.every(s=>s.dicht && s.eben));
+      chk('step: Volumen = Wandring x Hoehe - Tuer - Fenster',
+        near(V, (4480*3480-4000*3000)*2500 - 900*240*2000 - 1000*240*1200, 1));
+      const Sch=prep(ops,[{kind:'h',at:'A',d:2500,on:true},{kind:'h',at:'C',d:2200,on:true}]);
+      chk('step: schraege Decke -> geschlossen, nicht-ebene Kopfflaechen zerlegt',
+        Sch.length===4 && Sch.every(s=>s.dicht && s.eben) && Sch.some(s=>s.faces.some(F=>F[0].length===3)));
+      const Sv=prep([{id:'o1',kind:'hole',a:'A',b:'B',x:1500,y:0,w:900,h:2500},
+                     {id:'o2',kind:'door',a:'B',b:'C',x:0,y:0,w:800,h:2000}],h25);
+      chk('step: Oeffnung Boden bis Decke teilt die Wand, Tuer an der Ecke bleibt dicht',
+        Sv.length===5 && Sv.every(s=>s.dicht && s.eben)
+        && near(Sv.filter(s=>/^Wand A-B/.test(s.name)).reduce((a,s)=>a+s.vol,0), ((4000+4480)/2*240-900*240)*2500, 1));
+      const st=globalThis.stepFile(S,"Bäder's");
+      chk('step: Datei mit mm-Kontext, ASCII-Namen und vier Koerpern',
+        st.startsWith('ISO-10303-21;') && st.includes("SI_UNIT(.MILLI.,.METRE.)")
+        && st.includes("PRODUCT('Baeder''s'") && (st.match(/MANIFOLD_SOLID_BREP/g)||[]).length===4
+        && !/[^\x00-\x7f]/.test(st)
+        // REAL immer mit Dezimalpunkt, nie "-0."
+        && [...st.matchAll(/(?:CARTESIAN_POINT|DIRECTION)\('',\(([^)]*)\)/g)].every(m=>m[1].split(',').every(v=>/^-?\d+\.\d*$/.test(v) && v!=='-0.')));
     }
     // --- Oeffnungen einmessen ---
     {
