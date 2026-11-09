@@ -6461,7 +6461,6 @@ const FLOWS=[
 const GROUPS={ein:'Eingang', zub:'Zubereitung', aus:'Geschirr'};
 const ROLE_LABEL={sink:'Spüle', dw:'Spülmaschine', hob:'Herd', kuehl:'Kühlschrank', tisch:'Tisch',
                   eingang:'Eingang', prep:'Arbeitsfläche', ...CLABEL};
-
 // ---------- Normalisieren (Import tolerant, wie normTiles) ----------
 function normSpec(s){
   const o={...K_DEF};
@@ -6578,7 +6577,6 @@ function fitStores(K, only){
   return n;
 }
 const isEmpty=K=>!K || (!K.items.length && Object.keys(K_DEF).every(k=>K.spec[k]===K_DEF[k]) && !K.spec.entry);
-
 // ---------- Raum ----------
 // Umgebung aus dem Aufmaß: Ring, Wände mit Innennormale, Höhen, Öffnungen.
 // pts sind die ausgeglichenen Punkte (M.fit.pts), sonst stimmt nichts.
@@ -8453,6 +8451,24 @@ function placeOk(E, K, L, t){
   const g=geom(E,K,t); if(!g || !polyInRoom(E,g.foot||g.poly)) return false;
   return !L.G.some(h=>h.it.id!==t.id && bandsMeet(g,h) && TL.convexOverlap(g.foot||g.poly, h.foot||h.poly, 1));
 }
+// Duplizieren eines freien Teils (Insel, Tisch): die Kopie n (neue id, damit das
+// Original beim Überlappen zählt) steht daneben, in der eigenen Achse des Teils
+// (Drehung, wie die Achsen von sweep), mit gap mm Luft zur Platte samt Überstand.
+// Längs rechts, längs links, quer hinter, quer davor; genommen wird die erste Lage,
+// die im Raum liegt und nichts überlappt (placeOk). -> {x, y} im Raumrahmen oder
+// null, wenn nirgends Platz ist. Der Versatz in F statt in der Teilachse ließ die
+// Kopie ganz aus dem Raum fallen.
+function copySpot(E, K, L, n, gap){
+  const g=KIND[n.kind].free && geom(E,K,n); if(!g) return null;
+  gap=gap==null ? 200 : gap;
+  const P=g.foot||g.poly, span=ax=>{ const v=P.map(p=>dot(p,ax)); return Math.max(...v)-Math.min(...v); };
+  const r=(n.rot||0)*Math.PI/180, u={x:Math.cos(r), y:Math.sin(r)}, v={x:-Math.sin(r), y:Math.cos(r)};
+  for(const [d,s] of [[u,span(g.u)],[mul(u,-1),span(g.u)],[v,span(g.n)],[mul(v,-1),span(g.n)]]){
+    const t={...n, x:n.x+d.x*(s+gap), y:n.y+d.y*(s+gap)};
+    if(placeOk(E,K,L,t)) return {x:t.x, y:t.y};
+  }
+  return null;
+}
 function sweep(E, K, L, id, opts){
   opts=opts||{};
   const it=K.items.find(x=>x.id===id); if(!it || it.corner) return null;
@@ -8502,6 +8518,49 @@ function sweep(E, K, L, id, opts){
     swaps.sort((p,q)=>(q.ok-p.ok) || p.km-q.km || p.with-q.with);
   }
   return {id, axes, swaps};
+}
+// Lücken der km/Jahr-Kurve (gesperrte Lagen): br[i] = vor Punkt i bricht die Linie ab.
+// Das Raster kennt nur sweep; die jetzige Lage cur liegt meist daneben (Wand 4000:
+// 70-mm-Raster, Teil bei 600) und darf den Rasterschritt nicht stellen - als
+// kleinster Abstand aller Punkte machte sie fast jedes Stück zur „Lücke“. Der
+// Schritt ist der kleinste Abstand zweier Punkte ohne cur; gebrochen wird, wo mehr
+// als ein Schritt dazwischen liegt, dort fehlt eine Rasterlage.
+function sweepGaps(P, cur){
+  const sp=P.slice(1).map((p,i)=>({d:p.v-P[i].v, c:Math.abs(p.v-cur)<1 || Math.abs(P[i].v-cur)<1}));
+  const grid=sp.filter(s=>!s.c).map(s=>s.d), step=Math.min(...(grid.length ? grid : sp.map(s=>s.d)));
+  return P.map((p,i)=>i>0 && p.v-P[i-1].v>step+0.5);
+}
+
+// Texte in Hinweisen und Panel. Listen mit „ · “: Inhaltsnamen enthalten selbst
+// Kommas („Messer, Bretter“), ein Komma als Trenner wäre mehrdeutig.
+const roleList=keys=>keys.map(k=>ROLE_LABEL[k]||k).join(' · ');
+// Rückgängig-Zusatz hinter einer Aussage, die eine „ · “-Liste enthalten kann:
+// als eigener Satz, sonst liest sich „⌘Z nimmt es zurück“ wie ein Listenelement.
+const undoHint=t=>t+'. ⌘Z nimmt es zurück';
+// Einheiten im Plan: Schrankbreiten stehen als Nennmaß in cm (Typenliste, wie im
+// Panel), Maßkette und Abstände in mm (so bearbeitet man den Wandabstand). Die
+// globale Einheit (m/cm/mm) gilt für die Messeingaben des Grundrisses, nicht für Bauteile.
+const DIM_NOTE='Maße in mm · Schrankbreite in cm';
+// Bedienzustand der Küche aus einer Meldung (Meldedialog: zustand und Nachstellen).
+// Eine Meldung ist eine Fremddatei: nur gültige Werte kommen durch, der Rest bleibt
+// Standard. sel muss ein Teil von K sein, flow ein Ablauf; ref (Referenz der
+// Analyse) trägt km/Jahr und je Ablauf Woche und Meter. Die Schalter ana/paths/
+// show3d nur, wenn sie Wahrheitswerte sind (sonst bleibt, was die Sitzung hat).
+function normUi(o, K){
+  const r={sel:null, open:false, flow:null, anaMode:'week', kid:false, heat:true, ref:null};
+  if(!o || typeof o!=='object') return r;
+  if(Number.isInteger(o.sel) && K && K.items.some(it=>it.id===o.sel)) r.sel=o.sel;
+  r.open=o.open===true;
+  if(FLOWS.some(f=>f.key===o.flow)) r.flow=o.flow;
+  if(o.anaMode==='run') r.anaMode='run';
+  r.kid=o.kid===true; r.heat=o.heat!==false;
+  ['ana','paths','show3d'].forEach(k=>{ if(typeof o[k]==='boolean') r[k]=o[k]; });
+  const rf=o.ref && o.ref.flows;
+  if(rf && typeof rf==='object' && fin(o.ref.kmYear)){
+    const fl={}; FLOWS.forEach(f=>{ const x=rf[f.key]; if(x && fin(x.week) && fin(x.m)) fl[f.key]={week:x.week, m:x.m}; });
+    r.ref={kmYear:o.ref.kmYear, flows:fl};
+  }
+  return r;
 }
 
 // ---------- 3D-Szene ----------
@@ -9048,7 +9107,7 @@ Object.assign(globalThis.KITCHEN, { /* rest-3d */ });
 //
 Object.assign(globalThis.KITCHEN, { /* rest-zustand */ });
 //
-Object.assign(globalThis.KITCHEN, { /* rest-bedienung */ });
+Object.assign(globalThis.KITCHEN, { copySpot, sweepGaps, normUi, roleList, undoHint, DIM_NOTE });
 //
 Object.assign(globalThis.KITCHEN, { /* rest-etiketten */ });
 //
@@ -9468,7 +9527,9 @@ globalThis.normOpeningIds=function(openings, seq){
     let id;
     if(s && OPEN_ID_RE.test(s) && !used.has(s)) id=s;
     else { while(used.has('o'+seq)) seq++; id='o'+(seq++); }
-    used.add(id); map.set(o.id, id); o.id=id;
+    // Doppelte id (Fremdimport): die ERSTE Öffnung gewinnt, wie find() sie früher
+    // auflöste - sonst hängen Lagemaß, Nachbartür und Eingang an der zweiten.
+    used.add(id); if(!map.has(o.id)) map.set(o.id, id); o.id=id;
   });
   return {map, seq};
 };
@@ -19064,6 +19125,9 @@ function drawChain(c, dpr, LP){
   const g=c.L.byId.get(it.id); if(!g) return;
   ctx.save();
   ctx.strokeStyle=INK.scale; ctx.lineWidth=1*dpr; ctx.font=kFont({px:KX.PLAN_TXT.sub*dpr}); ctx.textAlign='center'; ctx.textBaseline='middle';
+  // Einheit der Zahlen einmal unter der Maßstabsleiste: Kette und Abstände in mm, die
+  // Breite am Schrank in cm (KX.DIM_NOTE) - ohne Hinweis liest man 600 als cm.
+  const note=()=>{ ctx.save(); ctx.textAlign='left'; ctx.fillStyle=INK.scale; ctx.fillText(KX.DIM_NOTE, 14*dpr, 40*dpr); ctx.restore(); };
   if(g.free){
     (KX.freeDims(c.E, c.L, g)||[]).forEach(d=>{
       if(d.val<1) return;
@@ -19072,6 +19136,7 @@ function drawChain(c, dpr, LP){
       ctx.moveTo(q.x-t.x,q.y-t.y); ctx.lineTo(q.x+t.x,q.y+t.y); ctx.stroke();
       dimLabel(String(Math.round(d.val)), p, q, d.wall?INK.meas:INK.scale, d.edit, dpr, LP);
     });
+    note();
     ctx.restore();
     return;
   }
@@ -19092,6 +19157,7 @@ function drawChain(c, dpr, LP){
   c.E.openings.forEach(o=>{ if(o.kind!=='window') return; const on=KX.openingOn(c.E,o,Wf); if(!on) return;
     const s0=(on.s0+on.s1)/2, t=toScr(KX.wpt(Wf,s0,q-120)), u=toScr(KX.wpt(Wf,s0,q+120));
     ctx.save(); ctx.setLineDash([3*dpr,3*dpr]); ctx.strokeStyle=KINK.sash; ctx.beginPath(); ctx.moveTo(t.x,t.y); ctx.lineTo(u.x,u.y); ctx.stroke(); ctx.restore(); });
+  note();
   ctx.restore();
 }
 // Klick auf einen Wandabstand: Eingabefeld darüber, Enter setzt, Esc bricht ab.
@@ -19409,8 +19475,14 @@ function duplicate(it){
     const x=Wf && KX.freeSlot(c.E,K,c.L,n,Wf,it.x+it.w);
     if(x==null){ setHint('Daneben ist kein Platz frei.'); K.seq--; return; }
     n.x=x;
-  } else { n.x+=it.w+200; }
-  snapshot(); K.items.push(n); KS.sel=n.id; kitchenSave();
+  } else {
+    // Freies Teil (Insel, Tisch): daneben in seiner Achse, wo es im Raum steht
+    // und nichts überlappt - sonst wie bei Wandteilen kein Duplikat.
+    const s=KX.copySpot(c.E,K,c.L,n);
+    if(!s){ setHint('Daneben ist kein Platz frei.'); K.seq--; return; }
+    n.x=s.x; n.y=s.y;
+  }
+  snapshot(); K.items.push(KX.normItem(n)||n); KS.sel=n.id; kitchenSave();
 }
 function removeItem(it){
   snapshot();
@@ -19418,6 +19490,20 @@ function removeItem(it){
   KS.sel=null; kitchenSave();
   setHint(`${nm(it)} entfernt · ⌘Z holt es zurück`);
 }
+// Bedienzustand für den Meldedialog (zustand und Nachstellen im meldung-Block):
+// KS bleibt in dieser IIFE. Ohne ihn ließ sich eine Meldung zum Panel eines Teils
+// nicht nachstellen - gewähltes Teil, offene Fronten, Ablauf, Analyse, Kind, Referenz.
+// Restore nimmt nur Gültiges (KX.normUi), der Aufrufer zeichnet danach.
+function kitchenUiState(){
+  return {sel:KS.sel, open:KS.open, flow:KS.flow, anaMode:KS.anaMode, kid:KS.kid, heat:KS.heat, ref:KS.ref,
+          ana:KS.ana, paths:KS.paths, show3d:KS.show3d};
+}
+function kitchenUiRestore(s){
+  Object.assign(KS, KX.normUi(s, kitchenData()));
+  KS.kidR=null; KS.swKey=''; KS.anaKey=''; KS.flowKey=''; KS.hl=null; KS.hoverFlow=null;
+  syncToggles();
+}
+Object.assign(globalThis, { kitchenUiState, kitchenUiRestore });
 
 // ---------- Schalter ----------
 function toggle3d(){ KS.show3d=!KS.show3d; lsSet('raumaufmass.k3d',KS.show3d?'1':'0'); syncToggles(); render(); }
@@ -19828,7 +19914,7 @@ function renderWays(c){
   Object.entries(KX.GROUPS).forEach(([gk,gl])=>{
     h+=`<div class="kflowgrp"><b style="color:${KINK.grp[gk]}">${gl}</b>`;
     R.flows.filter(f=>f.group===gk).forEach(f=>{
-      const miss=f.missing.length ? ` <em>fehlt: ${f.missing.map(x=>escapeHtml(KX.ROLE_LABEL[x]||x)).join(', ')}</em>` : '';
+      const miss=f.missing.length ? ` <em>fehlt: ${escapeHtml(KX.roleList(f.missing))}</em>` : '';
       const blk=f.blocked ? ` <em class="bad">${f.blocked} Weg${f.blocked>1?'e':''} gesperrt</em>` : '';
       const top=R.flows.filter(x=>x.complete).reduce((a,x)=>!a||x.week>a.week?x:a,null);
       const val = f.complete ? `${f.f}× · ${(f.m/1000).toFixed(1).replace('.',',')} m` : '–';
@@ -19898,7 +19984,7 @@ function renderWays(c){
     // Netto-Umzüge: erst alle herausnehmen, dann einräumen (Tausch geht so auf).
     list.forEach(s=>{ if(s.from!=null) take(s.c,s.from); });
     list.forEach(s=>put(s.c,s.to));
-    kitchenSave(); setHint(`${list.map(s=>KX.ROLE_LABEL[s.c]).join(' · ')} ${list.length>1?'eingeräumt/umgeräumt':'übernommen'} · ⌘Z nimmt es zurück`); };
+    kitchenSave(); setHint(KX.undoHint(`${KX.roleList(list.map(s=>s.c))} ${list.length>1?'eingeräumt/umgeräumt':'übernommen'}`)); };
   $('kSugg').querySelectorAll('[data-sg]').forEach(b=>b.onclick=()=>{ const g=S[+b.dataset.sg].grp; apply(S.filter(x=>x.grp===g)); });
   if($('kSuggAll')) $('kSuggAll').onclick=()=>apply(S);
   if($('kOpt')) $('kOpt').onclick=()=>{ KS.hl=null; snapshot();
@@ -19907,7 +19993,7 @@ function renderWays(c){
     items.forEach(it=>{ if(it.store){ it.store=it.store.filter(k=>!keys.has(k)); if(!it.store.length) delete it.store; } });
     Object.entries(O.assign).forEach(([k,ids])=>ids.forEach(id=>{ const t=items.find(it=>it.id===id); if(t) t.store=[...(t.store||[]),k]; }));
     const st=[...O.kept.map(x=>x.c), ...O.dropped].map(k=>KX.ROLE_LABEL[k]);
-    kitchenSave(); setHint(`Optimal eingeräumt: ≈ ${km(O.kmAfter)} km/Jahr${st.length?` · bleibt gegen die Regel: ${st.join(' · ')}`:''} · ⌘Z nimmt es zurück`); };
+    kitchenSave(); setHint(KX.undoHint(`Optimal eingeräumt: ≈ ${km(O.kmAfter)} km/Jahr${st.length?` · bleibt gegen die Regel: ${st.join(' · ')}`:''}`)); };
 }
 // ---------- Wege-Analyse (Meldungen M-20261109-151457-68b975, -151540-54f941) ----------
 // Eigene Ansicht statt 3D: wenig Text, viel Information. Oben die Summe
@@ -19960,9 +20046,10 @@ function sweepSvg(ax, unit, from, cssW){
   let g='';
   tick(y0,y1,3).forEach(v=>{ g+=`<line x1="${pl}" x2="${W-pr}" y1="${Y(v)}" y2="${Y(v)}" stroke="#e7e3d8" stroke-width="1"/><text x="${pl-6}" y="${Y(v)+3.5}" text-anchor="end" font-size="${fs}" fill="#7c766a">${String(+v.toFixed(2)).replace('.',',')}</text>`; });
   tick(x0,x1,5).forEach(v=>{ g+=`<text x="${X(v)}" y="${H-8}" text-anchor="middle" font-size="${fs}" fill="#7c766a">${unit(v)}</text>`; });
-  // Lücken (gesperrte Lagen) unterbrechen die Linie.
-  const step=Math.min(...P.slice(1).map((p,i)=>p.v-P[i].v));
-  let d='', prev=null; P.forEach(p=>{ const gap=prev && p.v-prev.v>step*1.5; d+=(prev&&!gap?'L':'M')+X(p.v).toFixed(1)+' '+Y(p.km).toFixed(1); prev=p; });
+  // Lücken (gesperrte Lagen) unterbrechen die Linie; Rasterschritt aus KX.sweepGaps
+  // (nicht der kleinste Abstand: die jetzige Lage liegt meist neben dem Raster).
+  const br=KX.sweepGaps(P, ax.cur);
+  let d=''; P.forEach((p,i)=>{ d+=(i&&!br[i]?'L':'M')+X(p.v).toFixed(1)+' '+Y(p.km).toFixed(1); });
   g+=`<path d="${d}" fill="none" stroke="#24221d" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
   // Lagen, die etwas verschlechtern (Weg gesperrt, neuer Befund): hohler Ring.
   P.filter(p=>!p.ok).forEach(p=>{ g+=`<circle cx="${X(p.v)}" cy="${Y(p.km)}" r="3.5" fill="#faf9f6" stroke="#b3261e" stroke-width="1.5"><title>${p.blocked?'Weg gesperrt':'neuer Befund in der Prüfung'}</title></circle>`; });
@@ -20729,6 +20816,8 @@ function zustand(alle){
       unit, wheelPref, currentRoom, currentRoomName,
       wpopPair:g(()=>wpopPair), cpopId:g(()=>cpopId), entryPair:g(()=>entryPair),
       ts:g(()=>({tool:TS.tool, sel:TS.sel, vec:TS.vec, lines:TS.lines})), activeTileId:g(()=>activeTileId),
+      // Küche: gewähltes Teil, Fronten offen, Ablauf, Analyse, Kind, Referenz (KS liegt in kitchen-ui).
+      kueche:g(()=>typeof kitchenUiState==='function' ? kitchenUiState() : null),
       andereRaeume:andereRaeume(), nachbarn:g(()=>neighbors.length,0),
     }),
     raum:g(()=>JSON.parse(serialize())),
@@ -20894,6 +20983,8 @@ if(lokal && nach){
     undoStack.length=0; undoStack.push(...(o.undo||[]));
     redoStack.length=0; redoStack.push(...(o.redo||[]));
     if(u.mode && u.mode!==M.mode) setMode(u.mode);
+    // Nach openRoom/deserialize/setMode: openRoom setzt die Küchenauswahl zurück.
+    if(u.kueche && typeof kitchenUiRestore==='function') kitchenUiRestore(u.kueche);
     if(Array.isArray(u.sel)) M.sel=u.sel;
     M.chain=u.chain??null; M.wallSel=u.wallSel??null; M.openSel=u.openSel??null;
     if(u.ts){ TS.tool=u.ts.tool||TS.tool; TS.sel=new Set(u.ts.sel||[]); }
@@ -24670,7 +24761,128 @@ globalThis.selfChecks=function(){
     //
     // --- Rest-Fix bedienung ---
     try{
-      // TESTS-bedienung
+      // (1) Duplizieren freier Teile (Insel, Tisch): die Kopie bleibt im Raum. Früher
+      // n.x+=w+200 im Raumrahmen: ohne Platzprüfung, nicht in der Teilachse.
+      {
+        const cOk=typeof KX.copySpot==='function';
+        const wl=(x,y)=>TILES.toLocal(E.F,{x,y});
+        const dup=(items,id)=>{ const K=KX.normKitchen({items}), L=KX.layout(E,K), it=K.items.find(i=>i.id===id), n={...it, id:K.seq++};
+          const old=KX.placeOk(E,K,L,{...n, x:n.x+n.w+200});          // die alte Regel
+          return {K, L, it, n, old, s:cOk ? KX.copySpot(E,K,L,n) : null}; };
+        const c3=wl(3000,1500), d1=dup([{id:1,kind:'island',x:c3.x,y:c3.y,rot:0,w:1800,d:900}],1);
+        chk('kueche: Duplizieren – Insel nah an der rechten Wand: Kopie links daneben im Raum (alte Regel: ganz draußen)',
+          !d1.old && !!d1.s && near(d1.s.x-d1.it.x,-2000,1e-6) && near(d1.s.y-d1.it.y,0,1e-6) && KX.placeOk(E,d1.K,d1.L,{...d1.n,x:d1.s.x,y:d1.s.y}));
+        const c2=wl(2000,1500), d2=dup([{id:1,kind:'island',x:c2.x,y:c2.y,rot:90,w:1800,d:900}],1);
+        chk('kueche: Duplizieren – gedrehte Insel: der Versatz folgt der Drehung, nicht dem Raumrahmen',
+          !d2.old && !!d2.s && near(d2.s.x-d2.it.x,-1100,1e-6) && near(d2.s.y-d2.it.y,0,1e-6) && KX.placeOk(E,d2.K,d2.L,{...d2.n,x:d2.s.x,y:d2.s.y}));
+        chk('kueche: Duplizieren – kein Platz: kein Duplikat (null), wie bei Wandteilen',
+          cOk && dup([{id:1,kind:'island',x:c2.x,y:c2.y,rot:0,w:3800,d:900}],1).s===null);
+        const c1=wl(1200,1500), t1=wl(2700,1500), d4=dup([{id:1,kind:'island',x:c1.x,y:c1.y,rot:0,w:1000,d:600},{id:2,kind:'table',x:t1.x,y:t1.y,rot:0,w:800,d:800}],1);
+        chk('kueche: Duplizieren – Tisch im Weg: die nächste freie Seite (quer), 200 mm Luft',
+          !d4.old && !!d4.s && near(d4.s.x-d4.it.x,0,1e-6) && near(d4.s.y-d4.it.y,800,1e-6));
+        const d5=dup([{id:1,kind:'table',x:c3.x,y:c3.y,rot:0,w:1200,d:800}],1);
+        chk('kueche: Duplizieren – Tisch wie Insel (1,2 m Breite + 200 mm Luft links daneben)',
+          !d5.old && !!d5.s && near(d5.s.x-d5.it.x,-1400,1e-6));
+        const t6=wl(2000,800), d6=dup([{id:1,kind:'island',x:t6.x,y:t6.y,rot:0,w:3600,d:600,bar:300}],1);
+        chk('kueche: Duplizieren – Tresen quer: Überstand der Platte zählt zum Abstand (900 + 200 mm)',
+          !d6.old && !!d6.s && near(d6.s.x-d6.it.x,0,1e-6) && near(d6.s.y-d6.it.y,1100,1e-6) && KX.placeOk(E,d6.K,d6.L,{...d6.n,x:d6.s.x,y:d6.s.y}));
+      }
+      // (2) Kurve „Verschieben und vergleichen“: Lücken nur, wo eine Rasterlage fehlt.
+      // Die jetzige Lage (600) liegt neben dem 70-mm-Raster der Wand und stellte als
+      // kleinster Abstand (30) den Schritt: fast jedes Stück galt als Lücke.
+      {
+        const gOk=typeof KX.sweepGaps==='function';
+        const E4=KX.makeEnv(R.pts,R.walls,[],[]);
+        const wall=items=>{ const K=KX.normKitchen({items}), L=KX.layout(E4,K); return KX.sweep(E4,K,L,2).axes[0]; };
+        const base=[{id:1,kind:'base',a:'A',b:'B',x:0,w:600},{id:2,kind:'base',a:'A',b:'B',x:600,w:600,dev:'sink'}];
+        const a0=wall(base), a1=wall([...base,{id:3,kind:'base',a:'A',b:'B',x:2600,w:600,dev:'hob'}]);
+        const minD=P=>Math.min(...P.slice(1).map((p,i)=>p.v-P[i].v));
+        chk('kueche: Kurve – jetzige Lage neben dem Raster (Vorbedingung: kleinster Abstand 30 < Schritt 70)',
+          near(a0.cur,600,1e-9) && minD(a0.pts)===30 && a0.pts.some(p=>p.v===630) && a0.pts.some(p=>p.v===700));
+        chk('kueche: Kurve – frei bis zum Wandende: keine Lücke, die Linie läuft durch',
+          gOk && KX.sweepGaps(a0.pts,a0.cur).length===a0.pts.length && !KX.sweepGaps(a0.pts,a0.cur).some(Boolean));
+        const g1=gOk ? KX.sweepGaps(a1.pts,a1.cur) : [];
+        chk('kueche: Kurve – Herd sperrt Lagen: genau eine Lücke (zwischen 1960 und 3220), nicht eine je Stück',
+          gOk && g1.filter(Boolean).length===1 && a1.pts[g1.indexOf(true)].v===3220 && a1.pts[g1.indexOf(true)-1].v===1960);
+        const R7=rect(7000,3000), E7=KX.makeEnv(R7.pts,R7.walls,[],[]), p1=TILES.toLocal(E7.F,{x:800,y:1500}), p2=TILES.toLocal(E7.F,{x:1500,y:1500});
+        const K7=KX.normKitchen({items:[{id:1,kind:'island',x:p1.x,y:p1.y,rot:0,w:1000,d:600},{id:2,kind:'table',x:p2.x,y:p2.y,rot:0,w:200,d:600}]});
+        const ax7=KX.sweep(E7,K7,KX.layout(E7,K7),1).axes.find(a=>a.key==='u'), g7=gOk ? KX.sweepGaps(ax7.pts,ax7.cur) : [];
+        chk('kueche: Kurve – freie Achse (Insel längs, Tisch im Weg): eine Lücke vor 1300',
+          gOk && g7.filter(Boolean).length===1 && ax7.pts[g7.indexOf(true)].v===1300 && ax7.pts[g7.indexOf(true)-1].v===100);
+      }
+      // (3) Bedienzustand der Küche in der Meldung: nur Gültiges kommt durch.
+      {
+        const uOk=typeof KX.normUi==='function';
+        const Ku=KX.normKitchen({items:[{id:1,kind:'base',a:'A',b:'B',x:0,w:600},{id:5,kind:'tall',a:'B',b:'C',x:0,w:600,dev:'dw'}]});
+        const raw={sel:5, open:true, flow:'kochen', anaMode:'run', kid:true, heat:false, ana:true, paths:false, show3d:false,
+                   ref:{kmYear:31.5, flows:{kochen:{week:100,m:12.5}, quatsch:{week:1,m:1}, snack:{week:'x',m:2}}}};
+        const u=uOk ? KX.normUi(JSON.parse(JSON.stringify(raw)),Ku) : null;
+        chk('kueche: Bedienzustand aus der Meldung – Teil, Fronten, Ablauf, Analyse, Kind, Referenz kommen durch',
+          !!u && u.sel===5 && u.open===true && u.flow==='kochen' && u.anaMode==='run' && u.kid===true && u.heat===false
+          && u.ana===true && u.paths===false && u.show3d===false && u.ref.kmYear===31.5 && u.ref.flows.kochen.m===12.5
+          && Object.keys(u.ref.flows).join()==='kochen');
+        const b=uOk ? KX.normUi({sel:99, open:'ja', flow:'nix', anaMode:'x', kid:1, heat:0, ana:'1', ref:{kmYear:'a', flows:{}}},Ku) : null;
+        chk('kueche: Bedienzustand – Ungültiges fällt auf den Standard (kein Teil 99, kein Ablauf „nix“, Modus Jahr)',
+          !!b && b.sel===null && b.open===false && b.flow===null && b.anaMode==='week' && b.kid===false && b.heat===true && !('ana' in b) && b.ref===null);
+        chk('kueche: Bedienzustand – fehlend, null, Text, Zahl: Standard',
+          uOk && [undefined,null,'x',5].every(v=>{ const r=KX.normUi(v,Ku); return r.sel===null && r.ref===null && r.anaMode==='week' && r.heat===true; }));
+      }
+      // (4) Öffnungs-ids: bei doppelter numerischer id gewinnt die ERSTE (Fremdimport).
+      {
+        const ops=[{id:7,kind:'door'},{id:7,kind:'window'}], rr=globalThis.normOpeningIds(ops,3);
+        const room={opmeas:[{id:'om1',op:7}], shared:{'A|B':{room:'r2',wall:['A','B'],tuer:{op:7}}}, kitchen:{spec:{entry:7}}};
+        globalThis.remapOpeningRefs(room,rr.map);
+        chk('kueche: doppelte numerische Öffnungs-id – Lagemaß, Nachbartür und Eingang bleiben an der ersten Öffnung',
+          ops[0].id==='7' && ops[1].id==='o3' && rr.map.get(7)==='7' && room.opmeas[0].op==='7'
+          && room.shared['A|B'].tuer.op==='7' && room.kitchen.spec.entry==='7');
+        const so=[{id:'a b'},{id:'a b'},{id:'o1'}], rs=globalThis.normOpeningIds(so,2);
+        chk('kueche: doppelte ungültige Text-id – die erste bekommt die neue id und behält die Verweise',
+          so.map(o=>o.id).join()==='o2,o3,o1' && rs.map.get('a b')==='o2');
+      }
+      // (5) Texte: Listen mit „ · “ (Inhaltsnamen enthalten Kommas), Rückgängig als eigener Satz.
+      {
+        const rl=typeof KX.roleList==='function', uh=typeof KX.undoHint==='function';
+        chk('kueche: Liste „fehlt: …“ – Inhaltsnamen mit Komma bleiben unterscheidbar („ · “ statt Komma)',
+          rl && KX.roleList(['messer','vorrat'])==='Messer, Bretter · Vorräte' && KX.roleList(['eingang'])==='Eingang' && KX.roleList([])===''
+          && KX.roleList(['sink','x'])==='Spüle · x');
+        chk('kueche: Hinweis nach einer Liste – „⌘Z nimmt es zurück“ als eigener Satz, kein Listenelement',
+          uh && KX.undoHint('bleibt gegen die Regel: Besteck · Messer, Bretter')==='bleibt gegen die Regel: Besteck · Messer, Bretter. ⌘Z nimmt es zurück'
+          && !KX.undoHint('A · B').includes(' · ⌘Z'));
+        // Einheiten im Plan: Kette in mm, Schrankbreite in cm (Nennmaß); Kasten nur, wenn er in die Strecke passt (dimLabel misst zuerst).
+        chk('kueche: Plan nennt die Einheiten (Maße mm, Schrankbreite cm); 200-mm-Lücke bei 21 px: Kasten „200“ (25 px) kommt neben die Strecke',
+          typeof KX.DIM_NOTE==='string' && /Maße in mm/.test(KX.DIM_NOTE) && /Schrankbreite in cm/.test(KX.DIM_NOTE)
+          && !KX.dimFits({x:0,y:0},{x:21,y:0},25,15,2) && KX.dimFits({x:0,y:0},{x:21,y:0},12,15,2));
+      }
+      // (6) Testabdeckung der Küche: verwaiste Wand, leere Küche und der Weg durch die Datei.
+      {
+        // Wand geteilt: die alte Wand A–B gibt es nicht mehr, ihr Teil ist verwaist und wird gemeldet.
+        const Rs={pts:[...R.pts,{id:'E',x:2000,y:0}], walls:[['A','E'],['E','B'],['B','C'],['C','D'],['D','A']]};
+        const Es=KX.makeEnv(Rs.pts,Rs.walls,[],[]), Ks=KX.normKitchen({items:[{id:1,kind:'base',a:'A',b:'B',x:0,w:600},{id:2,kind:'base',a:'A',b:'E',x:0,w:600}]});
+        const Ls=KX.layout(Es,Ks), Fs=KX.check(Es,Ks,Ls);
+        chk('kueche: Wand geteilt – das Teil an der alten Wand ist verwaist und wird als „hängt an einer Wand, die es nicht mehr gibt“ gemeldet',
+          Ls.orphans.length===1 && Ls.orphans[0].id===1 && Ls.byId.has(2) && !Ls.byId.has(1)
+          && Fs.some(f=>f.lvl==='bad' && f.ids.join()==='1' && /hängt an einer Wand, die es nicht mehr gibt/.test(f.txt)));
+        // serialize lässt eine leere Küche weg: Küchenmaß, Personen, Eingang oder ein Teil machen sie nicht leer.
+        const nk=o=>KX.normKitchen(o);
+        chk('kueche: leer = nichts geplant und nichts umgestellt (Personen 2, Eingang, Küchenmaß, ein Teil: nicht leer; Bezugsecke allein: leer)',
+          KX.isEmpty(null) && KX.isEmpty(nk(null)) && KX.isEmpty(nk({frame:{a:'A',b:'B'}}))
+          && !KX.isEmpty(nk({spec:{persons:2}})) && !KX.isEmpty(nk({spec:{entry:'o2'}})) && !KX.isEmpty(nk({spec:{plinth:100}}))
+          && !KX.isEmpty(nk({items:[{id:1,kind:'base',a:'A',b:'B',x:0,w:600}]})));
+        // serialize -> JSON -> normKitchen (deserialize) verliert nichts.
+        const Kr=nk({spec:{persons:2,plinth:100,entry:'o2'}, frame:{a:'B',b:'C'}, seq:9,
+          items:[{id:3,kind:'base',a:'A',b:'B',x:600,w:600,dev:'sink',front:'door',hinge:'right',store:['teller','glaeser']},
+                 {id:4,kind:'island',x:1500.5,y:900,rot:20,w:1800,d:900,bar:300},{id:6,kind:'tall',a:'B',b:'C',x:0,w:600,dev:'dw'}]});
+        const Kj=nk(JSON.parse(JSON.stringify(Kr)));
+        chk('kueche: Küche -> JSON -> normKitchen verliert nichts (Küchenmaße, Eingang, Bezugsecken, Zähler, Teile samt Inhalt), zweites Mal dasselbe',
+          Kr.items.length===3 && Kr.spec.persons===2 && Kr.spec.entry==='o2' && Kr.seq===9 && Kr.frame.a==='B'
+          && JSON.stringify(Kj)===JSON.stringify(Kr) && JSON.stringify(nk(JSON.parse(JSON.stringify(Kj))))===JSON.stringify(Kj));
+        // Abläufe mit demselben K, das auch das Layout bekam (so ruft die App): gleich einer gleichwertigen Kopie.
+        const its=[{id:1,kind:'base',a:'A',b:'B',x:0,w:600,dev:'sink'},{id:2,kind:'base',a:'A',b:'B',x:600,w:600,dev:'hob'},{id:3,kind:'tall',a:'B',b:'C',x:0,w:600,dev:'fridge'},
+                   {id:4,kind:'base',a:'A',b:'B',x:1200,w:600,store:['muell','vorrat']}];
+        const Ka=nk({items:its}), La=KX.layout(E,Ka), fa=KX.flows(E,Ka,La), fb=KX.flows(E,nk({items:its}),La);
+        chk('kueche: Abläufe mit demselben K wie das Layout (App-Aufruf) = mit einer gleichwertigen Kopie (mindestens ein Ablauf vollständig)',
+          fa.kmYear>0 && fa.complete>=1 && near(fa.kmYear,fb.kmYear,1e-9) && fa.complete===fb.complete);
+      }
     }catch(err){ chk('kueche: Rest-Fix bedienung ohne Ausnahme ('+err.message+')', false); }
     //
     // --- Rest-Fix etiketten ---
