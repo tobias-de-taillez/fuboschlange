@@ -8836,17 +8836,19 @@ function planLabels(L, o){
   // ins schräge Teil passt): dann muss nur der Kern im Teil liegen; frei
   // bleibt der ganze Kasten (LP), r ist dann der Kern.
   // (Mehrzeilig: oben und unten je der halbe Zeilenabstand weg.)
-  const core=(r,f)=>{ const e=lh(f)-0.8*f.px; return {x:r.x+pad/2, y:r.y+e/2, w:r.w-pad, h:r.h-e}; };
-  const inP=(r,f,P,tol)=>rectIn(tol ? core(r,f) : r, P);
+  // (k: Höhe des Kerns in em, 0,8 für Ziffern und Versalien; Inhalt mit Unterlängen
+  // und Umlauten, hier nur in Schritt 5, braucht 1,0.)
+  const core=(r,f,k=0.8)=>{ const e=lh(f)-k*f.px; return {x:r.x+pad/2, y:r.y+e/2, w:r.w-pad, h:r.h-e}; };
+  const inP=(r,f,P,tol,k)=>rectIn(tol ? core(r,f,k) : r, P);
   // Inhalt: ls = Zeilen einer Stufe aus contentCands, ein Kasten um alle.
   const mbox=(ls,f,x,y)=>{ const w=Math.max(...ls.map(t=>o.measure(t,f)))+pad, h=ls.length*lh(f); return {x:x-w/2, y:y-h/2, w, h}; };
-  const sub=(g,P,ls,x,y,f,tol)=>{ const r=mbox(ls,f,x,y);
-    if(!(inP(r,f,P,tol) && LP.place([r]))) return false;
+  const sub=(g,P,ls,x,y,f,tol,k)=>{ const r=mbox(ls,f,x,y);
+    if(!(inP(r,f,P,tol,k) && LP.place([r]))) return false;
     // Zeilenkästen fortlaufend addiert: Ober- und Unterkante zweier Zeilen
     // sind dieselbe Zahl (sonst überlappten sie um eine Rundungsstelle).
     let y0=r.y;
     ls.forEach(t=>{ const w=o.measure(t,f)+pad, ri={x:x-w/2, y:y0, w, h:lh(f)}; y0+=lh(f);
-      out.push({id:g.it.id, role:'sub', txt:t, font:f, x, y:ri.y+ri.h/2, r:tol ? core(ri,f) : ri}); });
+      out.push({id:g.it.id, role:'sub', txt:t, font:f, x, y:ri.y+ri.h/2, r:tol ? core(ri,f,k) : ri}); });
     return true; };
   // Block: Kopfzeilen frei und im Teil; die Inhaltszeile darunter wird nur im
   // Teil freigehalten und erst nach den Hängeschränken belegt. Variante vor
@@ -8859,19 +8861,19 @@ function planLabels(L, o){
   // „H“ über einem Inhalt, der dann gekürzt wurde oder woanders landete.
   const RV=C.labelPlacer(), occ=new Map();   // occ: Etikett → belegter Kasten (für 2c)
   // tol: letzte Stufe, nur der Kern im Teil (anchors bekommt die Kernmaße).
-  const block=(g, P, anchors, heads, f0, tol)=>{
+  const block=(g, P, anchors, heads, f0, tol, kS)=>{
     const subs=contentCands(g.it), wall=f0===fW, fs=wall ? fWS : fS;
     for(const H of heads) for(const strict of wall ? [true,false] : [false]) for(const s of [...subs, null]){
       const F=H.map((t,i)=>i ? fT : f0), sh=s ? s.length*lh(fs) : 0, tot=F.reduce((h,f)=>h+lh(f),0)+sh;
       const bw=Math.max(...H.map((t,i)=>o.measure(t,F[i])), ...(s ? s.map(t=>o.measure(t,fs)) : [0]))+pad, fl=s ? fs : F[F.length-1];
-      const C2=anchors(tol ? bw-pad : bw, tol ? tot-(lh(F[0])-0.8*F[0].px)/2-(lh(fl)-0.8*fl.px)/2 : tot).map(a=>{ let y=a.y-tot/2;
+      const C2=anchors(tol ? bw-pad : bw, tol ? tot-(lh(F[0])-0.8*F[0].px)/2-(lh(fl)-(s ? kS||0.8 : 0.8)*fl.px)/2 : tot).map(a=>{ let y=a.y-tot/2;
         const R=H.map((t,i)=>{ const r=box(t,F[i],a.x,y+lh(F[i])/2); y+=lh(F[i]); return r; }), sb=s && mbox(s,fs,a.x,y+sh/2);
-        return {a, R, sb, ok:R.every((r,i)=>inP(r,F[i],P,tol) && LP.free(r)) && (!s || (inP(sb,fs,P,tol) && (!wall || (LP.free(sb) && RV.free(sb))))),
+        return {a, R, sb, ok:R.every((r,i)=>inP(r,F[i],P,tol) && LP.free(r)) && (!s || (inP(sb,fs,P,tol,kS) && (!wall || (LP.free(sb) && RV.free(sb))))),
           rv:R.every(r=>RV.free(r))}; });
       const k=C2.find(k=>k.ok && (k.rv || !strict)); if(!k) continue;
       k.R.forEach((r,i)=>{ const l={id:g.it.id, role:i ? 'tag' : wall ? 'wall' : 'head', txt:H[i], font:i ? fT : f0, x:k.a.x, y:r.y+r.h/2, r:tol ? core(r,F[i]) : r};
         LP.occupy(r); out.push(l); occ.set(l, r); });
-      if(s){ if(!wall) RV.occupy(k.sb); pend.push({g, P, x:k.a.x, y:k.sb.y+k.sb.h/2, f:fs, tol, subs:subs.slice(subs.indexOf(s))}); }
+      if(s){ if(!wall) RV.occupy(k.sb); pend.push({g, P, x:k.a.x, y:k.sb.y+k.sb.h/2, f:fs, tol, kS, subs:subs.slice(subs.indexOf(s))}); }
       return true;
     }
     return false;
@@ -8937,19 +8939,26 @@ function planLabels(L, o){
   });
   // 3. Inhalte in den freigehaltenen Platz; stößt er an, kürzer, sonst entfällt er.
   const done=new Set();
-  pend.forEach(p=>{ if(p.subs.some(s=>sub(p.g,p.P,s,p.x,p.y,p.f,p.tol))) done.add(p.g); });
+  pend.forEach(p=>{ if(p.subs.some(s=>sub(p.g,p.P,s,p.x,p.y,p.f,p.tol,p.kS))) done.add(p.g); });
   // 4. Hängeschrank-Inhalt, der unter dem „H“ keinen Platz fand (meist über
   //    einem Unterschrank mit eigenem Inhalt): kursiv an einer anderen freien
   //    Stelle des Hängeschranks, sonst fehlte er im Plan ganz (Gegenprüfung).
   wallA.forEach((A,g)=>{ if(done.has(g) || !out.some(l=>l.id===g.it.id && l.role==='wall')) return; const P=scr(g);
     contentCands(g.it).some(s=>{ const b=mbox(s,fWS,0,0); return A(b.w, b.h).some(a=>sub(g,P,s,a.x,a.y,fWS)); }); });
-  // 5. Teile mit Kopfzeile, aber ohne Inhalt, weil Kopfzeile + Inhalt in der
-  //    schrägen Ansicht nirgends ganz ins Teil passen: der Inhalt unter oder
-  //    über die Kopfzeile, nur der Kern im Teil. Die Kopfzeile bleibt stehen.
+  // 5. Teile mit Kopfzeile, aber ohne Inhalt, weil Kopfzeile + Inhalt als Block
+  //    nirgends ganz (mit Rand) ins Teil passen – schräge Ansicht, kleiner
+  //    Maßstab: der Inhalt unter oder über die Kopfzeile, nur der Kern im Teil
+  //    (1,0 em, wegen Unterlängen und Umlauten). Sonst Kopfzeile + Inhalt neu
+  //    als Block mit Kern im Teil (die Kopfzeile darf rücken, alle anderen
+  //    stehen schon); gelingt beides nicht, bleibt alles, wie es war.
   G.forEach(g=>{ const mine=out.filter(l=>l.id===g.it.id);
-    if(!mine.length || mine.some(l=>l.role==='sub') || !mine.every(l=>occ.has(l))) return;
-    const f=g.it.kind==='wall' ? fWS : fS, P=scr(g), x=mine[0].x, top=Math.min(...mine.map(l=>occ.get(l).y)), bot=Math.max(...mine.map(l=>occ.get(l).y+occ.get(l).h));
-    contentCands(g.it).some(s=>{ const h=s.length*lh(f); return [bot+h/2, top-h/2].some(y=>sub(g,P,s,x,y,f,true)); }); });
+    if(!contentCands(g.it).length || !mine.length || mine.some(l=>l.role==='sub') || !mine.every(l=>occ.has(l))) return;
+    const wall=g.it.kind==='wall', f=wall ? fWS : fS, P=scr(g), x=mine[0].x, top=Math.min(...mine.map(l=>occ.get(l).y)), bot=Math.max(...mine.map(l=>occ.get(l).y+occ.get(l).h));
+    if(contentCands(g.it).some(s=>{ const h=s.length*lh(f); return [bot+h/2, top-h/2].some(y=>sub(g,P,s,x,y,f,true,1)); })) return;
+    const np=pend.length; drop(mine); const m=out.length;
+    if(block(g, P, wall ? wallA.get(g) : baseA.get(g), headCands(g,L), wall ? fW : fH, true, 1) && pend.length>np){
+      const p=pend.pop(); if(p.subs.some(s=>sub(p.g,p.P,s,p.x,p.y,p.f,p.tol,1))) return; }
+    pend.length=np; drop(out.slice(m)); mine.forEach(l=>{ out.push(l); LP.occupy(occ.get(l)); }); });
   return {labels:out, LP};
 }
 // Stationsetikett der Wege (Rollen an einem Punkt q, Bildschirm). Gegenprüfung:
@@ -24757,18 +24766,22 @@ globalThis.selfChecks=function(){
           !!s && !s.forced && s.r.k<=1 && !s.lead && !hits(prior[0],prior[1],s.r) && LP.leads.length===1);
       }
       {
-        // Schräge Ansicht: passt Kopfzeile + Inhalt nirgends ganz ins Teil, kommt der Inhalt unter die stehende
-        // Kopfzeile (Kern im Teil) – früher fiel er ganz weg. Die Kopfzeile bleibt, nichts überlappt.
+        // Passt Kopfzeile + Inhalt als Block nirgends ganz ins Teil (schräge Ansicht, kleiner Maßstab), kommt der
+        // Inhalt trotzdem hin, wenn nur sein Kern ins Teil muss – unter die stehende Kopfzeile oder mit ihr als
+        // Block (die Kopfzeile darf rücken). Früher fiel er ganz weg. Nichts überlappt, nichts ragt aus dem Teil.
         const Ep=KX.makeEnv([{id:'A',x:0,y:0},{id:'B',x:4500,y:0},{id:'C',x:4500,y:3500},{id:'D',x:0,y:3500}],[['A','B'],['B','C'],['C','D'],['D','A']],[],[]);
-        const Lp=KX.layout(Ep,KX.normKitchen({items:[{id:2,kind:'base',front:'drawer',w:900,a:'A',b:'B',x:2000,store:['besteck','teller']}]}));
+        const Lp=KX.layout(Ep,KX.normKitchen({items:[{id:1,kind:'tall',front:'door',w:600,a:'A',b:'B',x:1000,store:['teller','glaeser','tassen']},
+          {id:2,kind:'base',front:'drawer',w:900,a:'A',b:'B',x:2000,store:['besteck','teller']}]}));
         const at=(s,deg)=>{ const c=Math.cos(deg*Math.PI/180), sn=Math.sin(deg*Math.PI/180), toScr=p=>({x:(p.x*c-p.y*sn)*s+400, y:(p.x*sn+p.y*c)*s+400});
           return {toScr, lab:KX.planLabels(Lp,{toScr, dpr:1, measure}).labels}; };
-        const v=at(0.045,70), g=Lp.byId.get(2), head=v.lab.find(l=>l.role==='head'), sub=v.lab.filter(l=>l.role==='sub');
-        chk('kueche: schräge Ansicht – Inhalt unter der stehenden Kopfzeile, wenn Kopfzeile + Inhalt nicht ganz ins Teil passen (Kern im Teil)',
-          head && head.txt==='90' && sub.length>0 && sub.every(l=>KX.rectIn(l.r,(g.outline||g.poly).map(v.toScr)) && !ovA(l.r,head.r) && Math.abs(l.x-head.x)<0.5));
-        let ok=true; for(let s=0.04;s<=0.13;s+=0.01) for(let deg=0;deg<90;deg+=5){ const w=at(s,deg), P=(g.outline||g.poly).map(w.toScr);
-          ok=ok && w.lab.every((a,i)=>KX.rectIn(a.r,P) && w.lab.every((b,j)=>j<=i || !ovA(a.r,b.r))) && w.lab.some(l=>l.role==='head'); }
-        chk('kueche: schräge Ansicht mit Inhalt (Maßstab 0,04–0,13, 0–85°) – Etiketten im Teil, überlappen nicht, Kopfzeile bleibt', ok);
+        const ok=(v,id,txt)=>{ const g=Lp.byId.get(id), P=(g.outline||g.poly).map(v.toScr), head=v.lab.find(l=>l.id===id && l.role==='head'), sub=v.lab.filter(l=>l.id===id && l.role==='sub');
+          return !!head && sub.length>0 && sub.every(l=>KX.rectIn(l.r,P) && !ovA(l.r,head.r) && Math.abs(l.x-head.x)<0.5) && (!txt || sub[0].txt===txt); };
+        chk('kueche: Inhalt unter der stehenden Kopfzeile, wenn der Block nicht ganz ins Teil passt (schräge Ansicht, Kern im Teil)', ok(at(0.045,70),2,'+2'));
+        chk('kueche: Inhalt als Block mit der Kopfzeile, wenn nur der Kern ins Teil muss (Hochschrank, kleiner Maßstab: „60“ + „+3“)', ok(at(0.05,0),1,'+3'));
+        let all=true; for(let s=0.03;s<=0.13;s+=0.01) for(let deg=0;deg<90;deg+=5){ const w=at(s,deg);
+          all=all && Lp.G.every(g=>{ if(g.wing) return true; const P=(g.outline||g.poly).map(w.toScr); return w.lab.filter(l=>l.id===g.it.id).every(l=>KX.rectIn(l.r,P)); })
+            && w.lab.every((a,i)=>w.lab.every((b,j)=>j<=i || !ovA(a.r,b.r))) && [1,2].every(id=>w.lab.some(l=>l.id===id && l.role==='head') || s<0.04); }
+        chk('kueche: Etiketten mit Inhalt (Maßstab 0,03–0,13, 0–85°) – im Teil, überlappen nicht, Kopfzeile bleibt', all);
       }
     }catch(err){ chk('kueche: Rest-Fix etiketten ohne Ausnahme ('+err.message+')', false); }
     //
