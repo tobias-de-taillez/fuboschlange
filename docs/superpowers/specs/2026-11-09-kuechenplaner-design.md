@@ -92,6 +92,24 @@ Abgleich mit den Maßblättern:
 - Im Plan erscheinen die Hülle 0–90°, das Blatt bei 90° und der Bogen der Außenecke bis „ganz offen“. Beim gewählten Gerät kommt das Blatt bei „ganz offen“ gestrichelt dazu.
 - In 3D stehen die Flügel geschlossen und offen („Fronten offen“) in Türdicke.
 
+### Eckschrank-Konfigurator (Halbeck, unten und oben)
+
+Wunsch aus der Meldung M-20261109-134919-c2a193: Konfigurator für Eck-Unter- und Eck-Hängeschränke.
+
+- **Modell:** `corner:true` gilt jetzt für `base` und `wall`. Neu sind `door` (Türbreite; ohne Angabe „passend“), `cEnd` (0/1: Ecke bei a oder b, wird beim Umdrehen des Wandrahmens mitgedreht) und `inner` (`schub`, `schwenk`, sonst Einlegeboden; nur unten). Blende = Korpus − Tür. „Passend“ nimmt die tatsächliche Tiefe der Querzeile plus 50 mm Passblende (`g.cross` aus `layout`).
+- **Lage:** `cornerPlace` setzt die Blende hinter die Querzeile und die Tür davor frei. Ist die Blende kürzer als Querzeile + Passblende, rückt der Schrank von der Ecke ab, so wie nobilia es plant: UE100-50 steht 130 mm vor der Ecke, Planmaß längs 1150. Ohne Querzeile sitzt er bündig in der Ecke. Die Stelle ist auch eine Rastkante beim Ziehen.
+- **Bedienung:** Ein eigener Kasten über den Feldern des gewählten Teils mit Ecke, Korpus, Tür (nobilia-Maße oder „passend“), Innenleben, „An die Ecke setzen“ und „Normaler Schrank“. Jede Änderung setzt den Schrank neu an die Ecke. An einem normalen Unter- oder Hängeschrank direkt an der Querzeile steht „Als Eckschrank“. In der Leiste gibt es neu den Eckhängeschrank (WE80-35).
+- **Prüfung:** Die Abhilfe „Als Eckschrank“ gibt es auch oben („Als Eckhängeschrank“). In der Stückliste stehen Typ und Innenleben, z. B. „UE100-50 · Schubkasten + Tür“.
+
+| | Unten (Halbeck) | Oben (Wand-Eckschrank) |
+|---|---|---|
+| Korpus | 900 / 1000 | 600 / 782 / 882 (Typ 60/80/90) |
+| Tür | 900: 400/450 · 1000: 500/600 | 200 / 350 / 450 |
+| Planmaß quer | 650 (630–750) | 450 (390–500) |
+| Innen | UED Einlegeboden · UE Schubkasten + Tür · UEDSA Schwenkauszug | Einlegeboden(e) |
+
+Quelle: nobilia Kurztypenliste (Halbeckschränke UED/UE/UEDSA, Wand-Eckschränke WE60-20/WE80-35/WE90-45). Planmaß längs = Planmaß quer + Tür (UE90-40: 1050, UE100-60: 1250).
+
 ## Prüfungen
 
 **bad (rot)** heißt „geht so nicht“:
@@ -176,7 +194,8 @@ Die Wände sind einseitig (Culling), deshalb verschwinden sie, wenn man von auß
 - Side by Side neben Möbeln: Bosch KAN93VIFP verlangt 50 mm Luft bei Möbeltiefe ≤ 650 und 53/96 mm bei 650–700. Das Modell braucht bei ≤ 600 keine Luft und liegt bei 650–700 etwa 15–20 mm darunter. Ein Side by Side bündig zwischen 58er Hochschränken bleibt deshalb ohne Befund.
 - Side by Side: Das Gefrierteil liegt immer links.
 - An stumpfen Ecken bleibt in der Arbeitsplatte eine kleine Dreieckslücke (keine Gehrung). Bei 1–2° Abweichung ist das unter 15 mm.
-- Die Blendenbreite des Eckschranks richtet sich nach der Standardtiefe, nicht nach der tatsächlichen Tiefe der Querzeile.
+- L-förmige Eckschränke über Eck (nobilia UE/UEK 80/90 mit 165°-Türen oder Karussell, Wand-Eckschrank 2 Türen) und Diagonal-Eckschränke (UED 80/90, WED65) fehlen. Das Modell kennt je Teil nur ein Rechteck an einer Wand; ein L über zwei Wände bräuchte zwei Körper je Teil.
+- Rückt ein Halbeckschrank von der Ecke ab, meldet die Platte den toten Winkel dahinter als „Passleiste“. Bei nobilia deckt das der Winkelpassstück-Bereich hinter der Querzeile ab, ein Bauteil ist es nicht.
 - Insel und Tisch rasten nicht ein.
 - Es gibt keinen Druck, keine Wandansicht von vorn und keine Auswahl in 3D.
 

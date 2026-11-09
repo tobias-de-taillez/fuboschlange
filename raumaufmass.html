@@ -6131,7 +6131,8 @@ const FRONTS={ drawer:'Schubladen', door:'Drehtür', slide:'Schiebetür', flap:'
 const CORNER={
   base:{ bodies:[900,1000], doors:{900:[400,450], 1000:[500,600]}, plan:650, minDoor:300,
          inner:{boden:'Einlegeboden', schub:'Schubkasten + Tür', schwenk:'Schwenkauszug'}, type:{boden:'UED', schub:'UE', schwenk:'UEDSA'} },
-  wall:{ bodies:[600,782,882], doors:{600:[200], 782:[350], 882:[450]}, plan:450, minDoor:150,
+  // Hänge-Eckschrank: Typname nennt 60/80/90, der Korpus misst 600/782/882.
+  wall:{ bodies:[600,782,882], nominal:{600:60, 782:80, 882:90}, doors:{600:[200], 782:[350], 882:[450]}, plan:450, minDoor:150,
          inner:{boden:'Einlegeboden'}, type:{boden:'WE'} },
 };
 const PRESETS=[
@@ -6454,7 +6455,8 @@ function cornerType(it){
   const C=CORNER[it.kind]; if(!it.corner || !C) return null;
   const doors=C.doors[Math.round(it.w)]||[];
   if(it.door==null || !doors.includes(Math.round(it.door))) return null;
-  return `${C.type[it.inner||'boden']}${Math.round(it.w/10)}-${Math.round(it.door/10)}`;
+  const nom=(C.nominal||{})[Math.round(it.w)] || Math.round(it.w/10);
+  return `${C.type[it.inner||'boden']}${nom}-${Math.round(it.door/10)}`;
 }
 function envelopes(K, g){
   const it=g.it, S=K.spec, D=derived(S), fk=frontKind(it), out=[];
@@ -17178,7 +17180,8 @@ const cseg=(name, opts, cur)=>`<div class="seg" data-cseg="${name}">${opts.map((
 function renderCorner(c){
   const box=$('kCorner'), it=selItem(), g=it && c.L.byId.get(it.id), C=it && KX.CORNER[it.kind];
   // Angeboten an Schränken nahe einer Ecke mit Querzeile; Eckschränke immer.
-  const nearCorner=()=>[true,false].some(a=>(a ? g.s0 : g.Wf.L-g.s1)<=1300 && KX.crossAt(c.E,c.K,c.L.G,g,a));
+  // (die Querzeile steht vor seiner Front: Abstand zur Ecke < ihre Tiefe + Passblende)
+  const nearCorner=()=>[true,false].some(a=>{ const cr=KX.crossAt(c.E,c.K,c.L.G,g,a); return cr && (a ? g.s0 : g.Wf.L-g.s1) < cr.d+50; });
   const can = !!(g && !g.free && C && (it.corner || !(it.dev && !(it.kind==='base' && it.dev==='sink')) && nearCorner()));
   if(!can){ box.hidden=true; box.innerHTML=''; box.dataset.key=''; return; }
   // Breite steht im Konfigurator (Korpus); die allgemeine Zeile ausblenden.
@@ -17195,7 +17198,7 @@ function renderCorner(c){
   }
   const cb=KX.cornerBlind(g, c.K.spec), atS0=cb ? cb.atS0 : g.s0<=g.Wf.L-g.s1;
   const body=Math.round(it.w), doors=C.doors[body]||[];
-  const bOpts=C.bodies.map(v=>[String(v), cmTxt(v)]); if(!C.bodies.includes(body)) bOpts.push([String(body), cmTxt(body)]);
+  const bOpts=C.bodies.map(v=>[String(v), String((C.nominal||{})[v] || cmTxt(v))]); if(!C.bodies.includes(body)) bOpts.push([String(body), cmTxt(body)]);
   const dCur = it.door==null ? 'auto' : String(Math.round(it.door));
   const dOpts=[['auto','passend'], ...doors.map(v=>[String(v), cmTxt(v)])]; if(it.door!=null && !doors.includes(Math.round(it.door))) dOpts.push([dCur, cmTxt(it.door)]);
   const typ=KX.cornerType(it), dist=atS0 ? g.s0 : g.Wf.L-g.s1, cid=atS0 ? g.Wf.a : g.Wf.b;
@@ -17203,7 +17206,7 @@ function renderCorner(c){
     +`<div class="krow"><label>Ecke</label>${cseg('cEnd', [['0',`bei ${g.Wf.a}`],['1',`bei ${g.Wf.b}`]], atS0?'0':'1')}</div>`
     +`<div class="krow"><label title="Korpusbreite">Korpus</label>${cseg('cBody', bOpts, String(body))} cm</div>`
     +`<div class="krow"><label title="Türbreite – der Rest ist Blende hinter der Querzeile">Tür</label>${cseg('cDoor', dOpts, dCur)} cm</div>`;
-  if(it.kind==='base') h+=`<div class="krow"><label>Innen</label>${cseg('cInner', Object.entries(C.inner), it.inner||'boden')}</div>`;
+  if(it.kind==='base') h+=`<div class="krow"><label>Innen</label><select id="kCnInner">${Object.entries(C.inner).map(([k,l])=>`<option value="${k}"${(it.inner||'boden')===k?' selected':''}>${l}</option>`).join('')}</select></div>`;
   h+= cb ? `<p class="knote">Blende ${cmTxt(cb.b)} cm zur Ecke ${cid}, Tür ${cmTxt(it.w-cb.b)} cm${g.cross?` · Querzeile ${Math.round(g.cross.d)} mm tief`:' · noch keine Querzeile'} · ${dist>0.5?`${Math.round(dist)} mm Abstand zur Ecke`:'bündig in der Ecke'}</p>`
          : `<p class="knote">Zu schmal für Blende und Tür.</p>`;
   h+=`<div class="trow"><button id="kCnPlace" title="Blende hinter die Querzeile, Tür davor frei">An die Ecke setzen</button><button id="kCnOff">Normaler Schrank</button></div>`;
@@ -17213,8 +17216,8 @@ function renderCorner(c){
     if(k==='cEnd') cornerEdit(t=>{ t.cEnd=+v; }, `Blende zur Ecke ${+v===0?g.Wf.a:g.Wf.b}`);
     if(k==='cBody') cornerEdit(t=>{ t.w=+v; const ds=C.doors[+v]||[]; if(t.door!=null && !ds.includes(Math.round(t.door))) { if(ds.length) t.door=ds[ds.length-1]; else delete t.door; } });
     if(k==='cDoor') cornerEdit(t=>{ if(v==='auto') delete t.door; else t.door=+v; });
-    if(k==='cInner') cornerEdit(t=>{ if(v==='boden') delete t.inner; else t.inner=v; }, `Innen: ${C.inner[v]}`);
   }));
+  if($('kCnInner')) $('kCnInner').onchange=()=>{ const v=$('kCnInner').value; cornerEdit(t=>{ if(v==='boden') delete t.inner; else t.inner=v; }, `Innen: ${C.inner[v]}`); };
   $('kCnPlace').onclick=()=>cornerEdit(t=>{ if(t.cEnd==null) t.cEnd=atS0?0:1; });
   $('kCnOff').onclick=()=>{ const t=selItem(); if(!t) return; snapshot(); delete t.corner; delete t.door; delete t.cEnd; delete t.inner; kitchenSave(); setHint('Wieder ein normaler Schrank.'); };
 }
@@ -20767,7 +20770,7 @@ globalThis.selfChecks=function(){
       const K2=KX.normKitchen({items:[{...ue, x},...row]}), L2=KX.layout(E,K2), F2=KX.check(E,K2,L2), g2=L2.byId.get(1);
       chk('kueche-eck: so gesetzt keine roten Befunde', !F2.some(f=>f.lvl==='bad'));
       chk('kueche-eck: Schubkasten + Tür = Auszug oben und Tür', (()=>{ const e=KX.envelopes(K2,g2); return e.length===2 && e[0].what==='Auszug' && e[1].what==='Tür' && e[0].z0>=e[1].z1-1; })());
-      chk('kueche-eck: Typname nach nobilia', KX.cornerType(K2.items[0])==='UE100-50' && KX.cornerType({kind:'wall',corner:true,w:782,door:350})==='WE78-35');
+      chk('kueche-eck: Typname nach nobilia', KX.cornerType(K2.items[0])==='UE100-50' && KX.cornerType({kind:'wall',corner:true,w:782,door:350})==='WE80-35');
       chk('kueche-eck: Stückliste nennt Typ und Innenleben', KX.stock(K2,L2).list.some(r=>/UE100-50/.test(r.extra) && /Schubkasten/.test(r.extra)));
       // passend: Blende folgt der tatsächlichen Querzeile (400 tief -> 450)
       const K3=KX.normKitchen({items:[{id:1,kind:'base',corner:true,front:'door',a:'A',b:'D',x:0,w:1000},{id:2,kind:'base',a:'A',b:'B',x:450,w:600,d:400}]}), L3=KX.layout(E,K3);
