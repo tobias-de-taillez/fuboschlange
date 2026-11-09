@@ -18067,7 +18067,8 @@ function kitchenDown(e){
   if(dh){ gesture={t:'kdim', moved:false, x0:e.clientX, y0:e.clientY}; setTimeout(()=>openDimEdit(dh)); return true; }
   const w=toWorld(d.x,d.y), hs=hits(c,w);
   if(!hs.length){
-    const en=entryAt(c,w);
+    // Bei gewähltem Teil hat das Wandmaß Vorrang (Meldung 3ebe3b), sonst die Tür.
+    const en = KS.sel!=null && wallDimAt(c,w) && wallDimAt(c,w).hit ? null : entryAt(c,w);
     if(en){ gesture={t:'kdim', moved:false, x0:e.clientX, y0:e.clientY};
       if(!en.on){ snapshot(); c.K.spec.entry=en.o.id; kitchenSave(); }
       setHint(`Eingang: ${en.txt} – von hier zählen Einkauf und Müll`); return true; }
