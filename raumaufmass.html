@@ -6115,6 +6115,14 @@ const FRIDGE={
        leaves:['Gefrierteil (links)','Kühlteil (rechts)']},
 };
 const DOORT_LIM=[30,150];
+// Einbau-Kühlschrank: bis wohin die Tür aufgehen soll. 90° reicht zum
+// Hineingreifen; Gemüseschalen und Abstellfächer herausnehmen geht oft erst
+// darüber (Bosch: „Schubladen ausziehbar bei 90°, herausnehmbar bei
+// vollständig geöffneter Tür“), üblich sind um 115–120°. Beides ist wählbar,
+// damit man den Kompromiss sieht (Meldung M-20261109-135752-e60089).
+// Ohne Angabe 90° wie bisher; neue Kühlschränke aus der Leiste 120°.
+const SWINGS=[90,120];
+const swingOf=it=>it && it.dev==='fridge' && !fzOf(it) && SWINGS.includes(it.swing) ? it.swing : 90;
 const fzOf=it=>it && it.dev==='fridge' && it.kind==='tall' && FRIDGE[it.fz] ? FRIDGE[it.fz] : null;
 const doorTOf=it=>{ const f=fzOf(it); return !f ? 0 : it.doorT!=null ? it.doorT : f.doorT; };
 // Passblende an Innenecken: Griffe und Fronten stoßen sonst aneinander.
@@ -6145,7 +6153,7 @@ const PRESETS=[
   {key:'wcorner',kind:'wall', corner:true, front:'door', w:782, door:350, label:'Eckhängeschrank', tip:'Hänge-Eckschrank für die Innenecke (nobilia WE80-35): Blende hinter der Querzeile, Tür auf dem freien Teil'},
   {key:'hood',  kind:'wall', dev:'hood', front:'open', w:600, label:'Dunstabzug', tip:'Dunstabzug (Flachschirm im Hängeschrank) über dem Kochfeld'},
   {key:'tall',  kind:'tall', front:'door', w:600, label:'Hochschrank', tip:'Hochschrank'},
-  {key:'fridge',kind:'tall', dev:'fridge', front:'door', hinge:'right', w:600, store:['kuehl'], label:'Kühlschrank', tip:'Kühlschrank im Hochschrank'},
+  {key:'fridge',kind:'tall', dev:'fridge', front:'door', hinge:'right', swing:120, w:600, store:['kuehl'], label:'Kühlschrank', tip:'Kühlschrank im Hochschrank'},
   {key:'fridgeFD', kind:'tall', dev:'fridge', fz:'fd', front:'door', w:900, store:['kuehl'], label:'French Door', tip:'Kühlschrank frei stehend: oben zwei Flügeltüren, darunter Schubladen'},
   {key:'fridgeSBS',kind:'tall', dev:'fridge', fz:'sbs', front:'door', w:910, store:['kuehl'], label:'Side by Side', tip:'Kühlschrank frei stehend: links Gefrier-, rechts Kühlteil, zwei Türen'},
   {key:'oven',  kind:'tall', dev:'oven', front:'door', w:600, label:'Backofen hoch', tip:'Backofen auf Augenhöhe im Hochschrank'},
@@ -6231,7 +6239,7 @@ function normItem(o){
   if(it.dev==='fridge' && it.kind==='tall' && FRIDGE[o.fz]){
     it.fz=o.fz;
     if(fin(o.doorT)) it.doorT=clamp(o.doorT, DOORT_LIM[0], DOORT_LIM[1]);
-  }
+  } else if(it.dev==='fridge' && it.kind==='tall' && SWINGS.includes(o.swing)) it.swing=o.swing;
   if(o.kind==='island' && fin(o.bar) && o.bar>=1) it.bar=clamp(Math.round(o.bar), 50, 800);
   if(Array.isArray(o.store)){ const st=[...new Set(o.store.filter(k=>CKEY.has(k)))]; if(st.length) it.store=st; }
   return it;
@@ -6392,10 +6400,10 @@ function leafReach(E, L, g, e, roomDoors, winSashes){
   for(let a=2; a<=lf.full; a+=2){ hit=blockedAt(a*Math.PI/180); if(hit) break; angle=a; }
   return {angle, hit};
 }
-function swing90(h, along, out, r){
+function swing90(h, along, out, r, deg=90){
   const a0=ang(along), a1=ang(out);
   let d=a1-a0; while(d>Math.PI) d-=2*Math.PI; while(d<-Math.PI) d+=2*Math.PI;
-  return sector(h, r, a0, a0+d);
+  return sector(h, r, a0, a0+d*deg/90, Math.round(8*deg/90));
 }
 
 // Welche Front hat ein Teil, und was braucht sie offen? (Grundriss + Höhe)
@@ -6497,7 +6505,8 @@ function envelopes(K, g){
     // Bis 600 eine Tür, darüber zwei (Anschlag außen). Kühlschrank: eine.
     const doors = (w>600 && it.dev!=='fridge') ? [['left',pl,pr,w/2],['right',pr,pl,w/2]]
                 : [[it.hinge||'left', it.hinge==='right'?pr:pl, it.hinge==='right'?pl:pr, w]];
-    doors.forEach(([side,h,other,r])=>out.push({what:'Tür', poly:swing90(h, unit(sub(other,h)), n, r), z0:zf0, z1:zf1, hinge:h, side, r, along:unit(sub(other,h)), n}));
+    const deg=swingOf(it);
+    doors.forEach(([side,h,other,r])=>out.push({what:'Tür', poly:swing90(h, unit(sub(other,h)), n, r, deg), z0:zf0, z1:zf1, hinge:h, side, r, along:unit(sub(other,h)), n, deg}));
   } else if(fk==='drawer'){
     const t=Math.min(g.d-60, 520);
     out.push({what:'Auszug', poly:[pl,pr,add(pr,mul(n,t)),add(pl,mul(n,t))], z0:zf0, z1:zf1, t, pl, pr, n});
@@ -6922,7 +6931,8 @@ function check(E, K, L){
     });
     // Drehtür schwenkt aus dem Raum (Wand im Weg)
     if(e.what==='Tür' && !e.leaf && !polyInRoom(E, e.poly.map(p=>add(p, mul(sub(e.hinge,p),0.02)))))
-      add_('warn',[g.it.id], `Tür von ${nameOf(g.it)} geht keine 90° auf, die Wand ist im Weg (Anschlag tauschen oder Passblende)`, centroid(e.poly));
+      add_('warn',[g.it.id], `Tür von ${nameOf(g.it)} geht keine ${e.deg||90}° auf, die Wand ist im Weg (Anschlag tauschen oder Passblende${(e.deg||90)>90?', oder nur 90° einplanen':''})`, centroid(e.poly),
+        (e.deg||90)>90 && polyInRoom(E, swing90(e.hinge, e.along, e.n, e.r).map(p=>add(p, mul(sub(e.hinge,p),0.02)))) ? {label:'Nur 90° einplanen', id:g.it.id, set:{swing:90}} : null);
   }));
   // Kühlschrank mit Angel an der Wand: Tür und Auszüge brauchen Luft.
   G.filter(g=>g.it.dev==='fridge' && !fzOf(g.it)).forEach(g=>{
@@ -7623,9 +7633,14 @@ function wallFaces(E, thick=120){
       here.forEach(o=>{ if(o.z0>z+1) span(z, Math.min(o.z0,top0), Math.min(o.z0,top1)); z=Math.max(z,o.z1); });
       if(z<Math.min(top0,top1)-1) quads.push({a:wpt(Wf,s0,0), b:wpt(Wf,s1,0), z0a:z, z0b:z, z1a:top0, z1b:top1, n:Wf.n});
     }
-    caps.push({poly:[wpt(Wf,0,0), wpt(Wf,Wf.L,0), wpt(Wf,Wf.L,-thick), wpt(Wf,0,-thick)], za:ceilAt(E,Wf,0), zb:ceilAt(E,Wf,Wf.L)});
+    // Wand-Inseln (Säulen, freie Wandstücke) bekommen statt der Streifen
+    // einen vollen Deckel (tops), sonst schaut man von oben durch das hohle
+    // Innere auf das, was dahinter steht: die Flächen sind einseitig.
+    if(!W.hole) caps.push({poly:[wpt(Wf,0,0), wpt(Wf,Wf.L,0), wpt(Wf,Wf.L,-thick), wpt(Wf,0,-thick)], za:ceilAt(E,Wf,0), zb:ceilAt(E,Wf,Wf.L)});
   });
-  return {quads, caps};
+  const zOf=id=>E.H[id] ? E.H[id].h : 2500;
+  const tops=TL.ringsOf(E.ring).slice(1).map(R=>R.map(p=>({x:p.x, y:p.y, z:zOf(p.id)})));
+  return {quads, caps, tops};
 }
 // Fronten eines Teils als dünne Platten (geschlossen oder offen).
 function frontsOf(g, z0, z1, D, S){
@@ -7679,8 +7694,10 @@ function openPlates(g){
   g.env.forEach(e=>{
     if(e.open90) out.push({poly:e.open90, z0:e.z0, z1:e.z1});
     else if(e.what==='Tür'){
-      const tip=add(e.hinge, mul(e.n, e.r));
-      out.push({poly:[e.hinge, tip, add(tip,mul(e.along,t)), add(e.hinge,mul(e.along,t))], z0:e.z0, z1:e.z1});
+      // Im gewählten Winkel (90° oder 120°); die Dicke zur geschlossenen Seite.
+      const th=(e.deg||90)*Math.PI/180, dv=add(mul(e.along,Math.cos(th)), mul(e.n,Math.sin(th))), pv=sub(mul(e.along,Math.sin(th)), mul(e.n,Math.cos(th)));
+      const tip=add(e.hinge, mul(dv, e.r));
+      out.push({poly:[e.hinge, tip, add(tip,mul(pv,t)), add(e.hinge,mul(pv,t))], z0:e.z0, z1:e.z1});
     } else if(e.what==='Auszug'){
       const zm=e.z0+(e.z1-e.z0)*0.62;
       out.push({poly:[add(e.pl,mul(e.n,e.t-t)), add(e.pr,mul(e.n,e.t-t)), add(e.pr,mul(e.n,e.t)), add(e.pl,mul(e.n,e.t))], z0:zm, z1:e.z1});
@@ -7711,7 +7728,7 @@ function storable(it){
   if(it.dev==='sink') return ['muell','putz'];
   return CONTENTS.filter(c=>!c.fixed && !(c.low && it.kind==='wall') && !(c.key==='muell' && it.kind!=='base' && it.kind!=='island')).map(c=>c.key);
 }
-globalThis.KITCHEN={ FRIDGE, DOORT_LIM, fzOf, doorTOf, leaves, leafRect, leafReach, leafReachSide, entries, storable, wallFaces, K_DEF, K_LIM, WIDTHS, KIND, DEV, FRONTS, PRESETS, CONTENTS, FLOWS, GROUPS, ROLE_LABEL, BODY_R,
+globalThis.KITCHEN={ FRIDGE, DOORT_LIM, SWINGS, swingOf, fzOf, doorTOf, leaves, leafRect, leafReach, leafReachSide, entries, storable, wallFaces, K_DEF, K_LIM, WIDTHS, KIND, DEV, FRONTS, PRESETS, CONTENTS, FLOWS, GROUPS, ROLE_LABEL, BODY_R,
   derived, normKitchen, normItem, isEmpty, makeEnv, wallFrame, wpt, geom, dims, layout, envelopes, frontLR, frontKind,
   worktops, check, sashes, openingOn, faucetPoint, tableSides, tableSeats, seatPlan, rotSnaps, snapRot, chainDims, freeDims, applyDim, dockFree, barNkba, barSeats, BAR_SEAT_W, slotCandidates, cornerStop, fitsAt, freeSlot, snapX,
   nearestWall, planner, stations, flows, suggest, reachFactor, scene, frontsOf, stock, nameOf, inflate, polyInRoom, COL };
@@ -14024,7 +14041,7 @@ const KEYS=[
   ['Küche',[
     ['Teil setzen','Klick oder Ziehen aus der Leiste'], ['An der Wand schieben','Ziehen · ← →, mit ⇧ 10 cm'],
     ['Ohne Einrasten ziehen','⌥+Ziehen'], ['Tisch, Insel drehen','Q  E'], ['Anschlag tauschen','F'],
-    ['Daneben duplizieren','⌘D'], ['Teil löschen','Entf'],
+    ['Daneben duplizieren','⌘D'], ['Kopieren, unter dem Zeiger einfügen','⌘C  ⌘V'], ['Teil löschen','Entf'],
     ['3D · Wege · Fronten offen','V · W · O'], ['3D drehen, verschieben, zoomen','Ziehen · Rechts-Ziehen · Rad'],
   ]],
 ];
@@ -16438,7 +16455,7 @@ $('tRuler').onclick=()=>rulerToggle();
 const KX=globalThis.KITCHEN;
 const KS={ sel:null, hover:null, hl:null, flow:null, lastWall:null, palDrag:null, drag:false,
   show3d:lsGet('raumaufmass.k3d','1')==='1', paths:lsGet('raumaufmass.kwege','1')==='1', open:false,
-  ctxKey:'', ctx:null, flowKey:'', flowRes:null, suggKey:'', sugg:null, selKey:'', clearArmed:null };
+  ctxKey:'', ctx:null, flowKey:'', flowRes:null, suggKey:'', sugg:null, selKey:'', clearArmed:null, clip:null, ptr:null };
 function lsGet(k,d){ try{ const v=localStorage.getItem(k); return v==null?d:v; }catch(e){ return d; } }
 function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
 function kitchenData(){ if(!M.kitchen) M.kitchen=KX.normKitchen(null); return M.kitchen; }
@@ -16490,14 +16507,23 @@ function kitchenAdd(key, world){
   const pre=KX.PRESETS.find(p=>p.key===key); if(!pre) return;
   const K=c.K;
   const it={id:K.seq++, kind:pre.kind, w:pre.w};
-  ['front','dev','hinge','d','corner','door','fz','doorT'].forEach(k=>{ if(pre[k]!=null) it[k]=pre[k]; });
+  ['front','dev','hinge','d','corner','door','fz','doorT','swing'].forEach(k=>{ if(pre[k]!=null) it[k]=pre[k]; });
   // Inhalte der Vorlage nur, wenn sie noch nirgends liegen (Müll an der Spüle).
   if(pre.store){ const st=pre.store.filter(s=>!K.items.some(o=>(o.store||[]).includes(s))); if(st.length) it.store=st; }
+  placeItem(c, it, world, pre.label, true);
+}
+// Setzt ein fertiges Teil (ohne Lage) in den Plan: frei stehende an den
+// Punkt, Wandteile an die nächste Wand bzw. neben das gewählte Teil.
+// shrink: passt die Breite nicht, die größte passende Rasterbreite nehmen
+// (Leiste); beim Einfügen bleibt die kopierte Breite, sonst wäre es kein
+// Kopieren mehr.
+function placeItem(c, it, world, label, shrink){
+  const K=c.K;
   let msg=null;
-  if(KX.KIND[pre.kind].free){
+  if(KX.KIND[it.kind].free){
     const F=c.E.F;
     const p=world ? TILES.toLocal(F, world) : TILES.toLocal(F, innerPoint(c.E.ring));
-    it.x=p.x; it.y=p.y; it.rot=0;
+    it.x=p.x; it.y=p.y; if(!Number.isFinite(it.rot)) it.rot=0;
   } else {
     let Wf=null, near=null;
     if(world){ const nw=KX.nearestWall(c.E, world, 0, null, it.w); if(nw){ Wf=nw.Wf;
@@ -16523,19 +16549,33 @@ function kitchenAdd(key, world){
     let x=KX.freeSlot(c.E,K,c.L,it,Wf,near);
     // Eckschrank: in die nähere Ecke, Blende hinter die Querzeile.
     if(it.corner){ const xc=KX.cornerPlace(c.E,K,c.L,{...it, x:x!=null?x:(near!=null?near:0)},Wf); if(xc!=null) x=xc; }
-    if(x==null){
+    if(x==null && shrink){
       // Kein Platz in Standardbreite: die größte Rasterbreite nehmen, die passt.
       const widths=(it.dev?KX.DEV[it.dev].widths:it.corner?KX.CORNER[it.kind].bodies:KX.WIDTHS).filter(w=>w<it.w).sort((p,q)=>q-p);
-      for(const w of widths){ const t={...it,w}, xx=KX.freeSlot(c.E,K,c.L,t,Wf,near); if(xx!=null){ it.w=w; x=xx; msg=`Nur noch ${Math.round(w/10)} cm frei – ${pre.label} ${Math.round(w/10)} gesetzt.`; break; } }
+      for(const w of widths){ const t={...it,w}, xx=KX.freeSlot(c.E,K,c.L,t,Wf,near); if(xx!=null){ it.w=w; x=xx; msg=`Nur noch ${Math.round(w/10)} cm frei – ${label} ${Math.round(w/10)} gesetzt.`; break; } }
     }
-    if(x==null){ K.seq--; setHint(`Kein freier Platz an Wand ${Wf.a}–${Wf.b} für ${pre.label}. Auf eine andere Wand ziehen.`); return; }
+    if(x==null){ K.seq--; setHint(`Kein freier Platz an Wand ${Wf.a}–${Wf.b} für ${label}. ${shrink?'Auf eine andere Wand ziehen.':'Zeiger an eine andere Wand halten und noch einmal ⌘V.'}`); return false; }
     it.x=x; KS.lastWall=[Wf.a,Wf.b];
   }
   snapshot();
   K.items.push(KX.normItem(it));
   KS.sel=it.id;
   kitchenSave();
-  setHint(msg || `${pre.label} gesetzt${wallTxt(it)} · ziehen verschiebt, rechts Breite und Inhalt`);
+  setHint(msg || `${label} gesetzt${wallTxt(it)} · ziehen verschiebt, rechts Breite und Inhalt`);
+  return true;
+}
+// ⌘C merkt sich das gewählte Teil, ⌘V setzt eine Kopie unter den Zeiger
+// (steht er nicht über dem Plan: neben das gewählte Teil). Meldung
+// M-20261109-140133-cc2275.
+function kitchenCopy(it){
+  const t=JSON.parse(JSON.stringify(it)); delete t.id; delete t.a; delete t.b; delete t.x; delete t.y;
+  KS.clip=t; setHint(`${nm(it)} kopiert · ⌘V setzt es unter den Zeiger`);
+}
+function kitchenPaste(){
+  const c=kctx(); if(!c || !KS.clip) return;
+  const it={...JSON.parse(JSON.stringify(KS.clip)), id:c.K.seq++};
+  const over=KS.ptr && cv.matches(':hover');
+  placeItem(c, it, over ? toWorld(KS.ptr.x, KS.ptr.y) : null, `Kopie von ${nm(it)}`, false);
 }
 const dotWf=(Wf,p)=>(p.x-Wf.A.x)*Wf.u.x+(p.y-Wf.A.y)*Wf.u.y;
 // Punkt sicher im Raum (L-Räume: das Eckenmittel liegt oft draußen):
@@ -16696,6 +16736,8 @@ function drawKitchenView(){
     if(!(KS.open || g.it.id===KS.sel)) return;
     g.env.forEach(e=>{ poly(e.poly); ctx.setLineDash([4*dpr,3*dpr]);
       ctx.strokeStyle = g.it.id===KS.sel ? KINK.env : KINK.envOther; ctx.lineWidth=1.2*dpr; ctx.stroke(); ctx.setLineDash([]);
+      // Weiter als 90°: die 90°-Stellung als Strich, damit der Kompromiss sichtbar ist.
+      if(!e.leaf && e.deg>90){ const p=toScr(e.hinge), q=toScr(add2(e.hinge, mul2(e.n, e.r))); ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke(); }
       if(!e.leaf) return;
       // Flügel mit Türdicke: offen bei 90° als Blatt, dazu der Bogen der
       // Außenecke bis „ganz offen“ – so sieht man, wie weit er seitlich ausschlägt.
@@ -16936,11 +16978,14 @@ function kitchenTap(e){ if(KS.sel!=null){ KS.sel=null; render(); } }
 function kitchenHover(e){
   const c=kctx(); if(!c) return;
   const d=evDev(e), hs=hits(c,toWorld(d.x,d.y));
+  KS.ptr=d;
   cv.style.cursor = hs.length ? 'pointer' : '';
 }
 function kitchenKey(e){
   const k=e.key, mod=e.ctrlKey||e.metaKey, it=selItem();
   if(mod && k.toLowerCase()==='d' && it){ e.preventDefault(); duplicate(it); return true; }
+  if(mod && !e.altKey && !e.shiftKey && k.toLowerCase()==='c' && it){ e.preventDefault(); kitchenCopy(it); return true; }
+  if(mod && !e.altKey && !e.shiftKey && k.toLowerCase()==='v' && KS.clip){ e.preventDefault(); kitchenPaste(); return true; }
   if(mod || e.altKey) return false;
   const lk=k.toLowerCase();
   if(lk==='v'){ toggle3d(); return true; }
@@ -17058,6 +17103,7 @@ function renderSel(c){
   if(devs.length) h+=`<div class="krow"><label>Gerät</label><select id="kDev"><option value="">keins</option>${devs.map(([k,d])=>`<option value="${k}"${it.dev===k?' selected':''}>${d.label}</option>`).join('')}</select></div>`;
   if(it.dev==='fridge' && it.kind==='tall'){
     h+=`<div class="krow"><label>Bauform</label><div class="seg" id="kFz">${[['','Einbau'],...Object.entries(KX.FRIDGE).map(([k,f])=>[k,f.label])].map(([v,l])=>`<button data-fz="${v}" aria-pressed="${String((it.fz||'')===v)}">${l}</button>`).join('')}</div></div>`;
+    if(!fz) h+=`<div class="krow"><label title="Bis wohin die Tür aufgehen soll. Die Prüfung und der Schwenkbereich im Plan rechnen damit.">Tür auf</label><div class="seg" id="kSwing">${KX.SWINGS.map(v=>`<button data-swing="${v}" aria-pressed="${String(KX.swingOf(it)===v)}" title="${v===90?'Reicht zum Hineingreifen; Schalen und Fächer lassen sich oft nicht herausnehmen':'Schalen und Fächer lassen sich herausnehmen; braucht seitlich mehr Platz'}">${v}°</button>`).join('')}</div></div>`;
     if(fz) h+=`<div class="krow"><label>Türdicke</label><input id="kDT" inputmode="decimal" value="${Math.round(KX.doorTOf(it))}" title="Dicke der Tür samt Türfächern, ${KX.DOORT_LIM[0]}–${KX.DOORT_LIM[1]} mm. Offen steht der Flügel bei 90° um die halbe Türdicke seitlich über, ganz offen deutlich mehr."> mm <small>seitlich ${Math.round(KX.doorTOf(it)/2)} mm (90°) bis ${fullReach(c,it)} mm (ganz offen)</small></div>`;
   }
   const fk=KX.frontKind(it);
@@ -17128,8 +17174,10 @@ function renderSel(c){
   box.querySelectorAll('[data-fz]').forEach(b=>b.onclick=()=>edit(t=>{ const v=b.dataset.fz;
     if(v){ t.fz=v; const f=KX.FRIDGE[v]; if(!f.widths.includes(t.w)) t.w=f.widths.includes(900)?900:f.widths[0]; }
     else { delete t.fz; delete t.doorT; if(!KX.DEV.fridge.widths.includes(t.w)) t.w=600; if(!t.hinge) t.hinge='right'; }
+    if(v) delete t.swing;
     delete t.d; delete t.h; }));
   num('kDT',KX.DOORT_LIM[0],KX.DOORT_LIM[1],(t,v)=>{ t.doorT=Math.round(v); });
+  box.querySelectorAll('[data-swing]').forEach(b=>b.onclick=()=>edit(t=>{ t.swing=+b.dataset.swing; }));
   box.querySelectorAll('[data-seg]').forEach(sg=>sg.querySelectorAll('button').forEach(b=>b.onclick=()=>edit(t=>{ t[sg.dataset.seg]=b.dataset.v;
     if(sg.dataset.seg==='front' && b.dataset.v!=='door') delete t.corner; })));
   if($('kFau')) $('kFau').onchange=()=>edit(t=>{ const v=+$('kFau').value; if(v===kitchenData().spec.faucetH) delete t.faucetH; else t.faucetH=v; });
@@ -17395,6 +17443,11 @@ function buildGeom(c){
   const WF=KX.wallFaces(c.E);
   WF.quads.forEach(q=>{ const n=[q.n.x,0,q.n.y];
     quad(wall, P3(q.a,q.z0a), P3(q.b,q.z0b), P3(q.b,q.z1b), P3(q.a,q.z1a), KX.COL.wallFace, 1, n); });
+  WF.tops.forEach(R=>{
+    earcut(R).forEach(([i,j,k])=>{ const pa=[R[i].x,R[i].z,R[i].y], pb=[R[j].x,R[j].z,R[j].y], pc=[R[k].x,R[k].z,R[k].y], n=norm(pa,pb,pc), up=n[1]>=0;
+      const col=[0.55,0.53,0.49], nn=up?n:n.map(x=>-x); V(tri,pa,nn,col); V(tri,up?pb:pc,nn,col); V(tri,up?pc:pb,nn,col); });
+    R.forEach((p,i)=>{ const q=R[(i+1)%R.length]; edge([p.x,p.z,p.y],[q.x,q.z,q.y]); edge([p.x,0,p.y],[q.x,0,q.y]); });
+  });
   WF.caps.forEach(cp=>{ const [a,b,c2,d]=cp.poly;
     quad(tri, P3(a,cp.za), P3(b,cp.zb), P3(c2,cp.zb), P3(d,cp.za), [0.55,0.53,0.49], 1, [0,1,0]);
     edge(P3(a,cp.za),P3(b,cp.zb)); edge(P3(a,0),P3(b,0)); });
@@ -17520,8 +17573,8 @@ if(typeof ResizeObserver==='function') new ResizeObserver(()=>{ if(M.mode==='kit
 // Hinweis je Zustand (modeHint liest KITCHEN_HINT)
 function kitchenHint(){
   const it=selItem();
-  if(it) return it.a ? `${nm(it)}: ziehen schiebt an der Wand (⌥ ohne Einrasten) · ←/→ 1 cm, ⇧ 10 cm${hasHinge(it)?' · F Anschlag':''} · ⌘D daneben · Entf löscht`
-                     : `${nm(it)}: ziehen verschiebt · Q/E dreht 15° · Pfeile 1 cm · Entf löscht`;
+  if(it) return it.a ? `${nm(it)}: ziehen schiebt an der Wand (⌥ ohne Einrasten) · ←/→ 1 cm, ⇧ 10 cm${hasHinge(it)?' · F Anschlag':''} · ⌘D daneben · ⌘C/⌘V kopieren · Entf löscht`
+                     : `${nm(it)}: ziehen verschiebt · Q/E dreht 15° · Pfeile 1 cm · ⌘C/⌘V kopieren · Entf löscht`;
   return 'Schrank aus der Leiste ziehen oder klicken · V 3D · W Wege · O Fronten offen';
 }
 
@@ -20931,8 +20984,32 @@ globalThis.selfChecks=function(){
       const S=KX.scene(E,K,L,{}), Wf=KX.wallFaces(E);
       chk('kueche: 3D-Szene hat Prismen für Korpus, Fronten, Platte, Armatur', S.prisms.length>=8 && S.glass.length===1);
       chk('kueche: Wandflächen sparen Fenster und Tür aus (mehr Streifen als Wände)', Wf.quads.length>=4+3 && Wf.caps.length===4);
+      {
+        // Säule im Raum: voller Deckel statt Streifen, sonst sieht man in 3D
+        // durch die Säule hindurch (Meldung M-20261109-135945-ad27b6).
+        const Q=[['A',0,0],['B',6000,0],['C',6000,4000],['D',0,4000],['I',2800,1800],['J',3200,1800],['K',3200,2200],['L',2800,2200]].map(([id,x,y])=>({id,x,y}));
+        const EQ=KX.makeEnv(Q,[['A','B'],['B','C'],['C','D'],['D','A'],['I','J'],['J','K'],['K','L'],['L','I']],[],[]), WQ=EQ && KX.wallFaces(EQ);
+        chk('kueche: Säule bekommt in 3D einen geschlossenen Deckel, keine Randstreifen',
+          !!WQ && WQ.tops.length===1 && WQ.tops[0].length===4 && WQ.caps.length===4 && WQ.tops[0].every(p=>p.z>2000));
+      }
       chk('kueche: offene Fronten in 3D (Kühlschranktür steht 90° ab)',
         KX.scene(E,K,L,{open:true}).prisms.some(p=>p.id===2 && Math.abs(p.poly[1].x-p.poly[0].x)>500));
+    }
+    // --- Einbau-Kühlschrank: Tür 90° oder 120° (Meldung M-20261109-135752-e60089) ---
+    {
+      const fr=(hinge,swing)=>lay([{id:1,kind:'tall',dev:'fridge',a:'A',b:'B',x:0,w:600,hinge,swing}]);
+      const w120=['left','right'].map(hg=>fr(hg,120).F.some(f=>/geht keine 120° auf/.test(f.txt)));
+      const w90=['left','right'].map(hg=>fr(hg,90).F.some(f=>/geht keine 90° auf/.test(f.txt)));
+      chk('kueche: Kühlschrank in der Ecke – 120° stößt mit der Angel zur Ecke an die Wand, 90° nicht',
+        w120.filter(Boolean).length===1 && !w90.some(Boolean));
+      const hg=w120[0]?'left':'right', f=fr(hg,120).F.find(x=>/geht keine 120° auf/.test(x.txt));
+      chk('kueche: Abhilfe „Nur 90° einplanen“ wird angeboten', !!f && f.fix && f.fix.set.swing===90);
+      chk('kueche: Schwenkbereich 120° ist größer als 90°',
+        (()=>{ const e9=fr('left',90).L.G[0].env[0], e12=fr('left',120).L.G[0].env[0]; return e9.deg===90 && e12.deg===120 && e12.poly.length>e9.poly.length; })());
+      chk('kueche: Öffnungswinkel nur 90/120, nur beim Einbau-Kühlschrank',
+        (()=>{ const n=KX.normKitchen({items:[{id:1,kind:'tall',dev:'fridge',a:'A',b:'B',x:0,w:600,swing:120},{id:2,kind:'tall',dev:'fridge',a:'A',b:'B',x:700,w:600,swing:100},{id:3,kind:'tall',dev:'fridge',fz:'fd',a:'A',b:'B',x:1400,w:900,swing:120},{id:4,kind:'tall',a:'A',b:'B',x:2400,w:600,swing:120}]}).items;
+          return n[0].swing===120 && n[1].swing==null && n[2].swing==null && n[3].swing==null && KX.swingOf(n[1])===90; })());
+      chk('kueche: neuer Kühlschrank aus der Leiste geht 120° auf', KX.PRESETS.find(p=>p.key==='fridge').swing===120);
     }
     // --- Frei stehende Kühlschränke: French Door, Side by Side (Meldung M-20261109-133140-d316bb) ---
     {
