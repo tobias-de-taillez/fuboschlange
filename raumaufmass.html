@@ -4141,7 +4141,8 @@ globalThis.CORE={ TOL_RANK, TOL_RED, TOL_MODE, SIGMA_DEF, SUGGEST_CHECK_MAX, FIX
 // Kandidaten (Reihenfolge = Vorliebe) und belegt ihn, sonst null.
 function labelPlacer(){
   const R=[];
-  const hit=r=>R.some(o=>r.x<o.x+o.w && r.x+r.w>o.x && r.y<o.y+o.h && r.y+r.h>o.y);
+  // e: Rundung – gestapelte Zeilen stoßen an (y+h), das darf nicht als Treffer zählen.
+  const e=1e-3, hit=r=>R.some(o=>r.x<o.x+o.w-e && r.x+r.w>o.x+e && r.y<o.y+o.h-e && r.y+r.h>o.y+e);
   return { rects:R, free:r=>!hit(r), occupy:r=>{ if(r) R.push(r); return r; },
            place:cands=>{ for(const c of cands) if(c && !hit(c)){ R.push(c); return c; } return null; } };
 }
@@ -8439,19 +8440,23 @@ function contentCands(it){
   const out=[names.slice(0,2).join(' · ')+(n>2?` +${n-2}`:''), names[0]+(n>1?` +${n-1}`:''), `+${n}`];
   return out.filter((t,i)=>out.indexOf(t)===i);
 }
-// Erste Zeile, lang → kurz. Hängeschrank „H 60“, Dunstabzug „DA 90“; liegt er
-// (bis 30 mm versetzt) deckungsgleich über einem Unterschrank, steht dessen
-// Breite schon da – dann nur „H“/„DA“ statt eines zweiten „90“.
+// Kopfzeilen, lang → kurz; jede Variante ist eine Liste von Zeilen.
+// Hängeschrank „H 60“, Dunstabzug „DA 90“; liegt er (bis 30 mm versetzt)
+// deckungsgleich über einem Unterschrank, steht dessen Breite schon da – dann
+// nur „H“/„DA“ statt eines zweiten „90“. Kürzel (Gerät, „Eck“) erst neben der
+// Breite, dann darunter („60“/„GS“), erst zuletzt ohne: sonst fielen GS/KS im
+// geteilten Bild weg, während der Nachbar noch „+2“ zeigt (Gegenprüfung).
 function headCands(g, L){
   const it=g.it, w=nomCm(it);
-  if(it.kind==='table') return [`${w}×${Math.round(g.d/10)}`, w];
+  if(it.kind==='table') return [[`${w}×${Math.round(g.d/10)}`], [w]];
   if(it.kind==='wall'){
     const pre=it.dev==='hood' ? 'DA' : 'H';
     const same=L.G.some(h=>!h.wing && !h.free && h.it.kind==='base' && h.Wf.key===g.Wf.key && Math.abs(h.s0-g.s0)<=30 && Math.abs(h.s1-g.s1)<=30);
-    return same ? [pre] : it.corner ? [`${pre} Eck ${w}`, `${pre} ${w}`, pre] : [`${pre} ${w}`, pre];
+    return same ? [[pre]] : it.corner ? [[`${pre} Eck ${w}`], [`${pre} ${w}`], [pre]] : [[`${pre} ${w}`], [pre]];
   }
-  const t=devTag(it), b=it.corner ? ['Eck '+w, w] : [w];
-  return t ? [`${b[0]} ${t}`, ...b] : b;
+  const t=devTag(it), tag=[it.corner?'Eck':'', t].filter(Boolean).join(' ');
+  if(!tag) return [[w]];
+  return [[it.corner ? `Eck ${w}${t?' '+t:''}` : `${w} ${t}`], [w, tag], [w]];
 }
 // Rechteck ganz im Polygon: Ecken innen und keine Polygonecke im Rechteck –
 // fängt den L-förmigen Eckschrank, bei dem die Hülle passen würde.
@@ -8462,42 +8467,84 @@ const areaCentroid=P=>{ let a=0, x=0, y=0;
   return Math.abs(a)<1e-9 ? centroid(P) : {x:x/(3*a), y:y/(3*a)}; };
 // o={toScr, measure(txt, font), dpr, LP (CORE.labelPlacer mit Hindernissen)};
 // font={px (Gerätepixel), weight, italic}. Liefert {labels:[{id, role
-// 'head'|'wall'|'sub', txt, font, x, y (Mitte), r (belegtes Rechteck)}], LP}.
+// 'head'|'tag'|'wall'|'sub', txt, font, x, y (Mitte), r (belegtes Rechteck)}], LP}.
 function planLabels(L, o){
   const dpr=o.dpr||1, LP=o.LP||C.labelPlacer(), out=[], pend=[];
   const fH={px:PLAN_TXT.main*dpr, weight:600}, fS={px:PLAN_TXT.sub*dpr, weight:400}, fW={px:PLAN_TXT.sub*dpr, weight:600, italic:true};
+  const fWS={...fS, italic:true};   // Inhalt eines Hängeschranks: kursiv wie sein „H“
+  // Gestapeltes Kürzel („GS“ unter „60“) in Inhaltsgröße, fett: wo eine
+  // Inhaltszeile passt, passt auch das Kürzel – es geht dem Inhalt vor.
+  const fT={px:PLAN_TXT.sub*dpr, weight:600};
   const lh=f=>Math.round(f.px*1.25);
-  const box=(t,f,x,y)=>{ const w=o.measure(t,f)+4*dpr, h=lh(f); return {x:x-w/2, y:y-h/2, w, h}; };
+  // Rand je Seite 1,5 px: zwei Kästen, die sich berühren, lassen 3 px Luft.
+  const pad=3*dpr, box=(t,f,x,y)=>{ const w=o.measure(t,f)+pad, h=lh(f); return {x:x-w/2, y:y-h/2, w, h}; };
   const scr=g=>(g.outline||g.poly).map(o.toScr);
-  // Block: erste Zeile frei und im Teil; die zweite (Inhalt) wird nur im Teil
-  // freigehalten und erst nach den Hängeschränken belegt.
+  const sub=(g,P,s,x,y,f)=>{ const r=box(s,f,x,y);
+    if(rectIn(r,P) && LP.place([r])){ out.push({id:g.it.id, role:'sub', txt:s, font:f, x, y, r}); return true; } return false; };
+  // Block: Kopfzeilen frei und im Teil; die Inhaltszeile darunter wird nur im
+  // Teil freigehalten und erst nach den Hängeschränken belegt. Variante vor
+  // Ort: erst jede Stelle für die längste Kopfzeile, dann kürzen – sonst
+  // schrumpfte „H 60“ zu „H“, obwohl es weiter entlang der Wand passte.
+  // anchors(bw, bh) → Mittelpunkte für einen Block dieser Größe. RV: die
+  // für Unterschrank-Inhalte freigehaltenen Zeilen. Ein Hängeschrank meidet
+  // sie je Kopfzeile erst ganz (mit, dann ohne Inhalt), bevor er sie überdeckt,
+  // und nimmt seinen Inhalt nur, wo der schon jetzt frei ist – sonst stand das
+  // „H“ über einem Inhalt, der dann gekürzt wurde oder woanders landete.
+  const RV=C.labelPlacer();
   const block=(g, P, anchors, heads, f0)=>{
-    const subs=contentCands(g.it);
-    for(const a of anchors) for(const t of heads) for(const s of [...subs, null]){
-      const y0=s ? a.y-lh(fS)/2 : a.y, r=box(t,f0,a.x,y0);
-      if(!rectIn(r,P) || !LP.free(r)) continue;
-      if(s && !rectIn(box(s,fS,a.x,a.y+lh(f0)/2),P)) continue;
-      LP.occupy(r); out.push({id:g.it.id, role:f0===fW?'wall':'head', txt:t, font:f0, x:a.x, y:y0, r});
-      if(s) pend.push({g, P, x:a.x, y:a.y+lh(f0)/2, subs:subs.slice(subs.indexOf(s))});
+    const subs=contentCands(g.it), wall=f0===fW, fs=wall ? fWS : fS;
+    for(const H of heads) for(const strict of wall ? [true,false] : [false]) for(const s of [...subs, null]){
+      const F=H.map((t,i)=>i ? fT : f0), tot=F.reduce((h,f)=>h+lh(f),0)+(s?lh(fs):0);
+      const bw=Math.max(...H.map((t,i)=>o.measure(t,F[i])), s ? o.measure(s,fs) : 0)+pad;
+      const C2=anchors(bw, tot).map(a=>{ let y=a.y-tot/2;
+        const R=H.map((t,i)=>{ const r=box(t,F[i],a.x,y+lh(F[i])/2); y+=lh(F[i]); return r; }), sb=s && box(s,fs,a.x,y+lh(fs)/2);
+        return {a, R, sb, ok:R.every(r=>rectIn(r,P) && LP.free(r)) && (!s || (rectIn(sb,P) && (!wall || (LP.free(sb) && RV.free(sb))))),
+          rv:R.every(r=>RV.free(r))}; });
+      const k=C2.find(k=>k.ok && (k.rv || !strict)); if(!k) continue;
+      k.R.forEach((r,i)=>{ LP.occupy(r); out.push({id:g.it.id, role:i ? 'tag' : wall ? 'wall' : 'head', txt:H[i], font:i ? fT : f0, x:k.a.x, y:r.y+r.h/2, r}); });
+      if(s){ if(!wall) RV.occupy(k.sb); pend.push({g, P, x:k.a.x, y:k.sb.y+k.sb.h/2, f:fs, subs:subs.slice(subs.indexOf(s))}); }
       return;
     }
+  };
+  // Stellen im Hängeschrank für einen Block bw × bh: an der Wandseite zuerst,
+  // dann tiefer; entlang Mitte, Drittel und bündig an beiden Enden. Bündig im
+  // Bildschirm gerechnet (Ausdehnung des Kastens auf Wand und Normale) – mit
+  // festen Bruchteilen fiel „DA“ im geteilten Bild um 1 px aus dem Korpus.
+  const wallAnchors=g=>{
+    const p0=o.toScr(wpt(g.Wf,g.s0,0)), p1=o.toScr(wpt(g.Wf,g.s1,0)), p2=o.toScr(wpt(g.Wf,g.s0,g.d));
+    const Ls=Math.hypot(p1.x-p0.x,p1.y-p0.y), Ds=Math.hypot(p2.x-p0.x,p2.y-p0.y);
+    if(!Ls || !Ds) return ()=>[];
+    const u={x:(p1.x-p0.x)/Ls, y:(p1.y-p0.y)/Ls}, n={x:(p2.x-p0.x)/Ds, y:(p2.y-p0.y)/Ds};
+    return (bw,bh)=>{
+      const eu=(Math.abs(u.x)*bw+Math.abs(u.y)*bh)/2+0.5*dpr, en=(Math.abs(n.x)*bw+Math.abs(n.y)*bh)/2+0.5*dpr;
+      if(2*eu>Ls || 2*en>Ds) return [];
+      const cl=(v,e,l)=>Math.min(Math.max(v,e/l),1-e/l), uniq=A=>A.filter((v,i)=>A.findIndex(w=>Math.abs(w-v)<1e-6)===i);
+      const T=uniq([0.5,0.3,0.7,0,1,0.15,0.85].map(t=>cl(t,eu,Ls))), Q=uniq([0,0.4,0.55,0.7,1].map(q=>cl(q,en,Ds))), A=[];
+      Q.forEach(q=>T.forEach(t=>A.push({x:p0.x+u.x*Ls*t+n.x*Ds*q, y:p0.y+u.y*Ls*t+n.y*Ds*q})));
+      return A;
+    };
   };
   const G=L.G.filter(g=>!g.wing);
   // 1. Unter-/Hochschrank, Insel, Tisch: um den Flächenschwerpunkt (Eckschrank:
   //    des Umrisses; liegt der außerhalb, die Korpusmitte).
   G.filter(g=>g.it.kind!=='wall').forEach(g=>{
     const W=g.outline||g.poly; let c=areaCentroid(W); if(!TL.pointInRing(c,W)) c=g.c;
-    block(g, scr(g), [o.toScr(c)], headCands(g,L), fH);
+    const a=o.toScr(c); block(g, scr(g), ()=>[a], headCands(g,L), fH);
   });
   // 2. Hängeschrank/Dunstabzug: kursiv, an der Wandseite zuerst, dann entlang
   //    der Wand – nie auf der Breite des Unterschranks darunter.
+  const wallA=new Map();
   G.filter(g=>g.it.kind==='wall').forEach(g=>{
-    const A=[]; [0.25,0.4,0.55].forEach(q=>[0.5,0.3,0.7,0.15,0.85].forEach(t=>A.push(o.toScr(wpt(g.Wf, g.s0+(g.s1-g.s0)*t, g.d*q)))));
-    block(g, scr(g), A, headCands(g,L), fW);
+    const A=wallAnchors(g); wallA.set(g, A); block(g, scr(g), A, headCands(g,L), fW);
   });
   // 3. Inhalte in den freigehaltenen Platz; stößt er an, kürzer, sonst entfällt er.
-  pend.forEach(p=>{ for(const s of p.subs){ const r=box(s,fS,p.x,p.y);
-    if(rectIn(r,p.P) && LP.place([r])){ out.push({id:p.g.it.id, role:'sub', txt:s, font:fS, x:p.x, y:p.y, r}); return; } } });
+  const done=new Set();
+  pend.forEach(p=>{ if(p.subs.some(s=>sub(p.g,p.P,s,p.x,p.y,p.f))) done.add(p.g); });
+  // 4. Hängeschrank-Inhalt, der unter dem „H“ keinen Platz fand (meist über
+  //    einem Unterschrank mit eigenem Inhalt): kursiv an einer anderen freien
+  //    Stelle des Hängeschranks, sonst fehlte er im Plan ganz (Gegenprüfung).
+  wallA.forEach((A,g)=>{ if(done.has(g) || !out.some(l=>l.id===g.it.id && l.role==='wall')) return; const P=scr(g);
+    contentCands(g.it).some(s=>A(o.measure(s,fWS)+pad, lh(fWS)).some(a=>sub(g,P,s,a.x,a.y,fWS))); });
   return {labels:out, LP};
 }
 // Stationsetikett der Wege (Rollen an einem Punkt q, Bildschirm): rechts,
@@ -18413,8 +18460,11 @@ function drawKitchenView(){
   const LP=globalThis.CORE.labelPlacer();
   drawEntryLabels(c, dpr, LP);
   drawChain(c, dpr, LP);
+  // Heller Saum unter der Schrift: Kochfeldkreise, Spülbecken und die
+  // gestrichelte Hängeschrank-Kante laufen nicht mehr durch die Ziffern.
   ctx.save(); ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillStyle=KX.PLAN_TXT.ink;
-  KX.planLabels(L, {toScr, dpr, LP, measure:kMeasure}).labels.forEach(b=>{ ctx.font=kFont(b.font); ctx.fillText(b.txt, b.x, b.y); });
+  ctx.strokeStyle='rgba(251,250,246,.85)'; ctx.lineWidth=3*dpr; ctx.lineJoin='round';
+  KX.planLabels(L, {toScr, dpr, LP, measure:kMeasure}).labels.forEach(b=>{ ctx.font=kFont(b.font); ctx.strokeText(b.txt, b.x, b.y); ctx.fillText(b.txt, b.x, b.y); });
   ctx.restore();
   // Schwenkbereiche: gewähltes Teil immer, alle mit „Fronten offen“
   L.G.forEach(g=>{
@@ -19341,11 +19391,19 @@ function sweepSvg(ax, unit, from, cssW){
 }
 function renderAna(c){
   const box=$('kAna'); if(!box) return;
-  if(!KS.ana || M.mode!=='kitchen'){ if(box.innerHTML) box.innerHTML=''; KS.anaKey=''; return; }
+  if(!KS.ana || M.mode!=='kitchen'){ if(box.innerHTML) box.innerHTML=''; KS.anaKey=''; KS.anaW=null; return; }
   const R=flowRes(c), S=c.K.spec, it=selItem(), sw=anaSweep(c), kid=anaKid(c), persons=S.persons||1;
   // Innenbreite für die Kurven (viewBox = CSS-px); im Schlüssel, damit eine
-  // andere Fensterbreite die Achsenschrift neu setzt.
-  const bs=getComputedStyle(box), chartW=Math.max(0, box.clientWidth-parseFloat(bs.paddingLeft||0)-parseFloat(bs.paddingRight||0));
+  // andere Breite die Achsenschrift neu setzt. Gemessen nur einmal und dann per
+  // ResizeObserver nachgeführt – nicht bei jedem Render (erzwang sonst nach den
+  // innerHTML-Schreibern je Frame ein Layout beim Ziehen und Hovern).
+  if(KS.anaW==null || typeof ResizeObserver!=='function'){
+    const bs=getComputedStyle(box); KS.anaW=Math.max(0, box.clientWidth-parseFloat(bs.paddingLeft||0)-parseFloat(bs.paddingRight||0));
+    if(typeof ResizeObserver==='function' && !box._kaRO){
+      box._kaRO=new ResizeObserver(E=>{ const w=E[E.length-1].contentRect.width;
+        if(Math.round(w/8)!==Math.round(KS.anaW/8)){ KS.anaW=w; if(KS.ana && M.mode==='kitchen') render(); } });
+      box._kaRO.observe(box); } }
+  const chartW=KS.anaW;
   const key=JSON.stringify([c.key, KS.sel, KS.anaMode, KS.ref&&KS.ref.kmYear, KS.kid, KS.flow, KS.heat, sw===KS.sw?KS.swKey:String(sw), Math.round(chartW/8)]);
   if(KS.anaKey===key) return;
   KS.anaKey=key;
@@ -23483,6 +23541,37 @@ globalThis.selfChecks=function(){
         && KX.dimFits({x:0,y:0},{x:0,y:20},38,15,2) && !KX.dimFits({x:0,y:0},{x:0,y:16},38,15,2));
       chk('kueche: Lage-Diagramm – Achsenschrift effektiv ≥ 11 CSS-px (Analysebereich 410/483/527 px, schmal, versteckt)',
         [410,483,527,483.6,200,0].every(w=>{ const b=KX.chartBox(w); return b.fs*(w>0?w:b.W)/b.W>=11-1e-9 && (w<240 || b.W<=w); }));
+      // Gegenprüfung: GS/KS fielen im geteilten Bild weg, „H 60“ schrumpfte
+      // gedreht zu „H“, Hängeschrank-Inhalt fehlte, Inhalt fiel an Rundung weg.
+      {
+        const lab=(L,s,rot)=>KX.planLabels(L,{toScr:view(s,rot), dpr:1, measure}).labels, one=(A,id,role)=>A.find(l=>l.id===id && l.role===role);
+        const Kd=KX.normKitchen({items:[{id:7,kind:'base',dev:'dw',front:'door',w:600,a:'D',b:'A',x:1800},{id:8,kind:'tall',dev:'fridge',front:'door',w:600,a:'B',b:'C',x:0},
+          {id:1,kind:'base',corner:true,front:'door',w:900,a:'D',b:'A',x:2600,store:['messer','toepfe']}]}), Ld=KX.layout(E4,Kd);
+        const under=(A,L,s,id,h,t)=>{ const a=one(A,id,'head'), b=one(A,id,'tag'), g=L.byId.get(id), P=(g.outline||g.poly).map(view(s,0));
+          return a && b && a.txt===h && b.txt===t && b.y>a.y && Math.abs(a.x-b.x)<0.5 && KX.rectIn(a.r,P) && KX.rectIn(b.r,P); };
+        chk('kueche: Gerätekürzel bei kleinem Maßstab darunter („60“/„GS“, „60“/„KS“, „90“/„Eck“) statt weg – und vor dem Inhalt',
+          [0.05,0.06,0.067].every(s=>{ const A=lab(Ld,s,0); return under(A,Ld,s,7,'60','GS') && under(A,Ld,s,8,'60','KS') && under(A,Ld,s,1,'90','Eck'); })
+          && [0.05,0.06,0.067].every(s=>{ const A=lab(L4,s,0); return under(A,L4,s,7,'60','GS') && !one(A,7,'sub'); })
+          // nie Inhalt ohne sein Kürzel (Spülmaschine, Eckschrank)
+          && [0.04,0.05,0.06,0.067,0.094].every(s=>[0,Math.PI/2].every(rot=>{ const A=lab(L4,s,rot);
+            return [7,1].every(id=>!one(A,id,'sub') || /GS|Eck/.test(A.filter(l=>l.id===id && l.role!=='sub').map(l=>l.txt).join(' '))); })));
+        chk('kueche: Hängeschrank ohne Unterschrank behält „H 60“ auch in gedrehter Ansicht (erst jede Stelle, dann kürzen)',
+          runs.every(R=>{ const w=R.lab.find(l=>l.id===9 && l.role==='wall'); return w && w.txt==='H 60'; }));
+        chk('kueche: Hängeschrank-Inhalt über Unterschrank mit Inhalt bleibt sichtbar (kursiv), ohne den Unterschrank-Inhalt zu verdrängen',
+          [0.094,0.123,0.16].every(s=>[0,Math.PI/2].every(rot=>{ const A=lab(L4,s,rot), w=one(A,5,'sub'), b=one(A,6,'sub');
+            return w && w.font.italic && b && (s<0.12 || /^Besteck/.test(b.txt)); })));
+        const LPr=CORE.labelPlacer(); LPr.occupy({x:0, y:112.76, w:10, h:15});
+        const K2=KX.normKitchen({items:[{id:2,kind:'base',dev:'hob',front:'door',w:900,a:'A',b:'B',x:1500},{id:3,kind:'wall',dev:'hood',front:'open',w:900,a:'A',b:'B',x:1500},
+          {id:6,kind:'base',front:'drawer',w:600,a:'A',b:'B',x:600,store:['besteck','teller','backen']},{id:5,kind:'wall',front:'door',w:600,a:'A',b:'B',x:600,store:['glaeser','tassen']}]}), L2=KX.layout(E4,K2);
+        const at=s=>p=>({x:p.x*s+100, y:p.y*s+100});
+        chk('kueche: gestapelte Zeilen stoßen ohne Treffer an (Rundung ließ den Inhalt bei 0,094 px/mm wegfallen)',
+          LPr.free({x:0, y:127.75999999999999, w:10, h:14})
+          && !!one(KX.planLabels(L2,{toScr:at(0.094), dpr:1, measure}).labels,6,'sub'));
+        // Breiten wie in Chromium (DA kursiv 11 px, 90 fett 12 px): „DA“ passt bündig neben „90“.
+        const mz=(t,f)=>({DA:15.97, '90':16.01}[t] ?? measure(t,f));
+        chk('kueche: „DA“ im geteilten Bild bündig an der Haubenkante statt wegzufallen (Stellen nach Kastengröße)',
+          KX.planLabels(L2,{toScr:at(0.0669), dpr:1, measure:mz}).labels.some(l=>l.id===3 && l.txt==='DA'));
+      }
     }catch(err){ chk('kueche: Review-Fix beschriftung ohne Ausnahme ('+err.message+')', false); }
   }
   return {ok, out};
