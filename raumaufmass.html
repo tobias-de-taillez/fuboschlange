@@ -6144,21 +6144,22 @@ const CORNER={
          inner:{boden:'Einlegeboden'}, type:{boden:'WE'} },
 };
 const PRESETS=[
-  {key:'base',  kind:'base', front:'drawer', w:600, label:'Unterschrank', tip:'Unterschrank mit Auszügen'},
-  {key:'sink',  kind:'base', dev:'sink', front:'door', w:600, store:['muell','putz'], label:'Spüle', tip:'Spülenschrank mit Armatur'},
-  {key:'dw',    kind:'base', dev:'dw', front:'door', w:600, label:'Spülmaschine', tip:'Geschirrspüler, Tür klappt nach unten'},
-  {key:'hob',   kind:'base', dev:'hob', front:'door', w:600, label:'Herd', tip:'Kochfeld mit Backofen darunter'},
+  {key:'base',  kind:'base', front:'drawer', w:600, label:'Unterschrank', tip:'mit Schubladen; Türen, Breite und Inhalt danach rechts'},
+  {key:'sink',  kind:'base', dev:'sink', front:'door', w:600, store:['muell','putz'], label:'Spüle', tip:'Spülenschrank mit Becken und Armatur'},
+  {key:'dw',    kind:'base', dev:'dw', front:'door', w:600, label:'Spülmaschine', tip:'60 oder 45 cm breit, gehört neben die Spüle'},
+  {key:'hob',   kind:'base', dev:'hob', front:'door', w:600, label:'Herd', tip:'Kochfeld, Backofen darunter'},
   {key:'corner',kind:'base', corner:true, front:'door', w:1000, label:'Eckschrank', tip:'Halbeckschrank für die Innenecke: Blende hinter der Querzeile, Tür auf dem freien Teil'},
-  {key:'wall',  kind:'wall', front:'door', w:600, label:'Hängeschrank', tip:'Hängeschrank'},
+  {key:'wall',  kind:'wall', front:'door', w:600, label:'Hängeschrank', tip:'über der Arbeitsplatte; Tür, Klappe oder offen danach rechts'},
   {key:'wcorner',kind:'wall', corner:true, front:'door', w:782, door:350, label:'Eckhängeschrank', tip:'Hänge-Eckschrank für die Innenecke (nobilia WE80-35): Blende hinter der Querzeile, Tür auf dem freien Teil'},
-  {key:'hood',  kind:'wall', dev:'hood', front:'open', w:600, label:'Dunstabzug', tip:'Dunstabzug (Flachschirm im Hängeschrank) über dem Kochfeld'},
-  {key:'tall',  kind:'tall', front:'door', w:600, label:'Hochschrank', tip:'Hochschrank'},
-  {key:'fridge',kind:'tall', dev:'fridge', front:'door', hinge:'right', swing:120, w:600, store:['kuehl'], label:'Kühlschrank', tip:'Kühlschrank im Hochschrank'},
-  {key:'fridgeFD', kind:'tall', dev:'fridge', fz:'fd', front:'door', w:900, store:['kuehl'], label:'French Door', tip:'Kühlschrank frei stehend: oben zwei Flügeltüren, darunter Schubladen'},
-  {key:'fridgeSBS',kind:'tall', dev:'fridge', fz:'sbs', front:'door', w:910, store:['kuehl'], label:'Side by Side', tip:'Kühlschrank frei stehend: links Gefrier-, rechts Kühlteil, zwei Türen'},
-  {key:'oven',  kind:'tall', dev:'oven', front:'door', w:600, label:'Backofen hoch', tip:'Backofen auf Augenhöhe im Hochschrank'},
-  {key:'island',kind:'island', front:'drawer', w:1800, d:900, label:'Insel', tip:'Kücheninsel, frei stehend'},
-  {key:'table', kind:'table', w:1200, d:800, label:'Tisch', tip:'Esstisch – Plätze ergeben sich aus Länge und Breite (60 cm je Platz)'},
+  {key:'hood',  kind:'wall', dev:'hood', front:'open', w:600, label:'Dunstabzug', tip:'Flachschirm im Hängeschrank, gehört über den Herd'},
+  {key:'tall',  kind:'tall', front:'door', w:600, label:'Hochschrank', tip:'vom Boden bis oben, z. B. für Vorräte'},
+  // Ein Kühlschrank in der Leiste: erst „ich brauche einen“, die Bauform
+  // (Einbau, French Door, Side by Side) danach rechts (Meldung
+  // M-20261109-135632-2bb48a).
+  {key:'fridge',kind:'tall', dev:'fridge', front:'door', hinge:'right', swing:120, w:600, store:['kuehl'], label:'Kühlschrank', tip:'Einbau oder frei stehend (French Door, Side by Side) – Bauform danach rechts'},
+  {key:'oven',  kind:'tall', dev:'oven', front:'door', w:600, label:'Backofen hoch', tip:'im Hochschrank auf Augenhöhe'},
+  {key:'island',kind:'island', front:'drawer', w:1800, d:900, label:'Insel', tip:'frei stehend oder an eine Wand angedockt'},
+  {key:'table', kind:'table', w:1200, d:800, label:'Tisch', tip:'Plätze ergeben sich aus Länge und Breite (60 cm je Platz)'},
 ];
 
 // ---------- Inhalte ----------
@@ -16594,16 +16595,15 @@ const centroidW=R=>({x:R.reduce((s,p)=>s+p.x,0)/R.length, y:R.reduce((s,p)=>s+p.
 const ICONS={
   base:'<rect x="4" y="9" width="22" height="15"/><path d="M4 14h22M4 19h22M13 11.5h4M13 16.5h4M13 21.5h4"/>',
   sink:'<rect x="4" y="11" width="22" height="13"/><path d="M15 11V5h4v2"/><path d="M8 15h14v6H8z"/>',
-  dw:'<rect x="4" y="9" width="22" height="15"/><path d="M4 12.5h22M11 10.8h8"/><circle cx="21" cy="18" r="1.4"/>',
-  hob:'<rect x="4" y="9" width="22" height="15"/><path d="M4 12.5h22"/><rect x="8" y="15" width="14" height="6"/><path d="M8 7.5h5M17 7.5h5"/>',
+  dw:'<rect x="4" y="9" width="22" height="15"/><path d="M4 12.5h22M8 10.8h3"/><circle cx="15" cy="18.3" r="3.8"/><circle cx="15" cy="18.3" r="1.5"/>',
+  hob:'<rect x="4" y="9" width="22" height="15"/><path d="M4 12.5h22"/><rect x="8" y="15" width="14" height="6"/><path d="M10 9V4.5h10V9M8 4.5h14"/>',
   corner:'<path d="M3 24V10h24v14z"/><path d="M3 10l6-6h18v6M15 13v8"/><rect x="3" y="10" width="9" height="14" fill="currentColor" opacity=".18"/>',
   hood:'<path d="M5 4h20v7H5z"/><path d="M3 11h24l-2 4H5z"/><path d="M10 19c1 1.5 1 3 0 4.5M15 19c1 1.5 1 3 0 4.5M20 19c1 1.5 1 3 0 4.5" stroke-width="1"/>',
   wall:'<rect x="4" y="3" width="22" height="11"/><path d="M15 3v11M12 10v2M18 10v2"/><path d="M4 26h22" stroke-dasharray="2 2"/>',
   wcorner:'<rect x="3" y="3" width="24" height="11"/><rect x="3" y="3" width="9" height="11" fill="currentColor" opacity=".18"/><path d="M19 9v2"/><path d="M3 26h24" stroke-dasharray="2 2"/>',
   tall:'<rect x="8" y="2" width="14" height="25"/><path d="M8 13h14M19 6v4M19 16v4"/>',
-  fridge:'<rect x="8" y="2" width="14" height="25"/><path d="M8 11h14M10 5v3M10 14v4"/>',
-  fridgeFD:'<rect x="4" y="2" width="22" height="25"/><path d="M15 2v15M4 17h22M4 22h22M12.5 7v5M17.5 7v5M13 19.5h4"/>',
-  fridgeSBS:'<rect x="4" y="2" width="22" height="25"/><path d="M13.5 2v25M11 9v6M16 9v6"/>',
+  // Schneeflocke im Gerät mit runden Ecken – nicht wie der Hochschrank daneben.
+  fridge:'<rect x="7" y="2" width="16" height="25" rx="2.5"/><path d="M15 8.5v12M9.8 11.5l10.4 6M9.8 17.5l10.4-6M13.3 8.9l1.7 1.6 1.7-1.6M13.3 20.1l1.7-1.6 1.7 1.6" stroke-width="1.15"/>',
   oven:'<rect x="8" y="2" width="14" height="25"/><rect x="10" y="10" width="10" height="7"/><path d="M8 8h14M8 19h14"/>',
   island:'<rect x="2" y="12" width="26" height="12"/><path d="M1 12h28"/>',
   table:'<path d="M3 11h24M6 11v13M24 11v13"/><path d="M1 17h4v7M29 17h-4v7" stroke-width="1.1"/>',
@@ -16612,7 +16612,7 @@ function buildPalette(){
   const box=$('kPalette'); if(!box || box.childElementCount) return;
   KX.PRESETS.forEach(p=>{
     const b=document.createElement('button');
-    b.className='tb kpal'; b.title=p.tip+' – klicken oder in den Plan ziehen';
+    b.className='tb kpal'; b.title=`${p.label} – ${p.tip}`;   // Klicken/Ziehen sagt die Statuszeile
     b.setAttribute('aria-label', p.label);
     b.innerHTML=`<svg viewBox="0 0 30 28" aria-hidden="true">${ICONS[p.key]}</svg>`;
     b.addEventListener('pointerdown',e=>{ if(e.button!==0) return; KS.palDrag={key:p.key}; b.setPointerCapture(e.pointerId); });
@@ -17174,7 +17174,7 @@ function renderSel(c){
   box.querySelectorAll('[data-fz]').forEach(b=>b.onclick=()=>edit(t=>{ const v=b.dataset.fz;
     if(v){ t.fz=v; const f=KX.FRIDGE[v]; if(!f.widths.includes(t.w)) t.w=f.widths.includes(900)?900:f.widths[0]; }
     else { delete t.fz; delete t.doorT; if(!KX.DEV.fridge.widths.includes(t.w)) t.w=600; if(!t.hinge) t.hinge='right'; }
-    if(v) delete t.swing;
+    if(v) delete t.swing; else if(!t.swing) t.swing=120;   // wie aus der Leiste
     delete t.d; delete t.h; }));
   num('kDT',KX.DOORT_LIM[0],KX.DOORT_LIM[1],(t,v)=>{ t.doorT=Math.round(v); });
   box.querySelectorAll('[data-swing]').forEach(b=>b.onclick=()=>edit(t=>{ t.swing=+b.dataset.swing; }));
