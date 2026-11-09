@@ -4659,7 +4659,9 @@ function blockReach(E, K, L, parts, dir, T){
   const fits=t=>blockFits(E, K, L, parts, dir*t);
   if(!(T>0) || fits(T) || !fits(0)) return T;
   let a=0, b=T;
-  while(b-a>0.02){ const m=(a+b)/2; if(fits(m)) a=m; else b=m; }
+  // Höchstens 64 Halbierungen: ab etwa 3e14 mm (korrupte Raumdatei) kommt b-a in Gleitkommazahlen nie unter 0,02,
+  // die Schleife hinge sonst und fröre das Fenster ein.
+  for(let i=0; i<64 && b-a>0.02; i++){ const m=(a+b)/2; if(fits(m)) a=m; else b=m; }
   return Math.max(0, Math.round((a-1)*10)/10);
 }
 // Grenzen eines Wandabstand-Edits auf das zurückführen, was die harten Regeln
@@ -21263,6 +21265,11 @@ globalThis.selfChecks=function(){
             const E=rc(5000,3500,[good,{...good,id:'o2',...bad}]), K=KX.normKitchen({items}), L=KX.layout(E,K);
             KX.check(E,K,L); KX.flows(E,K,L,{}); KX.suggest(E,K,L); KX.optimalStore(E,K,L);
             return E.openings.length===1 && E.openings[0].id==='o1'; }); });
+      // Maßkette an einer absurd langen Wand (korrupte Datei): blockReach halbiert höchstens 64-mal, statt bei b-a>0,02 zu hängen
+      T('kueche-gesamt: Maßkette an einer Wand von 1e15 mm Länge kehrt zurück (die Bisektion in blockReach ist gedeckelt)',
+        ()=>{ const pts=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:1e15},{id:'D',x:0,y:3000}], wl=[['A','B'],['B','C'],['C','D'],['D','A']];
+          const E=KX.makeEnv(pts,wl,[],[]), K=KX.normKitchen({items:[{id:1,kind:'base',a:'B',b:'C',x:306,w:600,front:'door'}]}), L=KX.layout(E,K);
+          const D=KX.chainDims(E,L,L.G[0],K); return !!D && Array.isArray(D.segs) && D.segs.length>0; });
     }catch(err){ chk('kueche: Review-Fix Rest: gesamtpruefung ohne Ausnahme ('+err.message+')', false); }
   }
   return {ok, out};
