@@ -4253,9 +4253,14 @@ function edgesOf(P){
 }
 
 // Raumrahmen aus Punkten und erster Wand. null, solange es keine Wand gibt.
-function frameOf(pts, walls){
-  if(!walls || !walls.length) return null;
-  const A=pts.find(p=>p.id===walls[0][0]), B=pts.find(p=>p.id===walls[0][1]);
+// anchor {a,b} (optional): Rahmen an diesen beiden Ecken statt an walls[0] -
+// die Küche merkt sich so ihre Bezugsecken, damit freie Teile nicht mit der
+// Wandreihenfolge springen. Fehlt eine der Ecken, gilt wieder walls[0].
+function frameOf(pts, walls, anchor){
+  const ends = anchor && pts.some(p=>p.id===anchor.a) && pts.some(p=>p.id===anchor.b) ? [anchor.a, anchor.b]
+             : (walls && walls.length) ? walls[0] : null;
+  if(!ends) return null;
+  const A=pts.find(p=>p.id===ends[0]), B=pts.find(p=>p.id===ends[1]);
   if(!A||!B) return null;
   const u=unit(sub(B,A));
   return {o:{x:A.x,y:A.y}, u, v:{x:-u.y, y:u.x}};
@@ -6461,8 +6466,38 @@ function normKitchen(o){
   let seq=Math.max(0, ...used)+1;
   K.items.forEach(it=>{ if(it.id==null){ it.id=seq++; } });
   K.seq=Math.max(seq, (o && Number.isInteger(o.seq)) ? o.seq : 0, 1);
+  const fr=o && o.frame;
+  if(fr && typeof fr.a==='string' && typeof fr.b==='string' && fr.a!==fr.b) K.frame={a:fr.a, b:fr.b};
   fitStores(K);
   return K;
+}
+// Bezugsecken der freien Teile (Insel, Tisch). Ihr Rahmen hing früher an
+// walls[0]: Wand weg und neu gezogen oder „Ring“ - schon drehten und sprangen
+// alle freien Teile. Jetzt zwei Ecken-IDs in K.frame.
+// - gültig (beide Ecken in pts): bleibt.
+// - fehlt: erste Wand, deren Ecken es gibt (alte Stände ohne Anker liegen so
+//   unverändert im bisherigen Rahmen).
+// - Ecke gelöscht und oldPts (Stand vor der Änderung, alter Fit) kennt noch
+//   beide Rahmen: freie Teile in den neuen Rahmen umrechnen, ihre Lage im
+//   Raum bleibt. Nur im alten Fit rechnen - der Solver darf den Grundriss
+//   danach frei verschieben und drehen.
+function anchorFrame(K, pts, walls, oldPts){
+  if(!K) return null;
+  const ok=(P,f)=>!!f && P.some(p=>p.id===f.a) && P.some(p=>p.id===f.b);
+  if(ok(pts, K.frame)) return K.frame;
+  const w=(walls||[]).find(([a,b])=>a!==b && ok(pts,{a,b}) && (!oldPts || ok(oldPts,{a,b})));
+  if(!w) return K.frame||null;
+  const nf={a:w[0], b:w[1]};
+  if(oldPts && ok(oldPts, K.frame)){
+    const F0=TL.frameOf(oldPts, null, K.frame), F1=TL.frameOf(oldPts, null, nf);
+    const dr=Math.atan2(dot(F0.u,F1.v), dot(F0.u,F1.u))*180/Math.PI;
+    K.items.forEach(it=>{ if(!KIND[it.kind].free) return;
+      const l=TL.toLocal(F1, TL.toWorldF(F0, {x:it.x, y:it.y}));
+      it.x=Math.round(l.x*10)/10; it.y=Math.round(l.y*10)/10;
+      it.rot=Math.round((((it.rot||0)+dr)%360+360)%360*100)/100%360; });
+  }
+  K.frame=nf;
+  return nf;
 }
 // Inhalte, die in einer hohen Spülmaschine nach den jetzigen Küchenmaßen
 // keinen Platz mehr haben (Schrank niedriger, oberes Fach weg), entfernen –
@@ -6479,7 +6514,8 @@ const isEmpty=K=>!K || (!K.items.length && Object.keys(K_DEF).every(k=>K.spec[k]
 // ---------- Raum ----------
 // Umgebung aus dem Aufmaß: Ring, Wände mit Innennormale, Höhen, Öffnungen.
 // pts sind die ausgeglichenen Punkte (M.fit.pts), sonst stimmt nichts.
-function makeEnv(pts, walls, openings, hmeas, water){
+// frame: Bezugsecken der freien Teile (K.frame), fehlt er, gilt walls[0].
+function makeEnv(pts, walls, openings, hmeas, water, frame){
   const ring=C.wallPolygon(pts, walls);
   if(!ring) return null;
   const I=C.idx(pts), wallsByKey=new Map();
@@ -6496,7 +6532,7 @@ function makeEnv(pts, walls, openings, hmeas, water){
     });
   });
   const H=globalThis.cornerHeights ? globalThis.cornerHeights(pts, hmeas||[]) : {};
-  const F=TL.frameOf(pts, walls);
+  const F=TL.frameOf(pts, walls, frame);
   return {pts, walls, ring, I, wallsByKey, H, F, openings:(openings||[]).filter(o=>o && o.a && o.b),
           water:(water||[]).filter(w=>w && wallsByKey.has(wallKeyOf(w.a,w.b)))};
 }
@@ -8410,7 +8446,7 @@ function storeCap(it, S){
   return it.kind==='tall' ? 3 : it.w>=800 ? 3 : it.w>=450 ? 2 : 1;
 }
 globalThis.KITCHEN={ FRIDGE, DOORT_LIM, SWINGS, swingOf, isCold, fzOf, doorTOf, leaves, leafRect, leafReach, leafReachSide, entries, storable, storeCap, storeFits, fitStores, dwZones, dwZoneFor, DW_ZONE_MIN, DW_LOW, wallFaces, K_DEF, K_LIM, WIDTHS, KIND, DEV, FRONTS, PRESETS, PGROUPS, CONTENTS, FLOWS, GROUPS, ROLE_LABEL, BODY_R,
-  derived, devZ, ovenBelow, DW_H, normKitchen, normItem, isEmpty, makeEnv, wallFrame, wpt, geom, dims, layout, envelopes, frontLR, frontKind,
+  derived, devZ, ovenBelow, DW_H, normKitchen, normItem, isEmpty, anchorFrame, makeEnv, wallFrame, wpt, geom, dims, layout, envelopes, frontLR, frontKind,
   worktops, check, hoseCheck, alongWall, waterPts, HOSE, sashes, doorReach, optimalStore, hungarian, openingOn, faucetPoint, tableSides, tableSeats, seatPlan, rotSnaps, snapRot, chainDims, freeDims, applyDim, dockFree, barNkba, barSeats, BAR_SEAT_W, slotCandidates, cornerStop, fitsAt, freeSlot, snapX,
   nearestWall, planner, stations, flows, suggest, heatGrid, kidPoly, conflicts, PAIRS, sweep, placeOk, reachFactor, scene, frontsOf, stock, nameOf, inflate, polyInRoom, COL };
 Object.assign(globalThis.KITCHEN, { CORNER, CSHAPE, shapeOf, cornerBlind, cornerPlace, cornerType, crossAt, cornerWing });
@@ -10527,6 +10563,8 @@ function deserialize(o){
   M.tiles=globalThis.TILES.normTiles(o.tiles);
   // Küche: optional wie die Fliesen, kaputte Teile fallen einzeln weg.
   M.kitchen=globalThis.KITCHEN.normKitchen(o.kitchen);
+  // Alte Stände ohne Bezugsecken: bisheriger Rahmen (erste Wand) wird fest.
+  globalThis.KITCHEN.anchorFrame(M.kitchen, M.pts, M.walls);
   // Gehoert zum Raum, nicht zur Sitzung: ein fertig eingemessener Raum darf
   // ausgerichtet bleiben, waehrend der naechste frisch skizziert wird. Aeltere
   // Raeume und Fremdimporte kennen das Feld nicht - Standard ist aus.
@@ -10770,6 +10808,12 @@ function northWall(a,b,force){
 
 function recompute(){
   const hadFit=!!M.fit;
+  // Ecke der Küchen-Bezugsecken gelöscht: freie Teile im noch alten Fit auf
+  // eine verbleibende Wand umrechnen, sie bleiben, wo sie stehen. Hier nur
+  // umhängen, nie neu festlegen - nach einer Umordnung wäre walls[0] falsch.
+  const KF=M.kitchen && M.kitchen.frame;
+  if(KF && !(M.pts.some(p=>p.id===KF.a) && M.pts.some(p=>p.id===KF.b)))
+    globalThis.KITCHEN.anchorFrame(M.kitchen, M.pts, M.walls, M.fit && M.fit.pts);
   // Ein Hover-Highlight stammt immer aus einer Panel-Zeile, und die wird
   // gleich neu gebaut - ihr mouseleave feuert dann nie. Nur die offene
   // Masseingabe haelt ihr Highlight selbst (enterMeasurement setzt es neu).
@@ -17998,7 +18042,7 @@ function kitchenData(){ if(!M.kitchen) M.kitchen=KX.normKitchen(null); return M.
 // Nur mit eindeutiger Form: Schränke an Skizzenlinien wären Erfindung.
 function kitchenEnv(){
   if(!(M.fit && M.fit.pts && M.an && M.an.dof===0 && M.walls.length)) return null;
-  return KX.makeEnv(M.fit.pts, M.walls, M.openings, M.hmeas, M.water);
+  return KX.makeEnv(M.fit.pts, M.walls, M.openings, M.hmeas, M.water, M.kitchen && M.kitchen.frame);
 }
 // Alles Abgeleitete einmal je Zustand: Layout und Prüfung. Wege und
 // Vorschläge rechnen erst, wenn das Panel sie zeigt (eigener Cache).
@@ -18018,6 +18062,8 @@ function kctx(){
 const kitchenReady=()=>!!kitchenEnv();
 function kitchenSave(){
   KS.ctxKey='';
+  // Erstes freies Teil in einem neuen Raum: Bezugsecken jetzt festlegen.
+  KX.anchorFrame(kitchenData(), M.pts, M.walls);
   if(currentRoom && !STORE.save(currentRoom, {data:JSON.parse(serialize()), area:polyAreaM2()}))
     setHint('Speichern fehlgeschlagen (Speicher voll?). Raum als Datei sichern.');
   render();
@@ -23273,6 +23319,34 @@ globalThis.selfChecks=function(){
         const E3=KX.makeEnv(R.pts,R.walls,[d3],[]), K=KX.normKitchen({items:[{id:1,kind:'tall',dev:'fridge',fz:'fd',a:'A',b:'B',x:250,w:900}]});
         chk('kueche: Flügel schlägt an die Zimmertür daneben', KX.check(E3,K,KX.layout(E3,K)).some(f=>/Flügel.*die Zimmertür/.test(f.txt)));
       }
+    }
+    // --- Review-Fix rahmen ---
+    {
+      // Freie Teile hängen an Bezugsecken (K.frame), nicht an walls[0]
+      const free=[{id:1,kind:'island',x:2000,y:1500,rot:0,w:1800,d:900},{id:2,kind:'table',x:1000,y:800,rot:0,w:1200,d:800}];
+      const polys=(E,K)=>KX.layout(E,K).G.filter(g=>g.free).sort((a,b)=>a.it.id-b.it.id).map(g=>g.poly);
+      const same=(P,Q)=>P.length===Q.length && P.every((p,i)=>p.length===Q[i].length && p.every((q,j)=>Math.hypot(q.x-Q[i][j].x, q.y-Q[i][j].y)<0.5));
+      const rot1=[['B','C'],['C','D'],['D','A'],['A','B']], ring=[['D','C'],['C','B'],['B','A'],['A','D']];
+      const Ka=KX.normKitchen({frame:{a:'A',b:'B'}, items:free}), P0=polys(KX.makeEnv(R.pts,R.walls,[],[],[],Ka.frame),Ka);
+      chk('kueche: Wandreihenfolge ändert sich – Insel und Tisch bleiben, wo sie stehen',
+        P0.length===2 && same(P0, polys(KX.makeEnv(R.pts,rot1,[],[],[],Ka.frame),Ka)) && same(P0, polys(KX.makeEnv(R.pts,ring,[],[],[],Ka.frame),Ka)));
+      // Alter Stand ohne Anker: übernimmt die erste Wand, Lage unverändert, übersteht Speichern/Laden
+      const Ko=KX.normKitchen({items:free}), Po=polys(KX.makeEnv(R.pts,R.walls,[],[]),Ko);
+      KX.anchorFrame(Ko, R.pts, R.walls);
+      const Kl=KX.normKitchen(JSON.parse(JSON.stringify(Ko)));
+      chk('kueche: alter Stand ohne Bezugsecken lädt unverändert (erste Wand wird fest)',
+        Kl.frame && Kl.frame.a==='A' && Kl.frame.b==='B' && same(Po, polys(KX.makeEnv(R.pts,rot1,[],[],[],Kl.frame),Kl)) && same(Po, P0));
+      chk('kueche: nur Bezugsecken gesetzt – Küche gilt weiter als leer, kaputter Anker fällt weg',
+        KX.isEmpty(KX.normKitchen({frame:{a:'A',b:'B'}})) && KX.normKitchen({frame:{a:'A',b:'A'}}).frame===undefined);
+      // Bezugsecke gelöscht: im alten Fit umrechnen, Lage im Raum bleibt (schiefer Raum, Drehung zählt)
+      const Q=[{id:'A',x:0,y:0},{id:'B',x:4000,y:300},{id:'C',x:4300,y:3000},{id:'D',x:500,y:3200},{id:'E',x:-300,y:1500}];
+      const QW=[['A','B'],['B','C'],['C','D'],['D','E'],['E','A']];
+      const Kq=KX.normKitchen({frame:{a:'A',b:'B'}, items:[{...free[0], rot:20}, free[1]]}), Pq=polys(KX.makeEnv(Q,QW,[],[],[],Kq.frame),Kq);
+      const Q2=Q.filter(p=>p.id!=='A'), QW2=[['B','C'],['C','D'],['D','E'],['E','B']];
+      KX.anchorFrame(Kq, Q2, QW2, Q);
+      chk('kueche: Bezugsecke gelöscht – freie Teile behalten ihre Lage',
+        !!Kq.frame && Kq.frame.a==='B' && Kq.frame.b==='C' && Math.abs(Kq.items[0].rot-20)>1
+        && same(Pq, polys(KX.makeEnv(Q,QW,[],[],[],Kq.frame),Kq)) && polys(KX.makeEnv(Q2,QW2,[],[],[],Kq.frame),Kq).length===2);
     }
   }
   return {ok, out};
