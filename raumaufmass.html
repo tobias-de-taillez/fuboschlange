@@ -2,6 +2,22 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <title>Raumaufmaß</title>
+<script id="meldung-log">
+// Fehlerprotokoll fuer "Fehler melden": ab dem ersten Byte mitschneiden, was
+// der Browser an Fehlern wirft, damit eine Meldung zeigt, was vorher schiefging.
+// Ringpuffer, nur im Speicher; geht nur mit einer Meldung raus.
+(function(){
+  const L=globalThis.MELDUNG_LOG=[], MAX=80, t0=Date.now();
+  const s=v=>{ try{ return v instanceof Error ? (v.stack||String(v)) : typeof v==='string' ? v : JSON.stringify(v); }catch(e){ return String(v); } };
+  const add=(art,teile)=>{ L.push({t:Date.now()-t0, art, text:teile.map(s).join(' ').slice(0,4000)}); if(L.length>MAX) L.shift(); };
+  addEventListener('error',e=>add('error',[e.message, (e.filename||'')+':'+e.lineno+':'+e.colno, e.error&&e.error.stack||'']));
+  addEventListener('unhandledrejection',e=>add('promise',[e.reason]));
+  for(const k of ['error','warn']){
+    const orig=console[k];
+    console[k]=function(...a){ add('console.'+k,a); return orig.apply(this,a); };
+  }
+})();
+</script>
 <style>
   /* Gestaltungslinie: Messwerkzeug auf Papier, fuer den Schreibtisch.
      Warmweiss, Tinte, genau ein Akzent (Auswahl, Hauptaktion, ein-
@@ -490,6 +506,37 @@
   #tClear.arm{background:var(--bad)!important;color:#fff!important}
 #tPalette{display:flex;gap:5px;flex-wrap:wrap} #tPalette svg,#tSetList svg{width:42px;height:30px;display:block}
   #tSetList{display:grid;gap:6px;margin:10px 0} .tile-set-row{display:flex;gap:6px;align-items:center} .tile-set-row>button:first-child{flex:1;display:flex;align-items:center;gap:8px;text-align:left} .tile-set-row button[aria-pressed=true]{border-color:var(--accent);background:#fff1df} .tile-set-row small{display:block;color:var(--ink2)} #tPalette button{min-width:48px;padding:5px 8px} #tShape,#tNewShape{max-width:100%;padding:6px} #tName{min-width:0}
+
+  /* ---------- Fehler melden: schwebender Knopf unten links, ueber allem ---------- */
+  #mldFab{position:fixed;left:12px;bottom:40px;z-index:60;display:flex;align-items:center;
+    background:var(--surface);border:1px solid var(--line);border-radius:6px;
+    box-shadow:0 2px 10px rgba(36,34,29,.16);opacity:.82;transition:opacity .15s}
+  #mldFab:hover,#mldFab:focus-within{opacity:1}
+  #mldFab button{border:0;background:none;min-height:28px}
+  #mldOpen{display:flex;align-items:center;gap:6px;padding:0 8px 0 9px;font-size:12px;color:var(--ink2)}
+  #mldOpen svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
+  #mldOpen:hover{color:var(--accent);background:var(--hover)}
+  #mldHide{width:22px;padding:0;color:var(--muted);font-size:13px;line-height:1;border-left:1px solid var(--line2)!important;border-radius:0 6px 6px 0}
+  #mldHide:hover{color:var(--ink);background:var(--hover)}
+  #mldwrap{z-index:70}
+  #mldbox{width:min(620px,calc(100vw - 32px));max-height:calc(100vh - 32px)}
+  #mldbody{padding:12px 16px 4px;display:grid;gap:10px}
+  #mldbody .seg{display:flex;gap:0}
+  #mldbody .seg button{border-radius:0;margin-left:-1px} #mldbody .seg button:first-child{border-radius:4px 0 0 4px;margin-left:0} #mldbody .seg button:last-child{border-radius:0 4px 4px 0}
+  #mldbody .seg button[aria-pressed=true]{background:var(--accent-bg);color:var(--accent);border-color:var(--accent-line);position:relative}
+  #mldText{width:100%;min-height:120px;resize:vertical;font:inherit;padding:8px;border:1px solid var(--line);border-radius:4px;background:#fff;color:var(--ink)}
+  #mldKontakt{width:100%;height:28px;padding:0 8px;border:1px solid var(--line);border-radius:4px;background:#fff}
+  #mldbody label.f{display:grid;gap:4px;font-size:12px;color:var(--ink2)}
+  #mldShot{display:grid;grid-template-columns:200px minmax(0,1fr);gap:12px;align-items:start}
+  #mldShot img{width:200px;max-height:150px;object-fit:contain;background:var(--canvas);border:1px solid var(--line);border-radius:4px}
+  #mldShot p{margin:0 0 6px;font-size:12px;color:var(--ink2)}
+  #mldDsgvo{background:var(--warn-bg);border:1px solid #e6d3a8;border-radius:6px;padding:10px 12px;font-size:12px;color:var(--ink)}
+  #mldDsgvo b{display:block;margin-bottom:4px}
+  #mldDsgvo ul{margin:4px 0 6px;padding-left:18px} #mldDsgvo p{margin:4px 0}
+  #mldbody .chk{display:flex;gap:8px;align-items:flex-start;font-size:12px} #mldbody .chk input{margin-top:2px}
+  #mldMsg{font-size:12px;min-height:16px} #mldMsg.bad{color:var(--bad)} #mldMsg.good{color:var(--good)}
+  #mldfoot{display:flex;justify-content:flex-end;gap:8px;padding:10px 16px;border-top:1px solid var(--line2);position:sticky;bottom:0;background:var(--surface)}
+  @media print{ #mldFab,#mldwrap{display:none!important} }
 </style>
 
 <div id="app">
@@ -516,6 +563,8 @@
         <button id="mirror" role="menuitem">Raum spiegeln</button>
         <hr>
         <button id="clr" role="menuitem" class="danger" title="Zweimal klicken: der erste Klick fragt nach">Raum leeren</button>
+        <hr>
+        <button id="mldMenu" role="menuitem">Fehler / Wunsch melden …</button>
       </div>
     </div>
     <nav id="modes" aria-label="Modus">
@@ -819,6 +868,48 @@
       <p>Räume liegen nur im Browser. Wichtiges zusätzlich <b>Als Datei sichern</b> (⌘S). <b>Link kopieren</b> und <b>QR-Code</b> übertragen den Raum als Kopie aufs Handy. <b>Raum spiegeln</b> tauscht die Seite, Maße bleiben; mit Fliesen nicht möglich. <b>Raum leeren</b> fragt einmal nach. Rückgängig (⌘Z) gilt bis zum Raumwechsel.</p>
       <p class="hnote">Alle Tasten und Mausgesten: Knopf „Tasten ?“ unten rechts.</p>
     </div>
+  </div>
+</div>
+<div id="mldFab" role="group" aria-label="Fehler melden">
+  <button id="mldOpen" title="Fehler melden oder fehlende Funktion wünschen"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 5.2v3.6M8 10.9v.1"/><path d="M8 1.8 14.6 13.5H1.4z"/></svg>Fehler / Wunsch melden</button>
+  <button id="mldHide" aria-label="Ausblenden" title="Für diese Sitzung ausblenden (bleibt im Raum-Menü erreichbar)">×</button>
+</div>
+<div id="mldwrap" class="scrim" hidden>
+  <div id="mldbox" class="dlg" role="dialog" aria-modal="true" aria-labelledby="mldTitle">
+    <div class="dlghead"><h2 id="mldTitle">Fehler oder fehlende Funktion melden</h2><button id="mldClose" class="ib" aria-label="Schließen" title="Schließen (Esc)"><svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg></button></div>
+    <div id="mldbody">
+      <div class="seg" id="mldArt" role="group" aria-label="Art der Meldung">
+        <button data-art="fehler" aria-pressed="true">Fehler</button><button data-art="wunsch" aria-pressed="false">Funktion fehlt</button>
+      </div>
+      <label class="f"><span id="mldTextLbl">Was ist passiert? Was hast du erwartet?</span>
+        <textarea id="mldText" maxlength="20000" placeholder="z. B. „Nach dem Löschen der Diagonale A–C springt die Ecke C nach links, obwohl …“"></textarea></label>
+      <label class="f">Kontakt für Rückfragen (freiwillig)
+        <input id="mldKontakt" type="text" maxlength="200" autocomplete="email" placeholder="E-Mail oder Telefon, leer lassen geht auch"></label>
+      <div id="mldShot">
+        <img id="mldImg" alt="Vorschau des Bildes, das mitgeschickt wird">
+        <div>
+          <p id="mldImgNote">Bild der Zeichenfläche, so wie sie gerade aussieht.</p>
+          <label class="chk"><input type="checkbox" id="mldImgOn" checked>Bild mitsenden</label>
+          <p><button id="mldWin" type="button" title="Der Browser fragt, was aufgenommen werden soll – diesen Tab wählen">Ganzes Fenster aufnehmen …</button></p>
+        </div>
+      </div>
+      <label class="chk" id="mldAlleRow"><input type="checkbox" id="mldAlle"><span id="mldAlleTxt">Auch die anderen Räume aus diesem Browser mitsenden</span></label>
+      <div id="mldDsgvo">
+        <b>Datenschutz: Das wird gesendet</b>
+        <ul>
+          <li>dein Text und, falls angegeben, dein Kontakt</li>
+          <li>das Bild oben (wenn angehakt)</li>
+          <li>der genaue Zustand der App: der geöffnete Raum mit allen Maßen, Öffnungen und Fliesen, dazu Ansicht, Auswahl, Rückgängig-Verlauf und Einstellungen, <span id="mldAlleLi">ohne die anderen Räume</span></li>
+          <li>technische Angaben: Browser, Betriebssystem, Fenstergröße, Sprache und die Fehlermeldungen der Seite seit dem Laden</li>
+        </ul>
+        <p><b style="display:inline">Wofür:</b> ausschließlich, um den Fehler nachzustellen und zu beheben. Keine Weitergabe, keine Auswertung zu anderen Zwecken.</p>
+        <p><b style="display:inline">Wo und wie lange:</b> auf dem Webserver dieser Seite (Hetzner, Deutschland), nicht öffentlich abrufbar. Der Entwickler holt die Meldung ab, dabei wird sie vom Server gelöscht; seine Arbeitskopie löscht er direkt nach dem Debugging. Wie bei jedem Seitenaufruf vermerkt der Server den Zugriff mit gekürzter IP-Adresse.</p>
+        <p><b style="display:inline">Rechtsgrundlage:</b> deine Einwilligung (Art. 6 Abs. 1 lit. a DSGVO). Sie ist freiwillig und jederzeit widerrufbar; für Auskunft oder vorzeitige Löschung genügt die Meldungsnummer, die nach dem Senden erscheint.</p>
+      </div>
+      <label class="chk"><input type="checkbox" id="mldOk">Ich bin einverstanden, dass diese Daten zum Debugging gesendet werden.</label>
+      <div id="mldMsg" role="status"></div>
+    </div>
+    <div id="mldfoot"><button id="mldCancel" type="button">Abbrechen</button><button id="mldSend" type="button" class="primary" disabled>Senden</button></div>
   </div>
 </div>
 <dialog id="measDlg" aria-labelledby="mTitle">
@@ -14800,6 +14891,294 @@ if(typeof DeviceMotionEvent!=='undefined' && matchMedia('(pointer:coarse)').matc
     else if(phase!=='aus') stop('Abgebrochen.');
     else start();
   };
+}
+})();
+</script>
+
+<script id="meldung">
+"use strict";
+// ================= Fehler / Wunsch melden =================
+// Schwebender Knopf unten links, in jedem Zustand sichtbar (ueber allen
+// Overlays), per x fuer die laufende Sitzung ausblendbar; das Raum-Menue
+// fuehrt immer hin. Die Meldung traegt Text, ein Bild der Zeichenflaeche und
+// den genauen Zustand (Raum, Ansicht, Auswahl, Rueckgaengig, Einstellungen,
+// Fehlerprotokoll) - genug, um sie lokal mit ?meldung=<datei> nachzustellen.
+// Empfaenger ist bugreport.php neben der Seite; ohne den (lokal, file://)
+// wird die Meldung als Datei gesichert.
+(function(){
+// Ersetzt scripts/deploy-hetzner.sh durch den Commit von main.
+const MELDUNG_STAND='__MELDUNG_STAND__';
+const stand=()=>MELDUNG_STAND.startsWith('__') ? 'lokal' : MELDUNG_STAND;
+const K_AUS='raumaufmass.meldung.aus', K_NACH='raumaufmass.meldung.nachstellen';
+const ss={ get(k){ try{ return sessionStorage.getItem(k); }catch(e){ return null; } },
+           set(k,v){ try{ sessionStorage.setItem(k,v); return true; }catch(e){ return false; } },
+           del(k){ try{ sessionStorage.removeItem(k); }catch(e){} } };
+const fab=$('mldFab'), wrap=$('mldwrap');
+let art='fehler', bildPlan=null, bildFenster=null, sendet=false;
+
+// --- Knopf ein-/ausblenden (nur fuer diese Sitzung)
+let ausImSpeicher=false;
+const fabSync=()=>{ fab.hidden = ausImSpeicher || ss.get(K_AUS)==='1'; };
+$('mldHide').onclick=()=>{ if(!ss.set(K_AUS,'1')) ausImSpeicher=true; fabSync();
+  setHint('„Fehler / Wunsch melden“ ausgeblendet – bis zum Schließen des Tabs. Weiterhin im Raum-Menü.'); };
+fabSync();
+
+// --- Bild der Zeichenflaeche. Der Canvas ist durchsichtig (Hintergrund kommt
+// aus CSS), also erst mit der Flaechenfarbe fuellen. JPEG und hoechstens
+// 1600 px breit: ein Retina-Canvas als PNG waere schnell mehrere MB.
+function planBild(){
+  try{
+    const w=cv.width, h=cv.height; if(!w || !h) return null;
+    const f=Math.min(1, 1600/w), c=document.createElement('canvas');
+    c.width=Math.round(w*f); c.height=Math.round(h*f);
+    const g=c.getContext('2d');
+    g.fillStyle=getComputedStyle(cv).backgroundColor||'#f5f3ed'; g.fillRect(0,0,c.width,c.height);
+    g.drawImage(cv,0,0,c.width,c.height);
+    return c.toDataURL('image/jpeg',0.85);
+  }catch(e){ return null; }
+}
+// Ganzes Fenster: nur ueber die Bildschirmfreigabe des Browsers (fragt selbst
+// nach). Der Dialog geht dafuer kurz weg, damit er nicht im Bild steht.
+async function fensterBild(){
+  let st=null;
+  wrap.hidden=true; fab.hidden=true;
+  try{
+    st=await navigator.mediaDevices.getDisplayMedia({video:{displaySurface:'browser'}, audio:false,
+      preferCurrentTab:true, selfBrowserSurface:'include'});
+    const v=document.createElement('video'); v.muted=true; v.playsInline=true; v.srcObject=st;
+    await v.play(); await new Promise(r=>setTimeout(r,350));
+    const f=Math.min(1, 1920/(v.videoWidth||1)), c=document.createElement('canvas');
+    c.width=Math.round(v.videoWidth*f); c.height=Math.round(v.videoHeight*f);
+    c.getContext('2d').drawImage(v,0,0,c.width,c.height);
+    return c.width ? c.toDataURL('image/jpeg',0.85) : null;
+  }catch(e){ return null; }
+  finally{ if(st) st.getTracks().forEach(t=>t.stop()); wrap.hidden=false; fabSync(); }
+}
+
+// --- Zustand. Sets/Maps als Listen, DOM-Knoten und Funktionen raus.
+function roh(v){
+  const seen=new WeakSet();
+  return JSON.parse(JSON.stringify(v,(k,x)=>{
+    if(x instanceof Set) return [...x];
+    if(x instanceof Map) return [...x.entries()];
+    if(typeof x==='function' || (typeof Node!=='undefined' && x instanceof Node)) return undefined;
+    if(x && typeof x==='object'){ if(seen.has(x)) return '[zyklisch]'; seen.add(x); }
+    return x;
+  }) ?? 'null');
+}
+const g=(f,d=null)=>{ try{ const v=f(); return v===undefined?d:v; }catch(e){ return d; } };
+function andereRaeume(){ return g(()=>STORE.list().filter(r=>r.id!==currentRoom).length, 0); }
+function speicher(alle){
+  const out={};
+  try{
+    for(let i=0;i<localStorage.length;i++){
+      const k=localStorage.key(i);
+      if(!k || !k.startsWith('raumaufmass') || k===K_AUS) continue;
+      let v=localStorage.getItem(k);
+      if(k==='raumaufmass.rooms' && !alle){
+        try{ v=JSON.stringify((JSON.parse(v)||[]).filter(r=>r && r.id===currentRoom)); }catch(e){ v='[]'; }
+      }
+      out[k]=v;
+    }
+  }catch(e){ out._fehler=String(e); }
+  return out;
+}
+function sichtbar(){
+  const ids=['entry','pop','wpop','cpop','opop','roommenu','libwrap','qrwrap','keyswrap','helpwrap','tip','measDlg'];
+  const o={};
+  for(const id of ids){
+    const el=$(id); if(!el) continue;
+    const auf = el.tagName==='DIALOG' ? el.open : !el.hidden;
+    if(auf) o[id]=(el.innerText||'').slice(0,4000);
+  }
+  return o;
+}
+function zustand(alle){
+  return {
+    stand:stand(), zeit:new Date().toISOString(),
+    seite:location.origin+location.pathname,
+    umgebung:{
+      ua:navigator.userAgent,
+      uaData:g(()=>navigator.userAgentData ? {brands:navigator.userAgentData.brands, mobile:navigator.userAgentData.mobile, platform:navigator.userAgentData.platform} : null),
+      sprache:navigator.language, zeitzone:g(()=>Intl.DateTimeFormat().resolvedOptions().timeZone),
+      fenster:[innerWidth,innerHeight], bildschirm:[screen.width,screen.height], dpr:devicePixelRatio,
+      canvas:[cv.width,cv.height], touch:navigator.maxTouchPoints||0,
+      speicherOk:g(()=>STORE.storageOk), seitDemLaden_ms:Math.round(performance.now()),
+    },
+    ui:roh({
+      mode:M.mode, sel:M.sel, chain:M.chain, wallSel:M.wallSel, openSel:M.openSel,
+      highlight:M.highlight, querHl:M.querHl, suspects:M.suspects,
+      VIEW, WV, userView, wallUserView, unfoldOn, showEllipses, diagOpen,
+      unit, wheelPref, currentRoom, currentRoomName,
+      wpopPair:g(()=>wpopPair), cpopId:g(()=>cpopId), entryPair:g(()=>entryPair),
+      ts:g(()=>({tool:TS.tool, sel:TS.sel, vec:TS.vec, lines:TS.lines})), activeTileId:g(()=>activeTileId),
+      andereRaeume:andereRaeume(), nachbarn:g(()=>neighbors.length,0),
+    }),
+    raum:g(()=>JSON.parse(serialize())),
+    undo:undoStack.slice(), redo:redoStack.slice(),
+    speicher:speicher(alle),
+    log:(globalThis.MELDUNG_LOG||[]).slice(),
+    hinweis:g(()=>$('hint').textContent,''),
+    sichtbar:sichtbar(),
+    panel:g(()=>$('panel').innerText.slice(0,30000),''),
+  };
+}
+
+// --- Dialog
+const msg=(t,cls='')=>{ const m=$('mldMsg'); m.textContent=t; m.className=cls; };
+function bildZeigen(){
+  const b=bildFenster||bildPlan;
+  $('mldImg').src=b||''; $('mldImg').hidden=!b;
+  $('mldImgNote').textContent = bildFenster ? 'Bild des ganzen Fensters.' : b
+    ? 'Bild der Zeichenfläche, so wie sie gerade aussieht.' : 'Kein Bild verfügbar.';
+}
+function alleSync(){
+  const on=$('mldAlle').checked;
+  $('mldAlleLi').textContent = on ? 'und dazu alle anderen Räume dieses Browsers' : 'ohne die anderen Räume';
+}
+function sendSync(){
+  const b=$('mldSend');
+  b.disabled = sendet || !$('mldOk').checked || !$('mldText').value.trim();
+  b.title = !$('mldText').value.trim() ? 'Erst oben beschreiben, worum es geht.'
+    : !$('mldOk').checked ? 'Erst unten die Einwilligung anhaken.' : '';
+}
+function artSetzen(a){
+  art=a;
+  for(const b of $('mldArt').querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.art===a));
+  $('mldTextLbl').textContent = a==='fehler' ? 'Was ist passiert? Was hast du erwartet?' : 'Welche Funktion fehlt dir, und wofür brauchst du sie?';
+}
+function oeffnen(){
+  if(!wrap.hidden) return;
+  g(()=>hidePop());
+  bildPlan=planBild(); bildFenster=null; bildZeigen();
+  $('mldWin').hidden=!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
+  const n=andereRaeume();
+  $('mldAlleRow').hidden = n===0;
+  $('mldAlleTxt').textContent = (n===1 ? 'Auch den anderen Raum' : `Auch die ${n} anderen Räume`)
+    + ' aus diesem Browser mitsenden – nötig, wenn es um Nachbarräume oder das Gebäude geht';
+  $('mldAlle').checked = n>0 && g(()=>neighbors.length>0,false);
+  alleSync();
+  $('mldOk').checked=false; sendet=false; msg('');
+  $('mldSend').textContent='Senden'; $('mldCancel').textContent='Abbrechen';
+  for(const id of ['mldText','mldKontakt','mldArt','mldImgOn','mldAlle','mldOk','mldWin']) $(id).disabled=false;
+  sendSync();
+  wrap.hidden=false;
+  $('mldText').focus();
+}
+function schliessen(){ wrap.hidden=true; }
+$('mldOpen').onclick=oeffnen;
+$('mldMenu').onclick=oeffnen;
+$('mldClose').onclick=schliessen;
+$('mldCancel').onclick=schliessen;
+// Klick daneben schliesst nur, solange nichts geschrieben ist - sonst waere
+// ein verrutschter Klick der Verlust des Textes (der bleibt aber ohnehin bis
+// zum Senden stehen).
+wrap.addEventListener('pointerdown',e=>{ if(e.target===wrap && !sendet && !$('mldText').value.trim()) schliessen(); });
+$('mldArt').onclick=e=>{ const b=e.target.closest('button'); if(b) artSetzen(b.dataset.art); };
+$('mldText').oninput=sendSync; $('mldOk').onchange=sendSync; $('mldAlle').onchange=alleSync;
+$('mldImgOn').onchange=()=>{ $('mldImg').style.opacity=$('mldImgOn').checked?'':'.25'; };
+$('mldWin').onclick=async()=>{
+  const b=await fensterBild();
+  if(b){ bildFenster=b; $('mldImgOn').checked=true; $('mldImg').style.opacity=''; }
+  else msg('Fenster-Aufnahme abgebrochen oder nicht erlaubt – das Bild der Zeichenfläche bleibt.');
+  bildZeigen();
+};
+// Solange der Dialog offen ist, gehoeren ihm alle Tasten: App-Kuerzel (1-4,
+// Entf, H ...) duerfen dahinter nichts veraendern. Esc schliesst.
+addEventListener('keydown',e=>{
+  if(wrap.hidden) return;
+  if(e.key==='Escape'){ e.preventDefault(); e.stopPropagation(); if(!sendet) schliessen(); return; }
+  if(!wrap.contains(e.target)) e.stopPropagation();
+},true);
+wrap.addEventListener('keydown',e=>e.stopPropagation());
+
+function alsDatei(payload){
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([JSON.stringify(payload)],{type:'application/json'}));
+  a.download=`meldung-lokal-${new Date().toISOString().replace(/[:.]/g,'-')}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 10000);
+}
+$('mldSend').onclick=async()=>{
+  if($('mldSend').disabled) return;
+  const z=zustand($('mldAlle').checked);
+  const payload={ v:1, art, text:$('mldText').value.trim(), kontakt:$('mldKontakt').value.trim()||null,
+    einwilligung:true, bild:$('mldImgOn').checked ? (bildFenster||bildPlan) : null, zustand:z };
+  // Obergrenze des Empfaengers ist 15 MB: notfalls zuerst den Rueckgaengig-
+  // Verlauf kuerzen (aelteste zuerst), der ist am ehesten verzichtbar.
+  let body=JSON.stringify(payload);
+  while(body.length>14e6 && (z.undo.length || z.redo.length)){
+    if(z.undo.length) z.undo.splice(0, Math.max(1, z.undo.length>>1)); else z.redo.length=0;
+    z.undoGekuerzt=true; body=JSON.stringify(payload);
+  }
+  if(body.length>14e6){ msg('Die Meldung ist zu groß (über 14 MB). Bild weglassen oder ohne die anderen Räume senden.','bad'); return; }
+  sendet=true; sendSync(); $('mldSend').textContent='Sendet …'; msg('');
+  let r=null, j=null;
+  try{
+    r=await fetch('bugreport.php',{method:'POST', headers:{'Content-Type':'application/json'}, body, credentials:'same-origin'});
+    j=await r.json().catch(()=>null);
+  }catch(e){ r=null; }
+  if(r && r.ok && j && j.ok){
+    msg(`Danke! Die Meldung ist angekommen. Meldungsnummer: ${j.id}`,'good');
+    for(const id of ['mldText','mldKontakt','mldImgOn','mldAlle','mldOk','mldWin']) $(id).disabled=true;
+    $('mldSend').textContent='Gesendet'; $('mldCancel').textContent='Schließen';
+    $('mldText').value=''; sendet=false; $('mldSend').disabled=true;
+    return;
+  }
+  sendet=false; $('mldSend').textContent='Senden'; sendSync();
+  const live=/(^|\.)irazari-te\.ch$/.test(location.hostname);
+  if(!live && (!r || [404,405,501].includes(r.status))){
+    alsDatei(payload);
+    msg('Hier gibt es keinen Empfänger (lokale Fassung). Die Meldung wurde stattdessen als Datei gesichert.','good');
+    return;
+  }
+  msg(j && j.fehler ? `Senden fehlgeschlagen: ${j.fehler}` : `Senden fehlgeschlagen${r?` (Status ${r.status})`:' (keine Verbindung)'}. Bitte später noch einmal versuchen.`,'bad');
+};
+
+// --- Nachstellen (nur lokal): raumaufmass.html?meldung=bugreports/<datei>.json
+// ersetzt die Raeume dieses Browsers durch die der Meldung, laedt neu und
+// stellt danach Raum, Ansicht, Auswahl und Rueckgaengig wieder her.
+const lokal=/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+const q=new URLSearchParams(location.search).get('meldung');
+if(lokal && q){
+  (async()=>{
+    let o;
+    try{ o=await (await fetch(q,{cache:'no-store'})).json(); }
+    catch(e){ setHintLive(`Meldung ${q} nicht lesbar: ${e.message}`); return; }
+    const z=o && o.zustand;
+    if(!z || !z.speicher){ setHintLive(`${q} ist keine Meldung.`); return; }
+    if(!confirm(`Meldung ${o.id||q} nachstellen?\n\n„${String(o.text||'').slice(0,300)}“\n\nDas ersetzt ALLE Räume dieses Browsers (${location.host}) durch die aus der Meldung.`)) return;
+    try{
+      for(const k of Object.keys(localStorage)) if(k.startsWith('raumaufmass')) localStorage.removeItem(k);
+      for(const [k,v] of Object.entries(z.speicher)) if(k.startsWith('raumaufmass') && typeof v==='string') localStorage.setItem(k,v);
+    }catch(e){ setHintLive('localStorage nicht beschreibbar: '+e.message); return; }
+    if(!ss.set(K_NACH, JSON.stringify({id:o.id||q, ui:z.ui, raum:z.raum, undo:z.undo, redo:z.redo}))){ setHintLive('sessionStorage nicht beschreibbar.'); return; }
+    location.replace(location.pathname);
+  })();
+}
+const nach=ss.get(K_NACH);
+if(lokal && nach){
+  ss.del(K_NACH);
+  try{
+    const o=JSON.parse(nach), u=o.ui||{};
+    if(u.currentRoom && u.currentRoom!==currentRoom && STORE.load(u.currentRoom)) openRoom(u.currentRoom);
+    if(o.raum && serialize()!==JSON.stringify(o.raum)){ deserialize(o.raum); recompute(); }
+    undoStack.length=0; undoStack.push(...(o.undo||[]));
+    redoStack.length=0; redoStack.push(...(o.redo||[]));
+    if(u.mode && u.mode!==M.mode) setMode(u.mode);
+    if(Array.isArray(u.sel)) M.sel=u.sel;
+    M.chain=u.chain??null; M.wallSel=u.wallSel??null; M.openSel=u.openSel??null;
+    if(u.ts){ TS.tool=u.ts.tool||TS.tool; TS.sel=new Set(u.ts.sel||[]); }
+    if(u.activeTileId!==undefined) activeTileId=u.activeTileId;
+    if(typeof u.unfoldOn==='boolean' && u.unfoldOn!==unfoldOn) $('unfold').click();
+    if(typeof u.showEllipses==='boolean' && u.showEllipses!==showEllipses) $('ellipses').click();
+    // Die Ansicht nur uebernehmen, wenn der Nutzer sie selbst gestellt hatte;
+    // sonst war sie eingepasst und wird es hier auch.
+    if(u.VIEW && u.userView){ VIEW={...VIEW,...u.VIEW}; userView=true; }
+    if(u.WV && u.wallUserView){ WV={...WV,...u.WV}; wallUserView=true; }
+    render();
+    setHintLive(`Meldung ${o.id} nachgestellt (Modus ${u.mode}). Die Ansicht stammt vom Gerät des Nutzers – 0 passt ein.`);
+  }catch(e){ setHintLive('Nachstellen fehlgeschlagen: '+e.message); console.error(e); }
 }
 })();
 </script>

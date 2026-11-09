@@ -10,3 +10,6 @@ single-loop/src/wasm/pkg/
 single-loop/solver/target/
 single-loop/playwright-report/
 single-loop/test-results/
+
+# Meldungen aus "Fehler / Wunsch melden" (personenbezogen, nach dem Debugging loeschen)
+bugreports/
