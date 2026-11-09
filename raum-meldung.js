@@ -133,7 +133,9 @@ const CSS=`
 
 /* Bestätigung nach dem Senden, über dem Knopf */
 #mldToast{position:fixed;left:12px;bottom:76px;z-index:61;max-width:min(360px,calc(100vw - 24px));padding:8px 12px;font-size:12px;
-  background:var(--mld-surface);border:1px solid var(--mld-line);border-left:3px solid var(--mld-good);border-radius:6px;box-shadow:0 2px 10px rgba(36,34,29,.16);cursor:pointer}
+  background:var(--mld-surface);border:1px solid var(--mld-line);border-radius:6px;box-shadow:0 2px 10px rgba(36,34,29,.16);cursor:pointer}
+/* Gesendet: ein grüner Punkt wie beim Stand, kein farbiger Rand */
+#mldToast::before{content:"";display:inline-block;width:7px;height:7px;margin-right:8px;border-radius:50%;background:var(--mld-good);vertical-align:1px}
 @media print{ #mldFab,#mldwrap,#mldToast{display:none!important} }
 `;
 
