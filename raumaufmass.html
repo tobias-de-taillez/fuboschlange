@@ -6852,12 +6852,20 @@ function clipItem(it){
   ['id','a','b','x','y','cEnd'].forEach(k=>{ delete t[k]; });
   return t;
 }
-// Eckschrank nach dem Ablegen (kitchenUp). Mit snap (ohne ⌥) rastet ein Schrank
-// über Eck / diagonal bündig in die nähere Ecke der Wand ein. Sonst bleibt die Lage;
-// eine gesetzte Ecke (cEnd) folgt ihr nur, wenn er genau auf der Eckenlage der
-// anderen Ecke steht (Rastkante, ⌥ am Wandende) – cEnd ist relativ zur Wand, an der
-// er stand. Die Nähe taugt dafür nicht: an kurzen Wänden steht der Halbeckschrank
-// von der Ecke abgerückt (Blende hinter der Querzeile). {cEnd, x} oder null.
+// Eckschrank nach dem Ablegen (kitchenUp). Mit snap (ohne ⌥) rastet ein Schrank über Eck /
+// diagonal bündig in die nähere Ecke der Wand ein. Sonst bleibt die Lage; eine gesetzte
+// Ecke (cEnd, relativ zur Wand, an der er stand) folgt ihm in die andere Ecke o:
+// 1. Er steht im Bereich von o: nicht weiter von der Ecke weg als die Eckenlage (cornerPlace,
+//    Blende hinter der Querzeile; bündig am Wandende, der übliche Endpunkt des Ziehens,
+//    gehört dazu) – näher ist die Blende zu kurz, mit snap rückt er in die Eckenlage. Liegt er
+//    im Bereich nur einer Ecke, entscheidet das; in beiden (kurze Wand) die Rastkante, auf der
+//    er genau steht.
+// 2. In keinem Bereich: die Ecke, an der allein eine Querzeile vor seiner Front steht (Abstand
+//    zur Ecke < ihre Tiefe + Passblende) – die Blende gehört auf diese Seite; die Lage bleibt
+//    (jeder größere Abstand als die Eckenlage ist gültig).
+// Über Eck / diagonal ist die Eckenlage bündig, dort zählt nur 1. Die Nähe taugt nicht: an
+// kurzen Wänden steht der Halbeckschrank abgerückt (UE100-50 an 1200er Wand bei x=130: näher
+// an B, steht aber in A). {cEnd, x} oder null.
 function cornerDrop(E, K, L, it, Wf, snap){
   if(!it.corner) return null;
   if(it.ctype && snap){
@@ -6865,9 +6873,16 @@ function cornerDrop(E, K, L, it, Wf, snap){
     return x!=null ? {cEnd:near, x} : null;
   }
   if(it.cEnd==null) return null;
-  const on=e=>{ const x=cornerPlace(E,K,L,{...it, cEnd:e},Wf); return x!=null && Math.abs(x-it.x)<0.5; };
-  const o=1-it.cEnd;
-  return on(o) && !on(it.cEnd) ? {cEnd:o, x:it.x} : null;
+  const g=geom(E,K,{...it, a:Wf.a, b:Wf.b}); if(!g) return null;
+  const others=L.G.filter(h=>h.it.id!==it.id), gap=(e,x)=>e===0 ? x : Wf.L-x-it.w;        // Abstand zur Ecke e
+  const lay=e=>cornerPlace(E,K,L,{...it, cEnd:e},Wf);
+  const zone=(e,xc)=>gap(e,it.x) <= (xc!=null ? gap(e,xc) : cornerStop(E,Wf,g.d,e))+0.5;
+  // Querzeile vor der Front an Ecke e (wie im Eck-Kasten: Abstand zur Ecke < Tiefe + Passblende)
+  const hid=e=>{ const cr=it.ctype ? null : crossAt(E,K,others,g,e===0); return !!cr && gap(e,it.x) < cr.d+PASS-0.5; };
+  const on=xc=>xc!=null && Math.abs(xc-it.x)<0.5;                                          // genau auf der Eckenlage
+  const o=1-it.cEnd, xo=lay(o), xc=lay(it.cEnd), zo=zone(o,xo), zc=zone(it.cEnd,xc);
+  const flip = zo!==zc ? zo : zo ? on(xo) && !on(xc) : hid(o) && !hid(it.cEnd);
+  return flip ? {cEnd:o, x:snap && zo && xo!=null ? xo : it.x} : null;
 }
 // Eckschrank wieder zum normalen Schrank: alles weg, was nur ein Eckschrank hat
 // (Knopf „Normaler Schrank“, Front ≠ Drehtür, Bauart ohne Eckschrank). Sonst
@@ -19393,7 +19408,8 @@ function kitchenUp(e, g){
       const Wf=KX.wallFrame(c.E,it.a,it.b), cand=snap && Wf ? KX.slotCandidates(c.E,c.K,c.L,it,Wf) : [];
       if(snap && Wf && !cand.some(x=>Math.abs(x-it.x)<0.5)){ const r=Math.max(0,Math.min(Wf.L-it.w, Math.round(it.x/10)*10)); if(KX.fitsAt(c.E,c.K,c.L,it,Wf,r) || !KX.fitsAt(c.E,c.K,c.L,it,Wf,it.x)) it.x=r; }
       // Eckschrank: über Eck / diagonal in die nähere Ecke der neuen Wand; die
-      // gesetzte Ecke (Halbeck) folgt der Lage, auch mit ⌥ (dann ohne zu rücken).
+      // gesetzte Ecke (Halbeck) folgt ihm in die andere Ecke (dort in die Eckenlage),
+      // auch mit ⌥ (dann ohne zu rücken).
       if(Wf && it.corner){ const r=KX.cornerDrop(c.E,c.K,c.L,it,Wf,snap); if(r){ it.cEnd=r.cEnd; it.x=r.x; } }
     }
     kitchenSave(); return; }
@@ -24747,6 +24763,94 @@ globalThis.selfChecks=function(){
           && at(xA,true)===null && at(xA-5,true)===null && at(xA,false)===null           // bleibt A
           && (at(xB,true)||{}).cEnd===1 && near((at(xB,true)||{}).x,xB,0.01) && (at(xB,false)||{}).cEnd===1  // exakt auf B: folgt, auch mit ⌥
           && at(xB,true,null)===null;                                                       // ohne gesetzte Ecke nichts zu tun
+      });
+      // Der übliche Endpunkt des Ziehens ist bündig am Wandende; die Eckenlage hinter der Querzeile
+      // (Blende + Querzeile + Passblende) liegt davon weg, sobald die Blende kürzer ist als die Querzeile.
+      T('kueche-eck: Halbeck bündig ans andere Wandende gezogen – Ecke folgt und rückt in die Eckenlage (Korpus 90, feste Türen)', ()=>{
+        const Wf=KX.wallFrame(E0,'A','B'), row=[{id:2,kind:'base',a:'B',b:'C',x:630,w:600,front:'drawer'},{id:3,kind:'base',a:'B',b:'C',x:1230,w:600,front:'drawer'}];
+        let weit=0;
+        const ok=[{w:1000},{w:900},{w:1000,door:500},{w:1000,door:600},{w:900,door:400},{w:900,door:450}].every(extra=>{
+          const K3=KX.normKitchen({items:[{id:1,kind:'base',corner:true,front:'door',cEnd:0,a:'A',b:'B',x:0,w:1000,...extra},...row]}), it=K3.items[0], L3=KX.layout(E0,K3);
+          const flush=4000-it.w, xB=KX.cornerPlace(E0,K3,L3,{...it,cEnd:1},Wf);
+          if(xB<flush-1) weit++;                                          // Eckenlage ≠ bündig: hier versagt der Rastpunkt allein
+          it.x=flush;                                                     // Cursor über das Wandende hinaus: klemmt bündig
+          const r=KX.cornerDrop(E0,K3,L3,it,Wf,true), ra=KX.cornerDrop(E0,K3,L3,it,Wf,false);
+          if(!(r && r.cEnd===1 && near(r.x,xB,0.01) && ra && ra.cEnd===1 && near(ra.x,flush,0.01))) return false;      // ⌥ ändert die Lage nicht
+          it.cEnd=r.cEnd; it.x=r.x;
+          const L4=KX.layout(E0,K3), g=L4.byId.get(1), cb=KX.cornerBlind(g,K3.spec), sx=g.env.filter(e=>e.what==='Tür').flatMap(e=>e.poly.map(p=>p.x));
+          // Blende zur Ecke B, Tür davor (nicht dahinter in 3630…4000), keine Warnung und kein roter Befund
+          return !!cb && !cb.atS0 && sx.length>0 && Math.max(...sx)<=3420+1 && !KX.check(E0,K3,L4).some(f=>f.ids.includes(1) && f.lvl!=='info');
+        });
+        return ok && weit===5;
+      });
+      // Zwischenlagen: ein Zug, der nicht auf einer Rastkante endet (zu weit gezoomt, ⌥, Pfeiltasten), liegt
+      // zwischen bündig und der Mitte. Im Bereich bis zur Eckenlage ist die Blende zu kurz: er rückt hinein
+      // (⌥: bleibt). Davor, solange die Querzeile vor seiner Front steht (< Tiefe 580 + Passblende), gehört die
+      // Blende trotzdem auf ihre Seite; die Lage bleibt, jeder größere Abstand ist gültig.
+      T('kueche-eck: Halbeck zwischen bündig und Mitte abgelegt – im Bereich der Eckenlage rückt er hinein, davor kippt nur die Ecke', ()=>{
+        const Wf=KX.wallFrame(E0,'A','B'), row=[{id:2,kind:'base',a:'B',b:'C',x:630,w:600,front:'drawer'},{id:3,kind:'base',a:'B',b:'C',x:1230,w:600,front:'drawer'}];
+        const K3=KX.normKitchen({items:[{id:1,kind:'base',corner:true,front:'door',door:500,cEnd:0,a:'A',b:'B',x:0,w:1000},...row]}), it=K3.items[0], L3=KX.layout(E0,K3);
+        const at=(x,snap)=>KX.cornerDrop(E0,K3,L3,{...it,x},Wf,snap);       // Eckenlage 2870, bündig 3000, Querzeile vor der Front ab x > 2370
+        const a=at(2940,true), b=at(2940,false), c=at(2870,true);
+        const stay=[2860,2500,2380].every(x=>[true,false].every(sn=>{ const r=at(x,sn); return !!r && r.cEnd===1 && near(r.x,x,0.01); }));
+        return near(KX.cornerPlace(E0,K3,L3,{...it,cEnd:1},Wf),2870,0.5)
+          && !!a && a.cEnd===1 && near(a.x,2870,0.01) && !!b && b.cEnd===1 && near(b.x,2940,0.01)         // im Bereich: in die Eckenlage, mit ⌥ bleibt die Lage
+          && !!c && c.cEnd===1 && near(c.x,2870,0.01)
+          && stay                                                                                         // davor: Ecke kippt, Lage bleibt
+          && at(2370,true)===null && at(2370,false)===null && at(1500,true)===null && at(0,true)===null;    // Querzeile nicht mehr vor der Front, Wandmitte, eigene Ecke
+      });
+      T('kueche-eck: Halbeck zwischen bündig und Mitte – nach dem Kippen Blende zur Ecke, Tür davor, kein roter Befund und keine Warnung', ()=>{
+        const Wf=KX.wallFrame(E0,'A','B'), row=[{id:2,kind:'base',a:'B',b:'C',x:630,w:600,front:'drawer'},{id:3,kind:'base',a:'B',b:'C',x:1230,w:600,front:'drawer'}];
+        return [[{w:1000},2910],[{w:900},3010],[{w:1000,door:500},2500],[{w:1000,door:600},2700],[{w:900,door:400},2600]].every(([extra,x])=>{
+          const K3=KX.normKitchen({items:[{id:1,kind:'base',corner:true,front:'door',cEnd:0,a:'A',b:'B',x,w:1000,...extra},...row]}), it=K3.items[0];
+          const L3=KX.layout(E0,K3), r=KX.cornerDrop(E0,K3,L3,it,Wf,true);
+          if(!(r && r.cEnd===1 && near(r.x,x,0.01))) return false;
+          const bef=KX.cornerBlind(L3.byId.get(1),K3.spec);                                              // vorher: Blende zur Wandmitte (A), Tür hinter der Querzeile
+          it.cEnd=r.cEnd; it.x=r.x;
+          const L4=KX.layout(E0,K3), g=L4.byId.get(1), cb=KX.cornerBlind(g,K3.spec), sx=g.env.filter(e=>e.what==='Tür').flatMap(e=>e.poly.map(p=>p.x));
+          return !!bef && bef.atS0 && !!cb && !cb.atS0 && sx.length>0 && Math.max(...sx)<=3420+1 && !KX.check(E0,K3,L4).some(f=>f.ids.includes(1) && f.lvl!=='info');
+        });
+      });
+      T('kueche-eck: Halbeck an kurzer Wand mit Querzeile an beiden Enden – überlappen die Bereiche, entscheidet die Rastkante (wie bisher)', ()=>{
+        const E5=rE(1200,3000), Wf=KX.wallFrame(E5,'A','B');
+        const mk=pin=>{ const K=KX.normKitchen({items:[{id:1,kind:'base',corner:true,front:'door',door:500,cEnd:pin,a:'A',b:'B',x:0,w:1000},{id:2,kind:'base',a:'A',b:'D',x:630,w:600,front:'drawer'},{id:3,kind:'base',a:'B',b:'C',x:630,w:600,front:'drawer'}]}); return {K,it:K.items[0],L:KX.layout(E5,K)}; };
+        const a=mk(0), b=mk(1), at=(s,x)=>KX.cornerDrop(E5,s.K,s.L,{...s.it,x},Wf,true);
+        // Eckenlagen: A bei 130, B bei 70; dazwischen (70…130) liegt er in beiden Bereichen
+        return near(KX.cornerPlace(E5,a.K,a.L,a.it,Wf),130,0.5) && near(KX.cornerPlace(E5,a.K,a.L,{...a.it,cEnd:1},Wf),70,0.5)
+          && (at(a,70)||{}).cEnd===1 && at(a,100)===null && at(a,130)===null
+          && (at(b,130)||{}).cEnd===0 && at(b,100)===null && at(b,70)===null;
+      });
+      T('kueche-eck: Halbeck an kurzer Wand mit Querzeile an beiden Enden – bündig am Wandende gehört er der Ecke, an der er steht', ()=>{
+        const E5=rE(1200,3000), Wf=KX.wallFrame(E5,'A','B');
+        const mk=pin=>{ const K=KX.normKitchen({items:[{id:1,kind:'base',corner:true,front:'door',door:500,cEnd:pin,a:'A',b:'B',x:0,w:1000},{id:2,kind:'base',a:'A',b:'D',x:630,w:600,front:'drawer'},{id:3,kind:'base',a:'B',b:'C',x:630,w:600,front:'drawer'}]}); return {K,it:K.items[0],L:KX.layout(E5,K)}; };
+        const a=mk(0), b=mk(1), at=(s,x,snap)=>KX.cornerDrop(E5,s.K,s.L,{...s.it,x},Wf,snap);
+        const e1=at(a,200,true), e2=at(a,200,false), e3=at(b,0,true), e4=at(b,0,false);
+        return !!e1 && e1.cEnd===1 && near(e1.x,70,0.01) && !!e2 && e2.cEnd===1 && near(e2.x,200,0.01)        // B: in die Eckenlage, mit ⌥ bleibt die Lage
+          && !!e3 && e3.cEnd===0 && near(e3.x,130,0.01) && !!e4 && e4.cEnd===0 && near(e4.x,0,0.01)           // A ebenso
+          && at(a,0,true)===null && at(b,200,true)===null;                                                      // an der eigenen Ecke bleibt es
+      });
+      T('kueche-eck: Halbeck zwischen zwei Querzeilen – verdecken beide die Front, bleibt die Ecke; ab dort, wo nur eine sie verdeckt, kippt sie', ()=>{
+        const E6=rE(1900,3000), Wf=KX.wallFrame(E6,'A','B');
+        const mk=pin=>{ const K=KX.normKitchen({items:[{id:1,kind:'base',corner:true,front:'door',door:500,cEnd:pin,a:'A',b:'B',x:0,w:1000},{id:2,kind:'base',a:'A',b:'D',x:630,w:600,front:'drawer'},{id:3,kind:'base',a:'B',b:'C',x:630,w:600,front:'drawer'}]}); return {K,it:K.items[0],L:KX.layout(E6,K)}; };
+        const a=mk(0), b=mk(1), at=(s,x,snap)=>KX.cornerDrop(E6,s.K,s.L,{...s.it,x},Wf,snap);
+        // Wand 1900, Schrank 1000: x 0…900. Beide Querzeilen stehen vor der Front für x 280…620; Eckenlagen A 130, B 770
+        const up=at(a,700,true), dn=at(b,200,true);
+        return at(a,100,true)===null && at(a,400,true)===null && at(a,400,false)===null && at(b,400,true)===null && at(b,800,true)===null
+          && !!up && up.cEnd===1 && near(up.x,700,0.01) && !!dn && dn.cEnd===0 && near(dn.x,200,0.01);
+      });
+      // Pfeiltasten schieben in kleinen Schritten, ohne Einrasten: dieselbe Funktion (snap aus) nimmt nur die Ecke mit.
+      T('kueche-eck: Halbeck Schritt für Schritt über die Wand geschoben (Pfeiltasten, ohne Einrasten) – Ecke kippt vor der Querzeile, die Lage bleibt', ()=>{
+        const Wf=KX.wallFrame(E0,'A','B'), row=[{id:2,kind:'base',a:'B',b:'C',x:630,w:600,front:'drawer'},{id:3,kind:'base',a:'B',b:'C',x:1230,w:600,front:'drawer'}];
+        const K3=KX.normKitchen({items:[{id:1,kind:'base',corner:true,front:'door',door:500,cEnd:0,a:'A',b:'B',x:0,w:1000},...row]}), it=K3.items[0], L3=KX.layout(E0,K3);
+        const run=st=>{                                            // hin und zurück mit Schrittweite st (Pfeil 10 mm, ⇧Pfeil 100 mm), am Ende geklemmt
+          let cur=0, moved=false; const flips=[], max=Wf.L-it.w;
+          const at=x=>{ const r=KX.cornerDrop(E0,K3,L3,{...it,cEnd:cur,x},Wf,false); if(r){ flips.push([x,r.cEnd]); cur=r.cEnd; if(r.x!==x) moved=true; } };
+          for(let x=0;;x=Math.min(max,x+st)){ at(x); if(x===max) break; }
+          for(let x=max;;x=Math.max(0,x-st)){ at(x); if(x===0) break; }
+          return {flips:JSON.stringify(flips), moved, cur};
+        };
+        const a=run(10), b=run(100);       // kippt, sobald die Querzeile vor der Front steht (Abstand < 580 + 50): 2380 bzw. 2400; zurück erst an der Ecke A
+        return a.flips==='[[2380,1],[0,0]]' && b.flips==='[[2400,1],[0,0]]' && !a.moved && !b.moved && a.cur===0 && b.cur===0;
       });
       T('kueche-eck: Eckschrank über Eck nach dem Ziehen – bündig in die nähere Ecke, mit ⌥ bleibt die Lage', ()=>{
         const Wf=KX.wallFrame(E0,'A','B'), K5=KX.normKitchen({items:[{id:1,kind:'base',corner:true,ctype:'L',front:'door',cEnd:0,a:'A',b:'B',x:3050,w:900}]}), it=K5.items[0], L5=KX.layout(E0,K5);
