@@ -100,13 +100,26 @@ Die 3D-Ansicht nutzt rohes WebGL2. Die globale Vorgabe vgpu wurde geprüft und b
 
 Die Wände sind einseitig (Culling), deshalb verschwinden sie, wenn man von außen schaut (Puppenhaus). „Fronten offen“ zeigt dieselben Hüllen, die die Prüfung verwendet.
 
+## Verbesserungslauf (gleicher Tag)
+
+- **Einrasten:** Hängeschrank bündig über der Unterzeile, an Tür und Fenster, Spüle mittig unters Fenster. An Innenecken mit 50 mm Passblende. Nicht über das Wandende.
+- **Lage und Bedienung:** Die Lage steht als Zahl im Panel, im Plan gibt es eine Maßkette. Pfeiltasten wirken an jeder Wand in Bildrichtung. Nach dem Ziehen wird auf 10 mm gerundet.
+- **Eckschrank als Typ** (Halbeck: Blende plus eine Tür). Die Platte schließt an U- und L-Ecken ohne Loch. Die Abstellfläche zählt die Querplatte mit.
+- **Dunstabzug als Gerät** (Neff: Elektro ab 430, Gas 650 mm). Hängeschränke brauchen Kopffreiheit über der Platte, mindestens 500 mm.
+- **Passleisten:** Lücken und Restmaße bis 150 mm werden zu Passleisten. Die Platte läuft darüber durch, die Leiste steht in der Stückliste.
+- **Abhilfe-Knöpfe** an Befunden: Vorfensterarmatur, Anschlag tauschen, Als Eckschrank, Als Dunstabzug. Ein Knopf erscheint nur, wenn die Abhilfe auch wirkt.
+- **Wege ehrlich:** Ein Ablauf zählt nur vollständig.
+- **Einräumen:** Fehlende Inhalte räumt das Programm selbst ein. Danach wird netto umsortiert:
+  - Zusammenhängende Umzüge werden nur gemeinsam übernommen.
+  - Besteck und Messer kommen nur in Schubladen.
+  - Müll und Putzmittel bleiben an der Spüle.
+
 ## Bekannte Lücken
 
-- An stumpfen Ecken bleibt in der Arbeitsplatte eine kleine Dreieckslücke (keine Gehrung).
-- Die Abstellfläche an einer Innenecke zählt nur die eigene Platte.
-- Ein Halbeckschrank wird als Blende plus Tür bewertet. In 3D erscheinen trotzdem zwei Türen.
+- An stumpfen Ecken bleibt in der Arbeitsplatte eine kleine Dreieckslücke (keine Gehrung). Bei 1–2° Abweichung ist das unter 15 mm.
+- Die Blendenbreite des Eckschranks richtet sich nach der Standardtiefe, nicht nach der tatsächlichen Tiefe der Querzeile.
 - Insel und Tisch rasten nicht ein.
-- Es gibt keinen Druck und keine Auswahl direkt in 3D.
+- Es gibt keinen Druck, keine Wandansicht von vorn und keine Auswahl in 3D.
 
 ## Quellen
 
