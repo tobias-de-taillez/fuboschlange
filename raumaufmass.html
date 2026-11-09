@@ -681,7 +681,7 @@
   body.outmode #fitview{display:none}
   #empty{display:none!important}
   #sheets{position:absolute;inset:0;z-index:5;overflow:auto;padding:28px 0 48px;background:var(--paper);display:none}
-  body.outmode #sheets{display:block}
+  body.outmode #sheets{display:grid;justify-items:center;align-content:start;gap:24px}
   /* Rückmeldung erscheint dort, wo sie ausgelöst wurde */
   #toast{position:fixed;left:50%;top:64px;translate:-50% -100%;z-index:60;max-width:min(520px,calc(100vw - 24px));
     padding:7px 12px;background:var(--ink);color:#fff;border-radius:6px;font-size:12px;line-height:1.4;
@@ -6098,6 +6098,7 @@ Object.assign(globalThis.KITCHEN, { snapIsland, islandTops, topsTouch, partsClas
 <script src="raum-haus.js"></script>
 <script src="raum-modell.js"></script>
 <script src="raum-zeichnung.js"></script>
+<script src="raum-blatt.js"></script>
 
 <script id="ui">
 "use strict";
@@ -10209,7 +10210,8 @@ function shareUrl(){
   if(!currentRoom) return null;
   const r=STORE.load(currentRoom);
   if(!r) return null;
-  return location.origin+location.pathname+'#raum='+encodeShare({name:r.name, data:r.data});
+  // Der Link führt auf den Startbildschirm: dort kommt ein geteilter Raum an.
+  return new URL('raeume.html', location.href).href.split('#')[0]+'#raum='+encodeShare({name:r.name, data:r.data});
 }
 $('sharelink').onclick=async()=>{
   const url=shareUrl();
