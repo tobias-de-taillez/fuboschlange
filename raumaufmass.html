@@ -681,7 +681,7 @@
   body.outmode #fitview{display:none}
   #empty{display:none!important}
   #sheets{position:absolute;inset:0;z-index:5;overflow:auto;padding:28px 0 48px;background:var(--paper);display:none}
-  body.outmode #sheets{display:grid;justify-items:center;align-content:start;gap:24px}
+  body.outmode #sheets{display:block}
   /* Rückmeldung erscheint dort, wo sie ausgelöst wurde */
   #toast{position:fixed;left:50%;top:64px;translate:-50% -100%;z-index:60;max-width:min(520px,calc(100vw - 24px));
     padding:7px 12px;background:var(--ink);color:#fff;border-radius:6px;font-size:12px;line-height:1.4;
@@ -10990,7 +10990,9 @@ function renderOut(){
   const sh=$('sheets');
   if(typeof BLATT!=='undefined'){
     if(!$('blattcss')){ const st=document.createElement('style'); st.id='blattcss'; st.textContent=BLATT.css; document.head.appendChild(st); }
-    sh.innerHTML=BLATT.html(BLATT.modell(), {mitMassliste:$('outList').checked});
+    // Der Stapel bekommt einen eigenen Kasten ohne feste Höhe: als Raster direkt
+    // im Rollbereich drückt der Browser die Blätter auf dessen Höhe zusammen.
+    sh.innerHTML='<div class="bl-stapel">'+BLATT.html(BLATT.modell(), {mitMassliste:$('outList').checked})+'</div>';
   }
   const fl=tilesReady(), ku=typeof kitchenReady==='function' && kitchenReady();
   const nFl=M.tiles && M.tiles.items ? M.tiles.items.length : 0, nKu=M.kitchen && M.kitchen.items ? M.kitchen.items.length : 0;

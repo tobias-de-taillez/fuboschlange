@@ -3,11 +3,12 @@
 // von innen; auf Wunsch die Liste aller Maße.
 //
 // Klassisches Skript, kein Modul, läuft per file://. Legt globalThis.BLATT an:
-//   BLATT.css                         CSS der Blätter (Vorschau und Druckregeln, Präfix "bl-")
-//   BLATT.modell([quelle])            liest den offenen Raum, liefert reine Daten
-//   BLATT.html(modell, {mitMassliste}) reine Funktion, DOM-frei: die Blätter als HTML
-//   BLATT.dokument(modell, opt)       vollständiges Druckdokument als Zeichenkette
-//   BLATT.drucken({mitMassliste})     druckt nur die Blätter, A4 hoch, je Blatt eine Seite
+//   BLATT.css                          CSS der Blätter (Vorschau und Druckregeln, Präfix "bl-")
+//   BLATT.modell([quelle])             liest den offenen Raum, liefert reine Daten
+//   BLATT.html(modell, {mitMassliste})  reine Funktion, DOM-frei: die Blätter als HTML
+//   BLATT.blaetter(modell, opt)        dasselbe als Liste {art, svg}
+//   BLATT.dokument(modell, opt)        vollständiges Druckdokument als Zeichenkette (mit BLATT.druckCss)
+//   BLATT.drucken({mitMassliste})      druckt nur die Blätter, A4 hoch, je Blatt eine Seite
 //
 // Braucht für modell(): raum-kern.js (CORE), raum-geometrie.js (wallShape,
 // cornerHeights, solveOpening, outerNormal, globalTestFails, computeSuspects),
@@ -70,6 +71,7 @@ function kuerzen(s, fs, fett, max){
 }
 // Ein Textelement. o: {fs, a:'start'|'middle'|'end', f:Farbe, b:fett, hof:weißer Lichthof}
 function T(x, y, s, o){
+  if(s==null || s==='') return '';
   o=o||{};
   return `<text x="${n2(x)}" y="${n2(y)}"${o.fs?` font-size="${o.fs}"`:''}${o.a&&o.a!=='start'?` text-anchor="${o.a}"`:''}`
     +`${o.f?` fill="${o.f}"`:''}${o.b?' font-weight="600"':''}`
@@ -112,8 +114,11 @@ function textZeilen(s, fs, max){
 function modell(quelle){
   const q=quelle||{};
   const C=G.CORE;
-  const Mx=q.M || (typeof M!=='undefined' ? M : null);
+  const Mglobal=typeof M!=='undefined' ? M : null;
+  const Mx=q.M || Mglobal;
   if(!C || !Mx) throw new Error('BLATT.modell: CORE (raum-kern.js) oder M (raum-modell.js) fehlt.');
+  // Stand, Name und Drehung des Werkzeugs gelten nur für dessen eigenen Raum.
+  const eigen=Mx===Mglobal;
   const hatFit=!!(Mx.fit && Mx.fit.pts && Mx.fit.pts.length);
   // Zahlen immer aus dem Ausgleich, nie aus der Skizze (wie fitPts()).
   const P=hatFit ? Mx.fit.pts : (Mx.pts||[]);
@@ -124,7 +129,7 @@ function modell(quelle){
   const sus=(Mx.suspects instanceof Set) ? Mx.suspects
     : (an && G.computeSuspects ? G.computeSuspects(an.w, 3.29, 0.02) : new Set());
 
-  const stand=standVon(Mx, C, q, sus);
+  const stand=standVon(Mx, C, q, sus, eigen);
   const eindeutig=stand.eindeutig, geprueft=stand.geprueft;
 
   // ---- Wandzug: Ringe, Fläche, Umfang ----
@@ -246,10 +251,10 @@ function modell(quelle){
   }).filter(Boolean);
 
   return {
-    name:q.name!=null ? String(q.name) : (typeof currentRoomName!=='undefined' ? String(currentRoomName) : ''),
+    name:q.name!=null ? String(q.name) : (eigen && typeof currentRoomName!=='undefined' ? String(currentRoomName) : ''),
     datum:q.datum || new Date().toLocaleDateString('de-DE'),
     drehung:Number.isFinite(q.drehung) ? q.drehung
-      : (typeof VIEW!=='undefined' && VIEW && Number.isFinite(VIEW.rot) ? VIEW.rot : 0),
+      : (eigen && typeof VIEW!=='undefined' && VIEW && Number.isFinite(VIEW.rot) ? VIEW.rot : 0),
     hatFit, eindeutig, geprueft, stand,
     ecken:P.map(p=>({id:p.id, x:p.x, y:p.y})),
     waende, ringe, geschlossen:!!poly,
@@ -288,13 +293,16 @@ function wandFolge(C, P, walls, flipVon){
 // Der Stand: zuerst standInfo() des Werkzeugs, sonst statusText(), sonst
 // dieselbe Herleitung hier. geprueft heißt: die Form ist eindeutig UND es
 // gibt mindestens ein Kontrollmaß.
-function standVon(Mx, C, q, sus){
+function standVon(Mx, C, q, sus, eigen){
   const an=Mx.an||null, fit=Mx.fit||null;
   const ruhig=!(fit && fit.converged===false);
   const eindeutig=!!(an && an.dof===0 && (Mx.walls||[]).length && ruhig);
   const red=an ? an.redundancy : 0;
   const genau=(eindeutig && red>0 && Number.isFinite(an.sigmaHat)) ? an.sigmaHat : null;
-  const fn=q.standInfo || (typeof standInfo==='function' ? standInfo : null);
+  // Kurzform fürs Feld im Fuß, wo Ton und Schalter allein nicht reichen: mit
+  // Kontrollmaßen eindeutig und trotzdem nur "warn" heißt, die Maße streuen.
+  const kurzZu=(tone, eind)=>(tone!=='good' && tone!=='bad' && eind && red>0) ? 'Maße streuen auffällig' : null;
+  const fn=q.standInfo || (eigen && typeof standInfo==='function' ? standInfo : null);
   if(fn){
     try{
       const s=fn();
@@ -302,17 +310,17 @@ function standVon(Mx, C, q, sus){
         const tone=String(s.tone||'');
         return { tone, text:s.text, eindeutig:!!s.eindeutig, geprueft:!!s.geprueft,
           genauigkeit:Number.isFinite(s.genauigkeit) ? s.genauigkeit : (tone==='good' ? genau : null),
-          kurz:typeof s.kurz==='string' ? s.kurz : null };
+          kurz:typeof s.kurz==='string' ? s.kurz : kurzZu(tone, !!s.eindeutig) };
       }
     }catch(e){ /* dann die Herleitung unten */ }
   }
-  const st=q.statusText || (typeof statusText==='function' ? statusText : null);
+  const st=q.statusText || (eigen && typeof statusText==='function' ? statusText : null);
   if(st){
     try{
       const r=st();
       if(Array.isArray(r) && typeof r[0]==='string'){
-        const tone=r[1]==='prog' ? '' : String(r[1]||'');
-        return {tone, text:r[0], eindeutig, geprueft:eindeutig && red>0, genauigkeit:tone==='good' ? genau : null, kurz:null};
+        const tone=['good','warn','bad'].includes(r[1]) ? r[1] : '';     // prog, skizze: neutral
+        return {tone, text:r[0], eindeutig, geprueft:eindeutig && red>0, genauigkeit:tone==='good' ? genau : null, kurz:kurzZu(tone, eindeutig)};
       }
     }catch(e){ /* dann die Herleitung unten */ }
   }
@@ -344,6 +352,7 @@ function standVon(Mx, C, q, sus){
 // ================= Blätter =================
 function standKurz(m){
   const s=m.stand||{};
+  if(!m.ecken.length) return '–';
   if(s.kurz) return s.kurz;
   if(s.tone==='good') return 'Geprüft'+(Number.isFinite(s.genauigkeit) ? ' ± '+komma(s.genauigkeit,1)+' mm' : '');
   if(s.tone==='bad') return 'Widerspruch in den Maßen';
@@ -369,7 +378,8 @@ function blattGrundriss(m){
   // Der Stand im Wortlaut, sofern er mehr sagt als das Feld im Fuß.
   if(s.tone!=='good' && s.text && s.text.replace(/\.$/,'')!==standKurz(m))
     hinweis.push(...textZeilen('Stand: '+s.text, 9.5, W));
-  if(!m.belastbar && m.ecken.length)
+  if(!m.ecken.length) hinweis.length=0;          // der leere Grundriss sagt es selbst
+  else if(!m.belastbar)
     hinweis.push(...textZeilen(m.geschlossen
       ? 'Fläche und Umfang stehen hier erst, wenn die Form eindeutig ist und die Maße zusammenpassen.'
       : 'Fläche und Umfang stehen hier erst, wenn der Wandzug geschlossen ist.', 9.5, W));
@@ -403,12 +413,14 @@ function blattGrundriss(m){
 function grundriss(m, box){
   if(!m.ecken.length)
     return T(box.x+box.w/2, box.y+box.h/2, 'Noch keine Ecke gesetzt.', {a:'middle', f:GEDAEMPFT});
-  const FS=9, FE=6.5, RAND=22, BALKEN=16;
+  // Rand für Längen und Eckbuchstaben. Reicht er außen nicht, weicht die Zahl
+  // nach innen aus (siehe frei); so bleibt der größere Maßstab möglich.
+  const FS=9, FE=6.5, RX=24, RY=20, BALKEN=16;
   const c=Math.cos(m.drehung||0), s=Math.sin(m.drehung||0);
   const R=m.ecken.map(p=>({id:p.id, x:p.x*c-p.y*s, y:p.x*s+p.y*c}));
   const xs=R.map(p=>p.x), ys=R.map(p=>p.y);
   const minx=Math.min(...xs), miny=Math.min(...ys), bw=Math.max(...xs)-minx, bh=Math.max(...ys)-miny;
-  const aw=box.w-2*RAND, ah=box.h-2*RAND-BALKEN;
+  const aw=box.w-2*RX, ah=box.h-2*RY-BALKEN;
   // Maßstäblich nur, wenn die Form eindeutig ist: dann ein glatter Maßstab,
   // der bei 100 % auf A4 stimmt. Sonst füllt die Skizze den Platz.
   const massstaeblich=!!(m.hatFit && m.eindeutig);
@@ -417,7 +429,7 @@ function grundriss(m, box){
   if(N) k=UPM/N;
   else k=Math.min(bw>0 ? aw/bw : Infinity, bh>0 ? ah/bh : Infinity);
   if(!Number.isFinite(k) || !(k>0)) k=1;
-  const ox=box.x+RAND+(aw-bw*k)/2-minx*k, oy=box.y+RAND+(ah-bh*k)/2-miny*k;
+  const ox=box.x+RX+(aw-bw*k)/2-minx*k, oy=box.y+RY+(ah-bh*k)/2-miny*k;
   const Q={};
   R.forEach(p=>{ Q[p.id]={id:p.id, x:ox+p.x*k, y:oy+p.y*k}; });
   const ecken=R.map(p=>Q[p.id]);
@@ -634,7 +646,8 @@ function blaetterAnsichten(m){
 
   const gestrichelt=mit.some(w=>w.ansicht.hoehe!=='gemessen' || w.ansicht.oeffnungen.some(o=>o.geschaetzt));
   const unterzeile=['Von innen gesehen', N ? 'Maßstab 1:'+N : null,
-    mit.some(w=>w.ansicht.oeffnungen.length+w.ansicht.anschluesse.length) ? 'Öffnungen und Anschlüsse in mm' : null,
+    [mit.some(w=>w.ansicht.oeffnungen.length) ? 'Öffnungen' : null, mit.some(w=>w.ansicht.anschluesse.length) ? 'Anschlüsse' : null]
+      .filter(Boolean).join(' und ').replace(/(.+)/, '$1 in mm') || null,
     m.hoeheAngenommen ? 'Raumhöhe nicht gemessen, angenommen '+fm(m.hoeheStandard)+' m' : null,
     gestrichelt ? 'gestrichelt: angenommen oder geschätzt' : null].filter(Boolean);
   const unterZeilen=umbrechen(unterzeile.map(t=>[{t, f:GEDAEMPFT}]), 8.5, W);
@@ -781,19 +794,22 @@ function blaetterMasse(m){
 // Alle Blätter als Liste {art, svg-Inhalt}; html() setzt sie zusammen.
 function blaetter(m, opt){
   const o=opt||{};
+  m={name:'', datum:'', drehung:0, ecken:[], waende:[], ringe:[], masse:[], hoehenMasse:[], lageMasse:[],
+     stand:{tone:'', text:''}, hoeheStandard:H_STANDARD, ...(m||{})};
   const liste=[blattGrundriss(m), ...blaetterAnsichten(m)];
   if(o.mitMassliste) liste.push(...blaetterMasse(m));
   return liste;
 }
 // Reine Funktion, DOM-frei: die Blätter als HTML-Zeichenkette.
 function html(m, opt){
+  m=m||{};
   const liste=blaetter(m, opt), n=liste.length;
   return liste.map((b,i)=>{
     const titel=`Aufmaßblatt ${m.name||''}, Blatt ${i+1} von ${n}: ${b.art}`;
     return `<article class="bl-blatt" data-blatt="${i+1}" data-art="${esc(b.art)}">`
       +`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${BB} ${BH}" role="img" aria-label="${esc(titel)}" `
       +`font-family='${SCHRIFT}' font-size="11" fill="${TINTE}" style="font-variant-numeric:tabular-nums">`
-      +`<title>${esc(titel)}</title><rect width="${BB}" height="${BH}" fill="${WEISS}"/>${b.svg}`
+      +`<rect width="${BB}" height="${BH}" fill="${WEISS}"/>${b.svg}`
       +(n>1 ? T(X1, Y1+20, `Blatt ${i+1} von ${n}`, {fs:7.5, a:'end', f:GEDAEMPFT}) : '')
       +`</svg></article>`;
   }).join('');
@@ -826,6 +842,7 @@ body{background:#ebe8e0;padding:28px 0 48px}
 `.trim()+'\n'+css;
 
 function dokument(m, opt){
+  m=m||{};
   return `<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">`
     +`<title>${esc('Aufmaßblatt '+(m.name||'')).trim()}</title><style>${druckCss}</style></head>`
     +`<body><main class="bl-stapel">${html(m, opt)}</main></body></html>`;
@@ -836,19 +853,21 @@ function dokument(m, opt){
 // kein Pop-up, der Druckdialog kommt sofort. opt.fenster:true (oder ein
 // Fehler im Rahmen) nimmt ein eigenes Fenster wie beim Fliesenplan.
 // Rückgabe: {ok:true, weg:'rahmen'|'fenster', blaetter:n}
-//   oder {ok:false, grund:'leer'|'popup'|'fehler', text} - text ist für den Nutzer.
+//   oder {ok:false, grund:'leer'|'popup'|'fehler', text, fehler} - text ist für
+//   den Nutzer; fehler trägt denselben Satz (so fragt ihn das Werkzeug ab).
+const nein=(grund, text)=>({ok:false, grund, text, fehler:text});
 function drucken(opt){
   const o=opt||{};
   let m, doc, n;
   try{
     m=o.modell || modell();
-    if(!m.ecken.length) return {ok:false, grund:'leer', text:'Noch nichts zu drucken: Der Raum hat keine Ecke.'};
+    if(!m.ecken || !m.ecken.length) return nein('leer', 'Noch nichts zu drucken: Der Raum hat keine Ecke.');
     n=blaetter(m, o).length;
     doc=dokument(m, o);
   }catch(e){
-    return {ok:false, grund:'fehler', text:'Das Aufmaßblatt ließ sich nicht erstellen: '+(e && e.message || e)};
+    return nein('fehler', 'Das Aufmaßblatt ließ sich nicht erstellen: '+(e && e.message || e));
   }
-  if(typeof document==='undefined') return {ok:false, grund:'fehler', text:'Drucken geht nur im Browser.'};
+  if(typeof document==='undefined') return nein('fehler', 'Drucken geht nur im Browser.');
   if(!o.fenster){
     try{
       const alt=document.getElementById('bl-druckrahmen');
@@ -871,7 +890,7 @@ function drucken(opt){
   }
   let w=null;
   try{ w=window.open('', '_blank'); }catch(e){ w=null; }
-  if(!w) return {ok:false, grund:'popup', text:'Das Druckfenster wurde blockiert. Pop-ups für diese Seite erlauben und noch einmal drucken.'};
+  if(!w) return nein('popup', 'Das Druckfenster wurde blockiert. Pop-ups für diese Seite erlauben und noch einmal drucken.');
   try{
     w.document.open(); w.document.write(doc); w.document.close();
     w.focus();
