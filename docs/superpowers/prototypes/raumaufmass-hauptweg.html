@@ -1,0 +1,969 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Raumaufmaß · Prototyp Hauptweg</title>
+<style>
+  /* Prototyp des Hauptwegs. Kein Rechenkern: Stand, Längen und Abweichungen
+     der Wohnküche sind feste Daten aus dem echten Raum. Gestaltungslinie wie
+     raumaufmass.html (Messwerkzeug auf Papier), nur leiser: Tinte für
+     Gemessenes, Bleistift für Skizziertes, Akzent allein für die nächste
+     Strecke und die Auswahl. */
+  :root{
+    --paper:#ebe8e0; --surface:#faf9f6; --canvas:#f5f3ed; --floor:#fbfaf7;
+    --ink:#24221d; --ink2:#4b473e; --muted:#6f6a5e; --pencil:#a39d90;
+    --line:#d8d3c6; --line2:#e8e4da; --hover:#eeeae0; --press:#e4dfd3;
+    --accent:#c2410c; --accent-bg:#f9e7dc; --accent-line:#ebbda2;
+    --good:#1a6b34; --warn-dot:#c98a1a; --warn:#8a5a10; --bad:#b3261e; --bad-bg:#f7e4e0;
+    --font:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --ease:cubic-bezier(.16,1,.3,1);
+  }
+  *{box-sizing:border-box}
+  [hidden]{display:none!important}
+  html,body{height:100%}
+  body{margin:0;font:13px/1.4 var(--font);background:var(--paper);color:var(--ink);
+    overflow:hidden;overscroll-behavior:none;-webkit-font-smoothing:antialiased;
+    font-variant-numeric:tabular-nums;caret-color:var(--accent);
+    scrollbar-color:var(--line) transparent;scrollbar-width:thin}
+  ::selection{background:var(--accent-bg);color:var(--ink)}
+  button{font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);
+    border-radius:4px;padding:0 10px;min-height:28px;cursor:pointer}
+  button:hover{background:var(--hover)} button:active{background:var(--press)}
+  button:disabled{opacity:.4;cursor:default;background:var(--surface)}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  button.primary:hover{background:#a8380a;border-color:#a8380a}
+  button.quiet{border-color:transparent;background:none;color:var(--ink2)}
+  button.quiet:hover{background:var(--hover);color:var(--ink)}
+  button.danger{color:var(--bad)}
+  input,select{font:inherit;color:var(--ink)}
+  input[type=text]{height:28px;padding:0 7px;border:1px solid var(--line);border-radius:4px;background:#fff;min-width:0}
+  input[type=text]:focus{outline:none;border-color:var(--accent)}
+  select{height:28px;border:1px solid var(--line);border-radius:4px;background:#fff;padding:0 4px}
+  input[type=checkbox]{accent-color:var(--accent);margin:0}
+  kbd{font:inherit;font-size:11px;color:var(--muted)}
+  h2,h3,p{margin:0}
+  .ib{width:30px;height:30px;min-height:0;padding:0;display:inline-grid;place-items:center;border:0;
+    background:none;border-radius:4px;color:var(--ink2)}
+  .ib:hover{background:var(--hover);color:var(--ink)} .ib:disabled{opacity:.3;background:none}
+  svg.ic{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}
+
+  #app{height:100%;display:grid;grid-template-rows:44px minmax(0,1fr) auto;min-width:860px}
+
+  /* ---------- Leiste ---------- */
+  #bar{display:flex;align-items:stretch;padding:0 8px 0 6px;background:var(--surface);border-bottom:1px solid var(--line)}
+  #bar .grp{display:flex;align-items:center;gap:2px}
+  #back{display:flex;align-items:center;gap:4px;border:0;background:none;color:var(--ink2);padding:0 8px 0 4px;align-self:center}
+  #back:hover{background:var(--hover);color:var(--ink)}
+  #name{font-weight:600;padding:4px 6px;border:0;border-radius:4px;background:none;cursor:text;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px}
+  #name:hover{background:var(--hover)}
+  #nameEdit{font-weight:600;width:190px}
+  #steps{display:flex;align-items:stretch;margin-left:14px;padding-left:8px;border-left:1px solid var(--line2)}
+  #steps button{position:relative;display:flex;align-items:center;gap:6px;min-height:0;border:0;border-radius:0;
+    background:none;padding:0 12px;color:var(--ink2)}
+  #steps button i{font-style:normal;font-size:11px;color:var(--muted)}
+  #steps button:hover{color:var(--ink);background:var(--hover)}
+  #steps button[aria-current=step]{color:var(--ink);font-weight:600}
+  #steps button[aria-current=step]::after{content:'';position:absolute;left:10px;right:10px;bottom:-1px;height:2px;background:var(--ink)}
+  #steps .arrow{align-self:center;color:var(--pencil);margin:0 2px}
+  #bar .sp{flex:1}
+  .menu{position:absolute;z-index:30;min-width:232px;padding:4px;background:var(--surface);border:1px solid var(--line);
+    border-radius:6px;box-shadow:0 6px 20px rgba(36,34,29,.14)}
+  .menu h3{font-size:11px;font-weight:600;color:var(--muted);padding:8px 8px 3px}
+  .menu button{display:flex;align-items:center;justify-content:space-between;gap:16px;width:100%;border:0;background:none;
+    text-align:left;padding:0 8px;border-radius:4px}
+  .menu button:hover{background:var(--hover)}
+  .menu button[aria-checked=true]::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--accent);margin-right:-8px;order:2}
+  .menu hr{border:0;border-top:1px solid var(--line2);margin:4px 0}
+
+  /* ---------- Werkzeug ---------- */
+  #tool{display:grid;grid-template-columns:minmax(0,1fr) 320px;min-height:0}
+  #stage{position:relative;min-width:0;min-height:0;overflow:hidden;background:var(--canvas)}
+  #plan{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;user-select:none}
+  body[data-step=skizze] #plan{cursor:crosshair}
+  #plan text{font:11px var(--font);fill:var(--ink2);font-variant-numeric:tabular-nums;paint-order:stroke;stroke:var(--canvas);stroke-width:3px;stroke-linejoin:round}
+  #plan text.lbl{font-size:10px;fill:var(--muted)}
+  #plan .wall{stroke:var(--ink);stroke-width:2;stroke-linecap:round}
+  #plan .wall.pencil{stroke:var(--pencil);stroke-width:1.25;stroke-dasharray:5 4}
+  #plan .diag{stroke:var(--ink2);stroke-width:1;opacity:.55}
+  #plan .next{stroke:var(--accent);stroke-width:2.5;stroke-dasharray:none;opacity:1}
+  #plan .sel{stroke:var(--accent)}
+  #plan .bad{stroke:var(--bad);stroke-width:2.5;opacity:1}
+  #plan .just{animation:ink .6s var(--ease)}
+  @keyframes ink{from{stroke:var(--accent);stroke-width:4}}
+  #plan .hit{stroke:transparent;stroke-width:14;cursor:pointer}
+  #plan .ecke{fill:var(--ink)} #plan .ecke.sel,#plan .ecke.act{fill:var(--accent)}
+  #plan .eckehit{fill:transparent;cursor:pointer}
+  #plan .ring{fill:none;stroke:var(--accent);stroke-width:1.5}
+  #plan .ghost{stroke:var(--pencil);stroke-width:1.25;stroke-dasharray:5 4;pointer-events:none}
+  #plan .ghostdot{fill:var(--pencil);pointer-events:none}
+  #plan .invite{stroke:var(--muted);stroke-width:1.5;stroke-dasharray:6 5;pointer-events:none}
+  #plan .invitedot{fill:var(--muted);pointer-events:none}
+  #plan .invitering{fill:none;stroke:var(--muted);stroke-width:1.5;stroke-dasharray:3 3;pointer-events:none}
+  #plan .diag.fade{animation:inkfade 1.2s var(--ease) forwards;pointer-events:none}
+  @keyframes inkfade{0%{stroke:var(--accent);stroke-width:3;opacity:1}40%{stroke:var(--ink);stroke-width:1.5;opacity:1}100%{stroke:var(--ink);stroke-width:1;opacity:0}}
+  #plan .bad{stroke-dasharray:9 4}
+  #plan text.devl{fill:var(--bad);font-weight:600}
+  #plan .hit:focus-visible{outline:none;stroke:var(--accent-line)} #plan .eckehit:focus-visible{outline:none;stroke:var(--accent);stroke-width:2}
+  #plan .floor{fill:var(--floor)}
+  #plan .ell{fill:var(--accent-bg);stroke:var(--accent-line)}
+  #plan .op{stroke:var(--canvas);stroke-width:5} #plan .opl{stroke:var(--ink);stroke-width:1;fill:none}
+  #scale{position:absolute;left:14px;top:12px;display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted);pointer-events:none}
+  #scale i{display:block;height:5px;border:1px solid var(--muted);border-top:0}
+  #fit{position:absolute;right:10px;top:8px}
+  #melden{position:absolute;left:10px;bottom:10px;display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink2);
+    background:var(--surface);min-height:28px}
+  .pop{position:absolute;z-index:20;background:var(--surface);border:1px solid var(--line);border-radius:6px;
+    box-shadow:0 4px 16px rgba(36,34,29,.14)}
+  #entry{display:flex;align-items:center;gap:6px;padding:6px 6px 6px 10px}
+  #entry b{white-space:nowrap} #entry input{width:86px;text-align:right}
+  #card{width:292px;padding:10px 12px 12px}
+  #card header{display:flex;align-items:baseline;gap:8px;margin-bottom:8px}
+  #card header b{font-size:13px} #card header span{color:var(--muted)} #card header .ib{margin:-6px -8px -6px auto;align-self:center}
+  .row{display:flex;align-items:center;gap:6px;min-height:30px}
+  .row label{color:var(--ink2);min-width:74px} .row .v{margin-left:auto}
+  .mrow{display:grid;grid-template-columns:1fr auto auto;align-items:center;gap:10px;min-height:28px;border-top:1px solid var(--line2)}
+  .mrow.off span{color:var(--muted);text-decoration:line-through} .mrow .dev{color:var(--muted);font-size:12px}
+  .mrow .dev.bad{color:var(--bad);font-weight:600}
+  .sw{width:28px;height:16px;min-height:0;padding:0;border-radius:8px;border:1px solid var(--line);background:var(--press);position:relative}
+  .sw::after{content:'';position:absolute;left:1px;top:1px;width:12px;height:12px;border-radius:50%;background:#fff;transition:transform .15s var(--ease)}
+  .sw[aria-checked=true]{background:var(--ink);border-color:var(--ink)} .sw[aria-checked=true]::after{transform:translateX(12px)}
+  .seg{display:flex;gap:4px;flex-wrap:wrap}
+  .seg button[aria-pressed=true]{background:var(--ink);border-color:var(--ink);color:#fff}
+  ::placeholder{color:var(--muted);opacity:1;font-style:italic}
+  .why{font-size:12px;color:var(--ink2);margin:6px 0 8px} .hint{color:var(--muted);font-size:12px}
+  .addrow.more{border-top:1px solid var(--line2);padding-top:6px;min-height:36px}
+  #geo.in{animation:arrive .4s var(--ease)} @keyframes arrive{from{opacity:0;transform:translateY(5px)}}
+  #demo{margin-left:auto;color:var(--ink2)}
+  .sub{margin-top:10px;padding-top:8px;border-top:1px solid var(--line2)}
+  .sub > p{font-size:12px;color:var(--muted);margin-bottom:6px}
+  #gate{position:absolute;inset:0;display:grid;place-content:center;justify-items:center;gap:12px;background:var(--canvas);text-align:center}
+  #gate p{font-size:13px;color:var(--ink2);max-width:36ch}
+  #toast{position:fixed;left:50%;top:64px;translate:-50% -100%;z-index:40;white-space:nowrap;padding:7px 12px;background:var(--ink);color:#fff;border-radius:4px;
+    font-size:12px;pointer-events:none;opacity:0;transition:opacity .2s}
+  #toast.on{opacity:1}
+
+  /* Wandansicht */
+  #wallwrap{position:absolute;inset:0;display:grid;place-items:center;background:var(--canvas)}
+  #wallview{width:100%;height:100%}
+  #wallview text{font:11px var(--font);fill:var(--ink2);font-variant-numeric:tabular-nums}
+  #wallview .w{fill:var(--floor);stroke:var(--ink);stroke-width:2;stroke-linejoin:round}
+  #wallview .assumed{stroke:var(--pencil);stroke-width:1.25;stroke-dasharray:5 4}
+  #wallview .o{fill:var(--canvas);stroke:var(--ink);stroke-width:1.25;cursor:pointer}
+  #wallview .o.sel{stroke:var(--accent);stroke-width:2}
+  #wallview .thin{stroke:var(--ink2);stroke-width:1;fill:none}
+  #lage{position:absolute;right:12px;top:12px;width:168px;height:128px;background:var(--surface);border:1px solid var(--line);border-radius:6px}
+  #lage line{stroke:var(--pencil);stroke-width:1.5;stroke-linecap:round} #lage line.cur{stroke:var(--accent);stroke-width:3}
+  #lage line.h{stroke:transparent;stroke-width:10;cursor:pointer}
+
+  /* ---------- Panel ---------- */
+  #panel{overflow-y:auto;background:var(--surface);border-left:1px solid var(--line)}
+  #stand{display:block;width:100%;text-align:left;border:0;border-bottom:1px solid var(--line);border-radius:0;background:none;padding:14px 16px 14px}
+  #stand:hover{background:var(--hover)}
+  #standtxt{display:flex;gap:9px;align-items:flex-start;font-weight:600;line-height:1.35}
+  #standtxt::before{content:'';flex:none;width:8px;height:8px;border-radius:50%;margin-top:5px;background:var(--pencil)}
+  #stand[data-tone=good] #standtxt::before{background:var(--good)}
+  #stand[data-tone=warn] #standtxt::before{background:none;box-shadow:inset 0 0 0 1.5px var(--ink2)}
+  #stand[data-tone=bad] #standtxt::before{background:var(--bad)} #stand[data-tone=bad] #standtxt{color:var(--bad)}
+  #geo{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0 0 17px}
+  #geo small{display:block;font-size:11px;color:var(--muted)} #geo b{font-size:20px;font-weight:600;letter-spacing:-.01em}
+  #geo b span{font-size:12px;font-weight:400;color:var(--muted);margin-left:3px}
+  #more{padding:10px 16px 14px;border-bottom:1px solid var(--line);background:var(--canvas)}
+  #more dl{display:grid;grid-template-columns:1fr auto;gap:5px 12px;margin:0 0 10px} #more dt{color:var(--ink2)} #more dd{margin:0;text-align:right}
+  #more label{display:flex;gap:8px;align-items:center;color:var(--ink2)}
+  #more h3{font-size:11px;font-weight:600;color:var(--muted);margin:2px 0 5px}
+  section h3.title{font-size:13px;color:var(--ink);margin-bottom:8px} section h3.title span{font-weight:400;color:var(--muted);margin-left:6px}
+  section{padding:14px 16px 6px}
+  section h3{font-size:11px;font-weight:600;color:var(--muted);margin-bottom:6px}
+  .sg{display:flex;align-items:center;justify-content:space-between;width:100%;border:0;border-top:1px solid var(--line2);border-radius:0;
+    background:none;padding:0 2px;min-height:32px;text-align:left}
+  .sg:first-of-type{border-top:0} .sg span{color:var(--muted);font-size:12px}
+  .sg.cur{font-weight:600} .sg.cur b{color:var(--accent)}
+  .sg b{font-weight:inherit}
+  details summary{list-style:none;cursor:pointer;display:flex;justify-content:space-between;min-height:30px;align-items:center;color:var(--ink2)}
+  details summary::-webkit-details-marker{display:none}
+  details summary::after{content:'';width:6px;height:6px;border-right:1.5px solid var(--muted);border-bottom:1.5px solid var(--muted);rotate:45deg;margin-right:4px;transition:rotate .15s}
+  details[open] summary::after{rotate:225deg}
+  .go{display:flex;gap:8px;padding:8px 16px 16px}
+  .intent{padding:16px 16px 14px;border-bottom:1px solid var(--line2)}
+  .intent h3{font-size:13px;font-weight:600;color:var(--ink);margin-bottom:8px}
+  .intent label{display:flex;gap:8px;align-items:center;color:var(--ink2);margin-bottom:10px}
+  .intent .tr{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:36px;border-top:1px solid var(--line2)}
+  .intent .tr:first-of-type{border-top:0} .intent .tr small{display:block;font-size:12px;color:var(--muted)}
+
+  /* ---------- Ausgabe: das Blatt ---------- */
+  #sheets{position:absolute;inset:0;overflow:auto;padding:28px 0 48px;display:grid;justify-items:center;align-content:start;gap:24px;background:var(--paper)}
+  .sheet{width:min(560px,calc(100% - 64px));aspect-ratio:210/297;background:#fff;box-shadow:0 1px 2px rgba(36,34,29,.12),0 8px 24px rgba(36,34,29,.10);
+    padding:6.5% 7%;display:flex;flex-direction:column;font-size:11px;color:#1c1b18}
+  .sheet header{display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid #1c1b18;padding-bottom:6px;margin-bottom:10px}
+  .sheet header b{font-size:15px} .sheet svg{flex:1;min-height:0;width:100%}
+  .sheet svg text{font:9px var(--font);fill:#1c1b18;font-variant-numeric:tabular-nums}
+  .sheet .foot{display:grid;grid-template-columns:repeat(3,auto);justify-content:space-between;border-top:1px solid #1c1b18;padding-top:8px;margin-top:8px}
+  .sheet .walls{display:grid;grid-template-columns:repeat(6,1fr);gap:2px 10px;font-size:8.5px;margin-top:8px;padding-top:6px;border-top:1px solid #e5e2da}
+  .sheet .walls span{display:flex;justify-content:space-between;white-space:nowrap} .sheet .walls b{font-weight:600}
+  .sheet .foot small{display:block;color:#6b665b} .sheet .foot b{font-size:14px}
+  .sheet table{border-collapse:collapse;width:100%} .sheet td,.sheet th{text-align:right;padding:2px 0;border-bottom:1px solid #e5e2da;font-weight:400}
+  .sheet th{color:#6b665b} .sheet td:first-child,.sheet th:first-child{text-align:left}
+  .sheet .cols{columns:2;column-gap:8%}
+
+  /* ---------- Startbildschirm ---------- */
+  #home{overflow:auto;background:var(--paper)}
+  #homein{max-width:760px;margin:0 auto;padding:36px 24px 48px}
+  #home h2{font-size:20px;font-weight:600;letter-spacing:-.01em;margin:28px 0 2px}
+  #home h2:first-child{margin-top:0}
+  #home h3{font-size:12px;font-weight:400;color:var(--muted);margin:14px 0 6px}
+  .rooms{background:var(--surface);border:1px solid var(--line);border-radius:6px}
+  .room{position:relative;display:grid;grid-template-columns:64px minmax(0,1fr) auto auto;align-items:center;gap:14px;padding:10px 8px 10px 12px;border-top:1px solid var(--line2);cursor:pointer}
+  .room:first-child{border-top:0} .room:hover{background:var(--hover)}
+  .room svg.th{width:64px;height:44px} .room svg.th path{fill:var(--floor);stroke:var(--ink);stroke-width:1.5;stroke-linejoin:round}
+  .room svg.th path.pencil{stroke:var(--pencil);stroke-dasharray:3 3;fill:none}
+  .room b{display:block;font-weight:600} .room .st{display:flex;align-items:center;gap:7px;color:var(--ink2);font-size:12px}
+  .room .st::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--pencil)}
+  .room .st.good::before{background:var(--good)} .room .st.warn::before{background:none;box-shadow:inset 0 0 0 1.5px var(--ink2)}
+  .room .has{display:flex;gap:4px} .room .has button{min-height:26px;font-size:12px;color:var(--ink2)}
+  .room > .ib{color:var(--pencil)} .room:hover > .ib,.room > .ib:focus-visible{color:var(--ink2)}
+  .room .confirm{grid-column:1/-1;display:flex;align-items:center;gap:10px;padding:8px 0 2px;color:var(--ink2)}
+  .room .confirm span{margin-right:auto}
+  #note{margin-top:28px;font-size:12px;color:var(--muted)}
+
+  /* ---------- Prototyp-Leiste: gehört nicht zur Oberfläche ---------- */
+  #proto{display:flex;align-items:center;gap:4px;padding:3px 10px;border-top:1px dashed var(--pencil);background:var(--paper);font-size:11px;color:var(--muted)}
+  #proto b{font-weight:600;margin-right:8px} #proto button{min-height:22px;font-size:11px;padding:0 8px;background:none;color:var(--ink2)}
+  #proto button:hover{background:var(--hover)}
+
+  dialog{border:1px solid var(--line);border-radius:6px;padding:0;background:var(--surface);color:var(--ink);box-shadow:0 12px 40px rgba(36,34,29,.2);width:min(520px,calc(100vw - 40px))}
+  dialog::backdrop{background:rgba(36,34,29,.28)}
+  dialog header{display:flex;align-items:center;justify-content:space-between;padding:10px 10px 10px 16px;border-bottom:1px solid var(--line2)}
+  dialog h2{font-size:13px} dialog dl{display:grid;grid-template-columns:auto 1fr;gap:6px 18px;margin:0;padding:14px 16px 18px}
+  dialog dt{color:var(--muted);white-space:nowrap} dialog dd{margin:0}
+  #qr{display:block;margin:16px auto}
+
+  body[data-view=home] #tool,body[data-view=home] .toolonly{display:none!important}
+  body[data-view=tool] #home,body[data-view=tool] .homeonly{display:none!important}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+  @media print{
+    body{overflow:visible;background:#fff} #app{display:block;min-width:0}
+    #bar,#panel,#proto,#plan,#scale,#fit,#melden,.pop,#toast{display:none!important}
+    #tool{display:block} #stage{overflow:visible;background:#fff} #sheets{position:static;padding:0;gap:0;background:#fff;display:block}
+    .sheet{width:100%;height:100vh;aspect-ratio:auto;box-shadow:none;break-after:page}
+  }
+</style>
+</head>
+<body data-view="tool" data-step="skizze">
+<div id="app">
+  <header id="bar">
+    <div class="grp toolonly">
+      <button id="back" title="Alle Räume"><svg class="ic" viewBox="0 0 16 16"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg>Räume</button>
+      <button id="name" title="Umbenennen"></button>
+    </div>
+    <nav id="steps" class="toolonly" aria-label="Schritte">
+      <button data-step="skizze"><i>1</i>Skizze</button>
+      <button data-step="masse"><i>2</i>Maße</button>
+      <button data-step="waende"><i>3</i>Wände</button>
+      <svg class="ic arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M9 5l3 3-3 3"/></svg>
+      <button data-step="ausgabe">Ausgabe</button>
+    </nav>
+    <div class="grp homeonly"><span id="brand" style="font-weight:600;padding:0 8px">Raumaufmaß</span></div>
+    <div class="sp"></div>
+    <div class="grp toolonly">
+      <button id="undo" class="ib" title="Rückgängig" data-tk="undo"><svg class="ic" viewBox="0 0 16 16"><path d="M5.5 3.5 2.5 6.5l3 3"/><path d="M2.5 6.5h7a4 4 0 0 1 0 8h-2"/></svg></button>
+      <button id="redo" class="ib" title="Wiederherstellen" data-tk="redo"><svg class="ic" viewBox="0 0 16 16"><path d="M10.5 3.5l3 3-3 3"/><path d="M13.5 6.5h-7a4 4 0 0 0 0 8h2"/></svg></button>
+      <button id="menuBtn" class="ib" aria-haspopup="menu" aria-expanded="false" title="Menü"><svg class="ic" viewBox="0 0 16 16"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/></svg></button>
+    </div>
+    <div class="grp homeonly" style="gap:8px">
+      <button id="homeOpen">Datei öffnen <kbd data-k="open"></kbd></button>
+      <button id="homeNew" class="primary">Neuer Raum</button>
+    </div>
+  </header>
+
+  <main id="tool">
+    <div id="stage">
+      <svg id="plan" aria-label="Plan des Raums"></svg>
+      <div id="scale"><i></i><span></span></div>
+      <button id="fit" class="ib" title="Ansicht einpassen (0)"><svg class="ic" viewBox="0 0 16 16"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></svg></button>
+      <button id="melden"><svg class="ic" viewBox="0 0 16 16"><path d="M8 2.5 14 13H2z"/><path d="M8 6.5v3M8 11.3v.2"/></svg>Fehler / Wunsch melden</button>
+      <div id="wallwrap" hidden><svg id="wallview"></svg><svg id="lage" viewBox="0 0 168 128" aria-label="Lageplan: Wand wählen"></svg></div>
+      <div id="sheets" hidden></div>
+      <div id="gate" hidden><p></p><button class="primary"></button></div>
+      <div id="entry" class="pop" hidden>
+        <b></b><input type="text" inputmode="decimal" autocomplete="off" placeholder="Maß" aria-label="Maß in Metern"><span style="color:var(--muted)">m</span>
+        <button id="entryOk" class="primary">OK</button>
+      </div>
+      <div id="card" class="pop" hidden></div>
+    </div>
+    <aside id="panel">
+      <button id="stand" aria-expanded="false"><div id="standtxt"></div><div id="geo"></div></button>
+      <div id="more" hidden></div>
+      <div id="stepbody"></div>
+    </aside>
+  </main>
+
+  <main id="home"><div id="homein"></div></main>
+
+  <footer id="proto">
+    <b>Prototyp · Beispieldaten, kein Rechenkern</b>
+    <button data-sc="leer">Leerer Start</button>
+    <button data-sc="skizze">Skizze fertig</button>
+    <button data-sc="mitte">Mitten im Messen</button>
+    <button data-sc="geprueft">Geprüft</button>
+    <button data-sc="fehler">Ein Maß passt nicht</button>
+    <button data-sc="start">Startbildschirm</button>
+    <span id="demo"></span>
+  </footer>
+</div>
+
+<div id="toast" role="status"></div>
+<div id="menu" class="menu" role="menu" hidden>
+  <h3>Raum</h3>
+  <button role="menuitemcheckbox" data-m="ortho" aria-checked="false">Rechte Winkel annehmen</button>
+  <button role="menuitem" data-m="mirror">Raum spiegeln</button>
+  <button role="menuitem" data-m="clear" class="danger">Raum leeren</button>
+  <hr><h3>Ansicht</h3>
+  <button role="menuitemcheckbox" data-m="snap" aria-checked="false">Maßhaltig zeichnen</button>
+  <button role="menuitemcheckbox" data-m="unfold" aria-checked="false">Abwicklung</button>
+  <button role="menuitem" data-m="rot">Ansicht drehen</button>
+  <hr><h3>Weitergeben</h3>
+  <button role="menuitem" data-m="save">Als Datei sichern<kbd data-k="save"></kbd></button>
+  <button role="menuitem" data-m="link">Link kopieren</button>
+  <button role="menuitem" data-m="qr">QR-Code zeigen</button>
+  <hr>
+  <button role="menuitem" data-m="help">Hilfe und Tasten<kbd>?</kbd></button>
+</div>
+
+<dialog id="help">
+  <header><h2>Hilfe und Tasten</h2><button class="ib" data-close aria-label="Schließen"><svg class="ic" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg></button></header>
+  <dl>
+    <dt>1 2 3</dt><dd>Skizze, Maße, Wände</dd>
+    <dt>4</dt><dd>Ausgabe</dd>
+    <dt>Enter</dt><dd>Maß übernehmen, weiter zur nächsten Strecke</dd>
+    <dt>Esc</dt><dd>Eingabe oder Karte schließen</dd>
+    <dt data-k="del"></dt><dd>Angefasste Ecke, Wand oder Öffnung löschen</dd>
+    <dt><span data-k="undo"></span> · <span data-k="redo"></span></dt><dd>Rückgängig, Wiederherstellen</dd>
+    <dt>0</dt><dd>Ansicht einpassen</dd>
+    <dt>← →</dt><dd>In Wände: nächste Wand</dd>
+    <dt>Rad · ziehen</dt><dd>Plan verschieben, mit <span data-k="zoom"></span> oder Pinch zoomen</dd>
+  </dl>
+</dialog>
+<dialog id="qrdlg">
+  <header><h2>Raum als QR-Code</h2><button class="ib" data-close aria-label="Schließen"><svg class="ic" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg></button></header>
+  <svg id="qr" width="180" height="180" viewBox="0 0 21 21" shape-rendering="crispEdges"></svg>
+  <p style="padding:0 16px 16px;color:var(--muted);font-size:12px;text-align:center">Im Prototyp nur ein Platzhalter-Muster.</p>
+</dialog>
+
+<script>
+'use strict';
+/* ---------- Daten der Wohnküche (aus dem echten Raum, Stand 09.11.2026) ---------- */
+const DATA = {
+  pts:'A -481 1321|B -497 9157|C 2547 9177|D 2546 8959|E 7286 8994|F 7313 5408|G 4170 5398|H 4175 5573|I 2563 5549|J 2557 5183|L 8865 5281|M 8863 1340|N 2908 1316|O 2921 2294|P 2589 2285|Q 2594 1327|V 6823 5414|W 6819 5248|X 3804 5232|Y 3795 5562|Z 5850 5409|AA 5852 5246|AC 2952 5186|AD 2964 5561',
+  walls:'A B|B C|C D|D E|E F|F V|V W|W L|L M|M N|N O|O P|P Q|Q A|I J|J AC|AC AD|AD I|X Y|Y H|G H|G Z|Z AA|AA X',
+  meas:'M N 5962 -6.3|Q A 3077 -1.3|A B 7842 -6|B C 3046 -2.1|C D 221 -3.5|D E 4745 -4.3|E F 3591 -4.8|G H 178 -3.3|H I 1609 2.8|I J 375 -9|L J 6308 0.6|L M 3943 -2.6|O B 7665 2.7|A C 8413 6|A D 8219 -3|D F 5938 6.3|D H 3758 0|D I 3412 -1.6|C I 3630 -2.1|J O 2914 -1.8|N O 979 -1.3|J A 4917 -3.4|I A 5202 7.7|O M 6019 -0.9|N L 7148 7.6|L A 10147 3.2|J B 5003 9.1|I B 4739 -7.9|J I 373 -7|W L 2050 -4.3|V W 166 0.1|AA Z 166 -3.1|AA W 971 -3.8|V Z 971 1.8|Z W 983 -0.5|Z E 3863 -1|V E 3609 1.2|V F 490 -0.4|AD Y 833 -1.9|AC AD 373 1.7|AC X 857 -3.7|AC N 3873 -2.6|X M 6382 0.7|Y E 4892 3.4|AD E 5519 1|N O 978 -0.3|O M 6016 2.1|O L 6658 -6.2|X B 5822 1.4|AC M 7045 7.2|Y AC 922 1.1|X AD 905 -2.7|Z F 1464 -1.6|AA X 2054 -6.1|J AC 392 3.4|AD I 405 -3.7|Y H 383 -3.4|X Y 329 1.8|AC O 2892 0.6|AA M 4936 -3.8|X D 3936 -1.6|Z M 5062 1.4|D Z 4852 -1.9|A V 8373 -0.1|H E 4627 -2.2|G F 3144 -1.7|V H 2653 0.1|H F 3146 -3.8|H Z 1681 2.5|G Z 1681 -1.1|G E 4754 4.3|B F 8660 2.8|V B 8224 -2.4|H B 5891 -2.6|P Q 960 -1.8|Q J 3858 -1.6|J P 2901 -2.7|P A 3223 -5.2|B Q 8415 3.7|P B 7534 -0.6|O P 338 -5.3',
+  sigma:5.6, area:65.3951e6
+};
+
+/* ---------- Zustand ---------- */
+const $ = s => document.querySelector(s);
+const MAC = /Mac|iP(hone|ad)/.test(navigator.platform||navigator.userAgent);
+const KEYS = MAC ? {undo:'⌘Z',redo:'⇧⌘Z',save:'⌘S',open:'⌘O',del:'⌫',zoom:'⌘'}
+                 : {undo:'Strg+Z',redo:'Strg+Y',save:'Strg+S',open:'Strg+O',del:'Entf',zoom:'Strg'};
+const S = { view:'tool', step:'skizze', name:'Neuer Raum', pts:[], walls:[], closed:false, queue:[], k:0, meas:[],
+  sel:null, guide:true, snap:false, ortho:false, unfold:false, morph:0, height:null, openings:[], wall:0, op:null,
+  just:null, hover:null, more:false, ell:false, list:false, sigma:4, real:false, hasRooms:false, seq:0 };
+const V = { x:-1500, y:-800, s:.08 };
+const hist = [], fut = [];
+const KEEP = ['name','pts','walls','closed','queue','k','meas','height','openings','sigma','real','seq'];
+const snap = () => JSON.stringify(KEEP.reduce((o,k)=>(o[k]=S[k],o),{}));
+function mark(){ hist.push(snap()); if(hist.length>80) hist.shift(); fut.length=0; }
+function restore(j){ Object.assign(S, JSON.parse(j)); S.sel=null; S.op=null; S.just=null; }
+
+const key = (a,b) => a<b ? a+'|'+b : b+'|'+a;
+const nm  = m => m.a+'–'+m.b;
+const P = id => S.pts.find(p=>p.id===id);
+const D = p => p.fx==null||!S.morph ? {x:p.x,y:p.y} : {x:p.x+(p.fx-p.x)*S.morph, y:p.y+(p.fy-p.y)*S.morph};
+const T = p => p.fx==null ? {x:p.x,y:p.y} : {x:p.fx,y:p.fy};
+const dist = (a,b) => Math.hypot(a.x-b.x,a.y-b.y);
+const isWall = (a,b) => S.walls.some(w=>key(w[0],w[1])===key(a,b));
+const fm = (mm,d=3) => (mm/1000).toFixed(d).replace('.',',');
+const esc = s => String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function label(i){ let s=''; i++; while(i>0){ i--; s=String.fromCharCode(65+i%26)+s; i=Math.floor(i/26);} return s; }
+function onMeas(a,b){ return S.meas.filter(m=>key(m.a,m.b)===key(a,b)); }
+function lenOf(a,b){            /* Länge: was das Werkzeug ausrechnet */
+  const pa=P(a), pb=P(b); if(!pa||!pb) return null;
+  const ms=onMeas(a,b).filter(m=>m.on&&!m.bad);
+  if(pa.fx!=null) return ms.length||definite() ? dist(T(pa),T(pb)) : null;
+  return ms.length ? ms.reduce((s,m)=>s+m.d,0)/ms.length : null;
+}
+const need = () => Math.max(0, 2*S.pts.length-3);
+const have = () => S.meas.filter(m=>m.on).length;
+const definite = () => S.closed && have()>=need();
+function rings(get=T){          /* geschlossene Wandzüge, größter zuerst */
+  const adj={}; S.walls.forEach(([a,b])=>{(adj[a]=adj[a]||[]).push(b);(adj[b]=adj[b]||[]).push(a);});
+  const seen=new Set(), out=[];
+  for(const s of Object.keys(adj)){
+    if(seen.has(s)||adj[s].length!==2) continue;
+    const r=[s]; seen.add(s); let prev=null, cur=s, ok=true;
+    for(;;){ const nx=adj[cur].find(n=>n!==prev)??adj[cur][0]; if(nx===s) break;
+      if(!nx||seen.has(nx)||(adj[nx]||[]).length!==2){ ok=false; break; } r.push(nx); seen.add(nx); prev=cur; cur=nx; }
+    if(ok&&r.length>=3) out.push(r.map(id=>get(P(id))));
+  }
+  const ar=r=>Math.abs(r.reduce((s,p,i)=>{const q=r[(i+1)%r.length];return s+p.x*q.y-q.x*p.y;},0))/2;
+  return out.map(r=>({r,a:ar(r)})).sort((x,y)=>y.a-x.a);
+}
+function geo(){
+  const rs=rings(); if(!rs.length) return null;
+  const area=S.real&&S.pts.length===24 ? DATA.area : rs[0].a-rs.slice(1).reduce((s,r)=>s+r.a,0);
+  const per=S.walls.reduce((s,[a,b])=>s+dist(T(P(a)),T(P(b))),0);
+  return {area, per, islands:rs.length-1};
+}
+function stand(){
+  const n=S.pts.length;
+  if(!S.closed){
+    if(!n) return {tone:'', text:'Noch keine Ecke. Ein Klick in den Plan setzt die erste.'};
+    if(n<3) return {tone:'', text:n===1?'1 Ecke gesetzt.':n+' Ecken gesetzt.'};
+    return {tone:'', text:n+' Ecken. Ein Klick auf die erste schließt den Raum.'};
+  }
+  const bad=S.meas.find(m=>m.on&&m.bad);
+  if(bad) return {tone:'bad', text:'Ein Maß passt nicht: '+nm(bad)+' weicht '+bad.dev+' mm ab.'};
+  const h=have(), nd=need();
+  if(h<nd) return {tone:'warn', text:(nd-h===1?'Noch 1 Maß':'Noch '+(nd-h)+' Maße')+', dann ist die Form eindeutig.'};
+  if(h===nd) return {tone:'warn', text:'Form eindeutig, aber ungeprüft. Ein weiteres Maß prüft sie.'};
+  return {tone:'good', text:S.real?'Geprüft ± '+String(S.sigma).replace('.',',')+' mm':'Geprüft'};
+}
+
+/* ---------- Szenarien des Prototyps ---------- */
+function loadKitchen(k){
+  /* Die Skizze ist die echte Form, von Hand leicht verzogen: so sieht ein Raum vor dem Messen aus. */
+  const jit=id=>{ let h=0; for(const c of id) h=(h*31+c.charCodeAt(0))%997; return [(h%120)-60, ((h*7)%120)-60]; };
+  S.pts=DATA.pts.split('|').map(r=>{ const [id,x,y]=r.split(' '); const [dx,dy]=jit(id);
+    return {id, fx:+x, fy:+y, x:+x+dx+(+y-5200)*.03, y:+y+dy-(+x-4200)*.018}; });
+  S.walls=DATA.walls.split('|').map(r=>r.split(' '));
+  const all=DATA.meas.split('|').map(r=>{ const [a,b,d,v]=r.split(' '); return {a,b,d:+d,v:+v,on:true}; });
+  S.queue=[...all.filter(m=>isWall(m.a,m.b)), ...all.filter(m=>!isWall(m.a,m.b))];
+  S.closed=true; S.k=k; S.meas=S.queue.slice(0,k).map(m=>({...m})); S.name='Wohnküche'; S.sigma=DATA.sigma; S.real=true;
+  S.height=null; S.openings=[]; S.seq=0; S.wall=0;
+}
+function scenario(sc){
+  hist.length=fut.length=0; S.sel=null; S.op=null; S.guide=true; S.more=false; S.ell=false; S.list=false; S.morph=S.snap?1:0;
+  if(sc==='leer'){ Object.assign(S,{pts:[],walls:[],closed:false,queue:[],k:0,meas:[],name:'Neuer Raum',real:false,height:null,openings:[],sigma:4,seq:0}); go('tool','skizze'); V.x=-1500;V.y=-800;V.s=.08; }
+  if(sc==='skizze'){ loadKitchen(0); go('tool','skizze'); fit(); }
+  if(sc==='mitte'){ loadKitchen(31); go('tool','masse'); fit(); }
+  if(sc==='geprueft'){ loadKitchen(81); go('tool','masse'); fit(); }
+  if(sc==='fehler'){ loadKitchen(81); const m=S.meas.find(m=>m.a==='J'&&m.b==='B'); m.dev=87; m.d=Math.round(dist(T(P('J')),T(P('B'))))+m.dev; m.bad=true; go('tool','masse'); fit(); S.sel={type:'strecke',a:'J',b:'B'}; }
+  if(sc==='start'){ if(!S.pts.length) loadKitchen(81); S.hasRooms=true; go('home'); }
+  if(sc!=='leer') S.hasRooms=true;
+  render();
+}
+function go(view, step){
+  S.view=view; if(step) S.step=step; S.sel=null; S.op=null; closeMenu();
+  document.body.dataset.view=view; document.body.dataset.step=S.step;
+}
+
+/* ---------- Ansicht ---------- */
+const plan=$('#plan');
+const w2s = p => ({x:(p.x-V.x)*V.s, y:(p.y-V.y)*V.s});
+const s2w = (x,y) => ({x:x/V.s+V.x, y:y/V.s+V.y});
+function fit(){
+  const r=plan.getBoundingClientRect(); if(!S.pts.length||!r.width) return;
+  const ps=S.pts.map(D), xs=ps.map(p=>p.x), ys=ps.map(p=>p.y);
+  const x0=Math.min(...xs), x1=Math.max(...xs), y0=Math.min(...ys), y1=Math.max(...ys), pad=72;
+  V.s=Math.min((r.width-2*pad)/Math.max(x1-x0,1000), (r.height-2*pad)/Math.max(y1-y0,1000), .5);
+  V.x=(x0+x1)/2-r.width/2/V.s; V.y=(y0+y1)/2-r.height/2/V.s;
+}
+function centroid(){ const ps=S.pts.map(D); return {x:ps.reduce((s,p)=>s+p.x,0)/ps.length, y:ps.reduce((s,p)=>s+p.y,0)/ps.length}; }
+const nextM = () => S.step==='masse'&&S.closed&&S.guide&&!S.meas.some(m=>m.on&&m.bad) ? S.queue[S.k]||null : null;
+
+function renderPlan(){
+  const r=plan.getBoundingClientRect(), g=1000*V.s, o=w2s({x:0,y:0});
+  let h=`<defs><pattern id="grid" width="${g}" height="${g}" patternUnits="userSpaceOnUse" x="${o.x%g}" y="${o.y%g}"><path d="M${g} 0H0V${g}" fill="none" stroke="var(--line2)" stroke-width="1"/></pattern></defs><rect width="100%" height="100%" fill="url(#grid)" data-bg="1"/>`;
+  const rs=S.closed?rings(D):[];
+  if(rs.length) h+=`<path class="floor" fill-rule="evenodd" d="${rs.map(x=>'M'+x.r.map(p=>{const q=w2s(p);return q.x.toFixed(1)+' '+q.y.toFixed(1);}).join('L')+'Z').join('')}" data-bg="1"/>`;
+  const c=S.pts.length?w2s(centroid()):{x:0,y:0}, nx=nextM(), act=new Set();
+  const line=(a,b,cls,extra='')=>{ const p=w2s(D(P(a))), q=w2s(D(P(b))); return `<line x1="${p.x.toFixed(1)}" y1="${p.y.toFixed(1)}" x2="${q.x.toFixed(1)}" y2="${q.y.toFixed(1)}" class="${cls}" ${extra}/>`; };
+  /* Diagonalen bleiben unsichtbar, außer sie sind dran, angefasst oder falsch */
+  const show=new Map();
+  if(S.sel?.type==='strecke'&&!isWall(S.sel.a,S.sel.b)) show.set(key(S.sel.a,S.sel.b),[S.sel.a,S.sel.b,'diag sel']);
+  if(S.hover&&!isWall(S.hover[0],S.hover[1])) show.set(key(...S.hover),[S.hover[0],S.hover[1],'diag sel']);
+  S.meas.forEach(m=>{ if(m.on&&m.bad&&!isWall(m.a,m.b)) show.set(key(m.a,m.b),[m.a,m.b,'diag bad']); });   /* falsch schlägt angefasst */
+  if(S.sel?.type==='ecke') S.meas.forEach(m=>{ if((m.a===S.sel.id||m.b===S.sel.id)&&!isWall(m.a,m.b)&&!show.has(key(m.a,m.b))) show.set(key(m.a,m.b),[m.a,m.b,'diag']); });
+  show.forEach(([a,b,cls])=>{ h+=line(a,b,cls)+line(a,b,'hit',`data-diag="${a}|${b}" tabindex="0" role="button" aria-label="Diagonale ${a}–${b}"`); act.add(a); act.add(b); });
+  if(S.just&&!show.has(S.just)){ const [a,b]=S.just.split('|'); if(P(a)&&P(b)&&!isWall(a,b)) h+=line(a,b,'diag fade'); }   /* gemessene Diagonale: kurz Tinte, dann still */
+  S.walls.forEach(([a,b],i)=>{
+    const ms=onMeas(a,b), meas=ms.some(m=>m.on), bad=ms.some(m=>m.on&&m.bad);
+    const sel=S.sel?.type==='strecke'&&key(S.sel.a,S.sel.b)===key(a,b) || S.hover&&key(...S.hover)===key(a,b);
+    h+=line(a,b,'wall'+(meas?'':' pencil')+(bad?' bad':'')+(sel?' sel':'')+(S.just===key(a,b)?' just':''));
+  });
+  if(nx){ h+=line(nx.a,nx.b,'wall next'); act.add(nx.a); act.add(nx.b); }
+  if(S.sel?.type==='strecke'){ act.add(S.sel.a); act.add(S.sel.b); }
+  /* Öffnungen im Grundriss */
+  S.openings.forEach(op=>{ const [a,b]=S.walls[op.wall]||[]; if(!a) return; const p=D(P(a)), q=D(P(b)), L=dist(p,q)||1, tl=dist(T(P(a)),T(P(b)))||L;
+    const t0=op.x/tl, t1=(op.x+op.w)/tl, at=t=>w2s({x:p.x+(q.x-p.x)*t,y:p.y+(q.y-p.y)*t}), u=at(t0), v=at(t1);
+    if(op.type==='anschluss'){ h+=`<circle cx="${u.x}" cy="${u.y}" r="4" fill="var(--canvas)" class="opl"/>`; return; }
+    h+=`<line x1="${u.x}" y1="${u.y}" x2="${v.x}" y2="${v.y}" class="op"/>`;
+    const dx=v.x-u.x, dy=v.y-u.y, n=Math.hypot(dx,dy)||1, sx=c.x-(u.x+v.x)/2, sy=c.y-(u.y+v.y)/2, sg=(-dy*sx+dx*sy)>0?1:-1, nxn=-dy/n*sg, nyn=dx/n*sg;
+    if(op.type==='tuer') h+=`<path class="opl" d="M${u.x} ${u.y}L${u.x+nxn*n} ${u.y+nyn*n}A${n} ${n} 0 0 ${sg>0?1:0} ${v.x} ${v.y}"/>`;
+    else h+=`<line x1="${u.x}" y1="${u.y}" x2="${v.x}" y2="${v.y}" class="opl"/><line x1="${u.x+nxn*3}" y1="${u.y+nyn*3}" x2="${v.x+nxn*3}" y2="${v.y+nyn*3}" class="opl"/>`;
+  });
+  S.walls.forEach(([a,b],i)=>{ h+=line(a,b,'hit',`data-wand="${i}" tabindex="0" role="button" aria-label="Wand ${a}–${b}"`); });
+  /* Längen an den Wänden: nur wo Platz ist */
+  const segs=S.walls.map(([a,b])=>[w2s(D(P(a))),w2s(D(P(b))),key(a,b)]);
+  const cuts=(p,q,b)=>{ let t0=0,t1=1; const dx=q.x-p.x, dy=q.y-p.y;
+    for(const [pp,qq] of [[-dx,p.x-b.x0],[dx,b.x1-p.x],[-dy,p.y-b.y0],[dy,b.y1-p.y]]){
+      if(pp===0){ if(qq<0) return false; continue; } const r=qq/pp; if(pp<0){ if(r>t1) return false; if(r>t0) t0=r; } else { if(r<t0) return false; if(r<t1) t1=r; } }
+    return true; };
+  const boxes=[], clash=(b,own)=>boxes.some(o=>b.x0<o.x1&&b.x1>o.x0&&b.y0<o.y1&&b.y1>o.y0)||segs.some(s=>s[2]!==own&&cuts(s[0],s[1],b));
+  S.walls.map(([a,b])=>({a,b,L:lenOf(a,b)})).filter(w=>w.L!=null).sort((x,y)=>y.L-x.L).forEach(({a,b,L})=>{
+    const p=w2s(D(P(a))), q=w2s(D(P(b))), n=Math.hypot(q.x-p.x,q.y-p.y); if(n<48) return;
+    const t=fm(L), tw=t.length*6.2, mx=(p.x+q.x)/2, my=(p.y+q.y)/2; let ux=-(q.y-p.y)/n, uy=(q.x-p.x)/n; if((mx-c.x)*ux+(my-c.y)*uy<0){ux=-ux;uy=-uy;}
+    for(const sg of [1,-1]){ const off=(9+Math.abs(ux)*tw/2+Math.abs(uy)*5)*sg, x=mx+ux*off, y=my+uy*off, bx={x0:x-tw/2-3,x1:x+tw/2+3,y0:y-9,y1:y+9};
+      if(clash(bx,key(a,b))) continue; boxes.push(bx); h+=`<text x="${x.toFixed(1)}" y="${(y+4).toFixed(1)}" text-anchor="middle">${t}</text>`; break; } });
+  S.meas.filter(m=>m.on&&m.bad).forEach(m=>{ const p=w2s(D(P(m.a))), q=w2s(D(P(m.b))); h+=`<text class="devl" x="${((p.x+q.x)/2+10).toFixed(1)}" y="${((p.y+q.y)/2-8).toFixed(1)}">+${m.dev} mm</text>`; });
+  /* Genauigkeit je Ecke */
+  if(S.ell&&definite()) S.pts.forEach((p,i)=>{ const q=w2s(D(p)); h+=`<ellipse class="ell" cx="${q.x}" cy="${q.y}" rx="${7+(i*5)%9}" ry="${5+(i*3)%6}" transform="rotate(${(i*37)%180} ${q.x} ${q.y})"/>`; });
+  /* Ecken */
+  const deg={}; S.walls.forEach(([a,b])=>{deg[a]=(deg[a]||0)+1;deg[b]=(deg[b]||0)+1;});
+  const tight=new Set(); S.walls.forEach(([a,b])=>{ if(dist(w2s(D(P(a))),w2s(D(P(b))))<40){tight.add(a);tight.add(b);} });
+  S.pts.forEach((p,i)=>{ const q=w2s(D(p)), sel=S.sel?.type==='ecke'&&S.sel.id===p.id, on=act.has(p.id);
+    h+=`<circle class="ecke${sel?' sel':on?' act':''}" cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="${sel||on?4.5:3.5}"/>`;
+    if(!tight.has(p.id)||sel||on){ let ux=q.x-c.x, uy=q.y-c.y; const n=Math.hypot(ux,uy)||1; ux/=n; uy/=n;
+      h+=`<text class="lbl" x="${(q.x+ux*13).toFixed(1)}" y="${(q.y+uy*13+3.5).toFixed(1)}" text-anchor="middle">${p.id}</text>`; }
+    h+=`<circle class="eckehit" cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="11" data-ecke="${p.id}" tabindex="0" role="button" aria-label="Ecke ${p.id}"/>`; });
+  /* Skizze: Gummiband und Ziel */
+  if(S.step==='skizze'&&!S.closed&&mouse){
+    const last=S.pts[S.pts.length-1], m=mouse;
+    if(last){ const q=w2s(D(last)); h+=`<line class="ghost" x1="${q.x}" y1="${q.y}" x2="${m.x}" y2="${m.y}"/>`; }
+    if(!overFirst) h+=`<circle class="ghostdot" cx="${m.x}" cy="${m.y}" r="3.5"/>`;
+    if(S.pts.length>=3){ const q=w2s(D(S.pts[0])); h+=`<circle class="ring" cx="${q.x}" cy="${q.y}" r="${overFirst?11:8}"/>`; }
+  }
+  /* Leerer Start: eine Ecke mit dem Ansatz der ersten Wand zeigt, was der erste Klick tut */
+  if(S.step==='skizze'&&!S.pts.length&&!mouse){ const x=r.width/2-85, y=r.height/2+20;
+    h+=`<line class="invite" x1="${x}" y1="${y}" x2="${x+170}" y2="${y-22}"/><circle class="invitedot" cx="${x}" cy="${y}" r="4"/><circle class="invitering" cx="${x+170}" cy="${y-22}" r="9"/>`; }
+  const fa=document.activeElement, keep=fa&&plan.contains(fa)?['ecke','wand','diag'].map(k=>fa.dataset[k]!=null?`[data-${k}="${fa.dataset[k]}"]`:'').join(''):'';
+  plan.innerHTML=h; if(keep) plan.querySelector(keep)?.focus();
+  /* Maßstab */
+  const steps=[500,1000,2000,5000,10000], bar=steps.find(s=>s*V.s>=64)||10000;
+  $('#scale i').style.width=bar*V.s+'px'; $('#scale span').textContent=bar<1000?'50 cm':bar/1000+' m';
+}
+let mouse=null, overFirst=false;
+
+/* ---------- Panel ---------- */
+function renderPanel(){
+  const st=stand(), g=S.real&&definite()?geo():null;
+  $('#stand').dataset.tone=st.tone; $('#standtxt').textContent=st.text; $('#stand').setAttribute('aria-expanded',S.more);
+  $('#geo').innerHTML=g?`<div><small>Fläche</small><b>${(g.area/1e6).toFixed(2).replace('.',',')}<span>m²</span></b></div><div><small>Umfang${g.islands?' inkl. '+g.islands+(g.islands>1?' Inseln':' Insel'):''}</small><b>${fm(g.per,2)}<span>m</span></b></div>`:'';
+  $('#geo').hidden=!g; $('#geo').classList.toggle('in',!!g);
+  const m=$('#more'); m.hidden=!S.more;
+  if(S.more){
+    const h=have(), nd=need(), worst=S.meas.filter(x=>x.on).map(x=>({n:nm(x),v:x.bad?x.dev:Math.abs(x.v??0)})).sort((a,b)=>b.v-a.v).slice(0,4);
+    const big=worst.filter(w=>w.v);
+    m.innerHTML=`<dl><dt>Maße eingetragen</dt><dd>${h}</dd><dt>Nötig für die Form</dt><dd>${nd}</dd><dt>Zur Kontrolle</dt><dd>${Math.max(0,h-nd)}</dd>`+
+      (h>nd&&S.real?`<dt>Standardabweichung σ̂</dt><dd>${String(S.sigma).replace('.',',')} mm</dd>`:'')+`</dl>`+
+      (big.length?`<h3>Größte Abweichungen</h3><dl>`+big.map(w=>`<dt>${w.n}</dt><dd>${String(w.v).replace('.',',')} mm</dd>`).join('')+`</dl>`:'')+
+      `<label><input type="checkbox" id="ellchk" ${S.ell?'checked':''} ${definite()?'':'disabled'}>Genauigkeit je Ecke im Plan zeigen</label>`;
+  }
+  const b=$('#stepbody'); let h='';
+  if(S.step==='masse'&&S.closed){
+    const bad=S.meas.find(x=>x.on&&x.bad);
+    const rest=S.queue.slice(S.k, S.k+5);
+    if(rest.length&&!bad){ const nd=need(); h+=`<section><h3>Als Nächstes messen</h3>`+rest.map((x,i)=>{ const idx=S.k+i, why=have()+i<nd?'für die Form':'zur Kontrolle';
+        return `<button class="sg${i===0&&S.guide?' cur':''}" data-sugg="${idx}" data-hover="${x.a}|${x.b}"><b>${nm(x)}</b><span>${isWall(x.a,x.b)?'Wand':'Diagonale'} · ${why}</span></button>`; }).join('')+`</section>`; }
+    const ks=new Map(); S.meas.forEach(x=>{ const k=key(x.a,x.b); ks.set(k,(ks.get(k)||0)+1); });
+    const rows=[...new Map(S.meas.map(x=>[key(x.a,x.b),x])).values()];
+    h+=`<section><details id="list" ${S.list?'open':''}><summary>Alle Strecken<span>${S.walls.length} Wände, ${rows.filter(x=>!isWall(x.a,x.b)).length} Diagonalen</span></summary>`+
+      [...S.walls.map(([a,b])=>({a,b})), ...rows.filter(x=>!isWall(x.a,x.b))].map(x=>{ const L=lenOf(x.a,x.b), n=ks.get(key(x.a,x.b))||0;
+        return `<button class="sg" data-strecke="${x.a}|${x.b}" data-hover="${x.a}|${x.b}"><b>${x.a}–${x.b}</b><span>${n>1?n+' Maße · ':''}${L==null?'kein Maß':fm(L)+' m'}</span></button>`; }).join('')+`</details></section>`;
+    if(definite()&&!bad) h+=`<div class="go"><button class="primary" data-step="waende">Weiter: Wände</button></div>`;
+  }
+  if(S.step==='skizze'&&S.closed) h+=`<div class="go" style="padding-top:16px"><button class="primary" data-step="masse">Weiter: Maße</button></div>`;
+  if(S.step==='waende'&&definite()) h+=wallPanel();
+  if(S.step==='ausgabe') h+=outPanel();
+  b.innerHTML=h;
+}
+
+/* ---------- Karte am Objekt ---------- */
+const XBTN=`<button class="ib" data-act="closecard" aria-label="Schließen"><svg class="ic" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>`;
+const sgn = v => (v>0?'+':'−')+String(Math.abs(v)).replace('.',',');
+/* Neben das Objekt legen, quer zur Strecke: sie bleibt mit ihrer Länge ganz sichtbar */
+function placeBy(el, p, q){
+  const r=$('#stage').getBoundingClientRect(), w=el.offsetWidth, h=el.offsetHeight, mx=(p.x+q.x)/2, my=(p.y+q.y)/2, n=Math.hypot(q.x-p.x,q.y-p.y);
+  const ux=n<1?1:-(q.y-p.y)/n, uy=n<1?0:(q.x-p.x)/n, d=Math.abs(ux)*w/2+Math.abs(uy)*h/2+(n<1?16:30); let best=null;
+  for(const sg of [1,-1]){ const cx=mx+ux*d*sg-w/2, cy=my+uy*d*sg-h/2, x=Math.max(10,Math.min(r.width-w-10,cx)), y=Math.max(10,Math.min(r.height-h-10,cy)), cost=Math.abs(x-cx)+Math.abs(y-cy);
+    if(!best||cost<best.cost-1) best={x,y,cost}; }
+  el.style.left=best.x+'px'; el.style.top=best.y+'px';
+}
+function streckeBody(a,b){      /* dieselbe Karte in allen drei Schritten */
+  const wall=isWall(a,b), ms=onMeas(a,b), bad=ms.find(m=>m.on&&m.bad); let h='';
+  h+=ms.map(m=>{ const i=S.meas.indexOf(m), dv=m.bad?'+'+m.dev+' mm':(S.real&&definite()&&m.on?sgn(m.v)+' mm':'');
+    return `<div class="mrow${m.on?'':' off'}"><span>${fm(m.d)} m</span><span class="dev${m.bad?' bad':''}">${dv}</span><button class="sw" role="switch" aria-checked="${m.on}" data-toggle="${i}" aria-label="Maß verwenden"></button></div>`; }).join('');
+  if(bad) h+=`<p class="why">Zu den anderen Maßen passen ${fm(bad.d-bad.dev)} m.</p><div class="seg"><button class="primary" data-act="remeasure">Neu messen</button><button data-act="switchoff">Maß abschalten</button></div>`;
+  else h+=`<div class="row addrow${ms.length?' more':''}"><input type="text" inputmode="decimal" placeholder="${ms.length?'weiteres Maß':'Maß'}" aria-label="Maß in Metern" style="flex:1;text-align:right"><span>m</span><button data-act="addmeas" data-s="${a}|${b}">${ms.length?'+ Maß':'Eintragen'}</button></div>`;
+  if(wall){ const wi=S.walls.findIndex(w=>key(w[0],w[1])===key(a,b));
+    h+=`<div class="sub"><p>An dieser Wand</p><div class="seg"><button data-add="tuer" data-w="${wi}">Tür</button><button data-add="fenster" data-w="${wi}">Fenster</button><button data-add="loch" data-w="${wi}">Loch</button><button data-add="anschluss" data-w="${wi}">Anschluss</button></div></div>
+    <div class="sub"><div class="row"><label>Wanddicke</label><input type="text" inputmode="decimal" style="width:64px;text-align:right" placeholder="240" aria-label="Wanddicke in Millimetern"><span>mm</span></div>
+    <div class="seg"><button data-act="north">Einnorden</button>${S.step==='skizze'?`<button class="danger" data-act="delete">Löschen <kbd>${KEYS.del}</kbd></button>`:''}</div></div>`;
+  } else h+=`<div class="sub"><button class="danger" data-act="delete">Löschen <kbd>${KEYS.del}</kbd></button></div>`;
+  return h;
+}
+function opBody(op){
+  const an=op.type==='anschluss', kinds=op.type==='tuer'?['Drehflügel','Schiebetür','Durchgang']:op.type==='fenster'?['Dreh-Kipp','Drehflügel','Kipp','Fest']:null;
+  const f=(l,k)=>`<div class="row"><label>${l}</label><input type="text" inputmode="decimal" data-f="${k}" value="${Math.round(op[k])}" style="width:70px;text-align:right" aria-label="${l} in Millimetern"><span>mm</span></div>`;
+  const seg=(l,k,vals)=>`<div class="row"><label>${l}</label><div class="seg">${vals.map(v=>`<button data-set="${k}:${v[0]}" aria-pressed="${op[k]===v[0]}">${v[1]}</button>`).join('')}</div></div>`;
+  return (an?'':f('Breite','w')+f('Höhe','h'))+
+    (kinds?`<div class="row"><label>Art</label><select data-sel="kind" aria-label="Art">${kinds.map(k=>`<option${op.kind===k?' selected':''}>${k}</option>`).join('')}</select></div>`:'')+
+    (op.type==='tuer'&&op.kind!=='Durchgang'?seg('Band','hinge',[['links','links'],['rechts','rechts']])+seg('Öffnet','dir',[['innen','nach innen'],['außen','nach außen']]):'')+
+    `<div class="sub"><p>Lage${op.fix?' eingemessen':' geschätzt'}</p>`+f('Von links','x')+(op.type==='tuer'?'':f('Vom Boden','sill'))+`</div>
+    <div class="sub"><button class="danger" data-act="delop">Löschen <kbd>${KEYS.del}</kbd></button></div>`;
+}
+function renderCard(){
+  const c=$('#card'), s=S.sel, inWall=S.step==='waende'&&definite(), op=inWall?S.openings.find(o=>o.id===S.op&&o.wall===S.wall):null;
+  if(S.step==='ausgabe'||(S.step==='waende'?!op:!s)){ c.hidden=true; return; }
+  if(op){                       /* Karte der Öffnung, neben ihr in der Wandansicht */
+    c.innerHTML=`<header><b>${OP[op.type].n}</b><span>${op.type==='anschluss'?'':Math.round(op.w)+' × '+op.h+' mm'}</span>${XBTN}</header>`+opBody(op); c.hidden=false;
+    const r=$('#stage').getBoundingClientRect(), b=opBox(op), w=c.offsetWidth, h=c.offsetHeight;
+    let x=b.x+b.w+18; if(x+w>r.width-10) x=b.x-w-18;
+    c.style.left=Math.max(10,x)+'px'; c.style.top=Math.max(10,Math.min(r.height-h-10,b.y+b.h/2-h/2))+'px'; return;
+  }
+  if(s.type==='ecke'){
+    const p=P(s.id), nb=S.walls.filter(w=>w.includes(s.id)).map(w=>w[0]===s.id?w[1]:w[0]); let ang='';
+    if(nb.length===2){ const a=T(P(nb[0])), o=T(p), b2=T(P(nb[1])); let d=Math.abs(Math.atan2(a.y-o.y,a.x-o.x)-Math.atan2(b2.y-o.y,b2.x-o.x))*180/Math.PI; if(d>180) d=360-d; ang=d.toFixed(1).replace('.',',')+'°'; }
+    const known=S.real&&definite();
+    c.innerHTML=`<header><b>Ecke ${s.id}</b><span>${known?ang:''}</span>${XBTN}</header>
+      <div class="row"><label>Winkel</label><input type="text" inputmode="decimal" id="angv" style="width:64px;text-align:right" placeholder="${known?ang.replace('°',''):'90'}" aria-label="Winkel in Grad"><span>°</span><button data-act="angle" class="v">Festlegen</button></div>
+      <div class="sub"><button class="danger" data-act="delete">Löschen <kbd>${KEYS.del}</kbd></button></div>`;
+    c.hidden=false; const q=w2s(D(p)); placeBy(c,q,q); return;
+  }
+  const wall=isWall(s.a,s.b), L=lenOf(s.a,s.b);
+  c.innerHTML=`<header><b>${wall?'Wand':'Diagonale'} ${s.a}–${s.b}</b><span>${L==null?'':fm(L)+' m'}</span>${XBTN}</header>`+streckeBody(s.a,s.b);
+  c.hidden=false; placeBy(c, w2s(D(P(s.a))), w2s(D(P(s.b))));
+}
+function renderEntry(){
+  const e=$('#entry'), nx=nextM();
+  $('#demo').textContent = nx&&!S.sel ? 'Tab setzt '+(S.real?'das vorbereitete Maß':'die Länge aus der Skizze')+' ein: '+fm(nx.d)
+    : !S.real&&S.closed ? 'Eigene Skizze: ohne Rechenkern gibt es keine Fläche und keine Genauigkeit.' : '';
+  if(!nx||S.sel){ e.hidden=true; return; }
+  const was=e.hidden||e.dataset.k!==String(S.k); e.hidden=false; e.dataset.k=S.k;
+  e.querySelector('b').textContent=nm(nx);
+  const inp=e.querySelector('input'); if(was){ inp.value=''; requestAnimationFrame(()=>inp.focus()); }
+  placeBy(e, w2s(D(P(nx.a))), w2s(D(P(nx.b))));
+}
+
+/* ---------- Schritt Wände ---------- */
+const OP={tuer:{n:'Tür',w:885,h:2010,sill:0}, fenster:{n:'Fenster',w:1200,h:1300,sill:900}, loch:{n:'Loch',w:300,h:300,sill:1100}, anschluss:{n:'Anschluss Wasser',w:0,h:0,sill:500}};
+function addOp(type, wi){
+  mark(); const [a,b]=S.walls[wi], L=dist(T(P(a)),T(P(b))), d=OP[type], n=S.openings.filter(o=>o.wall===wi).length;
+  const op={id:++S.seq, wall:wi, type, w:Math.min(d.w,L*.6), h:d.h, sill:d.sill, x:Math.max(100,Math.min(L-d.w-100, L*(.3+.25*n)-d.w/2)), hinge:'links', dir:'innen', kind:type==='fenster'?'Dreh-Kipp':'Drehflügel', fix:false};
+  S.openings.push(op); S.op=op.id; S.wall=wi;
+  if(S.step!=='waende') toast(d.n+' an Wand '+a+'–'+b+' gesetzt');
+}
+function wallPanel(){            /* die Wand ist hier immer angefasst: ihre Karte liegt im Panel */
+  const [a,b]=S.walls[S.wall], L=dist(T(P(a)),T(P(b)));
+  let h=`<section><h3 class="title">Wand ${a}–${b}<span>${fm(L)} m</span></h3>
+    <div class="row"><label>Höhe</label><input type="text" id="hv" inputmode="decimal" style="width:76px;text-align:right" value="${S.height?fm(S.height):''}" placeholder="2,500" aria-label="Raumhöhe in Metern"><span>m</span><span class="v hint">${S.height?'gilt für alle Ecken':'angenommen'}</span></div>`+streckeBody(a,b)+`</section>`;
+  h+=`<div class="go"><button class="primary" data-step="ausgabe">Weiter: Ausgabe</button></div>`;
+  return h;
+}
+let WV={x0:0,y0:0,s:1};
+function opBox(o){ const X=WV.x0+o.x*WV.s; return o.type==='anschluss' ? {x:X-6,y:WV.y0-o.sill*WV.s-6,w:12,h:12} : {x:X,y:WV.y0-(o.sill+o.h)*WV.s,w:o.w*WV.s,h:o.h*WV.s}; }
+function renderWall(){
+  const sv=$('#wallview'), r=sv.getBoundingClientRect(); if(!r.width) return;
+  const [a,b]=S.walls[S.wall], L=dist(T(P(a)),T(P(b))), H=S.height||2500, s=Math.min((r.width-220)/L,(r.height-200)/H), x0=(r.width-L*s)/2, y0=(r.height+H*s)/2; WV={x0,y0,s};
+  let h=`<rect class="w" x="${x0}" y="${y0-H*s}" width="${L*s}" height="${H*s}"/>`;
+  if(!S.height) h+=`<line x1="${x0}" y1="${y0-H*s}" x2="${x0+L*s}" y2="${y0-H*s}" stroke="var(--floor)" stroke-width="3"/><line class="assumed" x1="${x0}" y1="${y0-H*s}" x2="${x0+L*s}" y2="${y0-H*s}"/>`;
+  S.openings.filter(o=>o.wall===S.wall).forEach(o=>{ const sel=o.id===S.op?' sel':'', X=x0+o.x*s;
+    if(o.type==='anschluss'){ h+=`<circle class="o${sel}" cx="${X}" cy="${y0-o.sill*s}" r="5" data-op="${o.id}"/>`; return; }
+    const Y=y0-(o.sill+o.h)*s;
+    h+=`<rect class="o${sel}" x="${X}" y="${Y}" width="${o.w*s}" height="${o.h*s}" data-op="${o.id}"/>`;
+    if(o.type==='tuer'){ const hx=o.hinge==='links'?X:X+o.w*s, ox=o.hinge==='links'?X+o.w*s:X; h+=`<path class="thin" pointer-events="none" d="M${ox} ${Y}L${hx} ${Y+o.h*s/2}L${ox} ${Y+o.h*s}"/>`; }
+    if(o.type==='fenster') h+=`<path class="thin" pointer-events="none" d="M${X} ${Y+o.h*s}L${X+o.w*s/2} ${Y}L${X+o.w*s} ${Y+o.h*s}"/>`;
+  });
+  h+=`<text x="${x0}" y="${y0+20}" text-anchor="middle">${a}</text><text x="${x0+L*s}" y="${y0+20}" text-anchor="middle">${b}</text>
+    <text x="${x0+L*s/2}" y="${y0+20}" text-anchor="middle">${fm(L)} m</text>
+    <text x="${x0-10}" y="${y0-H*s/2+4}" text-anchor="end" ${S.height?'':'fill="var(--muted)"'}>${fm(H)} m</text>`;
+  sv.innerHTML=h;
+  /* Lageplan */
+  const ps=S.pts.map(T), xs=ps.map(p=>p.x), ys=ps.map(p=>p.y), mx=Math.min(...xs), my=Math.min(...ys), k=Math.min(140/(Math.max(...xs)-mx),100/(Math.max(...ys)-my));
+  const ox=(168-(Math.max(...xs)-mx)*k)/2, oy=(128-(Math.max(...ys)-my)*k)/2;
+  const ln=(w,cls,ex='')=>{ const p=T(P(w[0])), q=T(P(w[1])); return `<line x1="${(ox+(p.x-mx)*k).toFixed(1)}" y1="${(oy+(p.y-my)*k).toFixed(1)}" x2="${(ox+(q.x-mx)*k).toFixed(1)}" y2="${(oy+(q.y-my)*k).toFixed(1)}" class="${cls}" ${ex}/>`; };
+  $('#lage').innerHTML=S.walls.map((w,i)=>ln(w,i===S.wall?'cur':'')).join('')+S.walls.map((w,i)=>ln(w,'h',`data-lage="${i}"`)).join('');
+}
+
+/* ---------- Ausgabe ---------- */
+function outPanel(){
+  const def=definite(), st=stand();
+  return `<div class="intent"><h3>Drucken</h3>
+      <label><input type="checkbox" id="withlist" ${S.withList?'checked':''}>Liste aller Maße mitdrucken</label>
+      <button class="primary" data-act="print">Aufmaßblatt drucken</button></div>
+    <div class="intent"><h3>Weiter planen</h3>
+      <div class="tr"><div>Fliesenplan<small>${def?(S.real?'593 Fliesen verlegt':'noch nicht begonnen'):'braucht eine eindeutige Form'}</small></div><button data-act="proto" ${def?'':'disabled'}>Öffnen</button></div>
+      <div class="tr"><div>Küchenplaner<small>${def?'noch nicht begonnen':'braucht eine eindeutige Form'}</small></div><button data-act="proto" ${def?'':'disabled'}>Öffnen</button></div></div>
+    <div class="intent"><h3>Für CAD</h3>
+      <div class="tr"><div>DXF<small>Grundriss in mm</small></div><button data-act="proto">Sichern</button></div>
+      <div class="tr"><div>STEP<small>Wände als Körper${S.height?'':' · Höhe angenommen'}</small></div><button data-act="proto">Sichern</button></div></div>`;
+}
+function sheetPlan(){
+  const ps=S.pts.map(T), xs=ps.map(p=>p.x), ys=ps.map(p=>p.y), x0=Math.min(...xs), y0=Math.min(...ys), w=Math.max(...xs)-x0, hh=Math.max(...ys)-y0, pad=Math.max(w,hh)*.1;
+  const cx=x0+w/2, cy=y0+hh/2, fs=Math.max(w,hh)/42, ink='#1c1b18', labs=[]; let h='';
+  const rs=rings(T); if(rs.length) h+=`<path fill="#f4f2ec" fill-rule="evenodd" d="${rs.map(r=>'M'+r.r.map(p=>p.x+' '+p.y).join('L')+'Z').join('')}"/>`;
+  S.walls.forEach(([a,b],i)=>{ const p=T(P(a)), q=T(P(b)), n=dist(p,q), L=lenOf(a,b);
+    h+=`<line x1="${p.x}" y1="${p.y}" x2="${q.x}" y2="${q.y}" stroke="${ink}" stroke-width="${fs*.28}" stroke-linecap="round"/>`;
+    S.openings.filter(o=>o.wall===i&&o.type!=='anschluss').forEach(o=>{ const at=u=>(p.x+(q.x-p.x)*u)+' '+(p.y+(q.y-p.y)*u); h+=`<path d="M${at(o.x/n)}L${at((o.x+o.w)/n)}" stroke="#fff" stroke-width="${fs*.16}"/>`; });
+    if(L!=null&&n>fs*5.5){ const mx=(p.x+q.x)/2, my=(p.y+q.y)/2; let ux=-(q.y-p.y)/n, uy=(q.x-p.x)/n; if((mx-cx)*ux+(my-cy)*uy<0){ux=-ux;uy=-uy;}
+      const off=fs*(.8+Math.abs(ux)*1.5); labs.push({x:mx+ux*off,y:my+uy*off}); h+=`<text x="${mx+ux*off}" y="${my+uy*off+fs*.35}" text-anchor="middle" style="font-size:${fs}px">${fm(L)}</text>`; } });
+  /* Eckbuchstaben: aus 16 Richtungen die, die am weitesten von Wänden, Nachbarecken und Längenzahlen liegt */
+  const segD=(c,p,q)=>{ const dx=q.x-p.x, dy=q.y-p.y, k=Math.max(0,Math.min(1,((c.x-p.x)*dx+(c.y-p.y)*dy)/(dx*dx+dy*dy||1))); return Math.hypot(c.x-p.x-k*dx,c.y-p.y-k*dy); };
+  const segsT=S.walls.map(([a,b])=>[T(P(a)),T(P(b))]), put=[];
+  S.pts.forEach(p=>{ const u=T(p); let best=null;
+    for(let k=0;k<16;k++){ const a=k*Math.PI/8, c={x:u.x+Math.cos(a)*fs*1.15, y:u.y+Math.sin(a)*fs*1.15};
+      const sc=Math.min(...segsT.map(s=>segD(c,s[0],s[1])), ...S.pts.filter(q=>q!==p).map(q=>dist(c,T(q))), ...labs.map(l=>dist(c,l)-fs*1.1), ...put.map(l=>dist(c,l)-fs*.3), fs*1.1)
+        + ((c.x-cx)*(u.x-cx)+(c.y-cy)*(u.y-cy)>(u.x-cx)**2+(u.y-cy)**2 ? fs*.02 : 0);   /* bei Gleichstand nach außen */
+      if(!best||sc>best.sc) best={sc,c}; }
+    put.push(best.c);
+    h+=`<text x="${best.c.x}" y="${best.c.y+fs*.28}" text-anchor="middle" style="font-size:${fs*.72}px;fill:#6b665b">${p.id}</text>`; });
+  const bx=x0, by=y0+hh+pad*.8;
+  h+=`<path d="M${bx} ${by-fs*.35}V${by}H${bx+1000}V${by-fs*.35}" fill="none" stroke="${ink}" stroke-width="${fs*.09}"/><text x="${bx+1000+fs*.5}" y="${by}" style="font-size:${fs*.8}px">1 m</text>`;
+  return `<svg viewBox="${x0-pad} ${y0-pad} ${w+2*pad} ${hh+2*pad}" preserveAspectRatio="xMidYMid meet">${h}</svg>`;
+}
+function renderSheets(){
+  const g=geo(), st=stand(), date=new Date().toLocaleDateString('de-DE'), def=definite();
+  const head=t=>`<header><b>${esc(S.name)}</b><span>${t} · ${date}</span></header>`;
+  let h=`<article class="sheet">${head('Aufmaßblatt')}${sheetPlan()}<div class="walls">${S.walls.map(([a,b])=>{ const L=lenOf(a,b); return `<span><b>${a}–${b}</b>${L==null?'–':fm(L)}</span>`; }).join('')}</div><div class="foot">
+    <div><small>Fläche</small><b>${def&&g&&S.real?(g.area/1e6).toFixed(2).replace('.',',')+' m²':'–'}</b></div>
+    <div><small>Umfang</small><b>${def&&g&&S.real?fm(g.per,2)+' m':'–'}</b></div>
+    <div><small>Stand</small><b>${esc(st.tone==='good'?st.text:def?'Ungeprüft':'Form nicht eindeutig')}</b></div></div></article>`;
+  const ws=S.walls.map(([a,b],i)=>({a,b,i,L:dist(T(P(a)),T(P(b)))})).filter(w=>w.L>=600), H=S.height||2500;
+  h+=`<article class="sheet">${head('Wandansichten')}<div style="display:grid;grid-template-columns:1fr 1fr;gap:5% 8%;flex:1;align-content:start">`+ws.slice(0,12).map(w=>{
+    const ops=S.openings.filter(o=>o.wall===w.i).map(o=>o.type==='anschluss'?`<circle cx="${o.x}" cy="${H-o.sill}" r="40" fill="none" stroke="#1c1b18" stroke-width="14"/>`:`<rect x="${o.x}" y="${H-o.sill-o.h}" width="${o.w}" height="${o.h}" fill="#fff" stroke="#1c1b18" stroke-width="14"/>`).join('');
+    return `<div><svg viewBox="-60 -60 ${w.L+120} ${H+120}" style="max-height:74px"><rect width="${w.L}" height="${H}" fill="#f4f2ec" stroke="#1c1b18" stroke-width="24"/>${ops}</svg><div style="display:flex;justify-content:space-between"><b>${w.a}–${w.b}</b><span>${fm(w.L)} × ${fm(H)} m${S.height?'':' (Höhe angenommen)'}</span></div></div>`; }).join('')+`</div></article>`;
+  if(S.withList) h+=`<article class="sheet">${head('Maße')}<div class="cols"><table><tr><th>Strecke</th><th>Maß</th><th>Abweichung</th></tr>`+
+    S.meas.map(m=>`<tr><td>${nm(m)}</td><td>${m.on?fm(m.d):'aus'}</td><td>${m.bad?m.dev:S.real&&def?String(m.v).replace('.',',').replace('-','−'):''}</td></tr>`).join('')+`</table></div></article>`;
+  $('#sheets').innerHTML=h;
+}
+
+/* ---------- Startbildschirm ---------- */
+const DEMO=[
+  {b:'Hesterkamp', g:'Erdgeschoss', id:'wk', real:true},
+  {b:'Hesterkamp', g:'Erdgeschoss', id:'flur', n:'Flur', st:'Noch 3 Maße', tone:'warn', d:'M4 4h56v14H30v22H4z', has:[]},
+  {b:'Hesterkamp', g:'Obergeschoss', id:'bad', n:'Bad', st:'Skizze, 4 Ecken', tone:'', d:'M8 6l46 2-3 30-44-2z', pencil:true, has:[]},
+  {b:'', g:'', id:'wg', n:'Wintergarten', st:'Geprüft ± 3,1 mm · 29,45 m²', tone:'good', d:'M4 6h56v32H4z', has:['Fliesenplan']}
+];
+function thumb(){
+  const rs=rings(T); if(!rs.length) return 'M4 6h56v32H4z';
+  const ps=S.pts.map(T), xs=ps.map(p=>p.x), ys=ps.map(p=>p.y), x0=Math.min(...xs), y0=Math.min(...ys), k=Math.min(58/(Math.max(...xs)-x0),38/(Math.max(...ys)-y0));
+  return rs.map(r=>'M'+r.r.map(p=>(3+(p.x-x0)*k).toFixed(1)+' '+(3+(p.y-y0)*k).toFixed(1)).join('L')+'Z').join('');
+}
+function renderHome(){
+  let h='', lastB=null, lastG=null, open=false; const close=()=>{ if(open){h+='</div>';open=false;} };
+  DEMO.filter(r=>!r.gone).forEach(r=>{
+    const b=r.b||'Einzelne Räume';
+    if(b!==lastB){ close(); h+=`<h2>${b}</h2>`; lastB=b; lastG=null; }
+    if(r.g!==lastG){ close(); if(r.g) h+=`<h3>${r.g}</h3>`; lastG=r.g; }
+    if(!open){ h+='<div class="rooms">'; open=true; }
+    const st=r.real?stand():null, g=r.real&&definite()?geo():null;
+    const txt=r.real?(st.tone==='good'?st.text+(S.real?' · '+(g.area/1e6).toFixed(2).replace('.',',')+' m²':''):S.closed?st.text.replace(/, dann.*/,''):'Skizze, '+S.pts.length+' Ecken'):r.st;
+    const has=r.real?(definite()?['Fliesenplan','Küche']:[]):r.has;
+    h+=`<div class="room" data-room="${r.id}" tabindex="0"><svg class="th" viewBox="0 0 64 44"><path fill-rule="evenodd" class="${r.pencil||(r.real&&!definite())?'pencil':''}" d="${r.real?thumb():r.d}"/></svg>
+      <div><b>${esc(r.real?S.name:r.n)}</b><span class="st ${r.real?st.tone:r.tone}">${esc(txt)}</span></div>
+      <div class="has">${has.map(x=>`<button class="quiet" data-act="proto">${x}</button>`).join('')}</div>
+      <button class="ib" data-del="${r.id}" title="Raum löschen" aria-label="Raum löschen"><svg class="ic" viewBox="0 0 16 16"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5"/></svg></button>
+      ${r.ask?`<div class="confirm"><span>„${esc(r.real?S.name:r.n)}“ löschen? Das lässt sich nicht zurückholen.</span><button data-delno="${r.id}">Abbrechen</button><button class="danger" data-delyes="${r.id}">Löschen</button></div>`:''}</div>`;
+  });
+  close();
+  h+=`<p id="note">Räume liegen nur in diesem Browser. Wichtige Aufmaße zusätzlich als Datei sichern.</p>`;
+  $('#homein').innerHTML=h;
+}
+
+/* ---------- Rendern ---------- */
+function render(){
+  document.body.dataset.view=S.view; document.body.dataset.step=S.step;
+  $('#name').textContent=S.name; $('#back').hidden=!S.hasRooms;
+  document.querySelectorAll('#steps button').forEach(b=>b.toggleAttribute('aria-current',false)||b.dataset.step===S.step&&b.setAttribute('aria-current','step'));
+  $('#undo').disabled=!hist.length; $('#redo').disabled=!fut.length;
+  if(S.view==='home'){ renderHome(); return; }
+  const gate=$('#gate'); let gmsg='', gbtn='', gstep='';
+  if(S.step==='masse'&&!S.closed){ gmsg='Maße gibt es, sobald der Raum geschlossen ist.'; gbtn='Zur Skizze'; gstep='skizze'; }
+  if(S.step==='waende'&&!definite()){ const st=stand(); gmsg=S.closed?'Wandansichten gibt es, sobald die Form eindeutig ist. '+st.text.replace(', dann ist die Form eindeutig',''):'Wandansichten gibt es, sobald der Raum geschlossen und gemessen ist.'; gbtn=S.closed?'Weiter messen':'Zur Skizze'; gstep=S.closed?'masse':'skizze'; }
+  if(S.step==='ausgabe'&&!S.closed){ gmsg='Die Ausgabe gibt es, sobald der Raum geschlossen ist.'; gbtn='Zur Skizze'; gstep='skizze'; }
+  gate.hidden=!gmsg; gate.querySelector('p').textContent=gmsg; const gb=gate.querySelector('button'); gb.textContent=gbtn; gb.dataset.step=gstep;
+  const wall=S.step==='waende'&&!gmsg, out=S.step==='ausgabe'&&!gmsg;
+  $('#wallwrap').hidden=!wall; $('#sheets').hidden=!out;
+  ['#scale','#fit','#melden'].forEach(s=>$(s).hidden=wall||out||!!gmsg);
+  renderPlan(); renderPanel(); if(wall) renderWall(); renderCard(); renderEntry(); if(out) renderSheets();
+  S.just=null;
+}
+let tt, lastPt=null;             /* Rückmeldung erscheint dort, wo geklickt wurde */
+addEventListener('pointerdown',e=>{ lastPt={x:e.clientX,y:e.clientY,t:performance.now()}; },true);
+function toast(t){ const e=$('#toast'), near=lastPt&&performance.now()-lastPt.t<1500, box=[$('#entry'),$('#card')].find(x=>x&&!x.hidden)?.getBoundingClientRect(); e.textContent=t;
+  const inBox=box&&near&&lastPt.x>=box.left&&lastPt.x<=box.right&&lastPt.y>=box.top&&lastPt.y<=box.bottom, atBox=box&&(inBox||!near);   /* nie über der Karte selbst */
+  const x=atBox?box.left+box.width/2:near?lastPt.x:innerWidth/2, y=atBox?box.top-8:near?lastPt.y-14:70;
+  e.style.left=Math.max(150,Math.min(innerWidth-150,x))+'px'; e.style.top=Math.max(70,y)+'px';
+  e.classList.add('on'); clearTimeout(tt); tt=setTimeout(()=>e.classList.remove('on'),2200); }
+function morphTo(v){ const a=S.morph, t0=performance.now(), red=matchMedia('(prefers-reduced-motion:reduce)').matches;
+  if(red){ S.morph=v; render(); return; }
+  const f=t=>{ const k=Math.min(1,(t-t0)/420), e=1-Math.pow(1-k,4); S.morph=a+(v-a)*e; renderPlan(); renderEntry(); if(k<1) requestAnimationFrame(f); else render(); }; requestAnimationFrame(f); }
+
+/* ---------- Aktionen ---------- */
+function setStep(s){ S.step=s; S.sel=null; S.op=null; S.more=false; if(s==='masse') S.guide=true; render(); if(s==='waende'||s==='ausgabe') requestAnimationFrame(render); }
+function commitEntry(){
+  const nx=nextM(); if(!nx) return; const v=parseFloat($('#entry input').value.replace(',','.')); if(!(v>0)){ $('#entry input').select(); return; }
+  mark(); S.meas.push({...nx, d:Math.round(v*1000), on:true}); S.k++; S.just=key(nx.a,nx.b);
+  if(!S.queue[S.k]) toast('Nichts mehr zu messen.');
+  render();
+}
+function closeRoom(){
+  mark(); const n=S.pts.length; S.walls.push([S.pts[n-1].id,S.pts[0].id]); S.closed=true;
+  const d=(a,b)=>Math.round(dist(a,b)/10)*10, q=S.pts.map((p,i)=>({a:p.id,b:S.pts[(i+1)%n].id,d:d(p,S.pts[(i+1)%n]),v:0}));
+  for(let i=2;i<n-1;i++) q.push({a:S.pts[0].id,b:S.pts[i].id,d:d(S.pts[0],S.pts[i]),v:0});
+  if(n>3) q.push({a:S.pts[1].id,b:S.pts[n-1].id,d:d(S.pts[1],S.pts[n-1]),v:0});
+  S.queue=q; S.k=0; S.meas=[]; S.hasRooms=true; setStep('masse');
+}
+function del(){
+  const s=S.sel; if(S.step==='waende'&&S.op){ mark(); S.openings=S.openings.filter(o=>o.id!==S.op); S.op=null; render(); return; }
+  if(!s) return; mark();
+  if(s.type==='ecke'){ S.pts=S.pts.filter(p=>p.id!==s.id); S.walls=S.walls.filter(w=>!w.includes(s.id)); S.meas=S.meas.filter(m=>m.a!==s.id&&m.b!==s.id); S.queue=S.queue.filter(m=>m.a!==s.id&&m.b!==s.id); S.k=Math.min(S.k,S.queue.length); S.closed=rings().length>0&&S.walls.length>=S.pts.length; }
+  else if(isWall(s.a,s.b)){ S.walls=S.walls.filter(w=>key(w[0],w[1])!==key(s.a,s.b)); S.closed=false; }
+  else S.meas=S.meas.filter(m=>key(m.a,m.b)!==key(s.a,s.b));
+  S.sel=null; render();
+}
+function undo(){ if(!hist.length) return; fut.push(snap()); restore(hist.pop()); render(); }
+function redo(){ if(!fut.length) return; hist.push(snap()); restore(fut.pop()); render(); }
+function closeMenu(){ $('#menu').hidden=true; $('#menuBtn').setAttribute('aria-expanded','false'); }
+
+/* ---------- Zeiger im Plan ---------- */
+let drag=null;
+const loc=e=>{ const r=plan.getBoundingClientRect(); return {x:e.clientX-r.left,y:e.clientY-r.top}; };
+plan.addEventListener('pointerdown',e=>{
+  if(e.button===2) return; const m=loc(e), t=e.target.dataset; plan.setPointerCapture(e.pointerId);
+  drag={m, t, moved:false, pan:e.button===1||space||(!t.ecke&&(S.step!=='skizze'||S.closed)), v:{x:V.x,y:V.y}, id:t.ecke, start:t.ecke?{...P(t.ecke)}:null};
+});
+plan.addEventListener('pointermove',e=>{
+  const m=loc(e); mouse=m;
+  if(drag){
+    if(!drag.moved&&Math.hypot(m.x-drag.m.x,m.y-drag.m.y)<4) return;
+    if(!drag.moved&&drag.id&&!drag.pan) mark();
+    drag.moved=true;
+    if(drag.id&&!drag.pan){ const p=P(drag.id), w=s2w(m.x,m.y); p.x=w.x; p.y=w.y; S.sel=null; }
+    else { V.x=drag.v.x-(m.x-drag.m.x)/V.s; V.y=drag.v.y-(m.y-drag.m.y)/V.s; }
+    renderPlan(); renderEntry(); renderCard(); return;
+  }
+  if(S.step==='skizze'&&!S.closed){ overFirst=S.pts.length>=3&&e.target.dataset.ecke===S.pts[0].id; renderPlan(); }
+});
+plan.addEventListener('pointerleave',()=>{ mouse=null; if(S.step==='skizze'&&!S.closed) renderPlan(); });
+plan.addEventListener('pointerup',e=>{
+  const d=drag; drag=null; if(!d) return; if(d.moved){ render(); return; }
+  const m=loc(e), t=d.t;
+  if(S.step==='skizze'&&!S.closed){
+    if(t.ecke&&S.pts.length>=3&&t.ecke===S.pts[0].id){ closeRoom(); return; }
+    if(!t.ecke&&!t.wand){ mark(); const w=s2w(m.x,m.y), n=S.pts.length; S.pts.push({id:label(n), x:w.x, y:w.y}); if(n) S.walls.push([S.pts[n-1].id,S.pts[n].id]); S.sel=null; render(); return; }
+  }
+  if(t.ecke){ S.sel={type:'ecke', id:t.ecke}; }
+  else if(t.wand!=null){ const [a,b]=S.walls[+t.wand]; S.sel={type:'strecke', a, b}; }
+  else if(t.diag){ const [a,b]=t.diag.split('|'); S.sel={type:'strecke', a, b}; }
+  else if(S.sel){ S.sel=null; }
+  else if(S.step==='masse'){ S.guide=true; }
+  render();
+});
+plan.addEventListener('wheel',e=>{ e.preventDefault(); const m=loc(e);
+  if(e.ctrlKey||e.metaKey){ const w=s2w(m.x,m.y), k=Math.exp(-e.deltaY*.01); V.s=Math.max(.01,Math.min(1.2,V.s*k)); V.x=w.x-m.x/V.s; V.y=w.y-m.y/V.s; }
+  else { V.x+=e.deltaX/V.s; V.y+=e.deltaY/V.s; }
+  renderPlan(); renderEntry(); renderCard(); },{passive:false});
+
+/* ---------- Klicks ---------- */
+document.addEventListener('click',e=>{
+  const t=e.target.closest('button,[data-room],[data-op],[data-lage]'); if(!t){ if(!e.target.closest('#menu')) closeMenu(); return; }
+  const d=t.dataset;
+  if(t.id!=='menuBtn'&&!t.closest('#menu')) closeMenu();
+  if(d.sc) return scenario(d.sc);
+  if(d.step) return setStep(d.step);
+  if(d.close!=null) return t.closest('dialog').close();
+  if(t.id==='back'){ go('home'); return render(); }
+  if(t.id==='homeNew'){ scenario('leer'); S.hasRooms=true; return render(); }
+  if(t.id==='homeOpen') return toast('Prototyp: hier öffnet sich die Dateiauswahl.');
+  if(t.id==='fit'){ fit(); return render(); }
+  if(t.id==='melden') return toast('Prototyp: hier öffnet sich der Meldedialog.');
+  if(t.id==='undo') return undo(); if(t.id==='redo') return redo();
+  if(t.id==='entryOk') return commitEntry();
+  if(t.id==='stand'){ const bad=S.meas.find(m=>m.on&&m.bad);     /* im Fehlerfall führt der Stand zur Strecke */
+    if(bad&&S.step==='masse') S.sel={type:'strecke',a:bad.a,b:bad.b}; else S.more=!S.more; return render(); }
+  if(t.id==='menuBtn'){ const m=$('#menu'), r=t.getBoundingClientRect(); m.hidden=!m.hidden; t.setAttribute('aria-expanded',!m.hidden); m.style.top=r.bottom+4+'px'; m.style.right='8px';
+    m.querySelector('[data-m=snap]').setAttribute('aria-checked',S.snap); m.querySelector('[data-m=ortho]').setAttribute('aria-checked',S.ortho); m.querySelector('[data-m=unfold]').setAttribute('aria-checked',S.unfold); return; }
+  if(d.m){ closeMenu();
+    if(d.m==='snap'){ S.snap=!S.snap; morphTo(S.snap?1:0); return; }
+    if(d.m==='ortho'){ S.ortho=!S.ortho; return toast(S.ortho?'Ecken nahe 90° gelten als rechtwinklig.':'Winkel kommen wieder allein aus den Maßen.'); }
+    if(d.m==='unfold'){ S.unfold=!S.unfold; return toast('Prototyp: Abwicklung ist hier nicht gezeichnet.'); }
+    if(d.m==='mirror'){ mark(); const c=centroid(); S.pts.forEach(p=>{ p.x=2*c.x-p.x; if(p.fx!=null){ const fc=S.pts.reduce((s,q)=>s+q.fx,0)/S.pts.length; p._fx=2*fc-p.fx; } }); S.pts.forEach(p=>{ if(p._fx!=null){p.fx=p._fx; delete p._fx;} }); return render(); }
+    if(d.m==='clear'){ mark(); Object.assign(S,{pts:[],walls:[],closed:false,queue:[],k:0,meas:[],openings:[],height:null}); S.step='skizze'; render(); return toast('Raum geleert. '+KEYS.undo+' holt alles zurück.'); }
+    if(d.m==='help') return $('#help').showModal();
+    if(d.m==='qr'){ let q=''; for(let y=0;y<21;y++) for(let x=0;x<21;x++){ const f=(x<7&&y<7)||(x>13&&y<7)||(x<7&&y>13), on=f?((x%14===0||x%14===6||y%14===0||y%14===6)||((x%14>1&&x%14<5)&&(y%14>1&&y%14<5))):((x*7+y*13+x*y)%3===0); if(on) q+=`<rect x="${x}" y="${y}" width="1" height="1" fill="var(--ink)"/>`; } $('#qr').innerHTML=q; return $('#qrdlg').showModal(); }
+    return toast({rot:'Prototyp: Ansicht drehen ist hier ohne Funktion.',save:'Prototyp: hier würde der Raum als Datei gesichert.',link:'Prototyp: hier würde der Link kopiert.'}[d.m]);
+  }
+  if(d.sugg){ S.sel=null; S.guide=true; const i=+d.sugg; if(i!==S.k){ const [x]=S.queue.splice(i,1); S.queue.splice(S.k,0,x); } return render(); }
+  if(d.strecke){ const [a,b]=d.strecke.split('|'); S.sel={type:'strecke',a,b}; return render(); }
+  if(d.toggle){ mark(); const m=S.meas[+d.toggle]; m.on=!m.on; return render(); }
+  if(d.add){ addOp(d.add,+d.w); S.sel=null; if(S.step!=='waende'){ S.op=null; } return render(); }
+  if(d.op){ S.op=+d.op; return render(); }
+  if(d.lage){ S.wall=+d.lage; S.op=null; return render(); }
+  if(d.set){ mark(); const [k,v]=d.set.split(':'); S.openings.find(o=>o.id===S.op)[k]=v; return render(); }
+  if(d.room){ if(e.target.closest('[data-del],[data-delyes],[data-delno],.has')) {} else { const r=DEMO.find(x=>x.id===d.room); if(!r.real) return toast('Im Prototyp ist nur die Wohnküche hinterlegt.'); go('tool',S.closed?'masse':'skizze'); render(); return requestAnimationFrame(()=>{fit();render();}); } }
+  if(d.del){ DEMO.forEach(x=>x.ask=x.id===d.del); return render(); }
+  if(d.delno){ DEMO.forEach(x=>x.ask=false); return render(); }
+  if(d.delyes){ const r=DEMO.find(x=>x.id===d.delyes); r.gone=true; r.ask=false; return render(); }
+  const act=d.act;
+  if(act==='closecard'){ S.sel=null; S.op=null; render(); if(S.back){ plan.querySelector(S.back)?.focus(); S.back=null; } return; }
+  if(act==='delete') return del();
+  if(act==='delop') return del();
+  if(act==='proto') return toast('Prototyp: an dieser Stelle geht es im echten Werkzeug weiter.');
+  if(act==='print') return window.print();
+  if(act==='north') return toast('Prototyp: die Ansicht würde so drehen, dass diese Wand oben liegt.');
+  if(act==='angle'){ const v=$('#angv').value||$('#angv').placeholder; return toast('Winkel an Ecke '+S.sel.id+' auf '+v+'° festgelegt.'); }
+  if(act==='addmeas'){ const [a,b]=d.s.split('|'), inp=t.closest('.row').querySelector('input'), v=parseFloat(inp.value.replace(',','.')); if(!(v>0)) return inp.focus();
+    mark(); S.meas.push({a,b,d:Math.round(v*1000),v:0,on:true});
+    const qi=S.queue.findIndex((m,i)=>i>=S.k&&key(m.a,m.b)===key(a,b)); if(qi>=0) S.queue.splice(qi,1); S.just=key(a,b); return render(); }
+  if(act==='remeasure'){ mark(); const m=S.meas.find(x=>x.on&&x.bad); m.d=m.d-m.dev; delete m.bad; delete m.dev; S.just=key(m.a,m.b); toast(nm(m)+' neu gemessen: '+fm(m.d)+' m'); return render(); }
+  if(act==='switchoff'){ mark(); const m=S.meas.find(x=>x.on&&x.bad); m.on=false; return render(); }
+});
+document.addEventListener('change',e=>{
+  const t=e.target;
+  if(t.id==='ellchk'){ S.ell=t.checked; return renderPlan(); }
+  if(t.id==='withlist'){ S.withList=t.checked; return renderSheets(); }
+  if(t.id==='hv'){ const v=parseFloat(t.value.replace(',','.')); if(v>0){ mark(); S.height=Math.round(v*1000); } return render(); }
+  if(t.dataset.sel){ mark(); S.openings.find(o=>o.id===S.op)[t.dataset.sel]=t.value; return render(); }
+  if(t.dataset.f){ const v=parseFloat(t.value.replace(',','.')); if(v>=0){ mark(); const o=S.openings.find(o=>o.id===S.op); o[t.dataset.f]=Math.round(v); if(t.dataset.f==='x') o.fix=true; } return render(); }
+});
+document.addEventListener('toggle',e=>{ if(e.target.id==='list') S.list=e.target.open; },true);
+document.addEventListener('mouseover',e=>{ const t=e.target.closest('[data-hover]'); const h=t?t.dataset.hover.split('|'):null; if(String(h)!==String(S.hover)){ S.hover=h; renderPlan(); } });
+$('#wallview').addEventListener('click',e=>{ if(!e.target.dataset.op){ S.op=null; render(); } });
+$('#name').addEventListener('click',()=>{ const n=$('#name'); const i=document.createElement('input'); i.type='text'; i.id='nameEdit'; i.value=S.name; n.replaceWith(i); i.focus(); i.select();
+  const done=ok=>{ if(ok&&i.value.trim()){ mark(); S.name=i.value.trim(); } i.replaceWith(n); render(); };
+  i.addEventListener('keydown',e=>{ if(e.key==='Enter') done(true); if(e.key==='Escape') done(false); e.stopPropagation(); }); i.addEventListener('blur',()=>done(true),{once:true}); });
+
+/* ---------- Tasten ---------- */
+let space=false;
+document.addEventListener('keyup',e=>{ if(e.key===' ') space=false; });
+document.addEventListener('keydown',e=>{
+  const inField=/INPUT|SELECT|TEXTAREA/.test(e.target.tagName), mod=e.metaKey||e.ctrlKey;
+  if(mod&&e.key.toLowerCase()==='z'){ e.preventDefault(); return e.shiftKey?redo():undo(); }
+  if(mod&&e.key.toLowerCase()==='y'){ e.preventDefault(); return redo(); }
+  if((e.key==='Enter'||e.key===' ')&&e.target.dataset){ const t=e.target.dataset;   /* Plan und Raumliste per Tastatur */
+    if(t.room){ e.preventDefault(); return e.target.click(); }
+    if(t.ecke||t.wand!=null||t.diag){ e.preventDefault(); if(t.ecke) S.sel={type:'ecke',id:t.ecke}; else { const [a,b]=t.diag?t.diag.split('|'):S.walls[+t.wand]; S.sel={type:'strecke',a,b}; }
+      S.back=t.ecke?`[data-ecke="${t.ecke}"]`:t.diag?`[data-diag="${t.diag}"]`:`[data-wand="${t.wand}"]`; render(); return ($('#card input')||$('#card button'))?.focus(); } }
+  if(mod&&e.key.toLowerCase()==='s'){ e.preventDefault(); return toast('Prototyp: hier würde der Raum als Datei gesichert.'); }
+  if(e.target.closest?.('#entry')){ if(e.key==='Enter'){ e.preventDefault(); commitEntry(); } if(e.key==='Escape'){ S.guide=false; render(); }
+    if(e.key==='Tab'&&!e.shiftKey&&e.target.tagName==='INPUT'&&!e.target.value){ const nx=nextM(); if(nx){ e.preventDefault(); e.target.value=fm(nx.d); } } return; }   /* Tab: Hilfe des Prototyps */
+  if(e.key==='Enter'&&e.target.closest?.('.addrow')){ e.preventDefault(); return e.target.closest('.addrow').querySelector('button').click(); }
+  if(e.key==='Enter'&&inField){ e.target.blur(); return; }
+  if(e.key==='Escape'){ if(!$('#menu').hidden) return closeMenu(); if(inField) e.target.blur(); if(S.sel||S.op){ S.sel=null; S.op=null; render(); if(S.back){ plan.querySelector(S.back)?.focus(); S.back=null; } return; } if(S.step==='masse'){ S.guide=false; return render(); } return; }
+  if(inField||mod||document.querySelector('dialog[open]')||S.view!=='tool') return;
+  if(e.key===' '){ space=true; e.preventDefault(); }
+  if(e.key>='1'&&e.key<='4') return setStep(['skizze','masse','waende','ausgabe'][e.key-1]);
+  if(e.key==='0'){ fit(); return render(); }
+  if(e.key==='?') return $('#help').showModal();
+  if(e.key==='Delete'||e.key==='Backspace') return del();
+  if(S.step==='waende'&&definite()&&(e.key==='ArrowRight'||e.key==='ArrowLeft')){ const n=S.walls.length; S.wall=(S.wall+(e.key==='ArrowRight'?1:n-1))%n; S.op=null; return render(); }
+});
+addEventListener('resize',render);
+document.querySelectorAll('[data-k]').forEach(e=>e.textContent=KEYS[e.dataset.k]);
+document.querySelectorAll('[data-tk]').forEach(e=>e.title+=' ('+KEYS[e.dataset.tk]+')');
+render();
+</script>
+</body>
+</html>
