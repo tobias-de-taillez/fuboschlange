@@ -6980,13 +6980,16 @@ function worktops(E, K, G, fillers=[]){
   G.filter(g=>!g.free && g.it.kind==='base').forEach(g=>{
     const k=g.Wf.key; if(!byWall.has(k)) byWall.set(k,[]); byWall.get(k).push(g);
   });
+  // Hochschrank derselben Wand in der Lücke a..b: dort endet die Platte (wie am
+  // Zeilenende unten), sie läuft nicht über ihn, er ist keine Passleiste.
+  const tallIn=(key,a,b)=>G.some(h=>!h.free && h.Wf.key===key && h.it.kind==='tall' && h.s0<b-1 && h.s1>a+1);
   byWall.forEach(list=>{
     list.sort((p,q)=>p.s0-q.s0);
     let cur=null;
     list.forEach(g=>{
       // Bis 150 mm Lücke bleibt es EINE Zeile: die Lücke wird eine Passleiste,
-      // die Platte läuft darüber durch.
-      if(cur && g.s0<=cur.s1+150){ if(g.s0>cur.s1+1) fillers.push({Wf:g.Wf, s0:cur.s1, s1:g.s0, w:g.s0-cur.s1, between:[cur.ids[cur.ids.length-1], g.it.id]});
+      // die Platte läuft darüber durch – außer ein Hochschrank steht darin.
+      if(cur && g.s0<=cur.s1+150 && !(g.s0>cur.s1+1 && tallIn(g.Wf.key, cur.s1, g.s0))){ if(g.s0>cur.s1+1) fillers.push({Wf:g.Wf, s0:cur.s1, s1:g.s0, w:g.s0-cur.s1, between:[cur.ids[cur.ids.length-1], g.it.id]});
         cur.s1=Math.max(cur.s1,g.s1); cur.ids.push(g.it.id); }
       else { cur={Wf:g.Wf, s0:g.s0, s1:g.s1, ids:[g.it.id]}; runs.push(cur); }
     });
@@ -7818,9 +7821,11 @@ function snapRot(E, deg, tol=4){
 // (160×90 ergibt so 6 Plätze, wie im Handel üblich). Kostet der Stirnplatz
 // einen Längsplatz, gewinnt die Variante mit mehr Plätzen, bei Gleichstand
 // die ohne Stirnplatz. An einer Seite ohne Stuhlraum (Wand, Schrank näher
-// als SEAT_ROOM) sitzt niemand.
+// als SEAT_ROOM) sitzt niemand. Lang ist immer die längere Seite, gleich in
+// welches Feld sie eingetragen ist: 90 × 160 gibt dieselben Plätze wie 160 × 90.
 const SEAT_W=600, SEAT_CORNER=200, SEAT_ROOM=450;
 function seatPlan(w, d, open){
+  if(w<d) [w,d]=[d,w];                                // w = Langseite
   const op=open||[true,true,true,true];             // lang, lang, kurz, kurz
   const nl=(op[0]?1:0)+(op[1]?1:0), ne=(op[2]?1:0)+(op[3]?1:0);
   const plain={long:Math.floor(w/SEAT_W), end:0};
@@ -7841,8 +7846,12 @@ function seatRoom(E, L, g, s){
 function tableSides(g, E, L){
   const out=[], P=g.poly;
   const sideOf=([i,j],end)=>{ const a=P[i], b=P[j], m=mul(add(a,b),0.5); return {mid:m, n:unit(sub(m,g.c)), a, b, len:len(sub(b,a)), end}; };
-  [[0,1],[2,3]].forEach(e=>out.push(sideOf(e,false)));
-  [[1,2],[3,0]].forEach(e=>out.push(sideOf(e,true)));
+  // Die Langseiten sind die längeren Kanten: bei Breite > Länge (900 × 1600) die
+  // Kanten 1–2 und 3–0, nicht 0–1 und 2–3. Bei Gleichstand zählt die Länge.
+  // Langseiten zuerst: so passt die Reihenfolge zu seatPlan (lang, lang, kurz, kurz).
+  const wLang=g.it.w>=g.d;
+  (wLang ? [[0,1],[2,3]] : [[1,2],[3,0]]).forEach(e=>out.push(sideOf(e,false)));
+  (wLang ? [[1,2],[3,0]] : [[0,1],[2,3]]).forEach(e=>out.push(sideOf(e,true)));
   if(E && L) out.forEach(s=>{ s.room=seatRoom(E,L,g,s); });
   const plan=seatPlan(g.it.w, g.d, out.map(s=>s.room==null || s.room>=SEAT_ROOM));
   out.forEach(s=>{ s.open = s.room==null || s.room>=SEAT_ROOM; s.seats = s.open ? (s.end?plan.end:plan.long) : 0; });
@@ -24640,7 +24649,45 @@ globalThis.selfChecks=function(){
     //
     // --- Rest-Fix platte ---
     try{
-      // TESTS-platte
+      // Umgebung ohne Fenster und Tür: ein Hochschrank bei x=1600 verdeckte sonst das Fenster der Prüfumgebung E.
+      const EP=KX.makeEnv(R.pts,R.walls,[],[]);
+      const layP=items=>{ const K=KX.normKitchen({items}); const L=KX.layout(EP,K); return {K,L,F:KX.check(EP,K,L)}; };
+      const bs=(id,x,w=600)=>({id,kind:'base',a:'A',b:'B',x,w}), tl=(id,x,w)=>({id,kind:'tall',a:'A',b:'B',x,w});
+      const span=r=>JSON.stringify(r.L.tops.filter(t=>!t.island && !t.patch).map(t=>[Math.round(t.s0),Math.round(t.s1)]).sort((p,q)=>p[0]-q[0]));
+      // D1: Hochschrank in der Lücke zwischen zwei Unterschränken
+      {
+        const r=layP([bs(1,1000), tl(2,1600,150), bs(3,1750)]), St=KX.stock(r.K,r.L);
+        chk('kueche-platte: Hochschrank (150) zwischen zwei Unterschränken – zwei Platten, kein Füller, keine Passleiste',
+          span(r)==='[[1000,1600],[1750,2350]]' && r.L.fillers.length===0 && !has(r.F,/Passleiste/)
+          && St.tops.length===2 && near(St.topSum,1200,0.01) && St.fillers.length===0);
+        const r2=layP([bs(1,1000), tl(2,1600,100), bs(3,1750)]);
+        chk('kueche-platte: Hochschrank (100) in 150 mm Lücke – die Platte endet an ihm, der Rest (50) wird Passleiste am Plattenende',
+          span(r2)==='[[1000,1600],[1700,2350]]' && r2.L.fillers.length===1 && !!r2.L.fillers[0].end && !r2.L.fillers[0].between && near(r2.L.fillers[0].w,50,0.01));
+        const r3=layP([bs(1,1000), bs(3,1700)]);
+        chk('kueche-platte: 100 mm Lücke ohne Hochschrank – wie bisher eine Platte mit Passleiste dazwischen',
+          span(r3)==='[[1000,2300]]' && r3.L.fillers.length===1 && !!r3.L.fillers[0].between && has(r3.F,/Passleiste 100 mm zwischen zwei Schränken/));
+      }
+      // D3: Tisch – die längere Seite ist die Langseite, gleich in welches Feld sie eingetragen ist
+      {
+        const tab=(w,d,rot,x,y)=>{ const r=layP([{id:1,kind:'table',x:x==null?2500:x,y:y==null?1500:y,rot:rot||0,w,d}]), g=r.L.byId.get(1);
+          return {n:KX.tableSeats(g,EP,r.L), sd:KX.tableSides(g,EP,r.L), F:r.F}; };
+        const a=tab(1600,900), b=tab(900,1600), lg=b.sd.filter(s=>near(s.len,1600,0.01)), sh=b.sd.filter(s=>near(s.len,900,0.01));
+        chk('kueche-platte: Tisch 900 × 1600 hat wie 1600 × 900 sechs Plätze, an den 1600er Seiten je 2, an den Stirnseiten je 1',
+          a.n===6 && b.n===6 && lg.length===2 && lg.every(s=>!s.end && s.seats===2) && sh.length===2 && sh.every(s=>s.end && s.seats===1));
+        chk('kueche-platte: Tisch 800 × 1200 = 1200 × 800 (4 Plätze), 1000 × 2000 = 2000 × 1000 (6)',
+          tab(800,1200).n===4 && tab(1200,800).n===4 && tab(1000,2000).n===6 && tab(2000,1000).n===6);
+        chk('kueche-platte: quadratischer Tisch unverändert (bei Gleichstand ist w die Langseite)',
+          tab(1600,1600).n===6 && tab(800,800).n===2 && tab(1600,1600).sd.filter(s=>!s.end).length===2);
+        chk('kueche-platte: seatPlan(900,1600) = seatPlan(1600,900), um 90° gedrehter Tisch ebenfalls 6',
+          JSON.stringify(KX.seatPlan(900,1600))===JSON.stringify(KX.seatPlan(1600,900)) && tab(900,1600,90).n===6 && tab(1600,900,90).n===6);
+        // Stirnseite (900) an der Wand: kein Stuhl dort, die Langseiten behalten ihre Plätze (2 + 2 + 1 Stirnplatz)
+        const w1=tab(900,1600,0,2000,800), w0=w1.sd.filter(s=>!s.open);
+        chk('kueche-platte: Tisch 900 × 1600 mit der Stirnseite an der Wand – 5 Plätze, nur diese Seite ohne Stuhlraum',
+          w1.n===5 && w0.length===1 && w0[0].end && near(w0[0].len,900,0.01));
+        // Stuhlraum-Prüfung folgt der Langseite: Langseite (1600) 600 mm vor der Wand
+        chk('kueche-platte: Tisch 900 × 1600, Langseite 600 mm vor der Wand – Prüfung meldet den Stuhlraum',
+          has(tab(900,1600,0,1050,1500).F, /hinter den Stühlen nur 600 mm/, 'bad') && has(tab(1600,900,90,1050,1500).F, /hinter den Stühlen nur 600 mm/, 'bad'));
+      }
     }catch(err){ chk('kueche: Rest-Fix platte ohne Ausnahme ('+err.message+')', false); }
     //
     // --- Rest-Fix pruef ---
