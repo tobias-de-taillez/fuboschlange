@@ -16264,6 +16264,8 @@ function toggleOpen(){ KS.open=!KS.open; syncToggles(); render(); }
 function syncToggles(){
   const set=(id,v)=>{ const b=$(id); if(b) b.setAttribute('aria-pressed',String(!!v)); };
   set('k3dBtn',KS.show3d); set('kWayBtn',KS.paths); set('kOpenBtn',KS.open);
+  // Wege-Uebersicht im Panel nur, wenn "Wege" oben an ist (Meldung M-20261109-133312-e804a0).
+  { const wb=$('kWayBox'); if(wb) wb.hidden=!KS.paths; }
   document.body.classList.toggle('kitchenmode', M.mode==='kitchen');
   document.body.classList.toggle('k3d', M.mode==='kitchen' && KS.show3d);
 }
