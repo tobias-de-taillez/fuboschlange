@@ -59,7 +59,7 @@ function evDev(e){
 // Ansicht, die eine Punktmenge bei gegebener Drehung einpasst - ohne VIEW
 // anzufassen. Getrennt von autofit(), weil die Fahrt zum Nachbarraum ihr
 // Ziel braucht, bevor sie dort ankommt.
-function fitView(P, rot, auf){
+function fitView(P, rot, auf, rand){
   // Bounding-Box der GEDREHTEN Punkte: eingenordet eingepasst heisst, die
   // Wand liegt waagerecht UND der Raum fuellt den Schirm.
   const c=Math.cos(rot), s2=Math.sin(rot);
@@ -67,7 +67,9 @@ function fitView(P, rot, auf){
   const a=auf||0;
   const w=(Math.max(...rx)-Math.min(...rx)+2*a)||1000,
         h=(Math.max(...ry)-Math.min(...ry)+2*a)||1000;
-  const s=Math.min((cv.width-150)/w, (cv.height-150)/h);
+  // rand: freier Rand in Gerätepixeln, beide Seiten zusammen. Ohne Angabe wie bisher 150.
+  const r=rand>0 ? rand : 150;
+  const s=Math.min((cv.width-r)/w, (cv.height-r)/h);
   const mx=(Math.min(...rx)+Math.max(...rx))/2, my=(Math.min(...ry)+Math.max(...ry))/2;
   return { s, ox:cv.width/2-mx*s, oy:cv.height/2-my*s, rot };
 }

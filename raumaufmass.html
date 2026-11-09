@@ -6283,7 +6283,9 @@ function autofit(){
   // Der Wandkoerper steht IMMER nach aussen, nicht nur beim Aufklappen -
   // sonst schneidet der Bildrand die Aussenkante ab.
   auf=Math.max(auf, Math.max(THICK_DEFAULT, ...Object.values(M.thick||{})));
-  VIEW=fitView(P, VIEW.rot, auf);
+  // Im Raumaufmaß mehr Luft: oben liegen Maßstab und Einpassen, unten der
+  // Melde-Knopf, und die Karten brauchen Platz neben den Wänden.
+  VIEW=fitView(P, VIEW.rot, auf, TOOL==='aufmass' ? 150*DPR() : 0);
 }
 // Zoom um einen festen Bildpunkt (Geraetepixel): der Weltpunkt darunter
 // bleibt liegen.
