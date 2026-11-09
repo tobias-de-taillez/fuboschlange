@@ -1037,7 +1037,7 @@
         <div id="sugg">—</div>
       </section>
       <section id="ringsec" hidden>
-        <h3>Gebäude schließt nicht</h3>
+        <h3>Geschoss schließt nicht</h3>
         <div id="ringlist"></div>
       </section>
       <section id="nahsec" hidden>
@@ -1111,40 +1111,50 @@
 </div>
 <div id="helpwrap" class="scrim" hidden>
   <div id="helpbox" class="dlg" role="dialog" aria-label="Hilfe">
-    <div class="dlghead"><h2>Hilfe: zeichnen, messen, fliesen, Küche</h2><button id="helpclose" class="ib" aria-label="Schließen" title="Schließen (Esc)"><svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg></button></div>
+    <div class="dlghead"><h2>Hilfe und Tasten</h2><button id="helpclose" class="ib" aria-label="Schließen" title="Schließen (Esc)"><svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg></button></div>
     <div id="helpbody">
-      <p>Der Ablauf geht von links nach rechts durch die Modi oben (Tasten 1–5). Die Skizze gibt nur die Topologie vor: welche Ecke mit welcher verbunden ist. Die Form rechnet das Programm aus den Maßen aus. Wer mehr misst als nötig, bekommt eine Kontrolle und sieht Messfehler.</p>
+      <p>Ein Raum entsteht in drei Schritten: Skizze, Maße, Wände. Danach steht die Ausgabe. Die Skizze legt nur fest, welche Ecke mit welcher verbunden ist; die Form rechnet das Werkzeug aus den Maßen. Wer mehr misst als nötig, bekommt eine Kontrolle und sieht, welches Maß nicht passt.</p>
 
-      <h3><i>1</i>Zeichnen</h3>
-      <p>Den Raum ablaufen und jede Ecke der Reihe nach anklicken. Längen und Winkel müssen nicht stimmen, nur die Reihenfolge. Ein Klick auf die erste Ecke schließt den Wandzug. Ecken lassen sich ziehen; Rechtsklick oder Entf löscht.</p>
-      <dl>
-        <dt>Wandzug schließen</dt><dd>Verbindet alle Ecken in Anlegereihenfolge zum Ring, falls das Schließen per Klick nicht geklappt hat.</dd>
-        <dt>Entwirren</dt><dd>Erscheint, wenn sich Wände kreuzen. Sucht eine kreuzungsfreie Anordnung; eingetragene Maße bleiben unverändert.</dd>
-      </dl>
+      <h3><i>1</i>Skizze</h3>
+      <p>Den Raum ablaufen und jede Ecke der Reihe nach anklicken. Längen und Winkel müssen nicht stimmen, nur die Reihenfolge. Ein Klick auf die erste Ecke schließt den Raum. Ecken lassen sich ziehen. Entf löscht die Ecke oder Wand unter dem Zeiger, Rückgängig nimmt den letzten Schritt zurück.</p>
 
-      <h3><i>2</i>Messen</h3>
-      <p>Zwei Ecken anklicken, Maß eintippen (Einheit am Knopf daneben: m, cm, mm), Enter. Rechts unter <b>Als Nächstes messen</b> stehen die Strecken, die am meisten Unsicherheit beseitigen; ein Klick darauf öffnet die Eingabe. Fertig ist der Grundriss, wenn die Form eindeutig ist: alle Wände plus genug Diagonalen, damit nichts mehr kippen kann (ein Viereck braucht eine Diagonale, jede weitere Ecke eine weitere Strecke).</p>
-      <p>Mehrfach messen ist erwünscht. Jedes Maß geht gewichtet in einen Ausgleich ein; der Wert, der am stärksten aus der Reihe fällt, wird in der Wandliste markiert und kann per × gelöscht oder per Schalter abgeschaltet werden. Ein Klick auf eine Wand öffnet ihr Popup mit allen Werten.</p>
+      <h3><i>2</i>Maße</h3>
+      <p>Das Werkzeug schlägt die Strecke vor, die am meisten bringt, und öffnet die Eingabe an ihr. Zahl eintippen (Einheit am Knopf daneben: m, cm, mm), Enter, weiter zur nächsten. Der Stand oben rechts sagt, wie viele Maße noch fehlen und ob alles stimmt; ein Klick darauf zeigt die Statistik. Sobald die Form eindeutig ist, zeigt der Plan die gemessene Form.</p>
       <dl>
-        <dt>90°</dt><dd>Setzt Ecken, die innerhalb ±2° rechtwinklig sind, auf genau 90°, sofern die Messungen nicht dagegen sprechen. Spart Diagonalen, ist aber eine Annahme: bei Altbau lieber aus lassen und messen.</dd>
-        <dt>Maßhaltig</dt><dd>An: die Zeichnung springt auf die gemessene Form. Aus (Standard): Ecken bleiben, wo sie gezeichnet sind, damit man sich beim Messen nicht verliert. Gerechnet wird in beiden Fällen gleich.</dd>
-        <dt>Genauigkeit</dt><dd>Zeigt je Ecke eine Fehlerellipse. Große oder lange Ellipsen zeigen, wo eine weitere Messung am meisten bringt.</dd>
-        <dt>Einnorden</dt><dd>Im Wand-Popup: dreht die Ansicht so, dass diese Wand waagerecht oben liegt. Ändert nur die Ansicht, nicht die Maße.</dd>
-        <dt>Laufmessung</dt><dd>Nur am Handy: Schätzung aus dem Beschleunigungssensor. Geht mit ±200 mm statt Laser-Genauigkeit ein, ist also nur ein Platzhalter.</dd>
-        <dt>Nachbarräume</dt><dd>Mehrere Räume im selben Gebäude werden über gemeinsame Wände und Messungen <b>durch die Tür</b> zueinander gelegt. Schließt ein Ring von Räumen nicht, meldet <b>Gebäude schließt nicht</b> den Schlussfehler, statt ihn zu verstecken.</dd>
+        <dt>Karte der Wand</dt><dd>Eine Wand anklicken: ihre Maße, ein weiteres Maß, Tür, Fenster, Loch oder Anschluss setzen, Wanddicke, Einnorden, Löschen. Mehrfach messen ist erwünscht. „exakt“ nimmt ein Maß aus dem Ausgleich heraus: es gilt genau so.</dd>
+        <dt>Diagonale</dt><dd>Zwei Ecken nacheinander anklicken. Diagonalen stehen nicht dauernd im Plan. Sie erscheinen, wenn sie dran, angefasst oder auffällig sind, und unter „Alle Strecken“.</dd>
+        <dt>Karte der Ecke</dt><dd>Eine Ecke anklicken: Winkel festlegen oder lösen, Ecke löschen.</dd>
+        <dt>Ein Maß passt nicht</dt><dd>Die Strecke steht rot und gestrichelt im Plan. Auf ihrer Karte nachmessen, das Maß ändern oder mit × löschen.</dd>
+        <dt>Nachbarräume</dt><dd>Hinter einer Tür legt das „+“ einen Nachbarraum an. Die Räume eines Geschosses liegen über gemeinsame Wände und über Maße <b>durch die Tür</b> zueinander. Schließt ein Ring von Räumen nicht, meldet <b>Geschoss schließt nicht</b> den Schlussfehler, statt ihn zu verstecken.</dd>
       </dl>
 
       <h3><i>3</i>Wände</h3>
-      <p>Erst verfügbar, wenn der Grundriss eindeutig ist, vorher wären Wandansichten erfunden. Hier pro Wand die Ansicht von innen, wie man im Raum davor steht: unter den Kanten stehen die Ecken und die anschließenden Wände, oben rechts zeigt ein Lageplan mit Pfeil, welche Wand es ist (Klick dort wählt eine andere). Mit ‹ › oder ← → geht es ringsum zur Wand rechts oder links daneben.</p>
+      <p>Erst möglich, wenn die Form eindeutig ist; vorher wären Wandansichten erfunden. Je Wand die Ansicht von innen, so wie man im Raum davor steht. Der Lageplan oben rechts zeigt, welche Wand es ist; ein Klick dort oder ← → wählt eine andere.</p>
       <dl>
-        <dt>Höhe</dt><dd>Raumhöhe eintragen. Die erste gemessene Höhe gilt für alle Ecken; abweichende Ecken (Pultdach, Schräge) rechts im Panel unter <b>Höhe links / rechts</b> oder per Klick auf ihre Kante im Bild. Höhe 0 ist erlaubt: die Wand läuft dort spitz zu.</dd>
-        <dt>+ Knickpunkt</dt><dd>Für Giebel- und Kniestockwände: die Decke knickt zwischen den Ecken. Den Punkt im Bild ziehen, anklicken für seine Höhe, Rechtsklick löscht. Geht in die Wandansicht, die Öffnungsprüfung und den STEP-Export ein.</dd>
-        <dt>+ Tür, + Fenster, + Loch</dt><dd>Gibt es auch im Grundriss (Zeichnen und Messen): Knopf, dann auf die Wand klicken. Dort ziehen verschiebt die Öffnung entlang der Wand, das Kärtchen daneben stellt Art, Band und Öffnungsrichtung. Hier in der Wandansicht: Öffnung auf die Wand setzen, dann Größe und Art wählen. Links und rechts gelten immer von innen gesehen. Unter <b>Lage einmessen</b> den Abstand von links, rechts, Boden oder Decke eintragen; erst dann liegt sie maßhaltig. Türen bekommen Band und Öffnungsrichtung.</dd>
-        <dt>+ Wasser</dt><dd>Setzt einen Wasseranschluss (Eckventil und Abfluss) an die gewählte Wand, unter die Spüle, wenn dort eine steht, sonst in die Mitte, 50 cm hoch. Im Bild ziehen oder rechts Lage und Höhe in mm eintragen, × löscht. Die Küche prüft daran die Schlauchwege: Spülmaschine (Zulauf 1,68 m, Ablauf 1,9 m, Verlängerung 2,2 m) und Kühlschrank mit Festwasser. Der Schlauch läuft hinter den Schränken an der Wand entlang. Schneidet keine Fliesen.</dd>
-        <dt>Abwicklung</dt><dd>Klappt die Wände mit Öffnungen im Grundriss nach außen und blendet Nachbarräume aus. Nur Ansicht.</dd>
+        <dt>Höhe</dt><dd>Die erste gemessene Höhe gilt für alle Ecken. Abweichende Ecken (Pultdach, Schräge) rechts unter <b>Höhe links / rechts</b> oder per Klick auf ihre Kante im Bild. Höhe 0 ist erlaubt: die Wand läuft dort spitz zu.</dd>
+        <dt>Knickpunkt</dt><dd>Für Giebel- und Kniestockwände: die Decke knickt zwischen den Ecken. Den Punkt im Bild ziehen, anklicken für seine Höhe.</dd>
+        <dt>Tür, Fenster, Loch</dt><dd>Auf die Wand setzen, dann rechts Größe und Art wählen. Links und rechts gelten von innen gesehen. Unter <b>Lage einmessen</b> den Abstand von links, rechts, Boden oder Decke eintragen; erst dann liegt die Öffnung maßhaltig.</dd>
+        <dt>Anschluss</dt><dd>Ein Wasseranschluss (Eckventil und Abfluss) an der gewählten Wand. Im Bild ziehen oder rechts Lage und Höhe eintragen. Der Küchenplaner prüft daran die Schlauchwege.</dd>
       </dl>
 
-      <h3><i>4</i>Fliesen</h3>
+      <h3>Ausgabe</h3>
+      <dl>
+        <dt>Drucken</dt><dd>Das Aufmaßblatt: Grundriss mit Längen, Fläche, Umfang und Stand, danach die Wandansichten; auf Wunsch mit der Liste aller Maße. Im Druckdialog „Als PDF sichern“ wählen, Skalierung 100 %.</dd>
+        <dt>Weiter planen</dt><dd>Denselben Raum im Fliesenplan oder im Küchenplaner öffnen.</dd>
+        <dt>Für CAD</dt><dd>DXF: der Grundriss als 2D-Skizze in mm. STEP: die Wände als Körper mit Raumhöhen, Türen und Fenstern.</dd>
+      </dl>
+
+      <h3>Menü</h3>
+      <dl>
+        <dt>Rechte Winkel annehmen</dt><dd>Setzt Ecken, die innerhalb ±2° rechtwinklig sind, auf genau 90°, sofern die Maße nicht dagegen sprechen. Spart Diagonalen, ist aber eine Annahme: im Altbau lieber aus lassen und messen.</dd>
+        <dt>Maßhaltig zeichnen</dt><dd>An: sobald die Form eindeutig ist, zeigt der Plan die gemessene Form. Aus: Ecken bleiben, wo sie skizziert wurden. Gerechnet wird in beiden Fällen gleich.</dd>
+        <dt>Abwicklung</dt><dd>Klappt die Wände mit ihren Öffnungen im Grundriss nach außen und blendet Nachbarräume aus. Nur Ansicht.</dd>
+        <dt>Ansicht drehen</dt><dd>Dreht die Ansicht um 15°, mit ⇧ zurück. „Einnorden“ auf der Karte einer Wand legt diese Wand nach oben. Beides ändert nur die Ansicht, nicht die Maße.</dd>
+        <dt>Raum spiegeln</dt><dd>Für eine seitenverkehrt angelegte Skizze. Die Maße gelten unverändert weiter.</dd>
+        <dt>Weitergeben</dt><dd>Als Datei sichern, Link kopieren oder QR-Code zeigen. Räume liegen nur in diesem Browser; wichtige Aufmaße zusätzlich als Datei sichern.</dd>
+      </dl>
+
+      <h3>Fliesenplan</h3>
       <p>Verlegt werden Parallelogramm-Fliesen als L und R (Chevron). Rechts stehen die Maße: Breite, Länge, Winkel, Fuge, Randfuge (Abstand zur Wand; die Schnittlinie liegt in ihrer Mitte, sie nimmt die Wandtoleranz auf) und Stärke. Fliesen aus der Leiste in den Plan ziehen oder klicken; Ziehen rastet an Kanten anderer Fliesen ein (⌥ ohne Einrasten).</p>
       <dl>
         <dt>Fliesenpiktogramme</dt><dd>Fliesenset je Raum konfigurieren: Hexagon, Chevron, Viereck oder Dreieck mit eigenen Maßen und Dicken. Piktogramm klicken oder in den Plan ziehen. F tauscht Chevron L und R, Q/E dreht. ⌘D setzt das Muster fort.</dd>
@@ -1164,10 +1174,10 @@
         <dt>Alle Fliesen entfernen</dt><dd>Zweimal klicken; ⌘Z holt sie zurück.</dd>
       </dl>
 
-      <h3><i>5</i>Küche</h3>
+      <h3>Küchenplaner</h3>
       <p>Erst verfügbar, wenn der Grundriss eindeutig ist. Teile aus der Leiste oben auf eine Wand ziehen oder anklicken, geordnet nach Kalt (Kühl-, Gefrierschrank), Warm (Herd, Backofen im Hochschrank, Mikrowelle, Dunstabzug), Nass (Spüle, Spülmaschine), Stauraum (Schrank, Eckschrank, Insel) und Möbel (Tisch). Ob ein Schrank unten steht, hängt oder hoch ist, wählt man danach rechts unter „Bauart“; die Spülmaschine geht auch hoch eingebaut (Hüfthöhe, mit Fächern darunter und darüber für Vorräte, Geschirr usw.), der Herd auch ohne Backofen (nur Kochfeld, darunter Schubladen). Sie rasten an Ecken (mit 5 cm Passblende), Nachbarn, Türen und mittig unter Fenstern ein; ein Klick setzt das Teil neben das gewählte, einen Hängeschrank darüber. Die Arbeitsplatte entsteht von selbst, auf der Insel samt Tresen-Überstand; Lücken bis 15 cm werden Passleisten. Die Lage steht im Panel als Zahl (ab Ecke … mm), die Maßkette im Plan. Die Standardmaße passen meist; rechts stellt man Breite, Front, Anschlag, Gerät und Inhalt ein, unter „Maße frei“ alles Übrige.</p>
       <dl>
-        <dt>Prüfung</dt><dd>Meldet, was nicht geht (rot): Überlappungen, Schrank vor Tür oder Fenster, Fensterflügel gegen Armatur, Gerätetür gegen Insel, Zimmertür gegen Schrank oder Insel (im Plan bleibt die Tür am ersten Teil stehen, mit Winkel im Befund), Front in der Ecke verdeckt, Decke zu niedrig. Und Richtwerte (gelb): Schlauchweg von Spülmaschine und Festwasser-Kühlschrank zum Wasseranschluss (Wände-Tab), Gänge 1200 mm, Stuhlraum am Tisch, Abstellflächen, Spülmaschine neben der Spüle, Arbeitsdreieck. Ein Klick wählt das Teil; wo es eine eindeutige Abhilfe gibt (Vorfensterarmatur, Anschlag tauschen, Als Eckschrank, Als Dunstabzug), steht ein Knopf daneben.</dd>
+        <dt>Prüfung</dt><dd>Meldet, was nicht geht (rot): Überlappungen, Schrank vor Tür oder Fenster, Fensterflügel gegen Armatur, Gerätetür gegen Insel, Zimmertür gegen Schrank oder Insel (im Plan bleibt die Tür am ersten Teil stehen, mit Winkel im Befund), Front in der Ecke verdeckt, Decke zu niedrig. Und Richtwerte (gelb): Schlauchweg von Spülmaschine und Festwasser-Kühlschrank zum Wasseranschluss (Raumaufmaß, Schritt Wände), Gänge 1200 mm, Stuhlraum am Tisch, Abstellflächen, Spülmaschine neben der Spüle, Arbeitsdreieck. Ein Klick wählt das Teil; wo es eine eindeutige Abhilfe gibt (Vorfensterarmatur, Anschlag tauschen, Als Eckschrank, Als Dunstabzug), steht ein Knopf daneben.</dd>
         <dt>Maße und Abstände</dt><dd>Am gewählten Wandteil läuft die Maßkette bis zur Wand, die man an den Enden vor sich hat, bei Insel und Tisch zu allen vier Seiten. Ein Klick auf einen gestrichelt umrandeten Abstand öffnet ein Feld: Wert eintragen, Enter verschiebt das Teil (an der Wand den ganzen Block daneben).</dd>
         <dt>Insel und Tisch</dt><dd>Drehen per Schieber im Panel (rastet an 0/45/90° und an schiefen Wänden ein, mit ⌥ frei) oder mit Q/E. Eine Insel, deren Stirnseite man an eine Wand zieht, dockt bündig an; ihre Auszüge gehen dann parallel zur Wand auf. Zieht man eine Insel an eine andere, rastet sie bündig ein (gleiche Drehung oder quer dazu, an den Enden oder mittig, ⌥ frei); gleich hohe Inseln bekommen dann eine durchgehende Platte, auch über Eck. „Tresen“ lässt die Platte hinten überstehen (NKBA: 38 cm bei 91 cm Höhe, 61 cm je Hocker). Die Tischplätze ergeben sich aus Länge und Breite (60 cm je Platz, Stirnseite ab 60 cm Breite), Seiten ohne Stuhlraum bleiben frei.</dd>
         <dt>Offen (O)</dt><dd>Zeigt im Plan alle Schwenkbereiche und in 3D alle Türen, Auszüge und Gerätetüren offen, dazu offene Fensterflügel.</dd>
@@ -4782,7 +4792,7 @@ function hoseCheck(E, K, L){
   const needs=L.G.filter(g=>!g.wing && (g.it.dev==='dw' || (g.it.dev==='fridge' && g.it.water)));
   if(!needs.length) return out;
   if(!W.length){
-    out.push({lvl:'info', ids:needs.map(g=>g.it.id), txt:`Kein Wasseranschluss gesetzt – im Tab Wände „+ Wasser“, dann prüft die Küche die Schlauchlängen`, at:needs[0].c});
+    out.push({lvl:'info', ids:needs.map(g=>g.it.id), txt:`Kein Wasseranschluss gesetzt – im Raumaufmaß unter Wände „Anschluss“, dann prüft die Küche die Schlauchlängen`, at:needs[0].c});
     return out;
   }
   needs.forEach(g=>{
@@ -10803,21 +10813,21 @@ $('clr').onclick=()=>{
 // setzt sie fuer Windows um.
 const KEYS=[
   ['Allgemein',[
-    ['Modus: Zeichnen, Messen, Wände, Fliesen, Küche','1  2  3  4  5'],
+    ['Schritte: Skizze, Maße, Wände','1  2  3'], ['Ausgabe','4'],
     ['Rückgängig','⌘Z'], ['Wiederherstellen','⇧⌘Z'],
-    ['Als Datei sichern','⌘S'], ['Datei öffnen','⌘O'],
-    ['Abbrechen, Auswahl aufheben','Esc'], ['Diese Übersicht','?'], ['Hilfe zum Ablauf','H'],
+    ['Als Datei sichern','⌘S'],
+    ['Abbrechen, Karte schließen','Esc'], ['Hilfe und Tasten','?'],
   ]],
   ['Ansicht',[
     ['Zoomen','Mausrad · ⌘+Rad · Pinch · + −'],
     ['Verschieben','Wischen · Leertaste+Ziehen · Mitteltaste · Pfeile'],
     ['Einpassen','0 · Mitteltaste doppelt'],
   ]],
-  ['Zeichnen und Messen',[
-    ['Ecke setzen, Wand oder Strecke öffnen','Klick'],
+  ['Skizze und Maße',[
+    ['Ecke setzen, Wand oder Ecke öffnen','Klick'], ['Diagonale öffnen','zwei Ecken nacheinander'],
     ['Ecke verschieben','Ziehen'],
-    ['Ecke oder Wand löschen','Rechtsklick · Entf'],
-    ['Maß übernehmen, nächster Vorschlag','Enter'],
+    ['Ecke oder Wand unter dem Zeiger löschen','Entf'],
+    ['Maß übernehmen, nächste Strecke','Enter'],
   ]],
   ['Wände',[
     ['Vorherige, nächste Wand','←  →'],
@@ -10840,7 +10850,7 @@ const KEYS=[
 ];
 // Gruppen als Bloecke in zwei Spalten - frueher lief die Liste im Zickzack.
 function renderKeys(){
-  $('keysbody').innerHTML=KEYS.map(([h,rows])=>`<section class="kgrp"><h4>${escapeHtml(h)}</h4>`
+  $('keysbody').innerHTML='<h3>Tasten und Maus</h3>'+KEYS.map(([h,rows])=>`<section class="kgrp"><h4>${escapeHtml(h)}</h4>`
     +rows.map(([d,k])=>`<p><span>${escapeHtml(d)}</span><kbd>${escapeHtml(plat(k))}</kbd></p>`).join('')+'</section>').join('');
 }
 function toggleKeys(){ const w=$('keyswrap'); if(w.hidden) renderKeys(); w.hidden=!w.hidden; }
@@ -14283,7 +14293,7 @@ function renderSel(c){
   if(KX.isCold(it) && it.kind==='tall'){
     const fzs=Object.entries(KX.FRIDGE).filter(([,f])=>f.devs.includes(it.dev));
     h+=`<div class="krow"><label>Bauform</label><div class="seg" id="kFz">${[['','Einbau'],...fzs.map(([k,f])=>[k,f.label])].map(([v,l])=>`<button data-fz="${v}" aria-pressed="${String((it.fz||'')===v)}">${l}</button>`).join('')}</div></div>`;
-    if(it.dev==='fridge') h+=`<div class="krow"><label title="Eiswürfel- oder Wasserspender mit Festwasseranschluss: die Prüfung misst den Schlauchweg zum Wasseranschluss (Wände-Tab)">Festwasser</label><div class="seg">${[['0','nein'],['1','ja']].map(([v,l])=>`<button data-fw="${v}" aria-pressed="${String((it.water?'1':'0')===v)}">${l}</button>`).join('')}</div></div>`;
+    if(it.dev==='fridge') h+=`<div class="krow"><label title="Eiswürfel- oder Wasserspender mit Festwasseranschluss: die Prüfung misst den Schlauchweg zum Wasseranschluss (Raumaufmaß, Schritt Wände)">Festwasser</label><div class="seg">${[['0','nein'],['1','ja']].map(([v,l])=>`<button data-fw="${v}" aria-pressed="${String((it.water?'1':'0')===v)}">${l}</button>`).join('')}</div></div>`;
     if(it.fz==='free' && it.dev==='fridge') h+=`<div class="krow"><label>Gefrierteil</label><div class="seg">${[['0','ohne'],['1','mit']].map(([v,l])=>`<button data-gf="${v}" aria-pressed="${String((it.gf?'1':'0')===v)}">${l}</button>`).join('')}</div></div>`;
     if(!fz) h+=`<div class="krow"><label title="Bis wohin die Tür aufgehen soll. Die Prüfung und der Schwenkbereich im Plan rechnen damit.">Tür auf</label><div class="seg" id="kSwing">${KX.SWINGS.map(v=>`<button data-swing="${v}" aria-pressed="${String(KX.swingOf(it)===v)}" title="${v===90?'Reicht zum Hineingreifen; Schalen und Fächer lassen sich oft nicht herausnehmen':'Schalen und Fächer lassen sich herausnehmen; braucht seitlich mehr Platz'}">${v}°</button>`).join('')}</div></div>`;
     if(fz) h+=`<div class="krow"><label>Türdicke</label><input id="kDT" inputmode="decimal" value="${Math.round(KX.doorTOf(it))}" title="Dicke der Tür samt Türfächern, ${KX.DOORT_LIM[0]}–${KX.DOORT_LIM[1]} mm. Offen steht der Flügel bei 90° um die halbe Türdicke seitlich über, ganz offen deutlich mehr."> mm <small>seitlich ${Math.round(KX.doorTOf(it)/2)} mm (90°) bis ${fullReach(c,it)} mm (ganz offen)</small></div>`;
