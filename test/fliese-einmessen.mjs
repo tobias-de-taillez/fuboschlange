@@ -17,8 +17,11 @@ const chk=(name,cond,info='')=>{ ok=ok&&!!cond; out.push((cond?'ok   ':'ROT  ')+
 const near=(a,b,tol)=>Number.isFinite(a) && Math.abs(a-b)<=tol;
 
 // Der Kern ist eine Kopie - sie darf nicht still auseinanderlaufen.
-const src=['raumaufmass.html','raumaufmass_opus.html'].find(f=>existsSync(new URL('../'+f, import.meta.url)));
-chk(`core byte-gleich zu ${src}`, src && pick(read(src),'core')===pick(html,'core'));
+// Das Original liegt seit der Aufteilung in die Werkzeugfamilie (docs/adr/0001)
+// in raum-kern.js; dessen Dateikopf steht vor "use strict" und zählt nicht mit.
+const src='raum-kern.js';
+const kern=existsSync(new URL('../'+src, import.meta.url)) ? read(src) : null;
+chk(`core byte-gleich zu ${src}`, kern!=null && '\n'+kern.slice(kern.indexOf('"use strict";'))===pick(html,'core'));
 
 // Strecken einer beliebigen Viereck-Wahrheit, als Feldtexte.
 const dist=(P,a,b)=>Math.hypot(P[b].x-P[a].x, P[b].y-P[a].y);

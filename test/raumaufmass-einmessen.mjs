@@ -9,7 +9,9 @@ const pick=id=>{
   if(!m) throw new Error(`Script-Block "${id}" nicht gefunden`);
   return m[1];
 };
-new Function('"use strict";\n'+pick('core')+'\n'+pick('tiles')+'\n'+pick('tilemeasure'))();
+// Der Rechenkern liegt als geteilte Datei neben der HTML-Datei (docs/adr/0001).
+const kern=readFileSync(new URL('../raum-kern.js', import.meta.url),'utf8');
+new Function('"use strict";\n'+kern+'\n'+pick('tiles')+'\n'+pick('tilemeasure'))();
 const M=globalThis.TILEMEAS, TL=globalThis.TILES;
 
 const out=[]; let ok=true;
