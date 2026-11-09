@@ -6,7 +6,7 @@ Stand 2026-11-09. Der Code liegt in `raumaufmass.html`: Block `kitchen` (Logik, 
 
 Für den Standardfall soll es einfach sein, komplex wird es nur bei Sonderwünschen.
 
-- Teile kommen aus der Palette: Unterschrank, Spüle, Spülmaschine, Herd, Hängeschrank, Hochschrank, Kühlschrank, Backofen hoch, Insel, Tisch.
+- Teile kommen aus der Palette: Unterschrank, Spüle, Spülmaschine, Herd, Hängeschrank, Hochschrank, Kühlschrank (Einbau), French Door, Side by Side, Backofen hoch, Insel, Tisch.
 - Ein Klick setzt das Teil neben das gewählte. Ziehen legt es an die nächste Wand.
 - Die Arbeitsplatte entsteht automatisch je Zeile.
 - Im Panel stellt man für das gewählte Teil Breite (im Raster), Front, Anschlag, Gerät und Inhalt ein.
@@ -39,6 +39,59 @@ Quellen: nobilia Typenliste 2026, Neff.
 - Hängeschränke schließen oben bündig mit den Hochschränken ab, daraus ergibt sich die Unterkante 1446.
 - Breitenraster: 150/200/300/400/450/500/600/800/900/1000/1200.
 
+### Frei stehende Kühlschränke (French Door, Side by Side)
+
+Wunsch aus der Meldung M-20261109-133140-d316bb: French-Door- und Side-by-Side-Geräte. Die Türdicke soll einstellbar sein, damit man sieht, wie weit die Flügel ausschlagen.
+
+- **Modell:** `dev:'fridge'` mit Bauform `fz:'fd'|'sbs'` und `doorT` (Türdicke, 30–150 mm). Ohne `fz` bleibt es der Einbau-Kühlschrank wie bisher, alte Räume laden unverändert. `d` ist die Tiefe mit Tür wie im Datenblatt, der Korpus ist `d − doorT`. Frei stehende Geräte haben keinen Sockel.
+- **Bedienung:** Am Kühlschrank wählt man die Bauform als Knöpfe (Einbau / French Door / Side by Side). Die Türdicke ist ein Eingabefeld. Daneben stehen der seitliche Überstand bei 90° und der bei ganz geöffneter Tür.
+
+| | French Door | Side by Side |
+|---|---|---|
+| Breiten | 70 / 83 / 90 / 100 cm (Haier) | 90 / 91 cm |
+| Tiefe mit Tür | 706 | 708 |
+| Höhe | 1830 | 1787 |
+| Türdicke (Vorgabe) | 96 | 79 |
+| Flügel | 2 × ½, Schubladen darunter bis ≈ 700 | Gefrierteil links 43 %, Kühlteil rechts 57 % |
+| ganz offen | 118° | 130° (Bosch: 130°/135°) |
+
+Quellen: Bosch-Maßblätter KFF96PIEP und KAN93VIFP. Die KFF96-Zeichnung misst ab Wand mit 25 mm Abstandshaltern: 635/731 ab Wand entsprechen 610/706 am Gerät, die Tür ist also 96 mm dick.
+
+**Flügelgeometrie:**
+- Jeder Flügel ist ein Blatt W × t.
+- Die Drehachse sitzt an der Gerätekante, in der Mitte der Türdicke (Korpusfront + t/2).
+- Offen um θ ragt das Blatt seitlich `max(0, −W·cos θ) + t/2·sin θ` über die Gerätekante, bei 90° also t/2.
+
+Abgleich mit den Maßblättern:
+
+| Fall | Modell | Bosch |
+|---|---|---|
+| KFF96PIEP, 90° | 48 | 45 |
+| KFF96PIEP, 118° | 254 | 268 |
+| KFF96PIEP, Tiefe bei 118° ab Wand | 1105 | 1102 |
+| KAN93VIFP Gefrierteil (W 387), 130° | 279 | 277 |
+| KAN93VIFP Kühlteil (W 515), 135° | 392 | 418 |
+
+- Auch die Bosch-Tabellen zur Nachbartiefe trifft das Modell: Neben Möbeln oder Platten ≤ 600 tief reichen wenige Millimeter, über 700 zählt es wie eine Wand.
+- Ein erster Ansatz mit der Achse an der Korpus-Ecke (Überstand bei 90° = t) war zu streng. Er meldete beim Side by Side mit 50 mm Luft neben einer 600er Platte nur 112°. Bosch erlaubt dort die volle Öffnung.
+
+**Prüfung (`leafReach`):**
+- Jeder Flügel schwenkt in 2°-Schritten auf, bis er auf eines dieser Hindernisse trifft:
+  - Wand (`polyInRoom`)
+  - Nachbarteil im selben Höhenband
+  - Arbeitsplatte
+  - Schwenkbereich einer Zimmertür
+  - Fensterflügel nach innen
+- Unter 90° ist es **bad**: Die Schubladen lassen sich nicht ausziehen.
+- Unter dem vollen Winkel ist es **warn**: Fächer und Schubladen lassen sich nicht herausnehmen. Bosch: „ausziehbar bei 90° geöffneter Tür, herausnehmbar bei vollständig geöffneter Tür“.
+- Die Meldung nennt den erreichten Winkel, das Hindernis und den seitlichen Platzbedarf für 90° und für „ganz offen“.
+- Die Angel-Prüfung des Einbau-Kühlschranks und der Anschlag (Taste F) gelten für Flügeltüren nicht.
+- Die Abstellfläche zählt auf beiden Seiten (NKBA: „on either side of a side-by-side refrigerator“).
+
+**Plan und 3D:**
+- Im Plan erscheinen die Hülle 0–90°, das Blatt bei 90° und der Bogen der Außenecke bis „ganz offen“. Beim gewählten Gerät kommt das Blatt bei „ganz offen“ gestrichelt dazu.
+- In 3D stehen die Flügel geschlossen und offen („Fronten offen“) in Türdicke.
+
 ## Prüfungen
 
 **bad (rot)** heißt „geht so nicht“:
@@ -48,6 +101,7 @@ Quellen: nobilia Typenliste 2026, Neff.
 - Teil vor Tür, Durchgang oder Fenster, auch auf der Nachbarwand
 - Fensterflügel (Dreh, Drehkipp, Stulp, nach innen) schlägt an die Armatur oder an Schränke
 - Zimmertür schlägt an
+- Flügel eines French-Door- oder Side-by-Side-Geräts geht keine 90° auf (Wand, Nachbar, Platte, Zimmertür, Fensterflügel)
 - Gerätetür, Auszug oder Drehtür stößt an
 - Auszüge in der Ecke hinter der Querzeile
 - Kochfeld unter einem Fenster, das sich öffnen lässt
@@ -57,7 +111,8 @@ Quellen: nobilia Typenliste 2026, Neff.
 - Stuhlraum unter 813 (Fehler unter 750)
 - Halbeckschrank
 - Fronten über Eck oder gegenüber
-- Kühlschrank-Angel an der Wand (< 50 mm)
+- Kühlschrank-Angel an der Wand (< 50 mm, nur Einbau)
+- Flügel geht 90°, aber nicht ganz auf (French Door 118°, Side by Side 130°)
 - Abstellfläche am Kochfeld < 300, am Kühlschrank < 380
 - Spülmaschine > 914 von der Spüle
 - Zwischen Spüle und Kochfeld < 900
@@ -116,6 +171,9 @@ Die Wände sind einseitig (Culling), deshalb verschwinden sie, wenn man von auß
 
 ## Bekannte Lücken
 
+- Bei Flügeltüren fehlen die Griffe. Ganz offen liegt der seitliche Bedarf deshalb bis 26 mm unter dem Maßblatt (KAN93VIFP Kühlteil: 392 statt 418).
+- Die Flügelachse sitzt in der Mitte der Türdicke. Echte Scharniere weichen je Hersteller ab: Liebherr nennt laut Suchergebnis 13 mm Wandabstand mit Griffmulde und 57 mm mit Hebelgriff. Das PDF ließ sich nicht laden.
+- Side by Side: Das Gefrierteil liegt immer links.
 - An stumpfen Ecken bleibt in der Arbeitsplatte eine kleine Dreieckslücke (keine Gehrung). Bei 1–2° Abweichung ist das unter 15 mm.
 - Die Blendenbreite des Eckschranks richtet sich nach der Standardtiefe, nicht nach der tatsächlichen Tiefe der Querzeile.
 - Insel und Tisch rasten nicht ein.
@@ -137,4 +195,9 @@ Die PDFs liegen in `paper/`.
 - Mobiliar, Laufkilometer: https://www.mobiliar.ch/ratgeber/neue-kueche
 - UC Berkeley Dining Design Guidelines (Fluss, Gangbreiten): https://uhs.berkeley.edu/sites/default/files/diningdesignguidelines.pdf
 - WKO Hygiene-Leitlinie Großküchen (rein/unrein): https://wko.at/ktn/handel/maschinen-technologie/hygiene-leitlinie-fuer-grosskuechen.pdf
+- Bosch KFF96PIEP, French Door, Maßblatt mit Türöffnung 90°/118° und Wandabstand je Nachbartiefe (lokal `paper/BSH_KFF96PIEP_frenchdoor_specsheet.pdf`): https://media3.bsh-group.com/Documents/specsheet/de-DE/KFF96PIEP.pdf
+- Bosch KAN93VIFP, Side by Side, Maßblatt mit Türen 387/515, Öffnung 130°/135° und Wandabstand (lokal `paper/BSH_KAN93VIFP_sidebyside_specsheet.pdf`): https://media3.bsh-group.com/Documents/specsheet/de-DE/KAN93VIFP.pdf
+- Samsung RF28R6222WW „Will it fit“, French Door: 3,75″ an der Wand für 90°, Tiefe offen, Türen bis 125° (lokal `paper/Samsung_RF28R6222WW_WillItFit_frenchdoor.pdf`): https://image-us.samsung.com/SamsungUS/home/home-appliances/refrigerators/pdp/02022021/gallery/WillitFit_RF28R6222WW_V2.pdf
+- Bertazzoni RFD36, French Door: Gerät muss 4″ (102 mm) plus Griff vor den Seitenschränken stehen, Schubladen ziehen bei 90° aus, herausnehmen erst bei 160° (lokal `paper/Bertazzoni_RFD36_frenchdoor_install.pdf`): https://content.abt.com/documents/179515/bertazzoni-french-door-refrigerator-RFD36FZNX-install.pdf
+- Haier French-Door-Breiten 70/83/90/100 cm (Suchergebnis Herstellerseiten): https://www.haier-europe.com/de_DE/web/de/french-door-produktreihe
 - vgpu: https://vgpu.sh/ und web.dev zur WebGPU-Unterstützung: https://web.dev/blog/webgpu-supported-major-browsers
