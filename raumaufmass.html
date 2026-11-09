@@ -8721,9 +8721,13 @@ function planLabels(L, o){
   const G=L.G.filter(g=>!g.wing);
   // 1. Unter-/Hochschrank, Insel, Tisch: um den Flächenschwerpunkt (Eckschrank:
   //    des Umrisses; liegt der außerhalb, die Korpusmitte).
+  //    Eckschrank über Eck: passt der Block dort nicht (Inhalt fiel bei
+  //    „Eck 90“ immer weg), auch Korpusmitte und Mitte des Schenkels.
   G.filter(g=>g.it.kind!=='wall').forEach(g=>{
     const W=g.outline||g.poly; let c=areaCentroid(W); if(!TL.pointInRing(c,W)) c=g.c;
-    const a=o.toScr(c); block(g, scr(g), ()=>[a], headCands(g,L), fH);
+    const cs=[c, g.c, ...L.G.filter(w=>w.wing && w.it.id===g.it.id).map(w=>areaCentroid(w.poly))]
+      .filter((p,i,A)=>A.findIndex(q=>Math.hypot(q.x-p.x,q.y-p.y)<1)===i);
+    const A=cs.map(o.toScr); block(g, scr(g), ()=>A, headCands(g,L), fH);
   });
   // 2. Hängeschrank/Dunstabzug: kursiv, an der Wandseite zuerst, dann entlang
   //    der Wand – nie auf der Breite des Unterschranks darunter.
