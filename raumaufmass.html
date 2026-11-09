@@ -7214,6 +7214,13 @@ function topOf(L, g){
   return L.tops.find(t=>!t.island && !t.patch && t.Wf && t.Wf.key===g.Wf.key && t.ids.includes(g.it.id)) || null;
 }
 const frontage=(L, g)=>{ const t=topOf(L,g); return t ? [g.foot||g.poly, t.poly] : [g.foot||g.poly]; };
+// Punkt im Polygon oder höchstens 0,01 mm daneben: auf der Kante zählt als drin. Eine
+// Stichprobe genau auf der Kante einer Querplatte (Spüle mittig, Platte 600 tief)
+// läge sonst in gedrehten Räumen je nach Rauschen davor oder daneben.
+function inPolyTol(p, P){
+  if(TL.pointInRing(p, P)) return true;
+  return P.some((a,i)=>{ const e=sub(P[(i+1)%P.length],a), t=clamp(dot(sub(p,a),e)/(dot(e,e)||1),0,1); return len(sub(p,add(a,mul(e,t))))<=0.01; });
+}
 // Arbeitsfläche zwischen Spüle a und Kochfeld b (Blum: Vorbereitungszone, NKBA
 // Guideline 12): die längste durchgehende Platte zwischen ihren Kanten, ohne
 // Strecken, die andere Spülen oder Kochfelder belegen; Hochschränke, Lücken und
@@ -7237,7 +7244,9 @@ function prepBetween(L, a, b){
     const out=[]; iv.forEach(s=>{ const l=out[out.length-1]; if(l && s[0]<=l[1]+1) l[1]=Math.max(l[1],s[1]); else out.push([s[0],s[1]]); });
     return out; };
   // Spülen und Kochfelder belegen die Platte (die Spülmaschine liegt darunter).
-  const occ=Wf=>{ const d=depthOf(Wf); return L.G.filter(h=>!h.free && !h.wing && h.it.kind==='base' && (h.it.dev==='sink' || h.it.dev==='hob')).map(h=>span(h.poly,Wf,d)).filter(Boolean); };
+  // An der eigenen Wand zählen die exakten Maße s0/s1: eine Projektion des
+  // Polygons liegt in gedrehten Räumen um 1e-11 daneben und kürzte genau 900 auf 899,99….
+  const occ=Wf=>{ const d=depthOf(Wf); return L.G.filter(h=>!h.free && !h.wing && h.it.kind==='base' && (h.it.dev==='sink' || h.it.dev==='hob')).map(h=>h.Wf.key===Wf.key ? [h.s0,h.s1] : span(h.poly,Wf,d)).filter(Boolean); };
   // Stücke der Platte in [lo,hi] ohne die belegten Strecken.
   const pieces=(Wf, lo, hi)=>{ let segs=[]; cover(Wf).forEach(([c0,c1])=>{ const x0=Math.max(c0,lo), x1=Math.min(c1,hi); if(x1-x0>0) segs.push([x0,x1]); });
     occ(Wf).forEach(([o0,o1])=>{ const nx=[]; segs.forEach(([x0,x1])=>{ if(o1<=x0 || o0>=x1){ nx.push([x0,x1]); return; } if(o0>x0) nx.push([x0,o0]); if(o1<x1) nx.push([o1,x1]); }); segs=nx; });
@@ -7643,13 +7652,14 @@ function check(E, K, L){
       const s0=add(p, mul(sub(q,p),t)), s=add(s0, mul(g.n,ov)), probe=add(s0,mul(g.n,2));
       // Teil der Front, vor dem direkt ein anderes Teil steht (Blindecke):
       // dort ist kein Gang - das meldet die Eckprüfung.
-      if(L.G.some(h=>h!==g && h.it.kind!=='wall' && TL.pointInRing(probe,h.foot||h.poly))) continue;
+      if(L.G.some(h=>h!==g && h.it.kind!=='wall' && inPolyTol(probe,h.foot||h.poly))) continue;
       // Der Gang: von der Plattenkante bis zur Kante gegenüber (Platte, Korpus,
       // Wand). Liegt die Plattenkante schon in einem anderen Teil samt Platte
       // (ein Strahl begänne darin): bei einer Querzeile ist das die Blindecke,
-      // sonst stoßen die Kanten aneinander – kein Gang.
-      const cross=h=>Math.abs(dot(g.n,h.n))<0.7, pt=add(s,mul(g.n,2));
-      const inn=L.G.filter(h=>h!==g && h.it.kind!=='wall' && frontage(L,h).some(P=>TL.pointInRing(pt,P)));
+      // sonst (auch bei Insel und Tisch, die quer stehen können) stoßen die
+      // Kanten aneinander – kein Gang, 0 mm.
+      const cross=h=>!h.free && !g.free && Math.abs(dot(g.n,h.n))<0.7, pt=add(s,mul(g.n,2));
+      const inn=L.G.filter(h=>h!==g && h.it.kind!=='wall' && frontage(L,h).some(P=>inPolyTol(pt,P)));
       if(inn.some(cross)) continue;
       let tc=0;
       if(!inn.length){
@@ -7658,10 +7668,13 @@ function check(E, K, L){
           const r=rayPoly(o1,g.n,tp.poly); if(r!=null && r<tc){ tc=r; hit=h; } });
         // Knapp vor einer Querzeile (Passblende in der Innenecke): Blindecke, kein
         // Gang. Der Abstand zählt ab der Korpusfront (tc + ov), wie bisher.
-        if(tc+ov<300 && hit && !hit.free && !g.free && cross(hit)) continue;
+        if(tc+ov<300 && hit && cross(hit)) continue;
       }
       min=Math.min(min, tc); }
     if(!(w>0) || !isFinite(min)) return;
+    // Verglichen wird, was die Meldung zeigt (ganze mm): in gedrehten Räumen
+    // liegt ein Strahl um 1e-9 neben dem Sollwert, „900 mm“ dürfte nicht rot sein.
+    min=mm(min);
     // NKBA Guideline 6: Arbeitsgang 42″ (1067) für eine Person, 48″ (1219)
     // für mehrere Köche.
     if(min<900) add_('bad',[g.it.id], `Vor ${nameOf(g.it)} nur ${mm(min)} mm Platz (Gang mind. 900, empfohlen ${S.persons>=2?1219:1200})`, g.frontMid);
@@ -7673,7 +7686,7 @@ function check(E, K, L){
     const sides=tableSides(g,E,L);
     if(!sides.some(s=>s.seats>0)) add_('warn',[g.it.id], `Tisch: an keiner Seite Platz für einen Stuhl (mind. ${SEAT_ROOM} mm)`, g.c);
     sides.filter(s=>s.seats>0).forEach(s=>{
-      const t=s.room;
+      const t=mm(s.room);
       if(t<750) add_('bad',[g.it.id], `Tisch: hinter den Stühlen nur ${mm(t)} mm (mind. 750, NKBA 813)`, s.mid);
       else if(t<813) add_('warn',[g.it.id], `Tisch: hinter den Stühlen ${mm(t)} mm – NKBA 813, zum Vorbeigehen 1118`, s.mid);
     });
@@ -7685,14 +7698,16 @@ function check(E, K, L){
   G.filter(g=>g.bar>0).forEach(g=>{
     const [a,b]=g.foot, ab=sub(b,a), l2=dot(ab,ab), dir=mul(g.n,-1);
     const obs=[]; L.G.forEach(h=>{ if(h!==g && h.it.kind!=='wall') frontage(L,h).forEach(P=>obs.push(P)); });
-    const us=[1/Math.sqrt(l2), 1-1/Math.sqrt(l2)], addU=v=>{ const u=dot(sub(v,a),ab)/l2; if(u>0 && u<1) us.push(u); };
+    // Ecken näher als 1 mm am Kantenende zählen nicht (die Endstellen liegen schon 1 mm innen):
+    // ein bündig angrenzender Schrank steht nicht hinter dem letzten Platz, Rauschen entschiede sonst.
+    const e1=1/Math.sqrt(l2), us=[e1, 1-e1], addU=v=>{ const u=dot(sub(v,a),ab)/l2; if(u>e1 && u<1-e1) us.push(u); };
     obs.forEach(P=>P.forEach(addU)); TL.ringsOf(E.ring).forEach(R=>R.forEach(addU));
     let t=Infinity, m=mul(add(a,b),0.5);
     us.forEach(u=>{ const pu=add(a,mul(ab,u)), o=add(pu, mul(dir,-2)); let tu=Infinity;
       const r=TL.rayToRing(E.ring, o, dir); if(r) tu=r.t-2;
       obs.forEach(P=>{ const x=rayPoly(o,dir,P); if(x!=null && x-2<tu) tu=x-2; });
       if(tu<t){ t=tu; m=pu; } });
-    t=Math.max(0,t);
+    t=Math.max(0,mm(t));
     if(t<750) add_('bad',[g.it.id], `Tresen: hinter den Hockern nur ${mm(t)} mm (mind. 750, NKBA 813)`, m);
     else if(t<813) add_('warn',[g.it.id], `Tresen: hinter den Hockern ${mm(t)} mm – NKBA 813, zum Vorbeigehen 1118`, m);
   });
@@ -7749,10 +7764,11 @@ function check(E, K, L){
   });
   if(snk.length && hbs.length){
     // Arbeitsfläche = durchgehende Platte zwischen beiden (auch über Eck). Teile
-    // auf der Insel und nicht benachbarte Wände lassen sich nicht messen: dann kein Befund.
-    let best=null, unk=false;
-    snk.forEach(s=>hbs.forEach(h=>{ const m=prepBetween(L,s,h); if(m==null) unk=true; else if(!best || m>best.m) best={m, s, h}; }));
-    if(best && !unk && best.m<900) add_('warn',[best.s.it.id,best.h.it.id], `Zwischen Spüle und Kochfeld ${mm(best.m)} mm Arbeitsfläche – Blum/NKBA: mind. 900 mm`, centroid([best.s.c,best.h.c]));
+    // auf der Insel und nicht benachbarte Wände lassen sich nicht messen und
+    // zählen nicht: gewertet wird das beste messbare Paar (gibt es keins, kein Befund).
+    let best=null;
+    snk.forEach(s=>hbs.forEach(h=>{ const m=prepBetween(L,s,h); if(m!=null && (!best || m>best.m)) best={m, s, h}; }));
+    if(best && mm(best.m)<900) add_('warn',[best.s.it.id,best.h.it.id], `Zwischen Spüle und Kochfeld ${mm(best.m)} mm Arbeitsfläche – Blum/NKBA: mind. 900 mm`, centroid([best.s.c,best.h.c]));
   }
   frs.forEach(fridge=>{
     // Griffseite gegenüber der Angel, in Wandrichtung ausgedrückt
@@ -7766,13 +7782,16 @@ function check(E, K, L){
   if(snk.length && hbs.length && frs.length){
     // NKBA Guideline 3 nennt metrisch selbst 7,9 m und je Schenkel 1,2 bis 2,7 m.
     // Gibt es mehrere Geräte, zählt die Kombination mit den wenigsten Verstößen.
-    const st=g=>g.frontMid, mf=x=>(x/1000).toFixed(2).replace('.',','); let best=null;
+    // Verglichen wird, was die Meldung zeigt (10 mm): sonst stünde „2,70 m (zu lang)“
+    // neben der Grenze 2,7, und in gedrehten Räumen liegt ein Schenkel um 1e-11 über dem Sollwert.
+    // Genau halbe 10 mm (2705) runden nach unten, auch bei 2705,00000000001.
+    const st=g=>g.frontMid, cm=x=>Math.round((x-0.01)/10)*10, mf=x=>(cm(x)/1000).toFixed(2).replace('.',','), lo=x=>cm(x)<1200, hi=x=>cm(x)>2700; let best=null;
     snk.forEach(s=>hbs.forEach(h=>frs.forEach(f=>{
-      const a=len(sub(st(s),st(h))), b=len(sub(st(h),st(f))), c=len(sub(st(f),st(s))), sum=a+b+c, n=[a,b,c].filter(x=>x<1200||x>2700).length+(sum>7900?1:0);
-      if(!best || n<best.n || (n===best.n && sum<best.sum)) best={s,h,f,a,b,c,sum,n}; })));
+      const a=len(sub(st(s),st(h))), b=len(sub(st(h),st(f))), c=len(sub(st(f),st(s))), sum=a+b+c, n=[a,b,c].filter(x=>lo(x)||hi(x)).length+(cm(sum)>7900?1:0);
+      if(!best || n<best.n || (n===best.n && sum<best.sum-0.5)) best={s,h,f,a,b,c,sum,n}; })));
     // Schenkel mit zwei Nachkommastellen und dem Verstoß benannt: „2,72“ neben der Grenze 2,7 war nicht zu deuten.
-    const leg=(nm,x)=>`${nm} ${mf(x)} m${x<1200?' (zu kurz)':x>2700?' (zu lang)':''}`;
-    if(best.n) add_('warn',[best.s.it.id,best.h.it.id,best.f.it.id], `Arbeitsdreieck ${mf(best.sum)} m${best.sum>7900?' (zu lang)':''} – Schenkel ${leg('Spüle–Kochfeld',best.a)}, ${leg('Kochfeld–Kühlschrank',best.b)}, ${leg('Kühlschrank–Spüle',best.c)} – NKBA: Summe ≤ 7,9 m, je Schenkel 1,2–2,7 m`, centroid([st(best.s),st(best.h),st(best.f)]));
+    const leg=(nm,x)=>`${nm} ${mf(x)} m${lo(x)?' (zu kurz)':hi(x)?' (zu lang)':''}`;
+    if(best.n) add_('warn',[best.s.it.id,best.h.it.id,best.f.it.id], `Arbeitsdreieck ${mf(best.sum)} m${cm(best.sum)>7900?' (zu lang)':''} – Schenkel ${leg('Spüle–Kochfeld',best.a)}, ${leg('Kochfeld–Kühlschrank',best.b)}, ${leg('Kühlschrank–Spüle',best.c)} – NKBA: Summe ≤ 7,9 m, je Schenkel 1,2–2,7 m`, centroid([st(best.s),st(best.h),st(best.f)]));
   }
   // Doppelte Meldungen (über Eck) zusammenfassen
   const byKey=new Map();
@@ -24823,6 +24842,56 @@ globalThis.selfChecks=function(){
           has(tri([0,2720,1360]),/Schenkel Spüle–Kochfeld 2,72 m \(zu lang\), Kochfeld–Kühlschrank 1,36 m, Kühlschrank–Spüle 1,36 m – NKBA: Summe ≤ 7,9 m, je Schenkel 1,2–2,7 m/,'warn'));
         chk('kueche-pruef: Arbeitsdreieck – Schenkel 2700 und 1200 mm (NKBA 2,7 und 1,2 m) bleiben ohne Befund', !has(tri([0,2700,1350]),/Arbeitsdreieck/) && !has(tri([0,2400,1200]),/Arbeitsdreieck/));
         chk('kueche-pruef: Arbeitsdreieck – zu kurzer Schenkel (0,9 m) wird benannt', has(tri([0,1500,2100]),/Kochfeld–Kühlschrank 0,60 m \(zu kurz\)/,'warn'));
+      }
+      {
+        // Nachtrag nach der Gegenprüfung: freie Teile quer zur Zeile, Grenzwerte in gedrehten Räumen
+        // (Wände schief, Koordinaten mit Nachkommastellen: dort liegt ein gemessener Wert um 1e-11 neben dem Sollwert),
+        // Spüle–Kochfeld mit mehreren Paaren, Wahl der Dreieck-Kombination bei Gleichstand.
+        const rotE=(w,h,deg)=>{ const a=deg*Math.PI/180, cs=Math.cos(a), sn=Math.sin(a), r=rect(w,h);
+          return KX.makeEnv(r.pts.map(p=>({id:p.id, x:p.x*cs-p.y*sn+1234.5, y:p.x*sn+p.y*cs-777.7})), r.walls, [], []); };
+        const row=(id,x,w)=>({id,kind:'base',a:'A',b:'B',x,w}), sk=(id,x)=>({id,kind:'base',dev:'sink',a:'A',b:'B',x,w:600}), hb=x=>({id:2,kind:'base',dev:'hob',a:'A',b:'B',x,w:600});
+        // Plattenkante der Zeile steht 20 mm vor dem Korpus; Insel/Tisch quer (90°) 10 mm vor dem Korpus liegt darin.
+        const quer=(kind,gap)=>lay2(mkE(4000,3000),[row(1,1000,1200), kind==='island' ? {id:2,kind:'island',x:1600,y:580+gap+600,rot:90,w:1200,d:600} : {id:2,kind:'table',x:1600,y:580+gap+800,rot:90,w:1600,d:800}]).F;
+        chk('kueche-pruef: Gang – Insel quer (90°) 10 mm vor dem Korpus, in der Plattenkante der Zeile: rot, nicht still', has(quer('island',10),/Vor Unterschrank 120 nur \d{1,2} mm Platz/,'bad'));
+        chk('kueche-pruef: Gang – Tisch quer (90°) 10 mm vor dem Korpus, in der Plattenkante der Zeile: rot, nicht still', has(quer('table',10),/Vor Unterschrank 120 nur \d{1,2} mm Platz/,'bad'));
+        // Spüle–Kochfeld genau 900 mm
+        const zw=(deg,items)=>has(lay2(rotE(5000,3000,deg),items).F,/Zwischen Spüle und Kochfeld/);
+        chk('kueche-pruef: Spüle – 900er – Kochfeld im gedrehten Raum (17°, 133°, 0,5°): genau 900 mm Platte sind genug, 899 mm werden gemeldet',
+          [17,133,0.5].every(d=>!zw(d,[sk(1,0),row(3,600,900),hb(1500)]) && !zw(d,[sk(1,0),row(3,600,450),row(4,1050,450),hb(1500)]) && zw(d,[sk(1,0),row(3,600,899),hb(1499)])));
+        const lr=deg=>lay2(rotE(4000,3000,deg),[sk(1,2800),row(3,3400,600),{id:4,kind:'base',a:'B',b:'C',x:600,w:300},{id:2,kind:'base',dev:'hob',a:'B',b:'C',x:900,w:600}]).F;
+        chk('kueche-pruef: L-Küche im gedrehten Raum (0,5°, 1°, 2,5°): die Platte läuft genau 900 mm um die Ecke – keine Meldung', [0.5,1,2.5].every(d=>!has(lr(d),/Zwischen Spüle/)));
+        // Gang, Tresen, Tisch an ihren Grenzen
+        const gr=(H,deg)=>lay2(rotE(4000,H,deg),[row(1,1000,1200),{id:2,kind:'base',a:'C',b:'D',x:1000,w:1200}]).F;
+        chk('kueche-pruef: Gang im gedrehten Raum (17°): genau 1200 mm sind genug, 900 mm sind gelb und nicht rot',
+          !has(gr(2401,17),/Gang vor|nur \d+ mm Platz/) && !has(gr(2101,17),/nur \d+ mm Platz/,'bad') && has(gr(2101,17),/Gang vor Unterschrank 120 900 mm/,'warn'));
+        const bar750=deg=>lay2(rotE(4000,3000,deg),[{id:1,kind:'island',x:2000,y:1500,rot:180,w:1800,d:900,bar:300}]).F;
+        const tab750=deg=>lay2(rotE(4000,3000,deg),[{id:1,kind:'table',x:2000,y:1850,rot:0,w:1600,d:800}]).F;
+        chk('kueche-pruef: Tresen und Tisch – genau 750 mm hinter Hockern und Stühlen sind im gedrehten Raum (17°, 90°, 133°) gelb, nicht rot',
+          [17,90,133].every(d=>has(bar750(d),/Tresen: hinter den Hockern 750 mm/,'warn') && !has(bar750(d),/Tresen: hinter den Hockern nur/) && has(tab750(d),/Tisch: hinter den Stühlen 750 mm/,'warn') && !has(tab750(d),/Tisch: hinter den Stühlen nur/)));
+        // Arbeitsdreieck an den Grenzen: Anzeige und Urteil beziehen sich auf dieselben 10 mm
+        const tri3=(deg,xs)=>lay2(rotE(8000,4000,deg),[{id:1,kind:'base',dev:'sink',a:'A',b:'B',x:xs[0],w:600},{id:2,kind:'base',dev:'hob',a:'A',b:'B',x:xs[1],w:600},{id:3,kind:'tall',dev:'fridge',a:'A',b:'B',x:xs[2],w:600}]).F;
+        chk('kueche-pruef: Arbeitsdreieck im gedrehten Raum (17°): Schenkel 2700 und 1200 mm ohne Befund',
+          !has(tri3(17,[0,2700,1350]),/Arbeitsdreieck/) && !has(tri3(17,[0,2400,1200]),/Arbeitsdreieck/));
+        chk('kueche-pruef: Arbeitsdreieck – Schenkel 2704 mm zählt als „2,70 m“ ohne Befund, 2706 mm steht als „2,71 m (zu lang)“',
+          !has(tri3(0,[0,2704,1352]),/Arbeitsdreieck/) && has(tri3(0,[0,2706,1353]),/Schenkel Spüle–Kochfeld 2,71 m \(zu lang\)/,'warn'));
+        chk('kueche-pruef: Arbeitsdreieck – Schenkel genau 2705 mm (halbe 10 mm) zählt als „2,70 m“ in jedem Winkel, nicht mal so, mal so',
+          [0,17,133,271,0.5].every(d=>!has(tri3(d,[0,2705,1350]),/Arbeitsdreieck/)));
+        // Stichprobe vor der Spüle genau auf der Kante der Platte der Querzeile (Platte 600 tief, Spüle 600 breit, 300 vor der Ecke):
+        // dort ist die Blindecke, in jedem Winkel, nicht mal Gang „1109 mm“
+        const kante=deg=>lay2(rotE(4500,3500,deg),[{id:1,kind:'base',dev:'sink',a:'A',b:'B',x:3600,w:600},row(2,4200,300),{id:3,kind:'base',a:'B',b:'C',x:660,w:450},{id:4,kind:'base',dev:'hob',a:'B',b:'C',x:1110,w:600}]).F;
+        chk('kueche-pruef: Gang – Spüle mittig vor der Plattenkante der Querzeile: in jedem Winkel dieselbe Blindecke, kein Gang „1109 mm“', [0,17,133,271,0.5].every(d=>!has(kante(d),/Vor Spüle|Gang vor Spüle/)));
+        // Schrank bündig am Ende der Hockerkante steht nicht hinter dem letzten Platz (Insel bis x 2900, Schrank ab x 2900)
+        const buend=deg=>lay2(rotE(4500,3000,deg),[{id:1,kind:'island',x:2000,y:1486,rot:180,w:1800,d:900,bar:250},{id:2,kind:'base',a:'C',b:'D',x:1000,w:600}]).F;
+        chk('kueche-pruef: Tresen – Schrank bündig am Ende der Hockerkante: in jedem Winkel kein Befund (nicht „nur 214 mm“)', [0,17,133,271,0.5].every(d=>!has(buend(d),/Tresen/)));
+        // zwei gleichwertige Spülen (gleiche Summe, andere Schenkel zu kurz): im gedrehten Raum nicht anders gewählt
+        const gl=deg=>lay2(rotE(8000,4000,deg),[{id:1,kind:'tall',dev:'fridge',a:'A',b:'B',x:0,w:600,hinge:'left'},hb(2400),sk(3,1000),sk(4,1400)]).F.filter(f=>/Arbeitsdreieck/.test(f.txt)).map(f=>f.txt);
+        chk('kueche-pruef: Arbeitsdreieck – zwei gleichwertige Spülen: die Anzeige bleibt im gedrehten Raum (133°, 167°) dieselbe', gl(0).length===1 && [133,167].every(d=>gl(d).join()===gl(0).join()));
+        // Spüle–Kochfeld mit mehreren Paaren: Insel-Spüle zählt nicht, jedes messbare Paar kann genügen
+        const zs=items=>{ const f=lay2(mkE(4000,3000),items).F.find(x=>/Zwischen Spüle und Kochfeld/.test(x.txt)); return f ? f.txt : null; };
+        chk('kueche-pruef: zwei Spülen – die auf der Insel ist nicht messbar und zählt nicht: die Wandspüle direkt neben dem Kochfeld wird gemeldet (0 mm)',
+          /Zwischen Spüle und Kochfeld 0 mm/.test(zs([sk(1,0),hb(600),{id:5,kind:'island',dev:'sink',x:2000,y:1800,rot:0,w:1200,d:900}]) || ''));
+        chk('kueche-pruef: zwei Spülen an der Wand – ist eine mit 900 mm Platte vom Kochfeld getrennt, bleibt es still, auch wenn die andere daneben steht',
+          zs([sk(1,0),hb(600),row(3,1200,900),sk(5,2100)])===null);
       }
     }catch(err){ chk('kueche: Rest-Fix pruef ohne Ausnahme ('+err.message+')', false); }
     //
