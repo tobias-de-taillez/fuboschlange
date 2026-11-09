@@ -8948,11 +8948,13 @@ function planLabels(L, o){
 // Stationsetikett der Wege (Rollen an einem Punkt q, Bildschirm). Gegenprüfung:
 // war rechts/links/oben/unten nichts frei, stand der kurze Text erzwungen
 // rechts – über anderen Stationen, Maßzahlen (Klick traf das Maß) und der
-// Eingangs-Pille. Jetzt in Ringen (7 … 90 px) und 16 Richtungen, voller
-// Text vor dem kurzen (je Rolle das erste Wort); ab 28 px mit
-// Führungslinie (lead: Punkt am Kasten). Nur wenn nirgends frei ist, der kurze
-// Text an der am wenigsten überdeckten Stelle, die kein hartes Rechteck
-// (hard: Eingang, anklickbares Maß, Stationspunkt) berührt – forced.
+// Eingangs-Pille. Jetzt in Ringen (7 … 90 px) und 64 Richtungen (je Ring
+// zuerst die 16 Hauptrichtungen, dann die dazwischen: ein freier Platz nahe am
+// Punkt ist so fast immer da), voller Text vor dem kurzen (je Rolle das erste
+// Wort); ab 28 px mit Führungslinie (lead: Punkt am Kasten, meist der nächste).
+// Nur wenn nirgends frei ist, der kurze Text an der am wenigsten überdeckten
+// Stelle, die kein hartes Rechteck (hard: Eingang, anklickbares Maß,
+// Stationspunkt) berührt – forced.
 // o={dpr, measure, skip (Rollen ohne eigenes Etikett, z. B. 'eingang', wenn
 // die Pille gezeichnet ist), view {w,h} (Leinwand)}. null: nichts zu schreiben.
 function stationLabel(LP, q, roles, o){
@@ -8961,17 +8963,19 @@ function stationLabel(LP, q, roles, o){
   const full=rs.map(r=>ROLE_LABEL[r]||r).join(' · '), short=rs.map(r=>(ROLE_LABEL[r]||r).split(/[ ,]/)[0]).join(' · ');
   const V=o.view, onView=r=>!V || (r.x>=0 && r.y>=0 && r.x+r.w<=V.w && r.y+r.h<=V.h);
   // Ring k: Kasten so, dass seine Ausdehnung in Richtung a um gap neben q
-  // beginnt (wie dimLabel); erst die vier Seiten, dann Schrägen, dann dazwischen.
-  const GAP=[7,16,28,44,64,90], DIR=[0,180,270,90,315,45,225,135,337.5,22.5,202.5,157.5,292.5,67.5,247.5,112.5];
+  // beginnt (wie dimLabel); erst die vier Seiten, dann Schrägen, dann dazwischen
+  // (D16 in Rangfolge, danach dieselbe Folge um 11,25°, 5,625° und 16,875° gedreht).
+  const GAP=[7,16,28,44,64,90], D16=[0,180,270,90,315,45,225,135,337.5,22.5,202.5,157.5,292.5,67.5,247.5,112.5];
+  const DIR=[...D16, ...D16.map(a=>a+11.25), ...D16.map(a=>a+5.625), ...D16.map(a=>a+16.875)];
   const ring=(t,k,any)=>{ const gap=GAP[k]*dpr, w=o.measure(t,f)+8*dpr;
     return DIR.map(a=>{ const dx=Math.cos(a*Math.PI/180), dy=Math.sin(a*Math.PI/180), e=gap+(Math.abs(dx)*w+Math.abs(dy)*h)/2;
       return {x:q.x+dx*e-w/2, y:q.y+dy*e-h/2, w, h, txt:t, k}; }).filter(r=>any || onView(r)); };
   // Nah zuerst: voll in den ersten beiden Ringen, dann kurz; weiter außen je Ring voll, kurz.
   const K=GAP.map((g,k)=>k), T=short!==full ? [[full,0],[full,1],[short,0],[short,1], ...K.slice(2).flatMap(k=>[[full,k],[short,k]])] : K.map(k=>[full,k]);
-  const all=T.flatMap(([t,k])=>ring(t,k));
   // Weit abgesetzt (Ring ≥ 2): bevorzugt ein Platz, dessen Führungslinie durch
-  // kein belegtes Rechteck läuft (Maßzahl, Teil-Etikett, andere Station) und
-  // der keine schon gezogene Linie (LP.leads) schneidet. Sonst wie bisher.
+  // kein belegtes Rechteck läuft (Maßzahl, Teil-Etikett, andere Station), keine
+  // schon gezogene Linie (LP.leads) kreuzt und nicht durch deren Kasten läuft.
+  // Gibt es keinen, der mit den wenigsten Kreuzungen (erst Rechtecke, dann Linien).
   const leadAt=r=>({x:Math.min(Math.max(q.x, r.x), r.x+r.w), y:Math.min(Math.max(q.y, r.y), r.y+r.h)});
   const leads=LP.leads||(LP.leads=[]), e=1e-3;
   const inR=(p,b)=>p.x>b.x+e && p.x<b.x+b.w-e && p.y>b.y+e && p.y<b.y+b.h-e;
@@ -8980,12 +8984,33 @@ function stationLabel(LP, q, roles, o){
       if(Math.abs(pp)<1e-9){ if(qq<0) return false; continue; }
       const t=qq/pp; if(pp<0){ if(t>t1) return false; if(t>t0) t0=t; } else { if(t<t0) return false; if(t<t1) t1=t; } }
     return t1-t0>1e-6; };
-  // Kreuzungen der Linie (nahe Plätze: 0, unverändert in ihrer Reihenfolge).
-  const nX=c=>{ if(c.k<2) return 0; const z=leadAt(c);
-    return leads.filter(([a,b])=>segHits(a,b,c)).length + LP.rects.filter(b=>!inR(q,b) && segHits(q,z,b)).length; };
-  // Ohne saubere Linie: unter den freien Plätzen der mit den wenigsten Kreuzungen.
-  const X=all.filter(c=>LP.free(c)).map((c,i)=>({c, n:nX(c), i})).sort((a,b)=>a.n-b.n || a.i-b.i);
-  let r=X.length ? LP.occupy(X[0].c) : null, forced=false;
+  // Zwei Strecken kreuzen sich echt (Endpunkte und Berührung zählen nicht).
+  const cr=(o,a,b)=>(a.x-o.x)*(b.y-o.y)-(a.y-o.y)*(b.x-o.x);
+  const cross=(a,b,c,d)=>cr(c,d,a)*cr(c,d,b)<0 && cr(a,b,c)*cr(a,b,d)<0;
+  const dist=z=>Math.hypot(z.x-q.x, z.y-q.y);
+  const EDGE=[[0,0],[.25,0],[.5,0],[.75,0],[1,0],[0,1],[.25,1],[.5,1],[.75,1],[1,1],[0,.25],[0,.5],[0,.75],[1,.25],[1,.5],[1,.75]];
+  // Linie zum Kasten c: Ansatz am nächsten Punkt; kreuzt sie etwas, zählt auch
+  // ein anderer Randpunkt bis 30 px weiter weg, den die Linie von außen erreicht
+  // (sonst lief sie durch eine Maßzahl, obwohl ein Strich daneben frei war).
+  // n: Kreuzungen mit Kästen (belegt, schon gezogene Linie durch c), x: mit
+  // schon gezogenen Linien, z: Ansatzpunkt. Nahe Plätze (Ring < 2): ohne Linie.
+  const nX=c=>{ if(c.k<2) return {n:0, x:0};
+    const z0=leadAt(c), n0=leads.filter(([a,b])=>segHits(a,b,c)).length;
+    const R=LP.rects.filter(b=>!inR(q,b) && b.x<Math.max(q.x,c.x+c.w) && b.x+b.w>Math.min(q.x,c.x) && b.y<Math.max(q.y,c.y+c.h) && b.y+b.h>Math.min(q.y,c.y));
+    const at=z=>({n:n0+R.filter(b=>segHits(q,z,b)).length, x:leads.filter(([a,b])=>cross(q,z,a,b)).length, z});
+    let best=at(z0);
+    if(best.n+best.x>0) EDGE.forEach(([fx,fy])=>{ const z={x:c.x+c.w*fx, y:c.y+c.h*fy};
+      if(dist(z)>dist(z0)+30*dpr || segHits(q,z,c)) return;
+      const m=at(z); if(m.n<best.n || (m.n===best.n && (m.x<best.x || (m.x===best.x && dist(z)<dist(best.z)-1e-6)))) best=m; });
+    return best; };
+  // Der erste freie Platz ohne Kreuzung gewinnt (die Reihenfolge ist die
+  // Rangfolge), sonst der mit den wenigsten.
+  let B=null;
+  for(const [t,k] of T){ for(const c of ring(t,k)){ if(!LP.free(c)) continue;
+      const m={c, ...nX(c)}; if(!B || m.n<B.n || (m.n===B.n && m.x<B.x)) B=m;
+      if(!B.n && !B.x) break; }
+    if(B && !B.n && !B.x) break; }
+  let r=B ? LP.occupy(B.c) : null, forced=false;
   if(!r){
     // Überdeckung je Kandidat: hart zählt wie unendlich, sonst die Fläche.
     const ov=(a,b)=>Math.max(0, Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x))*Math.max(0, Math.min(a.y+a.h,b.y+b.h)-Math.max(a.y,b.y));
@@ -8993,8 +9018,8 @@ function stationLabel(LP, q, roles, o){
     let S=K.flatMap(k=>ring(short,k)); if(!S.length) S=ring(short,0,true);
     r=LP.occupy(S.map(c=>({c, v:cost(c)})).sort((a,b)=>a.v-b.v)[0].c); forced=true;
   }
-  // Führungslinie zum nächsten Punkt des Kastens, wenn er weiter weg steht.
-  const lead=r.k>1 ? leadAt(r) : null;
+  // Führungslinie zum gewählten Randpunkt des Kastens (meist der nächste), wenn er weiter weg steht.
+  const lead=r.k>1 ? ((!forced && B.z) || leadAt(r)) : null;
   if(lead) leads.push([{x:q.x, y:q.y}, lead]);
   return {txt:r.txt, font:f, r, lead, forced};
 }
@@ -24675,7 +24700,45 @@ globalThis.selfChecks=function(){
     //
     // --- Rest-Fix etiketten ---
     try{
-      // TESTS-etiketten
+      // Führungslinien der Stationsetiketten (Nachprüfung der Etiketten-Fixes):
+      // Segment gegen Segment statt nur Kasten, Ansatzpunkt am Kasten wählbar,
+      // dichtere Richtungen. Mess-Stub 0,6 em, kleiner Plan um q=(300,300).
+      const measure=(t,f)=>t.length*f.px*0.6, hits=(a,b,R)=>{ for(let i=0;i<=400;i++){ const t=i/400, x=a.x+(b.x-a.x)*t, y=a.y+(b.y-a.y)*t; if(x>R.x && x<R.x+R.w && y>R.y && y<R.y+R.h) return true; } return false; };
+      const segX=(a,b,c,d)=>{ const cr=(o,p,q)=>(p.x-o.x)*(q.y-o.y)-(p.y-o.y)*(q.x-o.x); return cr(c,d,a)*cr(c,d,b)<0 && cr(a,b,c)*cr(a,b,d)<0; };
+      const q0={x:300,y:300}, o0={dpr:1, measure};
+      const nearD=r=>Math.hypot(Math.min(Math.max(q0.x,r.x),r.x+r.w)-q0.x, Math.min(Math.max(q0.y,r.y),r.y+r.h)-q0.y);
+      const mk=()=>{ const LP=CORE.labelPlacer(); LP.occupy({x:q0.x-5,y:q0.y-5,w:10,h:10,hard:true}); LP.occupy({x:q0.x-26,y:q0.y-26,w:52,h:52}); return LP; };   // Ringe 0/1 gesperrt
+      // Nur ein Gang nach rechts frei (Mitte ±14), links, oben und unten zu.
+      const gang=()=>{ const LP=mk(); LP.occupy({x:0,y:0,w:700,h:q0.y-14}); LP.occupy({x:0,y:q0.y+14,w:700,h:400}); LP.occupy({x:0,y:0,w:q0.x-30,h:700}); return LP; };
+      {
+        // (a) Eine schon gezogene Linie steht senkrecht rechts von q: der Kasten bei 0° wäre frei (die Linie läuft
+        //     nicht hindurch), die Linie zu ihm kreuzte sie aber – stattdessen ein Platz ohne Kreuzung.
+        const LP=mk(), prior=[{x:q0.x+25,y:q0.y-80},{x:q0.x+25,y:q0.y+80}]; LP.leads=[prior];
+        const s=KX.stationLabel(LP,q0,['vorrat'],o0);
+        chk('kueche: Führungslinie kreuzt keine schon gezogene Linie, wenn es einen anderen freien Platz gibt (Segment gegen Segment)',
+          s && !s.forced && s.r.k>=2 && s.lead && !segX(q0,s.lead,prior[0],prior[1]) && !hits(prior[0],prior[1],s.r) && LP.leads.length===2);
+        // Nur ein Gang frei, die Linie muss kreuzen: trotzdem ein Platz (nicht erzwungen).
+        const L2=gang(); L2.leads=[[{x:q0.x+25,y:q0.y-12},{x:q0.x+25,y:q0.y+12}]];
+        const s2=KX.stationLabel(L2,q0,['vorrat'],o0);
+        chk('kueche: Führungslinie – ist jeder Platz gekreuzt, bleibt ein Platz mit nur einer Kreuzung (nicht erzwungen)', s2 && !s2.forced && s2.lead && s2.r.k>=2);
+      }
+      {
+        // (b) Maßzahl genau auf dem Weg zum nächsten Punkt des Kastens, Gang nach rechts: die Linie endet an einer
+        //     anderen Stelle des Kastens und läuft über der Zahl vorbei – früher mitten durch.
+        const LP=gang(), num={x:q0.x+18,y:q0.y-2,w:8,h:4,hard:true}; LP.occupy(num);
+        const s=KX.stationLabel(LP,q0,['vorrat'],o0);
+        const onBox=p=>p.x>=s.r.x-1e-6 && p.x<=s.r.x+s.r.w+1e-6 && p.y>=s.r.y-1e-6 && p.y<=s.r.y+s.r.h+1e-6;
+        chk('kueche: Führungslinie läuft nicht durch eine Maßzahl, wenn ein anderer Randpunkt des Kastens frei erreichbar ist (Ansatzpunkt wählbar)',
+          s && !s.forced && s.lead && onBox(s.lead) && !hits(q0,s.lead,num) && Math.hypot(s.lead.x-q0.x,s.lead.y-q0.y)<=nearD(s.r)+30+1e-6);
+      }
+      {
+        // (c) Dichte Richtungen: ein Gang, in dem nur das Etikett bei 5,6° (zwischen den 16 Hauptrichtungen) frei ist –
+        //     es steht dort ganz nah am Punkt statt erzwungen über einem Hindernis.
+        const LP=CORE.labelPlacer(); LP.occupy({x:q0.x-5,y:q0.y-5,w:10,h:10,hard:true});
+        LP.occupy({x:0,y:0,w:700,h:q0.y-4}); LP.occupy({x:0,y:q0.y+13,w:700,h:400}); LP.occupy({x:0,y:0,w:q0.x-1,h:700});
+        const s=KX.stationLabel(LP,q0,['hob'],o0);
+        chk('kueche: Stationsetikett zwischen den Hauptrichtungen – freier Platz nahe am Punkt statt erzwungen (64 Richtungen)', !!s && !s.forced && s.r.k<=1 && !s.lead);
+      }
     }catch(err){ chk('kueche: Rest-Fix etiketten ohne Ausnahme ('+err.message+')', false); }
     //
   }
