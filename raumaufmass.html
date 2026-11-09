@@ -8982,7 +8982,7 @@ function stationLabel(LP, q, roles, o){
   // Weit abgesetzt (Ring ≥ 2): bevorzugt ein Platz, dessen Führungslinie durch
   // kein belegtes Rechteck läuft (Maßzahl, Teil-Etikett, andere Station), keine
   // schon gezogene Linie (LP.leads) kreuzt und nicht durch deren Kasten läuft.
-  // Gibt es keinen, der mit den wenigsten Kreuzungen (erst Rechtecke, dann Linien).
+  // Gibt es keinen, gilt der Platz mit den wenigsten Kreuzungen (erst Rechtecke, dann Linien).
   const leadAt=r=>({x:Math.min(Math.max(q.x, r.x), r.x+r.w), y:Math.min(Math.max(q.y, r.y), r.y+r.h)});
   const leads=LP.leads||(LP.leads=[]), e=1e-3;
   const inR=(p,b)=>p.x>b.x+e && p.x<b.x+b.w-e && p.y>b.y+e && p.y<b.y+b.h-e;
@@ -9000,8 +9000,9 @@ function stationLabel(LP, q, roles, o){
   // ein anderer Randpunkt bis 30 px weiter weg, den die Linie von außen erreicht
   // (sonst lief sie durch eine Maßzahl, obwohl ein Strich daneben frei war).
   // n: Kreuzungen mit Kästen (belegt, schon gezogene Linie durch c), x: mit
-  // schon gezogenen Linien, z: Ansatzpunkt. Nahe Plätze (Ring < 2): ohne Linie.
-  const nX=c=>{ if(c.k<2) return {n:0, x:0};
+  // schon gezogenen Linien, z: Ansatzpunkt. Nahe Plätze (Ring < 2): ohne eigene
+  // Linie, aber eine schon gezogene Linie darf nicht durch sie laufen.
+  const nX=c=>{ if(c.k<2) return {n:leads.filter(([a,b])=>segHits(a,b,c)).length, x:0};
     const z0=leadAt(c), n0=leads.filter(([a,b])=>segHits(a,b,c)).length;
     const R=LP.rects.filter(b=>!inR(q,b) && b.x<Math.max(q.x,c.x+c.w) && b.x+b.w>Math.min(q.x,c.x) && b.y<Math.max(q.y,c.y+c.h) && b.y+b.h>Math.min(q.y,c.y));
     const at=z=>({n:n0+R.filter(b=>segHits(q,z,b)).length, x:leads.filter(([a,b])=>cross(q,z,a,b)).length, z});
@@ -24745,6 +24746,15 @@ globalThis.selfChecks=function(){
         LP.occupy({x:0,y:0,w:700,h:q0.y-4}); LP.occupy({x:0,y:q0.y+13,w:700,h:400}); LP.occupy({x:0,y:0,w:q0.x-1,h:700});
         const s=KX.stationLabel(LP,q0,['hob'],o0);
         chk('kueche: Stationsetikett zwischen den Hauptrichtungen – freier Platz nahe am Punkt statt erzwungen (64 Richtungen)', !!s && !s.forced && s.r.k<=1 && !s.lead);
+      }
+      {
+        // (d) Eine schon gezogene Linie läuft durch den ersten nahen Platz (rechts neben dem Punkt): das Etikett
+        //     weicht auf einen anderen nahen Platz aus, statt von der fremden Linie durchquert zu werden.
+        const LP=CORE.labelPlacer(); LP.occupy({x:q0.x-5,y:q0.y-5,w:10,h:10,hard:true});
+        const prior=[{x:q0.x+18,y:q0.y-60},{x:q0.x+18,y:q0.y+60}]; LP.leads=[prior];
+        const s=KX.stationLabel(LP,q0,['hob'],o0);
+        chk('kueche: nahes Stationsetikett steht nicht in einer schon gezogenen Führungslinie (Ring 0/1 gegen frühere Linien)',
+          !!s && !s.forced && s.r.k<=1 && !s.lead && !hits(prior[0],prior[1],s.r) && LP.leads.length===1);
       }
       {
         // Schräge Ansicht: passt Kopfzeile + Inhalt nirgends ganz ins Teil, kommt der Inhalt unter die stehende
