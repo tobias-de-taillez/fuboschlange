@@ -8627,11 +8627,14 @@ const devTag=it=>fzOf(it) ? ({fd:'FD', sbs:'SbS'}[it.fz] || (it.dev==='freezer'?
 // Nennmaß in cm: Eck-Hängeschrank mit Korpus 782 heißt „80“ wie Panel und Typ.
 const nomCm=it=>{ const C=it.corner && CORNER[it.kind]; return String((C && C.nominal || {})[Math.round(it.w)] || Math.round(it.w/10)); };
 // Inhalt gestuft: zwei Wörter (+n) → ein Wort +n → nur +n. „ · “ statt Komma,
-// weil die Bezeichnungen selbst Kommas tragen („Töpfe, Pfannen“).
+// weil die Bezeichnungen selbst Kommas tragen („Töpfe, Pfannen“). Bei genau
+// einem Inhalt kein bloßes „+1“ (liest sich als „einer mehr“, Gegenprüfung):
+// passt das Wort nicht, entfällt die Zeile.
 function contentCands(it){
   const names=(it.store||[]).filter(k=>k!=='kuehl').map(k=>(CLABEL[k]||k).split(/[ ,]/)[0]), n=names.length;
   if(!n) return [];
-  const out=[names.slice(0,2).join(' · ')+(n>2?` +${n-2}`:''), names[0]+(n>1?` +${n-1}`:''), `+${n}`];
+  if(n===1) return [names[0]];
+  const out=[names.slice(0,2).join(' · ')+(n>2?` +${n-2}`:''), names[0]+` +${n-1}`, `+${n}`];
   return out.filter((t,i)=>out.indexOf(t)===i);
 }
 // Kopfzeilen, lang → kurz; jede Variante ist eine Liste von Zeilen.
@@ -8673,8 +8676,15 @@ function planLabels(L, o){
   // Rand je Seite 1,5 px: zwei Kästen, die sich berühren, lassen 3 px Luft.
   const pad=3*dpr, box=(t,f,x,y)=>{ const w=o.measure(t,f)+pad, h=lh(f); return {x:x-w/2, y:y-h/2, w, h}; };
   const scr=g=>(g.outline||g.poly).map(o.toScr);
-  const sub=(g,P,s,x,y,f)=>{ const r=box(s,f,x,y);
-    if(rectIn(r,P) && LP.place([r])){ out.push({id:g.it.id, role:'sub', txt:s, font:f, x, y, r}); return true; } return false; };
+  // Kern eines Kastens: nur die Schrift (Breite ohne Rand, Höhe 1 em statt
+  // Zeilenhöhe). Letzte Stufe in schräger Ansicht (Gegenprüfung: bei 30° fiel
+  // „120“ der Insel und „DA“ ganz weg, weil der achsparallele Kasten nicht
+  // ins schräge Teil passt): dann muss nur der Kern im Teil liegen; frei
+  // bleibt der ganze Kasten (LP), r ist dann der Kern.
+  const core=(r,f)=>({x:r.x+pad/2, y:r.y+(r.h-0.8*f.px)/2, w:r.w-pad, h:0.8*f.px});
+  const inP=(r,f,P,tol)=>rectIn(tol ? core(r,f) : r, P);
+  const sub=(g,P,s,x,y,f,tol)=>{ const r=box(s,f,x,y);
+    if(inP(r,f,P,tol) && LP.place([r])){ out.push({id:g.it.id, role:'sub', txt:s, font:f, x, y, r:tol ? core(r,f) : r}); return true; } return false; };
   // Block: Kopfzeilen frei und im Teil; die Inhaltszeile darunter wird nur im
   // Teil freigehalten und erst nach den Hängeschränken belegt. Variante vor
   // Ort: erst jede Stelle für die längste Kopfzeile, dann kürzen – sonst
@@ -8684,21 +8694,24 @@ function planLabels(L, o){
   // sie je Kopfzeile erst ganz (mit, dann ohne Inhalt), bevor er sie überdeckt,
   // und nimmt seinen Inhalt nur, wo der schon jetzt frei ist – sonst stand das
   // „H“ über einem Inhalt, der dann gekürzt wurde oder woanders landete.
-  const RV=C.labelPlacer();
-  const block=(g, P, anchors, heads, f0)=>{
+  const RV=C.labelPlacer(), occ=new Map();   // occ: Etikett → belegter Kasten (für 2c)
+  // tol: letzte Stufe, nur der Kern im Teil (anchors bekommt die Kernmaße).
+  const block=(g, P, anchors, heads, f0, tol)=>{
     const subs=contentCands(g.it), wall=f0===fW, fs=wall ? fWS : fS;
     for(const H of heads) for(const strict of wall ? [true,false] : [false]) for(const s of [...subs, null]){
       const F=H.map((t,i)=>i ? fT : f0), tot=F.reduce((h,f)=>h+lh(f),0)+(s?lh(fs):0);
-      const bw=Math.max(...H.map((t,i)=>o.measure(t,F[i])), s ? o.measure(s,fs) : 0)+pad;
-      const C2=anchors(bw, tot).map(a=>{ let y=a.y-tot/2;
+      const bw=Math.max(...H.map((t,i)=>o.measure(t,F[i])), s ? o.measure(s,fs) : 0)+pad, fl=s ? fs : F[F.length-1];
+      const C2=anchors(tol ? bw-pad : bw, tol ? tot-(lh(F[0])-0.8*F[0].px)/2-(lh(fl)-0.8*fl.px)/2 : tot).map(a=>{ let y=a.y-tot/2;
         const R=H.map((t,i)=>{ const r=box(t,F[i],a.x,y+lh(F[i])/2); y+=lh(F[i]); return r; }), sb=s && box(s,fs,a.x,y+lh(fs)/2);
-        return {a, R, sb, ok:R.every(r=>rectIn(r,P) && LP.free(r)) && (!s || (rectIn(sb,P) && (!wall || (LP.free(sb) && RV.free(sb))))),
+        return {a, R, sb, ok:R.every((r,i)=>inP(r,F[i],P,tol) && LP.free(r)) && (!s || (inP(sb,fs,P,tol) && (!wall || (LP.free(sb) && RV.free(sb))))),
           rv:R.every(r=>RV.free(r))}; });
       const k=C2.find(k=>k.ok && (k.rv || !strict)); if(!k) continue;
-      k.R.forEach((r,i)=>{ LP.occupy(r); out.push({id:g.it.id, role:i ? 'tag' : wall ? 'wall' : 'head', txt:H[i], font:i ? fT : f0, x:k.a.x, y:r.y+r.h/2, r}); });
-      if(s){ if(!wall) RV.occupy(k.sb); pend.push({g, P, x:k.a.x, y:k.sb.y+k.sb.h/2, f:fs, subs:subs.slice(subs.indexOf(s))}); }
-      return;
+      k.R.forEach((r,i)=>{ const l={id:g.it.id, role:i ? 'tag' : wall ? 'wall' : 'head', txt:H[i], font:i ? fT : f0, x:k.a.x, y:r.y+r.h/2, r:tol ? core(r,F[i]) : r};
+        LP.occupy(r); out.push(l); occ.set(l, r); });
+      if(s){ if(!wall) RV.occupy(k.sb); pend.push({g, P, x:k.a.x, y:k.sb.y+k.sb.h/2, f:fs, tol, subs:subs.slice(subs.indexOf(s))}); }
+      return true;
     }
+    return false;
   };
   // Stellen im Hängeschrank für einen Block bw × bh: an der Wandseite zuerst,
   // dann tiefer; entlang Mitte, Drittel und bündig an beiden Enden. Bündig im
@@ -8723,11 +8736,12 @@ function planLabels(L, o){
   //    des Umrisses; liegt der außerhalb, die Korpusmitte).
   //    Eckschrank über Eck: passt der Block dort nicht (Inhalt fiel bei
   //    „Eck 90“ immer weg), auch Korpusmitte und Mitte des Schenkels.
+  const baseA=new Map();
   G.filter(g=>g.it.kind!=='wall').forEach(g=>{
     const W=g.outline||g.poly; let c=areaCentroid(W); if(!TL.pointInRing(c,W)) c=g.c;
     const cs=[c, g.c, ...L.G.filter(w=>w.wing && w.it.id===g.it.id).map(w=>areaCentroid(w.poly))]
       .filter((p,i,A)=>A.findIndex(q=>Math.hypot(q.x-p.x,q.y-p.y)<1)===i);
-    const A=cs.map(o.toScr); block(g, scr(g), ()=>A, headCands(g,L), fH);
+    const A=cs.map(o.toScr); baseA.set(g, ()=>A); block(g, scr(g), ()=>A, headCands(g,L), fH);
   });
   // 2. Hängeschrank/Dunstabzug: kursiv, an der Wandseite zuerst, dann entlang
   //    der Wand – nie auf der Breite des Unterschranks darunter.
@@ -8735,9 +8749,32 @@ function planLabels(L, o){
   G.filter(g=>g.it.kind==='wall').forEach(g=>{
     const A=wallAnchors(g); wallA.set(g, A); block(g, scr(g), A, headCands(g,L), fW);
   });
+  // 2b. Teile ganz ohne Kopfzeile (schräge Ansicht): letzte Stufe mit Kern im
+  //     Teil – erst jetzt, damit kein Nachbar seinen strengen Platz verliert.
+  const has=new Set(out.map(l=>l.id));
+  G.filter(g=>!has.has(g.it.id)).forEach(g=>{ const wall=g.it.kind==='wall';
+    block(g, scr(g), wall ? wallA.get(g) : baseA.get(g), headCands(g,L), wall ? fW : fH, true); });
+  // 2c. Hängeschrank/Dunstabzug weiter ohne Kopfzeile, weil die Breite des
+  //     Unterschranks darunter (Kochfeld „90“, ohne Inhalt) mitten unter ihm
+  //     steht: die Breite rückt an eine andere Stelle ihres Teils (streng),
+  //     wenn dann „DA“ (Kern) daneben passt – sonst bleibt alles wie es war.
+  const drop=ls=>ls.forEach(l=>{ out.splice(out.indexOf(l),1); const i=LP.rects.indexOf(occ.get(l)); if(i>=0) LP.rects.splice(i,1); });
+  G.filter(g=>g.it.kind==='wall' && !out.some(l=>l.id===g.it.id)).forEach(g=>{
+    const hs=G.filter(h=>h.it.kind==='base' && !h.free && h.Wf && g.Wf && h.Wf.key===g.Wf.key && h.s0<g.s1 && g.s0<h.s1 && !contentCands(h.it).length);
+    for(const h of hs){
+      const old=out.filter(l=>l.id===h.it.id); if(!old.length) continue;
+      drop(old);
+      const WA=wallAnchors(h), Ph=scr(h), Pg=scr(g); let ok=false;
+      for(let i=0; i<35 && !ok; i++){ const m=out.length;
+        if(!block(h, Ph, (bw,bh)=>WA(bw,bh).slice(i,i+1), headCands(h,L), fH)) continue;
+        if(block(g, Pg, wallA.get(g), headCands(g,L), fW, true)) ok=true; else drop(out.slice(m)); }
+      if(ok) return;
+      old.forEach(l=>{ out.push(l); LP.occupy(occ.get(l)); });
+    }
+  });
   // 3. Inhalte in den freigehaltenen Platz; stößt er an, kürzer, sonst entfällt er.
   const done=new Set();
-  pend.forEach(p=>{ if(p.subs.some(s=>sub(p.g,p.P,s,p.x,p.y,p.f))) done.add(p.g); });
+  pend.forEach(p=>{ if(p.subs.some(s=>sub(p.g,p.P,s,p.x,p.y,p.f,p.tol))) done.add(p.g); });
   // 4. Hängeschrank-Inhalt, der unter dem „H“ keinen Platz fand (meist über
   //    einem Unterschrank mit eigenem Inhalt): kursiv an einer anderen freien
   //    Stelle des Hängeschranks, sonst fehlte er im Plan ganz (Gegenprüfung).
@@ -8745,16 +8782,41 @@ function planLabels(L, o){
     contentCands(g.it).some(s=>A(o.measure(s,fWS)+pad, lh(fWS)).some(a=>sub(g,P,s,a.x,a.y,fWS))); });
   return {labels:out, LP};
 }
-// Stationsetikett der Wege (Rollen an einem Punkt q, Bildschirm): rechts,
-// links, oben, unten; voller Text, dann je Rolle das erste Wort. Ist nichts
-// frei, steht der kurze rechts – die Stationen des Ablaufs fehlen nie.
+// Stationsetikett der Wege (Rollen an einem Punkt q, Bildschirm). Gegenprüfung:
+// war rechts/links/oben/unten nichts frei, stand der kurze Text erzwungen
+// rechts – über anderen Stationen, Maßzahlen (Klick traf das Maß) und der
+// Eingangs-Pille. Jetzt in Ringen (7 … 90 px) und 16 Richtungen, voller
+// Text vor dem kurzen (je Rolle das erste Wort); ab 28 px mit
+// Führungslinie (lead: Punkt am Kasten). Nur wenn nirgends frei ist, der kurze
+// Text an der am wenigsten überdeckten Stelle, die kein hartes Rechteck
+// (hard: Eingang, anklickbares Maß, Stationspunkt) berührt – forced.
+// o={dpr, measure, skip (Rollen ohne eigenes Etikett, z. B. 'eingang', wenn
+// die Pille gezeichnet ist), view {w,h} (Leinwand)}. null: nichts zu schreiben.
 function stationLabel(LP, q, roles, o){
-  const dpr=o.dpr||1, f={px:PLAN_TXT.sub*dpr, weight:600}, h=16*dpr, gap=7*dpr;
-  const full=roles.map(r=>ROLE_LABEL[r]||r).join(' · '), short=roles.map(r=>(ROLE_LABEL[r]||r).split(/[ ,]/)[0]).join(' · ');
-  const cands=t=>{ const w=o.measure(t,f)+8*dpr;
-    return [{x:q.x+gap, y:q.y-h/2}, {x:q.x-gap-w, y:q.y-h/2}, {x:q.x-w/2, y:q.y-gap-h}, {x:q.x-w/2, y:q.y+gap}].map(r=>({...r, w, h, txt:t})); };
-  const r=LP.place([...cands(full), ...(short!==full ? cands(short) : [])]) || LP.occupy(cands(short)[0]);
-  return {txt:r.txt, font:f, r};
+  const dpr=o.dpr||1, f={px:PLAN_TXT.sub*dpr, weight:600}, h=16*dpr, skip=o.skip||[];
+  const rs=roles.filter(r=>!skip.includes(r)); if(!rs.length) return null;
+  const full=rs.map(r=>ROLE_LABEL[r]||r).join(' · '), short=rs.map(r=>(ROLE_LABEL[r]||r).split(/[ ,]/)[0]).join(' · ');
+  const V=o.view, onView=r=>!V || (r.x>=0 && r.y>=0 && r.x+r.w<=V.w && r.y+r.h<=V.h);
+  // Ring k: Kasten so, dass seine Ausdehnung in Richtung a um gap neben q
+  // beginnt (wie dimLabel); erst die vier Seiten, dann Schrägen, dann dazwischen.
+  const GAP=[7,16,28,44,64,90], DIR=[0,180,270,90,315,45,225,135,337.5,22.5,202.5,157.5,292.5,67.5,247.5,112.5];
+  const ring=(t,k,any)=>{ const gap=GAP[k]*dpr, w=o.measure(t,f)+8*dpr;
+    return DIR.map(a=>{ const dx=Math.cos(a*Math.PI/180), dy=Math.sin(a*Math.PI/180), e=gap+(Math.abs(dx)*w+Math.abs(dy)*h)/2;
+      return {x:q.x+dx*e-w/2, y:q.y+dy*e-h/2, w, h, txt:t, k}; }).filter(r=>any || onView(r)); };
+  // Nah zuerst: voll in den ersten beiden Ringen, dann kurz; weiter außen je Ring voll, kurz.
+  const K=GAP.map((g,k)=>k), T=short!==full ? [[full,0],[full,1],[short,0],[short,1], ...K.slice(2).flatMap(k=>[[full,k],[short,k]])] : K.map(k=>[full,k]);
+  const all=T.flatMap(([t,k])=>ring(t,k));
+  let r=LP.place(all), forced=false;
+  if(!r){
+    // Überdeckung je Kandidat: hart zählt wie unendlich, sonst die Fläche.
+    const ov=(a,b)=>Math.max(0, Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x))*Math.max(0, Math.min(a.y+a.h,b.y+b.h)-Math.max(a.y,b.y));
+    const cost=c=>LP.rects.reduce((s,b)=>{ const a=ov(c,b); return s + (a>1e-3 && b.hard ? 1e9 : a); }, 0);
+    let S=K.flatMap(k=>ring(short,k)); if(!S.length) S=ring(short,0,true);
+    r=LP.occupy(S.map(c=>({c, v:cost(c)})).sort((a,b)=>a.v-b.v)[0].c); forced=true;
+  }
+  // Führungslinie zum nächsten Punkt des Kastens, wenn er weiter weg steht.
+  const lead=r.k>1 ? {x:Math.min(Math.max(q.x, r.x), r.x+r.w), y:Math.min(Math.max(q.y, r.y), r.y+r.h)} : null;
+  return {txt:r.txt, font:f, r, lead, forced};
 }
 // Maßzahl nur, wenn ihr Kasten (w × h) in die Strecke p–q passt: seine
 // Ausdehnung entlang der Strecke, gemessen statt fester Pixelschwelle.
@@ -18752,7 +18814,8 @@ function dimLabel(txt, p, q, col, edit, dpr, LP){
   const cx=r.x+w/2, cy=r.y+hgt/2;
   ctx.fillStyle='rgba(250,249,246,.94)'; ctx.fillRect(r.x, r.y, w, hgt);
   if(edit){ ctx.strokeStyle=col; ctx.lineWidth=1*dpr; ctx.setLineDash([2*dpr,2*dpr]); ctx.strokeRect(r.x+0.5, r.y+0.5, w-1, hgt-1); ctx.setLineDash([]);
-    KS.dimHits.push({x:r.x-3*dpr, y:r.y-3*dpr, w:w+6*dpr, h:hgt+6*dpr, cx, cy, edit}); }
+    const hit={x:r.x-3*dpr, y:r.y-3*dpr, w:w+6*dpr, h:hgt+6*dpr, cx, cy, edit};
+    KS.dimHits.push(hit); LP && LP.occupy({x:hit.x, y:hit.y, w:hit.w, h:hit.h, hard:true}); }   // ganze Klickfläche hart
   ctx.fillStyle=col; ctx.fillText(txt, cx, cy);
 }
 function drawChain(c, dpr, LP){
@@ -18829,7 +18892,7 @@ function drawEntryLabels(c, dpr, LP){
   ctx.save(); ctx.font=kFont({px:KX.PLAN_TXT.sub*dpr, weight:600}); ctx.textAlign='center'; ctx.textBaseline='middle';
   ms.forEach(m=>{
     const q=toScr(m.at), t=m.on ? `Eingang · ${m.txt}` : m.txt, w=ctx.measureText(t).width+12*dpr, h=17*dpr;
-    LP && LP.occupy({x:q.x-w/2, y:q.y-h/2, w, h});
+    LP && LP.occupy({x:q.x-w/2, y:q.y-h/2, w, h, hard:true});   // hart: kein Stationsetikett darüber
     if(m.on){ const p=toScr(m.P), r=toScr(m.Q); ctx.strokeStyle=KINK.grp.ein; ctx.lineWidth=4*dpr; ctx.globalAlpha=.8;
       ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(r.x,r.y); ctx.stroke(); ctx.globalAlpha=1; }
     ctx.fillStyle = m.on ? KINK.grp.ein : 'rgba(250,249,246,.92)';
@@ -18907,11 +18970,20 @@ function drawPaths(c, dpr, LP){
     f.legs.forEach(l=>{ [[l.from,l.path[0]],[l.to,l.path[l.path.length-1]]].forEach(([r,p])=>{ const k=Math.round(p.x)+','+Math.round(p.y); if(!seen.has(k)) seen.set(k,{p,r:new Set()}); seen.get(k).r.add(r); }); });
     // Belegt-Liste des Bilds (Teil-Etiketten liegen schon drin): erst alle
     // Punkte, dann je Station die erste freie Seite (KX.stationLabel).
+    // Punkte sind hart (kein Etikett darüber). Der Eingang hat schon seine
+    // Pille („Eingang · Tür 1“) – kein zweites Etikett, das sie verdeckt.
+    // Erst alle Etiketten setzen, dann Führungslinien, Punkte, Schrift – so
+    // läuft keine Linie durch einen später gesetzten Kasten.
     const lp=LP||globalThis.CORE.labelPlacer(), St=[...seen.values()].map(v=>({...v, q:toScr(v.p)}));
-    St.forEach(({q})=>lp.occupy({x:q.x-5*dpr, y:q.y-5*dpr, w:10*dpr, h:10*dpr}));
+    St.forEach(({q})=>lp.occupy({x:q.x-5*dpr, y:q.y-5*dpr, w:10*dpr, h:10*dpr, hard:true}));
+    const o={dpr, measure:kMeasure, view:{w:cv.width, h:cv.height}, skip:entryMarks(c).some(m=>m.on) ? ['eingang'] : []};
+    const B=St.map(({q,r})=>KX.stationLabel(lp, q, [...r], o));
     ctx.save(); ctx.textAlign='start'; ctx.textBaseline='middle';
-    St.forEach(({q,r})=>{ ctx.beginPath(); ctx.arc(q.x,q.y,4.5*dpr,0,2*Math.PI); ctx.fillStyle=KINK.grp[f.group]; ctx.fill();
-      const b=KX.stationLabel(lp, q, [...r], {dpr, measure:kMeasure});
+    ctx.strokeStyle=INK.wall; ctx.lineWidth=1*dpr; ctx.globalAlpha=0.6;
+    B.forEach((b,i)=>{ if(!b || !b.lead) return; const q=St[i].q; ctx.beginPath(); ctx.moveTo(q.x,q.y); ctx.lineTo(b.lead.x,b.lead.y); ctx.stroke(); });
+    ctx.globalAlpha=1;
+    St.forEach(({q})=>{ ctx.beginPath(); ctx.arc(q.x,q.y,4.5*dpr,0,2*Math.PI); ctx.fillStyle=KINK.grp[f.group]; ctx.fill(); });
+    B.forEach(b=>{ if(!b) return;
       ctx.fillStyle='rgba(250,249,246,.92)'; ctx.fillRect(b.r.x, b.r.y, b.r.w, b.r.h);
       ctx.font=kFont(b.font); ctx.fillStyle=INK.wall; ctx.fillText(b.txt, b.r.x+4*dpr, b.r.y+b.r.h/2); });
     ctx.restore();
@@ -24064,6 +24136,62 @@ globalThis.selfChecks=function(){
           KX.planLabels(L2,{toScr:at(0.0669), dpr:1, measure:mz}).labels.some(l=>l.id===3 && l.txt==='DA'));
       }
     }catch(err){ chk('kueche: Review-Fix beschriftung ohne Ausnahme ('+err.message+')', false); }
+    // --- Review-Fix r2-ui ---
+    // Gegenprüfung (echte Küche): Stationsetiketten standen bei vollem Umfeld
+    // erzwungen rechts über anderen Stationen, Maßzahlen und der Eingangs-
+    // Pille; „Eingang“ doppelt zur Pille; bloßes „+1“; in schräger Ansicht
+    // fielen „120“ (Insel) und „DA“ ganz weg.
+    try{
+      const measure=(t,f)=>t.length*f.px*0.6, ovA=(a,b)=>Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x)>1e-3 && Math.min(a.y+a.h,b.y+b.h)-Math.max(a.y,b.y)>1e-3;
+      {
+        // Haufen wie „Kochen“: drei Stationen dicht beieinander, rechts die
+        // Eingangs-Pille, links ein anklickbares Maß (hart), oben/unten Teil-Etiketten.
+        const LP=CORE.labelPlacer(), Q=[{x:200,y:200},{x:212,y:204},{x:200,y:214}], o={dpr:1, measure};
+        Q.forEach(q=>LP.occupy({x:q.x-5, y:q.y-5, w:10, h:10, hard:true}));
+        [{x:207,y:186,w:130,h:17,hard:true}, {x:96,y:188,w:96,h:24,hard:true}, {x:140,y:160,w:130,h:24}, {x:140,y:228,w:130,h:24}].forEach(r=>LP.occupy(r));
+        const before=LP.rects.slice(), B=[['vorrat','gewuerze'],['hob'],['messer']].map((r,i)=>KX.stationLabel(LP,Q[i],r,o));
+        chk('kueche: Stationsetiketten im Gedränge – keine überdeckt eine andere, einen Punkt, ein Maß oder die Eingangs-Pille (Ringe, 8+ Richtungen)',
+          B.every(b=>b && !before.some(r=>ovA(b.r,r))) && B.every((a,i)=>B.every((b,j)=>j<=i || !ovA(a.r,b.r))) && B.every(b=>!b.forced));
+        chk('kueche: weit abgesetztes Stationsetikett bekommt eine Führungslinie an seinen Kasten',
+          B.every(b=>b && (b.r.k>1) === !!b.lead) && B.some(b=>b.lead) && B.filter(b=>b.lead).every(b=>b.lead.x>=b.r.x-1e-6 && b.lead.x<=b.r.x+b.r.w+1e-6 && b.lead.y>=b.r.y-1e-6 && b.lead.y<=b.r.y+b.r.h+1e-6));
+        // Ganz zugebaut: der kurze Text an der am wenigsten überdeckten Stelle,
+        // nie über einem harten Rechteck (rechts liegt das Maß, früher genau dort).
+        const LZ=CORE.labelPlacer(), q={x:300,y:300};
+        LZ.occupy({x:0, y:0, w:600, h:600}); LZ.occupy({x:306, y:280, w:200, h:40, hard:true});
+        const z=KX.stationLabel(LZ,q,['vorrat','gewuerze'],o);
+        chk('kueche: Stationsetikett ohne freien Platz – kurz, gekennzeichnet, nie über Maß/Pille',
+          z && z.forced && z.txt==='Vorräte · Gewürze' && !ovA(z.r,{x:306, y:280, w:200, h:40}));
+        const LV=CORE.labelPlacer(), v=KX.stationLabel(LV,{x:290,y:150},['vorrat'],{...o, view:{w:300,h:300}});
+        chk('kueche: Stationsetikett bleibt auf der Leinwand (Punkt am rechten Rand)', v && v.r.x>=0 && v.r.x+v.r.w<=300);
+      }
+      {
+        // Eingang: die Pille sagt es schon – kein eigenes Etikett darüber.
+        const LP=CORE.labelPlacer(), o={dpr:1, measure, skip:['eingang']};
+        const a=KX.stationLabel(LP,{x:100,y:100},['eingang'],o), b=KX.stationLabel(LP,{x:300,y:100},['eingang','muell'],o);
+        chk('kueche: Station „Eingang“ ohne eigenes Etikett, wenn die Eingangs-Pille steht (Müll am selben Punkt bleibt)',
+          a===null && b && b.txt==='Müll' && KX.stationLabel(CORE.labelPlacer(),{x:100,y:100},['eingang'],{dpr:1, measure}).txt==='Eingang');
+      }
+      chk('kueche: genau ein Inhalt ohne bloßes „+1“ (Wort oder nichts), ab zwei bleibt „+n“',
+        JSON.stringify(KX.contentCands({store:['besteck']}))==='["Besteck"]'
+        && JSON.stringify(KX.contentCands({store:['messer','toepfe']}))===JSON.stringify(['Messer · Töpfe','Messer +1','+2']));
+      {
+        // Schräge Ansicht (15°-Schritte): Insel 120 und Dunstabzug über Kochfeld.
+        const E6=KX.makeEnv([{id:'A',x:0,y:0},{id:'B',x:4500,y:0},{id:'C',x:4500,y:3500},{id:'D',x:0,y:3500}],[['A','B'],['B','C'],['C','D'],['D','A']],[],[]);
+        const L6=KX.layout(E6,KX.normKitchen({items:[{id:2,kind:'base',dev:'hob',front:'door',w:900,a:'A',b:'B',x:1500},{id:3,kind:'wall',dev:'hood',front:'open',w:900,a:'A',b:'B',x:1500},
+          {id:4,kind:'island',front:'drawer',w:1200,d:600,x:2200,y:2000,rot:0,store:['besteck']}]}));
+        const lab=(s,deg)=>{ const c=Math.cos(deg*Math.PI/180), sn=Math.sin(deg*Math.PI/180), toScr=p=>({x:(p.x*c-p.y*sn)*s+400, y:(p.x*sn+p.y*c)*s+400});
+          return {toScr, A:KX.planLabels(L6,{toScr, dpr:1, measure}).labels}; };
+        const R=[[0.056,30],[0.056,45],[0.054,15],[0.046,30],[0.046,45],[0.042,30],[0.042,45],[0.042,60]].map(([s,d])=>({s, d, ...lab(s,d)}));
+        chk('kueche: schräge Ansicht – „120“ der Insel und „DA“ bleiben stehen (Kern im Teil als letzte Stufe)',
+          R.every(r=>r.A.some(l=>l.id===4 && l.txt==='120')) && R.filter(r=>r.s>0.05).every(r=>r.A.some(l=>l.id===3 && l.txt==='DA' && l.font.italic)));
+        // Dunstabzug über Kochfeld: „90“ stand mitten unter der Haube und ließ
+        // „DA“ keinen Platz – die Breite rückt im Kochfeld beiseite (2c).
+        chk('kueche: schräge Ansicht – „90“ des Kochfelds rückt beiseite, damit „DA“ daneben steht',
+          R.filter(r=>r.s>0.045 && r.s<0.05).every(r=>r.A.some(l=>l.id===3 && l.txt==='DA') && r.A.some(l=>l.id===2 && l.txt==='90')));
+        chk('kueche: schräge Ansicht – dabei keine Überlappung, Schrift im eigenen Teil',
+          R.every(r=>r.A.every((a,i)=>r.A.every((b,j)=>j<=i || !ovA(a.r,b.r))) && r.A.every(l=>{ const g=L6.byId.get(l.id); return KX.rectIn(l.r,(g.outline||g.poly).map(r.toScr)); })));
+      }
+    }catch(err){ chk('kueche: Review-Fix r2-ui ohne Ausnahme ('+err.message+')', false); }
   }
   return {ok, out};
 };
