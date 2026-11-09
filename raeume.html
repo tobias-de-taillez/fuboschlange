@@ -194,15 +194,40 @@ globalThis.RAUMZEILE=(function(){
   const aktiveMasse=d=>(Array.isArray(d.meas) ? d.meas : []).filter(m=>m && m.on!==false).length;
   const flaeche=r=>(r && Number.isFinite(r.area)) ? fmt2(r.area)+' m²' : '';
   // Der Stand, den das Raumaufmaß beim Speichern in den Eintrag schreibt:
-  // stand:{tone:''|'warn'|'good'|'bad', text}.
+  // stand:{tone:''|'warn'|'good'|'bad', text}. text ist der Satz aus dem Panel
+  // des Raumaufmaßes, oft mit einer Handlungsanweisung dahinter („Ein Klick
+  // …“, „Nachmessen …“). In die Zeile gehört nur der Zustand in wenigen
+  // Wörtern: Sätze, die zum Handeln auffordern, fallen weg, vom Rest bleibt
+  // der erste, und die Sätze, die das Raumaufmaß heute schreibt, stehen hier
+  // in Kurzform. Einen Text, den hier niemand kennt, vertritt sein erster Satz.
+  const ANWEISUNG=/Klick|Vorschl[aä]g|[Nn]achmessen/;
+  const KURZ=[
+    [/^Noch keine Ecke$/, 'Noch leer'],
+    [/^(\d+ Ecken?)( gesetzt)?$/, 'Skizze, $1'],
+    [/^(Noch \d+ Maße?), dann ist die Form eindeutig$/, '$1'],
+    [/^Form eindeutig, aber ungeprüft$/, 'Ungeprüft'],
+    [/^(Ein Maß passt nicht) zu den übrigen$/, '$1'],
+    [/^(Mindestens ein Maß ist falsch), größte Abweichung .*$/, '$1'],
+    [/^Die Maße streuen .*$/, 'Maße streuen'],
+    [/^Festgelegte\S* .*pass\S* nicht zusammen.*$/, 'Festgelegtes passt nicht zusammen'],
+    [/^Raum ist offen$/, 'Raum offen'],
+  ];
+  const kurz=text=>{
+    const satz=text.replace(/([.!?])\s+(?=[A-ZÄÖÜ„])/g,'$1\n').split('\n').map(z=>z.replace(/[.!?]+$/,'').trim())
+      .find(z=>z && !ANWEISUNG.test(z)) || '';
+    for(const [re,neu] of KURZ) if(re.test(satz)) return satz.replace(re,neu);
+    return satz;
+  };
   const gespeichert=r=>{
     const s=r && r.stand;
-    if(!s || typeof s!=='object' || typeof s.text!=='string' || !s.text.trim()) return null;
-    return {tone:TOENE.includes(s.tone) ? s.tone : '', text:s.text.trim()};
+    if(!s || typeof s!=='object' || typeof s.text!=='string') return null;
+    const text=kurz(s.text.trim());
+    return text ? {tone:TOENE.includes(s.tone) ? s.tone : '', text} : null;
   };
 
-  // Stand der Zeile: {tone, text}. Gibt es den gespeicherten Stand, gilt er;
-  // bei „geprüft“ steht die Fläche dahinter. Fehlt er (ältere Einträge), sagt
+  // Stand der Zeile: {tone, text}. Gibt es den gespeicherten Stand, gilt er
+  // in Kurzform; bei „geprüft“ steht die Fläche dahinter. Fehlt er (ältere
+  // Einträge) oder bleibt von ihm nur eine Handlungsanweisung übrig, sagt
   // die Zeile nur, was die Daten selbst hergeben - ob ein alter Raum geprüft
   // ist, weiß hier niemand, also behauptet es auch niemand.
   function stand(r){

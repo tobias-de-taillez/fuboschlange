@@ -465,7 +465,7 @@ $('mldSend').onclick=async()=>{
     r=await fetch('bugreport.php',{method:'POST', headers:{'Content-Type':'application/json'}, body, credentials:'same-origin'});
     j=await r.json().catch(()=>null);
   }catch(e){ r=null; }
-  if(r && r.ok && j && j.ok){ fertig(`Danke! Meldung ${j.id} ist angekommen.`); return; }
+  if(r && r.ok && j && j.ok){ fertig(`Danke. Meldung ${j.id} ist angekommen.`); return; }
   sendet=false; $('mldSend').textContent='Senden'; sendSync();
   const live=/(^|\.)irazari-te\.ch$/.test(location.hostname);
   if(!live && (!r || [404,405,501].includes(r.status))){

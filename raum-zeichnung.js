@@ -80,18 +80,27 @@ function roomCentre(P){
 // Raumname in der Raummitte, hell und UNTER allem anderen - so wie in einer
 // Bauzeichnung. Die Diagonalen tragen ihre Masse genau dort; als Wasserzeichen
 // stoert der Name sie nicht. Rueckgabe: Trefferfeld fuers Umbenennen.
-function drawRoomLabel(name, P, dpr, col, px){
+function drawRoomLabel(name, P, dpr, col, px, meiden){
   if(!name || !P.length) return null;
   const s=toScr(roomCentre(P));
+  const y0=s.y;
   // Etwas unter die Mitte: genau dort kreuzen sich die Diagonalen, und deren
   // Massbeschriftung sitzt mit deckendem Kaestchen auf dem Mittelpunkt
   // (browser-gesehen - der Name verschwand komplett darunter).
   s.y += 26*dpr;
   ctx.save();
   ctx.font=`${px*dpr}px system-ui`; ctx.textAlign='center'; ctx.textBaseline='middle';
+  const w=ctx.measureText(name).width;
+  // meiden: Plaetze der Masszahlen an den Waenden. Laege der Name auf einem
+  // davon, weicht er aus - erst ueber die Mitte, dann weiter weg.
+  if(meiden && meiden.length){
+    const h=px*dpr*1.4;
+    const frei=y=>!meiden.some(r=>s.x-w/2<r.x+r.w && s.x+w/2>r.x && y-h/2<r.y+r.h && y+h/2>r.y);
+    const y1=[26,-26,52,-52,78,-78].map(d=>y0+d*dpr).find(frei);
+    if(y1!=null) s.y=y1;
+  }
   ctx.fillStyle=col;
   ctx.fillText(name, s.x, s.y);
-  const w=ctx.measureText(name).width;
   ctx.restore();
   return {x:s.x-w/2, y:s.y-px*dpr*0.7, w, h:px*dpr*1.4};
 }
@@ -128,17 +137,24 @@ function drawGrid(dpr){
 
 // Oben links, nicht unten: unten wohnt die Hinweiszeile, und zwei
 // uebereinandergelegte Textzeilen sind keine.
-function drawScalebar(dpr){
+// grund: mit deckender Flaeche darunter - fuer den Plan mit Nachbarraeumen,
+// deren Waende sonst durch den Massstab laufen.
+function drawScalebar(dpr, grund){
   const step=pickStep(70*dpr);
   const len=step*VIEW.s, x=14*dpr, y=20*dpr;
+  const txt=step>=1000 ? (step/1000)+' m' : step+' mm';
+  ctx.font=`${11*dpr}px system-ui`; ctx.textAlign='left';
+  if(grund){
+    ctx.fillStyle=INK.canvas;
+    ctx.fillRect(x-8*dpr, y-11*dpr, len+ctx.measureText(txt).width+22*dpr, 22*dpr);
+  }
   ctx.strokeStyle=INK.scale; ctx.fillStyle=INK.scale; ctx.lineWidth=1.5*dpr;
   ctx.beginPath();
   ctx.moveTo(x,y); ctx.lineTo(x+len,y);
   ctx.moveTo(x,y-4*dpr); ctx.lineTo(x,y+4*dpr);
   ctx.moveTo(x+len,y-4*dpr); ctx.lineTo(x+len,y+4*dpr);
   ctx.stroke();
-  ctx.font=`${11*dpr}px system-ui`; ctx.textAlign='left';
-  ctx.fillText(step>=1000 ? (step/1000)+' m' : step+' mm', x+len+6*dpr, y+3.5*dpr);
+  ctx.fillText(txt, x+len+6*dpr, y+3.5*dpr);
 }
 
 // Backbuffer nur neu anlegen, wenn sich die Groesse aendert - das Ueberfahren

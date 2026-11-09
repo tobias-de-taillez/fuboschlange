@@ -156,6 +156,7 @@ function modell(quelle){
   const verschiedeneHoehen=new Set(eckHoehen.map(m=>Math.round(m.d))).size>1;
   const lageV=new Map();        // Lagemaß -> Abweichung
   const lageVerdacht=new Set(); // ids der Lagemaße, die nicht passen
+  const lageVersetzt=new Set(); // ids der Lagemaße, auf denen ihre Öffnung nicht liegt
   const waende=wandFolge(C, P, walls, flipVon).map(({a,b,ring})=>{
     const k=schluessel(a,b);
     const L=C.dist(P[I[a]], P[I[b]]);
@@ -176,12 +177,21 @@ function modell(quelle){
       const sh=G.wallShape(P, Mx.hmeas||[], o.a, o.b);
       const r=(sh && G.solveOpening) ? G.solveOpening(sh, o, Mx.opmeas||[]) : null;
       const nx=r?r.x.n:0, ny=r?r.y.n:0;
+      // Liegt die Öffnung nicht, wo ihre Maße sie hinlegen (sie stößt mit einer
+      // anderen zusammen oder passt so nicht in die Wand), stehen in Ansicht
+      // und Maßliste verschiedene Zahlen: als Widerspruch kennzeichnen.
+      const st=(r && G.settleOpening) ? G.settleOpening(sh, o, (Mx.openings||[]).filter(x=>schluessel(x.a,x.b)===k), Mx.opmeas||[]) : null;
+      const versetzt=!!st && (st.stoesst.length>0 || st.wand);
       if(r){
         let ix=0, iy=0;
         r.rows.forEach(row=>{
-          const istX=row.achse==='x', v=istX ? r.x.v[ix++] : r.y.v[iy++], n=istX ? nx : ny;
+          const istX=row.achse==='x', n=istX ? nx : ny;
+          // Lage minus eingemessene Lage: 0, solange die Öffnung auf ihrem Maß liegt.
+          const ab=(istX ? o.x-r.x.wert : o.y-r.y.wert)||0, v=(istX ? r.x.v[ix++] : r.y.v[iy++])+ab;
+          const daneben=versetzt && Math.abs(ab)>0.05;
           // Vorzeichen wie bei den Strecken: ausgeglichener Abstand minus Maß.
-          lageV.set(row.m, n>1 ? ((row.m.edge==='left'||row.m.edge==='bottom') ? v : -v) : null);
+          lageV.set(row.m, (daneben || !(n>1 || Math.abs(ab)>0.05)) ? null : ((row.m.edge==='left'||row.m.edge==='bottom') ? v : -v));
+          if(daneben) lageVersetzt.add(row.m.id);
         });
         r.verdacht.forEach(id=>lageVerdacht.add(id));
       }
@@ -192,7 +202,7 @@ function modell(quelle){
         typ:(sw && TYP[o.kind] && TYP[o.kind][sw.type]) || null,
         x:flip ? shape.L-xa-o.w : xa, xa, y:o.y, w:o.w, h:o.h,
         lage:{seitlich:seitlich?'eingemessen':'geschätzt', hoehe:tuer?'Boden':(ny>0?'eingemessen':'geschätzt')},
-        geschaetzt:!(seitlich && hoehe), widerspruch:!!(r && r.verdacht.size),
+        geschaetzt:!(seitlich && hoehe) || versetzt, versetzt, widerspruch:!!(r && r.verdacht.size),
         // Band von innen gesehen links? hinge 'left' ist die Seite von o.a.
         symbol:sw ? {typ:sw.type, bandLinks:(sw.hinge==='left')===(o.a===links), aussen:!!sw.out} : null });
     });
@@ -247,7 +257,8 @@ function modell(quelle){
     const it=w.ansicht && w.ansicht.oeffnungen.find(x=>x.id===o.id);
     return { a:w.a, b:w.b, nr:it?it.nr:null, art:ART[o.kind]||'Öffnung',
       kante:m.edge==='left' ? 'ab '+o.a : m.edge==='right' ? 'ab '+o.b : m.edge==='bottom' ? 'ab Boden' : 'ab Decke',
-      d:m.d, an:m.on!==false, abw:lageV.has(m) ? lageV.get(m) : null, verdaechtig:lageVerdacht.has(m.id) };
+      d:m.d, an:m.on!==false, abw:lageV.has(m) ? lageV.get(m) : null, verdaechtig:lageVerdacht.has(m.id),
+      widerspruch:lageVersetzt.has(m.id) };
   }).filter(Boolean);
 
   return {
@@ -330,7 +341,7 @@ function standVon(Mx, C, q, sus, eigen){
   if(!ruhig) return S('bad', 'Der Ausgleich kommt nicht zur Ruhe. Das Ergebnis ist nicht belastbar.');
   const act=C.activeMeas(Mx.meas||[]);
   if(act.some((m,i)=>m.fix && Math.abs(an.v[i])>1))
-    return S('bad', 'Festgelegte Werte passen nicht zusammen.');
+    return S('bad', 'Festgelegtes passt nicht zusammen.');
   if(an.dof>0) return S('', `Noch ${an.dof} ${an.dof===1?'Maß':'Maße'}, dann ist die Form eindeutig.`);
   if(red===0){
     let ratio=0, v=0;
@@ -377,14 +388,14 @@ function blattGrundriss(m){
   const hinweis=[];
   // Der Stand im Wortlaut, sofern er mehr sagt als das Feld im Fuß.
   // Sätze, die nur am Bildschirm etwas bedeuten (Klick, Vorschläge), bleiben weg.
-  const aufPapier=s.text ? s.text.split(/(?<=\.)\s+/).filter(z=>!/Klick|Vorschläge/.test(z)).join(' ') : '';
+  const aufPapier=s.text ? s.text.split(/(?<=\.)\s+/).filter(z=>!/Klick|Vorschläge|^Nachmessen|^In der Skizze|lösen oder/.test(z)).join(' ') : '';
   if(s.tone!=='good' && aufPapier && aufPapier.replace(/\.$/,'')!==standKurz(m))
     hinweis.push(...textZeilen('Stand: '+aufPapier, 9.5, W));
   if(!m.ecken.length) hinweis.length=0;          // der leere Grundriss sagt es selbst
   else if(!m.belastbar)
     hinweis.push(...textZeilen(m.geschlossen
       ? 'Fläche und Umfang stehen hier erst, wenn die Form eindeutig ist und die Maße zusammenpassen.'
-      : 'Fläche und Umfang stehen hier erst, wenn der Wandzug geschlossen ist.', 9.5, W));
+      : 'Fläche und Umfang stehen hier erst, wenn der Raum geschlossen ist.', 9.5, W));
   const fussOben=Y1-40-(hinweis.length ? hinweis.length*12.5+3 : 0);
   h+=`<path d="M${X0} ${n2(fussOben)}H${X1}" stroke="${TINTE}" stroke-width="1"/>`;
   const zelle=(x, name, wert)=>T(x, fussOben+18, name, {f:GEDAEMPFT})+T(x, fussOben+35.5, wert, {fs:14, b:1});
@@ -610,7 +621,8 @@ function blaetterAnsichten(m){
       const g2=[[...(nummern ? [{t:it.nr+' ', b:1}] : []),
                  {t:it.anschluss ? it.name : `${it.name} ${fmm(it.w)} × ${fmm(it.h)} mm`}], ...lageText(it, a)];
       if(!it.anschluss){
-        if(it.widerspruch) g2.push([{t:'ein Lagemaß passt nicht'}]);
+        if(it.versetzt) g2.push([{t:'Lage widerspricht dem Maß'}]);
+        else if(it.widerspruch) g2.push([{t:'ein Lagemaß passt nicht'}]);
         else if(it.lage.seitlich==='geschätzt' && it.lage.hoehe!=='eingemessen') g2.push([{t:'Lage geschätzt'}]);
         else if(it.lage.seitlich==='geschätzt') g2.push([{t:'seitliche Lage geschätzt'}]);
         else if(it.lage.hoehe==='geschätzt') g2.push([{t:'Höhenlage geschätzt'}]);
@@ -758,7 +770,9 @@ function blaetterMasse(m){
     // Die Nummer aus der Wandansicht nur, wo die Wand mehrere Dinge trägt.
     const mehrere=new Set(m.waende.filter(w=>w.ansicht && w.ansicht.oeffnungen.length+w.ansicht.anschluesse.length>1).map(w=>schluessel(w.a,w.b)));
     // Die Bezugskante steht rechts; ein Lagemaß, das nicht passt, ist fett.
-    m.lageMasse.forEach(x=>eintraege.push({z:[`${strecke(x.a,x.b)} ${x.art}${x.nr!=null && mehrere.has(schluessel(x.a,x.b)) ? ' '+x.nr : ''}`, fm(x.d), abw(x), x.kante], aus:!x.an, falsch:x.an && x.verdaechtig}));
+    // Liegt die Öffnung nicht auf diesem Maß, steht es dabei (statt einer Abweichung).
+    m.lageMasse.forEach(x=>eintraege.push({z:[`${strecke(x.a,x.b)} ${x.art}${x.nr!=null && mehrere.has(schluessel(x.a,x.b)) ? ' '+x.nr : ''}`, fm(x.d), abw(x),
+      x.an && x.widerspruch ? x.kante+' · Widerspruch' : x.kante], aus:!x.an, falsch:x.an && (x.verdaechtig || x.widerspruch)}));
   }
   const ZH=11.5, FS=8.5, SPALT=38, sb=(W-SPALT)/2, OBEN=INHALT_OBEN+4;
   const jeSpalte=Math.floor((Y1-OBEN-ZH)/ZH);

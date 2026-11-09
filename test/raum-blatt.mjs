@@ -122,6 +122,24 @@ chk('modell: alle Maße mit Abweichung', r.masse.length===6 && r.masse.every(x=>
 const tr=texte(blaetterVon(B.html(r, {mitMassliste:true}))[0]);
 chk('echter Raum: alle Wände in der Wandliste', r.waende.every(w=>tr[tr.indexOf(w.a+'–'+w.b)+1]===fm(w.laenge)));
 
+// Zwei eingemessene Öffnungen, deren Maße sich überdecken: das Fenster liegt
+// nicht auf seinem Maß. Ansicht und Maßliste kennzeichnen den Widerspruch.
+lade({pts:q4, walls:w4, meas:[mm('A','B',4000),mm('B','C',3000),mm('C','D',4000),mm('D','A',3000),mm('A','C',5000),mm('B','D',5000)],
+  openings:[{id:'o1',kind:'door',a:'A',b:'B',x:600,y:0,w:885,h:2010},{id:'o2',kind:'window',a:'A',b:'B',x:2500,y:900,w:1000,h:1200}],
+  opmeas:[{id:'om1',op:'o1',edge:'left',d:600,sigma:5,on:true},{id:'om2',op:'o2',edge:'left',d:1000,sigma:5,on:true},
+          {id:'om3',op:'o2',edge:'bottom',d:900,sigma:5,on:true}]});
+const wi=B.modell({name:'Zimmer', datum:'9.11.2026'});
+const wo=wi.waende.find(w=>w.a==='A'&&w.b==='B').ansicht.oeffnungen;
+const wt=wo.find(o=>o.id==='o1'), wf=wo.find(o=>o.id==='o2');
+chk('Widerspruch: Öffnung neben ihrem Maß ist versetzt und gestrichelt, die andere nicht',
+  wf.versetzt && wf.geschaetzt && !wt.versetzt && !wt.geschaetzt);
+chk('Widerspruch: nur das Lagemaß der betroffenen Achse trägt ihn',
+  wi.lageMasse.map(x=>x.widerspruch?1:0).join('')==='010' && wi.lageMasse.every(x=>x.abw==null));
+const wb=blaetterVon(B.html(wi, {mitMassliste:true}));
+chk('Widerspruch: steht in der Wandansicht und in der Maßliste',
+  wb.slice(1,-1).map(texte).flat().some(t=>/Lage widerspricht dem Maß/.test(t)) && texte(wb[wb.length-1]).includes('ab A · Widerspruch')
+  && !texte(wb[wb.length-1]).includes('ab Boden · Widerspruch'));
+
 // Eindeutig, aber ungeprüft: fünf Maße.
 lade({pts:q4, walls:w4, meas:[mm('A','B',4000),mm('B','C',3000),mm('C','D',4000),mm('D','A',3000),mm('A','C',5000)]});
 const u=B.modell({name:'Zimmer', datum:'9.11.2026'});

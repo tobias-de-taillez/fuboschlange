@@ -325,6 +325,11 @@
   .rowbtn.tog{display:inline-flex;align-items:center;gap:5px;border:0;background:none;color:var(--ink2)}
   .rowbtn.tog[aria-pressed=true]{color:var(--accent);font-weight:600}
   .rowbtn.del:hover{color:var(--bad);background:var(--bad-bg)}
+  /* Abgeschaltetes Maß: bleibt stehen, zählt nicht mit. Die Knopfspalten
+     (exakt, aus, ×) rücken zusammen, damit die Karte mit dem Schalter kaum
+     breiter wird. */
+  #wpopTbl tr.aus input.d{color:var(--muted);text-decoration:line-through}
+  #wpopTbl td:nth-child(n+4){padding-left:0;padding-right:0}
 
   /* Wände-Modus: Panel zeigt die Wand und ihre Oeffnungen. */
   #wInfo{font-size:12px;color:var(--ink2);font-variant-numeric:tabular-nums;margin:-4px 0 8px}
@@ -341,6 +346,7 @@
   #wallops .orow.cur{background:var(--accent-bg)}
   #wallops .orow span:last-child{margin-left:auto;font-size:12px;color:var(--muted)}
   #wallops .orow span.ok{color:var(--good)}
+  #wallops .orow span.bad{color:var(--bad)}
   #wallops .none{font-size:12px;color:var(--muted)}
   #opop{border-top:1px solid var(--line2);padding-top:10px}
   /* Der Kopf der Einstellungen ist die markierte Zeile darueber. */
@@ -665,7 +671,7 @@
   #sheets{position:absolute;inset:0;z-index:5;overflow:auto;padding:28px 0 48px;background:var(--paper);display:none}
   body.outmode #sheets{display:block}
   /* Rückmeldung erscheint dort, wo sie ausgelöst wurde */
-  #toast{position:fixed;left:50%;top:64px;translate:-50% -100%;z-index:60;max-width:min(520px,calc(100vw - 24px));
+  #toast{position:fixed;left:0;top:0;z-index:60;max-width:min(520px,calc(100vw - 24px));
     padding:7px 12px;background:var(--ink);color:#fff;border-radius:6px;font-size:12px;line-height:1.4;
     pointer-events:none;opacity:0;transition:opacity .2s var(--ease)}
   #toast.on{opacity:1}
@@ -803,7 +809,7 @@
       </button>
       <div id="roommenu" class="menu" role="menu" hidden>
         <h4 class="nurAufmass">Raum</h4>
-        <button id="ortho" class="nurAufmass" role="menuitemcheckbox" aria-pressed="false" title="Ecken innerhalb ±2° auf 90° setzen, wo die Messungen das zulassen">Rechte Winkel annehmen</button>
+        <button id="ortho" class="nurAufmass" role="menuitemcheckbox" aria-pressed="false" title="Ecken innerhalb ±2° auf 90° setzen, wo die Maße das zulassen">Rechte Winkel annehmen</button>
         <button id="mirror" class="nurAufmass" role="menuitem">Raum spiegeln</button>
         <button id="clr" class="nurAufmass danger" role="menuitem">Raum leeren</button>
         <hr class="nurAufmass">
@@ -1092,10 +1098,10 @@
       <h3><i>2</i>Maße</h3>
       <p>Das Werkzeug schlägt die Strecke vor, die am meisten bringt, und öffnet die Eingabe an ihr. Zahl eintippen (Einheit am Knopf daneben: m, cm, mm), Enter, weiter zur nächsten. Der Stand oben rechts sagt, wie viele Maße noch fehlen und ob alles stimmt; ein Klick darauf zeigt die Statistik. Sobald die Form eindeutig ist, zeigt der Plan die gemessene Form.</p>
       <dl>
-        <dt>Karte der Wand</dt><dd>Eine Wand anklicken: ihre Maße, ein weiteres Maß, Tür, Fenster, Loch oder Anschluss setzen, Wanddicke, Einnorden, Löschen. Mehrfach messen ist erwünscht. „exakt“ nimmt ein Maß aus dem Ausgleich heraus: es gilt genau so.</dd>
+        <dt>Karte der Wand</dt><dd>Eine Wand anklicken: ihre Maße, ein weiteres Maß, Tür, Fenster, Loch oder Anschluss setzen, Wanddicke, Einnorden, Löschen. Mehrfach messen ist erwünscht. „exakt“ nimmt ein Maß aus dem Ausgleich heraus: es gilt genau so; „aus“ schaltet ein Maß ab, ohne es zu löschen.</dd>
         <dt>Diagonale</dt><dd>Zwei Ecken nacheinander anklicken. Diagonalen stehen nicht dauernd im Plan. Sie erscheinen, wenn sie dran, angefasst oder auffällig sind, und unter „Alle Strecken“.</dd>
         <dt>Karte der Ecke</dt><dd>Eine Ecke anklicken: Winkel festlegen oder lösen, Ecke löschen.</dd>
-        <dt>Ein Maß passt nicht</dt><dd>Die Strecke steht rot und gestrichelt im Plan. Auf ihrer Karte nachmessen, das Maß ändern oder mit × löschen.</dd>
+        <dt>Ein Maß passt nicht</dt><dd>Die Strecke steht rot und gestrichelt im Plan. Auf ihrer Karte nachmessen, das Maß ändern, mit „aus“ abschalten oder mit × löschen.</dd>
         <dt>Nachbarräume</dt><dd>Hinter einer Tür legt das „+“ einen Nachbarraum an. Die Räume eines Geschosses liegen über gemeinsame Wände und über Maße <b>durch die Tür</b> zueinander. Schließt ein Ring von Räumen nicht, meldet <b>Geschoss schließt nicht</b> den Schlussfehler, statt ihn zu verstecken.</dd>
       </dl>
 
@@ -6380,17 +6386,26 @@ function recompute(){
   // sonst zeigt die App eine Lage, die den eigenen Messwerten
   // widerspricht (browser-gesehen: 1220 gespeichert, 1200 gemessen).
   // Messungen schlagen Ziehen; ohne Messung bleibt die Lage unberuehrt.
+  // Gemessen schlaegt auch geschaetzt: eine nur geschaetzt gesetzte Oeffnung
+  // im Weg weicht aus (settleOpening). Bei einem Widerspruch bleibt alles
+  // liegen; der Stand der Oeffnung und das Blatt nennen ihn.
+  // Bis nichts mehr rueckt: macht eine spaetere Platz (kleiner geworden, Mass
+  // geloescht), kommt eine frueher gepruefte erst im naechsten Durchgang auf
+  // ihr Mass - sonst stuende sie daneben, und der Stand sagte "bestimmt".
   if(M.openings.length && M.opmeas.length && M.fit){
     const P=M.fit.pts;
-    M.openings.forEach(o=>{
-      if(!M.opmeas.some(m=>m.op===o.id && m.on!==false)) return;
-      const sh=wallShape(P, M.hmeas, o.a, o.b);
-      if(!sh) return;
-      const r=solveOpening(sh, o, M.opmeas);
-      const andere=M.openings.filter(x=>x!==o && [x.a,x.b].sort().join('|')===[o.a,o.b].sort().join('|'));
-      const platz=clampOpening(sh, r.ziel);
-      if(openingPlaceable(sh, platz, andere)){ o.x=platz.x; o.y=platz.y; }
-    });
+    for(let lauf=0, rueckt=true; rueckt && lauf<=M.openings.length; lauf++){
+      rueckt=false;
+      M.openings.forEach(o=>{
+        if(!M.opmeas.some(m=>m.op===o.id && m.on!==false)) return;
+        const sh=wallShape(P, M.hmeas, o.a, o.b);
+        if(!sh) return;
+        const s=settleOpening(sh, o, openingsOnWall(o.a,o.b), M.opmeas);
+        if(!s.platz) return;
+        if(Math.abs(s.platz.x-o.x)>1e-6 || Math.abs(s.platz.y-o.y)>1e-6 || s.weicht.length) rueckt=true;
+        o.x=s.platz.x; o.y=s.platz.y; s.weicht.forEach(w=>{ w.op.x=w.x; });
+      });
+    }
   }
   // Streuung auffaellig, aber kein EINZELNER Schuldiger isolierbar (leer =
   // alle unter der Schwelle, >1 = Gleichstand): dann helfen nur
@@ -6574,7 +6589,7 @@ function neighborAt(wx,wy){
 }
 let ownLabelRect=null;
 
-function drawNeighbors(dpr){
+function drawNeighbors(dpr, meiden){
   // Entweder Nachbarn oder Abwicklung: die aufgeklappten Waende legen sich
   // genau dorthin, wo die Nachbarraeume liegen - beides zusammen ist Brei.
   if(!neighbors.length || unfoldOn) return;
@@ -6608,7 +6623,7 @@ function drawNeighbors(dpr){
       ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y);
     });
     ctx.stroke();
-    drawRoomLabel(n.name, n.pts, dpr, hot?INK.wall:'#a8a396', 13);
+    drawRoomLabel(n.name, n.pts, dpr, hot?INK.wall:'#a8a396', 13, meiden);
   });
 }
 
@@ -6639,10 +6654,11 @@ function createNeighborRoom(opId){
   M.thick[k]=t;
   const id=STORE.create('Neuer Raum');
   // Der Nachbarraum gehört ins selbe Geschoss wie der Raum, aus dem er
-  // entsteht. Steht der noch einzeln, wird aus beiden ein Gebäude.
+  // entsteht. Steht der noch einzeln, wird aus beiden ein Gebäude. Es heißt
+  // wie ein auf dem Startbildschirm angelegtes, nicht wie der Raum.
   if(globalThis.HAUS){
     const ort=HAUS.ort(currentRoom);
-    const geschoss=ort ? ort.geschoss.id : (HAUS.neuesGebaeude(currentRoom, currentRoomName)||{}).geschoss;
+    const geschoss=ort ? ort.geschoss.id : (HAUS.neuesGebaeude(currentRoom)||{}).geschoss;
     if(geschoss) HAUS.ordneZu(id, geschoss);
   }
   // Die Tuer ist der Anker der Verbindung, nicht die Wandecke: die Wand
@@ -6680,9 +6696,15 @@ function createNeighborRoom(opId){
   // setHintLive statt setHint: das hier ist keine Quittung, die nach vier
   // Sekunden verschwinden darf - es erklaert, warum der neue Raum schon
   // eine Wand hat und wo die Tuer geblieben ist.
+  // Der Zeiger steht noch, wo im alten Raum das Plus war: kein Ort für diese
+  // Meldung, sie läge quer über der geerbten Wand.
+  lastPtr=null;
   setHintLive(`Wand A–B mit ${fmtM(L)} m aus „${self.name}“ übernommen `
     +`(${t} mm dick), die Tür zählt für beide Räume. `
     +`Klick setzt die nächste Ecke.`);
+  // Der Raum heißt noch wie jeder neue: sein Name ist gleich zum
+  // Überschreiben markiert. Ein Klick in den Plan lässt ihn, wie er ist.
+  renameCurrentRoom();
 }
 
 // ================= Passen die Nachbarn zusammen? =================
@@ -6985,8 +7007,10 @@ function wallFit(shape){
   // Rand knapp halten - die Wand soll die Flaeche fuellen, nicht darin schweben.
   // Oben bleibt Platz fuer Titel und Lageplan, unten fuer Ecken und Nachbarn.
   const dpr=DPR(), pad=34*dpr;
-  // Unten bleibt Platz für Eckennamen und den schwebenden Melde-Knopf.
-  const oben=(wallInsetBox().h/dpr+30)*dpr, unten=(TOOL==='aufmass'?96:62)*dpr;
+  // Unten bleibt Platz für Eckennamen und den schwebenden Melde-Knopf: seine
+  // Oberkante liegt 70 px über dem Rand, die untere Beschriftungszeile (Wand
+  // nebenan, 38 px unter dem Boden) muss darüber enden.
+  const oben=(wallInsetBox().h/dpr+30)*dpr, unten=(TOOL==='aufmass'?118:62)*dpr;
   const hoch=Math.max(40*dpr, cv.height-oben-unten);
   const s=Math.min((cv.width-2*pad)/(shape.L||1), hoch/hMax);
   WV={ ...WV, s, ox:(cv.width-shape.L*s)/2, oy:oben+(hoch+hMax*s)/2 };
@@ -7278,7 +7302,7 @@ function drawUnfolded(P, I, dpr){
 // o.x sind Millimeter, auf einer blossen Skizze waere die Lage erfunden.
 const PLAN_ADD_W={door:985, window:1000, hole:600};
 const planMode=()=>M.mode==='draw'||M.mode==='measure';
-const planEditable=()=>planMode() && M.chain==null && wallTabReady();
+const planEditable=()=>planMode() && M.chain==null && formEindeutig();
 // Wand unter dem Zeiger ueber die GANZE Laenge (nearestWall laesst die Enden
 // fuer die Ecken frei - eine Tuer sitzt aber oft genau dort). t in mm ab a.
 function planWallAt(wx,wy){
@@ -7331,7 +7355,7 @@ function planOpDrag(e, g){
   render();
 }
 function setPlanAdd(kind){
-  if(kind && !wallTabReady()){
+  if(kind && !formEindeutig()){
     setHint('Öffnungen setzen geht, sobald der Grundriss eindeutig eingemessen ist.');
     kind=null;
   }
@@ -7446,7 +7470,7 @@ $('opplDel').onclick=()=>{
 // In die Wandansicht dieser Wand springen, Oeffnung bleibt gewaehlt.
 function openingToWallView(o){
   const w=M.walls.find(([a,b])=>wallKey(a,b)===wallKey(o.a,o.b));
-  if(!w || !wallTabReady()) return;
+  if(!w) return;
   setMode('wall');
   if(M.mode!=='wall') return;
   pickWall(w[0], w[1]);
@@ -7612,15 +7636,31 @@ function drawCanvas(){
   const P=viewPts(), I=C.idx(P);
   // Raster und Massstab erst, wenn die Koordinaten Millimeter sind - vorher
   // waere beides eine Aussage ueber Bildschirmpixel.
-  if(M.fit){ drawGrid(dpr); drawScalebar(dpr); }
+  if(M.fit) drawGrid(dpr);
+  // Wo an den Waenden Masszahlen stehen (Wandmitte): dort weichen die
+  // Raumnamen aus, statt unter der Zahl zu liegen.
+  const zahlPlatz=[];
+  if(neighbors.length){
+    const gemessen=new Set(C.activeMeas(M.meas).map(m=>wallKey(m.a,m.b)));
+    M.walls.forEach(([a,b])=>{
+      if(I[a]==null||I[b]==null||!gemessen.has(wallKey(a,b))) return;
+      const p=toScr(P[I[a]]), q=toScr(P[I[b]]);
+      zahlPlatz.push({x:(p.x+q.x)/2-36*dpr, y:(p.y+q.y)/2-12*dpr, w:72*dpr, h:24*dpr});
+    });
+  }
   // Nachbarraeume und beide Raumnamen liegen UNTER dem aktiven Aufmass:
   // Kontext, kein Vordergrund.
-  drawNeighbors(dpr);
+  drawNeighbors(dpr, zahlPlatz);
   drawOwnBands(dpr);
+  // Der Massstab liegt fest auf dem Plan, also UEBER Nachbarn und
+  // Wandkoerpern: der Nachbar ragt immer ueber den Einpass-Rand hinaus, und
+  // seine blasse Wand deckte den Massstab zu.
+  if(M.fit) drawScalebar(dpr, neighbors.length>0 && !unfoldOn);
   // Der eigene Name steht in der Kopfleiste; im Plan nur, wenn Nachbarraeume
-  // daneben liegen und Namen die Raeume unterscheiden.
-  ownLabelRect = (currentRoom && P.length && neighbors.length && currentRoomName && currentRoomName!=='—')
-    ? drawRoomLabel(currentRoomName, P, dpr, 'rgba(42,40,35,.30)', 15) : null;
+  // daneben liegen und Namen die Raeume unterscheiden. Ein Raum mit erst
+  // einer Wand hat keine Mitte: der Name laege an der Masszahl dieser Wand.
+  ownLabelRect = (currentRoom && P.length>=3 && neighbors.length && currentRoomName && currentRoomName!=='—')
+    ? drawRoomLabel(currentRoomName, P, dpr, 'rgba(42,40,35,.30)', 15, zahlPlatz) : null;
   // Waende. Waehrend eines Zugs toenen sich die Paare, die sich fast
   // beruehren (M.nearPairs) - erklaert wortlos, warum der Punkt hinter
   // dem Finger zurueckbleibt; Zaehigkeit ohne Grund wirkt wie ein Ruckler.
@@ -7789,12 +7829,7 @@ function drawCanvas(){
   // Punkte: heller Rand haelt den Marker auf Linien lesbar. Auswahl und
   // aktiver Zeichenzug in der Akzentfarbe; die Ecke unter dem Zeiger waechst.
   const hovPt=hoverTarget && hoverTarget.t==='pt' ? hoverTarget.id : null;
-  let zielEcke=null;
-  if(M.mode==='draw' && M.chain!=null && P.length>=3 && !C.wallPolygonRing(M.pts, M.walls)){
-    const grad={}; M.walls.forEach(([a,b])=>{ grad[a]=(grad[a]||0)+1; grad[b]=(grad[b]||0)+1; });
-    const enden=P.filter(p=>grad[p.id]===1 && p.id!==M.chain);
-    if(enden.length===1) zielEcke=enden[0].id;
-  }
+  const zielEcke=zugZiel();
   P.forEach(pt=>{
     const p=toScr(pt), big=hovPt===pt.id || M.drag===pt.id;
     const r=(big?6:4.5)*dpr;
@@ -8179,19 +8214,31 @@ function renderWallPopup(){
     const ai=act.indexOf(m);                     // -1 fuer stillgelegte
     const w=(ai>=0 && M.an) ? M.an.w[ai] : null;
     const sus=ai>=0 && M.suspects.has(ai);
+    const aus=m.on===false;
     const tr=document.createElement('tr');
     if(sus) tr.className='worst';
+    if(aus) tr.className='aus';
     // Nur Ausnahmen bekommen eine Marke; "geprueft" je Zeile war Rauschen.
     // w (Baarda) steht nur bei Verdacht, mit Komma.
     // Festgelegt heisst nicht ungeprueft-gelb: der Nutzer hat es so gewollt.
-    const badge = m.on===false ? '<button class="badge">aus, einschalten</button>'
+    // Ein abgeschaltetes Maß trägt keine Marke: die Zeile ist durchgestrichen,
+    // der Schalter "aus" steht gedrückt.
+    const badge = aus ? ''
       : sus ? '<span class="badge suspect">verdächtig</span>'
       : (w==null && !m.fix) ? '<span class="badge unchecked">ungeprüft</span>' : '';
     tr.innerHTML=`<td><input class="d" inputmode="decimal" value="${fmtLen(m.d)}"></td>`
       +`<td>${m.von==='nachbar' ? 'vom Nachbarn' : (sus && w!=null ? 'w '+fmtGrad(w) : '')}</td>`
       +`<td>${badge}</td>`
-      +`<td><button class="rowbtn tog fix" aria-pressed="${!!m.fix}" title="Exakt: dieses Maß gilt genau so, der Ausgleich verteilt Abweichungen auf die übrigen">exakt</button></td>`
+      +`<td><button class="rowbtn tog fix" aria-pressed="${!!m.fix}"${aus?' disabled':''} title="Exakt: dieses Maß gilt genau so, der Ausgleich verteilt Abweichungen auf die übrigen">exakt</button></td>`
+      +`<td><button class="rowbtn tog off" aria-pressed="${aus}" title="${aus ? 'Einschalten: dieses Maß zählt wieder mit' : 'Abschalten: dieses Maß bleibt stehen, zählt aber nicht mit'}">aus</button></td>`
       +`<td><button class="rowbtn del" title="Dieses Maß löschen">×</button></td>`;
+    // Abschalten statt löschen: das Maß bleibt stehen (m.on===false), der
+    // Ausgleich rechnet ohne es. Derselbe Knopf schaltet es wieder ein.
+    tr.querySelector('.off').onclick=()=>{
+      snapshot();
+      m.on=aus;
+      recompute();
+    };
     tr.querySelector('.fix').onclick=()=>{
       snapshot();
       if(m.fix) delete m.fix; else m.fix=true;
@@ -8207,9 +8254,7 @@ function renderWallPopup(){
       else { inp.value=fmtLen(m.d); setHint('Ungültig: Maß muss eine Zahl größer 0 sein.'); }
     };
     if(sus) attachTip(tr.children[2],
-      `w = ${fmtGrad(w)}: weicht am stärksten vom Rest ab, vermutlich falsch gemessen oder vertippt. × löscht das Maß.`);
-    const offBtn=m.on===false ? tr.querySelector('button.badge') : null;
-    if(offBtn) offBtn.onclick=()=>{ snapshot(); m.on=true; recompute(); };
+      `w = ${fmtGrad(w)}: weicht am stärksten vom Rest ab, vermutlich falsch gemessen oder vertippt. „aus“ schaltet das Maß ab, × löscht es.`);
     tr.querySelector('.del').onclick=()=>{
       snapshot();
       M.meas.splice(M.meas.indexOf(m),1);
@@ -8323,7 +8368,7 @@ $('wpopX').onclick=closeWallPopup;
 let wpopMitte=null;
 document.querySelectorAll('#wpopOps button').forEach(b=>{ b.onclick=()=>{
   if(!wpopPair) return;
-  if(!wallTabReady()){ sag('Türen, Fenster und Anschlüsse lassen sich setzen, sobald die Form eindeutig ist.', b); return; }
+  if(!formEindeutig()){ sag('Türen, Fenster und Anschlüsse lassen sich setzen, sobald die Form eindeutig ist.', b); return; }
   const {a, b:b2}=wpopPair, kind=b.dataset.op, mitte=wpopMitte;
   closeWallPopup();
   if(kind==='water'){ insertWater(a, b2); render(); return; }
@@ -8924,6 +8969,18 @@ function addPoint(w){
   recompute();
 }
 
+// Die Ecke, an der ein Klick den Raum schliesst: laeuft der Zug an einem
+// Ende eines offenen Zugs mit mindestens drei Ecken, ist es das andere -
+// sofern die Wand dorthin den Raum wirklich schliesst (finishIfClosed fragt
+// dasselbe; eine lose Ecke daneben haelt ihn offen). Der Ring im Plan und
+// der Satz im Stand fragen beide hier, damit sie dasselbe sagen.
+function zugZiel(){
+  if(M.mode!=='draw' || M.chain==null || M.pts.length<3 || C.wallPolygonRing(M.pts, M.walls)) return null;
+  const grad={}; M.walls.forEach(([a,b])=>{ grad[a]=(grad[a]||0)+1; grad[b]=(grad[b]||0)+1; });
+  const enden=M.pts.filter(p=>grad[p.id]===1 && p.id!==M.chain);
+  return enden.length===1 && C.wallPolygonRing(M.pts, M.walls.concat([[M.chain, enden[0].id]])) ? enden[0].id : null;
+}
+
 // Ist der Wandzug mit der letzten Aktion geschlossen worden, ist das
 // Zeichnen erledigt: Zug loslassen und in den Messen-Modus wechseln - genau
 // dahin, wo der Nutzer als Naechstes muss.
@@ -8944,7 +9001,10 @@ function finishIfClosed(){
 // ================= Wände-Tab =================
 // Erst sinnvoll, wenn die Form des Grundrisses eindeutig ist - vorher
 // waeren Wandlaengen Skizzenpixel und jede Wandansicht eine Erfindung.
-const wallTabReady=()=>!!(M.an && M.an.dof===0 && M.walls.length);
+const formEindeutig=()=>!!(M.an && M.an.dof===0 && M.walls.length);
+// Der Schritt selbst braucht dazu den geschlossenen Raum, wie die Ausgabe
+// dahinter. Oeffnungen im Plan haengen weiter nur an der eindeutigen Form.
+const wallTabReady=()=>formEindeutig() && !!C.wallPolygonRing(M.pts, M.walls);
 
 function serializeOpenings(){ return M.openings.map(o=>({...o})); }
 
@@ -9005,13 +9065,15 @@ function renderWallSection(){
   const s2=M.wallSel;
   $('wallTitle').textContent = s2 ? `Wand ${s2.a}–${s2.b}` : 'Wand';
   renderWallHeights();
-  const list=wallOpenings(), box=$('wallops');
+  const list=wallOpenings(), box=$('wallops'), shape=currentShape();
   box.innerHTML = list.length
     ? list.map(o=>{
         const n=M.opmeas.filter(m=>m.op===o.id && m.on!==false).length;
+        const s=(n && shape) ? settleOpening(shape, o, list, M.opmeas) : null;
+        const wid=!!s && (s.stoesst.length>0 || s.wand);
         return `<div class="orow${o.id===M.openSel?' cur':''}" data-id="${escapeHtml(o.id)}">`
           +`<span>${OPEN_LABEL[o.kind]}</span><span>${Math.round(o.w)} × ${Math.round(o.h)}</span>`
-          +`<span class="${n?'ok':''}">${n ? n+(n===1?' Maß':' Maße') : 'geschätzt'}</span></div>`;
+          +`<span class="${wid?'bad':n?'ok':''}">${wid ? 'Widerspruch' : n ? n+(n===1?' Maß':' Maße') : 'geschätzt'}</span></div>`;
       }).join('')
     : (waterOnWall().length ? '' : '<div class="none">Noch keine Öffnung an dieser Wand.</div>');
   box.querySelectorAll('.orow[data-id]').forEach(r=>{ r.onclick=()=>{ M.openSel=r.dataset.id; M.waterSel=null; render(); }; });
@@ -9476,8 +9538,10 @@ $('opDel').onclick=()=>{
   const o=selectedOpening(); if(!o) return;
   snapshot();
   M.openings=M.openings.filter(x=>x.id!==o.id);
+  M.opmeas=M.opmeas.filter(m=>m.op!==o.id);
   M.openSel=null;
   recompute();
+  setHint(`${OPEN_LABEL[o.kind]} gelöscht · ⌘Z holt sie zurück`);
 };
 $('opopX').onclick=()=>{ M.openSel=null; render(); };
 
@@ -9486,16 +9550,35 @@ $('opopX').onclick=()=>{ M.openSel=null; render(); };
 // oder von der Decke - genau diese vier Angaben tippt man ein.
 const EDGE_LABEL={left:'von links', right:'von rechts', bottom:'vom Boden', top:'von der Decke'};
 
+const OPEN_MIT={door:'der Tür', window:'dem Fenster', hole:'dem Loch'};
 function applyOpeningFit(o){
   const shape=currentShape();
   if(!shape) return null;
-  const r=solveOpening(shape, o, M.opmeas);
   // Die eingemessene Lage muss trotzdem in die Wand passen und darf keine
   // Nachbarin ueberdecken - Messungen heben die Exklusivitaet nicht auf.
-  const andere=wallOpenings().filter(x=>x.id!==o.id);
-  const platz=clampOpening(shape, r.ziel);
-  if(openingPlaceable(shape, platz, andere)){ o.x=platz.x; o.y=platz.y; }
-  return r;
+  // Gemessen schlaegt aber geschaetzt: eine Nachbarin, deren seitliche Lage
+  // nur geschaetzt ist, weicht aus. Sonst bleibt alles liegen, und der Stand
+  // nennt den Widerspruch.
+  const lege=x=>{
+    const s=settleOpening(shape, x, wallOpenings(), M.opmeas);
+    if(s.platz){ x.x=s.platz.x; x.y=s.platz.y; s.weicht.forEach(w=>{ w.op.x=w.x; }); }
+    return s;
+  };
+  const s=lege(o);
+  // Danach die uebrigen dieser Wand: eine, die bisher nicht auf ihr Mass kam,
+  // hat vielleicht jetzt Platz (ein Mass der Nachbarin wurde geloescht).
+  wallOpenings().forEach(x=>{ if(x!==o) s.weicht.push(...lege(x).weicht); });
+  return s;
+}
+// Was das Einmessen an der Wand ausgeloest hat: kurz dort, wo eben getippt wurde.
+function sagOpeningFit(s){
+  if(!s) return;
+  const b=s.stoesst[0], namen=s.weicht.map(w=>OPEN_LABEL[w.op.kind]);
+  const txt = b ? `Stößt mit ${OPEN_MIT[b.kind]} zusammen: `
+        +(s.eng ? 'zum Ausweichen fehlt der Platz.' : 'beide Lagen sind eingemessen.')
+    : namen.length ? `${namen.join(' und ')} ${namen.length>1?'sind':'ist'} ausgewichen, die seitliche Lage war nur geschätzt.`
+    : s.wand ? 'Das Maß passt so nicht in die Wand.' : null;
+  if(txt) setHint(txt);
 }
 
 function renderOpeningMeasures(){
@@ -9505,6 +9588,9 @@ function renderOpeningMeasures(){
   box.hidden=false;
   const shape=currentShape();
   const r=shape ? solveOpening(shape, o, M.opmeas) : null;
+  // Liegt die Oeffnung nicht, wo ihre Masse sie hinlegen, ist sie nicht
+  // "bestimmt": der Stand nennt, woran es haengt.
+  const s=shape ? settleOpening(shape, o, wallOpenings(), M.opmeas) : null;
   const st=$('opState');
   // Tueren stehen auf dem Boden: ihre Hoehenlage ist gegeben, nur die
   // seitliche wird gemessen. "Breite fehlt" las sich wie die Groesse.
@@ -9512,6 +9598,10 @@ function renderOpeningMeasures(){
   document.querySelectorAll('.mbtn[data-edge=bottom],.mbtn[data-edge=top]').forEach(b=>{ b.hidden=tuer; });
   if(!r || (!r.x.n && !r.y.n)){
     st.textContent='geschätzt, noch nicht eingemessen'; st.className='warn';
+  } else if(s && (s.stoesst.length || s.wand)){
+    st.textContent = s.stoesst.length ? `Widerspruch: stößt mit ${OPEN_MIT[s.stoesst[0].kind]} zusammen`
+      : 'Widerspruch: passt so nicht in die Wand';
+    st.className='bad';
   } else if(tuer && r.x.n && !r.y.n){
     st.textContent = r.verdacht.size ? 'ein Maß passt nicht' : r.x.n>1 ? 'eingemessen und geprüft' : 'eingemessen, ungeprüft';
     st.className = r.verdacht.size ? 'bad' : r.x.n>1 ? 'good' : 'warn';
@@ -9537,8 +9627,9 @@ function renderOpeningMeasures(){
     b.onclick=()=>{
       snapshot();
       M.opmeas=M.opmeas.filter(m=>m.id!==b.dataset.del);
-      const sel=selectedOpening(); if(sel) applyOpeningFit(sel);
+      const sel=selectedOpening(), s=sel ? applyOpeningFit(sel) : null;
       recompute();
+      sagOpeningFit(s);
     };
   });
 }
@@ -9564,8 +9655,9 @@ function commitOpMeasure(){
   M.opmeas.push({id:'om'+(opMeasSeq++), op:o.id, edge:opMeasEdge, d, sigma:C.SIGMA_DEF, on:true});
   opMeasEdge=null;
   $('entry').hidden=true;
-  applyOpeningFit(o);
+  const s=applyOpeningFit(o);
   recompute();
+  sagOpeningFit(s);
 }
 // Ziehen in der Wandansicht: die Oeffnung bleibt HART in der Wand
 // (anders als die Kreuzungsbremse im Grundriss - eine Tuer halb
@@ -9685,7 +9777,8 @@ function refreshHint(){
 
 function setMode(mode){
   if(mode==='wall' && !wallTabReady()){
-    sag('Wände gibt es, sobald die Form eindeutig ist.'+(M.an && M.an.dof>0 ? ' '+statusText()[0] : ''),
+    sag(M.an && !C.wallPolygonRing(M.pts, M.walls) ? 'Wände gibt es, sobald der Raum geschlossen ist.'
+        : 'Wände gibt es, sobald die Form eindeutig ist.'+(M.an && M.an.dof>0 ? ' '+statusText()[0] : ''),
         document.querySelector('#modes button[data-mode="wall"]'));
     return;
   }
@@ -9693,9 +9786,11 @@ function setMode(mode){
     sag('Maße gibt es, sobald der Raum geschlossen ist.', document.querySelector('#modes button[data-mode="measure"]'));
     return;
   }
+  // Eine Rückmeldung gehört zu dem Schritt, in dem sie entstand.
+  sag(null);
   closeOut();
   if(mode==='tiles' && !tilesReady()){
-    setHint('Fliesen erst, wenn der Wandzug geschlossen und eingemessen ist.');
+    setHint('Fliesen erst, wenn der Raum geschlossen und eingemessen ist.');
     return;
   }
   if(mode==='kitchen' && !(typeof kitchenReady==='function' && kitchenReady())){
@@ -9807,7 +9902,7 @@ $('ortho').onclick=()=>{
   recompute();
   const r=M.orthoInfo;
   setHint(!M.ortho ? 'Rechte Winkel aus: alle Ecken so, wie gemessen.'
-    : r ? `${r.ortho.length} Ecke(n) auf 90° gesetzt` + (r.rejected.length ? ` · ${r.rejected.length} bleiben, wie gemessen (die Maße sprechen dagegen)` : '')
+    : r ? `${r.ortho.length} ${r.ortho.length===1?'Ecke':'Ecken'} auf 90° gesetzt` + (r.rejected.length ? ` · ${r.rejected.length} ${r.rejected.length===1?'bleibt':'bleiben'}, wie gemessen (die Maße sprechen dagegen)` : '')
         : 'Rechte Winkel an: greifen, sobald gemessen ist.');
 };
 // Wandabwicklung: ein Schalter mit festem Namen - der Zustand steht in der
@@ -9878,8 +9973,24 @@ document.addEventListener('change',e=>{
   if(t && (t.tagName==='SELECT' || (t.tagName==='INPUT' && t.type==='checkbox'))) t.blur();
 });
 function zoomCenter(f){ viewZoomAt(cv.width/2, cv.height/2, f); redraw(); }
-function doUndo(){ if(!undo()) setHint('Nichts mehr rückgängig zu machen.'); }
-function doRedo(){ if(!redo()) setHint('Nichts wiederherzustellen.'); }
+// Das Schliessen des Raums fuehrt in den Schritt Maße (finishIfClosed), der
+// Schritt steckt aber nicht im Snapshot. Nimmt Rueckgaengig genau die
+// schliessende Wand zurueck (Raum war zu, ist offen, eine Wand weniger bei
+// gleichen Ecken), geht es in der Skizze weiter, und der Zug laeuft.
+// Wiederherstellen schliesst wieder und fuehrt wie der Klick nach Maße.
+function doUndo(){
+  const zu=!!C.wallPolygonRing(M.pts, M.walls), ecken=M.pts.length, waende=M.walls.length;
+  if(!undo()){ setHint('Nichts mehr rückgängig zu machen.'); return; }
+  if(TOOL==='aufmass' && planMode() && zu && M.pts.length===ecken && M.walls.length===waende-1
+     && !C.wallPolygonRing(M.pts, M.walls)){
+    M.chain=zugEnde(); setMode('draw');
+  }
+}
+function doRedo(){
+  const offen=!C.wallPolygonRing(M.pts, M.walls), ecken=M.pts.length, waende=M.walls.length;
+  if(!redo()){ setHint('Nichts wiederherzustellen.'); return; }
+  if(TOOL==='aufmass' && M.mode==='draw' && offen && M.pts.length===ecken && M.walls.length===waende+1) finishIfClosed();
+}
 // Entf/⌫: loescht, was unter dem Zeiger liegt (Ecke vor Wand), in der
 // Wandansicht die gewaehlte Oeffnung. Ohne Rueckfrage - Rueckgaengig holt
 // es zurueck, und der Hinweis sagt wie.
@@ -10053,8 +10164,8 @@ $('stepsave').onclick=()=>{
   a.download=fname;
   a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
-  const h=r.hoehen.map(v=>v.toLocaleString('de-DE')).join(' / ');
-  setHint(`Exportiert als ${fname} (Downloads), ${S.length} Körper. Raumhöhe ${h} mm${r.gemessen==='keine'?' – angenommen, nicht gemessen':r.gemessen==='teils'?' – an ungemessenen Ecken angenommen':''}.${r.hinweise.length?' '+r.hinweise.join('; ')+'.':''}`);
+  const h=r.hoehen.map(fmtM).join(' / ');
+  setHint(`Exportiert als ${fname} (Downloads), ${S.length} Körper. Raumhöhe ${h} m${r.gemessen==='keine'?' – angenommen, nicht gemessen':r.gemessen==='teils'?' – an ungemessenen Ecken angenommen':''}.${r.hinweise.length?' '+r.hinweise.join('; ')+'.':''}`);
 };
 $('filepick').onchange=async()=>{
   const f=$('filepick').files[0];
@@ -10203,7 +10314,15 @@ function statusText(){
   if(!M.pts.length) return ['Noch keine Ecke. Ein Klick in den Plan setzt die erste.','skizze'];
   if(M.pts.length<3) return [M.pts.length===1 ? '1 Ecke gesetzt.' : M.pts.length+' Ecken gesetzt.','skizze'];
   if(!M.an){
-    if(!C.wallPolygonRing(M.pts, M.walls)) return [M.pts.length+' Ecken. Ein Klick auf die erste schließt den Raum.','skizze'];
+    if(!C.wallPolygonRing(M.pts, M.walls)){
+      // Der Satz sagt, was der naechste Klick tut: mit Ziel schliesst er den
+      // Raum, mit Zug ohne Ziel setzt er die naechste Ecke, ohne Zug nimmt
+      // er ihn an einer Ecke auf. Ausserhalb der Skizze zeichnet kein Klick.
+      const n=M.pts.length+' Ecken. ';
+      if(M.mode!=='draw') return [n+'Raum ist offen.','skizze'];
+      if(zugZiel()!=null) return [n+'Ein Klick auf die erste schließt den Raum.','skizze'];
+      return [n+(M.chain!=null ? 'Ein Klick setzt die nächste Ecke.' : 'Ein Klick auf eine Ecke zeichnet dort weiter.'),'skizze'];
+    }
     return ['Raum geschlossen, noch kein Maß.','prog'];
   }
   if(M.fit && !M.fit.converged){
@@ -10219,9 +10338,25 @@ function statusText(){
   }
   const verl=fixVerletzt();
   if(verl.length)
-    return [`Festgelegte Werte passen nicht zusammen: ${verl.map(x=>x.txt).join(', ')}. Einen davon lösen oder die übrigen Maße prüfen.`,'bad'];
+    return [`Festgelegtes passt nicht zusammen: ${verl.map(x=>x.txt).join(', ')}. Eines davon lösen oder die übrigen Maße prüfen.`,'bad'];
+  // Ein offener Raum ist nie fertig, auch wenn seine Masse schon alles
+  // festlegen (Wand oder Ecke nachtraeglich geloescht, aeltere Raeume).
+  // Widersprueche in den Massen bleiben vorn; sonst sagt der Stand, was den
+  // Raum schliesst. Mit Namen nur, wenn zwischen genau zwei losen Enden die
+  // eine Wand fehlt - steht sie schon (freie Wand, begonnene Insel), naehme
+  // derselbe Klick sie wieder weg (tapPointDraw).
+  let offen=null;
+  if(!C.wallPolygonRing(M.pts, M.walls)){
+    const n={}; M.walls.forEach(w=>w.forEach(id=>{ n[id]=(n[id]||0)+1; }));
+    const lose=M.pts.filter(p=>n[p.id]!==2);
+    const paar=lose.length===2 && lose.every(p=>n[p.id]===1)
+      && !M.walls.some(w=>w.includes(lose[0].id) && w.includes(lose[1].id));
+    offen=['Raum ist offen. In der Skizze '+(paar
+      ? 'schließt ihn ein Klick auf '+lose[0].id+', dann auf '+lose[1].id+'.'
+      : 'braucht jede Ecke zwei Wände.'),'skizze'];
+  }
   if(M.an.dof>0)
-    return [`Noch ${M.an.dof} ${M.an.dof===1?'Maß':'Maße'}, dann ist die Form eindeutig.`,'prog'];
+    return offen || [`Noch ${M.an.dof} ${M.an.dof===1?'Maß':'Maße'}, dann ist die Form eindeutig.`,'prog'];
   if(M.an.redundancy===0){
     // "Nicht pruefbar" gilt fuer die einzelne Messung, nicht fuers Netz:
     // passen die Messungen nicht zueinander, verteilt der Fit den Widerspruch
@@ -10230,14 +10365,20 @@ function statusText(){
     const {ratio,v}=worstResidualRatio();
     if(ratio>GROSS_ERROR_SIGMA)
       return [`Mindestens ein Maß ist falsch, größte Abweichung ${v.toFixed(0)} mm. Welches, zeigt erst ein Kontrollmaß.`,'bad'];
-    return ['Form eindeutig, aber ungeprüft. Ein Kontrollmaß deckt Tippfehler auf.','warn'];
+    return offen || ['Form eindeutig, aber ungeprüft. Ein Kontrollmaß deckt Tippfehler auf.','warn'];
   }
   const txtS=M.an.sigmaHat.toFixed(1).replace('.',',');
-  if(netFails())
-    return M.suspects.size===1
-      ? ['Ein Maß passt nicht zu den übrigen. Nachmessen oder das Maß löschen.','bad']
-      : [`Die Maße streuen mit ± ${txtS} mm mehr als erwartet. Die Vorschläge grenzen den Fehler ein.`,'warn'];
-  return [`Geprüft ± ${txtS} mm`,'good'];
+  if(netFails()){
+    if(M.suspects.size!==1)
+      return [`Die Maße streuen mit ± ${txtS} mm mehr als erwartet. Die Vorschläge grenzen den Fehler ein.`,'warn'];
+    // Genau ein Verdächtiger: die Strecke beim Namen nennen (Index über
+    // activeMeas, wie M.suspects), in der Schreibweise der Liste: die Wand
+    // wie gezeichnet, die Diagonale wie zuerst gemessen.
+    const act=C.activeMeas(M.meas), sm=act[[...M.suspects][0]], sk=wallKey(sm.a,sm.b);
+    const sw=M.walls.find(([a,b])=>wallKey(a,b)===sk), sd=act.find(m=>wallKey(m.a,m.b)===sk);
+    return [`Ein Maß passt nicht: ${sw ? 'Wand '+sw[0]+'–'+sw[1] : 'Diagonale '+sd.a+'–'+sd.b}. Nachmessen, abschalten oder löschen.`,'bad'];
+  }
+  return offen || [`Geprüft ± ${txtS} mm`,'good'];
 }
 
 // ================= Info-Kaestchen =================
@@ -10323,13 +10464,13 @@ function renderPanel(){
   // noch fehlt, statt stumm zu bleiben.
   const wt=document.querySelector('#modes button[data-mode="wall"]');
   if(wt){ const ok=wallTabReady(); wt.setAttribute('aria-disabled', String(!ok));
-    wt.title = ok ? 'Wände (3)' : 'Wände (3): erst, wenn die Form eindeutig ist'; }
+    wt.title = ok ? 'Wände (3)' : M.an && !C.wallPolygonRing(M.pts, M.walls) ? 'Wände (3): erst, wenn der Raum geschlossen ist' : 'Wände (3): erst, wenn die Form eindeutig ist'; }
   // Der tiles-ui-Block laedt NACH diesem - beim ersten Bild waehrend des
   // Boots gibt es ihn noch nicht. Danach rendert er seinen Teil selbst mit.
   if(typeof renderTilesPanel==='function'){
     const ft=document.querySelector('#modes button[data-mode="tiles"]');
     if(ft){ const ok=tilesReady(); ft.setAttribute('aria-disabled', String(!ok));
-      ft.title = ok ? 'Fliesen (4)' : 'Fliesen (4): erst, wenn der Wandzug geschlossen und eingemessen ist'; }
+      ft.title = ok ? 'Fliesen (4)' : 'Fliesen (4): erst, wenn der Raum geschlossen und eingemessen ist'; }
     // Fliesen-Modus ohne gueltigen Grundriss (z.B. nach Rueckgaengig): raus.
     if(M.mode==='tiles' && !tilesReady()){ setTool('aufmass'); return; }
     renderTilesPanel();
@@ -10347,7 +10488,7 @@ function renderPanel(){
   // verlaesst die App den Modus selbst, statt Skizzenmasse zu zeigen.
   if(M.mode==='wall' && !wallTabReady()){
     setMode(M.walls.length?'measure':'draw');
-    setHint('Wandansicht verlassen: die Form ist nicht mehr eindeutig.');
+    setHint(formEindeutig() ? 'Wandansicht verlassen: der Raum ist offen.' : 'Wandansicht verlassen: die Form ist nicht mehr eindeutig.');
     return;
   }
   if(M.mode==='wall' && !M.wallSel && M.walls.length){
@@ -10385,9 +10526,9 @@ function renderPanel(){
     geo.innerHTML=`<div class="kv"><span>Fläche</span><b>${ca}${fmt2(C.roomArea(poly)/1e6)} <small>m²</small></b></div>`
       +`<div class="kv"><span>Umfang${inseln}</span><b>${ca}${fmt2(u/1000)} <small>m</small></b></div>${ortho}`;
   } else if(poly){
-    geo.innerHTML='<p class="ph">Fläche folgt mit der ersten Messung.</p>';
+    geo.innerHTML='<p class="ph">Fläche folgt mit dem ersten Maß.</p>';
   } else {
-    geo.innerHTML='<p class="ph">Fläche folgt, sobald der Wandzug geschlossen ist.</p>';
+    geo.innerHTML='<p class="ph">Fläche folgt, sobald der Raum geschlossen ist.</p>';
   }
 
   // Wandring kaputt -> Messbarkeitsfilter in suggest() ist aus (siehe dort).
@@ -10405,7 +10546,7 @@ function renderPanel(){
   wwEl.style.display = warnen ? 'block' : 'none';
   if(warnen) wwEl.textContent = kreuzt
     ? 'Wände kreuzen sich. Fläche und Vorschläge sind ausgesetzt, bis sie es nicht mehr tun: eine Ecke ziehen.'
-    : 'Wandzug nicht geschlossen. Vorschläge können Strecken enthalten, die sich nicht direkt messen lassen.';
+    : 'Raum ist offen. Vorschläge können Strecken enthalten, die sich nicht direkt messen lassen.';
 
   // Widersprueche zu den Nachbarraeumen. Bewusst eine eigene Meldung neben
   // dem Netzzustand: das Aufmass DIESES Raums kann tadellos sein und
@@ -10481,8 +10622,12 @@ function renderPanel(){
         : !cnt ? `<span class="wn todo">ohne Ma\u00df${e&&e.off?' \u00b7 '+e.off+' aus':''}</span>`
         : e&&e.fix ? `<span class="wn">exakt${cnt>1?' \u00b7 '+cnt+'\u00d7':''}</span>`
         : cnt>1 ? `<span class="wn">${cnt} Ma\u00dfe${devHtml?' \u00b7 ':''}${devHtml}</span>` : `<span class="wn">${devHtml}</span>`;
+      // Abgeschaltete Maße stehen an jeder Strecke dabei, nicht nur an der,
+      // die sonst keines hat (die sagt es oben schon selbst).
+      const noteAus = cnt && e.off
+        ? `<span class="wn">${note}${e.sus||e.fix||cnt>1||devHtml ? ' · ' : ''}${e.off} aus</span>` : note;
       return `<div class="wrow${e&&e.sus?' worst':''}" data-a="${a2}" data-b="${b2}">`
-        +`<span class="wk">${a2}\u2013${b2}</span>${note}`
+        +`<span class="wk">${a2}\u2013${b2}</span>${noteAus}`
         +`<span class="wlen${!cnt?' approx':''}">${len}</span></div>`;
     };
     const wallRows=M.walls.map(w=>[w[0],w[1]]).sort(nachRang).map(([a2,b2])=>rowHtml(a2,b2)).join('');
@@ -10554,7 +10699,7 @@ function renderPanel(){
       sg.innerHTML='<div class="grp"><b>Mit einer Wand anfangen</b><div class="chips">'
         + M.walls.map(([a2,b2])=>`<button class="sg" data-a="${a2}" data-b="${b2}"><span>${a2}–${b2}</span><small>Wand</small></button>`).join('')
         + '</div></div>';
-    else sg.innerHTML='<span>Erst den Wandzug schließen.</span>';
+    else sg.innerHTML='<span>Erst den Raum schließen.</span>';
   }
   // Fertig und nichts einzugrenzen: dann sagt der Status alles, der
   // Abschnitt verschwindet.
@@ -10763,10 +10908,13 @@ const toolFromHash=()=>location.hash==='#fliesen' ? 'fliesen' : location.hash===
 const istWand=(a,b)=>M.walls.some(w=>wallKey(w[0],w[1])===wallKey(a,b));
 const raumGeschlossen=()=>!!C.wallPolygonRing(M.pts, M.walls);
 function setTool(tool, boot){
+  // Der Wechsel räumt jede ältere Rückmeldung weg (setMode); die eigene
+  // Absage kommt deshalb erst danach.
+  let absage=null;
   if(tool==='fliesen' && !tilesReady()){
-    tool='aufmass'; sag('Der Fliesenplan braucht einen geschlossenen, eingemessenen Raum.'); }
+    tool='aufmass'; absage='Der Fliesenplan braucht einen geschlossenen, eingemessenen Raum.'; }
   if(tool==='kueche' && !(typeof kitchenReady==='function' && kitchenReady())){
-    tool='aufmass'; sag('Der Küchenplaner braucht eine eindeutige Form.'); }
+    tool='aufmass'; absage='Der Küchenplaner braucht eine eindeutige Form.'; }
   TOOL=tool; document.body.dataset.tool=tool;
   $('toolname').hidden = tool==='aufmass';
   $('toolname').textContent=TOOLNAME[tool];
@@ -10780,6 +10928,7 @@ function setTool(tool, boot){
   // Im Raumaufmaß beginnt man dort, wo der Raum steht: offen in der Skizze,
   // geschlossen bei den Maßen.
   else setMode((raumGeschlossen() || M.meas.length) ? 'measure' : 'draw');
+  if(absage) sag(absage);
 }
 $('toAufmass').onclick=()=>setTool('aufmass');
 
@@ -10788,25 +10937,42 @@ $('toAufmass').onclick=()=>setTool('aufmass');
 // kurz dort, wo sie ausgelöst wurde: am Anker, über der offenen Karte oder am
 // Zeiger.
 let sagTimer=null, sagLive=false, lastPtr=null;
-addEventListener('pointerdown',e=>{ lastPtr={x:e.clientX, y:e.clientY, t:performance.now()}; }, true);
+addEventListener('pointerdown',e=>{ lastPtr={x:e.clientX, y:e.clientY, t:performance.now(),
+  plan:!!(e.target.closest && e.target.closest('#canvaswrap'))}; }, true);
 function sag(txt, anker, bleibt){
   const el=$('toast');
   clearTimeout(sagTimer);
-  if(!txt){ el.classList.remove('on'); return; }
+  if(!txt){ el.classList.remove('on'); sagLive=false; return; }
   el.textContent=plat(txt);
+  // Erst messen, dann setzen: nahe am rechten Rand bräche der Text sonst früher um.
+  el.style.left='0px';
+  const w=el.offsetWidth, h=el.offsetHeight;
   const offen=[$('wpop'),$('cpop'),$('entry'),$('oppl')].find(x=>x && !x.hidden);
   const r=anker ? anker.getBoundingClientRect() : null, box=offen ? offen.getBoundingClientRect() : null;
+  const plan=$('canvaswrap').getBoundingClientRect();
   const nah=lastPtr && performance.now()-lastPtr.t<1500;
   const imBox=box && nah && lastPtr.x>=box.left && lastPtr.x<=box.right && lastPtr.y>=box.top && lastPtr.y<=box.bottom;
-  let x, y, unter=false;
-  if(r){ x=r.left+r.width/2; y=r.bottom+10; unter=true; }
-  else if(box && (imBox || !nah)){ x=box.left+box.width/2; y=box.top-8; }
-  else if(nah){ x=lastPtr.x; y=lastPtr.y-16; }
-  else { const s=$('canvaswrap').getBoundingClientRect(); x=s.left+s.width/2; y=s.top+64; }
-  el.style.translate = unter ? '-50% 0' : '-50% -100%';
-  const halb=Math.min(520, innerWidth-24)/2+12;
-  el.style.left=Math.max(halb, Math.min(innerWidth-halb, x))+'px';
-  el.style.top=Math.max(unter ? 8 : 44, y)+'px';
+  // x: Mitte, y: Oberkante.
+  let x, y, links=12;
+  // Über der offenen Karte; fehlt dort der Platz, darunter.
+  const anKarte=()=>{ x=box.left+box.width/2; y=box.top-8-h; if(y<plan.top+4) y=box.bottom+8; };
+  // Am Anker: darunter; fehlt dort der Platz, darüber. Nie auf ihm.
+  if(r && r.width){ x=r.left+r.width/2; y=r.bottom+10; if(y+h>innerHeight-8) y=r.top-10-h; }
+  else {
+    if(box && (imBox || !nah)) anKarte();
+    // Am Zeiger nur im Plan: ein Klick im Panel oder in der Leiste ist kein Ort im Plan.
+    else if(nah && lastPtr.plan){ x=lastPtr.x; y=lastPtr.y-16-h; }
+    // Sonst unten mittig im Plan, neben dem Melde-Knopf und nie über dem Panel.
+    else {
+      x=plan.left+plan.width/2; y=plan.bottom-16-h;
+      const f=$('mldFab'), fr=f ? f.getBoundingClientRect() : null;
+      if(fr && fr.width && fr.top<y+h && fr.bottom>y) links=fr.right+8;
+    }
+    // Nie auf der offenen Karte.
+    if(box && y<box.bottom && y+h>box.top && x-w/2<box.right && x+w/2>box.left) anKarte();
+  }
+  el.style.left=Math.max(links, Math.min(innerWidth-12-w, x-w/2))+'px';
+  el.style.top=Math.max(8, Math.min(innerHeight-8-h, y))+'px';
   el.classList.add('on');
   if(!bleibt) sagTimer=setTimeout(()=>el.classList.remove('on'), 2600+Math.min(3200, txt.length*32));
 }
@@ -10872,12 +11038,14 @@ function openOut(){
   if(TOOL!=='aufmass') return;
   if(!raumGeschlossen()){ sag('Die Ausgabe gibt es, sobald der Raum geschlossen ist.', $('outTab')); return; }
   closeEntry(); if(wpopPair) closeWallPopup(); hidePop();
+  sag(null);
   OUT.on=true; document.body.classList.add('outmode');
   syncOutTab(); renderPanel();
   $('sheets').scrollTop=0;
 }
 function closeOut(){
   if(!OUT.on) return;
+  sag(null);
   OUT.on=false; document.body.classList.remove('outmode'); syncOutTab();
 }
 function renderOut(){
@@ -16672,6 +16840,37 @@ globalThis.selfChecks=function(){
       chk('einmessen: ohne Messung bleibt die Lage unveraendert',
         (()=>{ const r=so(shape, {...op, x:777, y:333}, []);
                return r.ziel.x===777 && r.ziel.y===333 && r.x.n===0; })());
+      // --- Gemessen schlaegt geschaetzt ---
+      const se=globalThis.settleOpening;
+      const fen={id:'f', x:0, y:900, w:1000, h:1200}, tuer={id:'t', x:1508, y:0, w:985, h:1985};
+      const mf=[{id:'m1',op:'f',edge:'right',d:1200,sigma:5}];       // -> x = 4000-1000-1200 = 1800
+      chk('ausweichen: eingemessen nimmt seine Lage, die geschaetzte Nachbarin rueckt buendig daneben',
+        (()=>{ const s=se(shape, fen, [tuer, fen], mf);
+               return !!s.platz && near(s.platz.x,1800,1e-9) && s.platz.y===900 && s.stoesst.length===0 && !s.wand
+                   && s.weicht.length===1 && s.weicht[0].op===tuer && near(s.weicht[0].x,815,1e-9)
+                   && fen.x===0 && tuer.x===1508; })());
+      chk('ausweichen: zwei eingemessene, die sich ueberdecken -> nichts bewegt sich, die andere ist benannt',
+        (()=>{ const s=se(shape, fen, [tuer, fen], [...mf, {id:'m2',op:'t',edge:'left',d:1508,sigma:5}]);
+               return s.platz===null && s.weicht.length===0 && s.stoesst.length===1 && s.stoesst[0]===tuer && s.eng===false; })());
+      chk('ausweichen: ein Hoehenmass allein haelt die Nachbarin nicht fest - seitlich ist sie geschaetzt',
+        (()=>{ const f2={id:'g', x:1500, y:900, w:1000, h:1200};
+               const s=se(shape, fen, [f2, fen], [...mf, {id:'m3',op:'g',edge:'bottom',d:900,sigma:5}]);
+               return !!s.platz && near(s.platz.x,1800,1e-9) && s.stoesst.length===0
+                   && s.weicht.length===1 && s.weicht[0].op===f2 && near(s.weicht[0].x,800,1e-9); })());
+      chk('ausweichen: kein Platz zum Ausweichen -> Widerspruch statt Ueberdeckung',
+        (()=>{ const breit={id:'h', x:500, y:900, w:3500, h:500};
+               const s=se(shape, fen, [breit, fen], mf);
+               return s.platz===null && s.stoesst[0]===breit && s.weicht.length===0 && s.eng===true; })());
+      chk('ausweichen: freie Lage -> nichts weicht, nichts stoesst',
+        (()=>{ const s=se(shape, fen, [{...tuer, x:0}, fen], mf);
+               return near(s.platz.x,1800,1e-9) && !s.weicht.length && !s.stoesst.length; })());
+      chk('ausweichen: Mass ausserhalb der Wand -> am Rand und als solches gemeldet',
+        (()=>{ const s=se(shape, fen, [fen], [{id:'m1',op:'f',edge:'left',d:3500,sigma:5}]);
+               const knapp=se(shape, fen, [fen], [{id:'m1',op:'f',edge:'left',d:3002,sigma:5}]);
+               return near(s.platz.x,3000,1e-9) && s.wand===true && knapp.wand===false && near(knapp.platz.x,3000,1e-9); })());
+      chk('ausweichen: ohne eigenes Lagemass bleibt alles, wie es ist',
+        (()=>{ const s=se(shape, tuer, [tuer, fen], mf);
+               return s.platz===null && !s.weicht.length && !s.stoesst.length && !s.wand; })());
     }
     chk('oeffnung: Vorbelegung passt auch in eine winzige Wand',
       (()=>{ const eng={L:700, ha:1800, hb:1800,

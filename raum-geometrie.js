@@ -1079,6 +1079,45 @@ globalThis.solveOpening=function(shape, op, meas){
   return {ziel, x:fx, y:fy, verdacht,
           rows:obs.map((e,i)=>({m:e.m, achse:e.o.achse}))};
 };
+// Gemessen schlaegt geschaetzt: eine eingemessene Oeffnung nimmt die Lage
+// ein, die ihre Masse ihr geben. Liegt dort eine, deren seitliche Lage nur
+// geschaetzt ist (kein Mass von links oder rechts - ein Hoehenmass allein
+// haelt sie nicht fest), weicht die seitlich aus - buendig an die naechste
+// freie Kante, auf ihrer Hoehe. Geht das nicht (die andere ist selbst seitlich
+// eingemessen, oder zum Ausweichen fehlt der Platz: eng), bleibt alles liegen
+// und stoesst nennt, womit sie zusammenstoesst. Still verwerfen waere eine
+// Luege: das Mass stuende in der Liste, die Oeffnung laege woanders.
+// Aendert nichts. Liefert {platz, weicht:[{op,x}], stoesst:[op], wand, eng}:
+// platz null = nicht eingemessen oder Widerspruch; wand = das Mass legt sie
+// weiter aus der Wand, als die Messgenauigkeit hergibt (3,29 * 5 mm, Baardas
+// Schwelle wie oben) - sie liegt dann am Rand.
+globalThis.settleOpening=function(shape, op, others, meas){
+  const fest=(o, seitlich)=>(meas||[]).some(m=>m.op===o.id && m.on!==false
+    && (!seitlich || m.edge==='left' || m.edge==='right'));
+  if(!fest(op)) return {platz:null, weicht:[], stoesst:[], wand:false, eng:false};
+  const clamp=globalThis.clampOpening, so=globalThis.solveOpening;
+  // Zweimal: "von der Decke" haengt unter einer Schraege an der seitlichen Lage.
+  let ziel=so(shape, op, meas).ziel;
+  ziel=so(shape, {...op, x:clamp(shape, ziel).x}, meas).ziel;
+  const platz=clamp(shape, ziel);
+  const wand=Math.max(Math.abs(platz.x-ziel.x), Math.abs(platz.y-ziel.y))>3.29*5;
+  const rest=(others||[]).filter(o=>o.id!==op.id);
+  const imWeg=rest.filter(o=>globalThis.openingsOverlap(platz, o));
+  const stoesst=imWeg.filter(o=>fest(o, true)), weicht=[];
+  let eng=false;
+  if(!stoesst.length){
+    const belegt=[platz, ...rest.filter(o=>!imWeg.includes(o))];
+    for(const w of imWeg){
+      const xs=[0, shape.L-w.w];
+      belegt.forEach(b=>xs.push(b.x-w.w, b.x+b.w));
+      const frei=xs.sort((p,q)=>Math.abs(p-w.x)-Math.abs(q-w.x))
+        .map(x=>({...w, x})).find(k=>globalThis.openingPlaceable(shape, k, belegt));
+      if(!frei){ stoesst.push(w); eng=true; break; }
+      weicht.push({op:w, x:frei.x}); belegt.push(frei);
+    }
+  }
+  return stoesst.length ? {platz:null, weicht:[], stoesst, wand, eng} : {platz, weicht, stoesst, wand, eng};
+};
 
 // ================= Entwirren =================
 // Ein geschlossener, teilgemessener Wandzug kann sich beim Skizzieren

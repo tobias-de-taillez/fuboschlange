@@ -194,30 +194,30 @@ function importProblem(o){
   const ids=new Set();
   for(const p of o.pts){
     if(!p || typeof p!=='object') return 'pts enthält einen Eintrag ohne Objektform.';
-    if(typeof p.id!=='string' || !p.id) return 'pts enthält einen Punkt ohne gültige id.';
+    if(typeof p.id!=='string' || !p.id) return 'pts enthält eine Ecke ohne gültige id.';
     if(!Number.isFinite(p.x) || !Number.isFinite(p.y))
-      return `Punkt ${p.id}: x/y müssen endliche Zahlen sein.`;
-    if(ids.has(p.id)) return `Punkt-ID ${p.id} kommt mehrfach vor.`;
+      return `Ecke ${p.id}: x/y müssen endliche Zahlen sein.`;
+    if(ids.has(p.id)) return `Ecke ${p.id} kommt mehrfach vor.`;
     ids.add(p.id);
   }
   for(const w of o.walls){
     if(!Array.isArray(w) || w.length!==2 || typeof w[0]!=='string' || typeof w[1]!=='string')
       return 'walls enthält einen Eintrag, der nicht aus genau zwei IDs besteht.';
     if(!ids.has(w[0]) || !ids.has(w[1]))
-      return `Wand ${w[0]}–${w[1]} verweist auf einen unbekannten Punkt.`;
+      return `Wand ${w[0]}–${w[1]} verweist auf eine unbekannte Ecke.`;
   }
   for(const m of o.meas){
     if(!m || typeof m!=='object') return 'meas enthält einen Eintrag ohne Objektform.';
     if(!ids.has(m.a) || !ids.has(m.b))
-      return `Messung ${m.a}–${m.b} verweist auf einen unbekannten Punkt.`;
+      return `Maß ${m.a}–${m.b} verweist auf eine unbekannte Ecke.`;
     if(!Number.isFinite(m.d) || !(m.d>0))
-      return `Messung ${m.a}–${m.b}: d muss eine Zahl größer 0 sein.`;
+      return `Maß ${m.a}–${m.b}: d muss eine Zahl größer 0 sein.`;
     // sigma ist optional - fehlt es, greift SIGMA_DEF (siehe analyze()). Ist es
     // aber da, muss es eine echte, positive Zahl sein: sigma:0 ergaebe in
     // analyze() eine Division durch 0 und damit ein literales Infinity in der
     // w-Spalte. null/undefined zaehlen als "fehlt", nicht als ungueltiger Wert.
     if(m.sigma!=null && (!Number.isFinite(m.sigma) || !(m.sigma>0)))
-      return `Messung ${m.a}–${m.b}: σ muss, wenn angegeben, eine Zahl größer 0 sein.`;
+      return `Maß ${m.a}–${m.b}: σ muss, wenn angegeben, eine Zahl größer 0 sein.`;
   }
   return null;
 }
@@ -247,14 +247,42 @@ function redo(){
   restoreSnapshot(redoStack.pop());
   return true;
 }
+// Wo ein offener Zug weiterlaeuft, wenn deserialize() ihn beendet hat: an
+// seinem freien Ende. vor ist die Ecke, an der er lief, davor sind ihre
+// Nachbarn von vorhin. Nimmt der Schritt die Ecke mit, geht es an der Ecke
+// davor weiter; hat er sie nicht beruehrt, bleibt der Zug dort. Sonst gilt
+// bei einer einzelnen Ecke diese und bei einem offenen Zug mit zwei Enden
+// das spaetere - die erste Ecke bleibt das Ziel, das den Raum schliesst.
+// null: Raum geschlossen oder kein eindeutiges freies Ende.
+function zugEnde(vor, davor){
+  if(C.wallPolygonRing(M.pts, M.walls)) return null;
+  const grad=id=>M.walls.filter(w=>w.includes(id)).length;
+  const frei=M.pts.map(p=>p.id).filter(id=>grad(id)<2);
+  if(vor!=null){
+    if(!M.pts.some(p=>p.id===vor)){ const d=davor.find(id=>frei.includes(id)); if(d!=null) return d; }
+    else if(frei.includes(vor) && grad(vor)===davor.length) return vor;
+  }
+  if(frei.length===1) return frei[0];
+  return frei.length===2 && grad(frei[0])===1 && grad(frei[1])===1 ? frei[1] : null;
+}
 function restoreSnapshot(json){
   // deserialize() raeumt die Auswahl - beim Undo einer Messung soll das
   // Popup aber offen bleiben, sonst verliert man nach jedem Schritt den
   // Kontext. Auswahl zurueckholen, falls es sie noch gibt.
   const wandVor=M.wallSel, offenVor=M.openSel;
+  // Ebenso der Zeichenzug: wo er lief und von welcher Ecke er dorthin kam.
+  const zugVor=M.chain, zugDavor=M.walls.filter(w=>w.includes(zugVor)).map(w=>w[0]===zugVor ? w[1] : w[0]);
+  const eckenVor=M.pts.length;
   deserialize(JSON.parse(json));
   if(wandVor && M.walls.some(([a,b])=>a===wandVor.a&&b===wandVor.b)) M.wallSel=wandVor;
   if(offenVor && M.openings.some(o=>o.id===offenVor)) M.openSel=offenVor;
+  // In der Skizze laeuft der Zug nach Rueckgaengig und Wiederherstellen
+  // weiter, sonst setzte der naechste Klick eine lose Ecke ohne Wand. Lief
+  // keiner, nimmt ihn nur ein Schritt auf, der Ecken bringt oder nimmt, und
+  // nur ohne Masse: nach Esc oeffnet der Klick auf eine Wand weiter ihre
+  // Karte, und ein vermessener Raum darf offen bleiben, ohne dass jeder
+  // Schritt zurueck den Zug aufnimmt.
+  if(M.mode==='draw' && (zugVor!=null || (M.pts.length!==eckenVor && !M.meas.length))) M.chain=zugEnde(zugVor, zugDavor);
   // deserialize() loescht M.fit - recompute() hielte das fuer eine neue
   // Szene und passte die Kamera neu ein. Rueckgaengig laesst die Ansicht.
   const viewVor={...VIEW};

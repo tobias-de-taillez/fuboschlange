@@ -208,6 +208,28 @@ const form=g=>({b:g.gebaeude.map(B=>[B.name, B.geschosse.map(G=>[G.name, G.raeum
       && gleich(Z.stand({area:12, stand:{tone:'bad', text:'Ein Maß passt nicht: Strecke A–B'}, data:quad}), {tone:'bad', text:'Ein Maß passt nicht: Strecke A–B'}));
   chk('stand: unbekannter Ton wird Skizze, leerer Text zählt als fehlend', Z.stand({stand:{tone:'lila', text:'x'}, data:quad}).tone===''
       && Z.stand({area:12, stand:{tone:'good', text:'  '}, data:quad}).text==='12,00 m²');
+  // Der Satz aus dem Panel des Raumaufmaßes steht in der Zeile als Zustand, ohne Handlungsanweisung.
+  const zeile=(tone, text, area=null)=>Z.stand({area, stand:{tone, text}, data:quad});
+  chk('stand: Bediensatz hinter dem Zustand fällt weg',
+      gleich(zeile('', 'Noch keine Ecke. Ein Klick in den Plan setzt die erste.'), {tone:'', text:'Noch leer'})
+      && gleich(zeile('', '5 Ecken. Ein Klick auf die erste schließt den Raum.'), {tone:'', text:'Skizze, 5 Ecken'})
+      && zeile('', '1 Ecke gesetzt.').text==='Skizze, 1 Ecke' && zeile('', '2 Ecken gesetzt.').text==='Skizze, 2 Ecken'
+      && zeile('warn', 'Raum geschlossen, noch kein Maß.').text==='Raum geschlossen, noch kein Maß');
+  chk('stand: Sätze des Raumaufmaßes in Kurzform',
+      gleich(zeile('warn', 'Noch 3 Maße, dann ist die Form eindeutig.'), {tone:'warn', text:'Noch 3 Maße'})
+      && zeile('warn', 'Noch 1 Maß, dann ist die Form eindeutig.').text==='Noch 1 Maß'
+      && zeile('warn', 'Form eindeutig, aber ungeprüft. Ein Kontrollmaß deckt Tippfehler auf.').text==='Ungeprüft'
+      && gleich(zeile('bad', 'Ein Maß passt nicht zu den übrigen. Nachmessen oder das Maß löschen.'), {tone:'bad', text:'Ein Maß passt nicht'})
+      && zeile('warn', 'Die Maße streuen mit ± 2,3 mm mehr als erwartet. Die Vorschläge grenzen den Fehler ein.').text==='Maße streuen'
+      && zeile('bad', 'Mindestens ein Maß ist falsch, größte Abweichung 12 mm. Welches, zeigt erst ein Kontrollmaß.').text==='Mindestens ein Maß ist falsch'
+      && zeile('bad', 'Festgelegte Werte passen nicht zusammen: A–B um 3,0 mm, Winkel B 91,0° statt 90,0°. Einen davon lösen oder die übrigen Maße prüfen.').text==='Festgelegtes passt nicht zusammen'
+      && zeile('bad', 'Ausgleich kommt nicht zur Ruhe. Am weitesten daneben liegt A–B (12 mm): nachmessen oder das Maß löschen.').text==='Ausgleich kommt nicht zur Ruhe'
+      && zeile('warn', 'Raum ist offen. Ein Klick auf die erste Ecke schließt ihn.').text==='Raum offen'
+      && zeile('good', 'Geprüft ± 0,2 mm', 9).text==='Geprüft ± 0,2 mm · 9,00 m²');
+  chk('stand: unbekannter Text bleibt mit seinem ersten Satz, nur Anweisung zählt als fehlend',
+      gleich(zeile('warn', 'Zwei Wände fehlen noch. Erst dann geht es weiter.'), {tone:'warn', text:'Zwei Wände fehlen noch'})
+      && zeile('warn', 'Etwa 3,5 m² fehlen').text==='Etwa 3,5 m² fehlen'
+      && gleich(zeile('', 'Ein Klick in den Plan setzt die erste Ecke.', 12), {tone:'warn', text:'12,00 m²'}));
   chk('stand fehlt, offen: Skizze, n Ecken', gleich(Z.stand({area:null, data:offen}), {tone:'', text:'Skizze, 3 Ecken'}));
   chk('stand fehlt, eine Ecke', Z.stand({data:{pts:[quad.pts[0]], walls:[], meas:[]}}).text==='Skizze, 1 Ecke');
   chk('stand fehlt, leer', gleich(Z.stand({data:{pts:[],walls:[],meas:[]}}), {tone:'', text:'Noch leer'}) && Z.stand({}).text==='Noch leer');
