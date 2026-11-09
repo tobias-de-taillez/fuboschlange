@@ -771,6 +771,11 @@
   #wpopThick .thk{width:64px;height:28px;padding:0 7px;border:1px solid var(--line);border-radius:4px;background:#fff;
     text-align:right;font-variant-numeric:tabular-nums}
   #wpopTitle,#cpopTitle,#opplTitle{font-size:13px}
+  /* ---------- Wände ---------- */
+  body[data-mode=wall] #fitview{top:auto;bottom:10px}
+  #wHeight{display:none}
+  #opState.warn{color:var(--ink2)}
+  #opDel{color:var(--bad)}
 </style>
 
 <div id="app">
@@ -6990,7 +6995,8 @@ function wallFit(shape){
   // Rand knapp halten - die Wand soll die Flaeche fuellen, nicht darin schweben.
   // Oben bleibt Platz fuer Titel und Lageplan, unten fuer Ecken und Nachbarn.
   const dpr=DPR(), pad=34*dpr;
-  const oben=(wallInsetBox().h/dpr+30)*dpr, unten=62*dpr;
+  // Unten bleibt Platz für Eckennamen und den schwebenden Melde-Knopf.
+  const oben=(wallInsetBox().h/dpr+30)*dpr, unten=(TOOL==='aufmass'?96:62)*dpr;
   const hoch=Math.max(40*dpr, cv.height-oben-unten);
   const s=Math.min((cv.width-2*pad)/(shape.L||1), hoch/hMax);
   WV={ ...WV, s, ox:(cv.width-shape.L*s)/2, oy:oben+(hoch+hMax*s)/2 };
@@ -9037,7 +9043,7 @@ function renderWallSection(){
           +`<span>${OPEN_LABEL[o.kind]}</span><span>${Math.round(o.w)} × ${Math.round(o.h)}</span>`
           +`<span class="${n?'ok':''}">${n ? n+(n===1?' Maß':' Maße') : 'geschätzt'}</span></div>`;
       }).join('')
-    : (waterOnWall().length ? '' : '<div class="none">Keine Öffnungen. Tür, Fenster oder Loch über die Leiste oben einsetzen.</div>');
+    : (waterOnWall().length ? '' : '<div class="none">Noch keine Öffnung an dieser Wand.</div>');
   box.querySelectorAll('.orow[data-id]').forEach(r=>{ r.onclick=()=>{ M.openSel=r.dataset.id; M.waterSel=null; render(); }; });
   if(waterOnWall().length){ box.insertAdjacentHTML('beforeend', waterRows()); wireWaterRows(box); }
 }
