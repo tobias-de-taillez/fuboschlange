@@ -7975,12 +7975,16 @@ function suggest(E, K, L, n=3){
 // mit Schrankkapazitäten (Ungarische Methode über Kapazitäts-Plätze).
 // Was der Nutzer bewusst doppelt eingeräumt hat (Teller in zwei Schränken),
 // bleibt stehen und belegt seine Plätze - doppelt ist der Weg kürzer, als
-// es eine Einzelzuordnung je sein kann. Damit ist die jetzige Einteilung
-// selbst eine zulässige Lösung, das Ergebnis also nie schlechter.
+// es eine Einzelzuordnung je sein kann.
 // Regeln wie beim Umsortieren: storable, Besteck/Messer nur in Schubladen,
 // Müll und Putzmittel an die Spüle (wenn sie dort Platz haben). Inhalte ohne
 // Ablauf (Backbleche, Seltenes; Putzmittel) nehmen die schlechter
 // greifbaren Plätze und lassen die guten frei.
+// Nie etwas herausnehmen (Review L8053): was eingeräumt ist, bleibt
+// eingeräumt - umgezogen, oder, wenn kein passender Platz frei ist, gegen die
+// Regel an seinem Ort (kept, mit Grund). Reicht der Platz nicht für alles, was
+// noch fehlt, bleibt das Seltenste draußen (Review L8043): „nicht
+// eingeräumt“ kostet je Inhalt nach seiner Häufigkeit in den Abläufen.
 function hungarian(C){
   // C: n Zeilen × m Spalten, n ≤ m. Minimiert Σ C[i][p[i]]. (e-maxx, Potentiale)
   const n=C.length, m=C[0].length, u=new Array(n+1).fill(0), v=new Array(m+1).fill(0), p=new Array(m+1).fill(0), way=new Array(m+1).fill(0);
@@ -8002,6 +8006,20 @@ function hungarian(C){
   for(let j=1;j<=m;j++) if(p[j]) res[p[j]-1]=j-1;
   return res;
 }
+// Was an einer Belegung gegen die Regeln verstößt: je Inhalt „nicht“
+// (storable), „schublade“ (Besteck/Messer); je Schrank „voll“ (mehr als
+// storeCap) oder „fach“ (hohe Spülmaschine: Fächer passen nicht).
+function storeBreaks(K, L, assign){
+  const out=[], on=new Map();
+  Object.entries(assign).forEach(([c,ids])=>ids.forEach(id=>on.set(id,[...(on.get(id)||[]),c])));
+  on.forEach((list,id)=>{ const g=L.byId.get(id); if(!g) return;
+    const ok=storable(g.it,K.spec);
+    list.forEach(c=>{ if(!ok.includes(c)) out.push({c, id, why:'nicht'});
+      else if((c==='besteck'||c==='messer') && frontKind(g.it)!=='drawer') out.push({c, id, why:'schublade'}); });
+    if(!storeFits(g.it,K.spec,list)) out.push({id, why:list.length>storeCap(g.it,K.spec) ? 'voll' : 'fach', list});
+  });
+  return out;
+}
 function optimalStore(E, K, L){
   const base=flows(E,K,L), pl=base.planner, memo=base.memo;
   const evalA=a=>flows(E,K,L,{assign:a, planner:pl, memo, partial:true}).cost;
@@ -8018,16 +8036,23 @@ function optimalStore(E, K, L){
   const used=new Map(); fixed.forEach(k=>start[k].forEach(id=>used.set(id,(used.get(id)||0)+1)));
   const free=keys.filter(k=>!fixed.includes(k));
   const inFlow=new Set(); FLOWS.forEach(F=>F.chains.flat().forEach(r=>{ if(keys.includes(r)) inFlow.add(r); }));
-  const E0=evalA(empty), INF=1e15, UNPLACED=1e12;
+  // Nutzen je Inhalt: Gänge je Woche in den Abläufen (Rückweg doppelt).
+  const use=c=>FLOWS.reduce((s,F)=>s+(F.chains.flat().includes(c) ? F.f*(F.back?2:1) : 0),0);
+  // Kosten in Stufen, jede schlägt alle darunter: verboten (INF) > Eingeräumtes
+  // herausnehmen (LOSE) > gegen die Regel bleiben lassen (KEEP) > Fehlendes nicht
+  // einräumen (UNPLACED, plus Nutzen) > Müll/Putz nicht an der Spüle > Wege.
+  const E0=evalA(empty), INF=1e15, LOSE=1e13, KEEP=2e12, UNPLACED=1e12, USE=1e9;
+  const miss=c=>(start[c].length ? LOSE : UNPLACED)+USE*use(c);
   const atSink=c=>(c==='muell'||c==='putz') && cabinets.some(g=>g.it.dev==='sink' && allowed(c,g));
   const walk=new Map();
   const cost=(c,s)=>{
-    const g=s.g;
-    if(!allowed(c,g) || (s.z && s.z.only && !s.z.only.includes(c))) return INF;
+    const g=s.g, was=start[c].includes(g.it.id);
+    // Überzählige Plätze und Regelverstöße nur für das, was schon dort liegt.
+    if(s.over || !allowed(c,g) || (s.z && s.z.only && !s.z.only.includes(c))) return was ? KEEP : INF;
     if(atSink(c) && g.it.dev!=='sink') return 1e10;
     const rf=reachFactor(K,g,s.z), k=c+'|'+g.it.id;
     if(inFlow.has(c) && !walk.has(k)) walk.set(k, evalA({...empty,[c]:[g.it.id]})-E0);
-    return inFlow.has(c) ? walk.get(k) + rf : -rf;   // ohne Ablauf: lieber schlecht greifbar
+    return inFlow.has(c) ? walk.get(k) + rf : 2.5-rf;   // ohne Ablauf: lieber schlecht greifbar, nie unter 0
   };
   const slots=[]; cabinets.forEach(g=>{
     const Z=dwZones(g.it,K.spec);
@@ -8037,20 +8062,31 @@ function optimalStore(E, K, L){
       rest.forEach(z=>slots.push({g, z}));
     } else for(let k=used.get(g.it.id)||0;k<cap(g);k++) slots.push({g});
   });
-  const assign={}, unplaced=[];
+  // Was jetzt über storeCap hinaus (oder in einem Teil ohne Stauraum) liegt,
+  // bekommt dort Plätze zum Bleiben - genutzt nur, wenn sonst nichts frei ist.
+  L.G.forEach(g=>{ if(g.wing) return;
+    const load=keys.filter(k=>start[k].includes(g.it.id)).length, n=cabinets.includes(g) ? cap(g) : 0;
+    for(let k=n;k<load;k++) slots.push({g, over:true}); });
+  const assign={}, unplaced=[], kept=[], whyNot=(c,s)=>!storable(s.g.it,K.spec).includes(c) ? 'nicht' : (c==='besteck'||c==='messer') && frontKind(s.g.it)!=='drawer' ? 'schublade' : s.over ? 'voll' : 'fach';
   fixed.forEach(k=>{ assign[k]=[...start[k]]; });
   if(free.length){
-    const rows=free.map(c=>[...slots.map(s=>cost(c,s)), ...free.map(()=>UNPLACED)]);
+    const rows=free.map(c=>[...slots.map(s=>cost(c,s)), ...free.map(()=>miss(c))]);
     const pick=hungarian(rows);
-    free.forEach((c,i)=>{ const j=pick[i], g=j<slots.length ? slots[j].g : null;
-      if(g && rows[i][j]<INF/2) assign[c]=[g.it.id]; else { assign[c]=[]; unplaced.push(c); } });
+    free.forEach((c,i)=>{ const j=pick[i], s=j<slots.length ? slots[j] : null;
+      if(s && rows[i][j]<INF/2){ assign[c]=[s.g.it.id]; if(rows[i][j]>=KEEP) kept.push({c, id:s.g.it.id, why:whyNot(c,s)}); }
+      else { assign[c]=[]; unplaced.push(c); } });
   }
   const same=keys.every(k=>JSON.stringify([...start[k]].sort())===JSON.stringify([...assign[k]].sort()));
   const hb=honest(start), ha=honest(assign), cs=evalA(start), co=evalA(assign);
-  // Fehlt vorher ein Inhalt, zählt sein Weg nicht mit - Einräumen ist dann
-  // Fortschritt, auch wenn die Summe steigt.
+  // Vergleichbar sind nur gleich vollständige Einteilungen: kommt etwas dazu
+  // (und fehlt nichts), ist das Fortschritt, auch wenn die Summe steigt; ein
+  // behobener Regelverstoß ebenso. Weniger Eingeräumtes ist nie „besser“.
+  // dropped bleibt leer (KEEP-Plätze), steht hier nur als Absicherung.
+  const dropped=unplaced.filter(k=>start[k].length);
+  const violations=storeBreaks(K,L,start), after=storeBreaks(K,L,assign);
   const placedBefore=keys.filter(k=>start[k].length).length, placedAfter=keys.filter(k=>assign[k].length).length;
-  return {assign, unplaced, fixed, same, better: placedAfter>placedBefore || co<cs-1, placedBefore, placedAfter, kmBefore:hb.kmYear, kmAfter:ha.kmYear, completeBefore:hb.complete, completeAfter:ha.complete,
+  const better=!dropped.length && (placedAfter>placedBefore || after.length<violations.length || co<cs-1);
+  return {assign, unplaced, fixed, kept, dropped, violations, violationsAfter:after, same, better, placedBefore, placedAfter, kmBefore:hb.kmYear, kmAfter:ha.kmYear, completeBefore:hb.complete, completeAfter:ha.complete,
           cost:co, costStart:cs, costSum:E0+free.reduce((s,c)=>s+(assign[c].length && inFlow.has(c) ? evalA({...empty,[c]:assign[c]})-E0 : 0),0)};
 }
 
@@ -19109,12 +19145,22 @@ function renderWays(c){
     const dup=O.fixed.length ? ` Doppelt Eingeräumtes (${O.fixed.map(k=>escapeHtml(KX.ROLE_LABEL[k])).join(', ')}) bleibt, wie es ist.` : '';
     const gain = O.completeAfter>O.completeBefore ? ` Danach sind ${O.completeAfter} statt ${O.completeBefore} Abläufe vollständig.`
       : O.placedAfter>O.placedBefore ? ` Räumt ${O.placedAfter-O.placedBefore} Inhalt${O.placedAfter-O.placedBefore>1?'e':''} ein, die noch keinen Platz haben.`
+      : O.violationsAfter.length<O.violations.length ? ' Räumt um, was gegen die Regeln liegt.'
       : O.kmAfter<O.kmBefore-0.05 ? ` ≈ ${km(O.kmBefore)} → ${km(O.kmAfter)} km/Jahr.` : ' Wege etwa gleich, aber besser greifbar.';
-    if(O.same || !O.better) hs+=`<p class="tnote">Optimal eingeräumt – keine Einteilung hat kürzere Wege.${dup}</p>`;
+    // Regelverstöße der jetzigen Belegung nennen; was mangels Platz so bleibt
+    // (kept), ebenso - Optimal einräumen nimmt nie etwas heraus.
+    const WHY={nicht:'gehört dort nicht hin', schublade:'braucht eine Schublade', fach:'passt nicht in dieses Fach'};
+    const lbl=k=>escapeHtml(KX.ROLE_LABEL[k]), capOf=id=>{ const it=c.K.items.find(x=>x.id===id); return it ? KX.storeCap(it,c.K.spec) : 0; };
+    const viol=O.violations.map(v=>v.c ? `${lbl(v.c)} in ${escapeHtml(nmId(v.id))} (${WHY[v.why]})`
+      : `${escapeHtml(nmId(v.id))} ${v.why==='voll' ? `zu voll (höchstens ${capOf(v.id)})` : '– Fächer passen nicht'}`).join(', ');
+    const stay=[...O.kept.map(x=>x.c), ...O.dropped];
+    if(O.same || !O.better) hs+=`<p class="tnote">${O.kept.length ? 'Optimal eingeräumt, soweit die Schränke es zulassen.' : 'Optimal eingeräumt – keine Einteilung hat kürzere Wege.'}${dup}</p>`;
     else hs+=`<div class="ksugghead"><b>Optimal einräumen</b><button id="kOpt" class="primary">Einräumen</button></div>`
       +`<p class="tnote">Jeder Inhalt dorthin, wo die Wege aller Abläufe zusammen am kürzesten sind.${gain} Gerechnet, nicht geschätzt: dieselbe Küche ergibt immer dieselbe Einteilung. Besteck und Messer in Schubladen, Töpfe unten, Müll und Putzmittel an der Spüle, Seltenes in die schlechter greifbaren Fächer.${dup}</p>`
       +`<details class="kopt"><summary>Einteilung ansehen</summary><ul>${lines}</ul></details>`;
-    if(O.unplaced.length) hs+=`<p class="tnote">Kein passender Schrank frei für: ${O.unplaced.map(k=>escapeHtml(KX.ROLE_LABEL[k])).join(', ')}.</p>`;
+    if(O.violations.length) hs+=`<p class="tnote">Gegen die Regeln eingeräumt: ${viol}.${stay.length ? ` Bleibt, wo es ist, weil kein passender Platz frei ist: ${stay.map(lbl).join(', ')}. Weitere Schränke setzen.` : ''}</p>`;
+    const fresh=O.unplaced.filter(k=>!O.dropped.includes(k));
+    if(fresh.length) hs+=`<p class="tnote">Kein passender Schrank frei für: ${fresh.map(lbl).join(', ')}${fresh.length>1?' (Häufiges geht vor)':''}.</p>`;
   }
   if(S.length){
     hs+=`<div class="ksugghead"><b>${places.length?'Einräumen und umsortieren':'Umsortieren'}</b><button id="kSuggAll" class="primary">Alles übernehmen</button></div>`;
@@ -19142,10 +19188,12 @@ function renderWays(c){
   $('kSugg').querySelectorAll('[data-sg]').forEach(b=>b.onclick=()=>{ const g=S[+b.dataset.sg].grp; apply(S.filter(x=>x.grp===g)); });
   if($('kSuggAll')) $('kSuggAll').onclick=()=>apply(S);
   if($('kOpt')) $('kOpt').onclick=()=>{ KS.hl=null; snapshot();
-    const items=kitchenData().items, keys=new Set(Object.keys(O.assign));
+    // Nur umräumen, was einen neuen Platz hat: nichts Eingeräumtes geht verloren.
+    const items=kitchenData().items, keys=new Set(Object.keys(O.assign).filter(k=>O.assign[k].length));
     items.forEach(it=>{ if(it.store){ it.store=it.store.filter(k=>!keys.has(k)); if(!it.store.length) delete it.store; } });
     Object.entries(O.assign).forEach(([k,ids])=>ids.forEach(id=>{ const t=items.find(it=>it.id===id); if(t) t.store=[...(t.store||[]),k]; }));
-    kitchenSave(); setHint(`Optimal eingeräumt: ≈ ${km(O.kmAfter)} km/Jahr · ⌘Z nimmt es zurück`); };
+    const st=[...O.kept.map(x=>x.c), ...O.dropped].map(k=>KX.ROLE_LABEL[k]);
+    kitchenSave(); setHint(`Optimal eingeräumt: ≈ ${km(O.kmAfter)} km/Jahr${st.length?` · bleibt gegen die Regel: ${st.join(', ')}`:''} · ⌘Z nimmt es zurück`); };
 }
 // ---------- Wege-Analyse (Meldungen M-20261109-151457-68b975, -151540-54f941) ----------
 // Eigene Ansicht statt 3D: wenig Text, viel Information. Oben die Summe
@@ -23272,6 +23320,55 @@ globalThis.selfChecks=function(){
         const d3={id:'o9',kind:'door',a:'A',b:'B',x:1200,w:900,y:0,h:2000,swing:{type:'turn',hinge:'left',out:false}};
         const E3=KX.makeEnv(R.pts,R.walls,[d3],[]), K=KX.normKitchen({items:[{id:1,kind:'tall',dev:'fridge',fz:'fd',a:'A',b:'B',x:250,w:900}]});
         chk('kueche: Flügel schlägt an die Zimmertür daneben', KX.check(E3,K,KX.layout(E3,K)).some(f=>/Flügel.*die Zimmertür/.test(f.txt)));
+      }
+    }
+    // --- Review-Fix einraeumen ---
+    {
+      const opt=items=>{ const r=lay(items); return {r, O:KX.optimalStore(E,r.K,r.L)}; };
+      const lost=O=>!Array.isArray(O.dropped) || O.dropped.length>0;
+      const fr={id:1,kind:'tall',a:'A',b:'B',x:0,w:600,dev:'fridge'}, tb={id:9,kind:'table',x:1500,y:2200,rot:0,w:1400,d:800};
+      // Besteck und Messer im Drehtür-Unterschrank, keine Schublade in der Küche:
+      // bleiben, wo sie sind, und werden als Regelverstoß genannt; Entfernen ist keine Ersparnis.
+      {
+        const {O}=opt([fr,{id:2,kind:'base',a:'A',b:'B',x:600,w:900,front:'door',store:['besteck','teller','messer']},
+          {id:3,kind:'base',a:'A',b:'B',x:1500,w:600,dev:'sink',store:['muell','putz']},{id:4,kind:'base',a:'A',b:'B',x:2100,w:600,dev:'dw'},
+          {id:5,kind:'base',a:'A',b:'B',x:2700,w:900,dev:'hob',noOven:true,front:'door',store:['toepfe','gewuerze']},
+          {id:6,kind:'base',a:'B',b:'C',x:700,w:900,front:'door',store:['glaeser','tassen','vorrat']},{id:7,kind:'tall',a:'B',b:'C',x:1600,w:600,store:['backen']},tb]);
+        chk('kueche: optimal einräumen nimmt nichts heraus – Besteck/Messer ohne Schublade bleiben und werden als Regelverstoß genannt',
+          !lost(O) && O.assign.besteck.join()==='2' && O.assign.messer.join()==='2' && O.placedAfter===O.placedBefore && O.completeAfter>=O.completeBefore
+          && ['besteck','messer'].every(k=>(O.kept||[]).some(x=>x.c===k && x.id===2 && x.why==='schublade') && (O.violations||[]).some(v=>v.c===k && v.id===2 && v.why==='schublade')));
+      }
+      // Überfüllt (3 Inhalte im 600er, höchstens 2): ist woanders Platz, zieht einer
+      // um (Regelverstoß behoben, als Fortschritt erkannt); sonst bleibt er.
+      {
+        const st={id:2,kind:'base',a:'A',b:'B',x:600,w:600,front:'drawer',store:['besteck','teller','glaeser']}, sk={id:3,kind:'base',a:'A',b:'B',x:1200,w:600,dev:'sink'};
+        const A=opt([fr,st,sk,{id:4,kind:'base',a:'A',b:'B',x:1800,w:600,front:'drawer'},{id:5,kind:'base',a:'A',b:'B',x:2400,w:600,dev:'hob'},
+          {id:6,kind:'base',a:'B',b:'C',x:700,w:900,front:'drawer'},tb]).O;
+        const B=opt([fr,st,sk,tb]).O;
+        chk('kueche: optimal einräumen bei Überfüllung – zieht um, wenn Platz ist, sonst bleibt alles und „zu voll“ wird genannt',
+          !lost(A) && ['besteck','teller','glaeser'].every(k=>A.assign[k].length) && (A.violations||[]).some(v=>v.id===2 && v.why==='voll')
+          && !(A.kept||[]).length && A.better && Object.values(A.assign).filter(ids=>ids.includes(2)).length<=2
+          && !lost(B) && ['besteck','teller','glaeser'].every(k=>B.assign[k].join()==='2') && (B.kept||[]).some(x=>x.id===2 && x.why==='voll'));
+      }
+      // Hohe Spülmaschine, Plätze knapp: Backbleche (ohne Ablauf) verdrängen
+      // weder eingeräumte Vorräte/Töpfe noch – leer gestartet – die häufig
+      // gebrauchten Inhalte; Besteck bekommt die Schublade.
+      {
+        const items=[fr,{id:2,kind:'tall',a:'A',b:'B',x:600,w:600,dev:'dw',store:['vorrat','toepfe']},
+          {id:3,kind:'base',a:'A',b:'B',x:1200,w:600,dev:'sink'},{id:4,kind:'base',a:'A',b:'B',x:1800,w:600,front:'drawer'},
+          {id:5,kind:'base',a:'A',b:'B',x:2400,w:600,dev:'hob'},tb];
+        const A=opt(items).O, {r, O:B}=opt(items.map(it=>{ const o={...it}; delete o.store; return o; }));
+        const use=k=>KX.FLOWS.reduce((s,F)=>s+(F.chains.flat().includes(k) ? F.f*(F.back?2:1) : 0),0);
+        const placed=Object.keys(B.assign).filter(k=>B.assign[k].length);
+        // Tausch „Fehlendes u statt Eingeräumtem p“ nach den Regeln möglich?
+        const swapOk=(u,p)=>{ const id=B.assign[p][0], h=r.L.byId.get(id);
+          if(!KX.storable(h.it,r.K.spec).includes(u) || ((u==='besteck'||u==='messer') && KX.frontKind(h.it)!=='drawer')) return false;
+          return KX.storeFits(h.it,r.K.spec,placed.filter(k=>B.assign[k].includes(id)).map(k=>k===p?u:k)); };
+        chk('kueche: optimal einräumen bei knappen Plätzen – eingeräumte Vorräte/Töpfe bleiben, Backbleche verdrängen sie nicht',
+          !lost(A) && A.assign.vorrat.length && A.assign.toepfe.length && !A.assign.backen.includes(2) && A.placedAfter>A.placedBefore && A.better);
+        chk('kueche: optimal einräumen bei knappen Plätzen – Häufiges vor Seltenem (Töpfe statt Backbleche unten, Besteck in die Schublade)',
+          B.assign.toepfe.join()==='2' && !B.assign.backen.length && B.assign.besteck.join()==='4'
+          && B.unplaced.length && B.unplaced.every(u=>placed.every(p=>!swapOk(u,p) || use(u)<=use(p))));
       }
     }
   }
