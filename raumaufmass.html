@@ -6228,24 +6228,24 @@ const CSHAPE={
 };
 const shapeOf=it=>it.corner && it.ctype && CSHAPE[it.kind] ? CSHAPE[it.kind][it.ctype] : null;
 const PRESETS=[
-  {key:'base',  kind:'base', front:'drawer', w:600, grp:'stau', label:'Unterschrank', tip:'mit Schubladen; Türen, Breite und Inhalt danach rechts'},
-  {key:'sink',  kind:'base', dev:'sink', front:'door', w:600, store:['muell','putz'], grp:'nass', label:'Spüle', tip:'Spülenschrank mit Becken und Armatur'},
-  {key:'dw',    kind:'base', dev:'dw', front:'door', w:600, grp:'nass', label:'Spülmaschine', tip:'60 oder 45 cm breit, gehört neben die Spüle'},
-  {key:'hob',   kind:'base', dev:'hob', front:'door', w:600, grp:'warm', label:'Herd', tip:'Kochfeld, Backofen darunter'},
-  {key:'corner',kind:'base', corner:true, front:'door', w:1000, grp:'stau', label:'Eckschrank', tip:'Halbeckschrank für die Innenecke: Blende hinter der Querzeile, Tür auf dem freien Teil'},
-  {key:'wall',  kind:'wall', front:'door', w:600, grp:'stau', label:'Hängeschrank', tip:'über der Arbeitsplatte; Tür, Klappe oder offen danach rechts'},
-  {key:'wcorner',kind:'wall', corner:true, front:'door', w:782, door:350, grp:'stau', label:'Eckhängeschrank', tip:'Hänge-Eckschrank für die Innenecke (nobilia WE80-35): Blende hinter der Querzeile, Tür auf dem freien Teil'},
-  {key:'hood',  kind:'wall', dev:'hood', front:'open', w:600, grp:'warm', label:'Dunstabzug', tip:'Flachschirm im Hängeschrank, gehört über den Herd'},
-  {key:'tall',  kind:'tall', front:'door', w:600, grp:'stau', label:'Hochschrank', tip:'vom Boden bis oben, z. B. für Vorräte'},
+  {key:'base',  kind:'base', front:'drawer', w:600, grp:'stau', label:'Unterschrank'},
+  {key:'sink',  kind:'base', dev:'sink', front:'door', w:600, store:['muell','putz'], grp:'nass', label:'Spüle'},
+  {key:'dw',    kind:'base', dev:'dw', front:'door', w:600, grp:'nass', label:'Spülmaschine'},
+  {key:'hob',   kind:'base', dev:'hob', front:'door', w:600, grp:'warm', label:'Herd'},
+  {key:'corner',kind:'base', corner:true, front:'door', w:1000, grp:'stau', label:'Eckschrank'},
+  {key:'wall',  kind:'wall', front:'door', w:600, grp:'stau', label:'Hängeschrank'},
+  {key:'wcorner',kind:'wall', corner:true, front:'door', w:782, door:350, grp:'stau', label:'Eckhängeschrank'},
+  {key:'hood',  kind:'wall', dev:'hood', front:'open', w:600, grp:'warm', label:'Dunstabzug'},
+  {key:'tall',  kind:'tall', front:'door', w:600, grp:'stau', label:'Hochschrank'},
   // Ein Kühlschrank in der Leiste: erst „ich brauche einen“, die Bauform
   // (Einbau, French Door, Side by Side) danach rechts (Meldung
   // M-20261109-135632-2bb48a).
-  {key:'fridge',kind:'tall', dev:'fridge', front:'door', hinge:'right', swing:120, w:600, store:['kuehl'], grp:'kalt', label:'Kühlschrank', tip:'Einbau oder frei stehend (mit/ohne Gefrierteil, French Door, Side by Side) – Bauform danach rechts'},
-  {key:'freezer',kind:'tall', dev:'freezer', front:'door', hinge:'right', swing:120, w:600, grp:'kalt', label:'Gefrierschrank', tip:'Einbau oder frei stehend – Bauform danach rechts'},
-  {key:'mw',    kind:'tall', dev:'mw', front:'door', w:600, grp:'warm', label:'Mikrowelle', tip:'im Hochschrank auf Augenhöhe; rechts auf Backofen umstellbar'},
-  {key:'oven',  kind:'tall', dev:'oven', front:'door', w:600, pal:false, label:'Backofen hoch', tip:'im Hochschrank auf Augenhöhe'},
-  {key:'island',kind:'island', front:'drawer', w:1800, d:900, grp:'moebel', label:'Insel', tip:'frei stehend oder an eine Wand angedockt'},
-  {key:'table', kind:'table', w:1200, d:800, grp:'moebel', label:'Tisch', tip:'Plätze ergeben sich aus Länge und Breite (60 cm je Platz)'},
+  {key:'fridge',kind:'tall', dev:'fridge', front:'door', hinge:'right', swing:120, w:600, store:['kuehl'], grp:'kalt', label:'Kühlschrank'},
+  {key:'freezer',kind:'tall', dev:'freezer', front:'door', hinge:'right', swing:120, w:600, grp:'kalt', label:'Gefrierschrank'},
+  {key:'mw',    kind:'tall', dev:'mw', front:'door', w:600, grp:'warm', label:'Mikrowelle'},
+  {key:'oven',  kind:'tall', dev:'oven', front:'door', w:600, pal:false, label:'Backofen hoch'},
+  {key:'island',kind:'island', front:'drawer', w:1800, d:900, grp:'moebel', label:'Insel'},
+  {key:'table', kind:'table', w:1200, d:800, grp:'moebel', label:'Tisch'},
 ];
 
 // ---------- Inhalte ----------
@@ -14530,6 +14530,49 @@ function attachTip(el, text){
   el.addEventListener('pointerdown',()=>showTip(el, text));
 }
 
+// ================= Hover-Texte =================
+// Die title-Tooltips des Browsers kommen erst nach 1-2 s. Fuer Maus und Stift
+// zeigt dasselbe Info-Kaestchen den title-Text nach kurzer Pause; solange
+// liegt der title in data-ttl, damit der Browser nicht zusaetzlich seinen
+// zeigt. Von einem Hover-Text zum naechsten geht es ohne Pause weiter.
+(()=>{
+  const PAUSE=300, WARM=500;
+  let cur=null, t=0, zuletzt=-1e9;
+  const zurueck=el=>{
+    if(el.dataset.ttl==null) return;
+    if(!el.hasAttribute('title')) el.setAttribute('title', el.dataset.ttl);
+    delete el.dataset.ttl;
+  };
+  const weg=()=>{
+    clearTimeout(t);
+    if(!cur) return;
+    zurueck(cur); cur=null;
+    if(!$('tip').hidden){ hideTip(); zuletzt=performance.now(); }
+  };
+  const zeigen=el=>{
+    if(cur!==el || !el.isConnected) return;
+    // Hat der Code den title inzwischen neu gesetzt, gilt der neue.
+    if(el.hasAttribute('title')){ el.dataset.ttl=el.getAttribute('title'); el.removeAttribute('title'); }
+    const tip=$('tip'), host=el.closest('dialog[open]') || document.body;
+    if(tip.parentNode!==host) host.appendChild(tip);
+    showTip(el, el.dataset.ttl);
+  };
+  addEventListener('pointerover',e=>{
+    if(e.pointerType==='touch') return;
+    const el=e.target.closest && e.target.closest('[data-ttl],[title]:not([data-tip])');
+    if(el===cur) return;
+    weg();
+    if(!el || !el.getAttribute('title')) return;
+    cur=el; el.dataset.ttl=el.getAttribute('title'); el.removeAttribute('title');
+    t=setTimeout(()=>zeigen(el), performance.now()-zuletzt<WARM ? 0 : PAUSE);
+  });
+  addEventListener('pointerout',e=>{ if(!e.relatedTarget) weg(); });
+  addEventListener('pointerdown',weg,true);
+  addEventListener('wheel',weg,{passive:true,capture:true});
+  addEventListener('keydown',weg,true);
+  addEventListener('blur',weg);
+})();
+
 function renderPanel(){
   const [txt,cls]=statusText();
   $('statustxt').textContent=txt;
@@ -17558,7 +17601,7 @@ function buildPalette(){
     const row=grp.lastChild;
   KX.PRESETS.filter(p=>p.grp===gk && p.pal!==false).forEach(p=>{
     const b=document.createElement('button');
-    b.className='tb kpal'; b.title=`${p.label} – ${p.tip}`;   // Klicken/Ziehen sagt die Statuszeile
+    b.className='tb kpal'; b.title=p.label;   // nur der Name; Klicken/Ziehen sagt die Statuszeile
     b.setAttribute('aria-label', p.label);
     b.innerHTML=`<svg viewBox="0 0 30 28" aria-hidden="true">${ICONS[p.key]}</svg>`;
     b.addEventListener('pointerdown',e=>{ if(e.button!==0) return; KS.palDrag={key:p.key}; b.setPointerCapture(e.pointerId); });
