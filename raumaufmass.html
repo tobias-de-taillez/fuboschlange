@@ -8950,13 +8950,16 @@ function planLabels(L, o){
   //    Maßstab: der Inhalt unter oder über die Kopfzeile, nur der Kern im Teil
   //    (1,0 em, wegen Unterlängen und Umlauten). Sonst Kopfzeile + Inhalt neu
   //    als Block mit Kern im Teil (die Kopfzeile darf rücken, alle anderen
-  //    stehen schon); gelingt beides nicht, bleibt alles, wie es war.
+  //    stehen schon); gelingt beides nicht, bleibt alles, wie es war. Die
+  //    Kopfzeile wird dabei nie kürzer als sie steht (Breite geht dem Inhalt vor:
+  //    sonst wurde aus „H 45“ ein „H“ mit „+4“).
   G.forEach(g=>{ const mine=out.filter(l=>l.id===g.it.id);
     if(!contentCands(g.it).length || !mine.length || mine.some(l=>l.role==='sub') || !mine.every(l=>occ.has(l))) return;
     const wall=g.it.kind==='wall', f=wall ? fWS : fS, P=scr(g), x=mine[0].x, top=Math.min(...mine.map(l=>occ.get(l).y)), bot=Math.max(...mine.map(l=>occ.get(l).y+occ.get(l).h));
     if(contentCands(g.it).some(s=>{ const h=s.length*lh(f); return [bot+h/2, top-h/2].some(y=>sub(g,P,s,x,y,f,true,1)); })) return;
+    const hc=headCands(g,L), cur=hc.findIndex(H=>H.length===mine.length && H.every((t,i)=>mine[i].txt===t));
     const np=pend.length; drop(mine); const m=out.length;
-    if(block(g, P, wall ? wallA.get(g) : baseA.get(g), headCands(g,L), wall ? fW : fH, true, 1) && pend.length>np){
+    if(block(g, P, wall ? wallA.get(g) : baseA.get(g), cur<0 ? hc : hc.slice(0,cur+1), wall ? fW : fH, true, 1) && pend.length>np){
       const p=pend.pop(); if(p.subs.some(s=>sub(p.g,p.P,s,p.x,p.y,p.f,p.tol,1))) return; }
     pend.length=np; drop(out.slice(m)); mine.forEach(l=>{ out.push(l); LP.occupy(occ.get(l)); }); });
   return {labels:out, LP};
@@ -24782,6 +24785,24 @@ globalThis.selfChecks=function(){
           all=all && Lp.G.every(g=>{ if(g.wing) return true; const P=(g.outline||g.poly).map(w.toScr); return w.lab.filter(l=>l.id===g.it.id).every(l=>KX.rectIn(l.r,P)); })
             && w.lab.every((a,i)=>w.lab.every((b,j)=>j<=i || !ovA(a.r,b.r))) && [1,2].every(id=>w.lab.some(l=>l.id===id && l.role==='head') || s<0.04); }
         chk('kueche: Etiketten mit Inhalt (Maßstab 0,03–0,13, 0–85°) – im Teil, überlappen nicht, Kopfzeile bleibt', all);
+      }
+      {
+        // Schritt 5 kürzt keine Kopfzeile (Breite geht dem Inhalt vor): der Hängeschrank 4 (45 cm, vier Inhalte, im
+        // Gedränge über Hochschrank und Hängeschränken) stand als „H 45“; im neuen Block ohne Gegenprüfung wurde daraus
+        // „H“ mit „+4“ (Maßstab 0,108, 318,5°, dpr 1,5; Mess-Stub 0,57/0,64 em).
+        const m2=(t,f)=>String(t).length*f.px*(f.weight>=600?0.64:0.57);
+        const Ed=KX.makeEnv([{id:'A',x:0,y:0},{id:'B',x:5856,y:0},{id:'C',x:5856,y:4133},{id:'D',x:0,y:4133}],[['A','B'],['B','C'],['C','D'],['D','A']],[],[]);
+        const Ld=KX.layout(Ed,KX.normKitchen({items:[
+          {id:1,a:'B',b:'C',x:2020,w:600,store:['besteck','glaeser','messer','gewuerze'],kind:'base',front:'door',dev:'dw'},
+          {id:2,a:'C',b:'D',x:5080,w:400,store:['toepfe','muell'],kind:'wall',front:'door'},
+          {id:3,a:'B',b:'C',x:1080,w:300,store:['messer'],kind:'wall',front:'open'},
+          {id:4,a:'B',b:'C',x:1640,w:450,store:['tassen','messer','gewuerze','putz'],kind:'wall',front:'open'},
+          {id:5,a:'B',b:'C',x:1150,w:1000,store:['teller','gewuerze','backen','kuehl'],kind:'tall',front:'door'},
+          {id:6,a:'B',b:'C',x:1370,w:800,store:['besteck','vorrat','muell','kuehl'],kind:'wall',front:'open'}]}));
+        const sd=0.10770836797282633, rd=5.5584659720988965, dd=1.5, cd=Math.cos(rd), snd=Math.sin(rd);
+        const toScrD=p=>({x:(p.x*cd-p.y*snd)*sd*dd+589.6680780686438, y:(p.x*snd+p.y*cd)*sd*dd+532.8586620278656});
+        const labD=KX.planLabels(Ld,{toScr:toScrD, dpr:dd, measure:m2}).labels.filter(l=>l.id===4);
+        chk('kueche: Schritt 5 kürzt die Kopfzeile nicht (Hängeschrank bleibt „H 45“, kein „H“ mit „+4“)', labD.some(l=>l.role==='wall' && l.txt==='H 45'));
       }
     }catch(err){ chk('kueche: Rest-Fix etiketten ohne Ausnahme ('+err.message+')', false); }
     //
