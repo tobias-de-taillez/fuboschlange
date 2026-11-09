@@ -6793,14 +6793,16 @@ function check(E, K, L){
     G.forEach(h=>{
       if(e.leaf || h===g || !bandsMeet(e,h)) return;
       // Nachbarn an derselben Wand teilen nur die Kante - kein Anschlag.
-      if(!TL.convexOverlap(e.poly, h.poly, 2)) return;
+      // Tresen: was bis unter die Platte reicht, stößt an den Überstand.
+      const hp = h.foot && e.z1 > h.z1-60 ? h.foot : h.poly;
+      if(!TL.convexOverlap(e.poly, hp, 2)) return;
       // Innenecke: die Zeile an der Nachbarwand steht direkt vor einem Teil
       // der Front. Bleiben ≥ 300 mm frei, ist es ein Eckschrank (Blindecke),
       // sonst ist die Front zu.
       if((e.what==='Tür'||e.what==='Auszug') && h.Wf && g.Wf && h.Wf.key!==g.Wf.key){
         const {L:pl,R:pr}=frontLR(g), dir=unit(sub(pr,pl)), wF=len(sub(pr,pl));
         const strip=[pl, pr, add(pr,mul(g.n,60)), add(pl,mul(g.n,60))];
-        const cut=TL.clipConvex(h.poly, strip);
+        const cut=TL.clipConvex(hp, strip);
         if(cut.length>=3){
           const pr_=cut.map(p=>dot(sub(p,pl),dir)), c0=Math.max(0,Math.min(...pr_)), c1=Math.min(wF,Math.max(...pr_)), b=c1-c0, free=wF-b;
           // Abhilfe: zum Eckschrank machen – an der Ecke stehen bleiben, zur
@@ -20721,6 +20723,10 @@ globalThis.selfChecks=function(){
       const r=lay([{id:1,kind:'island',x:2000,y:1500,rot:0,w:1800,d:900,bar:381}]), g=r.L.byId.get(1);
       chk('kueche: Tresen – Platte 381 mm Überstand hinten, 2 Hocker, Platte im Plan', g.foot && near(Math.abs(TILES.polyArea(g.foot)),1800*1281,1) && KX.barSeats(g)===2 && r.L.tops.find(t=>t.island).depth===1281);
       chk('kueche: Tresen – NKBA-Knieraum nach Höhe (Tisch 457, Theke 381, Bar 305)', KX.barNkba(750)===457 && KX.barNkba(910)===381 && KX.barNkba(1070)===305);
+      chk('kueche: Kühlschranktür schlägt an den Tresen-Überstand (nicht an den Korpus)',
+        (()=>{ const it=[{id:2,kind:'tall',dev:'fridge',a:'A',b:'B',x:1700,w:600,hinge:'left'}];
+          const isl=bar=>({id:1,kind:'island',x:2000,y:1980,rot:0,w:1800,d:900,...(bar?{bar:500}:{})});
+          return !has(lay([...it, isl(0)]).F, /Tür von Kühlschrank.*stößt an Insel/) && has(lay([...it, isl(1)]).F, /Tür von Kühlschrank.*stößt an Insel/); })());
       chk('kueche: Tresen nahe der Wand – zu wenig Platz hinter den Hockern', has(lay([{id:1,kind:'island',x:2000,y:1200,rot:0,w:1800,d:900,bar:381}]).F, /hinter den Hockern nur/, 'bad'));
     }
     chk('kueche: alte gespeicherte Platzzahl wird ignoriert',
