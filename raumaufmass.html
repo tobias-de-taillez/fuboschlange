@@ -23678,7 +23678,9 @@ globalThis.selfChecks=function(){
           && KX.devZones({...ov,h:1300},S).length===0 && KX.storable({...mw,h:800},S).length===0);
         {
           // sweep zählt Befunde: der Höhenbefund hängt nicht an der Lage, das Optimum bleibt erreichbar.
-          const items=h=>[{id:1,kind:'base',a:'B',b:'C',x:0,w:600,dev:'sink'},{id:2,kind:'tall',dev:'oven',a:'B',b:'C',x:1800,w:600,h},{id:3,kind:'base',a:'B',b:'C',x:1200,w:600,dev:'hob',noOven:true,front:'drawer'}];
+          // (Ofen zwischen Spüle und Herd: fitsAt sperrt seit dem Review die
+          // Zone vor der Tür an C–D, die Lagen ab 1850 an B–C wären rot.)
+          const items=h=>[{id:1,kind:'base',a:'B',b:'C',x:0,w:600,dev:'sink'},{id:2,kind:'tall',dev:'oven',a:'B',b:'C',x:1200,w:600,h},{id:3,kind:'base',a:'B',b:'C',x:1800,w:600,dev:'hob',noOven:true,front:'drawer'}];
           const ax=h=>{ const r=lay(items(h)), sw=KX.sweep(E,r.K,r.L,2); return sw && sw.axes[0]; }, a1=ax(1300), a0=ax(undefined);
           chk('kueche: zu niedriger Backofen-Hochschrank – Verschieben findet weiter eine Lage, der Befund zählt an jeder Stelle genau einmal',
             !!a1 && !!a1.best && a1.pts.length>2 && a1.pts.length===a0.pts.length && a1.pts.every((p,i)=>p.v===a0.pts[i].v && p.bad===a0.pts[i].bad+1 && p.ok===a0.pts[i].ok)
@@ -23951,7 +23953,6 @@ globalThis.selfChecks=function(){
       const p3=place([],[{id:1,kind:'island',x:2000,y:1100,rot:0,w:1800,d:900,bar:400}],1700);
       chk('kueche: Unterschrank nicht unter den Tresen-Überstand einer Insel (fitsAt prüft foot)',
         !p3.fits(1700) && p3.clean);
-    }
     }
     // --- Review-Fix beschriftung ---
     // Plan-Etiketten im Bildschirmraum (Meldungen: „120“ über „Besteck“,
