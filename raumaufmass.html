@@ -8530,7 +8530,9 @@ function scene(E, K, L, opts){
       // Gemeinsame Platte mehrerer Inseln: je Insel ihr Stück, Kanten nur am
       // Umriss (am ersten Stück), damit zwischen den Stücken keine Fuge zu sehen ist.
       const jt = it.kind==='island' && L.tops.find(t=>t.joined && t.ids.includes(id));
-      if(it.kind==='island') P_(g.foot||g.poly, tz, wt, tint(COL.top), id, jt ? (jt.ids[0]===id ? jt.edges : []) : true);
+      // Eine Farbe für die ganze gemeinsame Platte (Auswahl vor rot vor gelb).
+      const jtint=c=>jt.ids.some(i=>sel.has(i)) ? mix(c,COL.sel,0.35) : jt.ids.some(i=>bad.has(i)) ? mix(c,COL.bad,0.45) : jt.ids.some(i=>warn.has(i)) ? mix(c,[0.95,0.70,0.15],0.3) : c;
+      if(it.kind==='island') P_(g.foot||g.poly, tz, wt, jt ? jtint(COL.top) : tint(COL.top), id, jt ? (jt.ids[0]===id ? jt.edges : []) : true);
       if(it.dev==='sink'){
         P_(frameRect(g, 60, w-60, 90, d-90), wt, wt+2, COL.steel, id);
         const fp=faucetPoint(K,g), fh=it.faucetH!=null?it.faucetH:S.faucetH, r=18;
@@ -24211,6 +24213,9 @@ globalThis.selfChecks=function(){
       const pr1=KX.scene(E,r1.K,r1.L,{}).prisms.filter(p=>Array.isArray(p.edge)), sg1=pr1.flatMap(p=>p.edge);
       chk('kueche-insel: 3D – gemeinsame Platte ohne Fuge (Kanten nur am Umriss, keine bei x=2400)',
         pr1.length===2 && sg1.length===4 && !sg1.some(([p,q])=>near(p.x,2400,1) && near(q.x,2400,1)));
+      const pr1s=KX.scene(E,r1.K,r1.L,{sel:new Set([2])}).prisms.filter(p=>Array.isArray(p.edge));
+      chk('kueche-insel: 3D – gemeinsame Platte in einer Farbe, auch wenn nur eine Insel gewählt ist',
+        pr1s.length===2 && pr1s[0].col.every((v,k)=>v===pr1s[1].col[k]) && pr1s[0].col.some((v,k)=>v!==pr1[0].col[k]));
       // ungleich hoch: rastet ein, aber zwei Platten
       const r1h=lay(put([A,{...B1,h:1050}],2,s1));
       chk('kueche-insel: ungleich hohe Inseln – zwei Platten', isTops(r1h).length===2 && !has(r1h.F,/überlappen/));
