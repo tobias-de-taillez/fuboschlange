@@ -6351,6 +6351,136 @@ globalThis.doorSwing=function(pts, walls, o){
   return {r, angel, dir0, sense, max};
 };
 
+// ================= Wandaufbau fuer CAD (DXF und STEP) =================
+// wallBands traegt jede Wand mit ihrer (meist angenommenen) Dicke nach aussen
+// auf. Das geht schief an WANDZUNGEN: zwei gegenlaeufige Innenkanten mit
+// kurzer Spitze dazwischen, deren Abstand kleiner ist als die beiden Dicken
+// zusammen (Hesterkamp: F-V-W 152-166 mm, N-O-P-Q 315-333 mm, angenommen je
+// 240). Dann laufen die Baender durch die Zunge in den Raum, ueberkreuzen
+// sich an der Spitze und das DXF hat eine sich selbst schneidende
+// Aussenkontur. Die Zunge ist aber gemessen - ihre Innenflaechen SIND die
+// Wand. Darum wird sie vor den Baendern abgetrennt: sie wird ein eigener
+// Koerper aus ihren echten Innenflaechen (Dicke = Abstand aus dem Aufmass,
+// keine Annahme), und die Baender laufen ueber einen vereinfachten Ring.
+//   1. Flanke laeuft weiter (F-V-W): Fusspunkt X = Gerade(E-F) x Gerade(W-L);
+//      Ring E -> X -> L, Zunge F, V, W, X.
+//   2. dasselbe gespiegelt: X = Gerade(L-M) x Gerade(F-V).
+//   3. Vorsprung aus gerader Wand (N-O-P-Q): Ring M -> N -> Q -> A,
+//      Zunge N, O, P, Q.
+// Gekuerzte Baender behalten die Wand-ID (orig) - daran haengen Oeffnungen
+// und gemessene Dicken. wallBands selbst bleibt unberuehrt (Plan, Nachbarn).
+// Danach prueft ein Waechter jedes Band; was er nicht abnimmt, wird nicht
+// exportiert, sondern beim Namen genannt.
+globalThis.wallLayout=function(pts, walls, thick, hmeas){
+  const C=globalThis.CORE;
+  const ring=C.wallPolygon(pts, walls);
+  if(!ring || ring.length<3) return null;
+  const T0=globalThis.THICK_DEFAULT, MIN=50;
+  const key=(a,b)=>[a,b].sort().join('|');
+  const gem=k=>!!(thick && thick[k]>0);
+  const tOf=k=>gem(k)?thick[k]:T0;
+  const H=globalThis.cornerHeights(pts, hmeas), Hs={};
+  const hOf=id=>Hs[id]!=null ? Hs[id] : H[id].h;
+  const sub=(a,b)=>({x:a.x-b.x,y:a.y-b.y}), dot=(a,b)=>a.x*b.x+a.y*b.y;
+  const len=v=>Math.hypot(v.x,v.y), dist=(a,b)=>len(sub(a,b));
+  const unit=v=>{ const l=len(v); return {x:v.x/l,y:v.y/l}; };
+  // Gerade p-q geschnitten mit Gerade r-s; t laeuft entlang r -> s.
+  const schnitt=(p,q,r,s)=>{
+    const d1=sub(q,p), d2=sub(s,r), den=d1.x*d2.y-d1.y*d2.x;
+    if(Math.abs(den)<1e-9) return null;
+    const w=sub(r,p), t=(w.x*d1.y-w.y*d1.x)/den;
+    return {x:r.x+d2.x*t, y:r.y+d2.y*t, t};
+  };
+  const cosW=Math.cos(globalThis.NAH_WINKEL_CAD*Math.PI/180);
+  // k: Wand-ID (sortiert, wie M.thick und Oeffnungen), nm: Name in Laufrichtung
+  let R=ring.map((p,i)=>({p, k:key(p.id, ring[(i+1)%ring.length].id), nm:`${p.id}-${ring[(i+1)%ring.length].id}`}));
+  R.forEach(n=>{ n.t=tOf(n.k); n.gem=gem(n.k); });
+  const zungen=[];
+  for(let runde=0; runde<50; runde++){
+    const n=R.length;
+    if(n<6) break;                       // danach muss ein Ring bleiben
+    let A2=0; for(let i=0,j=n-1;i<n;j=i++) A2+=R[j].p.x*R[i].p.y-R[i].p.x*R[j].p.y;
+    const ccw=A2>0, aussen=u=>ccw?{x:u.y,y:-u.x}:{x:-u.y,y:u.x};
+    let neu=null;
+    for(let i=0;i<n && !neu;i++){
+      const nP=R[(i+n-1)%n], nA=R[i], nB=R[(i+1)%n], nC=R[(i+2)%n], nD=R[(i+3)%n], nN=R[(i+4)%n];
+      const p=nP.p, a=nA.p, b=nB.p, c=nC.p, d=nD.p, nn=nN.p;
+      const la=dist(a,b), lt=dist(b,c), lc=dist(c,d);
+      if(!(la>1 && lt>1 && lc>1) || lt>NAH_MAX) continue;
+      const u1=unit(sub(b,a)), u2=unit(sub(d,c));
+      if(dot(u1,u2) > -cosW) continue;                    // nicht gegenlaeufig
+      const gap=dot(sub(c,b), aussen(u1));                // Flanke 2 hinter Flanke 1?
+      if(!(gap>1) || gap>=nA.t+nC.t) continue;            // keine Zunge / Baender stossen nicht
+      const nah=q=>dist(q.a,q.b)<=1.5*gap+MIN;
+      const hz=(q,r,t)=>hOf(q.id)+(hOf(r.id)-hOf(q.id))*t;
+      // 1. Flanke 2 laeuft ueber den Fuss hinaus weiter
+      let X=schnitt(p,a,c,d);
+      if(X && X.t>0 && X.t*lc<lc-MIN && nah({a,b:X})){
+        const id=`${a.id}~${d.id}`; Hs[id]=hz(c,d,X.t);
+        neu={weg:[i,(i+1)%n,(i+2)%n], ein:{p:{id,x:X.x,y:X.y}, k:nC.k, nm:nC.nm, t:nC.t, gem:nC.gem},
+             zunge:{poly:[a,b,c,{id,x:X.x,y:X.y}], kanten:[nA.k,nB.k], teil:nC.k}};
+        break;
+      }
+      // 2. gespiegelt: Flanke 1 laeuft weiter
+      X=schnitt(d,nn,a,b);
+      if(X && X.t<1 && X.t*la>MIN && nah({a:d,b:X})){
+        const id=`${d.id}~${a.id}`; Hs[id]=hz(a,b,X.t);
+        neu={weg:[(i+1)%n,(i+2)%n,(i+3)%n], nach:i, ein:{p:{id,x:X.x,y:X.y}, k:nD.k, nm:nD.nm, t:nD.t, gem:nD.gem},
+             zunge:{poly:[{id,x:X.x,y:X.y},b,c,d], kanten:[nB.k,nC.k], teil:nA.k}};
+        break;
+      }
+      // 3. Vorsprung aus einer geraden Wand: Fuesse a und d auf einer Linie
+      const ub=unit(sub(a,p)), ud=unit(sub(nn,d));
+      const abw=Math.abs(dot(sub(d,a), {x:-ub.y,y:ub.x}));
+      if(dot(ub,ud)>cosW && abw<0.25*gap+10 && dist(a,d)<=1.5*gap+MIN){
+        const erb=nP.gem?nP:nD.gem?nD:nP;
+        neu={weg:[(i+1)%n,(i+2)%n], nach:i, setze:{k:key(a.id,d.id), nm:`${a.id}-${d.id}`, t:erb.t, gem:erb.gem},
+             zunge:{poly:[a,b,c,d], kanten:[nA.k,nB.k,nC.k]}};
+        break;
+      }
+    }
+    if(!neu) break;
+    const anker=R[neu.nach!=null?neu.nach:neu.weg[0]];
+    if(neu.setze) Object.assign(anker, neu.setze);
+    const bleibt=R.filter((_,j)=>!neu.weg.includes(j));
+    if(neu.ein){
+      const pos=neu.nach!=null ? bleibt.indexOf(anker)+1 : bleibt.indexOf(R[(neu.weg[0]+n-1)%n])+1;
+      bleibt.splice(pos, 0, neu.ein);
+    }
+    R=bleibt;
+    zungen.push({...neu.zunge, name:'Wandzunge '+neu.zunge.poly.map(q=>q.id.includes('~')?'':q.id).filter(Boolean).join('-')});
+  }
+  // Baender ueber den vereinfachten Ring (Inseln bleiben, wie sie sind).
+  const pts2=[...R.map(n=>n.p), ...ring.holes.flat()];
+  const walls2=[...R.map((n,i)=>[n.p.id, R[(i+1)%R.length].p.id]),
+                ...ring.holes.flatMap(h=>h.map((q,i)=>[q.id, h[(i+1)%h.length].id]))];
+  const thick2={}, orig={};
+  R.forEach((n,i)=>{ const k=key(n.p.id, R[(i+1)%R.length].p.id); orig[k]=n; if(n.gem) thick2[k]=n.t; });
+  const bands=globalThis.wallBands(pts2, walls2, thick2, T0);
+  if(bands.length!==R.length) return {ring, bands:[], zungen, hOf, fehler:['Wandaufbau: Ring nach dem Abtrennen ungültig']};
+  bands.forEach(b=>{ const n=orig[key(b.a,b.b)]; b.orig=n.k; b.nm=n.nm; });
+  // Waechter: jedes Band ein einfaches Viereck, ausserhalb des Raums, ohne
+  // Ueberlappung mit einem nicht benachbarten Band.
+  const fehler=[], nm=b=>b.nm;
+  const quad=b=>[b.iA,b.iB,b.oB,b.oA];
+  const kreuzt=(P,Q)=>P.some((p,i)=>Q.some((q,j)=>C.segCross(p,P[(i+1)%P.length],q,Q[(j+1)%Q.length])));
+  const raumKanten=[ring,...ring.holes].flatMap(L=>L.map((q,i)=>[q,L[(i+1)%L.length]]));
+  bands.forEach((b,i)=>{
+    const Q=quad(b);
+    if(C.segCross(Q[0],Q[1],Q[2],Q[3]) || C.segCross(Q[1],Q[2],Q[3],Q[0])) fehler.push(`Wand ${nm(b)}: Wandkörper verdreht`);
+    else if([b.oA,b.oB,{x:(b.oA.x+b.oB.x)/2,y:(b.oA.y+b.oB.y)/2}].some(q=>C.pointInPoly(q, ring))
+         || raumKanten.some(([p,q])=>C.segCross(b.oA,b.oB,p,q))) fehler.push(`Wand ${nm(b)} ragt in den Raum`);
+  });
+  for(let i=0;i<bands.length;i++) for(let j=i+1;j<bands.length;j++){
+    const nb=j===i+1 || (i===0 && j===bands.length-1);
+    if(!nb && kreuzt(quad(bands[i]),quad(bands[j]))) fehler.push(`Wände ${nm(bands[i])} und ${nm(bands[j])} überlappen`);
+  }
+  const alle=[...ring, ...ring.holes.flat(), ...bands.map(b=>b.oA)];
+  const frame={x0:Math.min(...alle.map(p=>p.x)), y1:Math.max(...alle.map(p=>p.y))};
+  return {ring, bands, zungen, hOf, H, frame, fehler};
+};
+globalThis.NAH_WINKEL_CAD=5;   // Grad, wie NAH_WINKEL: bis dahin gilt "gegenlaeufig"
+
 // ================= DXF fuer CAD (Shapr3D) =================
 // Shapr3D liest DXF als 2D-Skizze: geschlossene Linienzuege werden dort zu
 // Flaechen, die man extrudiert. Deshalb nur LINE und ARC (Polylinien
@@ -6364,21 +6494,21 @@ globalThis.doorSwing=function(pts, walls, o){
 // zerschnitte sein Bogen die Bodenflaeche. WAND_ANGENOMMEN zeichnet die
 // Aussenkanten mit angenommener Dicke noch einmal nach - nur als Hinweis,
 // der Layer ist aus.
+// Innenkontur = echter Ring, Aussenkontur = Baender des vereinfachten Rings
+// (wallLayout) - die beiden Zuege haben nicht mehr gleich viele Kanten.
 // Bildschirm-y zeigt nach unten, DXF-y nach oben: y wird gespiegelt, sonst
 // kaeme der Raum seitenverkehrt an. Ursprung ist die linke untere Ecke der
 // Aussenkontur, Einheit mm ($INSUNITS 4).
+// Rueckgabe {dxf, fehler, hinweise}; dxf ist null, wenn der Waechter etwas
+// findet.
 globalThis.roomDxf=function(pts, walls, thick, openings, name){
-  const C=globalThis.CORE;
-  const ring=C.wallPolygon(pts, walls);
-  if(!ring || ring.length<3) return null;
-  const bands=globalThis.wallBands(pts, walls, thick||{}, globalThis.THICK_DEFAULT);
-  if(bands.length!==ring.length) return null;
-  const aussen=bands.map(b=>b.oA);                 // Ecke i der Aussenkontur
-  const alle=[...ring, ...ring.holes.flat(), ...aussen];
-  const x0=Math.min(...alle.map(p=>p.x)), y1=Math.max(...alle.map(p=>p.y));
+  const W=globalThis.wallLayout(pts, walls, thick, []);
+  if(!W) return null;
+  if(W.fehler.length) return {dxf:null, fehler:W.fehler, hinweise:[]};
+  const {ring, bands, frame}=W;
   const f=v=>{ const s=v.toFixed(3); return s==='-0.000' ? '0.000' : s; };
-  const X=p=>f(p.x-x0), Y=p=>f(y1-p.y);
-  const ents=[], used=new Set();
+  const X=p=>f(p.x-frame.x0), Y=p=>f(frame.y1-p.y);
+  const ents=[], used=new Set(), hinweise=[];
   const line=(lay,a,b)=>{
     if(X(a)===X(b) && Y(a)===Y(b)) return;
     used.add(lay);
@@ -6386,36 +6516,42 @@ globalThis.roomDxf=function(pts, walls, thick, openings, name){
   };
   const zug=(lay,R)=>R.forEach((p,i)=>line(lay,p,R[(i+1)%R.length]));
   const key=(a,b)=>[a,b].sort().join('|');
-  const nr=Object.fromEntries(bands.map((b,i)=>[key(b.a,b.b), i]));
-  // Laibungen je Wand, als Lage entlang der Wand ab ihrer Innenecke iA.
+  const band=new Map(bands.map(b=>[b.orig,b]));
+  // Laibungen: innen auf der echten Kante, aussen auf dem Band derselben Wand.
   // Innen- und Aussenkante werden an jeder Laibung GETEILT: Shapr3D soll
-  // keine T-Stoesse selbst verschneiden muessen, damit die Wandstuecke
-  // sicher eigene Flaechen werden.
-  const schnitte=bands.map(()=>[]);
+  // keine T-Stoesse selbst verschneiden muessen.
+  const lb=new Map();                      // Wand-ID -> [{innen, aussen}]
   (openings||[]).forEach(o=>{
-    const i=nr[key(o.a,o.b)], r=globalThis.openingWorld(pts, o.a, o.b, o);
-    if(i==null || !r) return;
-    const b=bands[i];
+    const k=key(o.a,o.b), b=band.get(k), r=globalThis.openingWorld(pts, o.a, o.b, o);
+    if(!r) return;
+    if(!b){ hinweise.push(`Öffnung in ${o.a}-${o.b} liegt an einer Wandzunge – ohne Laibung exportiert`); return; }
     [r.P, r.Q].forEach(p=>{
-      const t=(p.x-b.iA.x)*b.u.x+(p.y-b.iA.y)*b.u.y;
-      if(t>0.5 && t<b.L-0.5) schnitte[i].push({t, innen:p, aussen:{x:p.x+b.n.x*b.t, y:p.y+b.n.y*b.t}});
+      const s=(p.x-b.iA.x)*b.u.x+(p.y-b.iA.y)*b.u.y;
+      if(s>0.5 && s<b.L-0.5){
+        if(!lb.has(k)) lb.set(k,[]);
+        lb.get(k).push({innen:p, aussen:{x:p.x+b.n.x*b.t, y:p.y+b.n.y*b.t}, s});
+      }
     });
   });
-  schnitte.forEach(S=>S.sort((u,v)=>u.t-v.t));
+  const proj=(A,u,p)=>(p.x-A.x)*u.x+(p.y-A.y)*u.y;
+  ring.forEach((p,i)=>{
+    const q=ring[(i+1)%ring.length], L=Math.hypot(q.x-p.x,q.y-p.y), u={x:(q.x-p.x)/L,y:(q.y-p.y)/L};
+    const S=(lb.get(key(p.id,q.id))||[]).map(j=>({t:proj(p,u,j.innen), pt:j.innen})).filter(j=>j.t>0.5&&j.t<L-0.5).sort((x,y)=>x.t-y.t);
+    const kette=[p, ...S.map(j=>j.pt), q];
+    for(let k=0;k+1<kette.length;k++) line('GRUNDRISS', kette[k], kette[k+1]);
+  });
   bands.forEach((b,i)=>{
-    const S=schnitte[i], j=(i+1)%bands.length;
-    const innen=[ring[i], ...S.map(s=>s.innen), ring[j]];
-    // Aussenkante: Gehrungspunkte einmal je Ecke, damit Nachbarkanten exakt
-    // denselben Endpunkt bekommen.
-    const aus=[aussen[i], ...S.map(s=>s.aussen), aussen[j]];
-    for(let k=0;k+1<innen.length;k++){ line('GRUNDRISS', innen[k], innen[k+1]); line('GRUNDRISS', aus[k], aus[k+1]); }
-    S.forEach(s=>line('GRUNDRISS', s.innen, s.aussen));
-    if(b.assumed) line('WAND_ANGENOMMEN', aussen[i], aussen[j]);
+    const nb=bands[(i+1)%bands.length];
+    const S=(lb.get(b.orig)||[]).slice().sort((x,y)=>x.s-y.s);
+    // Gehrungspunkte einmal je Ecke: Endpunkt = Anfang des naechsten Bands.
+    const kette=[b.oA, ...S.map(j=>j.aussen), nb.oA];
+    for(let k=0;k+1<kette.length;k++) line('GRUNDRISS', kette[k], kette[k+1]);
+    S.forEach(j=>line('GRUNDRISS', j.innen, j.aussen));
+    if(b.assumed) line('WAND_ANGENOMMEN', b.oA, nb.oA);
   });
   ring.holes.forEach(h=>zug('GRUNDRISS', h));
   const deg=a=>{ let d=a*180/Math.PI%360; if(d<0) d+=360; return f(d); };
   (openings||[]).forEach(o=>{
-    if(nr[key(o.a,o.b)]==null) return;
     const s=globalThis.doorSwing(pts, walls, o);
     if(!s || !(s.max>0)) return;
     const th1=s.dir0+s.sense*s.max;
@@ -6430,8 +6566,8 @@ globalThis.roomDxf=function(pts, walls, thick, openings, name){
   // Wand hellgrau. Negative Farbe = Layer aus (DXF-Konvention).
   const FARBE={GRUNDRISS:7, TUERBLATT:4, WAND_ANGENOMMEN:-9};
   const layer=Object.keys(FARBE).filter(l=>used.has(l));
-  const w=[...aussen.map(p=>p.x-x0)], h=[...aussen.map(p=>y1-p.y)];
-  return [
+  const w=bands.map(b=>b.oA.x-frame.x0), h=bands.map(b=>frame.y1-b.oA.y);
+  const dxf=[
     '999', `Raumaufmass ${String(name||'').replace(/[\r\n]+/g,' ')} - Masse in mm`,
     '0','SECTION','2','HEADER',
     '9','$ACADVER','1','AC1009',
@@ -6453,6 +6589,7 @@ globalThis.roomDxf=function(pts, walls, thick, openings, name){
     '0','ENDSEC',
     '0','EOF',''
   ].join('\n');
+  return {dxf, fehler:[], hinweise};
 };
 
 // ================= STEP fuer CAD (Shapr3D, 3D) =================
@@ -6463,35 +6600,37 @@ globalThis.roomDxf=function(pts, walls, thick, openings, name){
 // von oben; eine Oeffnung vom Boden bis zur Decke teilt die Wand in zwei
 // Koerper. Innen liegt das Profil auf der Innenkante, aussen auf der
 // Aussenkante; an den Raumecken sitzen die Aussenpunkte auf der Gehrung
-// (wallBands) - Nachbarwaende stossen dort exakt aneinander. Inseln werden
-// Pfeiler vom Boden bis zur Decke. Gleicher Ursprung und gleiche y-Spiegelung
-// wie das DXF, damit beide Dateien uebereinander liegen.
+// (wallBands) - Nachbarwaende stossen dort exakt aneinander. Waende kommen
+// aus wallLayout: Wandzungen und Inseln werden Pfeiler vom Boden bis zur
+// Decke. Gleicher Ursprung und gleiche y-Spiegelung wie das DXF, damit beide
+// Dateien uebereinander liegen.
 globalThis.roomSolids=function(pts, walls, thick, openings, hmeas){
-  const C=globalThis.CORE;
-  const ring=C.wallPolygon(pts, walls);
-  if(!ring || ring.length<3) return null;
-  const bands=globalThis.wallBands(pts, walls, thick||{}, globalThis.THICK_DEFAULT);
-  if(bands.length!==ring.length) return null;
-  const H=globalThis.cornerHeights(pts, hmeas);
-  const alle=[...ring, ...ring.holes.flat(), ...bands.map(b=>b.oA)];
-  const x0=Math.min(...alle.map(p=>p.x)), y1=Math.max(...alle.map(p=>p.y));
-  const P3=(p,z)=>[p.x-x0, y1-p.y, z];
+  const Wl=globalThis.wallLayout(pts, walls, thick, hmeas);
+  if(!Wl) return null;
+  if(Wl.fehler.length) return {solids:[], fehler:Wl.fehler, hinweise:[]};
+  const {ring, bands, zungen, hOf, H, frame}=Wl;
+  const P3=(p,z)=>[p.x-frame.x0, frame.y1-p.y, z];
   const add=(p,v,k)=>({x:p.x+v.x*k, y:p.y+v.y*k});
   const key=(a,b)=>[a,b].sort().join('|');
   const EPS=1;                                      // mm
-  const solids=[];
+  const solids=[], hinweise=[];
+  const anBand=new Set(bands.map(b=>b.orig));
+  (openings||[]).forEach(o=>{ if(!anBand.has(key(o.a,o.b))) hinweise.push(`Öffnung in ${o.a}-${o.b} liegt an einer Wandzunge – nicht ausgeschnitten`); });
   bands.forEach(b=>{
-    const L=b.L, ha=H[b.a].h, hb=H[b.b].h;
+    const L=b.L, ha=hOf(b.a), hb=hOf(b.b);
     const ceil=s=>ha+(hb-ha)*s/L;
     // Oeffnungen dieser Wand in s-Lage (die Wand kann andersherum laufen
-    // als o.a -> o.b; projiziert wird wie im DXF auf b.u ab iA).
+    // als o.a -> o.b, und ein gekuerztes Band beginnt nicht an o.a;
+    // projiziert wird auf b.u ab iA).
     const ops=[];
     (openings||[]).forEach(o=>{
-      if(key(o.a,o.b)!==key(b.a,b.b)) return;
+      if(key(o.a,o.b)!==b.orig) return;
       const r=globalThis.openingWorld(pts, o.a, o.b, o);
       if(!r || !(o.h>0)) return;
       const pr=p=>(p.x-b.iA.x)*b.u.x+(p.y-b.iA.y)*b.u.y;
-      let s0=Math.max(0,Math.min(pr(r.P),pr(r.Q))), s1=Math.min(L,Math.max(pr(r.P),pr(r.Q)));
+      let s0=Math.min(pr(r.P),pr(r.Q)), s1=Math.max(pr(r.P),pr(r.Q));
+      if(s0<-EPS || s1>L+EPS){ hinweise.push(`Öffnung in ${o.a}-${o.b} liegt an einer Wandzunge – nicht ausgeschnitten`); return; }
+      s0=Math.max(0,s0); s1=Math.min(L,s1);
       if(s1-s0<EPS) return;
       if(s0<EPS) s0=0; if(s1>L-EPS) s1=L;
       const z0=Math.max(0,o.y||0), z1=z0+o.h;
@@ -6544,20 +6683,26 @@ globalThis.roomSolids=function(pts, walls, thick, openings, hmeas){
         const q=l[(i+1)%l.length];
         faces.push([[innen(q),innen(p),aussen(p),aussen(q)]]);
       }));
-      solids.push({name:`Wand ${b.a}-${b.b}${stuecke.length>1?` (${k+1})`:''}`, verts, faces});
+      solids.push({name:`Wand ${b.nm}${stuecke.length>1?` (${k+1})`:''}`, verts, faces});
     });
   });
-  // Inseln: Pfeiler vom Boden bis zur Decke der jeweiligen Ecke.
-  ring.holes.forEach((h,k)=>{
+  // Pfeiler vom Boden bis zur Decke der jeweiligen Ecke: Wandzungen und Inseln.
+  const pfeiler=(h,name)=>{
     const verts=[], n=h.length;
     h.forEach(p=>verts.push(P3(p,0)));
-    h.forEach(p=>verts.push(P3(p,H[p.id].h)));
+    h.forEach(p=>verts.push(P3(p,hOf(p.id))));
     const faces=[[h.map((_,i)=>n-1-i)], [h.map((_,i)=>n+i)]];
     h.forEach((_,i)=>{ const j=(i+1)%n; faces.push([[i,j,n+j,n+i]]); });
-    solids.push({name:`Insel ${k+1} (${h.map(p=>p.id).join('-')})`, verts, faces});
-  });
-  const g=pts.filter(p=>H[p.id].gemessen).length;
-  return {solids, hoehen:[...new Set(pts.map(p=>Math.round(H[p.id].h)))],
+    solids.push({name, verts, faces});
+  };
+  zungen.forEach(z=>pfeiler(z.poly, z.name));
+  ring.holes.forEach((h,k)=>pfeiler(h, `Insel ${k+1} (${h.map(p=>p.id).join('-')})`));
+  // Ein einziger gemessener Wert gilt in cornerHeights fuer alle Ecken (ein
+  // Raum, eine Decke) - das ist dann keine Annahme.
+  const gm=pts.filter(p=>H[p.id].gemessen), einWert=new Set(gm.map(p=>Math.round(H[p.id].h))).size===1;
+  const g=einWert ? pts.length : gm.length;
+  return {solids, fehler:[], hinweise:[...new Set(hinweise)],
+          hoehen:[...new Set(pts.map(p=>Math.round(H[p.id].h)))],
           gemessen: g===pts.length ? 'alle' : g ? 'teils' : 'keine'};
 };
 
@@ -11308,21 +11453,25 @@ $('filesave').onclick=()=>{ if(currentRoom) exportRoomAsFile(currentRoom); };
 // DXF nimmt das AUSGEGLICHENE Aufmass des offenen Raums, nie die Skizze und
 // ohne Ansichtsdrehung - in Shapr3D soll stehen, was gemessen wurde.
 $('dxfsave').onclick=()=>{
-  const dxf=M.fit && roomDxf(M.fit.pts, M.walls, M.thick, M.openings, currentRoomName);
-  if(!dxf){ setHint('Für den DXF-Export braucht es einen geschlossenen, vermessenen Raum.'); return; }
+  const r=M.fit && roomDxf(M.fit.pts, M.walls, M.thick, M.openings, currentRoomName);
+  if(!r){ setHint('Für den DXF-Export braucht es einen geschlossenen, vermessenen Raum.'); return; }
+  // Der Waechter in wallLayout exportiert lieber nichts als verdrehte Waende.
+  if(r.fehler.length){ setHint('DXF nicht exportiert: '+r.fehler.join('; ')+'.'); return; }
+  const dxf=r.dxf;
   const fname=`${slug(currentRoomName)}-${new Date().toISOString().slice(0,10)}.dxf`;
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([dxf],{type:'application/dxf'}));
   a.download=fname;
   a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
-  setHint(`Exportiert als ${fname} (Downloads) – in Shapr3D über Importieren öffnen.`);
+  setHint(`Exportiert als ${fname} (Downloads) – in Shapr3D über Importieren öffnen.${r.hinweise.length?' '+[...new Set(r.hinweise)].join('; ')+'.':''}`);
 };
 // STEP: Waende als Koerper. Ungemessene Hoehen werden angenommen - das muss
 // der Hinweis sagen, sonst sieht die Wand in Shapr3D wie gemessen aus.
 $('stepsave').onclick=()=>{
   const r=M.fit && roomSolids(M.fit.pts, M.walls, M.thick, M.openings, M.hmeas);
   if(!r){ setHint('Für den STEP-Export braucht es einen geschlossenen, vermessenen Raum.'); return; }
+  if(r.fehler.length){ setHint('STEP nicht exportiert: '+r.fehler.join('; ')+'.'); return; }
   const S=r.solids.map(solidPrepare);
   if(!S.every(s=>s.dicht && s.eben && s.vol>0)){ setHint('STEP-Export: ein Wandkörper ist nicht geschlossen. Bitte Öffnungen prüfen.'); return; }
   const step=stepFile(S, currentRoomName);
@@ -11333,7 +11482,7 @@ $('stepsave').onclick=()=>{
   a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
   const h=r.hoehen.map(v=>v.toLocaleString('de-DE')).join(' / ');
-  setHint(`Exportiert als ${fname} (Downloads), ${S.length} Körper. Raumhöhe ${h} mm${r.gemessen==='keine'?' – angenommen, nicht gemessen':r.gemessen==='teils'?' – an ungemessenen Ecken angenommen':''}.`);
+  setHint(`Exportiert als ${fname} (Downloads), ${S.length} Körper. Raumhöhe ${h} mm${r.gemessen==='keine'?' – angenommen, nicht gemessen':r.gemessen==='teils'?' – an ungemessenen Ecken angenommen':''}.${r.hinweise.length?' '+r.hinweise.join('; ')+'.':''}`);
 };
 $('fileopen').onclick=()=>$('filepick').click();
 $('filepick').onchange=async()=>{
@@ -16269,7 +16418,7 @@ globalThis.selfChecks=function(){
                {id:'G',x:500,y:500},{id:'H',x:800,y:500},{id:'J',x:800,y:800}];
       const W=[['A','B'],['B','C'],['C','D'],['D','E'],['E','F'],['F','A'],['G','H'],['H','J'],['J','G']];
       const ops=[{id:'o1',kind:'door',a:'A',b:'B',x:1500,w:900,swing:{type:'turn',hinge:'left'}}];
-      const dxf=globalThis.roomDxf(R, W, {'A|B':175}, ops, 'Test');
+      const dxf=globalThis.roomDxf(R, W, {'A|B':175}, ops, 'Test').dxf;
       const ents=dxf ? dxf.split('ENTITIES')[1] : '';
       const lines=[...ents.matchAll(/LINE\n8\n(\w+)\n10\n(\S+)\n20\n(\S+)\n30\n0\.0\n11\n(\S+)\n21\n(\S+)/g)]
         .map(m=>({lay:m[1], a:m[2]+','+m[3], b:m[4]+','+m[5]}));
@@ -16326,6 +16475,40 @@ globalThis.selfChecks=function(){
         && !/[^\x00-\x7f]/.test(st)
         // REAL immer mit Dezimalpunkt, nie "-0."
         && [...st.matchAll(/(?:CARTESIAN_POINT|DIRECTION)\('',\(([^)]*)\)/g)].every(m=>m[1].split(',').every(v=>/^-?\d+\.\d*$/.test(v) && v!=='-0.')));
+    }
+    // --- Wandzungen: duenner als zwei angenommene Dicken ---
+    {
+      // 6000 x 5000 mit Vorsprung Q-P-O-N aus der Nordwand (300 breit, 900
+      // tief) und Zunge W-V-F (160 dick), an der die Suedwand W-L als
+      // Aussenwand weiterlaeuft - beides wie im Raum Hesterkamp. Dicke
+      // ueberall angenommen (240), Hoehe 2500.
+      const R=[{id:'A',x:0,y:0},{id:'Q',x:2000,y:0},{id:'P',x:2000,y:900},{id:'O',x:2300,y:900},
+               {id:'N',x:2300,y:0},{id:'M',x:6000,y:0},{id:'L',x:6000,y:3000},{id:'W',x:4000,y:3000},
+               {id:'V',x:4000,y:3160},{id:'F',x:4500,y:3160},{id:'E',x:4500,y:5000},{id:'D',x:0,y:5000}];
+      const W=R.map((p,i)=>[p.id, R[(i+1)%R.length].id]);
+      const h25=[{kind:'h',at:'A',d:2500,on:true}];
+      const L=globalThis.wallLayout(R, W, {}, h25);
+      chk('zunge: Vorsprung und Zunge erkannt, Ring vereinfacht, Waechter still',
+        L.fehler.length===0 && L.zungen.map(z=>z.name).sort().join()==='Wandzunge Q-P-O-N,Wandzunge W-V-F'
+        && L.bands.map(b=>b.nm).sort().join()==='A-Q,D-A,E-D,F-E,L-W,M-L,N-M,Q-N');
+      chk('zunge: Aussenkontur schneidet sich nicht selbst',
+        !globalThis.CORE.ringSelfIntersects(L.bands.map(b=>b.oA)));
+      const S=globalThis.roomSolids(R, W, {}, [], h25).solids.map(globalThis.solidPrepare);
+      // Band = Aussenpolygon - vereinfachter Ring; dazu die beiden Zungen.
+      const band=(6480*5480-1500*2000)-(6000*5000-1500*2000);
+      chk('zunge: Koerper dicht, Volumen = Baender + Zungen (keine Ueberlappung)',
+        S.length===10 && S.every(s=>s.dicht && s.eben)
+        && near(S.reduce((a,s)=>a+s.vol,0), (band+300*900+500*160)*2500, 1));
+      const dx=globalThis.roomDxf(R, W, {}, [], 'Z');
+      chk('zunge: DXF ohne Fehler', !!dx.dxf && dx.fehler.length===0);
+      // Zunge mit abgeschraegter Spitze: kein bekanntes Muster -> der
+      // Waechter meldet die Waende, statt Verdrehtes zu exportieren.
+      const R2=R.slice(0,3).concat([{id:'S',x:2150,y:1000}], R.slice(3));
+      const W2=R2.map((p,i)=>[p.id, R2[(i+1)%R2.length].id]);
+      const r2=globalThis.roomSolids(R2, W2, {}, [], h25);
+      chk('zunge: unbekanntes Muster -> Waechter nennt die Waende, kein Export',
+        r2.solids.length===0 && r2.fehler.some(f=>/Q-P/.test(f) && /O-N/.test(f))
+        && globalThis.roomDxf(R2, W2, {}, [], 'Z').dxf===null);
     }
     // --- Oeffnungen einmessen ---
     {
