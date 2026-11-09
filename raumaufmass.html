@@ -7208,7 +7208,7 @@ function check(E, K, L){
   G.filter(g=>tallDev(g.it)).forEach(g=>{
     const sg=devSegs(g.it,S); if(sg.fits) return;
     const need=Math.ceil(sg.need/10)*10, ceil=g.free ? Infinity : Math.min(ceilAt(E,g.Wf,g.s0), ceilAt(E,g.Wf,g.s1));
-    const tgt=D.tallTop>=sg.need ? D.tallTop : need;
+    const tgt=D.tallTop>=sg.need && D.tallTop<=ceil+1 ? D.tallTop : need;
     const fix = tgt<=ceil+1 ? (tgt===D.tallTop ? {label:'Standardhöhe', id:g.it.id, set:{}, del:['h']} : {label:`${mm(need)} mm hoch`, id:g.it.id, set:{h:need}}) : null;
     add_('bad',[g.it.id], `${nameOf(g.it)}: Hochschrank zu niedrig für das Gerät – ${mm(g.z1)} mm, gebraucht ${mm(sg.need)} mm (Gerät ${mm(DEV_H[g.it.dev])} mm ab ${mm(devZ(g.it,S))} mm)`, g.c, fix);
   });
@@ -18765,7 +18765,7 @@ function buildSpec(){
     });
   });
   $('kSpecReset').onclick=()=>{ const S=kitchenData().spec; snapshot(); Object.assign(S, KX.K_DEF); const n=KX.fitStores(kitchenData());
-    setHint('Küchenmaße auf Standard zurückgesetzt.'+(n?` ${n} Inhalt${n>1?'e':''} aus der hohen Spülmaschine entfernt.`:'')); kitchenSave(); };
+    setHint('Küchenmaße auf Standard zurückgesetzt.'+(n?` ${n} Inhalt${n>1?"e":""} aus Hochschränken mit Gerät entfernt.`:'')); kitchenSave(); };
 }
 function renderSpec(c){
   const S=c.K.spec, D=KX.derived(S);
@@ -23303,7 +23303,8 @@ globalThis.selfChecks=function(){
           return P.length===3 && Ev.length===3 && P.every((p,i)=>Math.abs(p.z0-(Ev[i].z0+1.5))<0.01 && (Ev[i].what.includes('tür') && Ev[i].what!=='Tür' && it.dev!=='mw' || Math.abs(p.z1-(Ev[i].z1-1.5))<0.01))
             && Ev[0].what==='Tür' && Ev[2].what==='Tür' && Ev[1].what===(it.dev==='mw'?'Mikrowellentür':it.dev==='dw'?'Spülmaschinentür':'Backofentür'); };
         chk('kueche: Hochschrank mit Gerät – Prüfhüllen wie die Fronten: Tür unten, Gerätetür, Tür oben (Mikrowelle nicht mehr eine durchgehende Tür)',
-          [ov,dw,mw].every(same) && (()=>{ const g=lay([{...mw,id:1,hinge:'right'}]).L.G[0], e=g.env; return e[0].side==='right' && e[2].side==='right' && e[1].side==='left'; })());
+          [ov,dw,mw].every(same) && (()=>{ const g=lay([{...mw,id:1,hinge:'right'}]).L.G[0], e=g.env; return e[0].side==='right' && e[2].side==='right' && e[1].side==='left'; })()
+          && [ov,dw].every(it=>{ const K=KX.normKitchen(JSON.parse(JSON.stringify({items:[{...it,id:1,hinge:'right'}]}))), r=lay(K.items); return K.items[0].hinge==='right' && r.L.G[0].env.filter(e=>e.what==='Tür').every(e=>e.side==='right'); }));
         // Offen-Ansicht: Schranktüren über und unter dem Gerät sind offen da.
         const openDoors=it=>{ const r=lay([{...it,id:1}]), g=r.L.G[0], sg=KX.devSegs(r.K.items[0],S), S1=KX.scene(E,r.K,r.L,{open:true});
           const n=g.n, f=g.front[0], out=p=>Math.max(...p.poly.map(q=>(q.x-f.x)*n.x+(q.y-f.y)*n.y));
