@@ -6551,11 +6551,14 @@ function cornerWing(E, K, g){
   if(dot(ub,g.n)<0.99 || dot(ua,Wn.n)<0.99) return null;                                    // Innenecke
   const w=it.w, d=g.d;
   if(w>Wn.L+1 || w<=d+50) return null;
-  const s0=atA ? d : Wn.L-w, s1=atA ? w : Wn.L-d;
+  // s0..s1 reicht bis in die Ecke (Maßkette und Zeile an der Nachbarwand
+  // sehen den ganzen Schenkel); vs0..vs1 ist der Teil außerhalb des
+  // Eckquadrats, den das Hauptteil nicht schon deckt (Zeichnung, 3D, Tür).
+  const s0=atA ? 0 : Wn.L-w, s1=atA ? w : Wn.L, vs0=atA ? d : Wn.L-w, vs1=atA ? w : Wn.L-d;
   const poly=[wpt(Wn,s0,0), wpt(Wn,s1,0), wpt(Wn,s1,d), wpt(Wn,s0,d)];
   const C=P(E,cid), at=(a,b)=>add(add(C,mul(ua,a)),mul(ub,b));
-  return {it, wing:true, main:g, poly, z0:g.z0, z1:g.z1, d, u:Wn.u, n:Wn.n, Wf:Wn, s0, s1, free:false,
-          c:wpt(Wn,(s0+s1)/2,d/2), front:[poly[3],poly[2]], frontMid:wpt(Wn,(s0+s1)/2,d), env:[], C, ua, ub, at};
+  return {it, wing:true, main:g, poly, z0:g.z0, z1:g.z1, d, u:Wn.u, n:Wn.n, Wf:Wn, s0, s1, vs0, vs1, free:false,
+          c:wpt(Wn,(vs0+vs1)/2,d/2), front:[wpt(Wn,vs0,d),wpt(Wn,vs1,d)], frontMid:wpt(Wn,(vs0+vs1)/2,d), env:[], C, ua, ub, at};
 }
 // Hauptteil um Umriss, Fronten und Standpunkt ergänzen (nach cornerWing).
 function cornerShape(g, wg){
@@ -6881,12 +6884,16 @@ function chainDims(E, L, g){
   }
   // Wandabstände: erste und letzte Lücke, wenn sie an x0 bzw. x1 stößt.
   // Bewegt wird der zusammenhängende Block daneben (Teile ohne Lücke).
-  const block=(from, dir)=>{ const ids=[]; let edge=null;
+  // Ein Block mit dem zweiten Schenkel eines Eckschranks (wing) hängt in der
+  // Ecke fest: dann kein Eingabefeld (sonst wanderte das Hauptteil an der
+  // anderen Wand mit).
+  const block=(from, dir)=>{ const ids=[]; let edge=null, pinned=false;
     const seq = dir>0 ? row : [...row].reverse();
     for(const r of seq){ const near = dir>0 ? r.s0 : r.s1;
       if(edge!=null && Math.abs(near-edge)>1) break;
+      if(r.h.wing) pinned=true;
       ids.push(r.h.it.id); edge = dir>0 ? r.s1 : r.s0; }
-    return {ids, edge}; };
+    return {ids, edge, pinned}; };
   const first=segs[0], last=segs[segs.length-1];
   const lo=cornerStop(E,Wf,qr*2,0), hi=Wf.L-cornerStop(E,Wf,qr*2,1);
   if(row.length && first && first.gap && Math.abs(first.a-x0)<0.5){
@@ -6894,12 +6901,12 @@ function chainDims(E, L, g){
     // dahinter oder das Wandende.
     const B=block(0,1), nb=row.find(r=>!B.ids.includes(r.h.it.id) && r.s0>=B.edge-1);
     const cur=first.b-first.a;
-    first.edit={ids:B.ids, fa:Wf.a, side:0, cur, min:Math.max(0,lo-x0), max:cur+((nb?nb.s0:hi)-B.edge)};
+    if(!B.pinned) first.edit={ids:B.ids, fa:Wf.a, side:0, cur, min:Math.max(0,lo-x0), max:cur+((nb?nb.s0:hi)-B.edge)};
   }
   if(row.length && last && last.gap && Math.abs(last.b-x1)<0.5 && last!==first){
     const B=block(0,-1), nb=[...row].reverse().find(r=>!B.ids.includes(r.h.it.id) && r.s1<=B.edge+1);
     const cur=last.b-last.a;
-    last.edit={ids:B.ids, fa:Wf.a, side:1, cur, min:Math.max(0,x1-hi), max:cur+(B.edge-(nb?nb.s1:lo))};
+    if(!B.pinned) last.edit={ids:B.ids, fa:Wf.a, side:1, cur, min:Math.max(0,x1-hi), max:cur+(B.edge-(nb?nb.s1:lo))};
   }
   return {Wf, xs, segs, x0, x1, q:Math.max(...row.map(r=>r.h.d))+260};
 }
@@ -7718,10 +7725,10 @@ function scene(E, K, L, opts){
     // Hauptteil deckt ihn ganz.
     if(g.wing){
       if(it.ctype==='diag') return;
-      const ln=g.s1-g.s0, lo=it.kind==='wall', zb=lo ? g.z0 : S.plinth, zt=lo ? g.z1 : D.workH-S.topT;
-      if(!lo) P_(frameRect(g,0,ln,0,d-19-50), 0, S.plinth, COL.plinth, id, false);
-      P_(frameRect(g,0,ln,0,d-19), zb, zt, tint(lo?COL.wallCab:COL.carcass), id);
-      if(!(open && g.main.env.length)) P_(frameRect(g,1.5,ln-1.5,d-19,d), zb+1.5, zt-1.5, tint(COL.front), id);
+      const a0=g.vs0-g.s0, a1=g.vs1-g.s0, lo=it.kind==='wall', zb=lo ? g.z0 : S.plinth, zt=lo ? g.z1 : D.workH-S.topT;
+      if(!lo) P_(frameRect(g,a0,a1,0,d-19-50), 0, S.plinth, COL.plinth, id, false);
+      P_(frameRect(g,a0,a1,0,d-19), zb, zt, tint(lo?COL.wallCab:COL.carcass), id);
+      if(!(open && g.main.env.length)) P_(frameRect(g,a0+1.5,a1-1.5,d-19,d), zb+1.5, zt-1.5, tint(COL.front), id);
       return;
     }
     // Diagonal-Eckschrank: Korpus als Fünfeck (Front 19 mm hinter der Schräge).
@@ -21545,7 +21552,7 @@ globalThis.selfChecks=function(){
       const Lk={id:1,kind:'base',corner:true,ctype:'L',inner:'karussell',front:'door',cEnd:0,a:'A',b:'D',x:0,w:900};
       const row=[{id:2,kind:'base',a:'A',b:'B',x:900,w:600},{id:3,kind:'base',a:'A',b:'B',x:1500,w:600}];
       const K=KX.normKitchen({items:[Lk,...row]}), L=KX.layout(E,K), g=L.byId.get(1), wg=L.G.find(h=>h.wing);
-      chk('kueche-eck: L-Eck bekommt den zweiten Schenkel an A–B (580…900)', !!wg && wg.it.id===1 && wg.Wf.key==='A|B' && near(wg.s0,580,0.5) && near(wg.s1,900,0.5) && L.byId.get(1)===g);
+      chk('kueche-eck: L-Eck bekommt den zweiten Schenkel an A–B (580…900)', !!wg && wg.it.id===1 && wg.Wf.key==='A|B' && near(wg.vs0,580,0.5) && near(wg.vs1,900,0.5) && near(wg.s0,0,0.5) && L.byId.get(1)===g);
       chk('kueche-eck: L-Eck – Umriss L, zwei Türen im Eckfeld', g.outline.length===6 && g.env.length===2 && g.env.every(e=>e.what==='Tür' && near(e.r,320,0.5)));
       chk('kueche-eck: L-Eck in der L-Küche ohne rote Befunde', !KX.check(E,K,L).some(f=>f.lvl==='bad'));
       chk('kueche-eck: Platte deckt den zweiten Schenkel', L.tops.some(t=>TILES.pointInRing({x:750,y:300},t.poly)) && L.tops.some(t=>TILES.pointInRing({x:300,y:750},t.poly)));
@@ -21562,9 +21569,13 @@ globalThis.selfChecks=function(){
       chk('kueche-eck: Diagonal – Platte deckt das Dreieck vor dem Eckfeld, Stückliste ohne Eckstück', Ld.tops.some(t=>TILES.pointInRing({x:650,y:650},t.poly)) && KX.stock(Kd,Ld).tops.every(t=>t.len>0));
       // Hänge-Eckschrank über Eck 60×60: zweiter Schenkel ab Tiefe oben
       const Kw=KX.normKitchen({items:[{id:1,kind:'wall',corner:true,ctype:'L',front:'door',cEnd:0,a:'A',b:'D',x:0,w:600}]}), Lw=KX.layout(E,Kw), ww=Lw.G.find(h=>h.wing);
-      chk('kueche-eck: Hänge-Eckschrank über Eck – Schenkel 370…600 an A–B', !!ww && near(ww.s0,370,0.5) && near(ww.s1,600,0.5) && KX.cornerType(Kw.items[0])==='WE60');
+      chk('kueche-eck: Hänge-Eckschrank über Eck – Schenkel 370…600 an A–B', !!ww && near(ww.vs0,370,0.5) && near(ww.vs1,600,0.5) && KX.cornerType(Kw.items[0])==='WE60');
       // Wandrahmen umgedreht: Ecke und Schenkel bleiben
       const Kf=KX.normKitchen({items:[{...Lk, a:'D', b:'A', x:2100, cEnd:1}]}), Lf=KX.layout(E,Kf);
+      // Maßkette an der Nachbarwand: der Schenkel zählt bis in die Ecke, und
+      // der Block mit ihm ist nicht per Eingabefeld verschiebbar.
+      const cd=KX.chainDims(E,L,L.byId.get(3));
+      chk('kueche-eck: Maßkette A–B – Schenkel bis in die Ecke, Block mit Schenkel ohne Eingabefeld', cd && !cd.segs[0].gap && cd.segs.every(sg=>!(sg.edit && sg.edit.ids && sg.edit.ids.includes(1))));
       chk('kueche-eck: L-Eck übersteht das Umdrehen des Wandrahmens', Kf.items[0].cEnd===0 && near(Kf.items[0].x,0,0.5) && Lf.G.some(h=>h.wing));
     }
     {
