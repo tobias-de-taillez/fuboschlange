@@ -8806,7 +8806,23 @@ function stationLabel(LP, q, roles, o){
   // Nah zuerst: voll in den ersten beiden Ringen, dann kurz; weiter außen je Ring voll, kurz.
   const K=GAP.map((g,k)=>k), T=short!==full ? [[full,0],[full,1],[short,0],[short,1], ...K.slice(2).flatMap(k=>[[full,k],[short,k]])] : K.map(k=>[full,k]);
   const all=T.flatMap(([t,k])=>ring(t,k));
-  let r=LP.place(all), forced=false;
+  // Weit abgesetzt (Ring ≥ 2): bevorzugt ein Platz, dessen Führungslinie durch
+  // kein belegtes Rechteck läuft (Maßzahl, Teil-Etikett, andere Station) und
+  // der keine schon gezogene Linie (LP.leads) schneidet. Sonst wie bisher.
+  const leadAt=r=>({x:Math.min(Math.max(q.x, r.x), r.x+r.w), y:Math.min(Math.max(q.y, r.y), r.y+r.h)});
+  const leads=LP.leads||(LP.leads=[]), e=1e-3;
+  const inR=(p,b)=>p.x>b.x+e && p.x<b.x+b.w-e && p.y>b.y+e && p.y<b.y+b.h-e;
+  const segHits=(a,b,R)=>{ let t0=0, t1=1; const dx=b.x-a.x, dy=b.y-a.y;   // Liang–Barsky, Rand zählt nicht
+    for(const [pp,qq] of [[-dx,a.x-R.x-e],[dx,R.x+R.w-e-a.x],[-dy,a.y-R.y-e],[dy,R.y+R.h-e-a.y]]){
+      if(Math.abs(pp)<1e-9){ if(qq<0) return false; continue; }
+      const t=qq/pp; if(pp<0){ if(t>t1) return false; if(t>t0) t0=t; } else { if(t<t0) return false; if(t<t1) t1=t; } }
+    return t1-t0>1e-6; };
+  // Kreuzungen der Linie (nahe Plätze: 0, unverändert in ihrer Reihenfolge).
+  const nX=c=>{ if(c.k<2) return 0; const z=leadAt(c);
+    return leads.filter(([a,b])=>segHits(a,b,c)).length + LP.rects.filter(b=>!inR(q,b) && segHits(q,z,b)).length; };
+  // Ohne saubere Linie: unter den freien Plätzen der mit den wenigsten Kreuzungen.
+  const X=all.filter(c=>LP.free(c)).map((c,i)=>({c, n:nX(c), i})).sort((a,b)=>a.n-b.n || a.i-b.i);
+  let r=X.length ? LP.occupy(X[0].c) : null, forced=false;
   if(!r){
     // Überdeckung je Kandidat: hart zählt wie unendlich, sonst die Fläche.
     const ov=(a,b)=>Math.max(0, Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x))*Math.max(0, Math.min(a.y+a.h,b.y+b.h)-Math.max(a.y,b.y));
@@ -8815,8 +8831,18 @@ function stationLabel(LP, q, roles, o){
     r=LP.occupy(S.map(c=>({c, v:cost(c)})).sort((a,b)=>a.v-b.v)[0].c); forced=true;
   }
   // Führungslinie zum nächsten Punkt des Kastens, wenn er weiter weg steht.
-  const lead=r.k>1 ? {x:Math.min(Math.max(q.x, r.x), r.x+r.w), y:Math.min(Math.max(q.y, r.y), r.y+r.h)} : null;
+  const lead=r.k>1 ? leadAt(r) : null;
+  if(lead) leads.push([{x:q.x, y:q.y}, lead]);
   return {txt:r.txt, font:f, r, lead, forced};
+}
+// Hindernisse nur für Stationsetiketten, unmittelbar vor stationLabel: die
+// Stationspunkte und die ganzen Klickflächen anklickbarer Maße (hits, je 3 px
+// größer als die Zahl). Die Klickflächen gehören nicht in die Belegt-Liste,
+// bevor planLabels läuft – sonst verlieren Teile bei gewähltem Teil Etiketten.
+function stationBlock(LP, pts, hits, dpr){
+  (hits||[]).forEach(h=>LP.occupy({x:h.x, y:h.y, w:h.w, h:h.h, hard:true}));
+  (pts||[]).forEach(q=>LP.occupy({x:q.x-5*dpr, y:q.y-5*dpr, w:10*dpr, h:10*dpr, hard:true}));
+  return LP;
 }
 // Maßzahl nur, wenn ihr Kasten (w × h) in die Strecke p–q passt: seine
 // Ausdehnung entlang der Strecke, gemessen statt fester Pixelschwelle.
@@ -8838,7 +8864,7 @@ globalThis.KITCHEN={ FRIDGE, DOORT_LIM, SWINGS, swingOf, isCold, fzOf, doorTOf, 
   worktops, check, hoseCheck, alongWall, waterPts, HOSE, sashes, doorReach, optimalStore, hungarian, openingOn, faucetPoint, tableSides, tableSeats, seatPlan, rotSnaps, snapRot, chainDims, freeDims, applyDim, dockFree, barNkba, barSeats, BAR_SEAT_W, slotCandidates, cornerStop, fitsAt, freeSlot, snapX,
   nearestWall, planner, stations, flows, suggest, heatGrid, kidPoly, conflicts, PAIRS, sweep, placeOk, reachFactor, scene, frontsOf, stock, nameOf, inflate, polyInRoom, COL };
 Object.assign(globalThis.KITCHEN, { CORNER, CSHAPE, shapeOf, cornerBlind, cornerPlace, cornerType, crossAt, cornerWing });
-Object.assign(globalThis.KITCHEN, { PLAN_TXT, planLabels, stationLabel, contentCands, headCands, nomCm, devTag, dimFits, chartBox, rectIn });
+Object.assign(globalThis.KITCHEN, { PLAN_TXT, planLabels, stationLabel, stationBlock, contentCands, headCands, nomCm, devTag, dimFits, chartBox, rectIn });
 })();
 </script>
 <script id="store">
@@ -18807,7 +18833,7 @@ function drawKitchenView(){
 function dimLabel(txt, p, q, col, edit, dpr, LP){
   const w=ctx.measureText(txt).width+8*dpr, hgt=15*dpr, m={x:(p.x+q.x)/2, y:(p.y+q.y)/2};
   const l=Math.hypot(q.x-p.x, q.y-p.y)||1, nx=-(q.y-p.y)/l, ny=(q.x-p.x)/l, off=(Math.abs(nx)*w+Math.abs(ny)*hgt)/2+3*dpr;
-  const at=c=>({x:c.x-w/2, y:c.y-hgt/2, w, h:hgt});
+  const at=c=>({x:c.x-w/2, y:c.y-hgt/2, w, h:hgt, hard:true});   // hart: kein Stationsetikett über der Zahl
   const cands=[KX.dimFits(p,q,w,hgt,2*dpr) ? at(m) : null, at({x:m.x+nx*off, y:m.y+ny*off}), at({x:m.x-nx*off, y:m.y-ny*off})];
   let r=LP ? LP.place(cands) : cands.find(Boolean);
   if(!r){ if(!edit) return; r=cands.find(Boolean); LP && LP.occupy(r); }
@@ -18815,7 +18841,9 @@ function dimLabel(txt, p, q, col, edit, dpr, LP){
   ctx.fillStyle='rgba(250,249,246,.94)'; ctx.fillRect(r.x, r.y, w, hgt);
   if(edit){ ctx.strokeStyle=col; ctx.lineWidth=1*dpr; ctx.setLineDash([2*dpr,2*dpr]); ctx.strokeRect(r.x+0.5, r.y+0.5, w-1, hgt-1); ctx.setLineDash([]);
     const hit={x:r.x-3*dpr, y:r.y-3*dpr, w:w+6*dpr, h:hgt+6*dpr, cx, cy, edit};
-    KS.dimHits.push(hit); LP && LP.occupy({x:hit.x, y:hit.y, w:hit.w, h:hit.h, hard:true}); }   // ganze Klickfläche hart
+    // Die 3-px-Klickfläche belegt LP hier nicht (sonst verlören Teil-Etiketten
+    // Platz, wenn ein Teil gewählt ist); drawPaths trägt sie für Stationen nach.
+    KS.dimHits.push(hit); }
   ctx.fillStyle=col; ctx.fillText(txt, cx, cy);
 }
 function drawChain(c, dpr, LP){
@@ -18887,13 +18915,15 @@ function entryMarks(c){
     return {o, i, on:cur===o, Wf, at:KX.wpt(Wf,m,300), P:KX.wpt(Wf,on.s0,0), Q:KX.wpt(Wf,on.s1,0),
             txt:`${o.kind==='door'?'Tür':'Durchgang'}${doors.length>1?' '+(i+1):''}`}; }).filter(Boolean);
 }
-function drawEntryLabels(c, dpr, LP){
-  const ms=entryMarks(c); if(!ms.length) return;
+// top: nur die Pille des Eingangs noch einmal obenauf (nach den Wegen, deren
+// Punkt und Linienende sonst die Schrift verdecken) – ohne Belegt-Liste und Türbalken.
+function drawEntryLabels(c, dpr, LP, top){
+  const ms=entryMarks(c).filter(m=>!top || m.on); if(!ms.length) return;
   ctx.save(); ctx.font=kFont({px:KX.PLAN_TXT.sub*dpr, weight:600}); ctx.textAlign='center'; ctx.textBaseline='middle';
   ms.forEach(m=>{
     const q=toScr(m.at), t=m.on ? `Eingang · ${m.txt}` : m.txt, w=ctx.measureText(t).width+12*dpr, h=17*dpr;
     LP && LP.occupy({x:q.x-w/2, y:q.y-h/2, w, h, hard:true});   // hart: kein Stationsetikett darüber
-    if(m.on){ const p=toScr(m.P), r=toScr(m.Q); ctx.strokeStyle=KINK.grp.ein; ctx.lineWidth=4*dpr; ctx.globalAlpha=.8;
+    if(m.on && !top){ const p=toScr(m.P), r=toScr(m.Q); ctx.strokeStyle=KINK.grp.ein; ctx.lineWidth=4*dpr; ctx.globalAlpha=.8;
       ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(r.x,r.y); ctx.stroke(); ctx.globalAlpha=1; }
     ctx.fillStyle = m.on ? KINK.grp.ein : 'rgba(250,249,246,.92)';
     ctx.beginPath(); ctx.roundRect ? ctx.roundRect(q.x-w/2, q.y-h/2, w, h, h/2) : ctx.rect(q.x-w/2, q.y-h/2, w, h); ctx.fill();
@@ -18975,11 +19005,11 @@ function drawPaths(c, dpr, LP){
     // Erst alle Etiketten setzen, dann Führungslinien, Punkte, Schrift – so
     // läuft keine Linie durch einen später gesetzten Kasten.
     const lp=LP||globalThis.CORE.labelPlacer(), St=[...seen.values()].map(v=>({...v, q:toScr(v.p)}));
-    St.forEach(({q})=>lp.occupy({x:q.x-5*dpr, y:q.y-5*dpr, w:10*dpr, h:10*dpr, hard:true}));
+    KX.stationBlock(lp, St.map(s=>s.q), KS.dimHits, dpr);   // Punkte + Klickflächen der Maße hart
     const o={dpr, measure:kMeasure, view:{w:cv.width, h:cv.height}, skip:entryMarks(c).some(m=>m.on) ? ['eingang'] : []};
     const B=St.map(({q,r})=>KX.stationLabel(lp, q, [...r], o));
     ctx.save(); ctx.textAlign='start'; ctx.textBaseline='middle';
-    ctx.strokeStyle=INK.wall; ctx.lineWidth=1*dpr; ctx.globalAlpha=0.6;
+    ctx.strokeStyle=INK.wall; ctx.lineWidth=1.25*dpr; ctx.globalAlpha=0.85;   // Führungslinie: auch bei dpr 1 sichtbar
     B.forEach((b,i)=>{ if(!b || !b.lead) return; const q=St[i].q; ctx.beginPath(); ctx.moveTo(q.x,q.y); ctx.lineTo(b.lead.x,b.lead.y); ctx.stroke(); });
     ctx.globalAlpha=1;
     St.forEach(({q})=>{ ctx.beginPath(); ctx.arc(q.x,q.y,4.5*dpr,0,2*Math.PI); ctx.fillStyle=KINK.grp[f.group]; ctx.fill(); });
@@ -18988,6 +19018,7 @@ function drawPaths(c, dpr, LP){
       ctx.font=kFont(b.font); ctx.fillStyle=INK.wall; ctx.fillText(b.txt, b.r.x+4*dpr, b.r.y+b.r.h/2); });
     ctx.restore();
   }
+  drawEntryLabels(c, dpr, null, true);   // Eingangs-Pille über Punkt und Linienende
 }
 
 // Analyse im Plan: Kind im Weg (Scheibe an der Heatmap-Spitze) und zu
@@ -24190,6 +24221,33 @@ globalThis.selfChecks=function(){
           R.filter(r=>r.s>0.045 && r.s<0.05).every(r=>r.A.some(l=>l.id===3 && l.txt==='DA') && r.A.some(l=>l.id===2 && l.txt==='90')));
         chk('kueche: schräge Ansicht – dabei keine Überlappung, Schrift im eigenen Teil',
           R.every(r=>r.A.every((a,i)=>r.A.every((b,j)=>j<=i || !ovA(a.r,b.r))) && r.A.every(l=>{ const g=L6.byId.get(l.id); return KX.rectIn(l.r,(g.outline||g.poly).map(r.toScr)); })));
+      }
+      {
+        // Gegenprüfung 2: die 3-px-Klickfläche eines anklickbaren Maßes stand
+        // schon vor planLabels als hart in der Belegt-Liste – bei gewähltem Teil
+        // verloren andere Teile Etiketten („Eck 90“ ohne „Messer +1“, „45“).
+        // Jetzt belegt dimLabel nur die Zahl; KX.stationBlock trägt Klickflächen
+        // und Punkte erst unmittelbar vor den Stationsetiketten ein.
+        const LP=CORE.labelPlacer(), num={x:100,y:100,w:40,h:15,hard:true}, hit={x:97,y:97,w:46,h:21};
+        LP.occupy(num); LP.occupy({x:124,y:134,w:100,h:20}); LP.occupy({x:0,y:134,w:117,h:20});
+        const near={x:141.5,y:100,w:30,h:15}, partFree=LP.free(near), q={x:120,y:140};
+        const L0=CORE.labelPlacer(); LP.rects.forEach(r=>L0.occupy(r));
+        const s0=KX.stationLabel(L0,{...q},['hob'],{dpr:1, measure});   // ohne Klickfläche: gleich oben im Band
+        KX.stationBlock(LP,[q],[hit],1);
+        const s=KX.stationLabel(LP,q,['hob'],{dpr:1, measure});
+        chk('kueche: Klickfläche eines Maßes nimmt Teil-Etiketten keinen Platz, Stationsetiketten meiden sie (stationBlock)',
+          partFree && s0 && ovA(s0.r,hit) && s && !ovA(s.r,hit) && !ovA(s.r,num) && !LP.free(near) && LP.rects.filter(r=>r.hard).length===3);
+      }
+      {
+        // Führungslinie lief durch Maßzahlen: bei weitem Abstand gewinnt ein
+        // Platz, dessen Linie kein belegtes Rechteck kreuzt (rechts liegt eine
+        // Zahl genau auf dem Weg zum ersten Ring-2-Platz).
+        const LP=CORE.labelPlacer(), q={x:300,y:300}, num={x:318,y:296,w:8,h:8};
+        LP.occupy({x:q.x-5,y:q.y-5,w:10,h:10,hard:true}); LP.occupy({x:q.x-27,y:q.y-27,w:54,h:54}); LP.occupy(num);
+        const s=KX.stationLabel(LP,q,['vorrat'],{dpr:1, measure});
+        const cross=(a,b,R)=>{ for(let i=0;i<=200;i++){ const t=i/200, x=a.x+(b.x-a.x)*t, y=a.y+(b.y-a.y)*t; if(x>R.x && x<R.x+R.w && y>R.y && y<R.y+R.h) return true; } return false; };
+        chk('kueche: Führungslinie eines weit abgesetzten Stationsetiketts kreuzt keine Maßzahl, wenn es anders geht',
+          s && s.lead && s.r.k===2 && !s.forced && !cross(q,s.lead,num) && (LP.leads||[]).length===1);
       }
     }catch(err){ chk('kueche: Review-Fix r2-ui ohne Ausnahme ('+err.message+')', false); }
   }
