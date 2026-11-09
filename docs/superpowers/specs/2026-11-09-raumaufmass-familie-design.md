@@ -73,6 +73,7 @@ Wer die Adresse zum ersten Mal öffnet, hat keinen Raum und landet deshalb sofor
 
 - Die App schlägt eine Strecke vor, hebt sie im Plan hervor und öffnet die Eingabe. Der Nutzer tippt die Zahl und drückt Enter, die Eingabe springt zur nächsten Strecke.
 - Der Stand sagt in einem Satz, wo man ist: „Noch 2 Maße, dann ist die Form eindeutig“, „Form eindeutig, aber ungeprüft“, „Geprüft ± 5,6 mm“, „Ein Maß passt nicht: Strecke A–B“.
+- Solange die Form nicht eindeutig ist, bleibt jede Ecke, wo sie skizziert wurde, damit man sich beim Messen nicht verliert. Sobald die Form eindeutig ist, gleitet der Plan von selbst in die gemessene Form.
 - Passt ein Maß nicht, zeigt der Plan die Strecke, und ihre Karte bietet an, das Maß abzuschalten oder neu zu messen.
 - Im Panel stehen der Stand und „Als Nächstes messen“ vorn. Die Liste aller Strecken liegt darunter, die Statistik (Verbesserung, Redundanz, Test) hinter dem Stand.
 
@@ -168,7 +169,7 @@ Die Statuszeile entfällt. Was als Nächstes zu tun ist, sagen der Stand und der
 | Funktion | Heute | Künftig |
 |---|---|---|
 | Rechte Winkel annehmen (90°) | Leistenschalter | Menü › Raum |
-| Maßhaltig zeichnen | Leistenschalter | Menü › Ansicht |
+| Maßhaltig zeichnen | Leistenschalter, anfangs aus | geschieht von selbst, sobald die Form eindeutig ist; abschaltbar unter Menü › Ansicht |
 | Abwicklung | Leistenschalter | Menü › Ansicht |
 | Ansicht drehen | Statuszeile | Menü › Ansicht |
 | Raum spiegeln | Menü | Menü › Raum |
