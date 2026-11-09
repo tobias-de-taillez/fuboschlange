@@ -376,8 +376,10 @@ function blattGrundriss(m){
   const s=m.stand||{tone:'',text:''};
   const hinweis=[];
   // Der Stand im Wortlaut, sofern er mehr sagt als das Feld im Fuß.
-  if(s.tone!=='good' && s.text && s.text.replace(/\.$/,'')!==standKurz(m))
-    hinweis.push(...textZeilen('Stand: '+s.text, 9.5, W));
+  // Sätze, die nur am Bildschirm etwas bedeuten (Klick, Vorschläge), bleiben weg.
+  const aufPapier=s.text ? s.text.split(/(?<=\.)\s+/).filter(z=>!/Klick|Vorschläge/.test(z)).join(' ') : '';
+  if(s.tone!=='good' && aufPapier && aufPapier.replace(/\.$/,'')!==standKurz(m))
+    hinweis.push(...textZeilen('Stand: '+aufPapier, 9.5, W));
   if(!m.ecken.length) hinweis.length=0;          // der leere Grundriss sagt es selbst
   else if(!m.belastbar)
     hinweis.push(...textZeilen(m.geschlossen
