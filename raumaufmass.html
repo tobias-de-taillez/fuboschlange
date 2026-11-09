@@ -8943,6 +8943,13 @@ function planLabels(L, o){
   //    Stelle des Hängeschranks, sonst fehlte er im Plan ganz (Gegenprüfung).
   wallA.forEach((A,g)=>{ if(done.has(g) || !out.some(l=>l.id===g.it.id && l.role==='wall')) return; const P=scr(g);
     contentCands(g.it).some(s=>{ const b=mbox(s,fWS,0,0); return A(b.w, b.h).some(a=>sub(g,P,s,a.x,a.y,fWS)); }); });
+  // 5. Teile mit Kopfzeile, aber ohne Inhalt, weil Kopfzeile + Inhalt in der
+  //    schrägen Ansicht nirgends ganz ins Teil passen: der Inhalt unter oder
+  //    über die Kopfzeile, nur der Kern im Teil. Die Kopfzeile bleibt stehen.
+  G.forEach(g=>{ const mine=out.filter(l=>l.id===g.it.id);
+    if(!mine.length || mine.some(l=>l.role==='sub') || !mine.every(l=>occ.has(l))) return;
+    const f=g.it.kind==='wall' ? fWS : fS, P=scr(g), x=mine[0].x, top=Math.min(...mine.map(l=>occ.get(l).y)), bot=Math.max(...mine.map(l=>occ.get(l).y+occ.get(l).h));
+    contentCands(g.it).some(s=>{ const h=s.length*lh(f); return [bot+h/2, top-h/2].some(y=>sub(g,P,s,x,y,f,true)); }); });
   return {labels:out, LP};
 }
 // Stationsetikett der Wege (Rollen an einem Punkt q, Bildschirm). Gegenprüfung:
@@ -24703,7 +24710,7 @@ globalThis.selfChecks=function(){
       // Führungslinien der Stationsetiketten (Nachprüfung der Etiketten-Fixes):
       // Segment gegen Segment statt nur Kasten, Ansatzpunkt am Kasten wählbar,
       // dichtere Richtungen. Mess-Stub 0,6 em, kleiner Plan um q=(300,300).
-      const measure=(t,f)=>t.length*f.px*0.6, hits=(a,b,R)=>{ for(let i=0;i<=400;i++){ const t=i/400, x=a.x+(b.x-a.x)*t, y=a.y+(b.y-a.y)*t; if(x>R.x && x<R.x+R.w && y>R.y && y<R.y+R.h) return true; } return false; };
+      const measure=(t,f)=>t.length*f.px*0.6, ovA=(a,b)=>Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x)>1e-3 && Math.min(a.y+a.h,b.y+b.h)-Math.max(a.y,b.y)>1e-3, hits=(a,b,R)=>{ for(let i=0;i<=400;i++){ const t=i/400, x=a.x+(b.x-a.x)*t, y=a.y+(b.y-a.y)*t; if(x>R.x && x<R.x+R.w && y>R.y && y<R.y+R.h) return true; } return false; };
       const segX=(a,b,c,d)=>{ const cr=(o,p,q)=>(p.x-o.x)*(q.y-o.y)-(p.y-o.y)*(q.x-o.x); return cr(c,d,a)*cr(c,d,b)<0 && cr(a,b,c)*cr(a,b,d)<0; };
       const q0={x:300,y:300}, o0={dpr:1, measure};
       const nearD=r=>Math.hypot(Math.min(Math.max(q0.x,r.x),r.x+r.w)-q0.x, Math.min(Math.max(q0.y,r.y),r.y+r.h)-q0.y);
@@ -24738,6 +24745,20 @@ globalThis.selfChecks=function(){
         LP.occupy({x:0,y:0,w:700,h:q0.y-4}); LP.occupy({x:0,y:q0.y+13,w:700,h:400}); LP.occupy({x:0,y:0,w:q0.x-1,h:700});
         const s=KX.stationLabel(LP,q0,['hob'],o0);
         chk('kueche: Stationsetikett zwischen den Hauptrichtungen – freier Platz nahe am Punkt statt erzwungen (64 Richtungen)', !!s && !s.forced && s.r.k<=1 && !s.lead);
+      }
+      {
+        // Schräge Ansicht: passt Kopfzeile + Inhalt nirgends ganz ins Teil, kommt der Inhalt unter die stehende
+        // Kopfzeile (Kern im Teil) – früher fiel er ganz weg. Die Kopfzeile bleibt, nichts überlappt.
+        const Ep=KX.makeEnv([{id:'A',x:0,y:0},{id:'B',x:4500,y:0},{id:'C',x:4500,y:3500},{id:'D',x:0,y:3500}],[['A','B'],['B','C'],['C','D'],['D','A']],[],[]);
+        const Lp=KX.layout(Ep,KX.normKitchen({items:[{id:2,kind:'base',front:'drawer',w:900,a:'A',b:'B',x:2000,store:['besteck','teller']}]}));
+        const at=(s,deg)=>{ const c=Math.cos(deg*Math.PI/180), sn=Math.sin(deg*Math.PI/180), toScr=p=>({x:(p.x*c-p.y*sn)*s+400, y:(p.x*sn+p.y*c)*s+400});
+          return {toScr, lab:KX.planLabels(Lp,{toScr, dpr:1, measure}).labels}; };
+        const v=at(0.045,70), g=Lp.byId.get(2), head=v.lab.find(l=>l.role==='head'), sub=v.lab.filter(l=>l.role==='sub');
+        chk('kueche: schräge Ansicht – Inhalt unter der stehenden Kopfzeile, wenn Kopfzeile + Inhalt nicht ganz ins Teil passen (Kern im Teil)',
+          head && head.txt==='90' && sub.length>0 && sub.every(l=>KX.rectIn(l.r,(g.outline||g.poly).map(v.toScr)) && !ovA(l.r,head.r) && Math.abs(l.x-head.x)<0.5));
+        let ok=true; for(let s=0.04;s<=0.13;s+=0.01) for(let deg=0;deg<90;deg+=5){ const w=at(s,deg), P=(g.outline||g.poly).map(w.toScr);
+          ok=ok && w.lab.every((a,i)=>KX.rectIn(a.r,P) && w.lab.every((b,j)=>j<=i || !ovA(a.r,b.r))) && w.lab.some(l=>l.role==='head'); }
+        chk('kueche: schräge Ansicht mit Inhalt (Maßstab 0,04–0,13, 0–85°) – Etiketten im Teil, überlappen nicht, Kopfzeile bleibt', ok);
       }
     }catch(err){ chk('kueche: Rest-Fix etiketten ohne Ausnahme ('+err.message+')', false); }
     //
