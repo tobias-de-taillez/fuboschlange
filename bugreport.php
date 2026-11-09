@@ -111,7 +111,9 @@ $an = @file_get_contents($ablage . '/.benachrichtigung');
 $an = $an !== false ? trim($an) : '';
 if ($an !== '' && filter_var($an, FILTER_VALIDATE_EMAIL) && function_exists('mail')) {
   $art = $m['art'] === 'wunsch' ? 'Funktionswunsch' : 'Fehlermeldung';
-  $absender = 'raumaufmass@' . preg_replace('/^www\./', '', explode(':', $host)[0]);
+  // Absender auf der registrierten Domain (irazari-te.ch, nicht der Subdomain):
+  // nur dort gibt es MX und SPF ("+mx" deckt den Webserver ab).
+  $absender = 'raumaufmass@' . implode('.', array_slice(explode('.', explode(':', $host)[0]), -2));
   @mail($an, "Raumaufmaß: neue $art $id",
     "Neue Meldung $id ($art) liegt auf dem Server.\n\nAbholen (löscht sie dort):\n  scripts/bugreports-abholen.sh\n",
     "From: Raumaufmaß <$absender>\r\nContent-Type: text/plain; charset=utf-8",

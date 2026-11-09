@@ -15091,6 +15091,16 @@ addEventListener('keydown',e=>{
   if(!wrap.contains(e.target)) e.stopPropagation();
 },true);
 wrap.addEventListener('keydown',e=>e.stopPropagation());
+// Ein modaler <dialog> (Fliese einmessen) macht alles ausserhalb inert, egal
+// welcher z-index. Solange er offen ist, ziehen Knopf und Meldedialog in ihn
+// um, damit "Fehler melden" auch dort geht; beim Schliessen zurueck.
+for(const dlg of document.querySelectorAll('dialog')){
+  const umzug=()=>{
+    const ziel = dlg.open && dlg.matches(':modal') ? dlg : document.body;
+    if(fab.parentNode!==ziel){ ziel.appendChild(fab); ziel.appendChild(wrap); }
+  };
+  new MutationObserver(umzug).observe(dlg,{attributes:true, attributeFilter:['open']});
+}
 
 function alsDatei(payload){
   const a=document.createElement('a');
