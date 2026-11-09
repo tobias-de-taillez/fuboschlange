@@ -4377,7 +4377,16 @@ const frontage=(L, g)=>{ const t=topOf(L,g); return t ? [g.foot||g.poly, t.poly]
 // läge sonst in gedrehten Räumen je nach Rauschen davor oder daneben.
 function inPolyTol(p, P){
   if(TL.pointInRing(p, P)) return true;
-  return P.some((a,i)=>{ const e=sub(P[(i+1)%P.length],a), t=clamp(dot(sub(p,a),e)/(dot(e,e)||1),0,1); return len(sub(p,add(a,mul(e,t))))<=0.01; });
+  // Abstand zur Kante mit Skalaren (kein Zwischenobjekt je Kante: check ruft das je Probe und Teil auf, die
+  // Objektkette kostete bei 40 Teilen rund ein Drittel der Prüfzeit).
+  const n=P.length;
+  for(let i=0;i<n;i++){
+    const a=P[i], b=P[i+1===n ? 0 : i+1], ex=b.x-a.x, ey=b.y-a.y, dx=p.x-a.x, dy=p.y-a.y;
+    let t=(dx*ex+dy*ey)/(ex*ex+ey*ey || 1); t=t<0 ? 0 : t>1 ? 1 : t;
+    const qx=dx-ex*t, qy=dy-ey*t;
+    if(qx*qx+qy*qy<=0.0001) return true;
+  }
+  return false;
 }
 // Arbeitsfläche zwischen Spüle a und Kochfeld b (Blum: Vorbereitungszone, NKBA
 // Guideline 12): die längste durchgehende Platte zwischen ihren Kanten, ohne
