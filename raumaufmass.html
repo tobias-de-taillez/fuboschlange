@@ -523,9 +523,16 @@
   .kflow em.bad{color:var(--bad)}
   #k3dMsg{position:absolute;right:12px;top:12px;z-index:3;max-width:40%;padding:8px 10px;font-size:12px;
     background:var(--warn-bg);color:var(--warn);border:1px solid #e6d3a8;border-radius:6px}
-  #kPalette{display:flex;gap:3px}
-  .kpal{padding:0 3px;cursor:grab;touch-action:none;color:var(--ink2)}
-  .kpal svg{width:30px;height:26px;display:block;fill:none;stroke:currentColor;stroke-width:1.3;stroke-linejoin:round;stroke-linecap:round}
+  #kPalette{display:flex;gap:2px;align-items:center}
+  /* Gruppe = kleine Überschrift über ihren Knöpfen (Kalt, Warm, Nass, Stauraum, Möbel) */
+  .kpg{display:flex;flex-direction:column;align-items:flex-start;padding:0 2px;border-left:1px solid var(--line)}
+  .kpg:first-child{border-left:0;padding-left:0}
+  .kpg>span{font-size:9px;line-height:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);padding-left:3px;pointer-events:none;white-space:nowrap}
+  .kpg>div{display:flex;gap:1px}
+  /* Schmale Bildschirme (MacBook 1440): Tastenkürzel stehen im Tooltip */
+  @media (max-width:1500px){ .tg[data-for~=kitchen] .tb kbd{display:none} }
+  .kpal{padding:0 1px;cursor:grab;touch-action:none;color:var(--ink2);min-height:0;height:28px}
+  .kpal svg{width:27px;height:24px;display:block;fill:none;stroke:currentColor;stroke-width:1.3;stroke-linejoin:round;stroke-linecap:round}
   .kpal:hover{color:var(--ink)}
   #kSpecBox summary{display:flex;align-items:baseline;gap:8px;cursor:pointer;list-style:none;flex-wrap:wrap}
   #kSpecBox summary::-webkit-details-marker{display:none}
@@ -686,7 +693,7 @@
         <i class="tsep"></i>
         <button id="k3dBtn" class="tb tog" aria-pressed="false" title="3D-Ansicht neben dem Plan (V)">3D <kbd>V</kbd></button>
         <button id="kWayBtn" class="tb tog" aria-pressed="false" title="Laufwege der Abläufe im Plan zeigen (W)">Wege <kbd>W</kbd></button>
-        <button id="kOpenBtn" class="tb tog" aria-pressed="false" title="Alle Türen, Auszüge und Gerätetüren offen zeigen (O)">Fronten offen <kbd>O</kbd></button>
+        <button id="kOpenBtn" class="tb tog" aria-pressed="false" title="Alle Türen, Auszüge und Gerätetüren offen zeigen (O)">Offen <kbd>O</kbd></button>
       </div>
     </div>
     <div id="histctl">
@@ -987,7 +994,7 @@
         <dt>Prüfung</dt><dd>Meldet, was nicht geht (rot): Überlappungen, Schrank vor Tür oder Fenster, Fensterflügel gegen Armatur, Gerätetür gegen Insel, Zimmertür gegen Schrank, Front in der Ecke verdeckt, Decke zu niedrig. Und Richtwerte (gelb): Gänge 1200 mm, Stuhlraum am Tisch, Abstellflächen, Spülmaschine neben der Spüle, Arbeitsdreieck. Ein Klick wählt das Teil; wo es eine eindeutige Abhilfe gibt (Vorfensterarmatur, Anschlag tauschen, Als Eckschrank, Als Dunstabzug), steht ein Knopf daneben.</dd>
         <dt>Maße und Abstände</dt><dd>Am gewählten Wandteil läuft die Maßkette bis zur Wand, die man an den Enden vor sich hat, bei Insel und Tisch zu allen vier Seiten. Ein Klick auf einen gestrichelt umrandeten Abstand öffnet ein Feld: Wert eintragen, Enter verschiebt das Teil (an der Wand den ganzen Block daneben).</dd>
         <dt>Insel und Tisch</dt><dd>Drehen per Schieber im Panel (rastet an 0/45/90° und an schiefen Wänden ein, mit ⌥ frei) oder mit Q/E. Eine Insel, deren Stirnseite man an eine Wand zieht, dockt bündig an; ihre Auszüge gehen dann parallel zur Wand auf. „Tresen“ lässt die Platte hinten überstehen (NKBA: 38 cm bei 91 cm Höhe, 61 cm je Hocker). Die Tischplätze ergeben sich aus Länge und Breite (60 cm je Platz, Stirnseite ab 60 cm Breite), Seiten ohne Stuhlraum bleiben frei.</dd>
-        <dt>Fronten offen (O)</dt><dd>Zeigt im Plan alle Schwenkbereiche und in 3D alle Türen, Auszüge und Gerätetüren offen, dazu offene Fensterflügel.</dd>
+        <dt>Offen (O)</dt><dd>Zeigt im Plan alle Schwenkbereiche und in 3D alle Türen, Auszüge und Gerätetüren offen, dazu offene Fensterflügel.</dd>
         <dt>Inhalt und Wege (W)</dt><dd>Je Schrank wählen, was darin liegt (Besteck, Teller, Gläser …). Daraus rechnet das Programm die Laufwege typischer Abläufe: Einkauf einräumen, Müll, Kochen, Servieren, Tisch decken, Abräumen in die Spülmaschine, Spülmaschine ausräumen. Ein Klick auf einen Ablauf zeichnet ihn ein. Fehlende Inhalte räumt das Programm selbst ein, „Umsortieren“ schlägt Umzüge vor, die Wege sparen (Besteck und Messer nur in Schubladen, Müll bleibt an der Spüle). Ein Ablauf zählt erst, wenn alle seine Stationen da sind; die Häufigkeiten sind eine Annahme für vier Personen.</dd>
         <dt>3D (V)</dt><dd>Ansicht neben dem Plan. Ziehen dreht, Rechts- oder ⇧-Ziehen verschiebt, Rad zoomt, Doppelklick setzt zurück. Wände, vor denen man steht, werden ausgeblendet.</dd>
       </dl>
@@ -6118,7 +6125,9 @@ const DEV={
   dw:    {label:'Spülmaschine',   kinds:['base'], widths:[450,600]},
   hob:   {label:'Herd',           kinds:['base','island'], widths:[600,800,900]},
   fridge:{label:'Kühlschrank',    kinds:['tall'], widths:[600]},
+  freezer:{label:'Gefrierschrank', kinds:['tall'], widths:[600]},
   oven:  {label:'Backofen hoch',  kinds:['tall'], widths:[600]},
+  mw:    {label:'Mikrowelle',     kinds:['tall'], widths:[600]},
   hood:  {label:'Dunstabzug',     kinds:['wall'], widths:[600,900]},
 };
 // Frei stehende Kühlschränke mit zwei Flügeltüren (Bauform it.fz; ohne fz
@@ -6131,10 +6140,16 @@ const DEV={
 // Datenblatt), Korpus = d − Türdicke. full = Öffnungswinkel, ab dem sich
 // Fächer und Schubladen herausnehmen lassen (Bosch: „Schubladen ausziehbar
 // bei 90°, herausnehmbar bei vollständig geöffneter Tür“).
+// Freistehend (eine Tür, Anschlag wählbar, beim Kühlschrank wahlweise mit
+// Gefrierteil unten; Meldung M-20261109-140322-42075e): Bosch KSV36 /
+// KGN36 (600 × 650…665 × 1860), Tür mit Fächern ≈ 70 dick, Gefrierteil
+// unten ≈ 700 hoch. Ganz offen 115° ist eine Annahme (übliche Bänder ohne
+// Türstopp, kein Maßblatt dazu). devs: für welche Geräte die Bauform gilt.
 const FRIDGE={
-  fd: {label:'French Door',  widths:[700,830,900,1000], d:706, h:1830, doorT:96, full:118, split:0.5, drawerZ:700,
+  free:{label:'Freistehend', devs:['fridge','freezer'], single:true, widths:[550,600,700], d:660, h:1860, doorT:70, full:115, gfZ:700},
+  fd: {label:'French Door',  devs:['fridge'], widths:[700,830,900,1000], d:706, h:1830, doorT:96, full:118, split:0.5, drawerZ:700,
        leaves:['linker Flügel','rechter Flügel']},
-  sbs:{label:'Side by Side', widths:[900,910], d:708, h:1787, doorT:79, full:130, split:0.43,
+  sbs:{label:'Side by Side', devs:['fridge'], widths:[900,910], d:708, h:1787, doorT:79, full:130, split:0.43,
        leaves:['Gefrierteil (links)','Kühlteil (rechts)']},
 };
 const DOORT_LIM=[30,150];
@@ -6145,8 +6160,11 @@ const DOORT_LIM=[30,150];
 // damit man den Kompromiss sieht (Meldung M-20261109-135752-e60089).
 // Ohne Angabe 90° wie bisher; neue Kühlschränke aus der Leiste 120°.
 const SWINGS=[90,120];
-const swingOf=it=>it && it.dev==='fridge' && !fzOf(it) && SWINGS.includes(it.swing) ? it.swing : 90;
-const fzOf=it=>it && it.dev==='fridge' && it.kind==='tall' && FRIDGE[it.fz] ? FRIDGE[it.fz] : null;
+// Kühl- und Gefriergeräte verhalten sich gleich: eine Tür, Angel wählbar.
+const COLD=new Set(['fridge','freezer']);
+const isCold=it=>!!it && COLD.has(it.dev);
+const swingOf=it=>it && isCold(it) && !fzOf(it) && SWINGS.includes(it.swing) ? it.swing : 90;
+const fzOf=it=>it && it.kind==='tall' && FRIDGE[it.fz] && FRIDGE[it.fz].devs.includes(it.dev) ? FRIDGE[it.fz] : null;
 const doorTOf=it=>{ const f=fzOf(it); return !f ? 0 : it.doorT!=null ? it.doorT : f.doorT; };
 // Passblende an Innenecken: Griffe und Fronten stoßen sonst aneinander.
 const PASS=50;
@@ -6166,23 +6184,29 @@ const CORNER={
   wall:{ bodies:[600,782,882], nominal:{600:60, 782:80, 882:90}, doors:{600:[200], 782:[350], 882:[450]}, plan:450, minDoor:150,
          inner:{boden:'Einlegeboden'}, type:{boden:'WE'} },
 };
+// Leiste oben nach Bedarf (Meldung M-20261109-140633-ca6d1f): kalt, warm,
+// nass, Stauraum, dann Möbel. Je Bedarf ein Knopf; Bauform und Varianten
+// wählt man danach rechts. pal:false = nicht in der Leiste (Import, Tests).
+const PGROUPS=[['kalt','Kalt'],['warm','Warm'],['nass','Nass'],['stau','Stauraum'],['moebel','Möbel']];
 const PRESETS=[
-  {key:'base',  kind:'base', front:'drawer', w:600, label:'Unterschrank', tip:'mit Schubladen; Türen, Breite und Inhalt danach rechts'},
-  {key:'sink',  kind:'base', dev:'sink', front:'door', w:600, store:['muell','putz'], label:'Spüle', tip:'Spülenschrank mit Becken und Armatur'},
-  {key:'dw',    kind:'base', dev:'dw', front:'door', w:600, label:'Spülmaschine', tip:'60 oder 45 cm breit, gehört neben die Spüle'},
-  {key:'hob',   kind:'base', dev:'hob', front:'door', w:600, label:'Herd', tip:'Kochfeld, Backofen darunter'},
-  {key:'corner',kind:'base', corner:true, front:'door', w:1000, label:'Eckschrank', tip:'Halbeckschrank für die Innenecke: Blende hinter der Querzeile, Tür auf dem freien Teil'},
-  {key:'wall',  kind:'wall', front:'door', w:600, label:'Hängeschrank', tip:'über der Arbeitsplatte; Tür, Klappe oder offen danach rechts'},
-  {key:'wcorner',kind:'wall', corner:true, front:'door', w:782, door:350, label:'Eckhängeschrank', tip:'Hänge-Eckschrank für die Innenecke (nobilia WE80-35): Blende hinter der Querzeile, Tür auf dem freien Teil'},
-  {key:'hood',  kind:'wall', dev:'hood', front:'open', w:600, label:'Dunstabzug', tip:'Flachschirm im Hängeschrank, gehört über den Herd'},
-  {key:'tall',  kind:'tall', front:'door', w:600, label:'Hochschrank', tip:'vom Boden bis oben, z. B. für Vorräte'},
+  {key:'base',  kind:'base', front:'drawer', w:600, grp:'stau', label:'Unterschrank', tip:'mit Schubladen; Türen, Breite und Inhalt danach rechts'},
+  {key:'sink',  kind:'base', dev:'sink', front:'door', w:600, store:['muell','putz'], grp:'nass', label:'Spüle', tip:'Spülenschrank mit Becken und Armatur'},
+  {key:'dw',    kind:'base', dev:'dw', front:'door', w:600, grp:'nass', label:'Spülmaschine', tip:'60 oder 45 cm breit, gehört neben die Spüle'},
+  {key:'hob',   kind:'base', dev:'hob', front:'door', w:600, grp:'warm', label:'Herd', tip:'Kochfeld, Backofen darunter'},
+  {key:'corner',kind:'base', corner:true, front:'door', w:1000, grp:'stau', label:'Eckschrank', tip:'Halbeckschrank für die Innenecke: Blende hinter der Querzeile, Tür auf dem freien Teil'},
+  {key:'wall',  kind:'wall', front:'door', w:600, grp:'stau', label:'Hängeschrank', tip:'über der Arbeitsplatte; Tür, Klappe oder offen danach rechts'},
+  {key:'wcorner',kind:'wall', corner:true, front:'door', w:782, door:350, grp:'stau', label:'Eckhängeschrank', tip:'Hänge-Eckschrank für die Innenecke (nobilia WE80-35): Blende hinter der Querzeile, Tür auf dem freien Teil'},
+  {key:'hood',  kind:'wall', dev:'hood', front:'open', w:600, grp:'warm', label:'Dunstabzug', tip:'Flachschirm im Hängeschrank, gehört über den Herd'},
+  {key:'tall',  kind:'tall', front:'door', w:600, grp:'stau', label:'Hochschrank', tip:'vom Boden bis oben, z. B. für Vorräte'},
   // Ein Kühlschrank in der Leiste: erst „ich brauche einen“, die Bauform
   // (Einbau, French Door, Side by Side) danach rechts (Meldung
   // M-20261109-135632-2bb48a).
-  {key:'fridge',kind:'tall', dev:'fridge', front:'door', hinge:'right', swing:120, w:600, store:['kuehl'], label:'Kühlschrank', tip:'Einbau oder frei stehend (French Door, Side by Side) – Bauform danach rechts'},
-  {key:'oven',  kind:'tall', dev:'oven', front:'door', w:600, label:'Backofen hoch', tip:'im Hochschrank auf Augenhöhe'},
-  {key:'island',kind:'island', front:'drawer', w:1800, d:900, label:'Insel', tip:'frei stehend oder an eine Wand angedockt'},
-  {key:'table', kind:'table', w:1200, d:800, label:'Tisch', tip:'Plätze ergeben sich aus Länge und Breite (60 cm je Platz)'},
+  {key:'fridge',kind:'tall', dev:'fridge', front:'door', hinge:'right', swing:120, w:600, store:['kuehl'], grp:'kalt', label:'Kühlschrank', tip:'Einbau oder frei stehend (mit/ohne Gefrierteil, French Door, Side by Side) – Bauform danach rechts'},
+  {key:'freezer',kind:'tall', dev:'freezer', front:'door', hinge:'right', swing:120, w:600, grp:'kalt', label:'Gefrierschrank', tip:'Einbau oder frei stehend – Bauform danach rechts'},
+  {key:'mw',    kind:'tall', dev:'mw', front:'door', w:600, grp:'warm', label:'Mikrowelle', tip:'im Hochschrank auf Augenhöhe; rechts auf Backofen umstellbar'},
+  {key:'oven',  kind:'tall', dev:'oven', front:'door', w:600, pal:false, label:'Backofen hoch', tip:'im Hochschrank auf Augenhöhe'},
+  {key:'island',kind:'island', front:'drawer', w:1800, d:900, grp:'moebel', label:'Insel', tip:'frei stehend oder an eine Wand angedockt'},
+  {key:'table', kind:'table', w:1200, d:800, grp:'moebel', label:'Tisch', tip:'Plätze ergeben sich aus Länge und Breite (60 cm je Platz)'},
 ];
 
 // ---------- Inhalte ----------
@@ -6260,10 +6284,11 @@ function normItem(o){
     if(o.cEnd===0 || o.cEnd===1) it.cEnd=o.cEnd;
     if(typeof o.inner==='string' && CORNER[o.kind].inner[o.inner] && o.inner!=='boden') it.inner=o.inner;
   }
-  if(it.dev==='fridge' && it.kind==='tall' && FRIDGE[o.fz]){
+  if(COLD.has(it.dev) && it.kind==='tall' && FRIDGE[o.fz] && FRIDGE[o.fz].devs.includes(it.dev)){
     it.fz=o.fz;
     if(fin(o.doorT)) it.doorT=clamp(o.doorT, DOORT_LIM[0], DOORT_LIM[1]);
-  } else if(it.dev==='fridge' && it.kind==='tall' && SWINGS.includes(o.swing)) it.swing=o.swing;
+    if(o.gf===true && it.fz==='free' && it.dev==='fridge') it.gf=true;
+  } else if(COLD.has(it.dev) && it.kind==='tall' && SWINGS.includes(o.swing)) it.swing=o.swing;
   if(o.kind==='island' && fin(o.bar) && o.bar>=1) it.bar=clamp(Math.round(o.bar), 50, 800);
   if(Array.isArray(o.store)){ const st=[...new Set(o.store.filter(k=>CKEY.has(k)))]; if(st.length) it.store=st; }
   return it;
@@ -6392,7 +6417,16 @@ const ang=v=>Math.atan2(v.y,v.x);
 function leaves(g){
   const fz=fzOf(g.it); if(!fz) return [];
   const {L:pl, R:pr}=frontLR(g), n=g.n, t=doorTOf(g.it), w=len(sub(pr,pl)), dir=unit(sub(pr,pl));
-  const cL=add(pl, mul(n,-t/2)), cR=add(pr, mul(n,-t/2)), wl=w*fz.split;
+  const cL=add(pl, mul(n,-t/2)), cR=add(pr, mul(n,-t/2));
+  if(fz.single){
+    // Eine Tür über die ganze Breite; mit Gefrierteil zwei übereinander.
+    const right=g.it.hinge==='right', P=right?cR:cL, along=right?mul(dir,-1):dir, side=right?'right':'left';
+    const zg=Math.min(fz.gfZ, g.z1-400);
+    return g.it.gf ? [{name:'Kühlteil (oben)', P, along, n, W:w, t, full:fz.full, side, z0:zg+10, z1:g.z1-10},
+                      {name:'Gefrierteil (unten)', P, along, n, W:w, t, full:fz.full, side, z0:20, z1:zg-10}]
+                   : [{name:'Tür', P, along, n, W:w, t, full:fz.full, side, z0:20, z1:g.z1-10}];
+  }
+  const wl=w*fz.split;
   return [
     {name:fz.leaves[0], P:cL, along:dir,         n, W:wl,   t, full:fz.full, side:'left'},
     {name:fz.leaves[1], P:cR, along:mul(dir,-1), n, W:w-wl, t, full:fz.full, side:'right'},
@@ -6422,6 +6456,9 @@ function leafReach(E, L, g, e, roomDoors, winSashes){
   };
   let angle=0, hit=null;
   for(let a=2; a<=lf.full; a+=2){ hit=blockedAt(a*Math.PI/180); if(hit) break; angle=a; }
+  // Ungerader Vollwinkel (115°): den letzten Schritt genau auf ihn setzen,
+  // sonst endet die Suche bei 114° ohne Hindernis („null ist im Weg“).
+  if(!hit && angle<lf.full){ hit=blockedAt(lf.full*Math.PI/180); if(!hit) angle=lf.full; }
   return {angle, hit};
 }
 function swing90(h, along, out, r, deg=90){
@@ -6516,7 +6553,7 @@ function envelopes(K, g){
     const zl0 = it.fz==='fd' ? Math.min(fz.drawerZ, g.z1-300) : 20;
     leaves(g).forEach(lf=>{
       const R=[]; for(let a=0;a<=90;a+=10) R.push(...leafRect(lf, a*Math.PI/180));
-      out.push({what:'Tür', leaf:lf, name:lf.name, poly:TL.hull(R), z0:zl0, z1:g.z1-10,
+      out.push({what:'Tür', leaf:lf, name:lf.name, poly:TL.hull(R), z0:lf.z0!=null?lf.z0:zl0, z1:lf.z1!=null?lf.z1:g.z1-10,
                 hinge:lf.P, r:lf.W, t:lf.t, along:lf.along, n, open90:leafRect(lf, Math.PI/2)});
     });
     // French Door: Gefrierschubladen darunter, gerade ausgezogen
@@ -6527,7 +6564,7 @@ function envelopes(K, g){
   const zf0=g.z0+(it.kind==='wall'?0:S.plinth), zf1=it.kind==='base' ? D.workH-S.topT : it.kind==='island' ? g.z1-S.topT : g.z1;
   if(fk==='door'){
     // Bis 600 eine Tür, darüber zwei (Anschlag außen). Kühlschrank: eine.
-    const doors = (w>600 && it.dev!=='fridge') ? [['left',pl,pr,w/2],['right',pr,pl,w/2]]
+    const doors = (w>600 && !isCold(it)) ? [['left',pl,pr,w/2],['right',pr,pl,w/2]]
                 : [[it.hinge||'left', it.hinge==='right'?pr:pl, it.hinge==='right'?pl:pr, w]];
     const deg=swingOf(it);
     doors.forEach(([side,h,other,r])=>out.push({what:'Tür', poly:swing90(h, unit(sub(other,h)), n, r, deg), z0:zf0, z1:zf1, hinge:h, side, r, along:unit(sub(other,h)), n, deg}));
@@ -6672,7 +6709,8 @@ function sashes(E, o){
 // Jeder Befund: {lvl:'bad'|'warn'|'info', ids, txt, at (Weltpunkt)}.
 // bad = geht so nicht (stößt an, passt nicht), warn = Richtwert verfehlt.
 const LEVEL_ORDER={bad:0, warn:1, info:2};
-const nameOf=it=>(fzOf(it)?fzOf(it).label:it.dev?DEV[it.dev].label:it.corner?(it.kind==='wall'?'Eckhängeschrank':'Eckschrank'):KIND[it.kind].label)+' '+Math.round(it.w/10);
+const fzName=it=>{ const f=fzOf(it); return !f ? null : f.single ? (it.dev==='freezer' ? 'Gefrierschrank frei' : it.gf ? 'Kühl-Gefrier frei' : 'Kühlschrank frei') : f.label; };
+const nameOf=it=>(fzName(it)||(it.dev?DEV[it.dev].label:it.corner?(it.kind==='wall'?'Eckhängeschrank':'Eckschrank'):KIND[it.kind].label))+' '+Math.round(it.w/10);
 // Für Meldungen: mit Lage, damit klar ist, welcher der Unterschränke gemeint ist.
 const fmtM1=v=>(v/1000).toFixed(2).replace('.',',').replace(/0$/,'');
 const labelOf=it=>nameOf(it)+(it.a ? ` (${it.a}–${it.b}, ab ${fmtM1(it.x)} m)` : '');
@@ -6959,7 +6997,7 @@ function check(E, K, L){
         (e.deg||90)>90 && polyInRoom(E, swing90(e.hinge, e.along, e.n, e.r).map(p=>add(p, mul(sub(e.hinge,p),0.02)))) ? {label:'Nur 90° einplanen', id:g.it.id, set:{swing:90}} : null);
   }));
   // Kühlschrank mit Angel an der Wand: Tür und Auszüge brauchen Luft.
-  G.filter(g=>g.it.dev==='fridge' && !fzOf(g.it)).forEach(g=>{
+  G.filter(g=>isCold(g.it) && !fzOf(g.it)).forEach(g=>{
     const hingeR = (g.it.hinge||'left')==='right', {L:pl, R:pr}=frontLR(g);
     // Luft neben der Angel: Strahl knapp vor der Frontebene (zählt nur, was
     // über die Front hinausragt – Wand, tieferer Nachbar, Querzeile).
@@ -6968,7 +7006,7 @@ function check(E, K, L){
       L.G.forEach(o=>{ if(o!==g && o.it.kind!=='wall'){ const r=rayPoly(o0, side, o.foot||o.poly); if(r!=null && r-5<gap){ gap=r-5; wall=false; } } });
       return {gap, wall, h}; };
     const cur=gapAt(hingeR), oth=gapAt(!hingeR);
-    if(cur.gap<50) add_('warn',[g.it.id], `Kühlschrank: Angel ${hingeR?'rechts':'links'} ${cur.wall?'an der Wand':'am Nachbarn'}, nur ${mm(Math.max(0,cur.gap))} mm Luft – Tür geht kaum über 90° auf, Auszüge klemmen. ${oth.gap>=50?'Anschlag tauschen oder ':''}50 mm Passblende`, cur.h,
+    if(cur.gap<50) add_('warn',[g.it.id], `${DEV[g.it.dev].label}: Angel ${hingeR?'rechts':'links'} ${cur.wall?'an der Wand':'am Nachbarn'}, nur ${mm(Math.max(0,cur.gap))} mm Luft – Tür geht kaum über 90° auf, Auszüge klemmen. ${oth.gap>=50?'Anschlag tauschen oder ':''}50 mm Passblende`, cur.h,
       oth.gap>=50 ? {label:'Anschlag tauschen', id:g.it.id, set:{hinge: hingeR?'left':'right'}} : null);
   });
   // Flügeltüren frei stehender Kühlschränke: jeden Flügel in 2°-Schritten
@@ -7621,9 +7659,9 @@ function scene(E, K, L, opts){
       else frontsOf(g, 10, g.z1, D, S).forEach(f=>P_(f.poly, f.z0, f.z1, tint(COL.fridge), id));
     } else if(it.kind==='tall'){
       P_(frameRect(g,0,w,0,carcD-50), 0, S.plinth, COL.plinth, id, false);
-      P_(frameRect(g,0,w,0,carcD), S.plinth, g.z1, tint(it.dev==='fridge'?COL.fridge:COL.carcass), id);
-      if(open && g.env.length) openPlates(g).forEach(f=>P_(f.poly, f.z0, f.z1, tint(f.col||(it.dev==='fridge'?COL.fridge:COL.front)), id));
-      else frontsOf(g, S.plinth, g.z1, D, S).forEach(f=>P_(f.poly, f.z0, f.z1, tint(f.oven?COL.dark:it.dev==='fridge'?COL.fridge:COL.front), id));
+      P_(frameRect(g,0,w,0,carcD), S.plinth, g.z1, tint(isCold(it)?COL.fridge:COL.carcass), id);
+      if(open && g.env.length) openPlates(g).forEach(f=>P_(f.poly, f.z0, f.z1, tint(f.col||(isCold(it)?COL.fridge:COL.front)), id));
+      else frontsOf(g, S.plinth, g.z1, D, S).forEach(f=>P_(f.poly, f.z0, f.z1, tint(f.oven?COL.dark:isCold(it)?COL.fridge:COL.front), id));
     }
   });
   L.tops.filter(t=>!t.island).forEach(t=>P_(t.poly, t.z0, t.z1, COL.top, null));
@@ -7673,8 +7711,9 @@ function frontsOf(g, z0, z1, D, S){
   const fk=frontKind(it), fz=fzOf(it);
   if(fz){
     // Flügel in Türdicke; French Door mit Schubladen darunter.
-    const T=doorTOf(it), wl=w*fz.split, zl=it.fz==='fd' ? Math.min(fz.drawerZ, z1-300) : z0;
+    const T=doorTOf(it), wl=w*(fz.split||1), zl=it.fz==='fd' ? Math.min(fz.drawerZ, z1-300) : z0;
     const leaf=(a0,a1,zz0,zz1)=>out.push({poly:frameRect(g, a0+gap/2, a1-gap/2, d-T, d), z0:zz0+gap/2, z1:zz1-gap/2});
+    if(fz.single){ const zg=Math.min(fz.gfZ, z1-400); if(it.gf){ leaf(0,w,z0,zg); leaf(0,w,zg,z1); } else leaf(0,w,z0,z1); return out; }
     leaf(0,wl,zl,z1); leaf(wl,w,zl,z1);
     if(it.fz==='fd'){ const zm=z0+(zl-z0)*0.45; leaf(0,w,z0,zm); leaf(0,w,zm,zl); }
     return out;
@@ -7682,6 +7721,13 @@ function frontsOf(g, z0, z1, D, S){
   if(it.dev==='hob' && it.kind==='base'){
     plate(0,w,z0,z0+(z1-z0)*0.25);
     plate(0,w,z0+(z1-z0)*0.25,z1,{oven:true});
+    return out;
+  }
+  if(it.dev==='mw'){
+    // Einbau-Mikrowelle (Nische 380 hoch) auf Augenhöhe, darüber und
+    // darunter Türen des Hochschranks.
+    const zm=Math.max(z0+300, Math.min(z1-500, D ? D.workH+420 : 1330));
+    plate(0,w,z0,zm); plate(0,w,zm,zm+380,{oven:true}); plate(0,w,zm+380,z1);
     return out;
   }
   if(it.dev==='oven'){
@@ -7705,7 +7751,7 @@ function frontsOf(g, z0, z1, D, S){
   if(fk==='drawer'){
     const hs=[0.25,0.375,0.375]; let z=z0;
     hs.forEach(h=>{ const z2=z+(z1-z0)*h; plate(0,w,z,z2); z=z2; });
-  } else if(fk==='door' && w>600 && it.dev!=='fridge'){ plate(0,w/2,z0,z1); plate(w/2,w,z0,z1); }
+  } else if(fk==='door' && w>600 && !isCold(it)){ plate(0,w/2,z0,z1); plate(w/2,w,z0,z1); }
   else if(fk==='slide'){ plate(0,w*0.55,z0,z1); out.push({poly:frameRect(g,w*0.45,w,d-2*t-2,d-t-2), z0:z0+2, z1:z1-2}); }
   else if(fk!=='open') plate(0,w,z0,z1);
   return out;
@@ -7748,11 +7794,11 @@ function stock(K, L){
 // Darf dieser Schrank Inhalte tragen, und welche?
 function storable(it){
   if(it.kind==='table') return [];
-  if(['dw','fridge','oven','hood'].includes(it.dev) || (it.dev==='hob' && it.kind==='base')) return [];
+  if(['dw','fridge','freezer','oven','mw','hood'].includes(it.dev) || (it.dev==='hob' && it.kind==='base')) return [];
   if(it.dev==='sink') return ['muell','putz'];
   return CONTENTS.filter(c=>!c.fixed && !(c.low && it.kind==='wall') && !(c.key==='muell' && it.kind!=='base' && it.kind!=='island')).map(c=>c.key);
 }
-globalThis.KITCHEN={ FRIDGE, DOORT_LIM, SWINGS, swingOf, fzOf, doorTOf, leaves, leafRect, leafReach, leafReachSide, entries, storable, wallFaces, K_DEF, K_LIM, WIDTHS, KIND, DEV, FRONTS, PRESETS, CONTENTS, FLOWS, GROUPS, ROLE_LABEL, BODY_R,
+globalThis.KITCHEN={ FRIDGE, DOORT_LIM, SWINGS, swingOf, isCold, fzOf, doorTOf, leaves, leafRect, leafReach, leafReachSide, entries, storable, wallFaces, K_DEF, K_LIM, WIDTHS, KIND, DEV, FRONTS, PRESETS, PGROUPS, CONTENTS, FLOWS, GROUPS, ROLE_LABEL, BODY_R,
   derived, normKitchen, normItem, isEmpty, makeEnv, wallFrame, wpt, geom, dims, layout, envelopes, frontLR, frontKind,
   worktops, check, sashes, openingOn, faucetPoint, tableSides, tableSeats, seatPlan, rotSnaps, snapRot, chainDims, freeDims, applyDim, dockFree, barNkba, barSeats, BAR_SEAT_W, slotCandidates, cornerStop, fitsAt, freeSlot, snapX,
   nearestWall, planner, stations, flows, suggest, reachFactor, scene, frontsOf, stock, nameOf, inflate, polyInRoom, COL };
@@ -17099,15 +17145,23 @@ const ICONS={
   wall:'<rect x="4" y="3" width="22" height="11"/><path d="M15 3v11M12 10v2M18 10v2"/><path d="M4 26h22" stroke-dasharray="2 2"/>',
   wcorner:'<rect x="3" y="3" width="24" height="11"/><rect x="3" y="3" width="9" height="11" fill="currentColor" opacity=".18"/><path d="M19 9v2"/><path d="M3 26h24" stroke-dasharray="2 2"/>',
   tall:'<rect x="8" y="2" width="14" height="25"/><path d="M8 13h14M19 6v4M19 16v4"/>',
-  // Schneeflocke im Gerät mit runden Ecken – nicht wie der Hochschrank daneben.
-  fridge:'<rect x="7" y="2" width="16" height="25" rx="2.5"/><path d="M15 8.5v12M9.8 11.5l10.4 6M9.8 17.5l10.4-6M13.3 8.9l1.7 1.6 1.7-1.6M13.3 20.1l1.7-1.6 1.7 1.6" stroke-width="1.15"/>',
+  // Kalt: Kühlschrank rund mit Griffen und Tropfen, Gefrierschrank mit
+  // Schneeflocke – beide anders als der eckige Hochschrank (Stauraum).
+  fridge:'<rect x="7" y="2" width="16" height="25" rx="2.5"/><path d="M7 10h16M9.5 5v2.5M9.5 13v5"/><path d="M16.5 14.5c-1.4 1.9-2.1 3-2.1 3.9a2.1 2.1 0 0 0 4.2 0c0-.9-.7-2-2.1-3.9z" stroke-width="1.15"/>',
+  freezer:'<rect x="7" y="2" width="16" height="25" rx="2.5"/><path d="M15 8.5v12M9.8 11.5l10.4 6M9.8 17.5l10.4-6M13.3 8.9l1.7 1.6 1.7-1.6M13.3 20.1l1.7-1.6 1.7 1.6" stroke-width="1.15"/>',
+  mw:'<rect x="3" y="7" width="24" height="15" rx="1.5"/><rect x="6" y="10" width="13" height="9"/><path d="M22.5 10.5v1M22.5 14v1M22.5 17.5v1"/>',
   oven:'<rect x="8" y="2" width="14" height="25"/><rect x="10" y="10" width="10" height="7"/><path d="M8 8h14M8 19h14"/>',
   island:'<rect x="2" y="12" width="26" height="12"/><path d="M1 12h28"/>',
   table:'<path d="M3 11h24M6 11v13M24 11v13"/><path d="M1 17h4v7M29 17h-4v7" stroke-width="1.1"/>',
 };
 function buildPalette(){
   const box=$('kPalette'); if(!box || box.childElementCount) return;
-  KX.PRESETS.forEach(p=>{
+  KX.PGROUPS.forEach(([gk,gl])=>{
+    const grp=document.createElement('div'); grp.className='kpg'; grp.setAttribute('role','group'); grp.setAttribute('aria-label',gl);
+    grp.innerHTML=`<span>${gl}</span><div></div>`;
+    box.appendChild(grp);
+    const row=grp.lastChild;
+  KX.PRESETS.filter(p=>p.grp===gk && p.pal!==false).forEach(p=>{
     const b=document.createElement('button');
     b.className='tb kpal'; b.title=`${p.label} – ${p.tip}`;   // Klicken/Ziehen sagt die Statuszeile
     b.setAttribute('aria-label', p.label);
@@ -17122,7 +17176,8 @@ function buildPalette(){
       else if(inR(br)) kitchenAdd(p.key);
     });
     b.addEventListener('pointercancel',()=>{ KS.palDrag=null; });
-    box.appendChild(b);
+    row.appendChild(b);
+  });
   });
 }
 
@@ -17344,7 +17399,7 @@ function deviceSymbol(c, g, dpr, onTop){
     const w=it.w, d=g.d;
     [[0.3,0.32],[0.7,0.32],[0.3,0.7],[0.7,0.7]].forEach(([a,b])=>{ const p=toScr(at(w*a, d*b)); ctx.beginPath(); ctx.arc(p.x,p.y,Math.max(2*dpr, 75*VIEW.s),0,2*Math.PI); ctx.stroke(); });
   } else {
-    const t=KX.fzOf(it) ? (it.fz==='fd'?'FD':'SbS') : {dw:'GS', fridge:'KS', oven:'BO'}[it.dev]; if(!t) return;
+    const t=KX.fzOf(it) ? ({fd:'FD', sbs:'SbS'}[it.fz] || (it.dev==='freezer'?'TK':it.gf?'KG':'KS')) : {dw:'GS', fridge:'KS', freezer:'TK', oven:'BO', mw:'MW'}[it.dev]; if(!t) return;
     const p=toScr(g.c); ctx.font=`600 ${10*dpr}px ${CANVAS_FONT}`; ctx.textAlign='center'; ctx.textBaseline='middle';
     ctx.fillStyle=INK.scale; ctx.fillText(t, p.x, p.y+12*dpr); ctx.textAlign='start'; ctx.textBaseline='alphabetic';
   }
@@ -17418,7 +17473,7 @@ const dotV=(a,b)=>a.x*b.x+a.y*b.y;
 // Hat das Teil einen wählbaren Anschlag? (eine Drehtür, Kühlschrank)
 // Seitlicher Platzbedarf des weitesten Flügels ganz offen (mm).
 const fullReach=(c,it)=>{ const g=c.L.byId.get(it.id); return g ? Math.round(Math.max(0, ...KX.leaves(g).map(lf=>KX.leafReachSide(lf, lf.full*Math.PI/180)))) : 0; };
-const hasHinge=it=>KX.frontKind(it)==='door' && (it.w<=600 || it.dev==='fridge') && !KX.fzOf(it);
+const hasHinge=it=>KX.frontKind(it)==='door' && (it.w<=600 || KX.isCold(it)) && (!KX.fzOf(it) || KX.fzOf(it).single);
 function kitchenMove(e, g){
   if(!g.moved) return;
   const c=kctx(); if(!c) return;
@@ -17598,15 +17653,17 @@ function renderSel(c){
   if(Wsel) h+=`<div class="krow"><label>Lage</label>ab ${it.a} <input id="kX" inputmode="decimal" value="${Math.round(it.x)}" title="Abstand der Schrankkante von Ecke ${it.a} in mm"> <small>bis ${it.b}: ${Math.round(Wsel.L-it.x-it.w)}</small></div>`;
   const devs=Object.entries(KX.DEV).filter(([,d])=>d.kinds.includes(it.kind));
   if(devs.length) h+=`<div class="krow"><label>Gerät</label><select id="kDev"><option value="">keins</option>${devs.map(([k,d])=>`<option value="${k}"${it.dev===k?' selected':''}>${d.label}</option>`).join('')}</select></div>`;
-  if(it.dev==='fridge' && it.kind==='tall'){
-    h+=`<div class="krow"><label>Bauform</label><div class="seg" id="kFz">${[['','Einbau'],...Object.entries(KX.FRIDGE).map(([k,f])=>[k,f.label])].map(([v,l])=>`<button data-fz="${v}" aria-pressed="${String((it.fz||'')===v)}">${l}</button>`).join('')}</div></div>`;
+  if(KX.isCold(it) && it.kind==='tall'){
+    const fzs=Object.entries(KX.FRIDGE).filter(([,f])=>f.devs.includes(it.dev));
+    h+=`<div class="krow"><label>Bauform</label><div class="seg" id="kFz">${[['','Einbau'],...fzs.map(([k,f])=>[k,f.label])].map(([v,l])=>`<button data-fz="${v}" aria-pressed="${String((it.fz||'')===v)}">${l}</button>`).join('')}</div></div>`;
+    if(it.fz==='free' && it.dev==='fridge') h+=`<div class="krow"><label>Gefrierteil</label><div class="seg">${[['0','ohne'],['1','mit']].map(([v,l])=>`<button data-gf="${v}" aria-pressed="${String((it.gf?'1':'0')===v)}">${l}</button>`).join('')}</div></div>`;
     if(!fz) h+=`<div class="krow"><label title="Bis wohin die Tür aufgehen soll. Die Prüfung und der Schwenkbereich im Plan rechnen damit.">Tür auf</label><div class="seg" id="kSwing">${KX.SWINGS.map(v=>`<button data-swing="${v}" aria-pressed="${String(KX.swingOf(it)===v)}" title="${v===90?'Reicht zum Hineingreifen; Schalen und Fächer lassen sich oft nicht herausnehmen':'Schalen und Fächer lassen sich herausnehmen; braucht seitlich mehr Platz'}">${v}°</button>`).join('')}</div></div>`;
     if(fz) h+=`<div class="krow"><label>Türdicke</label><input id="kDT" inputmode="decimal" value="${Math.round(KX.doorTOf(it))}" title="Dicke der Tür samt Türfächern, ${KX.DOORT_LIM[0]}–${KX.DOORT_LIM[1]} mm. Offen steht der Flügel bei 90° um die halbe Türdicke seitlich über, ganz offen deutlich mehr."> mm <small>seitlich ${Math.round(KX.doorTOf(it)/2)} mm (90°) bis ${fullReach(c,it)} mm (ganz offen)</small></div>`;
   }
   const fk=KX.frontKind(it);
-  if(it.kind!=='table' && !['dw','hob','oven'].includes(it.dev)){
+  if(it.kind!=='table' && !['dw','hob','oven','mw'].includes(it.dev)){
     const fronts = it.kind==='wall' ? [['door','Drehtür'],['flap','Klappe'],['slide','Schiebetür'],['open','offen']]
-                 : it.dev==='fridge' ? [['door','Drehtür']]
+                 : KX.isCold(it) ? [['door','Drehtür']]
                  : [['drawer','Schubladen'],['door','Drehtür'],['slide','Schiebetür'],['open','offen']];
     if(fronts.length>1) h+=`<div class="krow"><label>Front</label>${seg('front', fronts, fk)}</div>`;
     if(hasHinge(it)) h+=`<div class="krow"><label>Anschlag</label>${seg('hinge', [['left','links'],['right','rechts']], it.hinge||'left')}<kbd>F</kbd></div>`;
@@ -17666,14 +17723,17 @@ function renderSel(c){
   num('kWv',100,6000,(t,v)=>{ t.w=Math.round(v); });
   if($('kTd')) $('kTd').onchange=()=>{ const v=$('kTd').value; if(v==='free'){ $('kTdv').hidden=false; $('kTdv').focus(); return; } edit(t=>{ t.d=+v; }); };
   num('kTdv',300,3000,(t,v)=>{ t.d=Math.round(v); });
-  if($('kDev')) $('kDev').onchange=()=>edit(t=>{ const v=$('kDev').value; delete t.fz; delete t.doorT; if(v){ t.dev=v; const dw=KX.DEV[v].widths; if(!dw.includes(t.w)) t.w=dw.includes(600)?600:dw[0]; t.store=(t.store||[]).filter(x=>KX.storable(t).includes(x)); if(!t.store.length) delete t.store; } else delete t.dev; });
+  if($('kDev')) $('kDev').onchange=()=>edit(t=>{ const v=$('kDev').value; delete t.fz; delete t.doorT; delete t.gf; if(v){ t.dev=v; const dw=KX.DEV[v].widths; if(!dw.includes(t.w)) t.w=dw.includes(600)?600:dw[0]; t.store=(t.store||[]).filter(x=>KX.storable(t).includes(x)); if(!t.store.length) delete t.store; } else delete t.dev; });
   // Bauform: Breite und Maße auf die der Bauform zurücksetzen (Einbau 60 cm).
   box.querySelectorAll('[data-fz]').forEach(b=>b.onclick=()=>edit(t=>{ const v=b.dataset.fz;
-    if(v){ t.fz=v; const f=KX.FRIDGE[v]; if(!f.widths.includes(t.w)) t.w=f.widths.includes(900)?900:f.widths[0]; }
-    else { delete t.fz; delete t.doorT; if(!KX.DEV.fridge.widths.includes(t.w)) t.w=600; if(!t.hinge) t.hinge='right'; }
+    if(v){ t.fz=v; const f=KX.FRIDGE[v]; if(!f.widths.includes(t.w)) t.w=f.widths.reduce((b,w)=>Math.abs(w-t.w)<Math.abs(b-t.w)?w:b); }
+    else { delete t.fz; delete t.doorT; if(!KX.DEV[t.dev].widths.includes(t.w)) t.w=600; }
+    if(!t.hinge) t.hinge='right';
+    if(v!=='free') delete t.gf;
     if(v) delete t.swing; else if(!t.swing) t.swing=120;   // wie aus der Leiste
     delete t.d; delete t.h; }));
   num('kDT',KX.DOORT_LIM[0],KX.DOORT_LIM[1],(t,v)=>{ t.doorT=Math.round(v); });
+  box.querySelectorAll('[data-gf]').forEach(b=>b.onclick=()=>edit(t=>{ if(b.dataset.gf==='1') t.gf=true; else delete t.gf; }));
   box.querySelectorAll('[data-swing]').forEach(b=>b.onclick=()=>edit(t=>{ t.swing=+b.dataset.swing; }));
   box.querySelectorAll('[data-seg]').forEach(sg=>sg.querySelectorAll('button').forEach(b=>b.onclick=()=>edit(t=>{ t[sg.dataset.seg]=b.dataset.v;
     if(sg.dataset.seg==='front' && b.dataset.v!=='door') delete t.corner; })));
@@ -21540,6 +21600,32 @@ globalThis.selfChecks=function(){
         has(lay([fd(0)]).F, /linker Flügel: geht nur 0° auf, die Wand/, 'bad') || has(lay([fd(0)]).F, /rechter Flügel: geht nur 0° auf, die Wand/, 'bad'));
       chk('kueche: 100 mm neben der Wand – 90° ja, ganz offen nein (warn, nicht bad)',
         (()=>{ const F=lay([fd(100)]).F; return has(F,/Flügel: geht \d+° auf, nicht ganz \(118°\) – die Wand/, 'warn') && !has(F,/Flügel: geht nur/); })());
+      // Freistehend (Meldung M-20261109-140322-42075e): eine Tür, Anschlag wählbar,
+      // Kühlschrank wahlweise mit Gefrierteil; dazu Gefrierschrank und Mikrowelle.
+      chk('kueche: freistehender Kühlschrank – eine Tür über die ganze Breite, mit Gefrierteil zwei übereinander',
+        (()=>{ const one=lay([{id:1,kind:'tall',dev:'fridge',fz:'free',hinge:'left',a:'B',b:'C',x:500,w:600}]).L.G[0].env.filter(e=>e.leaf);
+          const two=lay([{id:1,kind:'tall',dev:'fridge',fz:'free',gf:true,a:'B',b:'C',x:500,w:600}]).L.G[0].env.filter(e=>e.leaf);
+          return one.length===1 && Math.abs(one[0].leaf.W-600)<1 && two.length===2 && two[0].z0>two[1].z1 && two.every(e=>e.leaf.full===115); })());
+      chk('kueche: freistehend frei vor der Wand geht ganz auf (115°, ungerade) – keine „null ist im Weg“-Meldung',
+        !lay([{id:1,kind:'tall',dev:'fridge',fz:'free',hinge:'left',a:'B',b:'C',x:800,w:600}]).F.some(f=>/null/.test(f.txt) || /Tür: geht/.test(f.txt)));
+      chk('kueche: Gefrierteil und Bauform werden gelesen; French Door am Gefrierschrank und Gefrierteil am Gefrierschrank fallen weg',
+        (()=>{ const n=KX.normKitchen({items:[{id:1,kind:'tall',dev:'freezer',fz:'free',gf:true,a:'A',b:'B',x:0,w:600},
+          {id:2,kind:'tall',dev:'freezer',fz:'fd',swing:120,a:'A',b:'B',x:700,w:900},{id:3,kind:'tall',dev:'fridge',fz:'free',gf:true,a:'A',b:'B',x:1700,w:600}]}).items;
+          return n[0].fz==='free' && !('gf' in n[0]) && !('fz' in n[1]) && n[1].swing===120 && n[2].gf===true; })());
+      chk('kueche: Mikrowelle im Hochschrank – 3D mit dunkler Gerätefront zwischen zwei Türen; Gefrierschrank frei mit einer Tür',
+        (()=>{ const {K,L}=lay([{id:1,kind:'tall',dev:'mw',a:'B',b:'C',x:500,w:600}]), g=L.G[0], fr=KX.frontsOf(g, 150, g.z1, L.D, K.spec);
+          const fz=lay([{id:1,kind:'tall',dev:'freezer',fz:'free',a:'B',b:'C',x:500,w:600}]);
+          return fr.length===3 && fr.filter(f=>f.oven).length===1 && KX.scene(E,K,L,{}).prisms.length>0
+            && fz.L.G[0].env.filter(e=>e.leaf).length===1 && KX.nameOf(fz.K.items[0])==='Gefrierschrank frei 60'; })());
+      chk('kueche: Mikrowelle und Gefrierschrank tragen keine Inhalte; Name Kühl-Gefrier frei',
+        KX.storable({kind:'tall',dev:'mw'}).length===0 && KX.storable({kind:'tall',dev:'freezer'}).length===0
+        && KX.nameOf({kind:'tall',dev:'fridge',fz:'free',gf:true,w:600})==='Kühl-Gefrier frei 60');
+      chk('kueche: Einbau-Gefrierschrank verhält sich wie der Kühlschrank (eine Tür, 120° wählbar, Angel-Prüfung)',
+        (()=>{ const r=lay([{id:1,kind:'tall',dev:'freezer',a:'D',b:'A',x:0,w:600,hinge:'right',swing:120}]); const e=r.L.G[0].env;
+          return e.length===1 && e[0].deg===120 && KX.swingOf(r.K.items[0])===120; })());
+      chk('kueche: Leiste nach kalt/warm/nass/Stauraum/Möbel – jede sichtbare Vorlage hat eine Gruppe, ein Kühlschrank, ein Gefrierschrank',
+        KX.PRESETS.filter(p=>p.pal!==false).every(p=>KX.PGROUPS.some(([g])=>g===p.grp))
+        && KX.PRESETS.filter(p=>p.pal!==false && p.dev==='fridge').length===1 && KX.PRESETS.filter(p=>p.pal!==false && p.dev==='freezer').length===1);
       chk('kueche: 60 mm neben der Wand – 96er Tür geht 90° auf, 140er nicht mehr (bad)',
         !has(lay([fd(60)]).F, /Flügel: geht nur/) && has(lay([{...fd(60), doorT:140}]).F, /Flügel: geht nur \d+° auf, die Wand/, 'bad'));
       chk('kueche: Side by Side 50 mm neben Unterschränken (Bosch: A ≤ 600 → 50 mm) – geht ganz auf',
