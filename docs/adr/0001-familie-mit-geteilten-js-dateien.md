@@ -18,3 +18,8 @@ Bis November 2026 galt: Jede Oberfläche ist eine einzelne, selbst-enthaltene HT
 - Der Upload muss alle Dateien eines Stands gemeinsam ausliefern, sonst passen HTML und geteilte Dateien nicht zusammen.
 - Alle Werkzeuge müssen unter derselben Adresse liegen, weil sie die Räume über den Speicher des Browsers teilen.
 - Die Selbstchecks, die heute beim Laden der einen Datei laufen, gehören künftig zu den geteilten Dateien und laufen in jedem Werkzeug, das sie lädt.
+
+## Zwischenstand (10.11.2026)
+
+Startbildschirm (`raeume.html`) und Raumaufmaß (`raumaufmass.html`) sind getrennte Dateien auf den geteilten Skripten. Fliesenplan und Küchenplaner laufen noch in `raumaufmass.html`, umgeschaltet über `body[data-tool]` und die Adresse (`#fliesen`, `#kueche`). Das ist der Zustand „eine Datei, getrennte Ansichten“, den dieses ADR als Ziel verwirft; er gilt nur, bis beide ihr eigenes Anforderungspapier und damit ihre eigene Datei bekommen.
+

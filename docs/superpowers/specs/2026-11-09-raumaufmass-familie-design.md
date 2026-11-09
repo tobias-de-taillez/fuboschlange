@@ -66,7 +66,7 @@ Wer die Adresse zum ersten Mal öffnet, hat keinen Raum und landet deshalb sofor
 - Jeder Klick setzt eine Ecke und zieht die Wand von der vorigen dorthin.
 - Ab der dritten Ecke ist die erste Ecke sichtbar das Ziel. Ein Klick darauf schließt den Raum.
 - Ecken lassen sich ziehen.
-- Eine angefasste Wand zeigt ihre Karte. Dort lassen sich Türen, Fenster und Löcher schon grob setzen, eingemessen werden sie im Schritt Wände.
+- Eine angefasste Wand zeigt ihre Karte. Türen, Fenster, Löcher und Anschlüsse lassen sich dort setzen, sobald die Form eindeutig ist; vorher läge ihre Lage auf Skizzenmaßen.
 - Ist der Raum geschlossen, rückt die App von selbst in den Schritt Maße.
 
 ### Schritt 2: Maße
@@ -142,7 +142,7 @@ Die Statuszeile entfällt. Was als Nächstes zu tun ist, sagen der Stand und der
 | Geschoss schließt nicht | Panel-Abschnitt „Gebäude schließt nicht“ | Teil des Stands |
 | Wand wählen | ‹ ›, Auswahlliste, Lageplan, Tasten ← → | Lageplan in der Wandansicht, Tasten ← → |
 | Höhe, Knickpunkt | Reiter Wände | Schritt Wände, an der Wand |
-| Tür, Fenster, Loch setzen | Leistenknöpfe im Grundriss und im Reiter Wände | Karte der Wand, in allen drei Schritten dieselbe; die Leistenknöpfe entfallen |
+| Tür, Fenster, Loch setzen | Leistenknöpfe im Grundriss und im Reiter Wände | Karte der Wand, sobald die Form eindeutig ist; die Leistenknöpfe entfallen |
 | Wasseranschluss | „+ Wasser“ im Reiter Wände | Karte der Wand, als Anschluss |
 | Öffnung einstellen und einmessen | Kärtchen im Plan, Formular im Panel | Karte der Öffnung |
 | Rückgängig, Wiederherstellen | Leiste | Leiste |
@@ -252,3 +252,17 @@ Abgenommen wird gegen die drei Prüfkriterien, Bildschirm für Bildschirm. Einen
 - Die Bildschirme von Fliesenplan und Küchenplaner. Beide bekommen ein eigenes Papier.
 - Die Fußbodenheizung. Sie gehört zur Familie, wird aber erst nach Fliesen und Küche angebunden.
 - Tablet-Bedienung, Login und Nutzerdatenbank.
+
+## Stand der Umsetzung (10.11.2026)
+
+Umgesetzt in `raeume.html` (Startbildschirm), `raumaufmass.html` (Werkzeug) und den geteilten Dateien `raum-*.js`. Wo die Umsetzung vom Papier abweicht, steht es hier:
+
+- **Fliesenplan und Küchenplaner wohnen noch in `raumaufmass.html`.** Sie sind eigene Werkzeuge mit eigener Leiste und eigener Adresse (`#fliesen`, `#kueche`), sehen aber aus wie bisher und haben weiter ihre Hinweiszeile. Eigene Dateien bekommen sie mit ihrem eigenen Papier; solange an der Küche parallel gearbeitet wird, bliebe ein Umzug der Blöcke ein Dauerkonflikt.
+- **Die Karte der Öffnung liegt im Schritt Wände im Panel**, direkt unter der Wand, nicht schwebend im Bild. Die Wandansicht bleibt so frei.
+- **In der Skizze gibt es keine Karte der Ecke.** Ein Klick auf eine Ecke setzt dort den Zug fort. Gelöscht wird mit Entf unter dem Zeiger oder mit Rückgängig; die Karte der Ecke gibt es ab dem Schritt Maße.
+- **„Geschoss schließt nicht“ und „Grenzt an Nachbarn“** sind eigene Abschnitte im Panel geblieben und nicht im Stand-Satz aufgegangen. Sie erscheinen nur, wenn es etwas zu melden gibt.
+- **Datei öffnen** geht zusätzlich im Werkzeug über die Taste (⌘O bzw. Strg+O); sichtbar steht es nur auf dem Startbildschirm.
+- **Plausibilitätsfragen** (sehr kurzes Maß, Höhe 0) fragen nicht mehr nach. Das Maß gilt sofort, eine Rückmeldung am Ort nennt den Verdacht.
+- **Rückmeldungen** der früheren Statuszeile erscheinen kurz am Ort der Aktion. Reine Bedienhinweise sind gestrichen.
+- **Die alte Raumliste im Werkzeug** ist nicht mehr erreichbar; ihr Code liegt noch in der Datei und fällt beim Aufräumen weg.
+
