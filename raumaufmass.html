@@ -3649,7 +3649,7 @@ function makeEnv(pts, walls, openings, hmeas, water, frame){
   const F=TL.frameOf(pts, walls, frame);
   // hmeas samt Knickpunkten ({kind:'k'}) bleibt in E: die Decke je Wand
   // (ceilShape) entsteht daraus.
-  return {pts, walls, ring, I, wallsByKey, hmeas:hmeas||[], shapes:new Map(), F, openings:(openings||[]).filter(o=>o && o.a && o.b),
+  return {pts, walls, ring, I, wallsByKey, hmeas:hmeas||[], shapes:new Map(), F, openings:(openings||[]).filter(o=>o && o.a && o.b && Number.isFinite(o.x) && Number.isFinite(o.w)),
           water:(water||[]).filter(w=>w && wallsByKey.has(wallKeyOf(w.a,w.b)))};
 }
 const P=(E,id)=>{ const i=E.I[id]; return i==null?null:E.pts[i]; };
@@ -4622,7 +4622,10 @@ function freeDims(E, L, g){
     const o=add(m, mul(n,-2));
     let t=Infinity, wall=true;
     const r=TL.rayToRing(E.ring, o, n); if(r) t=r.t-2;
-    L.G.forEach(h=>{ if(h.it.id===g.it.id || h.it.kind==='wall') return; const x=rayPoly(o,n,h.foot||h.poly); if(x!=null && x-2<t){ t=x-2; wall=false; } });
+    // Bis zur Plattenkante der Zeile, nicht bis zum Korpus: so misst auch der Gang in check (NKBA
+    // counter frontage). Sonst zeigte das Maß 1220, der Gang war 1200, und 1200 eingetragen meldete „1180“.
+    L.G.forEach(h=>{ if(h.it.id===g.it.id || h.it.kind==='wall') return;
+      frontage(L,h).forEach(P=>{ const x=rayPoly(o,n,P); if(x!=null && x-2<t){ t=x-2; wall=false; } }); });
     out.push({p0:m, n, val:isFinite(t)?Math.max(0,t):null, wall});
   }
   out.forEach((d,i)=>{ if(d.val==null) return; d.p1=add(d.p0, mul(d.n,d.val));
@@ -21241,6 +21244,25 @@ globalThis.selfChecks=function(){
       T('kueche-gesamt: Kopie einer Insel – ist jede Lage in der Türzone oder belegt, gibt es keine (null)',
         ()=>{ const E=rc(2600,1700,[{...door,x:900}]), K=KX.normKitchen({items:[{id:1,kind:'island',x:1300,y:850,rot:0,w:2000,d:1500}]});
           return KX.copySpot(E,K,KX.layout(E,K),{...K.items[0],id:2})===null; });
+      // Inselabstand (freeDims) und Gang (check) messen bis zur selben Kante: der Plattenkante der Zeile
+      const fz=(y)=>{ const E=rc(5000,3500), K=KX.normKitchen({items:[{id:1,kind:'base',a:'A',b:'B',x:1000,w:1200},{id:2,kind:'island',x:1600,y,rot:0,w:1200,d:900}]});
+        const L=KX.layout(E,K), side=KX.freeDims(E,L,L.byId.get(2)).find(d=>!d.wall && d.n.y<-0.5);
+        return {E,K,L,side,gang:KX.check(E,K,L).map(f=>f.txt).filter(s=>/Gang vor Unterschrank|Vor Unterschrank/.test(s))}; };
+      T('kueche-gesamt: Inselabstand zur Zeile – das Maß geht bis zur Plattenkante (1200), nicht bis zum Korpus (1220), und der Gang ist dann auch 1200: keine Meldung',
+        ()=>{ const r=fz(2250); return !!r.side && near(r.side.val,1200,0.6) && r.gang.length===0; });
+      T('kueche-gesamt: Inselabstand – das Maß eingetragen (applyDim) trifft den Gang: 1180 gelb „1180 mm“, 1200 ohne Meldung, 1219 zu zweit gelb',
+        ()=>{ const r=fz(2250);
+          const gang=(v)=>{ const K2=KX.normKitchen(JSON.parse(JSON.stringify(r.K))); const e=KX.freeDims(r.E,KX.layout(r.E,K2),KX.layout(r.E,K2).byId.get(2)).find(d=>!d.wall && d.n.y<-0.5).edit;
+            if(!KX.applyDim(r.E,K2,e,v)) return null; return KX.check(r.E,K2,KX.layout(r.E,K2)).map(f=>f.txt).filter(s=>/Gang vor Unterschrank|Vor Unterschrank/.test(s)); };
+          const a=gang(1180), b=gang(1200); return !!a && a.some(s=>/Gang vor Unterschrank 120 1180 mm/.test(s)) && !!b && b.length===0; });
+      // Öffnung ohne gültige Lage (Fremdimport, Link, Handbearbeitung): die Küche übergeht sie, statt bei jedem Neuzeichnen zu werfen
+      T('kueche-gesamt: Öffnung mit Text oder fehlender Lage/Breite wirft in Wegen, Vorschlag und Einräumen nicht, die gültige Tür bleibt',
+        ()=>{ const good={id:'o1',kind:'door',a:'A',b:'B',x:1500,w:900,y:0,h:2000,swing:{type:'turn',hinge:'left',out:false}};
+          const items=[{id:1,kind:'base',dev:'sink',a:'A',b:'B',x:0,w:600},{id:2,kind:'base',dev:'hob',a:'A',b:'B',x:600,w:600},{id:3,kind:'fridge',a:'C',b:'D',x:200,w:600}];
+          return [{w:undefined},{w:'x'},{w:{}},{x:'x'},{x:{}},{x:undefined}].every(bad=>{
+            const E=rc(5000,3500,[good,{...good,id:'o2',...bad}]), K=KX.normKitchen({items}), L=KX.layout(E,K);
+            KX.check(E,K,L); KX.flows(E,K,L,{}); KX.suggest(E,K,L); KX.optimalStore(E,K,L);
+            return E.openings.length===1 && E.openings[0].id==='o1'; }); });
     }catch(err){ chk('kueche: Review-Fix Rest: gesamtpruefung ohne Ausnahme ('+err.message+')', false); }
   }
   return {ok, out};
