@@ -23,6 +23,8 @@ grep -q "MELDUNG_STAND='$STAND'" "$OUT/index.html" || { echo "Stand nicht einges
 git show main:fliese-einmessen.html > "$OUT/fliese-einmessen.html"
 # Empfaenger der Meldungen; legt sie ausserhalb von public_html ab.
 git show main:bugreport.php         > "$OUT/bugreport.php"
+# Datenschutzhinweis zum Meldedialog (dort nur verlinkt).
+git show main:datenschutz-meldung.html > "$OUT/datenschutz-meldung.html"
 cat > "$OUT/.htaccess" <<'HT'
 # HTML immer frisch laden: neue Versionen sollen sofort ankommen.
 <FilesMatch "\.html$">
@@ -41,4 +43,6 @@ echo "lokal $L"; echo "https $H"
 [ "$L" = "$H" ] || { echo "Hash weicht ab – Upload prüfen!" >&2; exit 1; }
 C="$(curl -s -o /dev/null -w '%{http_code}' "https://raumaufmass.irazari-te.ch/bugreport.php")"
 [ "$C" = 405 ] || { echo "bugreport.php antwortet mit $C statt 405 – prüfen!" >&2; exit 1; }
+D="$(curl -s -o /dev/null -w '%{http_code}' "https://raumaufmass.irazari-te.ch/datenschutz-meldung.html")"
+[ "$D" = 200 ] || { echo "datenschutz-meldung.html antwortet mit $D statt 200 – prüfen!" >&2; exit 1; }
 echo "Fertig: https://raumaufmass.irazari-te.ch (Stand $STAND, sha256 ${L:0:8}, bugreport.php ok)"
