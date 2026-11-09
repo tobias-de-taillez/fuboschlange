@@ -7135,6 +7135,41 @@ function applyDim(E, K, edit, v){
   return true;
 }
 
+// ---------- Harte Platzregeln je Teil ----------
+// check() meldet sie rot, fitsAt weist die Stelle ab – beide über dieselben
+// Helfer, damit Platzieren nicht dort landet, wo check sofort rot ist.
+const zMeet=(g,on)=>g.z0<on.z1-1 && on.z0<g.z1-1;
+// Zwei Teile überlappen bei gleicher Höhenlage (Tresen: samt Überstand).
+const partsClash=(a,b)=>a.it.id!==b.it.id && bandsMeet(a,b) && TL.convexOverlap(a.foot||a.poly, b.foot||b.poly, 1);
+// Öffnung an der Wand des Teils (on aus openingOn mit g.Wf): Tür/Durchgang
+// zugestellt, Fenster verdeckt, Brüstung unter der Platte. Text oder null.
+// (Höhe zählt: ein Hängeschrank über der Tür ist kein Hindernis.)
+function openingOwnHit(D, g, on){
+  if(!(g.s0<on.s1-1 && on.s0<g.s1-1)) return null;
+  const k=on.o.kind;
+  if(k==='door') return zMeet(g,on) ? `${nameOf(g.it)} steht vor einer Tür` : null;
+  if(k==='hole') return zMeet(g,on) ? `${nameOf(g.it)} verdeckt einen Durchgang` : null;
+  if(k!=='window') return null;
+  if((g.it.kind==='wall'||g.it.kind==='tall') && zMeet(g,on)) return `${nameOf(g.it)} verdeckt ein Fenster`;
+  if(g.it.kind==='base' && D.workH>on.z0+1) return `Arbeitsplatte (${mm(D.workH)} mm) liegt über der Brüstung (${mm(on.z0)} mm) des Fensters`;
+  return null;
+}
+// Zone vor einer Öffnung, in die Teile anderer Wände (oder freie) nicht
+// ragen dürfen: vor Türen und Durchgängen 600 mm, vor Fenstern 100 mm.
+function openingZone(E, o){
+  const Wf=wallFrame(E,o.a,o.b), on=Wf&&openingOn(E,o,Wf); if(!on) return null;
+  const dq = o.kind==='window' ? 100 : 600;
+  return {Wf, on, rq:[wpt(Wf,on.s0,0), wpt(Wf,on.s1,0), wpt(Wf,on.s1,dq), wpt(Wf,on.s0,dq)]};
+}
+// Zählt die Zone für ein Teil dieser Höhe? (Unterschrank unter der Brüstung nicht.)
+const zoneMeets=(g,z)=>zMeet(g,z.on) && !(z.on.o.kind==='window' && g.it.kind==='base' && g.z1<=z.on.z0);
+// Text, wenn das Teil (nicht an der Wand der Öffnung) in der Zone steht, sonst null.
+function zoneHit(g, z){
+  if(!g.free && g.Wf.key===z.Wf.key) return null;
+  if(!zoneMeets(g,z) || !TL.convexOverlap(g.poly, z.rq, 1)) return null;
+  const k=z.on.o.kind;
+  return `${nameOf(g.it)} steht vor ${k==='window'?'einem Fenster':k==='door'?'einer Tür':'einem Durchgang'}${g.free?'':' an der Nachbarwand'}`;
+}
 function check(E, K, L){
   const S=K.spec, D=L.D, out=[];
   const add_=(lvl, ids, txt, at, fix)=>out.push({lvl, ids, txt, at, fix});
@@ -7158,37 +7193,20 @@ function check(E, K, L){
   // 2. Überlappung bei gleicher Höhenlage
   for(let i=0;i<G.length;i++) for(let j=i+1;j<G.length;j++){
     const a=G[i], b=G[j];
-    if(a.it.id===b.it.id || !bandsMeet(a,b)) continue;           // Eckschrank und sein zweiter Schenkel
-    if(TL.convexOverlap(a.foot||a.poly, b.foot||b.poly, 1)) add_('bad',[a.it.id,b.it.id], `${nameOf(a.it)} und ${nameOf(b.it)} überlappen`, centroid([...a.poly,...b.poly]));
+    // gleiche id: Eckschrank und sein zweiter Schenkel
+    if(partsClash(a,b)) add_('bad',[a.it.id,b.it.id], `${nameOf(a.it)} und ${nameOf(b.it)} überlappen`, centroid([...a.poly,...b.poly]));
   }
   // 3. Öffnungen: Fenster verdeckt, Brüstung zu tief, Tür/Durchgang zugestellt
-  //    (Höhe zählt: ein Hängeschrank über der Tür ist kein Hindernis)
-  const zMeet=(g,on)=>g.z0<on.z1-1 && on.z0<g.z1-1;
   G.filter(g=>!g.free).forEach(g=>{
     E.openings.forEach(o=>{
-      const on=openingOn(E,o,g.Wf); if(!on) return;
-      if(!(g.s0<on.s1-1 && on.s0<g.s1-1)) return;
-      if(o.kind==='door'){ if(zMeet(g,on)) add_('bad',[g.it.id], `${nameOf(g.it)} steht vor einer Tür`, g.c); }
-      else if(o.kind==='hole'){ if(zMeet(g,on)) add_('bad',[g.it.id], `${nameOf(g.it)} verdeckt einen Durchgang`, g.c); }
-      else if(o.kind==='window'){
-        if((g.it.kind==='wall'||g.it.kind==='tall') && zMeet(g,on))
-          add_('bad',[g.it.id], `${nameOf(g.it)} verdeckt ein Fenster`, g.c);
-        else if(g.it.kind==='base' && D.workH>on.z0+1)
-          add_('bad',[g.it.id], `Arbeitsplatte (${mm(D.workH)} mm) liegt über der Brüstung (${mm(on.z0)} mm) des Fensters`, g.c);
-      }
+      const on=openingOn(E,o,g.Wf), t=on && openingOwnHit(D,g,on);
+      if(t) add_('bad',[g.it.id], t, g.c);
     });
   });
-  // Teile von anderen Wänden (oder frei), die vor einer Öffnung stehen:
-  // vor Türen und Durchgängen 600 mm Durchgangstiefe, vor Fenstern 100 mm.
+  // Teile von anderen Wänden (oder frei), die vor einer Öffnung stehen.
   E.openings.forEach(o=>{
-    const Wf=wallFrame(E,o.a,o.b), on=Wf&&openingOn(E,o,Wf); if(!on) return;
-    const dq = o.kind==='window' ? 100 : 600;
-    const rq=[wpt(Wf,on.s0,0), wpt(Wf,on.s1,0), wpt(Wf,on.s1,dq), wpt(Wf,on.s0,dq)];
-    G.forEach(g=>{
-      if(!g.free && g.Wf.key===Wf.key) return;
-      if(!zMeet(g,on) || (o.kind==='window' && g.it.kind==='base' && g.z1<=on.z0)) return;
-      if(TL.convexOverlap(g.poly, rq, 1)) add_('bad',[g.it.id], `${nameOf(g.it)} steht vor ${o.kind==='window'?'einem Fenster':o.kind==='door'?'einer Tür':'einem Durchgang'}${g.free?'':' an der Nachbarwand'}`, g.c);
-    });
+    const z=openingZone(E,o); if(!z) return;
+    G.forEach(g=>{ const t=zoneHit(g,z); if(t) add_('bad',[g.it.id], t, g.c); });
   });
   // 4. Fensterflügel gegen Armatur, Hänge- und Hochschränke
   const sinks=G.filter(g=>g.it.dev==='sink');
@@ -7595,7 +7613,7 @@ function slotCandidates(E, K, L, it, Wf){
     if(same && it.kind==='wall' && g.it.kind!=='wall'){ c.push(g.s0, g.s1-w, g.s1, g.s0-w); return; }
     if(!(g.z0<z1-1 && z0<g.z1-1)) return;
     // Projektion des Nachbarn auf diese Wand, soweit er im Streifen 0..d liegt
-    const cut=TL.clipConvex(g.poly, strip);
+    const cut=TL.clipConvex(g.foot||g.poly, strip);        // Tresen: samt Überstand
     if(cut.length<3) return;
     const pr=cut.map(p=>dot(sub(p,Wf.A),Wf.u)), s0=Math.min(...pr), s1=Math.max(...pr);
     // Teil an einer etwa rechtwinkligen Nachbarwand (Innenecke): mit
@@ -7603,12 +7621,20 @@ function slotCandidates(E, K, L, it, Wf){
     const quer = !g.free && !same && Math.abs(dot(g.n,Wf.n))<0.7;
     if(quer) c.push(s1+PASS, s0-w-PASS); else c.push(s1, s0-w);
   });
-  // Öffnungen: neben Tür und Fenster anschließen, Spüle mittig unters Fenster.
+  // Öffnungen: neben Tür und Fenster anschließen (wo fitsAt sie sperrt,
+  // auch Brüstung unter der Platte), Spüle mittig unters Fenster.
+  const D=L.D||derived(K.spec), probe={it, z0, z1};
   E.openings.forEach(o=>{
     const on=openingOn(E,o,Wf); if(!on) return;
-    const hit = o.kind==='door' || o.kind==='hole' ? z0<on.z1-1 : (it.kind==='wall'||it.kind==='tall') ? (z0<on.z1-1 && on.z0<z1-1) : false;
-    if(hit) c.push(on.s1, on.s0-w);
+    if(openingOwnHit(D, {...probe, s0:on.s0, s1:on.s1}, on)) c.push(on.s1, on.s0-w);
     if(o.kind==='window' && (it.kind==='base')) c.push((on.s0+on.s1)/2-w/2);
+  });
+  // Zonen vor Öffnungen der Nachbarwände: dahinter anschließen.
+  E.openings.forEach(o=>{
+    const z=openingZone(E,o); if(!z || z.Wf.key===Wf.key || !zoneMeets(probe,z)) return;
+    const cut=TL.clipConvex(z.rq, strip); if(cut.length<3) return;
+    const pr=cut.map(p=>dot(sub(p,Wf.A),Wf.u));
+    c.push(Math.max(...pr), Math.min(...pr)-w);
   });
   return c.filter(x=>isFinite(x) && x>=-1 && x+w<=Wf.L+1).map(x=>clamp(x,0,Math.max(0,Wf.L-w)));
 }
@@ -7629,20 +7655,22 @@ function cornerStop(E, Wf, d, end){
   const t=crs(dirIn, mul(Wf.n,d))/den, s=dot(sub(mul(v,t), mul(Wf.n,d)), dirIn);
   return (t>0 && s>0) ? s : 0;
 }
-// Passt das Teil bei x? (Raum, Überlappung, Tür)
+// Passt das Teil bei x? Die harten Regeln von check(): im Raum, keine
+// Überlappung (Tresen samt Überstand), Öffnungen an der eigenen Wand
+// (auch Brüstung unter der Platte), Zonen vor Öffnungen der Nachbarwände.
+// Decke, Fensterflügel, Zimmertür und Fronten prüft nur check.
 function fitsAt(E, K, L, it, Wf, x){
   if(!(x>=-1 && x+it.w<=Wf.L+1)) return false;          // nicht über das Wandende
   const t={...it, a:Wf.a, b:Wf.b, x}, g=geom(E,K,t);
-  if(!g || !polyInRoom(E,g.poly)) return false;
-  for(const h of L.G){ if(h.it.id===it.id) continue; if(bandsMeet(g,h) && TL.convexOverlap(g.poly,h.poly,1)) return false; }
+  if(!g) return false;
   // Eckschrank über Eck / diagonal: auch der zweite Schenkel muss frei sein.
-  if(shapeOf(t)){ const wg=cornerWing(E,K,g);
-    if(wg){ if(!polyInRoom(E,wg.poly)) return false;
-      for(const h of L.G){ if(h.it.id===it.id) continue; if(bandsMeet(wg,h) && TL.convexOverlap(wg.poly,h.foot||h.poly,1)) return false; } } }
-  for(const o of E.openings){ const on=openingOn(E,o,Wf); if(!on || !(x<on.s1-1 && on.s0<x+it.w-1)) continue;
-    if((o.kind==='door'||o.kind==='hole') && g.z0<on.z1-1 && on.z0<g.z1-1) return false;
-    if(o.kind==='window' && (it.kind==='wall'||it.kind==='tall') && g.z0<on.z1-1 && on.z0<g.z1-1) return false; }
-  return true;
+  const parts=[g];
+  if(shapeOf(t)){ const wg=cornerWing(E,K,g); if(wg){ cornerShape(g,wg); parts.push(wg); } }
+  const D=L.D||derived(K.spec), zones=E.openings.map(o=>openingZone(E,o)).filter(Boolean);
+  return parts.every(p=>polyInRoom(E, p.foot||p.poly)
+    && !L.G.some(h=>h.it.id!==it.id && partsClash(p,h))
+    && !E.openings.some(o=>{ const on=openingOn(E,o,p.Wf); return on && openingOwnHit(D,p,on); })
+    && !zones.some(z=>zoneHit(p,z)));
 }
 // Erste freie Stelle an der Wand, ausgehend von x0 (sonst vom Anfang).
 function freeSlot(E, K, L, it, Wf, near){
@@ -23273,6 +23301,27 @@ globalThis.selfChecks=function(){
         const E3=KX.makeEnv(R.pts,R.walls,[d3],[]), K=KX.normKitchen({items:[{id:1,kind:'tall',dev:'fridge',fz:'fd',a:'A',b:'B',x:250,w:900}]});
         chk('kueche: Flügel schlägt an die Zimmertür daneben', KX.check(E3,K,KX.layout(E3,K)).some(f=>/Flügel.*die Zimmertür/.test(f.txt)));
       }
+    }
+    // --- Review-Fix fitsat ---
+    {
+      // Platzieren (fitsAt/freeSlot) nach denselben harten Regeln wie check():
+      // keine Stelle, die check sofort rot meldet, wenn die Wand eine saubere hat.
+      const badN=(E,K)=>KX.check(E,K,KX.layout(E,K)).filter(f=>f.lvl==='bad').length;
+      const place=(opens,items,nr)=>{
+        const E=KX.makeEnv(R.pts,R.walls,opens,[]), K=KX.normKitchen({items}), L=KX.layout(E,K), Wf=KX.wallFrame(E,'A','B');
+        const it={id:9,kind:'base',w:600}, x=KX.freeSlot(E,K,L,it,Wf,nr);
+        const clean = x!=null && badN(E,KX.normKitchen({items:[...items,{...it,a:'A',b:'B',x}]}))===badN(E,K);
+        return {fits:xx=>KX.fitsAt(E,K,L,it,Wf,xx), x, clean};
+      };
+      const p1=place([{id:'o1',kind:'window',a:'A',b:'B',x:0,w:1200,y:800,h:1200,swing:{type:'tilt',out:false}}],[],null);
+      chk('kueche: Unterschrank nicht unter eine Brüstung unter Arbeitshöhe – nächste Stelle neben dem Fenster',
+        !p1.fits(0) && p1.clean && near(p1.x,1200,1));
+      const p2=place([{id:'o2',kind:'door',a:'D',b:'A',x:2050,w:900,y:0,h:2000,swing:{type:'turn',hinge:'left',out:true}}],[],null);
+      chk('kueche: Unterschrank nicht vor eine Tür an der Nachbarwand – erst hinter 600 mm Durchgang',
+        !p2.fits(0) && p2.clean && near(p2.x,600,1));
+      const p3=place([],[{id:1,kind:'island',x:2000,y:1100,rot:0,w:1800,d:900,bar:400}],1700);
+      chk('kueche: Unterschrank nicht unter den Tresen-Überstand einer Insel (fitsAt prüft foot)',
+        !p3.fits(1700) && p3.clean);
     }
   }
   return {ok, out};
