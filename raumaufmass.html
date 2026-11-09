@@ -8660,16 +8660,20 @@ const devTag=it=>fzOf(it) ? ({fd:'FD', sbs:'SbS'}[it.fz] || (it.dev==='freezer'?
   : ({dw:'GS', fridge:'KS', freezer:'TK', oven:'BO', mw:'MW'}[it.dev] || '');
 // Nennmaß in cm: Eck-Hängeschrank mit Korpus 782 heißt „80“ wie Panel und Typ.
 const nomCm=it=>{ const C=it.corner && CORNER[it.kind]; return String((C && C.nominal || {})[Math.round(it.w)] || Math.round(it.w/10)); };
-// Inhalt gestuft: zwei Wörter (+n) → ein Wort +n → nur +n. „ · “ statt Komma,
-// weil die Bezeichnungen selbst Kommas tragen („Töpfe, Pfannen“). Bei genau
-// einem Inhalt kein bloßes „+1“ (liest sich als „einer mehr“, Gegenprüfung):
-// passt das Wort nicht, entfällt die Zeile.
+// Inhalt gestuft, jede Stufe eine Liste von Zeilen (Wunsch: erst umbrechen,
+// dann kürzen): je Inhalt eine Zeile mit voller Bezeichnung → je Inhalt das
+// erste Wort → weniger Zeilen, die letzte mit „+n“ → eine Zeile „A · B +n“ →
+// „A +n“ → nur „+n“. Eigene Zeile bzw. „ · “ statt Komma, weil die
+// Bezeichnungen selbst Kommas tragen („Töpfe, Pfannen“). Bei genau einem
+// Inhalt kein bloßes „+1“ (liest sich als „einer mehr“, Gegenprüfung): passt
+// das Wort nicht, entfällt die Zeile.
 function contentCands(it){
-  const names=(it.store||[]).filter(k=>k!=='kuehl').map(k=>(CLABEL[k]||k).split(/[ ,]/)[0]), n=names.length;
+  const full=(it.store||[]).filter(k=>k!=='kuehl').map(k=>CLABEL[k]||k), n=full.length;
   if(!n) return [];
-  if(n===1) return [names[0]];
-  const out=[names.slice(0,2).join(' · ')+(n>2?` +${n-2}`:''), names[0]+` +${n-1}`, `+${n}`];
-  return out.filter((t,i)=>out.indexOf(t)===i);
+  const names=full.map(t=>t.split(/[ ,]/)[0]), out=[full, names];
+  for(let k=n-1; k>=2; k--) out.push([...names.slice(0,k-1), `${names[k-1]} +${n-k}`]);
+  if(n>=2) out.push([names.slice(0,2).join(' · ')+(n>2?` +${n-2}`:'')], [`${names[0]} +${n-1}`], [`+${n}`]);
+  return out.filter((ls,i)=>out.findIndex(m=>m.join('\n')===ls.join('\n'))===i);
 }
 // Kopfzeilen, lang → kurz; jede Variante ist eine Liste von Zeilen.
 // Hängeschrank „H 60“, Dunstabzug „DA 90“; liegt er (bis 30 mm versetzt)
@@ -8715,10 +8719,19 @@ function planLabels(L, o){
   // „120“ der Insel und „DA“ ganz weg, weil der achsparallele Kasten nicht
   // ins schräge Teil passt): dann muss nur der Kern im Teil liegen; frei
   // bleibt der ganze Kasten (LP), r ist dann der Kern.
-  const core=(r,f)=>({x:r.x+pad/2, y:r.y+(r.h-0.8*f.px)/2, w:r.w-pad, h:0.8*f.px});
+  // (Mehrzeilig: oben und unten je der halbe Zeilenabstand weg.)
+  const core=(r,f)=>{ const e=lh(f)-0.8*f.px; return {x:r.x+pad/2, y:r.y+e/2, w:r.w-pad, h:r.h-e}; };
   const inP=(r,f,P,tol)=>rectIn(tol ? core(r,f) : r, P);
-  const sub=(g,P,s,x,y,f,tol)=>{ const r=box(s,f,x,y);
-    if(inP(r,f,P,tol) && LP.place([r])){ out.push({id:g.it.id, role:'sub', txt:s, font:f, x, y, r:tol ? core(r,f) : r}); return true; } return false; };
+  // Inhalt: ls = Zeilen einer Stufe aus contentCands, ein Kasten um alle.
+  const mbox=(ls,f,x,y)=>{ const w=Math.max(...ls.map(t=>o.measure(t,f)))+pad, h=ls.length*lh(f); return {x:x-w/2, y:y-h/2, w, h}; };
+  const sub=(g,P,ls,x,y,f,tol)=>{ const r=mbox(ls,f,x,y);
+    if(!(inP(r,f,P,tol) && LP.place([r]))) return false;
+    // Zeilenkästen fortlaufend addiert: Ober- und Unterkante zweier Zeilen
+    // sind dieselbe Zahl (sonst überlappten sie um eine Rundungsstelle).
+    let y0=r.y;
+    ls.forEach(t=>{ const w=o.measure(t,f)+pad, ri={x:x-w/2, y:y0, w, h:lh(f)}; y0+=lh(f);
+      out.push({id:g.it.id, role:'sub', txt:t, font:f, x, y:ri.y+ri.h/2, r:tol ? core(ri,f) : ri}); });
+    return true; };
   // Block: Kopfzeilen frei und im Teil; die Inhaltszeile darunter wird nur im
   // Teil freigehalten und erst nach den Hängeschränken belegt. Variante vor
   // Ort: erst jede Stelle für die längste Kopfzeile, dann kürzen – sonst
@@ -8733,10 +8746,10 @@ function planLabels(L, o){
   const block=(g, P, anchors, heads, f0, tol)=>{
     const subs=contentCands(g.it), wall=f0===fW, fs=wall ? fWS : fS;
     for(const H of heads) for(const strict of wall ? [true,false] : [false]) for(const s of [...subs, null]){
-      const F=H.map((t,i)=>i ? fT : f0), tot=F.reduce((h,f)=>h+lh(f),0)+(s?lh(fs):0);
-      const bw=Math.max(...H.map((t,i)=>o.measure(t,F[i])), s ? o.measure(s,fs) : 0)+pad, fl=s ? fs : F[F.length-1];
+      const F=H.map((t,i)=>i ? fT : f0), sh=s ? s.length*lh(fs) : 0, tot=F.reduce((h,f)=>h+lh(f),0)+sh;
+      const bw=Math.max(...H.map((t,i)=>o.measure(t,F[i])), ...(s ? s.map(t=>o.measure(t,fs)) : [0]))+pad, fl=s ? fs : F[F.length-1];
       const C2=anchors(tol ? bw-pad : bw, tol ? tot-(lh(F[0])-0.8*F[0].px)/2-(lh(fl)-0.8*fl.px)/2 : tot).map(a=>{ let y=a.y-tot/2;
-        const R=H.map((t,i)=>{ const r=box(t,F[i],a.x,y+lh(F[i])/2); y+=lh(F[i]); return r; }), sb=s && box(s,fs,a.x,y+lh(fs)/2);
+        const R=H.map((t,i)=>{ const r=box(t,F[i],a.x,y+lh(F[i])/2); y+=lh(F[i]); return r; }), sb=s && mbox(s,fs,a.x,y+sh/2);
         return {a, R, sb, ok:R.every((r,i)=>inP(r,F[i],P,tol) && LP.free(r)) && (!s || (inP(sb,fs,P,tol) && (!wall || (LP.free(sb) && RV.free(sb))))),
           rv:R.every(r=>RV.free(r))}; });
       const k=C2.find(k=>k.ok && (k.rv || !strict)); if(!k) continue;
@@ -8813,7 +8826,7 @@ function planLabels(L, o){
   //    einem Unterschrank mit eigenem Inhalt): kursiv an einer anderen freien
   //    Stelle des Hängeschranks, sonst fehlte er im Plan ganz (Gegenprüfung).
   wallA.forEach((A,g)=>{ if(done.has(g) || !out.some(l=>l.id===g.it.id && l.role==='wall')) return; const P=scr(g);
-    contentCands(g.it).some(s=>A(o.measure(s,fWS)+pad, lh(fWS)).some(a=>sub(g,P,s,a.x,a.y,fWS))); });
+    contentCands(g.it).some(s=>{ const b=mbox(s,fWS,0,0); return A(b.w, b.h).some(a=>sub(g,P,s,a.x,a.y,fWS)); }); });
   return {labels:out, LP};
 }
 // Stationsetikett der Wege (Rollen an einem Punkt q, Bildschirm). Gegenprüfung:
@@ -24153,7 +24166,7 @@ globalThis.selfChecks=function(){
           return h && h.txt==='120' && u && /^Besteck/.test(u.txt) && Math.abs(h.x-u.x)<0.5 && u.y>h.y; }));
       chk('kueche: Eckschrank an der Seitenwand – „Eck 90“ mit (gekürztem) Inhalt darunter',
         runs.every(R=>{ const h=R.lab.find(l=>l.id===1 && l.role==='head'), u=R.lab.find(l=>l.id===1 && l.role==='sub');
-          return h && h.txt==='Eck 90' && (!u || (u.y>h.y && Math.abs(u.x-h.x)<0.5)); }) && is(1,'sub') && is(1,'sub').txt==='+2');
+          return h && h.txt==='Eck 90' && (!u || (u.y>h.y && Math.abs(u.x-h.x)<0.5)); }) && R0.lab.filter(l=>l.id===1 && l.role==='sub').map(l=>l.txt).join('|')==='Messer|Töpfe');
       chk('kueche: Kochfeld 90 + Dunstabzug 90 – nur ein „90“, der Dunstabzug kursiv als „DA“',
         runs.every(R=>R.lab.filter(l=>(l.id===2||l.id===3) && /\b90\b/.test(l.txt)).length===1
           && R.lab.some(l=>l.id===3 && l.role==='wall' && l.txt==='DA' && l.font.italic)));
@@ -24167,8 +24180,8 @@ globalThis.selfChecks=function(){
       }
       chk('kueche: Gerätekürzel in der Breitenzeile („60 GS“), kein eigenes Etikett mehr',
         runs.every(R=>R.lab.filter(l=>l.id===7 && l.role==='head').length===1 && R.lab.some(l=>l.id===7 && l.txt==='60 GS')));
-      chk('kueche: Inhalt gestuft gekürzt (zwei Wörter → ein Wort +n → +n)',
-        JSON.stringify(KX.contentCands({store:['messer','toepfe','besteck']}))===JSON.stringify(['Messer · Töpfe +1','Messer +2','+3'])
+      chk('kueche: Inhalt erst umgebrochen (je Inhalt eine Zeile, voll → erstes Wort), dann gekürzt (+n)',
+        JSON.stringify(KX.contentCands({store:['messer','toepfe','besteck']}))===JSON.stringify([['Messer, Bretter','Töpfe, Pfannen','Besteck'],['Messer','Töpfe','Besteck'],['Messer','Töpfe +1'],['Messer · Töpfe +1'],['Messer +2'],['+3']])
         && JSON.stringify(KX.contentCands({store:['kuehl']}))==='[]');
       {
         const KL=KX.normKitchen({items:[{id:1,kind:'base',corner:true,ctype:'L',front:'door',cEnd:0,a:'A',b:'D',x:0,w:900,store:['toepfe']}]}), LL=KX.layout(E,KL), g=LL.byId.get(1);
@@ -24263,8 +24276,8 @@ globalThis.selfChecks=function(){
           a===null && b && b.txt==='Müll' && KX.stationLabel(CORE.labelPlacer(),{x:100,y:100},['eingang'],{dpr:1, measure}).txt==='Eingang');
       }
       chk('kueche: genau ein Inhalt ohne bloßes „+1“ (Wort oder nichts), ab zwei bleibt „+n“',
-        JSON.stringify(KX.contentCands({store:['besteck']}))==='["Besteck"]'
-        && JSON.stringify(KX.contentCands({store:['messer','toepfe']}))===JSON.stringify(['Messer · Töpfe','Messer +1','+2']));
+        JSON.stringify(KX.contentCands({store:['besteck']}))==='[["Besteck"]]'
+        && JSON.stringify(KX.contentCands({store:['messer','toepfe']}))===JSON.stringify([['Messer, Bretter','Töpfe, Pfannen'],['Messer','Töpfe'],['Messer · Töpfe'],['Messer +1'],['+2']]));
       {
         // Schräge Ansicht (15°-Schritte): Insel 120 und Dunstabzug über Kochfeld.
         const E6=KX.makeEnv([{id:'A',x:0,y:0},{id:'B',x:4500,y:0},{id:'C',x:4500,y:3500},{id:'D',x:0,y:3500}],[['A','B'],['B','C'],['C','D'],['D','A']],[],[]);
@@ -24382,6 +24395,18 @@ globalThis.selfChecks=function(){
           F7.some(f=>/steht vor einer Tür/.test(f.txt)) && !!low && !!low.fix && low.fix.label==='Standardhöhe' && !/verdeckte/.test(low.txt));
       }
     }catch(err){ chk('kueche: Review-Fix r2-daten ohne Ausnahme ('+err.message+')', false); }
+    // --- Wunsch Zeilenumbruch ---
+    // Inhalte erst umbrechen (je Inhalt eine Zeile), dann kürzen.
+    try{
+      const Ez=KX.makeEnv(R.pts,R.walls,[],[]), Kz=KX.normKitchen({items:[{id:1,kind:'tall',front:'door',w:600,a:'A',b:'B',x:600,store:['teller','glaeser','tassen']}]});
+      const Lz=KX.layout(Ez,Kz), mz=(t,f)=>t.length*f.px*0.6;
+      const at=s=>KX.planLabels(Lz,{toScr:p=>({x:p.x*s+50,y:p.y*s+50}), dpr:1, measure:mz}).labels.filter(l=>l.id===1);
+      const subs=s=>at(s).filter(l=>l.role==='sub').map(l=>l.txt).join('|');
+      const A=at(0.3), h=A.find(l=>l.role==='head'), S=A.filter(l=>l.role==='sub');
+      chk('kueche: Inhalte umgebrochen – je Inhalt eine Zeile, volle Bezeichnung, wo Platz ist; erst dann kürzer, zuletzt +n',
+        subs(0.3)==='Teller, Schüsseln|Gläser|Tassen' && subs(0.12)==='Teller|Gläser|Tassen' && subs(0.06)==='+3'
+        && S.every((l,i)=>Math.abs(l.x-h.x)<0.5 && l.y>h.y && (!i || (l.y>S[i-1].y && l.r.y>=S[i-1].r.y+S[i-1].r.h))));
+    }catch(err){ chk('kueche: Wunsch Zeilenumbruch ohne Ausnahme ('+err.message+')', false); }
   }
   return {ok, out};
 };
