@@ -1019,7 +1019,7 @@
       </dl>
 
       <h3><i>5</i>Küche</h3>
-      <p>Erst verfügbar, wenn der Grundriss eindeutig ist. Teile aus der Leiste oben auf eine Wand ziehen oder anklicken: Unterschrank, Spüle, Spülmaschine, Herd, Eckschrank, Hängeschrank, Dunstabzug, Hochschrank, Kühlschrank, Backofen hoch, Insel, Tisch. Sie rasten an Ecken (mit 5 cm Passblende), Nachbarn, Türen und mittig unter Fenstern ein; ein Klick setzt das Teil neben das gewählte, einen Hängeschrank darüber. Die Arbeitsplatte entsteht von selbst, auf der Insel samt Tresen-Überstand; Lücken bis 15 cm werden Passleisten. Die Lage steht im Panel als Zahl (ab Ecke … mm), die Maßkette im Plan. Die Standardmaße passen meist; rechts stellt man Breite, Front, Anschlag, Gerät und Inhalt ein, unter „Maße frei“ alles Übrige.</p>
+      <p>Erst verfügbar, wenn der Grundriss eindeutig ist. Teile aus der Leiste oben auf eine Wand ziehen oder anklicken, geordnet nach Kalt (Kühl-, Gefrierschrank), Warm (Herd, Backofen im Hochschrank, Mikrowelle, Dunstabzug), Nass (Spüle, Spülmaschine), Stauraum (Schrank, Eckschrank, Insel) und Möbel (Tisch). Ob ein Schrank unten steht, hängt oder hoch ist, wählt man danach rechts unter „Bauart“; die Spülmaschine geht auch hoch eingebaut (Hüfthöhe), der Herd auch ohne Backofen (nur Kochfeld, darunter Schubladen). Sie rasten an Ecken (mit 5 cm Passblende), Nachbarn, Türen und mittig unter Fenstern ein; ein Klick setzt das Teil neben das gewählte, einen Hängeschrank darüber. Die Arbeitsplatte entsteht von selbst, auf der Insel samt Tresen-Überstand; Lücken bis 15 cm werden Passleisten. Die Lage steht im Panel als Zahl (ab Ecke … mm), die Maßkette im Plan. Die Standardmaße passen meist; rechts stellt man Breite, Front, Anschlag, Gerät und Inhalt ein, unter „Maße frei“ alles Übrige.</p>
       <dl>
         <dt>Prüfung</dt><dd>Meldet, was nicht geht (rot): Überlappungen, Schrank vor Tür oder Fenster, Fensterflügel gegen Armatur, Gerätetür gegen Insel, Zimmertür gegen Schrank oder Insel (im Plan bleibt die Tür am ersten Teil stehen, mit Winkel im Befund), Front in der Ecke verdeckt, Decke zu niedrig. Und Richtwerte (gelb): Gänge 1200 mm, Stuhlraum am Tisch, Abstellflächen, Spülmaschine neben der Spüle, Arbeitsdreieck. Ein Klick wählt das Teil; wo es eine eindeutige Abhilfe gibt (Vorfensterarmatur, Anschlag tauschen, Als Eckschrank, Als Dunstabzug), steht ein Knopf daneben.</dd>
         <dt>Maße und Abstände</dt><dd>Am gewählten Wandteil läuft die Maßkette bis zur Wand, die man an den Enden vor sich hat, bei Insel und Tisch zu allen vier Seiten. Ein Klick auf einen gestrichelt umrandeten Abstand öffnet ein Feld: Wert eintragen, Enter verschiebt das Teil (an der Wand den ganzen Block daneben).</dd>
@@ -6152,7 +6152,9 @@ const KIND={
 };
 const DEV={
   sink:  {label:'Spüle',          kinds:['base','island'], widths:[450,500,600,800,900,1000,1200]},
-  dw:    {label:'Spülmaschine',   kinds:['base'], widths:[450,600]},
+  // Spülmaschine auch im Hochschrank auf Hüfthöhe (Meldung
+  // M-20261109-150300-1cb61f), Lage siehe devZ.
+  dw:    {label:'Spülmaschine',   kinds:['base','tall'], widths:[450,600]},
   hob:   {label:'Herd',           kinds:['base','island'], widths:[600,800,900]},
   fridge:{label:'Kühlschrank',    kinds:['tall'], widths:[600]},
   freezer:{label:'Gefrierschrank', kinds:['tall'], widths:[600]},
@@ -6198,6 +6200,21 @@ const fzOf=it=>it && it.kind==='tall' && FRIDGE[it.fz] && FRIDGE[it.fz].devs.inc
 const doorTOf=it=>{ const f=fzOf(it); return !f ? 0 : it.doorT!=null ? it.doorT : f.doorT; };
 // Passblende an Innenecken: Griffe und Fronten stoßen sonst aneinander.
 const PASS=50;
+// Geräte im Hochschrank: Unterkante des Geräts. Backofen: Tür offen knapp
+// unter Arbeitshöhe (wie bisher). Spülmaschine hoch eingebaut (Meldung
+// M-20261109-150300-1cb61f): EIGENE ANNAHME 400 mm unter Arbeitshöhe, dann
+// liegt der Unterkorb offen auf Hüfthöhe und der Oberkorb unter Augenhöhe;
+// Gerätehöhe 815 (Bosch SMV4EUX00D: „Gerätehöhe 81,5 cm“).
+const DW_H=815, DW_DROP=400;
+function devZ(it, S){
+  const D=derived(S);
+  if(it.dev==='dw' && it.kind==='tall') return Math.max(S.plinth+300, D.workH-DW_DROP);
+  if(it.dev==='oven') return Math.max(S.plinth+300, D.workH-60);
+  return null;
+}
+// Herd = Kochfeld mit Backofen darunter; noOven: nur Kochfeld, darunter
+// Schubladen (Meldung M-20261109-150755-4f921c, Backofen dann im Hochschrank).
+const ovenBelow=it=>it.dev==='hob' && it.kind==='base' && !it.noOven;
 const FRONTS={ drawer:'Schubladen', door:'Drehtür', slide:'Schiebetür', flap:'Klappe', open:'offen' };
 // Eckschränke (Meldung M-20261109-134919-c2a193: Konfigurator für Unter- und
 // Hängeschrank). nobilia Typenliste 2026, Halbeckschränke: Korpus und Tür
@@ -6229,23 +6246,26 @@ const CSHAPE={
 };
 const shapeOf=it=>it.corner && it.ctype && CSHAPE[it.kind] ? CSHAPE[it.kind][it.ctype] : null;
 const PRESETS=[
-  {key:'base',  kind:'base', front:'drawer', w:600, grp:'stau', label:'Unterschrank'},
+  // Stauraum (Meldung M-20261109-150551-fc7828): in der Leiste nur Schrank,
+  // Eckschrank und Insel; unten, hängend oder hoch wählt man danach rechts
+  // (Bauart). Hänge-/Hochschrank-Vorlagen bleiben für Import und Tests.
+  {key:'base',  kind:'base', front:'drawer', w:600, grp:'stau', label:'Schrank'},
   {key:'sink',  kind:'base', dev:'sink', front:'door', w:600, store:['muell','putz'], grp:'nass', label:'Spüle'},
   {key:'dw',    kind:'base', dev:'dw', front:'door', w:600, grp:'nass', label:'Spülmaschine'},
   {key:'hob',   kind:'base', dev:'hob', front:'door', w:600, grp:'warm', label:'Herd'},
   {key:'corner',kind:'base', corner:true, front:'door', w:1000, grp:'stau', label:'Eckschrank'},
-  {key:'wall',  kind:'wall', front:'door', w:600, grp:'stau', label:'Hängeschrank'},
-  {key:'wcorner',kind:'wall', corner:true, front:'door', w:782, door:350, grp:'stau', label:'Eckhängeschrank'},
+  {key:'wall',  kind:'wall', front:'door', w:600, grp:'stau', pal:false, label:'Hängeschrank'},
+  {key:'wcorner',kind:'wall', corner:true, front:'door', w:782, door:350, grp:'stau', pal:false, label:'Eckhängeschrank'},
   {key:'hood',  kind:'wall', dev:'hood', front:'open', w:600, grp:'warm', label:'Dunstabzug'},
-  {key:'tall',  kind:'tall', front:'door', w:600, grp:'stau', label:'Hochschrank'},
+  {key:'tall',  kind:'tall', front:'door', w:600, grp:'stau', pal:false, label:'Hochschrank'},
   // Ein Kühlschrank in der Leiste: erst „ich brauche einen“, die Bauform
   // (Einbau, French Door, Side by Side) danach rechts (Meldung
   // M-20261109-135632-2bb48a).
   {key:'fridge',kind:'tall', dev:'fridge', front:'door', hinge:'right', swing:120, w:600, store:['kuehl'], grp:'kalt', label:'Kühlschrank'},
   {key:'freezer',kind:'tall', dev:'freezer', front:'door', hinge:'right', swing:120, w:600, grp:'kalt', label:'Gefrierschrank'},
   {key:'mw',    kind:'tall', dev:'mw', front:'door', w:600, grp:'warm', label:'Mikrowelle'},
-  {key:'oven',  kind:'tall', dev:'oven', front:'door', w:600, pal:false, label:'Backofen hoch'},
-  {key:'island',kind:'island', front:'drawer', w:1800, d:900, grp:'moebel', label:'Insel'},
+  {key:'oven',  kind:'tall', dev:'oven', front:'door', w:600, grp:'warm', label:'Backofen im Hochschrank'},
+  {key:'island',kind:'island', front:'drawer', w:1800, d:900, grp:'stau', label:'Insel'},
   {key:'table', kind:'table', w:1200, d:800, grp:'moebel', label:'Tisch'},
 ];
 
@@ -6318,6 +6338,7 @@ function normItem(o){
   if(FRONTS[o.front]) it.front=o.front;
   if(o.hinge==='left'||o.hinge==='right') it.hinge=o.hinge;
   if(fin(o.faucetH)) it.faucetH=clamp(o.faucetH, 0, 600);
+  if(o.noOven===true && it.dev==='hob' && it.kind==='base') it.noOven=true;
   if(o.corner===true && CORNER[o.kind]){
     it.corner=true;
     if(fin(o.door)) it.door=clamp(o.door, 100, Math.max(100, it.w-50));
@@ -6540,7 +6561,7 @@ function swing90(h, along, out, r, deg=90){
 function frontKind(it){
   if(it.dev==='dw') return 'flapdown';
   if(it.dev==='oven') return 'flapdown';
-  if(it.dev==='hob' && it.kind==='base') return 'flapdown';   // Backofen unter dem Kochfeld
+  if(ovenBelow(it)) return 'flapdown';                        // Backofen unter dem Kochfeld
   if(it.kind==='table' || it.dev==='hood') return null;
   return it.front || (it.kind==='base'||it.kind==='island' ? 'drawer' : 'door');
 }
@@ -6708,7 +6729,7 @@ function envelopes(K, g){
     // Geschirrspüler 45/60: offen 1150/1200 ab Rückwand (BSH-Maßblatt),
     // also ≈ 600 vor der Front. Backofen ≈ 500.
     const t = it.dev==='dw' ? 600 : 500;
-    const zh = it.dev==='dw' ? S.plinth : it.dev==='oven' ? Math.max(0, D.workH-60) : S.plinth+120;
+    const zh = devZ(it,S)!=null ? devZ(it,S) : it.dev==='dw' ? S.plinth : S.plinth+120;
     out.push({what: it.dev==='dw'?'Spülmaschinentür':'Backofentür', poly:[pl,pr,add(pr,mul(n,t)),add(pl,mul(n,t))], z0:zh, z1:zh+80, dev:it.dev});
   }
   return out;
@@ -6845,7 +6866,7 @@ function sashes(E, o){
 // bad = geht so nicht (stößt an, passt nicht), warn = Richtwert verfehlt.
 const LEVEL_ORDER={bad:0, warn:1, info:2};
 const fzName=it=>{ const f=fzOf(it); return !f ? null : f.single ? (it.dev==='freezer' ? 'Gefrierschrank frei' : it.gf ? 'Kühl-Gefrier frei' : 'Kühlschrank frei') : f.label; };
-const nameOf=it=>(fzName(it)||(it.dev?DEV[it.dev].label:it.corner?(it.kind==='wall'?'Eckhängeschrank':'Eckschrank'):KIND[it.kind].label))+' '+Math.round(it.w/10);
+const nameOf=it=>(fzName(it)||(it.dev==='hob' && it.kind==='base' && it.noOven ? 'Kochfeld' : it.dev==='dw' && it.kind==='tall' ? 'Spülmaschine hoch' : it.dev?DEV[it.dev].label:it.corner?(it.kind==='wall'?'Eckhängeschrank':'Eckschrank'):KIND[it.kind].label))+' '+Math.round(it.w/10);
 // Für Meldungen: mit Lage, damit klar ist, welcher der Unterschränke gemeint ist.
 const fmtM1=v=>(v/1000).toFixed(2).replace('.',',').replace(/0$/,'');
 // Ohne Wandbuchstaben (Meldung M-20261109-145224-3ebe3b): in der Küche ist
@@ -7912,7 +7933,7 @@ function scene(E, K, L, opts){
       P_(frameRect(g,0,w,0,carcD-50), 0, S.plinth, COL.plinth, id, false);
       P_(frameRect(g,0,w,0,carcD), S.plinth, g.z1, tint(isCold(it)?COL.fridge:COL.carcass), id);
       if(open && g.env.length) openPlates(g).forEach(f=>P_(f.poly, f.z0, f.z1, tint(f.col||(isCold(it)?COL.fridge:COL.front)), id));
-      else frontsOf(g, S.plinth, g.z1, D, S).forEach(f=>P_(f.poly, f.z0, f.z1, tint(f.oven?COL.dark:isCold(it)?COL.fridge:COL.front), id));
+      else frontsOf(g, S.plinth, g.z1, D, S).forEach(f=>P_(f.poly, f.z0, f.z1, tint(f.oven?COL.dark:f.dw?COL.steel:isCold(it)?COL.fridge:COL.front), id));
     }
   });
   L.tops.filter(t=>!t.island).forEach(t=>P_(t.poly, t.z0, t.z1, COL.top, null));
@@ -7969,7 +7990,7 @@ function frontsOf(g, z0, z1, D, S){
     if(it.fz==='fd'){ const zm=z0+(zl-z0)*0.45; leaf(0,w,z0,zm); leaf(0,w,zm,zl); }
     return out;
   }
-  if(it.dev==='hob' && it.kind==='base'){
+  if(ovenBelow(it)){
     plate(0,w,z0,z0+(z1-z0)*0.25);
     plate(0,w,z0+(z1-z0)*0.25,z1,{oven:true});
     return out;
@@ -7984,8 +8005,14 @@ function frontsOf(g, z0, z1, D, S){
   if(it.dev==='oven'){
     // Gleiche Höhe wie die Prüfhülle (Arbeitshöhe − 60), sonst laufen
     // Zeichnung und Prüfung auseinander, wenn man die Küchenmaße ändert.
-    const zo=Math.max(z0+300, D ? D.workH-60 : 850);
+    const zo=Math.max(z0+300, S ? devZ(it,S) : D ? D.workH-60 : 850);
     plate(0,w,z0,zo); plate(0,w,zo,zo+600,{oven:true}); plate(0,w,zo+600,z1);
+    return out;
+  }
+  if(it.dev==='dw' && it.kind==='tall'){
+    // Hoch eingebaute Spülmaschine: Gerätefront zwischen zwei Schranktüren.
+    const zd=S ? devZ(it,S) : z0+300;
+    plate(0,w,z0,zd); plate(0,w,zd,zd+DW_H,{dw:true}); plate(0,w,zd+DW_H,z1);
     return out;
   }
   // Über Eck: am Hauptteil nur der freie Teil der Front (der Rest steht
@@ -8058,12 +8085,12 @@ function stock(K, L){
 // Darf dieser Schrank Inhalte tragen, und welche?
 function storable(it){
   if(it.kind==='table') return [];
-  if(['dw','fridge','freezer','oven','mw','hood'].includes(it.dev) || (it.dev==='hob' && it.kind==='base')) return [];
+  if(['dw','fridge','freezer','oven','mw','hood'].includes(it.dev) || ovenBelow(it)) return [];
   if(it.dev==='sink') return ['muell','putz'];
   return CONTENTS.filter(c=>!c.fixed && !(c.low && it.kind==='wall') && !(c.key==='muell' && it.kind!=='base' && it.kind!=='island')).map(c=>c.key);
 }
 globalThis.KITCHEN={ FRIDGE, DOORT_LIM, SWINGS, swingOf, isCold, fzOf, doorTOf, leaves, leafRect, leafReach, leafReachSide, entries, storable, wallFaces, K_DEF, K_LIM, WIDTHS, KIND, DEV, FRONTS, PRESETS, PGROUPS, CONTENTS, FLOWS, GROUPS, ROLE_LABEL, BODY_R,
-  derived, normKitchen, normItem, isEmpty, makeEnv, wallFrame, wpt, geom, dims, layout, envelopes, frontLR, frontKind,
+  derived, devZ, ovenBelow, DW_H, normKitchen, normItem, isEmpty, makeEnv, wallFrame, wpt, geom, dims, layout, envelopes, frontLR, frontKind,
   worktops, check, sashes, doorReach, optimalStore, hungarian, openingOn, faucetPoint, tableSides, tableSeats, seatPlan, rotSnaps, snapRot, chainDims, freeDims, applyDim, dockFree, barNkba, barSeats, BAR_SEAT_W, slotCandidates, cornerStop, fitsAt, freeSlot, snapX,
   nearestWall, planner, stations, flows, suggest, reachFactor, scene, frontsOf, stock, nameOf, inflate, polyInRoom, COL };
 Object.assign(globalThis.KITCHEN, { CORNER, CSHAPE, shapeOf, cornerBlind, cornerPlace, cornerType, crossAt, cornerWing });
@@ -18346,7 +18373,19 @@ function renderSel(c){
   // Feld bietet die üblichen Werte an, Abweichungen sind markiert.
   const Wsel=it.a ? KX.wallFrame(c.E,it.a,it.b) : null;
   box._widths=widths;
-  let h=dimBlock(c, it, widths, Wsel);
+  let h='';
+  // Bauart (Meldung M-20261109-150551-fc7828): erst Schrank, Eckschrank
+  // oder Insel, dann unten, hängend oder hoch. Geräte mit Einbau-Wahl
+  // (Spülmaschine unten / hoch, Herd mit oder ohne Backofen) ebenso hier.
+  if(it.a && !it.dev && !KX.fzOf(it)){
+    const kinds = it.corner ? [['base','unten'],['wall','hängend']] : [['base','Unterschrank'],['wall','Hängeschrank'],['tall','Hochschrank']];
+    h+=`<div class="krow"><label>Bauart</label><div class="seg" id="kKind">${kinds.map(([v,l])=>`<button data-kind="${v}" aria-pressed="${String(it.kind===v)}">${l}</button>`).join('')}</div></div>`;
+  }
+  if(it.dev==='dw' && it.a)
+    h+=`<div class="krow"><label title="Hoch eingebaut: im Hochschrank, Unterkorb auf Hüfthöhe – kein Bücken beim Ein- und Ausräumen">Einbau</label><div class="seg" id="kKind">${[['base','unten'],['tall','hoch (Hüfthöhe)']].map(([v,l])=>`<button data-kind="${v}" aria-pressed="${String(it.kind===v)}">${l}</button>`).join('')}</div></div>`;
+  if(it.dev==='hob' && it.kind==='base')
+    h+=`<div class="krow"><label title="Ohne Backofen: nur Kochfeld, darunter Schubladen (Töpfe). Den Backofen dann im Hochschrank setzen (Leiste: Warm).">Backofen</label><div class="seg">${[['1','darunter'],['0','keiner (Schubladen)']].map(([v,l])=>`<button data-oven="${v}" aria-pressed="${String((it.noOven?'0':'1')===v)}">${l}</button>`).join('')}</div></div>`;
+  h+=dimBlock(c, it, widths, Wsel);
   const devs=Object.entries(KX.DEV).filter(([,d])=>d.kinds.includes(it.kind));
   if(devs.length) h+=`<div class="krow"><label>Gerät</label><select id="kDev"><option value="">keins</option>${devs.map(([k,d])=>`<option value="${k}"${it.dev===k?' selected':''}>${d.label}</option>`).join('')}</select></div>`;
   if(KX.isCold(it) && it.kind==='tall'){
@@ -18357,7 +18396,7 @@ function renderSel(c){
     if(fz) h+=`<div class="krow"><label>Türdicke</label><input id="kDT" inputmode="decimal" value="${Math.round(KX.doorTOf(it))}" title="Dicke der Tür samt Türfächern, ${KX.DOORT_LIM[0]}–${KX.DOORT_LIM[1]} mm. Offen steht der Flügel bei 90° um die halbe Türdicke seitlich über, ganz offen deutlich mehr."> mm <small>seitlich ${Math.round(KX.doorTOf(it)/2)} mm (90°) bis ${fullReach(c,it)} mm (ganz offen)</small></div>`;
   }
   const fk=KX.frontKind(it);
-  if(it.kind!=='table' && !['dw','hob','oven','mw'].includes(it.dev)){
+  if(it.kind!=='table' && !['dw','oven','mw'].includes(it.dev) && !KX.ovenBelow(it)){
     const fronts = it.kind==='wall' ? [['door','Drehtür'],['flap','Klappe'],['slide','Schiebetür'],['open','offen']]
                  : KX.isCold(it) ? [['door','Drehtür']]
                  : [['drawer','Schubladen'],['door','Drehtür'],['slide','Schiebetür'],['open','offen']];
@@ -18414,6 +18453,8 @@ function renderSel(c){
     delete t.d; delete t.h; }));
   num('kDT',KX.DOORT_LIM[0],KX.DOORT_LIM[1],(t,v)=>{ t.doorT=Math.round(v); });
   box.querySelectorAll('[data-gf]').forEach(b=>b.onclick=()=>edit(t=>{ if(b.dataset.gf==='1') t.gf=true; else delete t.gf; }));
+  box.querySelectorAll('[data-kind]').forEach(b=>b.onclick=()=>{ const v=b.dataset.kind; if(selItem() && selItem().kind!==v) edit(t=>switchKind(t, v)); });
+  box.querySelectorAll('[data-oven]').forEach(b=>b.onclick=()=>edit(t=>{ if(b.dataset.oven==='0'){ t.noOven=true; t.front='drawer'; } else { delete t.noOven; delete t.store; } }));
   box.querySelectorAll('[data-swing]').forEach(b=>b.onclick=()=>edit(t=>{ t.swing=+b.dataset.swing; }));
   box.querySelectorAll('[data-seg]').forEach(sg=>sg.querySelectorAll('button').forEach(b=>b.onclick=()=>edit(t=>{ t[sg.dataset.seg]=b.dataset.v;
     if(sg.dataset.seg==='front' && b.dataset.v!=='door') delete t.corner; })));
@@ -18442,6 +18483,36 @@ function renderSel(c){
   $('kDup').onclick=()=>{ const t=selItem(); if(t) duplicate(t); };
   $('kDel').onclick=()=>{ const t=selItem(); if(t) removeItem(t); };
   if(fid && $(fid)){ $(fid).focus(); if($(fid).select) $(fid).select(); }
+}
+// Bauart wechseln (unten / hängend / hoch): Maße auf den Standard der neuen
+// Bauart, Front und Inhalte auf das, was dort geht, und an der Wand neu
+// einrasten - möglichst an derselben Stelle (Hängeschrank über dem
+// Unterschrank darf, ein Hochschrank daneben nicht). Eckschränke nehmen
+// Korpus und Tür der neuen Lage (nobilia UE/WE) und rücken in die Ecke.
+function switchKind(t, kind){
+  const c=kctx(); if(!c || !KX.KIND[kind] || KX.KIND[kind].free) return;
+  const was=nm(t);
+  t.kind=kind; delete t.d; delete t.h; delete t.z;
+  if(t.dev && !KX.DEV[t.dev].kinds.includes(kind)) delete t.dev;
+  if(kind==='wall' && (t.front==='drawer' || !t.front)) t.front='door';
+  if(kind==='tall' && t.front==='drawer') t.front='door';
+  if(kind!=='wall' && t.front==='flap') t.front = kind==='base' ? 'drawer' : 'door';
+  if(t.corner){
+    const C=KX.CORNER[kind]; if(!C){ delete t.corner; delete t.door; delete t.ctype; delete t.cEnd; delete t.inner; }
+    else {
+      if(t.ctype){ const sh=KX.CSHAPE[kind][t.ctype]; if(sh){ t.w=sh.def; } else delete t.ctype; }
+      if(!t.ctype){ t.w = kind==='wall' ? 782 : 1000; if(kind==='wall') t.door=350; else delete t.door; }
+      const inn = t.ctype ? KX.CSHAPE[kind][t.ctype].inner : C.inner; if(t.inner && !inn[t.inner]) delete t.inner;
+    }
+  }
+  if(t.store){ t.store=t.store.filter(x=>KX.storable(t).includes(x)); if(!t.store.length) delete t.store; }
+  const Wf=KX.wallFrame(c.E,t.a,t.b);
+  if(Wf){
+    let x=KX.freeSlot(c.E,c.K,c.L,t,Wf,t.x);
+    if(t.corner){ const xc=KX.cornerPlace(c.E,c.K,c.L,{...t, x:x!=null?x:t.x},Wf); if(xc!=null) x=xc; }
+    if(x!=null) t.x=x;
+  }
+  setHint(`${was} → ${nm(t)}${wallTxt(t)}`);
 }
 // ---------- Eckschrank-Konfigurator (Meldung M-20261109-134919-c2a193) ----------
 // Eigener Kasten über den übrigen Feldern, für Unter- und Hängeschränke an
@@ -22446,6 +22517,18 @@ globalThis.selfChecks=function(){
       chk('kueche: Leiste nach kalt/warm/nass/Stauraum/Möbel – jede sichtbare Vorlage hat eine Gruppe, ein Kühlschrank, ein Gefrierschrank',
         KX.PRESETS.filter(p=>p.pal!==false).every(p=>KX.PGROUPS.some(([g])=>g===p.grp))
         && KX.PRESETS.filter(p=>p.pal!==false && p.dev==='fridge').length===1 && KX.PRESETS.filter(p=>p.pal!==false && p.dev==='freezer').length===1);
+      chk('kueche: Stauraum in der Leiste nur Schrank, Eckschrank, Insel; Backofen im Hochschrank unter Warm',
+        JSON.stringify(KX.PRESETS.filter(p=>p.pal!==false && p.grp==='stau').map(p=>p.key))==='["base","corner","island"]'
+        && KX.PRESETS.some(p=>p.key==='oven' && p.pal!==false && p.grp==='warm'));
+      chk('kueche: Spülmaschine hoch im Hochschrank – Tür klappt auf Hüfthöhe, kein Stauraum',
+        (()=>{ const r=lay([{id:1,kind:'tall',dev:'dw',a:'D',b:'A',x:0,w:600}]); const e=r.L.G[0].env, S=r.K.spec, D=KX.derived(S);
+          return r.K.items[0].dev==='dw' && e.length===1 && /Spülmaschinentür/.test(e[0].what) && e[0].z0===D.workH-400 && e[0].z0>S.plinth+300
+            && KX.storable(r.K.items[0]).length===0 && KX.nameOf(r.K.items[0])==='Spülmaschine hoch 60'; })());
+      chk('kueche: Kochfeld ohne Backofen – Schubladen statt Backofentür, Töpfe darunter möglich, bleibt nach Import',
+        (()=>{ const r=lay([{id:1,kind:'base',dev:'hob',a:'D',b:'A',x:0,w:600,noOven:true,front:'drawer'}]); const it=r.K.items[0], e=r.L.G[0].env;
+          const mit=lay([{id:1,kind:'base',dev:'hob',a:'D',b:'A',x:0,w:600}]);
+          return it.noOven===true && KX.frontKind(it)==='drawer' && e.length===1 && e[0].what==='Auszug' && KX.storable(it).includes('toepfe')
+            && KX.nameOf(it)==='Kochfeld 60' && mit.L.G[0].env[0].what==='Backofentür' && KX.storable(mit.K.items[0]).length===0; })());
       chk('kueche: 60 mm neben der Wand – 96er Tür geht 90° auf, 140er nicht mehr (bad)',
         !has(lay([fd(60)]).F, /Flügel: geht nur/) && has(lay([{...fd(60), doorT:140}]).F, /Flügel: geht nur \d+° auf, die Wand/, 'bad'));
       chk('kueche: Side by Side 50 mm neben Unterschränken (Bosch: A ≤ 600 → 50 mm) – geht ganz auf',
