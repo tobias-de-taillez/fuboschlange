@@ -367,7 +367,7 @@ const MAC = /Mac|iP(hone|ad)/.test(navigator.platform||navigator.userAgent);
 const KEYS = MAC ? {undo:'⌘Z',redo:'⇧⌘Z',save:'⌘S',open:'⌘O',del:'⌫',zoom:'⌘'}
                  : {undo:'Strg+Z',redo:'Strg+Y',save:'Strg+S',open:'Strg+O',del:'Entf',zoom:'Strg'};
 const S = { view:'tool', step:'skizze', name:'Neuer Raum', pts:[], walls:[], closed:false, queue:[], k:0, meas:[],
-  sel:null, guide:true, snap:false, ortho:false, unfold:false, morph:0, height:null, openings:[], wall:0, op:null,
+  sel:null, guide:true, snap:true, ortho:false, unfold:false, morph:0, mt:0, height:null, openings:[], wall:0, op:null,
   just:null, hover:null, more:false, ell:false, list:false, sigma:4, real:false, hasRooms:false, seq:0 };
 const V = { x:-1500, y:-800, s:.08 };
 const hist = [], fut = [];
@@ -396,6 +396,8 @@ function lenOf(a,b){            /* Länge: was das Werkzeug ausrechnet */
 const need = () => Math.max(0, 2*S.pts.length-3);
 const have = () => S.meas.filter(m=>m.on).length;
 const definite = () => S.closed && have()>=need();
+/* Maßhaltig: sobald die Form eindeutig ist, zeigt der Plan die gemessene Form statt der Skizze */
+const snapTarget = () => S.snap && definite() && S.pts.some(p=>p.fx!=null) ? 1 : 0;
 function rings(get=T){          /* geschlossene Wandzüge, größter zuerst */
   const adj={}; S.walls.forEach(([a,b])=>{(adj[a]=adj[a]||[]).push(b);(adj[b]=adj[b]||[]).push(a);});
   const seen=new Set(), out=[];
@@ -443,14 +445,15 @@ function loadKitchen(k){
   S.height=null; S.openings=[]; S.seq=0; S.wall=0;
 }
 function scenario(sc){
-  hist.length=fut.length=0; S.sel=null; S.op=null; S.guide=true; S.more=false; S.ell=false; S.list=false; S.morph=S.snap?1:0;
+  hist.length=fut.length=0; S.sel=null; S.op=null; S.guide=true; S.more=false; S.ell=false; S.list=false;
   if(sc==='leer'){ Object.assign(S,{pts:[],walls:[],closed:false,queue:[],k:0,meas:[],name:'Neuer Raum',real:false,height:null,openings:[],sigma:4,seq:0}); go('tool','skizze'); V.x=-1500;V.y=-800;V.s=.08; }
   if(sc==='skizze'){ loadKitchen(0); go('tool','skizze'); fit(); }
-  if(sc==='mitte'){ loadKitchen(31); go('tool','masse'); fit(); }
+  if(sc==='mitte'){ loadKitchen(43); go('tool','masse'); fit(); }
   if(sc==='geprueft'){ loadKitchen(81); go('tool','masse'); fit(); }
   if(sc==='fehler'){ loadKitchen(81); const m=S.meas.find(m=>m.a==='J'&&m.b==='B'); m.dev=87; m.d=Math.round(dist(T(P('J')),T(P('B'))))+m.dev; m.bad=true; go('tool','masse'); fit(); S.sel={type:'strecke',a:'J',b:'B'}; }
   if(sc==='start'){ if(!S.pts.length) loadKitchen(81); S.hasRooms=true; go('home'); }
   if(sc!=='leer') S.hasRooms=true;
+  S.mt=S.morph=snapTarget();      /* ein Sprung zwischen Szenarien gleitet nicht */
   render();
 }
 function go(view, step){
@@ -773,6 +776,7 @@ function renderHome(){
 
 /* ---------- Rendern ---------- */
 function render(){
+  const tg=snapTarget(); if(tg!==S.mt){ S.mt=tg; morphTo(tg); }
   document.body.dataset.view=S.view; document.body.dataset.step=S.step;
   $('#name').textContent=S.name; $('#back').hidden=!S.hasRooms;
   document.querySelectorAll('#steps button').forEach(b=>b.toggleAttribute('aria-current',false)||b.dataset.step===S.step&&b.setAttribute('aria-current','step'));
@@ -886,7 +890,7 @@ document.addEventListener('click',e=>{
   if(t.id==='menuBtn'){ const m=$('#menu'), r=t.getBoundingClientRect(); m.hidden=!m.hidden; t.setAttribute('aria-expanded',!m.hidden); m.style.top=r.bottom+4+'px'; m.style.right='8px';
     m.querySelector('[data-m=snap]').setAttribute('aria-checked',S.snap); m.querySelector('[data-m=ortho]').setAttribute('aria-checked',S.ortho); m.querySelector('[data-m=unfold]').setAttribute('aria-checked',S.unfold); return; }
   if(d.m){ closeMenu();
-    if(d.m==='snap'){ S.snap=!S.snap; morphTo(S.snap?1:0); return; }
+    if(d.m==='snap'){ S.snap=!S.snap; return render(); }
     if(d.m==='ortho'){ S.ortho=!S.ortho; return toast(S.ortho?'Ecken nahe 90° gelten als rechtwinklig.':'Winkel kommen wieder allein aus den Maßen.'); }
     if(d.m==='unfold'){ S.unfold=!S.unfold; return toast('Prototyp: Abwicklung ist hier nicht gezeichnet.'); }
     if(d.m==='mirror'){ mark(); const c=centroid(); S.pts.forEach(p=>{ p.x=2*c.x-p.x; if(p.fx!=null){ const fc=S.pts.reduce((s,q)=>s+q.fx,0)/S.pts.length; p._fx=2*fc-p.fx; } }); S.pts.forEach(p=>{ if(p._fx!=null){p.fx=p._fx; delete p._fx;} }); return render(); }
