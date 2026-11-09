@@ -705,6 +705,7 @@
           <button data-add="door" class="tb">+ Tür</button>
           <button data-add="window" class="tb">+ Fenster</button>
           <button data-add="hole" class="tb">+ Loch</button>
+          <button id="wWater" class="tb" title="Wasseranschluss (Eckventil und Abfluss) an diese Wand setzen – die Küche prüft daran die Schlauchlängen von Spülmaschine und Kühlschrank">+ Wasser</button>
         </div>
       </div>
       <div class="tg" data-for="tiles">
@@ -995,6 +996,7 @@
         <dt>Höhe</dt><dd>Raumhöhe eintragen. Die erste gemessene Höhe gilt für alle Ecken; abweichende Ecken (Pultdach, Schräge) rechts im Panel unter <b>Höhe links / rechts</b> oder per Klick auf ihre Kante im Bild. Höhe 0 ist erlaubt: die Wand läuft dort spitz zu.</dd>
         <dt>+ Knickpunkt</dt><dd>Für Giebel- und Kniestockwände: die Decke knickt zwischen den Ecken. Den Punkt im Bild ziehen, anklicken für seine Höhe, Rechtsklick löscht. Geht in die Wandansicht, die Öffnungsprüfung und den STEP-Export ein.</dd>
         <dt>+ Tür, + Fenster, + Loch</dt><dd>Gibt es auch im Grundriss (Zeichnen und Messen): Knopf, dann auf die Wand klicken. Dort ziehen verschiebt die Öffnung entlang der Wand, das Kärtchen daneben stellt Art, Band und Öffnungsrichtung. Hier in der Wandansicht: Öffnung auf die Wand setzen, dann Größe und Art wählen. Links und rechts gelten immer von innen gesehen. Unter <b>Lage einmessen</b> den Abstand von links, rechts, Boden oder Decke eintragen; erst dann liegt sie maßhaltig. Türen bekommen Band und Öffnungsrichtung.</dd>
+        <dt>+ Wasser</dt><dd>Setzt einen Wasseranschluss (Eckventil und Abfluss) an die gewählte Wand, unter die Spüle, wenn dort eine steht, sonst in die Mitte, 50 cm hoch. Im Bild ziehen oder rechts Lage und Höhe in mm eintragen, × löscht. Die Küche prüft daran die Schlauchwege: Spülmaschine (Zulauf 1,68 m, Ablauf 1,9 m, Verlängerung 2,2 m) und Kühlschrank mit Festwasser. Der Schlauch läuft hinter den Schränken an der Wand entlang. Schneidet keine Fliesen.</dd>
         <dt>Abwicklung</dt><dd>Klappt die Wände mit Öffnungen im Grundriss nach außen und blendet Nachbarräume aus. Nur Ansicht.</dd>
       </dl>
 
@@ -1021,7 +1023,7 @@
       <h3><i>5</i>Küche</h3>
       <p>Erst verfügbar, wenn der Grundriss eindeutig ist. Teile aus der Leiste oben auf eine Wand ziehen oder anklicken, geordnet nach Kalt (Kühl-, Gefrierschrank), Warm (Herd, Backofen im Hochschrank, Mikrowelle, Dunstabzug), Nass (Spüle, Spülmaschine), Stauraum (Schrank, Eckschrank, Insel) und Möbel (Tisch). Ob ein Schrank unten steht, hängt oder hoch ist, wählt man danach rechts unter „Bauart“; die Spülmaschine geht auch hoch eingebaut (Hüfthöhe), der Herd auch ohne Backofen (nur Kochfeld, darunter Schubladen). Sie rasten an Ecken (mit 5 cm Passblende), Nachbarn, Türen und mittig unter Fenstern ein; ein Klick setzt das Teil neben das gewählte, einen Hängeschrank darüber. Die Arbeitsplatte entsteht von selbst, auf der Insel samt Tresen-Überstand; Lücken bis 15 cm werden Passleisten. Die Lage steht im Panel als Zahl (ab Ecke … mm), die Maßkette im Plan. Die Standardmaße passen meist; rechts stellt man Breite, Front, Anschlag, Gerät und Inhalt ein, unter „Maße frei“ alles Übrige.</p>
       <dl>
-        <dt>Prüfung</dt><dd>Meldet, was nicht geht (rot): Überlappungen, Schrank vor Tür oder Fenster, Fensterflügel gegen Armatur, Gerätetür gegen Insel, Zimmertür gegen Schrank oder Insel (im Plan bleibt die Tür am ersten Teil stehen, mit Winkel im Befund), Front in der Ecke verdeckt, Decke zu niedrig. Und Richtwerte (gelb): Gänge 1200 mm, Stuhlraum am Tisch, Abstellflächen, Spülmaschine neben der Spüle, Arbeitsdreieck. Ein Klick wählt das Teil; wo es eine eindeutige Abhilfe gibt (Vorfensterarmatur, Anschlag tauschen, Als Eckschrank, Als Dunstabzug), steht ein Knopf daneben.</dd>
+        <dt>Prüfung</dt><dd>Meldet, was nicht geht (rot): Überlappungen, Schrank vor Tür oder Fenster, Fensterflügel gegen Armatur, Gerätetür gegen Insel, Zimmertür gegen Schrank oder Insel (im Plan bleibt die Tür am ersten Teil stehen, mit Winkel im Befund), Front in der Ecke verdeckt, Decke zu niedrig. Und Richtwerte (gelb): Schlauchweg von Spülmaschine und Festwasser-Kühlschrank zum Wasseranschluss (Wände-Tab), Gänge 1200 mm, Stuhlraum am Tisch, Abstellflächen, Spülmaschine neben der Spüle, Arbeitsdreieck. Ein Klick wählt das Teil; wo es eine eindeutige Abhilfe gibt (Vorfensterarmatur, Anschlag tauschen, Als Eckschrank, Als Dunstabzug), steht ein Knopf daneben.</dd>
         <dt>Maße und Abstände</dt><dd>Am gewählten Wandteil läuft die Maßkette bis zur Wand, die man an den Enden vor sich hat, bei Insel und Tisch zu allen vier Seiten. Ein Klick auf einen gestrichelt umrandeten Abstand öffnet ein Feld: Wert eintragen, Enter verschiebt das Teil (an der Wand den ganzen Block daneben).</dd>
         <dt>Insel und Tisch</dt><dd>Drehen per Schieber im Panel (rastet an 0/45/90° und an schiefen Wänden ein, mit ⌥ frei) oder mit Q/E. Eine Insel, deren Stirnseite man an eine Wand zieht, dockt bündig an; ihre Auszüge gehen dann parallel zur Wand auf. „Tresen“ lässt die Platte hinten überstehen (NKBA: 38 cm bei 91 cm Höhe, 61 cm je Hocker). Die Tischplätze ergeben sich aus Länge und Breite (60 cm je Platz, Stirnseite ab 60 cm Breite), Seiten ohne Stuhlraum bleiben frei.</dd>
         <dt>Offen (O)</dt><dd>Zeigt im Plan alle Schwenkbereiche und in 3D alle Türen, Auszüge und Gerätetüren offen, dazu offene Fensterflügel.</dd>
@@ -6339,6 +6341,7 @@ function normItem(o){
   if(o.hinge==='left'||o.hinge==='right') it.hinge=o.hinge;
   if(fin(o.faucetH)) it.faucetH=clamp(o.faucetH, 0, 600);
   if(o.noOven===true && it.dev==='hob' && it.kind==='base') it.noOven=true;
+  if(o.water===true && it.dev==='fridge' && it.kind==='tall') it.water=true;
   if(o.corner===true && CORNER[o.kind]){
     it.corner=true;
     if(fin(o.door)) it.door=clamp(o.door, 100, Math.max(100, it.w-50));
@@ -6372,7 +6375,7 @@ const isEmpty=K=>!K || (!K.items.length && Object.keys(K_DEF).every(k=>K.spec[k]
 // ---------- Raum ----------
 // Umgebung aus dem Aufmaß: Ring, Wände mit Innennormale, Höhen, Öffnungen.
 // pts sind die ausgeglichenen Punkte (M.fit.pts), sonst stimmt nichts.
-function makeEnv(pts, walls, openings, hmeas){
+function makeEnv(pts, walls, openings, hmeas, water){
   const ring=C.wallPolygon(pts, walls);
   if(!ring) return null;
   const I=C.idx(pts), wallsByKey=new Map();
@@ -6390,7 +6393,8 @@ function makeEnv(pts, walls, openings, hmeas){
   });
   const H=globalThis.cornerHeights ? globalThis.cornerHeights(pts, hmeas||[]) : {};
   const F=TL.frameOf(pts, walls);
-  return {pts, walls, ring, I, wallsByKey, H, F, openings:(openings||[]).filter(o=>o && o.a && o.b)};
+  return {pts, walls, ring, I, wallsByKey, H, F, openings:(openings||[]).filter(o=>o && o.a && o.b),
+          water:(water||[]).filter(w=>w && wallsByKey.has(wallKeyOf(w.a,w.b)))};
 }
 const P=(E,id)=>{ const i=E.I[id]; return i==null?null:E.pts[i]; };
 const wallKeyOf=(a,b)=>[a,b].sort().join('|');
@@ -7246,6 +7250,8 @@ function check(E, K, L){
   });
   // Passleisten: Lücken zwischen Schränken und Restmaße zur Wand bis 150 mm.
   (L.fillers||[]).forEach(f=>add_('info', f.between||[], `${f.corner?'Passblende Ecke':'Passleiste'} ${mm(f.w)} mm${f.between?' zwischen zwei Schränken':''}`, wpt(f.Wf,(f.s0+f.s1)/2,300)));
+  // Schlauchlängen zum Wasseranschluss (Meldung M-20261109-150408-6c7165)
+  hoseCheck(E, K, L).forEach(f=>add_(f.lvl, f.ids, f.txt, f.at));
   // 9. Ergonomie (NKBA, Blum, Neff) – nur, wenn die Geräte da sind
   const dev=k=>G.filter(g=>g.it.dev===k);
   const [sink]=dev('sink'), [hob]=dev('hob'), [dw]=dev('dw'), [fridge]=dev('fridge');
@@ -7302,6 +7308,69 @@ function check(E, K, L){
   return [...byKey.values()].sort((p,q)=>LEVEL_ORDER[p.lvl]-LEVEL_ORDER[q.lvl]);
 }
 // Freie Arbeitsplatte neben g zur Seite sg (-1 links von s0, +1 rechts von s1).
+// ---------- Wasseranschluss und Schlauchlängen ----------
+// Meldung M-20261109-150408-6c7165. Der Anschluss (Eckventil + Abfluss) ist
+// ein Punkt an der Wand, gesetzt im Wände-Tab (E.water). Der Schlauch läuft
+// hinter den Schränken an der Wand entlang, um Innenecken herum, und
+// senkrecht vom Geräteanschluss zum Wandanschluss. Grenzen:
+//  Spülmaschine Zulauf mit AquaStop 1680 mm (Bosch-Ersatzteil 00668113,
+//  „1,68 m“), Ablauf 1900 mm (Bosch 00666148, „1,9 m“), Verlängerung
+//  2200 mm (Bosch 00671612, „220 cm“). Es bindet der kürzere Zulauf.
+//  Kühlschrank mit Festwasser: Einbau 1150 mm (Liebherr-Montageanleitung,
+//  600er Gerät: „Maximal verfügbare Schlauchlänge ~1150 mm“), frei
+//  stehend 5000 mm (Beko: 1 m + 4 m mit Filter dazwischen) – beides je
+//  Modell verschieden, daher als Richtwert (gelb).
+//  Hoch eingebaute Spülmaschine: liegt der Abfluss tiefer als die offene
+//  Tür, muss der Ablauf belüftet werden (Miele-Montageplan M.-Nr. 11 728 450).
+const HOSE={ dwIn:1680, dwOut:1900, dwExt:2200, fridgeBuilt:1150, fridgeFree:5000 };
+function waterPts(E){
+  return (E.water||[]).map(w=>{ const A=P(E,w.a), B=P(E,w.b); if(!A||!B) return null;
+    const u=unit(sub(B,A)); return {w, p:{x:A.x+u.x*w.x, y:A.y+u.y*w.x}, z:w.y}; }).filter(Boolean);
+}
+// Weg an der Wand entlang zwischen zwei Wandpunkten: auf demselben Ring
+// der kürzere Bogen, sonst (Insel, Pfeiler) die Luftlinie.
+function alongWall(E, p, q){
+  const pos=pt=>{ let best=null;
+    TL.ringsOf(E.ring).forEach((R,ri)=>{ let acc=0;
+      R.forEach((a,i)=>{ const b=R[(i+1)%R.length], e=sub(b,a), l=len(e)||1, t=clamp(dot(sub(pt,a),e)/(l*l),0,1);
+        const d=len(sub(pt,add(a,mul(e,t))));
+        if(!best || d<best.d) best={ri, s:acc+t*l, d};
+        acc+=l; });
+      if(best && best.ri===ri) best.P=acc; });
+    return best; };
+  const a=pos(p), b=pos(q);
+  if(!a || !b || a.ri!==b.ri || a.d>800 || b.d>800) return len(sub(p,q));
+  const ds=Math.abs(a.s-b.s);
+  return Math.min(ds, a.P-ds) + a.d + b.d;
+}
+function hoseCheck(E, K, L){
+  const S=K.spec, out=[], W=waterPts(E);
+  const needs=L.G.filter(g=>!g.wing && (g.it.dev==='dw' || (g.it.dev==='fridge' && g.it.water)));
+  if(!needs.length) return out;
+  if(!W.length){
+    out.push({lvl:'info', ids:needs.map(g=>g.it.id), txt:`Kein Wasseranschluss gesetzt – im Tab Wände „+ Wasser“, dann prüft die Küche die Schlauchlängen`, at:needs[0].c});
+    return out;
+  }
+  needs.forEach(g=>{
+    const it=g.it, dw=it.dev==='dw';
+    // Anschluss am Gerät: hinten unten an der Wand (Spülmaschine hoch: an
+    // ihrer Unterkante), bei frei stehenden Teilen in der Mitte.
+    const p = g.free ? g.c : wpt(g.Wf,(g.s0+g.s1)/2,0);
+    const z = dw ? (devZ(it,S)!=null ? devZ(it,S) : S.plinth) : 100;
+    let best=null;
+    W.forEach(x=>{ const l=(g.free ? len(sub(p,x.p)) : alongWall(E,p,x.p)) + Math.abs(x.z-z); if(!best || l<best.l) best={l, x}; });
+    const l=Math.round(best.l), at=mul(add(p,best.x.p),0.5);
+    if(dw){
+      if(l>HOSE.dwIn+HOSE.dwExt) out.push({lvl:'bad', ids:[it.id], txt:`${nameOf(it)} ${mm(l)} mm Schlauchweg zum Wasseranschluss – auch mit Verlängerung (2,2 m) zu weit; Anschluss näher setzen`, at});
+      else if(l>HOSE.dwIn) out.push({lvl:'warn', ids:[it.id], txt:`${nameOf(it)} ${mm(l)} mm Schlauchweg zum Wasseranschluss – Zulauf 1,68 m / Ablauf 1,9 m reichen nicht, Verlängerung nötig`, at});
+      if(it.kind==='tall' && best.x.z<z) out.push({lvl:'info', ids:[it.id], txt:`${nameOf(it)}: Abfluss liegt tiefer als das Gerät – Wasserablauf belüften (Miele-Montageplan)`, at});
+    } else {
+      const lim=fzOf(it) ? HOSE.fridgeFree : HOSE.fridgeBuilt;
+      if(l>lim) out.push({lvl:'warn', ids:[it.id], txt:`${nameOf(it)} Festwasser: ${mm(l)} mm Schlauchweg – üblich bis ${mm(lim)} mm (${fzOf(it)?'frei stehend':'Einbau'}, je Modell verschieden)`, at});
+    }
+  });
+  return out;
+}
 function landing(L, g, sg){
   // Eigene Platte, sonst (Hochschrank) die direkt anstoßende derselben Wand.
   let top=L.tops.find(t=>t.ids.includes(g.it.id));
@@ -8091,7 +8160,7 @@ function storable(it){
 }
 globalThis.KITCHEN={ FRIDGE, DOORT_LIM, SWINGS, swingOf, isCold, fzOf, doorTOf, leaves, leafRect, leafReach, leafReachSide, entries, storable, wallFaces, K_DEF, K_LIM, WIDTHS, KIND, DEV, FRONTS, PRESETS, PGROUPS, CONTENTS, FLOWS, GROUPS, ROLE_LABEL, BODY_R,
   derived, devZ, ovenBelow, DW_H, normKitchen, normItem, isEmpty, makeEnv, wallFrame, wpt, geom, dims, layout, envelopes, frontLR, frontKind,
-  worktops, check, sashes, doorReach, optimalStore, hungarian, openingOn, faucetPoint, tableSides, tableSeats, seatPlan, rotSnaps, snapRot, chainDims, freeDims, applyDim, dockFree, barNkba, barSeats, BAR_SEAT_W, slotCandidates, cornerStop, fitsAt, freeSlot, snapX,
+  worktops, check, hoseCheck, alongWall, waterPts, HOSE, sashes, doorReach, optimalStore, hungarian, openingOn, faucetPoint, tableSides, tableSeats, seatPlan, rotSnaps, snapRot, chainDims, freeDims, applyDim, dockFree, barNkba, barSeats, BAR_SEAT_W, slotCandidates, cornerStop, fitsAt, freeSlot, snapX,
   nearestWall, planner, stations, flows, suggest, reachFactor, scene, frontsOf, stock, nameOf, inflate, polyInRoom, COL };
 Object.assign(globalThis.KITCHEN, { CORNER, CSHAPE, shapeOf, cornerBlind, cornerPlace, cornerType, crossAt, cornerWing });
 })();
@@ -10067,6 +10136,10 @@ const M={ pts:[], walls:[], meas:[], mode:'draw', sel:[], chain:null,
           fit:null, an:null, sugg:[], suspects:new Set(), narrow:[],
           drag:null, dragMode:null, highlight:null, nearPairs:[],
           openings:[], hmeas:[], opmeas:[], wallSel:null, openSel:null,
+          // Wasseranschlüsse (Meldung M-20261109-150408-6c7165): Punkte an
+          // der Wand, KEINE Öffnungen (die schneiden Fliesen und sperren
+          // Schränke). {id, a, b, x ab Ecke a, y über Boden} in mm.
+          water:[], waterSel:null,
           // Wanddicke und geteilte Wand haengen an der Wand, aber Waende
           // sind ueberall im Programm Paare [a,b] - eine Karte ueber
           // pairKey ist dasselbe, ohne jede Zeile umzuschreiben, die
@@ -10145,6 +10218,7 @@ const serialize=()=>JSON.stringify({
   walls:M.walls.map(w=>[...w]),
   meas:M.meas.map(m=>({...m})),
   openings:M.openings.map(o=>({...o})),
+  water:M.water.length ? M.water.map(w=>({...w})) : undefined,
   hmeas:M.hmeas.map(m=>({...m})),
   opmeas:M.opmeas.map(m=>({...m})),
   thick:{...M.thick}, shared:{...M.shared},
@@ -10174,6 +10248,10 @@ function deserialize(o){
   // Oeffnungen sind optional: aeltere Raeume und Fremdimporte haben sie
   // nicht, und ein fehlendes Feld darf kein Fehler sein.
   M.openings=Array.isArray(o.openings) ? o.openings.map(x=>({...x})) : [];
+  // Wasseranschlüsse: optional, kaputte fallen einzeln weg.
+  M.water=Array.isArray(o.water) ? o.water.filter(w=>w && typeof w.a==='string' && typeof w.b==='string' && w.a!==w.b && Number.isFinite(w.x) && Number.isFinite(w.y))
+    .map((w,i)=>({id:typeof w.id==='string'&&w.id ? w.id : 'w'+(i+1), a:w.a, b:w.b, x:w.x, y:Math.max(0,w.y)})) : [];
+  M.waterSel=null;
   // Hoehen liegen BEWUSST getrennt von den Grundriss-Messungen: der
   // Solver darf sie nie als Strecke lesen (jacobian erwartet a/b).
   M.hmeas=Array.isArray(o.hmeas) ? o.hmeas.map(x=>({...x})) : [];
@@ -11324,6 +11402,7 @@ function drawWallView(){
     ctx.fillStyle=INK.mode; ctx.font=`${11.5*dpr}px system-ui`;
     ctx.fillText(hinweis, 14*dpr, 42*dpr);
   }
+  drawWater(dpr);
   drawWallInset(dpr);
 }
 
@@ -13400,8 +13479,9 @@ function renderWallSection(){
           +`<span>${OPEN_LABEL[o.kind]}</span><span>${Math.round(o.w)} × ${Math.round(o.h)}</span>`
           +`<span class="${n?'ok':''}">${n ? n+(n===1?' Maß':' Maße') : 'geschätzt'}</span></div>`;
       }).join('')
-    : '<div class="none">Keine Öffnungen. Tür, Fenster oder Loch über die Leiste oben einsetzen.</div>';
-  box.querySelectorAll('.orow').forEach(r=>{ r.onclick=()=>{ M.openSel=r.dataset.id; render(); }; });
+    : (waterOnWall().length ? '' : '<div class="none">Keine Öffnungen. Tür, Fenster oder Loch über die Leiste oben einsetzen.</div>');
+  box.querySelectorAll('.orow[data-id]').forEach(r=>{ r.onclick=()=>{ M.openSel=r.dataset.id; M.waterSel=null; render(); }; });
+  if(waterOnWall().length){ box.insertAdjacentHTML('beforeend', waterRows()); wireWaterRows(box); }
 }
 $('wPick').onchange=()=>{
   const [a,b]=$('wPick').value.split('|');
@@ -13472,7 +13552,7 @@ function insertOpening(kind, a, b, mitte){
   recompute();
   return o;
 }
-document.querySelectorAll('#wAdd button').forEach(b=>{
+document.querySelectorAll('#wAdd button[data-add]').forEach(b=>{
   b.onclick=()=>{
     if(!M.wallSel) return;
     const kind=b.dataset.add;
@@ -13480,6 +13560,91 @@ document.querySelectorAll('#wAdd button').forEach(b=>{
       setHint(`${OPEN_LABEL[kind]} eingesetzt. Zum Positionieren ziehen.`);
   };
 });
+// ================= Wasseranschluss =================
+// Punkt an der Wand (Meldung M-20261109-150408-6c7165). x ab Ecke a der
+// gewählten Wand wie bei Öffnungen, y über Boden. Steht an der Wand eine
+// Spüle, kommt er unter ihre Mitte (dort sitzen Eckventil und Siphon),
+// sonst in die Wandmitte. 500 mm hoch: übliche Eckventil-Höhe im
+// Spülenunterschrank.
+const WATER_Y=500;
+function waterOnWall(){ if(!M.wallSel) return []; const k=wallKey(M.wallSel.a,M.wallSel.b); return M.water.filter(w=>wallKey(w.a,w.b)===k); }
+function waterView(w){
+  // Gespeichert ab w.a; die Ansicht misst ab M.wallSel.a.
+  const shape=currentShape(); if(!shape) return null;
+  return {x: w.a===M.wallSel.a ? w.x : shape.L-w.x, y:w.y};
+}
+function insertWater(a, b){
+  const shape=wallShape(fitPts(), M.hmeas, a, b);
+  if(!shape) return null;
+  let x=shape.L/2;
+  // Küchenteile messen ab ihrer Ecke it.a (wallFrame), die Ansicht ab a.
+  const sink=((M.kitchen&&M.kitchen.items)||[]).find(it=>it.dev==='sink' && it.a && wallKey(it.a,it.b)===wallKey(a,b));
+  if(sink){ const s=sink.x+sink.w/2; x = sink.a===a ? s : shape.L-s; }
+  const n=1+Math.max(0,...M.water.map(w=>+(/^w(\d+)$/.exec(w.id)||[0,0])[1]));
+  snapshot();
+  const w={id:'w'+n, a, b, x:Math.round(Math.max(0,Math.min(shape.L,x))), y:WATER_Y};
+  M.water.push(w); M.waterSel=w.id; M.openSel=null;
+  recompute();
+  setHint(`Wasseranschluss gesetzt${sink?' unter der Spüle':''}. Ziehen verschiebt, rechts Lage und Höhe in mm.`);
+  return w;
+}
+$('wWater').onclick=()=>{ if(M.wallSel) insertWater(M.wallSel.a, M.wallSel.b); };
+function waterAt(d){
+  const r=10*DPR();
+  return waterOnWall().slice().reverse().find(w=>{ const v=waterView(w); if(!v) return false; const q=wToScr(v); return Math.hypot(q.x-d.x,q.y-d.y)<=r; })||null;
+}
+function drawWater(dpr){
+  ctx.textAlign='left'; ctx.textBaseline='middle';
+  waterOnWall().forEach(w=>{
+    const v=waterView(w); if(!v) return;
+    const q=wToScr(v), sel=M.waterSel===w.id;
+    ctx.beginPath(); ctx.arc(q.x,q.y,7*dpr,0,2*Math.PI);
+    ctx.fillStyle='#1d6fd6'; ctx.fill();
+    ctx.lineWidth=(sel?3:1.5)*dpr; ctx.strokeStyle=sel?INK.accent:'#fff'; ctx.stroke();
+    ctx.fillStyle='#1d6fd6'; ctx.font=`600 ${11*dpr}px system-ui`;
+    ctx.fillText(`Wasser · ${Math.round(v.y)}`, q.x+11*dpr, q.y);
+  });
+  ctx.textBaseline='alphabetic'; ctx.textAlign='start';
+}
+let waterDrag=null;
+cv.addEventListener('pointerdown',e=>{
+  if(M.mode!=='wall' || e.button!==0 || spaceHeld || (IS_MAC && e.ctrlKey)) return;
+  const d=evDev(e), w=waterAt(d);
+  if(!w) return;
+  M.waterSel=w.id; M.openSel=null;
+  waterDrag={id:w.id, snap:serialize(), x0:e.clientX, y0:e.clientY, moved:false};
+  e.stopImmediatePropagation(); render();
+},true);
+addEventListener('pointermove',e=>{
+  if(M.mode!=='wall' || !waterDrag) return;
+  if(!waterDrag.moved){ if(Math.hypot(e.clientX-waterDrag.x0, e.clientY-waterDrag.y0)<=TAP_SLOP) return; waterDrag.moved=true; }
+  const shape=currentShape(), w=M.water.find(x=>x.id===waterDrag.id); if(!shape||!w) return;
+  if(waterDrag.snap){ pushSnapshot(waterDrag.snap); waterDrag.snap=null; }
+  const d=evDev(e), p=wToWall(d.x,d.y);
+  const xv=Math.round(Math.max(0,Math.min(shape.L,p.x))/10)*10;
+  w.x = w.a===M.wallSel.a ? xv : shape.L-xv;
+  w.y = Math.round(Math.max(0,Math.min(2000,p.y))/10)*10;
+  setHintLive(`Wasseranschluss ${Math.round(xv)} mm ab ${M.wallSel.a} · ${Math.round(w.y)} mm hoch`);
+  render();
+});
+addEventListener('pointerup',()=>{ if(waterDrag){ const m=waterDrag.moved; waterDrag=null; if(m) recompute(); } });
+function waterRows(){
+  const list=waterOnWall(); if(!list.length) return '';
+  const left=M.wallSel.a;   // x zählt ab Ecke a der gewählten Wand
+  return list.map(w=>{ const v=waterView(w);
+    return `<div class="orow${w.id===M.waterSel?' cur':''}" data-water="${escapeHtml(w.id)}"><span>Wasser</span>`
+      +`<span><input data-wx="${escapeHtml(w.id)}" inputmode="decimal" value="${Math.round(v.x)}" title="Lage der Mitte ab Ecke ${left}, mm" style="width:5em"> ab ${left}</span>`
+      +`<span><input data-wy="${escapeHtml(w.id)}" inputmode="decimal" value="${Math.round(w.y)}" title="Höhe über Boden, mm" style="width:4em"> hoch <button data-wdel="${escapeHtml(w.id)}" title="Wasseranschluss löschen">×</button></span></div>`; }).join('');
+}
+function wireWaterRows(box){
+  box.querySelectorAll('[data-water]').forEach(r=>{ r.onclick=e=>{ if(e.target.tagName==='INPUT'||e.target.tagName==='BUTTON') return; M.waterSel=r.dataset.water; M.openSel=null; render(); }; });
+  const set=(id,fn)=>{ const w=M.water.find(x=>x.id===id), shape=currentShape(); if(!w||!shape) return; snapshot(); fn(w,shape); recompute(); };
+  box.querySelectorAll('[data-wx]').forEach(el=>el.onchange=()=>{ const v=parseFloat(String(el.value).replace(',','.'));
+    set(el.dataset.wx,(w,shape)=>{ if(!isFinite(v)) return; const xv=Math.max(0,Math.min(shape.L,v)); w.x = w.a===M.wallSel.a ? xv : shape.L-xv; }); });
+  box.querySelectorAll('[data-wy]').forEach(el=>el.onchange=()=>{ const v=parseFloat(String(el.value).replace(',','.'));
+    set(el.dataset.wy,w=>{ if(isFinite(v)) w.y=Math.max(0,Math.min(2000,v)); }); });
+  box.querySelectorAll('[data-wdel]').forEach(b=>b.onclick=()=>{ snapshot(); M.water=M.water.filter(x=>x.id!==b.dataset.wdel); M.waterSel=null; recompute(); setHint('Wasseranschluss gelöscht.'); });
+}
 // ================= Höhenmessung =================
 // Nutzt dasselbe Eingabefeld wie die Grundriss-Masse; heightAt haelt fest,
 // zu WELCHER Ecke der eingetippte Wert gehoert. Die erste Hoehe gilt fuer
@@ -17581,13 +17746,13 @@ function kitchenData(){ if(!M.kitchen) M.kitchen=KX.normKitchen(null); return M.
 // Nur mit eindeutiger Form: Schränke an Skizzenlinien wären Erfindung.
 function kitchenEnv(){
   if(!(M.fit && M.fit.pts && M.an && M.an.dof===0 && M.walls.length)) return null;
-  return KX.makeEnv(M.fit.pts, M.walls, M.openings, M.hmeas);
+  return KX.makeEnv(M.fit.pts, M.walls, M.openings, M.hmeas, M.water);
 }
 // Alles Abgeleitete einmal je Zustand: Layout und Prüfung. Wege und
 // Vorschläge rechnen erst, wenn das Panel sie zeigt (eigener Cache).
 function kctx(){
   if(!M.fit) return null;
-  const key=JSON.stringify([M.kitchen, M.fit.pts, M.walls, M.openings, M.hmeas, M.an&&M.an.dof]);
+  const key=JSON.stringify([M.kitchen, M.fit.pts, M.walls, M.openings, M.water, M.hmeas, M.an&&M.an.dof]);
   // Auch das Objekt muss dasselbe sein: Undo/Import ersetzen M.kitchen.
   if(key===KS.ctxKey && KS.ctx && KS.ctx.K===M.kitchen) return KS.ctx;
   const E=kitchenEnv();
@@ -17796,6 +17961,8 @@ function drawKitchenView(){
   ctx.strokeStyle=INK.wall; ctx.lineWidth=2.5*dpr; ctx.stroke();
   drawOpeningsOnPlan(E.pts, E.I, dpr, KX.doorReach(E, L));
   drawEntryLabels(c, dpr);
+  // Wasseranschlüsse (aus dem Wände-Tab): blauer Punkt an der Wand.
+  KX.waterPts(E).forEach(x=>{ const q=toScr(x.p); ctx.beginPath(); ctx.arc(q.x,q.y,5*dpr,0,2*Math.PI); ctx.fillStyle='#1d6fd6'; ctx.fill(); ctx.strokeStyle='#fff'; ctx.lineWidth=1.5*dpr; ctx.stroke(); });
   // Fensterflügel nach innen (gestrichelt): sie schwenken über die Platte.
   E.openings.forEach(o=>KX.sashes(E,o).forEach(sa=>{
     ctx.setLineDash([4*dpr,3*dpr]); ctx.strokeStyle=KINK.sash; ctx.lineWidth=1.2*dpr;
@@ -18391,6 +18558,7 @@ function renderSel(c){
   if(KX.isCold(it) && it.kind==='tall'){
     const fzs=Object.entries(KX.FRIDGE).filter(([,f])=>f.devs.includes(it.dev));
     h+=`<div class="krow"><label>Bauform</label><div class="seg" id="kFz">${[['','Einbau'],...fzs.map(([k,f])=>[k,f.label])].map(([v,l])=>`<button data-fz="${v}" aria-pressed="${String((it.fz||'')===v)}">${l}</button>`).join('')}</div></div>`;
+    if(it.dev==='fridge') h+=`<div class="krow"><label title="Eiswürfel- oder Wasserspender mit Festwasseranschluss: die Prüfung misst den Schlauchweg zum Wasseranschluss (Wände-Tab)">Festwasser</label><div class="seg">${[['0','nein'],['1','ja']].map(([v,l])=>`<button data-fw="${v}" aria-pressed="${String((it.water?'1':'0')===v)}">${l}</button>`).join('')}</div></div>`;
     if(it.fz==='free' && it.dev==='fridge') h+=`<div class="krow"><label>Gefrierteil</label><div class="seg">${[['0','ohne'],['1','mit']].map(([v,l])=>`<button data-gf="${v}" aria-pressed="${String((it.gf?'1':'0')===v)}">${l}</button>`).join('')}</div></div>`;
     if(!fz) h+=`<div class="krow"><label title="Bis wohin die Tür aufgehen soll. Die Prüfung und der Schwenkbereich im Plan rechnen damit.">Tür auf</label><div class="seg" id="kSwing">${KX.SWINGS.map(v=>`<button data-swing="${v}" aria-pressed="${String(KX.swingOf(it)===v)}" title="${v===90?'Reicht zum Hineingreifen; Schalen und Fächer lassen sich oft nicht herausnehmen':'Schalen und Fächer lassen sich herausnehmen; braucht seitlich mehr Platz'}">${v}°</button>`).join('')}</div></div>`;
     if(fz) h+=`<div class="krow"><label>Türdicke</label><input id="kDT" inputmode="decimal" value="${Math.round(KX.doorTOf(it))}" title="Dicke der Tür samt Türfächern, ${KX.DOORT_LIM[0]}–${KX.DOORT_LIM[1]} mm. Offen steht der Flügel bei 90° um die halbe Türdicke seitlich über, ganz offen deutlich mehr."> mm <small>seitlich ${Math.round(KX.doorTOf(it)/2)} mm (90°) bis ${fullReach(c,it)} mm (ganz offen)</small></div>`;
@@ -18454,6 +18622,7 @@ function renderSel(c){
   num('kDT',KX.DOORT_LIM[0],KX.DOORT_LIM[1],(t,v)=>{ t.doorT=Math.round(v); });
   box.querySelectorAll('[data-gf]').forEach(b=>b.onclick=()=>edit(t=>{ if(b.dataset.gf==='1') t.gf=true; else delete t.gf; }));
   box.querySelectorAll('[data-kind]').forEach(b=>b.onclick=()=>{ const v=b.dataset.kind; if(selItem() && selItem().kind!==v) edit(t=>switchKind(t, v)); });
+  box.querySelectorAll('[data-fw]').forEach(b=>b.onclick=()=>edit(t=>{ if(b.dataset.fw==='1') t.water=true; else delete t.water; }));
   box.querySelectorAll('[data-oven]').forEach(b=>b.onclick=()=>edit(t=>{ if(b.dataset.oven==='0'){ t.noOven=true; t.front='drawer'; } else { delete t.noOven; delete t.store; } }));
   box.querySelectorAll('[data-swing]').forEach(b=>b.onclick=()=>edit(t=>{ t.swing=+b.dataset.swing; }));
   box.querySelectorAll('[data-seg]').forEach(sg=>sg.querySelectorAll('button').forEach(b=>b.onclick=()=>edit(t=>{ t[sg.dataset.seg]=b.dataset.v;
@@ -22529,6 +22698,20 @@ globalThis.selfChecks=function(){
           const mit=lay([{id:1,kind:'base',dev:'hob',a:'D',b:'A',x:0,w:600}]);
           return it.noOven===true && KX.frontKind(it)==='drawer' && e.length===1 && e[0].what==='Auszug' && KX.storable(it).includes('toepfe')
             && KX.nameOf(it)==='Kochfeld 60' && mit.L.G[0].env[0].what==='Backofentür' && KX.storable(mit.K.items[0]).length===0; })());
+      chk('kueche: Wasseranschluss – Schlauchweg an der Wand um die Ecke, Spülmaschine nah ok, weit gelb, sehr weit rot, ohne Anschluss Hinweis',
+        (()=>{ const dw=[{id:1,kind:'base',dev:'dw',a:'D',b:'A',x:0,w:600}];
+          const run=water=>{ const Ew=KX.makeEnv(R.pts,R.walls,[win,door],[],water); const K=KX.normKitchen({items:dw}); return KX.check(Ew,K,KX.layout(Ew,K)); };
+          const none=run([]), near=run([{id:'w1',a:'C',b:'D',x:3700,y:500}]), mid=run([{id:'w1',a:'A',b:'B',x:300,y:500}]), far=run([{id:'w1',a:'B',b:'C',x:3000,y:500}]);
+          const Ew=KX.makeEnv(R.pts,R.walls,[],[],[]); const around=KX.alongWall(Ew,{x:0,y:300},{x:300,y:0});
+          return has(none,/Kein Wasseranschluss/,'info') && !has(near,/Schlauchweg/) && has(mid,/Schlauchweg.*Verlängerung nötig/,'warn') && has(far,/auch mit Verlängerung/,'bad') && Math.abs(around-600)<1; })());
+      chk('kueche: Kühlschrank mit Festwasser – Einbau 1150 mm, bleibt nach Import, ohne Festwasser keine Prüfung',
+        (()=>{ const Ew=KX.makeEnv(R.pts,R.walls,[win,door],[],[{id:'w1',a:'A',b:'B',x:3500,y:500}]);
+          const run=items=>{ const K=KX.normKitchen({items}); return {K, F:KX.check(Ew,K,KX.layout(Ew,K))}; };
+          const fw=run([{id:1,kind:'tall',dev:'fridge',a:'D',b:'A',x:0,w:600,water:true}]), ohne=run([{id:1,kind:'tall',dev:'fridge',a:'D',b:'A',x:0,w:600}]);
+          return fw.K.items[0].water===true && has(fw.F,/Festwasser.*1150/,'warn') && !has(ohne.F,/Festwasser|Wasseranschluss/); })());
+      chk('kueche: hoch eingebaute Spülmaschine über dem Abfluss – Ablauf belüften',
+        (()=>{ const Ew=KX.makeEnv(R.pts,R.walls,[win,door],[],[{id:'w1',a:'A',b:'B',x:300,y:450}]); const K=KX.normKitchen({items:[{id:1,kind:'tall',dev:'dw',a:'D',b:'A',x:0,w:600}]});
+          return has(KX.check(Ew,K,KX.layout(Ew,K)),/belüften/,'info'); })());
       chk('kueche: 60 mm neben der Wand – 96er Tür geht 90° auf, 140er nicht mehr (bad)',
         !has(lay([fd(60)]).F, /Flügel: geht nur/) && has(lay([{...fd(60), doorT:140}]).F, /Flügel: geht nur \d+° auf, die Wand/, 'bad'));
       chk('kueche: Side by Side 50 mm neben Unterschränken (Bosch: A ≤ 600 → 50 mm) – geht ganz auf',
