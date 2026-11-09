@@ -6587,6 +6587,98 @@ function freeAhead(E, L, g, p, skipId, info){
   return t;
 }
 
+// ---------- Maße am gewählten Teil (Meldung M-20261109-135204-ffeecf) ----------
+// Wandteile: Kette entlang der Wand, aber bis zur Wand, die man an den
+// Enden wirklich vor sich hat - über einen Wandversatz hinweg (die Ecke a/b
+// liegt dann mitten im Raum). Gemessen auf halber Korpustiefe.
+// Freie Teile: von jeder Seite bis zur Wand oder zum nächsten Teil.
+// Die Wandabstände tragen edit: was sich beim Ändern wie bewegt.
+function rowOf(L, g){
+  const band=g.it.kind==='wall' ? 'high' : 'low';
+  return L.G.filter(h=>!h.free && h.Wf.key===g.Wf.key && (band==='high' ? h.it.kind==='wall' : h.it.kind!=='wall'))
+            .map(h=>({h, s0: h.Wf.a===g.Wf.a ? h.s0 : g.Wf.L-h.s1, s1: h.Wf.a===g.Wf.a ? h.s1 : g.Wf.L-h.s0}))
+            .sort((p,q)=>p.s0-q.s0);
+}
+function wallReach(E, Wf, end, q){
+  // 2 mm innen starten: an einer gewöhnlichen Ecke liegt der Start sonst
+  // auf der Nachbarwand, und der Strahl fände erst eine Wand weit draußen.
+  const s=end ? Wf.L-2 : 2, d=end ? Wf.u : mul(Wf.u,-1);
+  const r=TL.rayToRing(E.ring, wpt(Wf,s,q), d);
+  const t=r ? r.t-2 : 0;
+  return t>5 ? t : 0;
+}
+function chainDims(E, L, g){
+  if(g.free) return null;
+  const Wf=g.Wf, row=rowOf(L, g);
+  const qr=Math.min(...row.map(r=>r.h.d))/2;
+  const x0=-wallReach(E,Wf,0,qr), x1=Wf.L+wallReach(E,Wf,1,qr);
+  const xs=[...new Set([x0, ...row.flatMap(r=>[r.s0,r.s1]), x1].map(v=>Math.round(v*10)/10))].sort((p,q)=>p-q);
+  const segs=[];
+  for(let i=0;i<xs.length-1;i++){
+    const a=xs[i], b=xs[i+1]; if(b-a<1) continue;
+    const part=row.find(r=>Math.abs(r.s0-a)<0.5 && Math.abs(r.s1-b)<0.5);
+    segs.push({a, b, gap:!part, part:part?part.h.it.id:null});
+  }
+  // Wandabstände: erste und letzte Lücke, wenn sie an x0 bzw. x1 stößt.
+  // Bewegt wird der zusammenhängende Block daneben (Teile ohne Lücke).
+  const block=(from, dir)=>{ const ids=[]; let edge=null;
+    const seq = dir>0 ? row : [...row].reverse();
+    for(const r of seq){ const near = dir>0 ? r.s0 : r.s1;
+      if(edge!=null && Math.abs(near-edge)>1) break;
+      ids.push(r.h.it.id); edge = dir>0 ? r.s1 : r.s0; }
+    return {ids, edge}; };
+  const first=segs[0], last=segs[segs.length-1];
+  const lo=cornerStop(E,Wf,qr*2,0), hi=Wf.L-cornerStop(E,Wf,qr*2,1);
+  if(row.length && first && first.gap && Math.abs(first.a-x0)<0.5){
+    // Block ab Ecke-a-Seite: wandert mit +delta; Grenze ist das nächste Teil
+    // dahinter oder das Wandende.
+    const B=block(0,1), nb=row.find(r=>!B.ids.includes(r.h.it.id) && r.s0>=B.edge-1);
+    const cur=first.b-first.a;
+    first.edit={ids:B.ids, fa:Wf.a, side:0, cur, min:Math.max(0,lo-x0), max:cur+((nb?nb.s0:hi)-B.edge)};
+  }
+  if(row.length && last && last.gap && Math.abs(last.b-x1)<0.5 && last!==first){
+    const B=block(0,-1), nb=[...row].reverse().find(r=>!B.ids.includes(r.h.it.id) && r.s1<=B.edge+1);
+    const cur=last.b-last.a;
+    last.edit={ids:B.ids, fa:Wf.a, side:1, cur, min:Math.max(0,x1-hi), max:cur+(B.edge-(nb?nb.s1:lo))};
+  }
+  return {Wf, xs, segs, x0, x1, q:Math.max(...row.map(r=>r.h.d))+260};
+}
+// Freies Teil: je Seite der Abstand nach außen bis Wand oder Teil. Weiter
+// weg geht es höchstens um das, was auf der Gegenseite frei ist.
+function freeDims(E, L, g){
+  if(!g.free) return null;
+  const P=g.foot||g.poly, c=centroid(P), out=[];
+  for(let i=0;i<P.length;i++){
+    const a=P[i], b=P[(i+1)%P.length], m=mul(add(a,b),0.5), n=unit(sub(m,c));
+    const o=add(m, mul(n,-2));
+    let t=Infinity, wall=true;
+    const r=TL.rayToRing(E.ring, o, n); if(r) t=r.t-2;
+    L.G.forEach(h=>{ if(h.it.id===g.it.id || h.it.kind==='wall') return; const x=rayPoly(o,n,h.foot||h.poly); if(x!=null && x-2<t){ t=x-2; wall=false; } });
+    out.push({p0:m, n, val:isFinite(t)?Math.max(0,t):null, wall});
+  }
+  out.forEach((d,i)=>{ if(d.val==null) return; d.p1=add(d.p0, mul(d.n,d.val));
+    const opp=out[(i+2)%out.length];
+    d.edit={id:g.it.id, n:d.n, wall:d.wall, cur:d.val, min:0, max:d.val+(opp && opp.val!=null ? opp.val : 0)}; });
+  return out.filter(d=>d.val!=null);
+}
+// Wandabstand setzen: Wandteile (Block) entlang der Wand, freie Teile entlang
+// der Seitennormalen. Gibt false, wenn der Wert außerhalb [min,max] liegt.
+function applyDim(E, K, edit, v){
+  if(!(v>=edit.min-0.5 && v<=edit.max+0.5)) return false;
+  const dv=v-edit.cur;
+  if(edit.ids){
+    const delta = edit.side===0 ? dv : -dv;
+    edit.ids.forEach(id=>{ const it=K.items.find(x=>x.id===id); if(!it) return;
+      const same = it.a===edit.fa;
+      it.x=Math.round((it.x + (same?delta:-delta))*10)/10; });
+    return true;
+  }
+  const it=K.items.find(x=>x.id===edit.id); if(!it || !E.F) return false;
+  const mv=mul(edit.n, -dv);
+  it.x=Math.round((it.x+dot(mv,E.F.u))*10)/10; it.y=Math.round((it.y+dot(mv,E.F.v))*10)/10;
+  return true;
+}
+
 function check(E, K, L){
   const S=K.spec, D=L.D, out=[];
   const add_=(lvl, ids, txt, at, fix)=>out.push({lvl, ids, txt, at, fix});
@@ -7485,7 +7577,7 @@ function storable(it){
 }
 globalThis.KITCHEN={ FRIDGE, DOORT_LIM, fzOf, doorTOf, leaves, leafRect, leafReach, leafReachSide, entries, storable, wallFaces, K_DEF, K_LIM, WIDTHS, KIND, DEV, FRONTS, PRESETS, CONTENTS, FLOWS, GROUPS, ROLE_LABEL, BODY_R,
   derived, normKitchen, normItem, isEmpty, makeEnv, wallFrame, wpt, geom, dims, layout, envelopes, frontLR, frontKind,
-  worktops, check, sashes, openingOn, faucetPoint, tableSides, tableSeats, seatPlan, rotSnaps, snapRot, slotCandidates, cornerStop, fitsAt, freeSlot, snapX,
+  worktops, check, sashes, openingOn, faucetPoint, tableSides, tableSeats, seatPlan, rotSnaps, snapRot, chainDims, freeDims, applyDim, slotCandidates, cornerStop, fitsAt, freeSlot, snapX,
   nearestWall, planner, stations, flows, suggest, reachFactor, scene, frontsOf, stock, nameOf, inflate, polyInRoom, COL };
 })();
 </script>
@@ -11944,6 +12036,7 @@ function endPointer(e){
   }
   if(g.t==='tiles'){ tilesUp(e, g); return; }
   if(g.t==='kitchen'){ kitchenUp(e, g); return; }
+  if(g.t==='kdim') return;                       // Maß-Eingabe ist offen
   if(M.mode==='kitchen'){
     if(g.moved) render();
     else if(e.type!=='pointercancel') kitchenTap(e);
@@ -16478,34 +16571,78 @@ function drawKitchenView(){
       ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x-d.x*s,q.y-d.y*s); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(q.x,q.y); ctx.lineTo(q.x-d.x*s-d.y*s*0.6,q.y-d.y*s+d.x*s*0.6); ctx.lineTo(q.x-d.x*s+d.y*s*0.6,q.y-d.y*s-d.x*s*0.6); ctx.closePath(); ctx.fill(); } }
 }
-// Maßkette für die Wand des gewählten Teils: Ecke – Teile – Lücken – Ecke,
-// vor der Front, im Höhenband des Teils. Fensterachse als Strichmarke.
+// Maßkette für die Wand des gewählten Teils: Wand – Teile – Lücken – Wand,
+// vor der Front, im Höhenband des Teils; an den Enden bis zur Wand, die man
+// dort vor sich hat. Fensterachse als Strichmarke. Bei Insel und Tisch die
+// Abstände aller Seiten. Wandabstände sind anklickbar (KS.dimHits).
+function dimLabel(txt, m, col, edit, dpr){
+  const w=ctx.measureText(txt).width+8*dpr, hgt=15*dpr;
+  ctx.fillStyle='rgba(250,249,246,.94)'; ctx.fillRect(m.x-w/2, m.y-hgt/2, w, hgt);
+  if(edit){ ctx.strokeStyle=col; ctx.lineWidth=1*dpr; ctx.setLineDash([2*dpr,2*dpr]); ctx.strokeRect(m.x-w/2+0.5, m.y-hgt/2+0.5, w-1, hgt-1); ctx.setLineDash([]);
+    KS.dimHits.push({x:m.x-w/2-3*dpr, y:m.y-hgt/2-3*dpr, w:w+6*dpr, h:hgt+6*dpr, cx:m.x, cy:m.y, edit}); }
+  ctx.fillStyle=col; ctx.fillText(txt, m.x, m.y);
+}
 function drawChain(c, dpr){
-  const it=selItem(); if(!it || !it.a || KS.drag) return;
+  KS.dimHits=[];
+  const it=selItem(); if(!it || KS.drag) return;
   const g=c.L.byId.get(it.id); if(!g) return;
-  const Wf=g.Wf, band=it.kind==='wall' ? 'high' : 'low';
-  const same=c.L.G.filter(h=>!h.free && h.Wf.key===Wf.key && (band==='high' ? h.it.kind==='wall' : h.it.kind!=='wall')).sort((p,q)=>p.s0-q.s0);
-  const pts=[0]; same.forEach(h=>pts.push(h.s0,h.s1)); pts.push(Wf.L);
-  const xs=[...new Set(pts.map(v=>Math.round(v*10)/10))].sort((p,q)=>p-q);
-  const q=Math.max(...same.map(h=>h.d))+260;
-  const P=s=>toScr(KX.wpt(Wf,s,q));
   ctx.strokeStyle=INK.scale; ctx.lineWidth=1*dpr; ctx.font=`${10*dpr}px ${CANVAS_FONT}`; ctx.textAlign='center'; ctx.textBaseline='middle';
-  const a0=P(xs[0]), a1=P(xs[xs.length-1]); ctx.beginPath(); ctx.moveTo(a0.x,a0.y); ctx.lineTo(a1.x,a1.y); ctx.stroke();
-  xs.forEach(v=>{ const p=P(v), t=toScr(KX.wpt(Wf,v,q-60)), u=toScr(KX.wpt(Wf,v,q+60)); ctx.beginPath(); ctx.moveTo(t.x,t.y); ctx.lineTo(u.x,u.y); ctx.stroke(); });
-  for(let i=0;i<xs.length-1;i++){
-    const d=xs[i+1]-xs[i]; if(d<1) continue;
-    const m=P((xs[i]+xs[i+1])/2), gap=!same.some(h=>Math.abs(h.s0-xs[i])<0.5 && Math.abs(h.s1-xs[i+1])<0.5);
-    if(d*VIEW.s<18*dpr) continue;
-    const txt=String(Math.round(d)), w=ctx.measureText(txt).width+6*dpr;
-    ctx.fillStyle='rgba(250,249,246,.92)'; ctx.fillRect(m.x-w/2, m.y-7*dpr, w, 14*dpr);
-    ctx.fillStyle = gap && d<=150 ? KINK.warn : gap ? INK.meas : INK.scale; ctx.fillText(txt, m.x, m.y);
+  if(g.free){
+    (KX.freeDims(c.E, c.L, g)||[]).forEach(d=>{
+      if(d.val<1) return;
+      const p=toScr(d.p0), q=toScr(d.p1), a=unitV(sub2(q,p)), t={x:-a.y*4*dpr, y:a.x*4*dpr};
+      ctx.strokeStyle=INK.scale; ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y);
+      ctx.moveTo(q.x-t.x,q.y-t.y); ctx.lineTo(q.x+t.x,q.y+t.y); ctx.stroke();
+      if(d.val*VIEW.s<22*dpr) return;
+      dimLabel(String(Math.round(d.val)), {x:(p.x+q.x)/2, y:(p.y+q.y)/2}, d.wall?INK.meas:INK.scale, d.edit, dpr);
+    });
+    ctx.textAlign='start'; ctx.textBaseline='alphabetic';
+    return;
   }
+  const D=KX.chainDims(c.E, c.L, g); if(!D) return;
+  const Wf=D.Wf, q=D.q, xs=D.xs;
+  const P=s=>toScr(KX.wpt(Wf,s,q));
+  const a0=P(xs[0]), a1=P(xs[xs.length-1]); ctx.beginPath(); ctx.moveTo(a0.x,a0.y); ctx.lineTo(a1.x,a1.y); ctx.stroke();
+  xs.forEach(v=>{ const t=toScr(KX.wpt(Wf,v,q-60)), u=toScr(KX.wpt(Wf,v,q+60)); ctx.beginPath(); ctx.moveTo(t.x,t.y); ctx.lineTo(u.x,u.y); ctx.stroke(); });
+  // Über den Wandversatz hinaus: dünne Hilfslinie von der Wandecke zur Kette.
+  [[D.x0,0],[D.x1,Wf.L]].forEach(([x,e])=>{ if(Math.abs(x-e)<1) return;
+    const t=toScr(KX.wpt(Wf,x,0)), u=toScr(KX.wpt(Wf,x,q)); ctx.save(); ctx.setLineDash([2*dpr,3*dpr]); ctx.beginPath(); ctx.moveTo(t.x,t.y); ctx.lineTo(u.x,u.y); ctx.stroke(); ctx.restore(); });
+  D.segs.forEach(sg=>{
+    const d=sg.b-sg.a; if(d*VIEW.s<18*dpr) return;
+    const m=P((sg.a+sg.b)/2);
+    const col = sg.gap && d<=150 ? KINK.warn : sg.gap ? INK.meas : INK.scale;
+    dimLabel(String(Math.round(d)), m, col, sg.edit||null, dpr);
+  });
   // Fensterachsen
   c.E.openings.forEach(o=>{ if(o.kind!=='window') return; const on=KX.openingOn(c.E,o,Wf); if(!on) return;
     const s0=(on.s0+on.s1)/2, t=toScr(KX.wpt(Wf,s0,q-120)), u=toScr(KX.wpt(Wf,s0,q+120));
     ctx.save(); ctx.setLineDash([3*dpr,3*dpr]); ctx.strokeStyle=KINK.sash; ctx.beginPath(); ctx.moveTo(t.x,t.y); ctx.lineTo(u.x,u.y); ctx.stroke(); ctx.restore(); });
   ctx.textAlign='start'; ctx.textBaseline='alphabetic';
 }
+// Klick auf einen Wandabstand: Eingabefeld darüber, Enter setzt, Esc bricht ab.
+function dimHitAt(d){ return (KS.dimHits||[]).find(h=>d.x>=h.x && d.x<=h.x+h.w && d.y>=h.y && d.y<=h.y+h.h) || null; }
+function openDimEdit(hit){
+  closeDimEdit();
+  const r=cv.getBoundingClientRect(), k=DPR();
+  const inp=document.createElement('input');
+  inp.id='kDimEd'; inp.inputMode='decimal'; inp.value=String(Math.round(hit.edit.cur));
+  inp.title=`Abstand in mm (${Math.ceil(hit.edit.min)}–${Math.floor(hit.edit.max)}) · Enter setzt, Esc bricht ab`;
+  Object.assign(inp.style, {position:'fixed', left:(r.left+hit.cx/k-34)+'px', top:(r.top+hit.cy/k-13)+'px', width:'68px', height:'26px', zIndex:50,
+    font:'12px '+CANVAS_FONT, textAlign:'center', border:'1px solid var(--accent, #b4532a)', borderRadius:'4px', background:'var(--surface, #fff)'});
+  document.body.appendChild(inp); inp.focus(); inp.select();
+  let done=false;
+  const commit=()=>{ if(done) return; done=true;
+    const v=parseFloat(String(inp.value).replace(',','.')); closeDimEdit();
+    if(!isFinite(v) || Math.abs(v-hit.edit.cur)<0.5) return;
+    const c=kctx(); if(!c) return;
+    snapshot();
+    if(!KX.applyDim(c.E, c.K, hit.edit, v)){ undoStack.pop(); setHint(`Geht nur zwischen ${Math.ceil(hit.edit.min)} und ${Math.floor(hit.edit.max)} mm.`); return; }
+    kitchenSave(); setHint(`Abstand ${Math.round(v)} mm gesetzt · ⌘Z nimmt es zurück`); };
+  inp.onkeydown=e=>{ e.stopPropagation(); if(e.key==='Enter'){ e.preventDefault(); commit(); } else if(e.key==='Escape'){ done=true; closeDimEdit(); } };
+  inp.onblur=()=>commit();
+  setHint(`Abstand ${hit.edit.wall===false?'zum Nachbarteil':'zur Wand'} eintragen (${Math.ceil(hit.edit.min)}–${Math.floor(hit.edit.max)} mm), Enter setzt, Esc bricht ab`);
+}
+function closeDimEdit(){ const e=$('kDimEd'); if(e) e.remove(); }
 function deviceSymbol(c, g, dpr, onTop){
   const it=g.it, K=c.K;
   if(!it.dev) return;
@@ -16578,7 +16715,9 @@ function hits(c, w){
 let gestureK=null;
 function kitchenDown(e){
   const c=kctx(); if(!c) return false;
-  const d=evDev(e), w=toWorld(d.x,d.y), hs=hits(c,w);
+  const d=evDev(e), dh=dimHitAt(d);
+  if(dh){ gesture={t:'kdim', moved:false, x0:e.clientX, y0:e.clientY}; setTimeout(()=>openDimEdit(dh)); return true; }
+  const w=toWorld(d.x,d.y), hs=hits(c,w);
   if(!hs.length) return false;
   const g = hs.find(h=>h.it.id===KS.sel) || hs[0];
   const it=g.it;
@@ -20481,6 +20620,28 @@ globalThis.selfChecks=function(){
         const wa=Math.atan2(3000,-500)*180/Math.PI, c=KX.snapRot(Ek, wa-2);
         const Eq=KX.makeEnv([{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4050,y:3000},{id:'D',x:0,y:3000}], [['A','B'],['B','C'],['C','D'],['D','A']], [], []);  // 1° schief = Rauschen
         return a.rot===90 && b.rot===37 && b.how===null && Math.abs(c.rot-wa)<1e-6 && /Wand/.test(c.how) && KX.snapRot(Eq, 88.5).rot===90; })());
+    {
+      // Wandversatz wie in Meldung ffeecf: Zeile an C–D, der Raum geht hinter D
+      // (Ecke im Raum) noch 1500 mm weiter bis zur Wand F–A.
+      const pts=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:3000},{id:'D',x:1500,y:3000},{id:'E',x:1500,y:3200},{id:'F',x:0,y:3200}];
+      const Ej=KX.makeEnv(pts,[['A','B'],['B','C'],['C','D'],['D','E'],['E','F'],['F','A']],[],[]);
+      const K=KX.normKitchen({items:[{id:1,kind:'base',a:'C',b:'D',x:500,w:600},{id:2,kind:'base',a:'C',b:'D',x:1100,w:600}]});
+      const L=KX.layout(Ej,K), D=KX.chainDims(Ej,L,L.byId.get(1));
+      const last=D.segs[D.segs.length-1], first=D.segs[0];
+      chk('kueche: Maßkette läuft über den Wandversatz bis zur Wand (4000 statt 2500)', near(D.x1,4000,1) && near(D.x0,0,1) && near(last.b-last.a,2300,1));
+      chk('kueche: Wandabstände sind editierbar, der Block (2 Schränke) zieht mit',
+        first.edit && last.edit && last.edit.ids.length===2 && near(first.edit.cur,500,1));
+      KX.applyDim(Ej,K,last.edit,2000);
+      chk('kueche: Wandabstand 2000 setzen schiebt beide Schränke um 300 Richtung D', K.items[0].x===800 && K.items[1].x===1400);
+      chk('kueche: Wandabstand außerhalb der Grenzen wird abgelehnt', !KX.applyDim(Ej,K,first.edit,-10) && !KX.applyDim(Ej,K,last.edit,99999));
+      const K2=KX.normKitchen({items:[{id:1,kind:'island',x:2000,y:1500,rot:0,w:1800,d:900}]}), L2=KX.layout(E,K2);
+      const fd=KX.freeDims(E,L2,L2.byId.get(1));
+      const right=fd.find(d=>d.n.x>0.9);
+      chk('kueche: Insel zeigt vier Wandabstände', fd.length===4 && near(right.val,4000-2900,2));
+      KX.applyDim(E,K2,right.edit,500);
+      const fd2=KX.freeDims(E,KX.layout(E,K2),KX.layout(E,K2).byId.get(1));
+      chk('kueche: Inselabstand rechts auf 500 setzen verschiebt sie', near(fd2.find(d=>d.n.x>0.9).val,500,2));
+    }
     chk('kueche: alte gespeicherte Platzzahl wird ignoriert',
       KX.normKitchen({items:[{id:1,kind:'table',x:0,y:0,w:1200,d:800,seats:10}]}).items[0].seats===undefined);
     {
