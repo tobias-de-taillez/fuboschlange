@@ -954,10 +954,10 @@
       </dl>
 
       <h3><i>3</i>Wände</h3>
-      <p>Erst verfügbar, wenn der Grundriss eindeutig ist, vorher wären Wandansichten erfunden. Hier pro Wand die Ansicht von innen: Wand mit ‹ › oder ← → wählen.</p>
+      <p>Erst verfügbar, wenn der Grundriss eindeutig ist, vorher wären Wandansichten erfunden. Hier pro Wand die Ansicht von innen, wie man im Raum davor steht: unter den Kanten stehen die Ecken und die anschließenden Wände, oben rechts zeigt ein Lageplan mit Pfeil, welche Wand es ist (Klick dort wählt eine andere). Mit ‹ › oder ← → geht es ringsum zur Wand rechts oder links daneben.</p>
       <dl>
         <dt>Höhe</dt><dd>Raumhöhe eintragen. Einzelne abweichende Ecken über ihre Kante im Bild.</dd>
-        <dt>+ Tür, + Fenster, + Loch</dt><dd>Öffnung auf die Wand setzen, dann Größe und Art wählen. Unter <b>Lage einmessen</b> den Abstand von links, rechts, Boden oder Decke eintragen; erst dann liegt sie maßhaltig. Türen bekommen Band und Öffnungsrichtung.</dd>
+        <dt>+ Tür, + Fenster, + Loch</dt><dd>Gibt es auch im Grundriss (Zeichnen und Messen): Knopf, dann auf die Wand klicken. Dort ziehen verschiebt die Öffnung entlang der Wand, das Kärtchen daneben stellt Art, Band und Öffnungsrichtung. Hier in der Wandansicht: Öffnung auf die Wand setzen, dann Größe und Art wählen. Links und rechts gelten immer von innen gesehen. Unter <b>Lage einmessen</b> den Abstand von links, rechts, Boden oder Decke eintragen; erst dann liegt sie maßhaltig. Türen bekommen Band und Öffnungsrichtung.</dd>
         <dt>Abwicklung</dt><dd>Klappt die Wände mit Öffnungen im Grundriss nach außen und blendet Nachbarräume aus. Nur Ansicht.</dd>
       </dl>
 
@@ -11344,6 +11344,7 @@ function planHover(e){
     return true;
   }
   if(!planEditable() || hit(w.x,w.y)) return false;
+  if(doorPluses.some(p=>Math.hypot(d.x-p.x, d.y-p.y)<=p.r+6*DPR())) return false;
   const op=planOpeningAt(w.x,w.y);
   if(!op) return false;
   // Kein Wand-Ziel unter der Oeffnung: Entf soll nicht die Wand loeschen.
@@ -12401,7 +12402,10 @@ cv.addEventListener('pointerdown',e=>{
   const h=hit(w.x,w.y);
   // Oeffnung im Plan: waehlen, ziehen verschiebt entlang der Wand. Ecken
   // gewinnen (sonst kaeme man an eine Ecke neben einer Tuer nicht heran).
-  const op=(!h && planEditable()) ? planOpeningAt(w.x,w.y) : null;
+  // Das Plus hinter einer Tuer (Nachbarraum anlegen) liegt dicht an der
+  // Luecke und wird erst beim Loslassen ausgewertet - es gewinnt.
+  const aufPlus=doorPluses.some(p=>Math.hypot(d.x-p.x, d.y-p.y)<=p.r+6*DPR());
+  const op=(!h && !aufPlus && planEditable()) ? planOpeningAt(w.x,w.y) : null;
   if(planMode() && M.openSel!=null && (!op || op.id!==M.openSel)) M.openSel=null;
   if(op){
     M.openSel=op.id;
