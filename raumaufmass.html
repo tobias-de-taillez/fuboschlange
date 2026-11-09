@@ -9046,7 +9046,41 @@ Object.assign(globalThis.KITCHEN, { /* rest-inhalte */ });
 //
 Object.assign(globalThis.KITCHEN, { /* rest-3d */ });
 //
-Object.assign(globalThis.KITCHEN, { /* rest-zustand */ });
+// --- Zustand der Bedienung: reine Regeln, hier statt in kitchen-ui, weil nur dieser Block im Selbsttest läuft ---
+// Schlüssel der Prüfliste im Panel: alles, was die Knöpfe zeigen und was ihre Handler beim Klick brauchen
+// (Teile-ids, Abhilfe samt Feldern). Nur Stufe und Text zu nehmen ließ nach einem Platztausch gleich benannter
+// Teile (gleiche Texte, andere ids) die alten ids im Handler und das falsche aria-current stehen.
+const checksKey=(F, sel)=>JSON.stringify([F.map(f=>[f.lvl, f.txt, f.ids, f.fix||null]), sel]);
+// Schlüssel der Kästen für das gewählte Teil und den Eckschrank. Dazu gehört die Ansichtsdrehung: links/rechts
+// bzw. oben/unten, die Reihenfolge der Lagefelder und die Eckenknöpfe folgen der Wand, wie sie auf dem
+// Bildschirm liegt (wallEnds über toScr) und müssen nach dem Drehen neu gebaut werden.
+const selBoxKey=(it, spec, bad, rot)=>JSON.stringify([it, spec, bad, rot]);
+const cornerBoxKey=(it, ctxKey, rot)=>JSON.stringify([it, ctxKey, rot]);
+// Tasten, die ein fokussiertes Bedienelement selbst verbraucht und die der Plan dann nicht anfassen darf:
+// der Drehregler nimmt Pfeile, Pos1/Ende und Bild auf/ab (1° statt die Insel zu schieben).
+const controlOwnsKey=(key, tag, type)=>tag==='INPUT' && type==='range'
+  && ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End','PageUp','PageDown'].includes(key);
+// Küchenzustand der Sitzung, der zu EINEM Raum gehört und beim Raumwechsel auf Anfang muss: Auswahl, Ablauf,
+// Vorschlag, Ziehen; die zuletzt benutzte Wand (A–B gibt es in jedem Raum, meint dort eine andere), die
+// Referenz der Wege-Analyse (verglichen würde gegen die Küche des alten Raums) und das scharf geschaltete
+// „Alle entfernen“ (ein Klick leerte sonst die Küche des neuen Raums). Einstellungen (3D, Wege, Analyse),
+// Zwischenablage und Zwischenspeicher bleiben: die hängen an ihrem Inhalt.
+const roomBound=()=>({ sel:null, flow:null, hl:null, drag:false, lastWall:null, ref:null, clearArmed:null, ctxKey:'', ctx:null });
+// Speichern bei gehaltener Taste: je Wiederholung nur vormerken (mark), einmal ausführen beim Loslassen (flush)
+// oder nach delay ms Ruhe, falls das keyup nie ankommt; cancel verwirft. Uhr eingehängt: der Selbsttest wartet nicht.
+function deferSave(run, delay, clock){
+  const T=clock || {set:(f,ms)=>setTimeout(f,ms), clear:t=>clearTimeout(t)};
+  let t=null, pend=false;
+  const stop=()=>{ if(t!=null){ T.clear(t); t=null; } };
+  const d={
+    mark(){ pend=true; stop(); t=T.set(()=>{ t=null; d.flush(); }, delay); },
+    flush(){ stop(); if(!pend) return false; pend=false; run(); return true; },
+    cancel(){ stop(); pend=false; },
+    get pending(){ return pend; },
+  };
+  return d;
+}
+Object.assign(globalThis.KITCHEN, { checksKey, selBoxKey, cornerBoxKey, controlOwnsKey, roomBound, deferSave });
 //
 Object.assign(globalThis.KITCHEN, { /* rest-bedienung */ });
 //
@@ -18718,11 +18752,23 @@ function kctx(){
 const kitchenReady=()=>!!kitchenEnv();
 function kitchenSave(){
   KS.ctxKey='';
+  nudgeSave.cancel();                              // ein volles Speichern erledigt auch das Vorgemerkte
   // Erstes freies Teil in einem neuen Raum: Bezugsecken jetzt festlegen.
   KX.anchorFrame(kitchenData(), M.pts, M.walls);
   if(currentRoom && !STORE.save(currentRoom, {data:JSON.parse(serialize()), area:polyAreaM2()}))
     setHint('Speichern fehlgeschlagen (Speicher voll?). Raum als Datei sichern.');
   render();
+}
+// Gehaltene Pfeil-/Dreh-Taste: erster Druck speichert wie bisher; jede Wiederholung nur neu zeichnen (wie beim
+// Ziehen) - gespeichert wird einmal beim Loslassen, sonst nach kurzer Ruhe (verliert das Fenster den Fokus,
+// kommt kein keyup). Je Wiederholung zu speichern schrieb die ganze Raumbibliothek und baute Panel samt
+// Wegen und Vorschlägen neu.
+const nudgeSave=KX.deferSave(()=>kitchenSave(), 400);
+addEventListener('keyup', ()=>{ nudgeSave.flush(); });
+addEventListener('blur', ()=>{ nudgeSave.flush(); });
+function nudged(e){
+  if(!e.repeat){ kitchenSave(); return; }
+  KS.ctxKey=''; nudgeSave.mark(); redraw();
 }
 const selItem=()=>KS.sel==null ? null : kitchenData().items.find(it=>it.id===KS.sel)||null;
 const cmTxt=v=>String(Math.round(v/10));
@@ -19364,6 +19410,9 @@ function kitchenKey(e){
   if(mod && !e.altKey && !e.shiftKey && k.toLowerCase()==='c' && it){ e.preventDefault(); kitchenCopy(it); return true; }
   if(mod && !e.altKey && !e.shiftKey && k.toLowerCase()==='v' && KS.clip){ e.preventDefault(); kitchenPaste(); return true; }
   if(mod || e.altKey) return false;
+  // Drehregler im Fokus: Pfeile (1°), Pos1/Ende, Bild auf/ab gehören ihm. true ohne preventDefault: der
+  // globale Handler tut dann auch nichts (sonst schöbe er die Ansicht) und der Regler macht seinen Schritt.
+  if(e.target && KX.controlOwnsKey(k, e.target.tagName, e.target.type)) return true;
   const lk=k.toLowerCase();
   if(lk==='v'){ toggle3d(); return true; }
   if(lk==='w'){ togglePaths(); return true; }
@@ -19372,8 +19421,8 @@ function kitchenKey(e){
   if(!it) return false;
   if(k==='Escape'){ KS.sel=null; render(); return true; }
   if(k==='Delete' || k==='Backspace'){ e.preventDefault(); removeItem(it); return true; }
-  if(lk==='f' && hasHinge(it)){ snapshot(); it.hinge = it.hinge==='right'?'left':'right'; kitchenSave(); setHint(`Anschlag ${it.hinge==='right'?'rechts':'links'}`); return true; }
-  if((lk==='q'||lk==='e') && !it.a){ snapshot(); it.rot=((it.rot||0)+(lk==='e'?1:-1)*(e.shiftKey?1:15)+360)%360; kitchenSave(); return true; }
+  if(lk==='f' && hasHinge(it)){ if(e.repeat) return true; snapshot(); it.hinge = it.hinge==='right'?'left':'right'; kitchenSave(); setHint(`Anschlag ${it.hinge==='right'?'rechts':'links'}`); return true; }
+  if((lk==='q'||lk==='e') && !it.a){ if(!e.repeat) snapshot(); it.rot=((it.rot||0)+(lk==='e'?1:-1)*(e.shiftKey?1:15)+360)%360; nudged(e); return true; }
   if(k.startsWith('Arrow')){
     e.preventDefault();
     const st=e.shiftKey?100:10;
@@ -19396,7 +19445,7 @@ function kitchenKey(e){
       const pa=TILES.toLocal(c.E.F,a), pb=TILES.toLocal(c.E.F,b);
       it.x+=pb.x-pa.x; it.y+=pb.y-pa.y;
     }
-    kitchenSave(); return true;
+    nudged(e); return true;
   }
   return false;
 }
@@ -19540,7 +19589,7 @@ function renderSel(c){
   box.hidden=!it;
   if(!it){ KS.selKey=''; KS.selIt=null; return; }
   const g=c.L.byId.get(it.id);
-  const key=JSON.stringify([it, c.K.spec, c.bad.has(it.id)]);
+  const key=KX.selBoxKey(it, c.K.spec, c.bad.has(it.id), VIEW.rot);   // mit Ansichtsdrehung (wallEnds)
   $('kSelInfo').textContent=nm(it)+wallTxt(it);
   if(key===KS.selKey && it===KS.selIt) return;
   KS.selKey=key; KS.selIt=it;
@@ -19746,7 +19795,7 @@ function renderCorner(c){
   const nearCorner=()=>[true,false].some(a=>{ const cr=KX.crossAt(c.E,c.K,c.L.G,g,a); return cr && (a ? g.s0 : g.Wf.L-g.s1) < cr.d+50; });
   const can = !!(g && !g.free && C && (it.corner || !(it.dev && !(it.kind==='base' && it.dev==='sink')) && nearCorner()));
   if(!can){ box.hidden=true; box.innerHTML=''; box.dataset.key=''; return; }
-  const key=JSON.stringify([it, c.key]);
+  const key=KX.cornerBoxKey(it, c.key, VIEW.rot);                      // mit Ansichtsdrehung (wallEnds)
   if(box.dataset.key===key && !box.hidden) return;
   box.dataset.key=key; box.hidden=false;
   const nmC = it.kind==='wall' ? 'Eckhängeschrank' : 'Eckschrank';
@@ -19799,7 +19848,7 @@ function renderCorner(c){
 function renderChecks(c){
   const F=c.F, nb=F.filter(f=>f.lvl==='bad').length, nw=F.filter(f=>f.lvl==='warn').length;
   $('kCheckCount').textContent = [nb?`${nb} geht nicht`:'', nw?`${nw} Hinweis${nw>1?'e':''}`:''].filter(Boolean).join(' · ');
-  const key=JSON.stringify(F.map(f=>[f.lvl,f.txt]))+KS.sel;
+  const key=KX.checksKey(F, KS.sel);          // mit ids und Abhilfe: die Handler unten schließen F ein
   if($('kChecks').dataset.key===key) return;
   $('kChecks').dataset.key=key;
   if(!c.K.items.length){ $('kChecks').innerHTML=''; return; }
@@ -20114,6 +20163,12 @@ function renderKitchenPanel(){
   renderSel(c); renderCorner(c); renderChecks(c); renderWays(c); renderStock(c); renderAna(c);
   $('kClear').hidden=!c.K.items.length;
 }
+// Scharf geschaltetes „Alle entfernen“ zurücknehmen: Uhr und Beschriftung (für den Raumwechsel).
+function disarmClear(){
+  if(!KS.clearArmed) return;
+  clearTimeout(KS.clearArmed); KS.clearArmed=null;
+  const b=$('kClear'); b.textContent='Alle Küchenteile entfernen'; b.classList.remove('arm');
+}
 function kitchenLeave(){ KS.sel=null; KS.drag=false; document.body.classList.remove('k3d'); document.body.classList.remove('kana'); }
 $('k3dBtn').onclick=toggle3d; $('kWayBtn').onclick=togglePaths; $('kOpenBtn').onclick=toggleOpen; $('kAnaBtn').onclick=toggleAna;
 $('kSelX').onclick=()=>{ KS.sel=null; render(); };
@@ -20324,7 +20379,9 @@ function kitchenHint(){
 Object.assign(globalThis, { kitchenReady, kitchenDown, kitchenMove, kitchenUp, kitchenTap, kitchenHover, kitchenKey,
   drawKitchenView, renderKitchenPanel, kitchenLeave, k3dSchedule, kitchenHint, kitchenData,
   kitchenDeleteSel:()=>{ const it=selItem(); if(!it) return false; removeItem(it); return true; },
-  kitchenResetSession:()=>{ KS.sel=null; KS.flow=null; KS.hl=null; KS.drag=false; KS.ctxKey=''; KS.ctx=null; G3.camFor=''; } });
+  // Raumwechsel (openRoom ruft das, wenn currentRoom schon der neue Raum ist, M aber noch den alten hält):
+  // Vorgemerktes Speichern verwerfen statt hier zu schreiben, sonst landeten die alten Daten im neuen Raum.
+  kitchenResetSession:()=>{ nudgeSave.cancel(); disarmClear(); Object.assign(KS, KX.roomBound()); G3.camFor=''; } });
 })();
 </script>
 <script id="imu">
@@ -24665,7 +24722,78 @@ globalThis.selfChecks=function(){
     //
     // --- Rest-Fix zustand ---
     try{
-      // TESTS-zustand
+      // Zustand der Bedienung (kitchen-ui läuft nicht im Selbsttest): die Regeln stehen als reine Funktionen im
+      // kitchen-Block. Jeder Test schlägt bei fehlendem Helfer fehl statt zu werfen (sonst bliebe nur die Sammelzeile).
+      const fn=n=>typeof KX[n]==='function';
+      // I13: Prüfliste im Panel. Zwei gleich benannte Hochschränke, einer vorm Fenster, dann Platztausch: gleiche
+      // Texte, andere ids. Der alte Schlüssel (nur Stufe, Text, Auswahl) war derselbe, die Handler hielten die alten ids.
+      {
+        const t1=(a,b,x)=>({id:1,kind:'tall',a,b,x,w:600}), t2=(a,b,x)=>({id:2,kind:'tall',a,b,x,w:600});
+        const vor=lay([t1('A','B',1600), t2('B','C',1000)]).F, nach=lay([t1('B','C',1000), t2('A','B',1600)]).F;
+        const win=F=>F.find(f=>/verdeckt ein Fenster/.test(f.txt)), oldKey=(F,sel)=>JSON.stringify(F.map(f=>[f.lvl,f.txt]))+sel;
+        chk('kueche-zustand: Platztausch gleich benannter Hochschränke – gleiche Befundtexte, andere ids (Szenario)',
+          !!win(vor) && !!win(nach) && win(vor).txt===win(nach).txt && win(vor).ids.join()==='1' && win(nach).ids.join()==='2' && oldKey(vor,1)===oldKey(nach,1));
+        chk('kueche-zustand: Prüfliste – Schlüssel unterscheidet die ids (Platztausch baut die Knöpfe neu)',
+          fn('checksKey') && KX.checksKey(vor,1)!==KX.checksKey(nach,1));
+        chk('kueche-zustand: Prüfliste – Schlüssel stabil bei gleichem Stand, anders bei anderer Auswahl',
+          fn('checksKey') && KX.checksKey(vor,1)===KX.checksKey(lay([t1('A','B',1600), t2('B','C',1000)]).F,1) && KX.checksKey(vor,1)!==KX.checksKey(vor,2));
+        const fx=set=>[{lvl:'bad', txt:'Hochschrank 60: zu niedrig', ids:[1], fix:{label:'Standardhöhe', id:1, set, del:['h']}}];
+        chk('kueche-zustand: Prüfliste – Schlüssel enthält die Abhilfe (Feld, Teil, Beschriftung)',
+          fn('checksKey') && KX.checksKey(fx({x:10}),1)!==KX.checksKey(fx({x:20}),1)
+          && KX.checksKey(fx({x:10}),1)!==KX.checksKey([{...fx({x:10})[0], fix:{...fx({x:10})[0].fix, id:2}}],1)
+          && KX.checksKey(fx({x:10}),1)!==KX.checksKey([{...fx({x:10})[0], fix:null}],1));
+      }
+      // I14: Auswahl- und Eckenkasten hängen über wallEnds an der Ansichtsdrehung.
+      {
+        const it={id:1,kind:'base',a:'A',b:'B',x:100,w:600}, sp=KX.K_DEF, ck=KX.K_DEF.plinth+'|k';
+        chk('kueche-zustand: Auswahl-Kasten – Schlüssel ändert sich mit der Ansichtsdrehung (links/rechts, Feldreihenfolge)',
+          fn('selBoxKey') && KX.selBoxKey(it,sp,false,0)!==KX.selBoxKey(it,sp,false,Math.PI) && KX.selBoxKey(it,sp,false,0)!==KX.selBoxKey(it,sp,false,Math.PI/12)
+          && KX.selBoxKey(it,sp,false,Math.PI)===KX.selBoxKey({...it},sp,false,Math.PI));
+        chk('kueche-zustand: Auswahl-Kasten – Schlüssel hängt weiter an Teil, Maßen und Befund',
+          fn('selBoxKey') && KX.selBoxKey(it,sp,false,0)!==KX.selBoxKey({...it,x:101},sp,false,0) && KX.selBoxKey(it,sp,false,0)!==KX.selBoxKey(it,{...sp,baseH:730},false,0)
+          && KX.selBoxKey(it,sp,false,0)!==KX.selBoxKey(it,sp,true,0));
+        chk('kueche-zustand: Ecken-Kasten – Schlüssel ändert sich mit der Ansichtsdrehung, nicht ohne',
+          fn('cornerBoxKey') && KX.cornerBoxKey(it,ck,0)!==KX.cornerBoxKey(it,ck,Math.PI) && KX.cornerBoxKey(it,ck,Math.PI/2)===KX.cornerBoxKey({...it},ck,Math.PI/2)
+          && KX.cornerBoxKey(it,ck,0)!==KX.cornerBoxKey(it,ck+'x',0) && KX.cornerBoxKey(it,ck,0)!==KX.cornerBoxKey({...it,x:5},ck,0));
+      }
+      // I15: Raumwechsel – was zu einem Raum gehört, geht zurück; Einstellungen und Zwischenablage bleiben.
+      {
+        const rb=fn('roomBound') ? KX.roomBound() : {};
+        chk('kueche-zustand: Raumwechsel setzt zuletzt benutzte Wand, Referenz und scharfes „Alle entfernen“ zurück',
+          ['lastWall','ref','clearArmed','sel','flow','hl','ctx'].every(k=>k in rb && rb[k]===null) && rb.drag===false && rb.ctxKey==='');
+        chk('kueche-zustand: Raumwechsel lässt Einstellungen (3D, Wege, Analyse), Zwischenablage und Zwischenspeicher stehen',
+          fn('roomBound') && !['show3d','paths','open','ana','heat','anaMode','kid','clip','ptr','mxOpen','flowKey','flowRes','suggKey','optKey','heatKey','swKey','anaKey'].some(k=>k in rb)
+          && KX.roomBound()!==KX.roomBound());
+      }
+      // I16: Tastenzuständigkeit bei fokussiertem Drehregler (type=range).
+      {
+        const own=(k,tag,type)=>fn('controlOwnsKey') && KX.controlOwnsKey(k,tag,type);
+        chk('kueche-zustand: Drehregler im Fokus – Pfeile, Pos1/Ende, Bild auf/ab gehören ihm (1° statt Insel schieben)',
+          ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End','PageUp','PageDown'].every(k=>own(k,'INPUT','range')));
+        chk('kueche-zustand: Kürzel (Q/E, V/W/O/A, F, Entf) und andere Elemente bleiben beim Plan',
+          fn('controlOwnsKey') && ['q','e','v','w','o','a','f','Delete','Backspace','Escape'].every(k=>!own(k,'INPUT','range'))
+          && !own('ArrowRight','BUTTON',undefined) && !own('ArrowRight','INPUT','checkbox') && !own('ArrowRight','INPUT','text') && !own('ArrowRight','DIV',undefined) && !own('ArrowRight',undefined,undefined));
+      }
+      // I12: gehaltene Taste speichert einmal statt je Wiederholung (Uhr eingehängt, kein Warten).
+      {
+        const clk=()=>{ let id=0; const q=new Map(); return {last:null, set(f,ms){ this.last=ms; q.set(++id,f); return id; }, clear(t){ q.delete(t); },
+          tick(){ const a=[...q.values()]; q.clear(); a.forEach(f=>f()); }, n:()=>q.size}; };
+        { const c=clk(); let runs=0; const d=fn('deferSave') ? KX.deferSave(()=>{ runs++; }, 400, c) : null;
+          if(d) for(let i=0;i<60;i++) d.mark();
+          chk('kueche-zustand: gehaltene Taste – 60 Wiederholungen speichern nicht, nur eine Uhr läuft (400 ms)', !!d && runs===0 && d.pending && c.n()===1 && c.last===400);
+          chk('kueche-zustand: gehaltene Taste – Loslassen speichert genau einmal, danach nichts mehr',
+            !!d && d.flush()===true && runs===1 && !d.pending && c.n()===0 && d.flush()===false && runs===1); }
+        { const c=clk(); let runs=0; const d=fn('deferSave') ? KX.deferSave(()=>{ runs++; }, 400, c) : null;
+          if(d){ d.mark(); d.mark(); c.tick(); }
+          chk('kueche-zustand: fehlt das keyup, speichert die Ruhe-Uhr einmal', !!d && runs===1 && !d.pending && c.n()===0); }
+        { const c=clk(); let runs=0; const d=fn('deferSave') ? KX.deferSave(()=>{ runs++; }, 400, c) : null;
+          if(d){ d.mark(); d.cancel(); c.tick(); }
+          chk('kueche-zustand: ein volles Speichern oder der Raumwechsel verwirft das Vorgemerkte (cancel)', !!d && runs===0 && !d.pending && c.n()===0 && d.flush()===false); }
+        { const c=clk(); let runs=0, d=null; d=fn('deferSave') ? KX.deferSave(()=>{ runs++; d.cancel(); }, 400, c) : null;
+          if(d){ d.mark(); d.flush(); }
+          chk('kueche-zustand: speichern, das selbst cancel ruft (wie kitchenSave), läuft nicht doppelt', !!d && runs===1 && !d.pending && c.n()===0); }
+        chk('kueche-zustand: ohne Vormerken tut flush nichts', fn('deferSave') && (()=>{ let runs=0; const d=KX.deferSave(()=>{ runs++; }, 400, clk()); return d.flush()===false && runs===0; })());
+      }
     }catch(err){ chk('kueche: Rest-Fix zustand ohne Ausnahme ('+err.message+')', false); }
     //
     // --- Rest-Fix bedienung ---
