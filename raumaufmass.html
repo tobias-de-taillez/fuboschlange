@@ -1046,7 +1046,7 @@
       <p>Erst verfügbar, wenn der Grundriss eindeutig ist, vorher wären Wandansichten erfunden. Hier pro Wand die Ansicht von innen, wie man im Raum davor steht: unter den Kanten stehen die Ecken und die anschließenden Wände, oben rechts zeigt ein Lageplan mit Pfeil, welche Wand es ist (Klick dort wählt eine andere). Mit ‹ › oder ← → geht es ringsum zur Wand rechts oder links daneben.</p>
       <dl>
         <dt>Höhe</dt><dd>Raumhöhe eintragen. Die erste gemessene Höhe gilt für alle Ecken; abweichende Ecken (Pultdach, Schräge) rechts im Panel unter <b>Höhe links / rechts</b> oder per Klick auf ihre Kante im Bild. Höhe 0 ist erlaubt: die Wand läuft dort spitz zu.</dd>
-        <dt>+ Knickpunkt</dt><dd>Für Giebel- und Kniestockwände: die Decke knickt zwischen den Ecken. Den Punkt im Bild ziehen, anklicken für seine Höhe, Rechtsklick löscht. Geht in die Wandansicht, die Öffnungsprüfung und den STEP-Export ein.</dd>
+        <dt>+ Knickpunkt</dt><dd>Für Giebel- und Kniestockwände: die Decke knickt zwischen den Ecken. Den Punkt im Bild ziehen, anklicken für seine Höhe, Rechtsklick löscht. Geht in die Wandansicht, die Öffnungsprüfung, den STEP-Export und die Küche (Deckenprüfung, 3D) ein.</dd>
         <dt>+ Tür, + Fenster, + Loch</dt><dd>Gibt es auch im Grundriss (Zeichnen und Messen): Knopf, dann auf die Wand klicken. Dort ziehen verschiebt die Öffnung entlang der Wand, das Kärtchen daneben stellt Art, Band und Öffnungsrichtung. Hier in der Wandansicht: Öffnung auf die Wand setzen, dann Größe und Art wählen. Links und rechts gelten immer von innen gesehen. Unter <b>Lage einmessen</b> den Abstand von links, rechts, Boden oder Decke eintragen; erst dann liegt sie maßhaltig. Türen bekommen Band und Öffnungsrichtung.</dd>
         <dt>+ Wasser</dt><dd>Setzt einen Wasseranschluss (Eckventil und Abfluss) an die gewählte Wand, unter die Spüle, wenn dort eine steht, sonst in die Mitte, 50 cm hoch. Im Bild ziehen oder rechts Lage und Höhe in mm eintragen, × löscht. Die Küche prüft daran die Schlauchwege: Spülmaschine (Zulauf 1,68 m, Ablauf 1,9 m, Verlängerung 2,2 m) und Kühlschrank mit Festwasser. Der Schlauch läuft hinter den Schränken an der Wand entlang. Schneidet keine Fliesen.</dd>
         <dt>Abwicklung</dt><dd>Klappt die Wände mit Öffnungen im Grundriss nach außen und blendet Nachbarräume aus. Nur Ansicht.</dd>
@@ -3207,9 +3207,12 @@ const K_LIM={ plinth:[0,300], baseH:[300,1200], baseD:[250,900], topT:[10,120], 
               wallH:[200,1400], wallD:[150,700], tallH:[1000,2800], tallD:[250,900], faucetH:[0,600], persons:[1,3] };
 // Arbeitshöhe = Sockel + Korpus + Platte; Hängeschränke schließen oben
 // bündig mit dem Hochschrank ab (eine Frontlinie), Unterkante folgt daraus.
+// Nie unter dem Boden: normSpec klemmt jedes Maß einzeln, aber Hochschrank
+// 1000 mit Hängeschrank 1400 (beides in K_LIM) ergäbe −400. Dann steht der
+// Hängeschrank auf dem Boden und ragt über den Hochschrank hinaus.
 function derived(S){
   const workH=S.plinth+S.baseH+S.topT, tallTop=S.plinth+S.tallH;
-  return {workH, tallTop, wallZ:tallTop-S.wallH};
+  return {workH, tallTop, wallZ:Math.max(0, tallTop-S.wallH)};
 }
 // Breitenraster (nobilia 10er plus 15er-Raster); Geräte haben eigene.
 const WIDTHS=[150,200,300,400,450,500,600,800,900,1000,1200];
@@ -3589,7 +3592,9 @@ function makeEnv(pts, walls, openings, hmeas, water, frame){
   });
   const H=globalThis.cornerHeights ? globalThis.cornerHeights(pts, hmeas||[]) : {};
   const F=TL.frameOf(pts, walls, frame);
-  return {pts, walls, ring, I, wallsByKey, H, F, openings:(openings||[]).filter(o=>o && o.a && o.b),
+  // hmeas samt Knickpunkten ({kind:'k'}) bleibt in E: die Decke je Wand
+  // (ceilShape) entsteht daraus. H, die Höhe je Ecke, rechnet sie nicht mehr.
+  return {pts, walls, ring, I, wallsByKey, H, hmeas:hmeas||[], shapes:new Map(), F, openings:(openings||[]).filter(o=>o && o.a && o.b),
           water:(water||[]).filter(w=>w && wallsByKey.has(wallKeyOf(w.a,w.b)))};
 }
 const P=(E,id)=>{ const i=E.I[id]; return i==null?null:E.pts[i]; };
@@ -3602,10 +3607,21 @@ function wallFrame(E, a, b){
   return {a, b, A, B, u:unit(sub(B,A)), n:W.nIn, L, key:wallKeyOf(a,b), hole:W.hole};
 }
 const wpt=(Wf,s,q)=>({x:Wf.A.x+Wf.u.x*s+Wf.n.x*q, y:Wf.A.y+Wf.u.y*s+Wf.n.y*q});
-const ceilAt=(E,Wf,s)=>{
-  const ha=E.H[Wf.a]?E.H[Wf.a].h:2500, hb=E.H[Wf.b]?E.H[Wf.b].h:2500;
-  return ha+(hb-ha)*clamp(s/Wf.L,0,1);
-};
+// Decke einer Wand: Oberkante als Polylinie aus Eckhöhen UND Knickpunkten
+// (Giebel, Kniestock) - wallShape, ceilingAt und ceilingMin aus dem store-Block,
+// dieselbe Quelle wie Öffnungsprüfung und Wandansicht, hier keine zweite
+// Deckenlogik. Der store-Block lädt NACH diesem Block: erst beim Aufruf über
+// globalThis (wie cornerHeights in makeEnv). Je Richtung a->b einmal gerechnet
+// und in E gemerkt: s zählt ab a, und Teile stehen in beiden Richtungen.
+function ceilShape(E, a, b){
+  const k=a+'|'+b;
+  if(!E.shapes.has(k)) E.shapes.set(k, globalThis.wallShape(E.pts, E.hmeas, a, b));
+  return E.shapes.get(k);
+}
+const ceilAt=(E,Wf,s)=>globalThis.ceilingAt(ceilShape(E,Wf.a,Wf.b), s);
+// Niedrigste Decke über [s0,s1]: an den Enden ODER an einem Knick dazwischen
+// (eine Kehle läge sonst unbemerkt über dem Teil).
+const ceilMin=(E,Wf,s0,s1)=>globalThis.ceilingMin(ceilShape(E,Wf.a,Wf.b), s0, s1);
 // Rechts aus Sicht dessen, der vor der Front steht und auf sie schaut
 // (Bildschirmsinn, y nach unten): Blick f=-n, rechts=(-f.y, f.x).
 const rightOf=n=>({x:n.y, y:-n.x});
@@ -4405,7 +4421,7 @@ function check(E, K, L){
   G.forEach(g=>{
     if(!polyInRoom(E, g.foot||g.poly)) add_('bad',[g.it.id], `${nameOf(g.it)}${g.foot && polyInRoom(E,g.poly)?' (Tresen)':''} ragt aus dem Raum`, g.c);
     if(!g.free){
-      const c=Math.min(ceilAt(E,g.Wf,g.s0), ceilAt(E,g.Wf,g.s1));
+      const c=ceilMin(E,g.Wf,g.s0,g.s1);
       if(g.z1>c+1) add_('bad',[g.it.id], `${nameOf(g.it)} ist ${mm(g.z1)} mm hoch, die Decke dort ${mm(c)} mm`, g.c);
     }
   });
@@ -4422,7 +4438,7 @@ function check(E, K, L){
       || zonesW.some(z=>zoneHit(h,z)); };
   G.filter(g=>tallDev(g.it)).forEach(g=>{
     const sg=devSegs(g.it,S); if(sg.fits) return;
-    const need=Math.ceil(sg.need/10)*10, ceil=g.free ? Infinity : Math.min(ceilAt(E,g.Wf,g.s0), ceilAt(E,g.Wf,g.s1));
+    const need=Math.ceil(sg.need/10)*10, ceil=g.free ? Infinity : ceilMin(E,g.Wf,g.s0,g.s1);
     const ok=z1=>z1<=ceil+1 && !blocksAt(g,z1);
     const fix = D.tallTop>=sg.need && ok(D.tallTop) ? {label:'Standardhöhe', id:g.it.id, set:{}, del:['h']}
       : ok(need) ? {label:`${mm(need)} mm hoch`, id:g.it.id, set:{h:need}} : null;
@@ -5596,7 +5612,10 @@ function wallFaces(E, thick=120){
     const Wf=wallFrame(E, W.a, W.b); if(!Wf) return;
     const ops=E.openings.map(o=>openingOn(E,o,Wf)).filter(Boolean)
       .map(on=>({...on, s0:clamp(on.s0,0,Wf.L), s1:clamp(on.s1,0,Wf.L)})).filter(on=>on.s1-on.s0>1);
-    const cuts=[...new Set([0, Wf.L, ...ops.flatMap(o=>[o.s0,o.s1])])].sort((p,q)=>p-q);
+    // Knicke der Oberkante (Giebel, Kniestock) schneiden die Streifen wie die
+    // Öffnungskanten: dazwischen läuft die Decke gerade, ceilAt gibt die Enden.
+    const kx=ceilShape(E,Wf.a,Wf.b).knicks.map(k=>k.x);
+    const cuts=[...new Set([0, Wf.L, ...kx, ...ops.flatMap(o=>[o.s0,o.s1])])].sort((p,q)=>p-q);
     for(let i=0;i<cuts.length-1;i++){
       const s0=cuts[i], s1=cuts[i+1]; if(s1-s0<1) continue;
       const sm=(s0+s1)/2, here=ops.filter(o=>o.s0<=sm && sm<=o.s1).sort((p,q)=>p.z0-q.z0);
@@ -5609,10 +5628,22 @@ function wallFaces(E, thick=120){
     // Wand-Inseln (Säulen, freie Wandstücke) bekommen statt der Streifen
     // einen vollen Deckel (tops), sonst schaut man von oben durch das hohle
     // Innere auf das, was dahinter steht: die Flächen sind einseitig.
-    if(!W.hole) caps.push({poly:[wpt(Wf,0,0), wpt(Wf,Wf.L,0), wpt(Wf,Wf.L,-thick), wpt(Wf,0,-thick)], za:ceilAt(E,Wf,0), zb:ceilAt(E,Wf,Wf.L)});
+    // Der Kantenstreifen folgt der Oberkante: je Stück zwischen zwei Knicken
+    // eine Schräge von za nach zb.
+    if(!W.hole){
+      const ks=[0, ...kx, Wf.L];
+      for(let i=0;i<ks.length-1;i++){
+        const s0=ks[i], s1=ks[i+1];
+        caps.push({poly:[wpt(Wf,s0,0), wpt(Wf,s1,0), wpt(Wf,s1,-thick), wpt(Wf,s0,-thick)], za:ceilAt(E,Wf,s0), zb:ceilAt(E,Wf,s1)});
+      }
+    }
   });
-  const zOf=id=>E.H[id] ? E.H[id].h : 2500;
-  const tops=TL.ringsOf(E.ring).slice(1).map(R=>R.map(p=>({x:p.x, y:p.y, z:zOf(p.id)})));
+  // Deckel der Wand-Inseln: Höhe je Ecke und je Knick aus derselben Deckenform
+  // wie die Wände (die Ecke ist ha der Wand, die dort beginnt).
+  const tops=TL.ringsOf(E.ring).slice(1).map(R=>R.flatMap((p,i)=>{
+    const q=R[(i+1)%R.length], sh=ceilShape(E,p.id,q.id), Wf=wallFrame(E,p.id,q.id);
+    return [{x:p.x, y:p.y, z:sh.ha}, ...(Wf ? sh.knicks.map(k=>{ const w=wpt(Wf,k.x,0); return {x:w.x, y:w.y, z:k.y}; }) : [])];
+  }));
   return {quads, caps, tops};
 }
 // Fronten eines Teils als dünne Platten (geschlossen oder offen).
@@ -6018,7 +6049,7 @@ Object.assign(globalThis.KITCHEN, { CORNER, CSHAPE, shapeOf, cornerBlind, corner
 Object.assign(globalThis.KITCHEN, { PLAN_TXT, planLabels, stationLabel, stationBlock, contentCands, headCands, nomCm, devTag, dimFits, chartBox, rectIn });
 Object.assign(globalThis.KITCHEN, { snapIsland, islandTops, topsTouch, partsClash });
 // Geruest Rest-Fixes (Anker, werden nach dem Zusammenfuehren entfernt)
-Object.assign(globalThis.KITCHEN, { /* rest-decke */ });
+Object.assign(globalThis.KITCHEN, { ceilAt, ceilMin });
 //
 Object.assign(globalThis.KITCHEN, { /* rest-eck */ });
 //
@@ -19176,7 +19207,81 @@ globalThis.selfChecks=function(){
     // === Geruest fuer die Rest-Fixes: jede Gruppe fuellt NUR ihren Block (Anker, werden nach dem Zusammenfuehren entfernt) ===
     // --- Rest-Fix decke ---
     try{
-      // TESTS-decke
+      // Decke mit Knickpunkten (Giebel, Kehle), 3D-Oberkante, Hängeschrank nie unter dem Boden.
+      // hz: Eckhöhe h an allen Ecken plus Knicke [id, x ab A, Höhe] auf A–B (oder a,b).
+      const hz=(h,ks)=>[...['A','B','C','D'].map(id=>({kind:'h',at:id,d:h})), ...ks.map(([id,x,d,a,b])=>({kind:'k',id,a:a||'A',b:b||'B',x,d,on:true}))];
+      const dE=(hm,ops)=>KX.makeEnv(R.pts,R.walls,ops||[],hm);
+      const hoch=(Ek,items)=>{ const K=KX.normKitchen({items}), F=KX.check(Ek,K,KX.layout(Ek,K)); return {F, dk:F.filter(f=>/mm hoch, die Decke dort/.test(f.txt))}; };
+      const tall=(x,extra)=>({id:1,kind:'tall',a:'A',b:'B',x,w:600,...extra});
+      const gi=dE(hz(1800,[['k1',2000,3000]]));
+      chk('kueche: Giebelwand – Hochschrank unter dem Knick (Decke dort 2820) ist nicht zu hoch, am Rand (1800) schon',
+        hoch(gi,[tall(1700)]).dk.length===0 && hoch(gi,[{...tall(1700),kind:'wall'}]).dk.length===0
+        && (()=>{ const r=hoch(gi,[tall(0)]).dk; return r.length===1 && /Decke dort 1800 mm/.test(r[0].txt); })());
+      chk('kueche: Kehle – Hochschrank 2166 unter der Kehle (Ecken 2500, Knick 1500) ist zu hoch',
+        (()=>{ const r=hoch(dE(hz(2500,[['k1',2000,1500]])),[tall(1700)]).dk; return r.length===1 && r[0].lvl==='bad' && /Decke dort 1500 mm/.test(r[0].txt); })());
+      {
+        // Beide Enden des Teils 2500, dazwischen 1500: nur die niedrigste Decke über [s0,s1] findet es.
+        const dip=dE(hz(2500,[['k1',1900,2500],['k2',2000,1500],['k3',2100,2500]])), r=hoch(dip,[tall(1700)]).dk;
+        chk('kueche: Knick zwischen den Kanten des Teils – die niedrigste Decke über dem Teil zählt, nicht nur die Enden',
+          r.length===1 && /Decke dort 1500 mm/.test(r[0].txt) && hoch(dip,[tall(100)]).dk.length===0);
+      }
+      {
+        // Teil in Gegenrichtung (a=B, b=A, x ab B): der Knick liegt 1000 ab A, also 3000 ab B.
+        // Auch ein ab B gespeicherter Knick (a=B, b=A, x=3000) ist derselbe Punkt.
+        const rv=dE(hz(2500,[['k1',1000,1500]])), hit=hoch(rv,[tall(2700,{a:'B',b:'A'})]).dk, fern=hoch(rv,[tall(0,{a:'B',b:'A'})]).dk;
+        chk('kueche: Wand in Gegenrichtung – Knick wird ab Ecke B gezählt (Teil darüber rot, Teil in der hohen Ecke nicht)',
+          hit.length===1 && /Decke dort 1500 mm/.test(hit[0].txt) && fern.length===0
+          && hoch(dE(hz(2500,[['k1',3000,1500,'B','A']])),[tall(700)]).dk.length===1
+          && !!KX.ceilAt && near(KX.ceilAt(rv,KX.wallFrame(rv,'B','A'),3000),1500,1e-6) && near(KX.ceilAt(rv,KX.wallFrame(rv,'A','B'),1000),1500,1e-6));
+      }
+      chk('kueche: Decke ohne Knick unverändert – Trapez aus den Eckhöhen (2400 / 2800), niedrigste Stelle am Teil',
+        (()=>{ const tz=dE([{kind:'h',at:'A',d:2400},{kind:'h',at:'B',d:2800},{kind:'h',at:'C',d:2800},{kind:'h',at:'D',d:2400}]), a=hoch(tz,[tall(0,{h:2450})]).dk, b=hoch(tz,[tall(3400,{h:2750})]).dk;
+          return a.length===1 && /Decke dort 2400 mm/.test(a[0].txt) && b.length===1 && /Decke dort 2740 mm/.test(b[0].txt) && hoch(tz,[tall(3400,{h:2700})]).dk.length===0; })());
+      {
+        // Abhilfe des zu niedrigen Geräte-Hochschranks rechnet mit derselben Decke.
+        const abh=(h)=>{ const r=hoch(dE(hz(2500,[['k1',2000,h]])),[{id:1,kind:'tall',dev:'dw',a:'A',b:'B',x:1700,w:600,h:1200}]); return r.F.find(f=>/zu niedrig für das Gerät/.test(f.txt)); };
+        const f1=abh(1300), f2=abh(1400);
+        chk('kueche: Hochschrank zu niedrig für das Gerät unter einer Kehle – Abhilfe nur, wenn die nötige Höhe (1330) unter die niedrigste Decke passt',
+          !!f1 && f1.fix===null && !!f2 && !!f2.fix && f2.fix.set && f2.fix.set.h===1330);
+      }
+      {
+        // 3D: Streifen der Wand werden an den Knicken geteilt, Oberkante folgt der Decke.
+        const onAB=q=>Math.abs(q.a.y)<1e-6 && Math.abs(q.b.y)<1e-6, capAB=c=>Math.abs(c.poly[0].y)<1e-6 && Math.abs(c.poly[1].y)<1e-6;
+        const WG=KX.wallFaces(gi), qa=WG.quads.filter(onAB).sort((p,q)=>p.a.x-q.a.x), ca=WG.caps.filter(capAB).sort((p,q)=>p.poly[0].x-q.poly[0].x);
+        chk('kueche: 3D – Giebelwand hat den Knick in der Oberkante (Streifen und Kantenstreifen an x = 2000 geteilt, 1800 → 3000 → 1800)',
+          qa.length===2 && near(qa[0].b.x,2000,1e-6) && near(qa[1].a.x,2000,1e-6)
+          && near(qa[0].z1a,1800,1e-6) && near(qa[0].z1b,3000,1e-6) && near(qa[1].z1a,3000,1e-6) && near(qa[1].z1b,1800,1e-6)
+          && ca.length===2 && near(ca[0].za,1800,1e-6) && near(ca[0].zb,3000,1e-6) && near(ca[1].za,3000,1e-6) && near(ca[1].zb,1800,1e-6)
+          && WG.caps.length===5);
+        const hmw=hz(1800,[['k1',2000,3000]]), Ew=dE(hmw,[win]), shw=globalThis.wallShape(R.pts,hmw,'A','B'), qw=KX.wallFaces(Ew).quads.filter(onAB);
+        chk('kueche: 3D – Giebelwand mit Fenster: kein Streifen läuft über den Knick, keiner ragt über die Decke, der Giebel steht bei 3000',
+          qw.length===6 && qw.every(q=>q.b.x<=2000+1e-6 || q.a.x>=2000-1e-6)
+          && qw.every(q=>q.z1a<=globalThis.ceilingAt(shw,q.a.x)+1e-6 && q.z1b<=globalThis.ceilingAt(shw,q.b.x)+1e-6)
+          && near(Math.max(...qw.map(q=>Math.max(q.z1a,q.z1b))),3000,1e-6));
+      }
+      {
+        // Säule (Wand-Insel) mit Knick in einer ihrer Wände: der Deckel bekommt ihn als Ecke.
+        const Q=[['A',0,0],['B',6000,0],['C',6000,4000],['D',0,4000],['I',2800,1800],['J',3200,1800],['K',3200,2200],['L',2800,2200]].map(([id,x,y])=>({id,x,y}));
+        const hmq=[{kind:'h',at:'A',d:2500},{kind:'k',id:'k1',a:'I',b:'J',x:100,d:3200,on:true}];
+        const TP=KX.wallFaces(KX.makeEnv(Q,[['A','B'],['B','C'],['C','D'],['D','A'],['I','J'],['J','K'],['K','L'],['L','I']],[],hmq)).tops[0];
+        chk('kueche: 3D – Säule mit Knick in einer Wand: Deckel hat den Knickpunkt (3200 auf I–J, 100 ab I) als fünfte Ecke, die vier Ecken bleiben 2500',
+          !!TP && TP.length===5 && TP.filter(p=>near(p.z,2500,1e-6)).length===4 && TP.some(p=>near(p.z,3200,1e-6) && near(p.x,2900,1e-6) && near(p.y,1800,1e-6)));
+      }
+      {
+        // Hängeschrank nie unter dem Boden: Hochschrank 1000 + Hängeschrank 1400 liegen beide in K_LIM.
+        const nk=s=>KX.normKitchen({spec:s}), Kw=KX.normKitchen({spec:{plinth:0,tallH:1000,wallH:1400},items:[{id:1,kind:'wall',a:'A',b:'B',x:1000,w:600}]});
+        chk('kueche: Hängeschrank beginnt nie unter dem Boden (Hochschrank 1000, Hängeschrank 1400: Unterkante 0 statt −400)',
+          KX.derived(Kw.spec).wallZ===0 && KX.dims(Kw,Kw.items[0]).z0===0 && KX.dims(Kw,Kw.items[0]).z1===1400
+          && [0,300].every(p=>[1000,2800].every(t=>[200,1400].every(w=>KX.derived(nk({plinth:p,tallH:t,wallH:w}).spec).wallZ>=0))));
+        chk('kueche: Hängeschrank bündig mit dem Hochschrank, wo er hineinpasst (Unterkante = Oberkante Hochschrank − Höhe)',
+          [{plinth:150,tallH:1000,wallH:720},{plinth:0,tallH:2016,wallH:900}].every(s=>{ const S=nk(s).spec, D=KX.derived(S); return D.wallZ===D.tallTop-S.wallH && D.wallZ>0; }));
+      }
+      {
+        // Spülmaschine oder Backofen im niedrigen Hochschrank (devZ fest): der Befund ist da, nicht stumm.
+        const low=(dev,h)=>hoch(dE([]),[{id:1,kind:'tall',dev,a:'A',b:'B',x:1000,w:600,h}]).F.filter(f=>/Hochschrank zu niedrig für das Gerät/.test(f.txt));
+        chk('kueche: Spülmaschine und Backofen im Hochschrank von 1000 oder 1200 mm – "zu niedrig für das Gerät" rot',
+          [['dw',1200],['dw',1000],['oven',1200],['oven',1000]].every(([d,h])=>{ const r=low(d,h); return r.length===1 && r[0].lvl==='bad'; }));
+      }
     }catch(err){ chk('kueche: Rest-Fix decke ohne Ausnahme ('+err.message+')', false); }
     //
     // --- Rest-Fix eck ---
