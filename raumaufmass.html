@@ -6106,7 +6106,7 @@ const PRESETS=[
   {key:'fridge',kind:'tall', dev:'fridge', front:'door', hinge:'right', w:600, store:['kuehl'], label:'Kühlschrank', tip:'Kühlschrank im Hochschrank'},
   {key:'oven',  kind:'tall', dev:'oven', front:'door', w:600, label:'Backofen hoch', tip:'Backofen auf Augenhöhe im Hochschrank'},
   {key:'island',kind:'island', front:'drawer', w:1800, d:900, label:'Insel', tip:'Kücheninsel, frei stehend'},
-  {key:'table', kind:'table', w:1200, d:800, seats:4, label:'Tisch', tip:'Esstisch (60 cm je Platz)'},
+  {key:'table', kind:'table', w:1200, d:800, seats:4, label:'Tisch', tip:'Esstisch (Länge 60 cm je Platz)'},
 ];
 
 // ---------- Inhalte ----------
@@ -16576,7 +16576,10 @@ function renderSel(c){
   const dev=it.dev?KX.DEV[it.dev]:null;
   const widths = it.kind==='table' ? [800,1000,1200,1400,1600,1800,2000,2200] : it.kind==='island' ? [1200,1500,1800,2000,2400,2700] : it.corner ? KX.WIDTHS.filter(w=>w>=900) : dev ? dev.widths : KX.WIDTHS;
   const std=widths.includes(Math.round(it.w));
-  let h=`<div class="krow"><label>Breite</label><select id="kW">${widths.map(w=>`<option value="${w}"${Math.round(it.w)===w?' selected':''}>${cmTxt(w)} cm</option>`).join('')}<option value="free"${std?'':' selected'}>frei …</option></select>`
+  // Beim Tisch heisst w Laenge (die Seite mit den Plaetzen, 60 cm je Platz)
+  // und d Breite (Abstand zwischen zwei Gegenuebersitzenden).
+  const tbl=it.kind==='table';
+  let h=`<div class="krow"><label${tbl?' title="Seite, an der die Plätze sitzen (60 cm je Platz)"':''}>${tbl?'Länge':'Breite'}</label><select id="kW">${widths.map(w=>`<option value="${w}"${Math.round(it.w)===w?' selected':''}>${cmTxt(w)} cm</option>`).join('')}<option value="free"${std?'':' selected'}>frei …</option></select>`
        +`<input id="kWv" inputmode="decimal" value="${Math.round(it.w)}"${std?' hidden':''}> ${std?'':'mm'}</div>`;
   // Lage an der Wand als Zahl (ab der ersten Ecke), Rest bis zur anderen.
   const Wsel=it.a ? KX.wallFrame(c.E,it.a,it.b) : null;
@@ -16597,16 +16600,21 @@ function renderSel(c){
     const uniq=[...new Map(opts.map(o=>[o[0],o])).values()];
     h+=`<div class="krow"><label>Armatur</label><select id="kFau">${uniq.map(([v,l])=>`<option value="${v}"${fh===v?' selected':''}>${l}</option>`).join('')}</select></div>`;
   }
+  const {d,z0,z1}=KX.dims(c.K,it);
+  if(tbl){
+    const tds=[700,800,900,1000,1100,1200], tstd=tds.includes(Math.round(d));
+    h+=`<div class="krow"><label title="Abstand zwischen zwei Gegenübersitzenden">Breite</label><select id="kTd">${tds.map(v=>`<option value="${v}"${Math.round(d)===v?' selected':''}>${cmTxt(v)} cm</option>`).join('')}<option value="free"${tstd?'':' selected'}>frei …</option></select>`
+      +`<input id="kTdv" inputmode="decimal" value="${Math.round(d)}"${tstd?' hidden':''}> ${tstd?'':'mm'}</div>`;
+  }
   if(it.kind==='table') h+=`<div class="krow"><label>Plätze</label><select id="kSeats">${[0,2,4,6,8,10].map(n=>`<option${(it.seats||0)===n?' selected':''}>${n}</option>`).join('')}</select></div>`;
   const st=KX.storable(it);
   if(st.length){
     h+=`<div class="kgrp"><label>Inhalt</label><div class="kchips">${st.map(k=>{ const on=(it.store||[]).includes(k);
       return `<button data-store="${k}" aria-pressed="${on}">${escapeHtml(KX.CONTENTS.find(x=>x.key===k).label)}</button>`; }).join('')}</div></div>`;
   }
-  const {d,z0,z1}=KX.dims(c.K,it);
   const custom=it.h!=null || it.z!=null || (it.d!=null && !KX.KIND[it.kind].free);
   h+=`<details id="kFree"${(custom||KS.freeOpen)?' open':''}><summary>Maße frei</summary><div class="tgrid">`
-    +`<label><span>Tiefe</span><input id="kD" inputmode="decimal" value="${Math.round(d)}"> mm</label>`
+    +(tbl ? '' : `<label><span>Tiefe</span><input id="kD" inputmode="decimal" value="${Math.round(d)}"> mm</label>`)
     +(it.kind==='base' ? '' : `<label><span>Höhe</span><input id="kH" inputmode="decimal" value="${Math.round(z1-z0)}"> mm</label>`)
     +(it.kind==='wall'?`<label><span>Unterkante</span><input id="kZ" inputmode="decimal" value="${Math.round(z0)}"> mm</label>`:'')
     +(!it.a?`<label><span>Drehung</span><input id="kR" inputmode="decimal" value="${Math.round(it.rot||0)}"> °</label>`:'')
@@ -16622,6 +16630,8 @@ function renderSel(c){
     setTimeout(()=>{ if(!isFinite(v)||v<lo||v>hi){ setHint(`Ungültiger Wert (${lo}–${hi}).`); KS.selKey=''; render(); return; } edit(cur=>fn(cur,v)); }); }; };
   $('kW').onchange=()=>{ const v=$('kW').value; if(v==='free'){ $('kWv').hidden=false; $('kWv').focus(); return; } edit(t=>{ t.w=+v; }); };
   num('kWv',100,6000,(t,v)=>{ t.w=Math.round(v); });
+  if($('kTd')) $('kTd').onchange=()=>{ const v=$('kTd').value; if(v==='free'){ $('kTdv').hidden=false; $('kTdv').focus(); return; } edit(t=>{ t.d=+v; }); };
+  num('kTdv',300,3000,(t,v)=>{ t.d=Math.round(v); });
   if($('kDev')) $('kDev').onchange=()=>edit(t=>{ const v=$('kDev').value; if(v){ t.dev=v; const dw=KX.DEV[v].widths; if(!dw.includes(t.w)) t.w=dw.includes(600)?600:dw[0]; t.store=(t.store||[]).filter(x=>KX.storable(t).includes(x)); if(!t.store.length) delete t.store; } else delete t.dev; });
   box.querySelectorAll('[data-seg]').forEach(sg=>sg.querySelectorAll('button').forEach(b=>b.onclick=()=>edit(t=>{ t[sg.dataset.seg]=b.dataset.v;
     if(sg.dataset.seg==='front' && b.dataset.v!=='door') delete t.corner; })));
