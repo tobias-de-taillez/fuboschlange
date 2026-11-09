@@ -5005,14 +5005,15 @@ function pointInRoom(p, ring){
   return inside;
 }
 // Erster Auftreffpunkt eines Strahls von p in Richtung d auf eine Wand
-// (Aussenwand oder Insel), mindestens 1 mm entfernt. null ohne Treffer.
-function rayToRing(ring, p, d){
+// (Aussenwand oder Insel), mindestens tmin (Standard 1 mm) entfernt. null
+// ohne Treffer. Die Küche ruft es mit 1e-6 für einzelne Teile auf (rayPoly).
+function rayToRing(ring, p, d, tmin=1){
   let best=null;
   for(const R of ringsOf(ring)) for(let i=0;i<R.length;i++){
     const a=R[i], e=sub(R[(i+1)%R.length],a), den=crs(d,e);
     if(Math.abs(den)<1e-12) continue;
     const t=crs(sub(a,p),e)/den, u=crs(sub(a,p),d)/den;
-    if(t>1 && u>=-1e-9 && u<=1+1e-9 && (!best || t<best.t)) best={t, q:{x:p.x+d.x*t, y:p.y+d.y*t}};
+    if(t>tmin && u>=-1e-9 && u<=1+1e-9 && (!best || t<best.t)) best={t, q:{x:p.x+d.x*t, y:p.y+d.y*t}};
   }
   return best;
 }
@@ -7175,16 +7176,10 @@ const fmtM1=v=>(v/1000).toFixed(2).replace('.',',').replace(/0$/,'');
 // keine Wand beschriftet. Welches Teil gemeint ist, zeigt der Klick auf den
 // Befund (wählt es) und die Marke im Plan.
 const labelOf=it=>nameOf(it);
-function rayPoly(p, d, poly){
-  let best=null;
-  for(let i=0;i<poly.length;i++){
-    const a=poly[i], e=sub(poly[(i+1)%poly.length],a), den=crs(d,e);
-    if(Math.abs(den)<1e-12) continue;
-    const t=crs(sub(a,p),e)/den, u=crs(sub(a,p),d)/den;
-    if(t>1e-6 && u>=-1e-9 && u<=1+1e-9 && (best==null || t<best)) best=t;
-  }
-  return best;
-}
+// Strahl gegen ein einzelnes Teil: dieselbe Schnittformel wie gegen die Wand
+// (TL.rayToRing), aber schon ab 1e-6 mm - ein Teil dicht am Start zählt, die
+// Wand erst ab 1 mm. Gibt nur den Abstand t, null ohne Treffer.
+function rayPoly(p, d, poly){ const r=TL.rayToRing(poly, p, d, 1e-6); return r ? r.t : null; }
 const inRoom=(E,p)=>TL.pointInRoom(p, E.ring);
 // 0,5 mm Toleranz: Rückkanten liegen kollinear auf schiefen Wänden, und
 // Rundungsrauschen darf dort nicht als „ragt aus dem Raum“ zählen.
@@ -7282,14 +7277,28 @@ function snapIsland(E, K, it, tol){
 // Enden wirklich vor sich hat - über einen Wandversatz hinweg (die Ecke a/b
 // liegt dann mitten im Raum). Gemessen auf halber Korpustiefe.
 // Freie Teile: von jeder Seite bis zur Wand oder zum nächsten Teil.
-// Die Wandabstände tragen edit: was sich beim Ändern wie bewegt.
+// Die Wandabstände tragen edit: was sich beim Ändern wie bewegt, und bis wohin
+// (min/max: bis zum ersten Hindernis, siehe blockReach).
 function rowOf(L, g){
-  const band=g.it.kind==='wall' ? 'high' : 'low';
-  return L.G.filter(h=>!h.free && h.Wf.key===g.Wf.key && (band==='high' ? h.it.kind==='wall' : h.it.kind!=='wall'))
+  // Höhenband wie in KIND: Hängeschrank high, Unterschrank low. Der
+  // Hochschrank (full) belegt beide Bänder und steht in beiden Zeilen. Seine
+  // eigene Zeile bleibt die untere; Hängeschränke daneben bremsen ihn über
+  // blockFits.
+  const band=g.it.kind==='wall' ? 'high' : 'low', inBand=h=>{ const b=KIND[h.it.kind].band; return b==='full' || b===band; };
+  return L.G.filter(h=>!h.free && h.Wf.key===g.Wf.key && inBand(h))
             .map(h=>({h, s0: h.Wf.a===g.Wf.a ? h.s0 : g.Wf.L-h.s1, s1: h.Wf.a===g.Wf.a ? h.s1 : g.Wf.L-h.s0}))
             .sort((p,q)=>p.s0-q.s0);
 }
+// Wie weit reicht die Wand auf Tiefe q über das Wandende hinaus (x0=-Reichweite,
+// x1=L+Reichweite)? Negativ an einer spitzen Ecke: dort schneidet die
+// Nachbarwand die Linie auf Tiefe q schon vor dem Wandende, die Kette beginnt
+// erst dahinter (cornerStop).
 function wallReach(E, Wf, end, q){
+  // Spitze Ecke: der Start 2 mm innen läge hinter der Nachbarwand (ab 1 mm
+  // Versatz), der Strahl träfe nichts oder erst eine Wand weit draußen und die
+  // Kette finge an der Raumecke an.
+  const cs=cornerStop(E, Wf, q, end);
+  if(cs>=1) return -cs;
   // 2 mm innen starten: an einer gewöhnlichen Ecke liegt der Start sonst
   // auf der Nachbarwand, und der Strahl fände erst eine Wand weit draußen.
   const s=end ? Wf.L-2 : 2, d=end ? Wf.u : mul(Wf.u,-1);
@@ -7297,11 +7306,17 @@ function wallReach(E, Wf, end, q){
   const t=r ? r.t-2 : 0;
   return t>5 ? t : 0;
 }
-function chainDims(E, L, g){
+// Mit K begrenzt fitEdit die Eingabefelder auf das, was die harten Regeln
+// zulassen; ohne K gelten nur die Grenzen der eigenen Zeile.
+function chainDims(E, L, g, K){
   if(g.free) return null;
   const Wf=g.Wf, row=rowOf(L, g);
   const qr=Math.min(...row.map(r=>r.h.d))/2;
-  const x0=-wallReach(E,Wf,0,qr), x1=Wf.L+wallReach(E,Wf,1,qr);
+  let x0=-wallReach(E,Wf,0,qr), x1=Wf.L+wallReach(E,Wf,1,qr);
+  // Spitze Ecke: die Kette beginnt hinter dem Wandende; ein Teil davor
+  // (Bestand mit Befund) geht vor, sonst entstünde eine Scheinlücke.
+  if(x0>0) x0=Math.min(x0, ...row.map(r=>r.s0));
+  if(x1<Wf.L) x1=Math.max(x1, ...row.map(r=>r.s1));
   const xs=[...new Set([x0, ...row.flatMap(r=>[r.s0,r.s1]), x1].map(v=>Math.round(v*10)/10))].sort((p,q)=>p-q);
   const segs=[];
   for(let i=0;i<xs.length-1;i++){
@@ -7311,14 +7326,15 @@ function chainDims(E, L, g){
   }
   // Wandabstände: erste und letzte Lücke, wenn sie an x0 bzw. x1 stößt.
   // Bewegt wird der zusammenhängende Block daneben (Teile ohne Lücke).
-  // Ein Block mit dem zweiten Schenkel eines Eckschranks (wing) hängt in der
-  // Ecke fest: dann kein Eingabefeld (sonst wanderte das Hauptteil an der
-  // anderen Wand mit).
+  // Ein Block mit einem Eckschrank über Eck / diagonal hängt in der Ecke fest,
+  // mit dem Hauptteil (wingG) wie mit dem zweiten Schenkel (wing): dann kein
+  // Eingabefeld (sonst wanderte der Eckschrank aus der Ecke, bzw. das
+  // Hauptteil an der anderen Wand mit).
   const block=(from, dir)=>{ const ids=[]; let edge=null, pinned=false;
     const seq = dir>0 ? row : [...row].reverse();
     for(const r of seq){ const near = dir>0 ? r.s0 : r.s1;
       if(edge!=null && Math.abs(near-edge)>1) break;
-      if(r.h.wing) pinned=true;
+      if(r.h.wing || r.h.wingG) pinned=true;
       ids.push(r.h.it.id); edge = dir>0 ? r.s1 : r.s0; }
     return {ids, edge, pinned}; };
   const first=segs[0], last=segs[segs.length-1];
@@ -7328,12 +7344,14 @@ function chainDims(E, L, g){
     // dahinter oder das Wandende.
     const B=block(0,1), nb=row.find(r=>!B.ids.includes(r.h.it.id) && r.s0>=B.edge-1);
     const cur=first.b-first.a;
-    if(!B.pinned) first.edit={ids:B.ids, fa:Wf.a, side:0, cur, min:Math.max(0,lo-x0), max:cur+((nb?nb.s0:hi)-B.edge), wp:wpt(Wf,x0,qr)};
+    const ed=!B.pinned && fitEdit(E,K,L,{ids:B.ids, fa:Wf.a, side:0, cur, min:Math.max(0,lo-x0), max:cur+((nb?nb.s0:hi)-B.edge), wp:wpt(Wf,x0,qr)});
+    if(ed) first.edit=ed;
   }
   if(row.length && last && last.gap && Math.abs(last.b-x1)<0.5 && last!==first){
     const B=block(0,-1), nb=[...row].reverse().find(r=>!B.ids.includes(r.h.it.id) && r.s1<=B.edge+1);
     const cur=last.b-last.a;
-    if(!B.pinned) last.edit={ids:B.ids, fa:Wf.a, side:1, cur, min:Math.max(0,x1-hi), max:cur+(B.edge-(nb?nb.s1:lo)), wp:wpt(Wf,x1,qr)};
+    const ed=!B.pinned && fitEdit(E,K,L,{ids:B.ids, fa:Wf.a, side:1, cur, min:Math.max(0,x1-hi), max:cur+(B.edge-(nb?nb.s1:lo)), wp:wpt(Wf,x1,qr)});
+    if(ed) last.edit=ed;
   }
   return {Wf, xs, segs, x0, x1, q:Math.max(...row.map(r=>r.h.d))+260};
 }
@@ -7355,10 +7373,68 @@ function freeDims(E, L, g){
     d.edit={id:g.it.id, n:d.n, wall:d.wall, cur:d.val, min:0, max:d.val+(opp && opp.val!=null ? opp.val : 0), wp:d.wall ? d.p1 : null}; });
   return out.filter(d=>d.val!=null);
 }
+// Die Teile, die ein Wandabstand-Edit bewegt, mit Vorzeichen: im kanonischen
+// Rahmen der Kette (a===fa) laufen sie mit dem Block, ältere Daten mit der
+// anderen Ecke als a gegenläufig.
+const dimParts=(K, edit)=>edit.ids.map(id=>K.items.find(x=>x.id===id)).filter(Boolean).map(it=>({it, sg:it.a===edit.fa ? 1 : -1}));
+// Passt der Block, um t mm entlang der Wand verschoben, samt dem ganzen Weg
+// dorthin? Jedes Teil geht als überstrichenes Rechteck (Breite + |t|) durch
+// fitsAt, also durch dieselben harten Regeln wie das Ziehen: Nachbarn, Querzeilen
+// der Nachbarwand, Öffnungen und Zonen, Raum. Der Block selbst bleibt außen vor.
+// Je länger der Weg, desto mehr Treffer - darum lässt sich die Grenze suchen.
+function blockFits(E, K, L, parts, t){
+  const ids=parts.map(p=>p.it.id), Ls={...L, G:L.G.filter(h=>!ids.includes(h.it.id))};
+  return parts.every(({it, sg})=>{
+    const Wf=wallFrame(E, it.a, it.b); if(!Wf) return true;
+    const dx=sg*t;
+    return fitsAt(E, K, Ls, {...it, w:it.w+Math.abs(dx)}, Wf, dx<0 ? it.x+dx : it.x);
+  });
+}
+// Wie weit darf der Block in Richtung dir (+1/-1 entlang der Wand) höchstens
+// wandern, wenn die eigene Zeile T mm erlaubt? Bis vors erste Hindernis, bündig.
+// Passt er schon jetzt nicht (Bestand mit Befund), bleibt T: er soll von dort
+// weg dürfen. Die harten Regeln lassen 1 mm Überlappung zu, die zieht die
+// Suche wieder ab.
+function blockReach(E, K, L, parts, dir, T){
+  const fits=t=>blockFits(E, K, L, parts, dir*t);
+  if(!(T>0) || fits(T) || !fits(0)) return T;
+  let a=0, b=T;
+  while(b-a>0.02){ const m=(a+b)/2; if(fits(m)) a=m; else b=m; }
+  return Math.max(0, Math.round((a-1)*10)/10);
+}
+// Grenzen eines Wandabstand-Edits auf das zurückführen, was die harten Regeln
+// zulassen: die eigene Zeile und cornerStop kennen weder Querzeilen der
+// Nachbarwand noch Türen. Ohne K bleibt es bei den Grenzen der Zeile. null,
+// wenn danach nichts mehr zu verstellen bleibt.
+function fitEdit(E, K, L, edit){
+  if(!K) return edit;
+  const parts=dimParts(K, edit); if(!parts.length) return edit;
+  const s=edit.side===0 ? 1 : -1;               // v = cur + s·t, t = Weg des Blocks entlang der Wand
+  const tLo=s>0 ? edit.min-edit.cur : edit.cur-edit.max, tHi=s>0 ? edit.max-edit.cur : edit.cur-edit.min;
+  const rn=blockReach(E,K,L,parts,-1,-tLo), rp=blockReach(E,K,L,parts,1,tHi);
+  if(rn<-tLo){ if(s>0) edit.min=edit.cur-rn; else edit.max=edit.cur+rn; }
+  if(rp<tHi){ if(s>0) edit.max=edit.cur+rp; else edit.min=edit.cur-rp; }
+  return edit.max-edit.min<0.5 ? null : edit;
+}
+// Wandabstand v prüfen, ohne etwas zu ändern: {ok} oder {ok:false, why} mit
+// why 'range' (außerhalb [min,max]) oder 'fit' (dort passt der Block nicht).
+// Passt der Block schon jetzt nicht, darf er trotzdem von dort weg. Ein
+// Eckschrank über Eck / diagonal bleibt in seiner Ecke (chainDims bietet für
+// so einen Block kein Feld an, hier zur Sicherheit auch für ein altes edit).
+function dimCheck(E, K, edit, v){
+  if(!(v>=edit.min-0.5 && v<=edit.max+0.5)) return {ok:false, why:'range'};
+  if(edit.ids){
+    const parts=dimParts(K, edit), dv=v-edit.cur, t=edit.side===0 ? dv : -dv;
+    if(parts.length){ const L=layout(E, K);
+      if(L.G.some(h=>(h.wing || h.wingG) && parts.some(p=>p.it.id===h.it.id))) return {ok:false, why:'fit'};
+      if(blockFits(E,K,L,parts,0) && !blockFits(E,K,L,parts,t)) return {ok:false, why:'fit'}; }
+  }
+  return {ok:true};
+}
 // Wandabstand setzen: Wandteile (Block) entlang der Wand, freie Teile entlang
-// der Seitennormalen. Gibt false, wenn der Wert außerhalb [min,max] liegt.
+// der Seitennormalen. Gibt false, wenn der Wert nicht geht (dimCheck).
 function applyDim(E, K, edit, v){
-  if(!(v>=edit.min-0.5 && v<=edit.max+0.5)) return false;
+  if(!dimCheck(E, K, edit, v).ok) return false;
   const dv=v-edit.cur;
   if(edit.ids){
     const delta = edit.side===0 ? dv : -dv;
@@ -7372,6 +7448,22 @@ function applyDim(E, K, edit, v){
   it.x=Math.round((it.x+dot(mv,E.F.u))*10)/10; it.y=Math.round((it.y+dot(mv,E.F.v))*10)/10;
   return true;
 }
+// Eingabe im Maßfeld, rein (ändert nichts, legt nichts auf den Undo-Stapel):
+// {kind:'none'} keine Zahl oder unverändert, 'range' außerhalb [min,max],
+// 'fit' passt dort nicht, 'ok' mit v. Erst danach darf snapshot() laufen.
+function dimInput(E, K, edit, raw){
+  const v=parseFloat(String(raw).replace(',','.'));
+  if(!isFinite(v) || Math.abs(v-edit.cur)<0.5) return {kind:'none'};
+  const r=dimCheck(E, K, edit, v);
+  return r.ok ? {kind:'ok', v} : {kind:r.why};
+}
+// Welches Maß ist gemeint? Das Maß selbst bleibt, seine Zahlen ändern sich:
+// Wandabstand der Kette = Wandecke und Seite, freies Teil = Teil und Richtung.
+const dimKey=edit=>edit.ids ? `w|${edit.fa}|${edit.side}` : `f|${edit.id}|${Math.round(edit.n.x*1000)}|${Math.round(edit.n.y*1000)}`;
+// Bei offenem Maßfeld liest der Klick auf ein anderes Maß seinen Treffer aus den
+// Maßen von vor dem Setzen. Gilt hier: derselbe Treffer, aus den frischen Maßen
+// (hits). null, wenn es ihn nicht mehr gibt.
+function dimResolve(hits, hit){ const k=dimKey(hit.edit); return (hits||[]).find(h=>dimKey(h.edit)===k) || null; }
 
 // ---------- Harte Platzregeln je Teil ----------
 // check() meldet sie rot, fitsAt weist die Stelle ab – beide über dieselben
@@ -9034,7 +9126,7 @@ Object.assign(globalThis.KITCHEN, { /* rest-decke */ });
 //
 Object.assign(globalThis.KITCHEN, { /* rest-eck */ });
 //
-Object.assign(globalThis.KITCHEN, { /* rest-masskette */ });
+Object.assign(globalThis.KITCHEN, { dimCheck, dimInput, dimKey, dimResolve, wallReach, rayPoly, centroid });
 //
 Object.assign(globalThis.KITCHEN, { /* rest-platte */ });
 //
@@ -18838,7 +18930,7 @@ function innerPoint(R){
     if(!TILES.pointInRoom(p,R)) continue; const n=TILES.nearestOnRing(R,p); if(n && n.dist>bd){ bd=n.dist; best=p; } }
   return best;
 }
-const centroidW=R=>({x:R.reduce((s,p)=>s+p.x,0)/R.length, y:R.reduce((s,p)=>s+p.y,0)/R.length});
+const centroidW=KX.centroid;                    // eine Quelle mit dem kitchen-Block
 
 // ---------- Palette ----------
 const ICONS={
@@ -19075,7 +19167,7 @@ function drawChain(c, dpr, LP){
     ctx.restore();
     return;
   }
-  const D=KX.chainDims(c.E, c.L, g); if(!D){ ctx.restore(); return; }
+  const D=KX.chainDims(c.E, c.L, g, c.K); if(!D){ ctx.restore(); return; }
   const Wf=D.Wf, q=D.q, xs=D.xs;
   const P=s=>toScr(KX.wpt(Wf,s,q));
   const a0=P(xs[0]), a1=P(xs[xs.length-1]); ctx.beginPath(); ctx.moveTo(a0.x,a0.y); ctx.lineTo(a1.x,a1.y); ctx.stroke();
@@ -19096,8 +19188,15 @@ function drawChain(c, dpr, LP){
 }
 // Klick auf einen Wandabstand: Eingabefeld darüber, Enter setzt, Esc bricht ab.
 function dimHitAt(d){ return (KS.dimHits||[]).find(h=>d.x>=h.x && d.x<=h.x+h.w && d.y>=h.y && d.y<=h.y+h.h) || null; }
-function openDimEdit(hit){
+let dimEd=null;                                  // offenes Maßfeld: {commit}
+function openDimEdit(hit0){
+  // Ist schon ein Feld offen, zuerst dessen Wert setzen (das rendert neu): der
+  // Treffer kam beim Klick aus den Maßen von vor dem Setzen, danach haben sie
+  // andere Werte und Grenzen. Darum dasselbe Maß frisch lesen, nicht den Treffer.
+  if(dimEd && $('kDimEd')) dimEd.commit();
+  const hit=KX.dimResolve(KS.dimHits, hit0);
   closeDimEdit();
+  if(!hit){ setHint('Dieses Maß gibt es nach der Änderung nicht mehr.'); return; }
   const r=cv.getBoundingClientRect(), k=DPR();
   const inp=document.createElement('input');
   inp.id='kDimEd'; inp.inputMode='decimal'; inp.value=String(Math.round(hit.edit.cur));
@@ -19107,12 +19206,19 @@ function openDimEdit(hit){
   document.body.appendChild(inp); inp.focus(); inp.select();
   let done=false;
   const commit=()=>{ if(done) return; done=true;
-    const v=parseFloat(String(inp.value).replace(',','.')); closeDimEdit();
-    if(!isFinite(v) || Math.abs(v-hit.edit.cur)<0.5) return;
+    const raw=inp.value; closeDimEdit();
     const c=kctx(); if(!c) return;
+    // Erst prüfen, dann snapshot(): ein Wert, der nicht geht, legt nichts auf
+    // den Undo-Stapel (snapshot leert den Redo-Stapel und schiebt bei vollem
+    // Stapel den ältesten Schritt hinaus).
+    const p=KX.dimInput(c.E, c.K, hit.edit, raw);
+    if(p.kind==='none') return;
+    if(p.kind==='range'){ setHint(`Geht nur zwischen ${Math.ceil(hit.edit.min)} und ${Math.floor(hit.edit.max)} mm.`); return; }
+    if(p.kind!=='ok'){ setHint('Dort ist kein Platz: ein Nachbarteil, eine Tür oder die Wand ist im Weg.'); return; }
     snapshot();
-    if(!KX.applyDim(c.E, c.K, hit.edit, v)){ undoStack.pop(); setHint(`Geht nur zwischen ${Math.ceil(hit.edit.min)} und ${Math.floor(hit.edit.max)} mm.`); return; }
-    kitchenSave(); setHint(`Abstand ${Math.round(v)} mm gesetzt · ⌘Z nimmt es zurück`); };
+    KX.applyDim(c.E, c.K, hit.edit, p.v);
+    kitchenSave(); setHint(`Abstand ${Math.round(p.v)} mm gesetzt · ⌘Z nimmt es zurück`); };
+  dimEd={commit};
   inp.onkeydown=e=>{ e.stopPropagation(); if(e.key==='Enter'){ e.preventDefault(); commit(); } else if(e.key==='Escape'){ done=true; closeDimEdit(); } };
   inp.onblur=()=>commit();
   setHint(`Abstand ${hit.edit.wall===false?'zum Nachbarteil':'zur Wand'} eintragen (${Math.ceil(hit.edit.min)}–${Math.floor(hit.edit.max)} mm), Enter setzt, Esc bricht ab`);
@@ -19150,7 +19256,7 @@ function entryAt(c, w){
   const R=14*DPR()/VIEW.s;
   return ms.find(m=>distToSeg(w, m.P, m.Q).d<R || Math.hypot(w.x-m.at.x, w.y-m.at.y)<Math.max(R, 250)) || null;
 }
-function closeDimEdit(){ const e=$('kDimEd'); if(e) e.remove(); }
+function closeDimEdit(){ const e=$('kDimEd'); if(e) e.remove(); dimEd=null; }
 // Wand anklicken (Meldung M-20261109-145224-3ebe3b): bei gewähltem Teil
 // öffnet ein Klick auf eine Wand das Abstandsmaß zu genau dieser Wand.
 // {hit} mit dem gezeichneten Maß, {none:true} bei Wand ohne Maß, sonst null.
@@ -19259,6 +19365,8 @@ let gestureK=null;
 function kitchenDown(e){
   const c=kctx(); if(!c) return false;
   const d=evDev(e), dh=dimHitAt(d);
+  // Der Treffer stammt aus den Maßen von vor diesem Klick; ist ein Maßfeld offen,
+  // setzt openDimEdit dessen Wert zuerst und liest das Maß danach frisch.
   if(dh){ gesture={t:'kdim', moved:false, x0:e.clientX, y0:e.clientY}; setTimeout(()=>openDimEdit(dh)); return true; }
   const w=toWorld(d.x,d.y), hs=hits(c,w);
   if(!hs.length){
@@ -24635,7 +24743,160 @@ globalThis.selfChecks=function(){
     //
     // --- Rest-Fix masskette ---
     try{
-      // TESTS-masskette
+      // Maßkette und Wandabstände (Befunde C1-C7 der Gegenprüfung). Raum 4000 × 3000.
+      const E0=KX.makeEnv(R.pts,R.walls,[],[]);
+      const kl=(Ex,items)=>{ const K=KX.normKitchen({items}), L=KX.layout(Ex,K); return {K,L}; };
+      const chain=(Ex,r,id)=>KX.chainDims(Ex,r.L,r.L.byId.get(id),r.K);
+      const badF=(Ex,r)=>KX.check(Ex,r.K,KX.layout(Ex,r.K)).filter(f=>f.lvl==='bad').map(f=>f.txt);
+      // C1: Block mit dem Hauptteil eines Eckschranks über Eck / diagonal hängt in der Ecke fest
+      [['L',0],['L',1],['diag',0],['diag',1]].forEach(([ct,ce])=>{
+        const r=kl(E0, ce===0 ? [{id:1,kind:'base',corner:true,ctype:ct,hinge:'left',cEnd:0,a:'A',b:'B',x:0,w:900},{id:2,kind:'base',a:'A',b:'B',x:900,w:600}]
+                              : [{id:1,kind:'base',corner:true,ctype:ct,hinge:'left',cEnd:1,a:'A',b:'B',x:3100,w:900},{id:2,kind:'base',a:'A',b:'B',x:2500,w:600}]);
+        const edits=[2,1].flatMap(id=>chain(E0,r,id).segs.filter(s=>s.edit));
+        chk(`kueche-masskette: Eckschrank ${ct==='L'?'über Eck':'diagonal'} in Ecke ${ce?'B':'A'} – Block mit dem Hauptteil ohne Eingabefeld, nichts zu verschieben`,
+          edits.length===0 && badF(E0,r).length===0);
+      });
+      {
+        // Mit Lücke zum Eckschrank bleibt das Feld, begrenzt vom Eckschrank (bündig), und bewegt ihn nicht
+        const r=kl(E0,[{id:1,kind:'base',corner:true,ctype:'L',cEnd:0,a:'A',b:'B',x:0,w:900},{id:3,kind:'base',a:'A',b:'B',x:1500,w:600}]);
+        const last=chain(E0,r,3).segs.find(s=>s.edit);
+        chk('kueche-masskette: Block ohne Eckschrank bleibt verstellbar, bis zum Eckschrank (bündig)',
+          !!last && !last.edit.ids.includes(1) && near(last.edit.cur,1900,0.5) && near(last.edit.max,2500,0.5));
+        // ein altes Feld mit dem Eckschrank im Block (vor dem Fix angeboten) setzt applyDim nicht um
+        const r2=kl(E0,[{id:1,kind:'base',corner:true,ctype:'L',cEnd:0,a:'A',b:'B',x:0,w:900},{id:2,kind:'base',a:'A',b:'B',x:900,w:600}]);
+        const old={ids:[2,1], fa:'A', side:1, cur:2500, min:0, max:2500};
+        chk('kueche-masskette: ein Block mit dem Eckschrank wird auch mit einem alten Feld nicht verschoben',
+          !KX.applyDim(E0,r2.K,old,2000) && r2.K.items[0].x===0 && r2.K.items[1].x===900 && KX.dimCheck(E0,r2.K,old,2000).why==='fit' && badF(E0,r2).length===0);
+      }
+      // C2: der Hochschrank belegt das Hängeschrankband und steht in dessen Zeile
+      {
+        const r=kl(E0,[{id:1,kind:'tall',a:'A',b:'B',x:0,w:600},{id:2,kind:'wall',a:'A',b:'B',x:600,w:600}]);
+        const cd=chain(E0,r,2), s0=cd.segs[0];
+        chk('kueche-masskette: Hängeschrank neben dem Hochschrank – die Kette zeigt ihn als Teil, nicht als Wandabstand ohne Grenze',
+          s0.part===1 && !s0.gap && !s0.edit && !cd.segs.some(s=>s.gap && s.a<600));
+        const r2=kl(E0,[{id:1,kind:'wall',a:'A',b:'B',x:0,w:600},{id:2,kind:'tall',a:'A',b:'B',x:600,w:600}]);
+        const f=chain(E0,r2,2).segs[0];
+        chk('kueche-masskette: Hochschrank neben dem Hängeschrank lässt sich nicht in ihn hineinschieben',
+          !!f.edit && near(f.edit.min,600,0.5) && !KX.applyDim(E0,r2.K,f.edit,0) && r2.K.items[1].x===600 && badF(E0,r2).length===0);
+        // Hochschrank neben Unterschrank: aus der Kette des Hängeschranks heraus nicht in den Unterschrank
+        const r3=kl(E0,[{id:1,kind:'tall',a:'A',b:'B',x:600,w:600},{id:2,kind:'base',a:'A',b:'B',x:1200,w:600},{id:3,kind:'wall',a:'A',b:'B',x:1500,w:600}]);
+        const g=chain(E0,r3,3).segs[0];
+        chk('kueche-masskette: Hochschrank aus der Hängeschrank-Kette – nach links frei, nach rechts am Unterschrank gesperrt',
+          !!g.edit && g.edit.ids.length===1 && g.edit.ids[0]===1 && near(g.edit.min,0,0.5) && near(g.edit.max,g.edit.cur,0.5));
+      }
+      // C3: Querzeile der Nachbarwand und Türen begrenzen die Wandabstände, applyDim prüft mit fitsAt
+      {
+        const c1={id:1,kind:'base',corner:true,front:'door',a:'A',b:'B',x:0,w:1000};
+        const k0=kl(E0,[c1]), x=KX.freeSlot(E0,k0.K,k0.L,{id:2,kind:'base',w:600},KX.wallFrame(E0,'A','D'));
+        const r=kl(E0,[c1,{id:2,kind:'base',a:'A',b:'D',x,w:600}]), f=chain(E0,r,2).segs[0], dEck=r.L.byId.get(1).d;
+        chk('kueche-masskette: Wandabstand an der Nachbarwand – der Eckschrank der Querzeile begrenzt das Feld (bündig an seiner Tiefe)',
+          !!f.edit && near(f.edit.min,dEck,1) && badF(E0,r).length===0);
+        chk('kueche-masskette: der Wert bis an den Eckschrank wird abgelehnt und lässt nichts überlappen, bündig geht',
+          !KX.applyDim(E0,r.K,f.edit,0) && r.K.items[1].x===x && KX.applyDim(E0,r.K,f.edit,f.edit.min) && !badF(E0,r).some(t=>/überlappen/.test(t)));
+        const door={id:'o2',kind:'door',a:'A',b:'B',x:1500,w:900,y:0,h:2000,swing:{type:'turn',hinge:'left',out:false}};
+        const Ed=KX.makeEnv(R.pts,R.walls,[door],[]), rd=kl(Ed,[{id:1,kind:'base',a:'A',b:'B',x:0,w:600}]);
+        const last=chain(Ed,rd,1).segs.find(s=>s.edit);
+        chk('kueche-masskette: Tür an der Wand – das Feld reicht nur bis an die Tür (2500 statt 0)', !!last && near(last.edit.min,2500,1) && near(last.edit.max,3400,0.5));
+        chk('kueche-masskette: Wandabstand vor die Tür wird abgelehnt, bündig neben der Tür geht',
+          !KX.applyDim(Ed,rd.K,last.edit,2000) && rd.K.items[0].x===0 && KX.applyDim(Ed,rd.K,last.edit,2500) && !badF(Ed,rd).some(t=>/vor einer Tür/.test(t)));
+        // ohne K bleiben die weiten Grenzen der Zeile; applyDim prüft trotzdem
+        const wide=KX.chainDims(Ed,rd.L,rd.L.byId.get(1)).segs.find(s=>s.edit);
+        chk('kueche-masskette: applyDim lehnt auch mit weiten Grenzen ab, was nicht passt (Tür im Weg)', !!wide && wide.edit.min===0 && !KX.applyDim(Ed,rd.K,wide.edit,2000) && KX.dimCheck(Ed,rd.K,wide.edit,2000).why==='fit');
+        // Bestand mit Befund: vor der Tür darf der Block weg von dort
+        const rb=kl(Ed,[{id:1,kind:'base',a:'A',b:'B',x:1500,w:600}]), fb=chain(Ed,rb,1).segs[0];
+        chk('kueche-masskette: steht ein Teil schon vor der Tür, darf es per Wandabstand von dort weg',
+          badF(Ed,rb).some(t=>/vor einer Tür/.test(t)) && !!fb.edit && KX.applyDim(Ed,rb.K,fb.edit,500) && !badF(Ed,rb).some(t=>/vor einer Tür/.test(t)));
+        // ohne Hindernis bleiben die Grenzen der Zeile unverändert
+        const ro=kl(E0,[{id:1,kind:'base',a:'A',b:'B',x:1000,w:600}]), fo=chain(E0,ro,1).segs.filter(s=>s.edit);
+        chk('kueche-masskette: ohne Hindernis bleiben die Grenzen wie bisher (0–3400)', fo.length===2 && fo.every(s=>s.edit.min===0 && s.edit.max===3400));
+      }
+      // C4: spitze Ecke – gemessen auf halber Tiefe bis zur Nachbarwand
+      [[60,0],[75,0],[60,1],[90,0],[120,0]].forEach(([deg,endB])=>{
+        const th=deg*Math.PI/180, H=3000*Math.sin(th);
+        const pts=!endB ? [{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:H},{id:'D',x:3000*Math.cos(th),y:H}]
+                        : [{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000-3000*Math.cos(th),y:H},{id:'D',x:0,y:H}];
+        const Ea=KX.makeEnv(pts,[['A','B'],['B','C'],['C','D'],['D','A']],[],[]), Wf=KX.wallFrame(Ea,'A','B');
+        const lo=KX.cornerStop(Ea,Wf,580,endB), x=endB ? Wf.L-Math.ceil(lo)-500-600 : Math.ceil(lo)+500;
+        const r=kl(Ea,[{id:1,kind:'base',a:'A',b:'B',x,w:600}]), cd=chain(Ea,r,1), seg=endB ? cd.segs[cd.segs.length-1] : cd.segs[0];
+        const sEdge=endB ? x+600 : x, hit=TILES.rayToRing(Ea.ring, KX.wpt(Wf,sEdge,290), endB ? Wf.u : {x:-Wf.u.x,y:-Wf.u.y});
+        chk(`kueche-masskette: ${deg}°-Ecke an ${endB?'B':'A'} – erster Wandabstand auf halber Tiefe gemessen (${hit?hit.t.toFixed(1):'?'} mm)`, !!hit && near(seg.b-seg.a, hit.t, 0.2));
+      });
+      {
+        // 60°-Ecke A: die Kette beginnt dort, wo die Nachbarwand die halbe Tiefe schneidet; min des Felds passt dazu
+        const th=Math.PI/3, pts=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:3000*Math.sin(th)},{id:'D',x:3000*Math.cos(th),y:3000*Math.sin(th)}];
+        const Ea=KX.makeEnv(pts,[['A','B'],['B','C'],['C','D'],['D','A']],[],[]), Wf=KX.wallFrame(Ea,'A','B');
+        const r=kl(Ea,[{id:1,kind:'base',a:'A',b:'B',x:835,w:600}]), cd=chain(Ea,r,1), e=cd.segs[0].edit;
+        chk('kueche-masskette: 60°-Ecke – x0 = 290·cot 60° (167,4), Feld ab Frontkante an der Nachbarwand (min = cornerStop − x0)',
+          near(cd.x0,290/Math.tan(th),0.1) && !!e && near(e.min, KX.cornerStop(Ea,Wf,580,0)-cd.x0, 0.1) && near(KX.wallReach(Ea,Wf,0,290),-cd.x0,1e-9));
+        // Bestand vor der Reichweite (Teil schon bei s=100): keine Scheinlücke davor
+        const rv=kl(Ea,[{id:1,kind:'base',a:'A',b:'B',x:100,w:600}]), cv_=chain(Ea,rv,1);
+        chk('kueche-masskette: 60°-Ecke, Teil vor der Reichweite – Kette beginnt am Teil, keine Scheinlücke', cv_.segs[0].part===1 && cv_.x0<=100);
+      }
+      {
+        // 90° und 120° wie bisher
+        const E90=KX.makeEnv(R.pts,R.walls,[],[]), W90=KX.wallFrame(E90,'A','B');
+        chk('kueche-masskette: rechtwinklige Ecke – Reichweite 0', KX.wallReach(E90,W90,0,290)===0 && KX.wallReach(E90,W90,1,290)===0);
+        const th=2*Math.PI/3, pts=[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:3000*Math.sin(th)},{id:'D',x:3000*Math.cos(th),y:3000*Math.sin(th)}];
+        const E120=KX.makeEnv(pts,[['A','B'],['B','C'],['C','D'],['D','A']],[],[]);
+        chk('kueche-masskette: stumpfe Ecke (120°) – Reichweite 167,4 über das Wandende hinaus', near(KX.wallReach(E120,KX.wallFrame(E120,'A','B'),0,290),290/Math.tan(Math.PI/3),0.1));
+      }
+      // C5 / C6: Maßfeld – welcher Treffer gilt, Eingabe prüfen vor snapshot()
+      {
+        const r=kl(E0,[{id:1,kind:'base',a:'A',b:'B',x:1000,w:600}]), segs0=chain(E0,r,1).segs.filter(s=>s.edit);
+        const hA={edit:segs0[0].edit}, hB={edit:segs0[1].edit};   // die Treffer beim Klick auf B
+        chk('kueche-masskette: Maßfeld – derselbe Treffer behält seinen Schlüssel, die Zahlen ändern sich nicht dessen Identität',
+          KX.dimKey(hA.edit)!==KX.dimKey(hB.edit) && KX.dimKey({...hB.edit,cur:1,min:2,max:3})===KX.dimKey(hB.edit));
+        // Feld A war offen (500 getippt) und wird beim Klick auf B gesetzt: A läuft vor B.
+        const pA=KX.dimInput(E0,r.K,hA.edit,'500'); KX.applyDim(E0,r.K,hA.edit,pA.v);
+        const fresh=KX.layout(E0,r.K), segs1=KX.chainDims(E0,fresh,fresh.byId.get(1),r.K).segs.filter(s=>s.edit).map(s=>({edit:s.edit}));
+        const hB2=KX.dimResolve(segs1,hB);
+        chk('kueche-masskette: Klick auf B bei offenem Feld A – B kommt mit frischen Werten (2900, nicht 2400)', !!hB2 && hB2.edit.cur===2900 && hB.edit.cur===2400);
+        KX.applyDim(E0,r.K,hB2.edit,KX.dimInput(E0,r.K,hB2.edit,'1000').v);
+        chk('kueche-masskette: … und 1000 eingegeben ergibt rechts genau 1000 (alter Treffer: 1500)', near(4000-(r.K.items[0].x+600),1000,0.5));
+        const rs=kl(E0,[{id:1,kind:'base',a:'A',b:'B',x:1000,w:600}]);
+        KX.applyDim(E0,rs.K,hA.edit,500); KX.applyDim(E0,rs.K,hB.edit,1000);
+        chk('kueche-masskette: mit dem alten Treffer wäre es rechts 1500 geworden (Beleg für den Fehler)', near(4000-(rs.K.items[0].x+600),1500,0.5));
+        chk('kueche-masskette: Maß, das es nicht mehr gibt – kein Treffer', KX.dimResolve([],hB)===null && KX.dimResolve(segs1.filter(s=>s.edit.side===0),hB)===null);
+        // freie Teile: Teil und Richtung
+        const rf=kl(E0,[{id:1,kind:'island',x:2000,y:1500,rot:0,w:1800,d:900}]), fd=KX.freeDims(E0,rf.L,rf.L.byId.get(1)), keys=fd.map(d=>KX.dimKey(d.edit));
+        chk('kueche-masskette: freies Teil – je Seite ein eigener Schlüssel', new Set(keys).size===4 && KX.dimKey({...fd[0].edit,cur:5})===keys[0]);
+      }
+      {
+        const r=kl(E0,[{id:1,kind:'base',a:'A',b:'B',x:1000,w:600}]), e=chain(E0,r,1).segs.find(s=>s.edit).edit, j0=JSON.stringify(r.K);
+        const k=raw=>KX.dimInput(E0,r.K,e,raw).kind;
+        chk('kueche-masskette: Eingabe – keine Zahl, leer, unverändert: nichts zu tun', k('abc')==='none' && k('')==='none' && k('1000')==='none' && k('1000,3')==='none');
+        chk('kueche-masskette: Eingabe – außerhalb [min,max] und negativ: Hinweis, kein Setzen', k('9999')==='range' && k('-5')==='range' && k('3401')==='range');
+        const ok=KX.dimInput(E0,r.K,e,'1250,5');
+        chk('kueche-masskette: Eingabe – gültig mit Komma, Wert gelesen', ok.kind==='ok' && ok.v===1250.5);
+        chk('kueche-masskette: Eingabe prüft nur – der Stand bleibt unverändert (erst danach snapshot)', JSON.stringify(r.K)===j0);
+        const door={id:'o2',kind:'door',a:'A',b:'B',x:1500,w:900,y:0,h:2000,swing:{type:'turn',hinge:'left',out:false}};
+        const Ed=KX.makeEnv(R.pts,R.walls,[door],[]), rd=kl(Ed,[{id:1,kind:'base',a:'A',b:'B',x:0,w:600}]);
+        const wide=KX.chainDims(Ed,rd.L,rd.L.byId.get(1)).segs.find(s=>s.edit).edit;
+        chk('kueche-masskette: Eingabe – im Bereich, aber nicht passend: „fit“ statt Setzen', KX.dimInput(Ed,rd.K,wide,'2000').kind==='fit' && KX.dimInput(Ed,rd.K,wide,'3000').kind==='ok');
+      }
+      // C7: rayPoly teilt die Schnittformel mit TL.rayToRing (Mindestabstand als Parameter), centroid mit kitchen-ui
+      {
+        let seed=12345; const rnd=()=>{ seed=(seed*1103515245+12345)%2147483648; return seed/2147483648; };
+        const ref=(p,d,poly)=>{ let best=null; for(let i=0;i<poly.length;i++){ const a=poly[i], b=poly[(i+1)%poly.length], e={x:b.x-a.x,y:b.y-a.y}, den=d.x*e.y-d.y*e.x;
+            if(Math.abs(den)<1e-12) continue; const t=((a.x-p.x)*e.y-(a.y-p.y)*e.x)/den, u=((a.x-p.x)*d.y-(a.y-p.y)*d.x)/den;
+            if(t>1e-6 && u>=-1e-9 && u<=1+1e-9 && (best==null || t<best)) best=t; } return best; };
+        let same=true, hits=0;
+        for(let n=0;n<400;n++){
+          const w=100+rnd()*900, h=100+rnd()*900, ox=(rnd()-0.5)*2000, oy=(rnd()-0.5)*2000, a=rnd()*Math.PI*2;
+          const poly=[{x:0,y:0},{x:w,y:0},{x:w,y:h},{x:0,y:h}].map(q=>({x:ox+q.x*Math.cos(a)-q.y*Math.sin(a), y:oy+q.x*Math.sin(a)+q.y*Math.cos(a)}));
+          const p={x:(rnd()-0.5)*3000,y:(rnd()-0.5)*3000}, c0=KX.centroid(poly), t=Math.atan2(c0.y-p.y,c0.x-p.x)+(rnd()-0.5)*0.5, d={x:Math.cos(t),y:Math.sin(t)};   // meist auf das Teil gerichtet
+          const x=KX.rayPoly(p,d,poly), y=ref(p,d,poly);
+          if(!(x===y || (x!=null && y!=null && Math.abs(x-y)<1e-9))) same=false;
+          if(x!=null) hits++;
+        }
+        chk('kueche-masskette: rayPoly rechnet wie die frühere eigene Schnittformel (400 Strahlen, '+hits+' Treffer)', same && hits>200);
+        const sq=[{x:0.5,y:-1},{x:2,y:-1},{x:2,y:1},{x:0.5,y:1}], inn={x:1.5,y:0}, dx={x:1,y:0};   // Start 0,5 mm vor der rechten Kante
+        chk('kueche-masskette: Mindestabstand – ein Teil 0,5 mm vor dem Start zählt (rayPoly), die Wand erst ab 1 mm (Standard)',
+          near(KX.rayPoly(inn,dx,sq),0.5,1e-9) && TILES.rayToRing(sq,inn,dx)===null && near(TILES.rayToRing(sq,inn,dx,1e-6).t,0.5,1e-9));
+        chk('kueche-masskette: TL.rayToRing ohne Parameter wie bisher (ab 1 mm, mit Auftreffpunkt q)', (()=>{ const r=TILES.rayToRing(sq,{x:-5,y:0},dx); return r && near(r.t,5.5,1e-9) && near(r.q.x,0.5,1e-9); })());
+        const P=[{x:0,y:0},{x:4,y:0},{x:4,y:2},{x:0,y:2}], c=KX.centroid(P);
+        chk('kueche-masskette: centroid ist der Eckenmittelwert, eine Quelle für kitchen und kitchen-ui', near(c.x,2,1e-12) && near(c.y,1,1e-12));
+      }
     }catch(err){ chk('kueche: Rest-Fix masskette ohne Ausnahme ('+err.message+')', false); }
     //
     // --- Rest-Fix platte ---
