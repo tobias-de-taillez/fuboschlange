@@ -212,24 +212,6 @@
   .dlghead{display:flex;align-items:center;gap:8px;padding:12px 12px 10px 16px;border-bottom:1px solid var(--line2)}
   .dlghead h2{font-size:13px;font-weight:600;margin:0;flex:1}
   .dlghead .ib{width:28px;height:28px}
-  #libbox{width:560px;display:flex;flex-direction:column;overflow:hidden}
-  #libnote{font-size:12px;color:var(--muted);padding:8px 16px 4px}
-  #liblist{padding:4px 8px 10px;overflow-y:auto;min-height:0}
-  .librow{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:4px;cursor:pointer}
-  .librow:hover{background:var(--hover)}
-  .librow .nm{flex:1;min-width:0}
-  .librow .nm b{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .librow .nm small{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
-  .librow.cur .nm b{color:var(--accent)}
-  /* Aktionen erst beim Ueberfahren (oder Tastaturfokus) - sonst stuenden
-     drei Knoepfe in jeder Zeile. */
-  .librow .acts{display:flex;gap:2px;visibility:hidden}
-  .librow:hover .acts,.librow:focus-within .acts{visibility:visible}
-  .librow button{min-height:24px;padding:0 7px;font-size:12px;flex:none;border:0;background:none;color:var(--ink2)}
-  .librow button:hover{background:var(--surface);color:var(--ink)}
-  .librow .del2:hover{color:var(--bad)}
-  .librow .del2.arm{background:var(--bad);color:#fff}
-  .libedit{font-weight:600;width:100%;padding:2px 5px;border:1px solid var(--accent);border-radius:4px;background:#fff;outline:none}
   #qrbox{padding-bottom:12px;text-align:center;width:340px}
   #qrcv{margin:12px auto 6px;display:block;image-rendering:pixelated;max-width:100%;height:auto}
   #qrnote{font-size:12px;color:var(--muted);padding:0 16px}
@@ -1085,17 +1067,6 @@
 
 <div id="tip" hidden></div>
 <div id="toast" role="status"></div>
-<div id="libwrap" class="scrim" hidden>
-  <div id="libbox" class="dlg" role="dialog" aria-label="Räume">
-    <div id="libhead" class="dlghead">
-      <h2>Räume</h2>
-      <button id="libnew">Neuer Raum</button>
-      <button id="libclose" class="ib" aria-label="Schließen" title="Schließen (Esc)"><svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
-    </div>
-    <div id="libnote">Räume liegen nur in diesem Browser. Wichtige Aufmaße zusätzlich als Datei sichern.</div>
-    <div id="liblist"></div>
-  </div>
-</div>
 <div id="qrwrap" class="scrim" hidden>
   <div id="qrbox" class="dlg" role="dialog" aria-label="QR-Code">
     <div id="qrhead" class="dlghead"><h2>Raum als QR-Code</h2><button id="qrclose" class="ib" aria-label="Schließen" title="Schließen (Esc)"><svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg></button></div>
@@ -9870,10 +9841,6 @@ function renameCurrentRoom(){
   inp.addEventListener('blur',()=>done(true));
 }
 $('roomname').onclick=renameCurrentRoom;
-// Neuer Raum ohne Dialog: er heisst erst einmal so, der Name ist sofort
-// zum Ueberschreiben markiert.
-function newRoomInline(){ closeLib(); newRoom('Neuer Raum'); renameCurrentRoom(); }
-
 // ================= Raum-Menue =================
 // Alles, was man pro Raum einmal tut (oeffnen, sichern, teilen, spiegeln,
 // leeren), wohnt hier statt dauerhaft in der Leiste.
@@ -9895,78 +9862,6 @@ $('roommenu').addEventListener('keydown',e=>{
     items[(i+(e.key==='ArrowDown'?1:-1)+items.length)%items.length].focus();
   } else if(e.key==='Escape'){ e.preventDefault(); e.stopPropagation(); openRoomMenu(false); $('roommenuBtn').focus(); }
 });
-
-// ================= Bibliothek (Overlay) =================
-const fmtDate=iso=>{
-  const d=new Date(iso);
-  return isFinite(d) ? d.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'}) : '';
-};
-function renderLib(){
-  const list=STORE.list();
-  const el=$('liblist');
-  if(!list.length){ el.innerHTML='<div style="padding:14px 8px;color:var(--muted);font-size:12px">Noch keine Räume.</div>'; return; }
-  const heute=new Date().toDateString();
-  const wann=iso=>{ const d=new Date(iso); return !isFinite(d) ? '' : d.toDateString()===heute
-    ? 'heute '+d.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}) : fmtDate(iso); };
-  el.innerHTML=list.map(r=>
-    `<div class="librow${r.id===currentRoom?' cur':''}" data-id="${r.id}">
-       <div class="nm"><b>${escapeHtml(r.name)}</b>
-         <small>${wann(r.updated)}${r.area!=null?` · ${fmt2(r.area)} m²`:''}</small></div>
-       <span class="acts">
-         <button class="ren">Umbenennen</button>
-         <button class="exp2">Als Datei sichern</button>
-         <button class="del2">Löschen</button>
-       </span>
-     </div>`).join('');
-  el.querySelectorAll('.librow').forEach(row=>{
-    const id=row.dataset.id;
-    row.onclick=e=>{
-      if(e.target.closest('button,input')) return;   // Aktionen nicht als "oeffnen" werten
-      openRoom(id); closeLib();
-    };
-    // Umbenennen in der Zeile: Enter oder Wegklicken uebernimmt, Esc verwirft.
-    row.querySelector('.ren').onclick=()=>{
-      const b=row.querySelector('.nm b'), r=STORE.load(id);
-      const inp=document.createElement('input');
-      inp.className='libedit'; inp.value=r?r.name:''; b.replaceWith(inp); inp.focus(); inp.select();
-      let fertig=false;
-      const done=ok=>{
-        if(fertig) return; fertig=true;
-        const v=inp.value.trim();
-        if(ok && v){ STORE.rename(id,v); if(id===currentRoom) currentRoomName=v; loadNeighbors(); render(); }
-        renderLib();
-      };
-      inp.addEventListener('keydown',e=>{ e.stopPropagation(); if(e.key==='Enter') done(true); else if(e.key==='Escape') done(false); });
-      inp.addEventListener('blur',()=>done(true));
-    };
-    row.querySelector('.exp2').onclick=()=>exportRoomAsFile(id);
-    // Loeschen ist hier endgueltig (kein Rueckgaengig): zweimal klicken.
-    const del=row.querySelector('.del2');
-    del.onclick=()=>{
-      if(!del.classList.contains('arm')){
-        del.classList.add('arm'); del.textContent='Wirklich löschen?';
-        setTimeout(()=>{ del.classList.remove('arm'); del.textContent='Löschen'; },4000);
-        return;
-      }
-      STORE.remove(id);
-      if(id===currentRoom){
-        const l=STORE.list();
-        if(l.length) openRoom(l[0].id); else newRoom('Neuer Raum');
-      } else {
-        // Ein geloeschter Nachbar darf nicht als Geist im Plan stehen
-        // bleiben - die Liste wird sonst erst beim naechsten Raumwechsel neu
-        // gelesen.
-        loadNeighbors(); render();
-      }
-      renderLib();
-    };
-  });
-}
-function openLib(){ renderLib(); $('libwrap').hidden=false; }
-function closeLib(){ $('libwrap').hidden=true; }
-$('libclose').onclick=closeLib;
-$('libnew').onclick=newRoomInline;
-$('libwrap').addEventListener('pointerdown',e=>{ if(e.target===$('libwrap')) closeLib(); });
 
 // Die Hotkeys sind auf window gebunden, damit sie ueberall wirken - aber
 // genau deshalb bubbelt auch ein Tastendruck in einem Eingabefeld bis
@@ -10009,8 +9904,8 @@ addEventListener('keydown',e=>{
   const mod=e.ctrlKey||e.metaKey, k=e.key.toLowerCase();
   // Raeume, QR-Code und Kuerzel-Uebersicht sind modal: dahinter darf keine
   // Taste etwas veraendern, was man nicht sieht. Esc schliesst, ? auch.
-  if(!$('libwrap').hidden || !$('qrwrap').hidden || !$('keyswrap').hidden || !$('helpwrap').hidden){
-    if(e.key==='Escape'){ hidePop(); if(closeKeys()) return; if(closeHelp()) return; if(!$('qrwrap').hidden){ $('qrwrap').hidden=true; return; } closeLib(); }
+  if(!$('qrwrap').hidden || !$('keyswrap').hidden || !$('helpwrap').hidden){
+    if(e.key==='Escape'){ hidePop(); if(closeKeys()) return; if(closeHelp()) return; if(!$('qrwrap').hidden){ $('qrwrap').hidden=true; return; } }
     else if((e.key==='?' || k==='h') && !$('helpwrap').hidden) toggleHelp();
     return;
   }
@@ -10044,7 +9939,6 @@ addEventListener('keydown',e=>{
     if(!$('roommenu').hidden){ openRoomMenu(false); return; }
     if(typeof closeKeys==='function' && closeKeys()) return;
     if(!$('qrwrap').hidden){ $('qrwrap').hidden=true; return; }
-    if(!$('libwrap').hidden){ closeLib(); return; }
     if(wpopPair){ closeWallPopup(); return; }
     if(OUT.on){ closeOut(); render(); return; }
     if(!$('entry').hidden){ closeEntry(); return; }   // auch Hoehe, Oeffnungslage, Querstrecke
