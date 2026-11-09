@@ -532,15 +532,21 @@
   body.kitchenmode.kana #cv{width:54%;right:auto}
   body.kitchenmode.kana #kAna{display:block}
   body.kitchenmode.kana #cv3d, body.kitchenmode.kana #k3dMsg{display:none}
+  /* In der Analyse rechts nur, was sie braucht: Auswahl (Inhalte) und Prüfung (Gang, Dreieck).
+     Küchenmaße, Stückliste und "Alle entfernen" gehören zum Planen (M-20261109-160341-3d3671). */
+  body.kitchenmode.kana #kSpecBox, body.kitchenmode.kana #kStockBox, body.kitchenmode.kana #kEnd{display:none}
   #kAna h4{margin:16px 0 6px;font-size:12px;font-weight:600;color:var(--ink2);display:flex;align-items:baseline;gap:8px}
   #kAna h4 small{font-weight:400;color:var(--muted)}
   #kAna h4 .seg{margin-left:auto}
-  .ka-head{display:flex;gap:12px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap}
   .ka-big{font-size:26px;font-weight:600;line-height:1.1}
   .ka-big small{font-size:12px;font-weight:400;color:var(--muted)}
   .ka-sub{font-size:12px;color:var(--ink2)}
-  .ka-ctl{display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:flex-end}
+  /* Zwei Gruppen statt einer Knopfreihe: links die Annahmen der Rechnung, rechts Ansicht/Vergleich */
+  .ka-ctl{display:flex;flex-wrap:wrap;gap:8px 20px;align-items:center;margin-top:10px}
+  .ka-grp{display:flex;gap:6px;align-items:center}
   .ka-ctl label{font-size:12px;color:var(--ink2)}
+  #kAna summary.ka-sum{margin:16px 0 6px;font-size:12px;font-weight:600;color:var(--ink2);cursor:pointer}
+  #kAna summary.ka-sum small{font-weight:400;color:var(--muted);margin-left:6px}
   .ka-bars{display:grid;grid-template-columns:auto 1fr auto;gap:3px 8px;align-items:center;font-size:12px}
   .ka-bars .lb{white-space:nowrap;cursor:pointer}
   .ka-bars .lb.on{font-weight:600}
@@ -576,7 +582,9 @@
   .kpg>span{font-size:9px;line-height:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);padding-left:3px;pointer-events:none;white-space:nowrap}
   .kpg>div{display:flex;gap:1px}
   /* Schmale Bildschirme (MacBook 1440): Tastenkürzel stehen im Tooltip */
-  @media (max-width:1500px){ .tg[data-for~=kitchen] .tb kbd{display:none} }
+  @media (max-width:1500px){ .tg[data-for~=kitchen] .tb kbd{display:none}
+    /* sonst ragt "Analyse" bei 1440 px 13 px aus der Leiste */
+    .tg[data-for~=kitchen] .tb.tog{padding-left:6px;padding-right:6px} }
   .kpal{padding:0 1px;cursor:grab;touch-action:none;color:var(--ink2);min-height:0;height:28px}
   .kpal svg{width:27px;height:24px;display:block;fill:none;stroke:currentColor;stroke-width:1.3;stroke-linejoin:round;stroke-linecap:round}
   .kpal:hover{color:var(--ink)}
@@ -588,6 +596,7 @@
   #kSpecBox[open] summary{margin-bottom:10px}
   #kEmpty{font-size:12px;color:var(--ink2);margin:10px 0 0;line-height:1.5}
   #kitchensec>div{margin-top:12px}
+  #kSpecBox{margin:16px 0 6px}
   #kitchensec h3 button{min-height:22px;padding:0 6px;font-size:12px}
   .krow{display:flex;align-items:center;gap:6px;margin:6px 0;font-size:12px;flex-wrap:wrap}
   .krow>label{min-width:62px;color:var(--ink2)}
@@ -939,12 +948,6 @@
         <div id="tEnd"><button id="tClear" title="Zweimal klicken: der erste Klick fragt nach">Alle Fliesen entfernen</button></div>
       </section>
       <section id="kitchensec" hidden>
-        <details id="kSpecBox">
-          <summary><b>Küchenmaße</b><span id="kSpecSum"></span><span class="ed">ändern</span></summary>
-          <div class="tgrid" id="kSpecGrid"></div>
-          <p class="tnote">Standard nach nobilia/Neff: Sockel 15, Korpus 72, Platte 4 cm, Tiefe mit Front 58 cm. Hängeschränke schließen oben mit den Hochschränken ab. Armatur: Höhe über der Platte (für den Fensterflügel).</p>
-          <div class="trow"><button id="kSpecReset">Standard</button></div>
-        </details>
         <p id="kEmpty"></p>
         <div id="kSelBox" hidden>
           <h3><span id="kSelInfo"></span><button id="kSelX" aria-label="Auswahl aufheben" title="Auswahl aufheben (Esc)">✕</button></h3>
@@ -953,6 +956,13 @@
         </div>
         <div id="kCheckBox"><h3>Prüfung <small id="kCheckCount"></small></h3><div id="kChecks"></div></div>
         <div id="kWayBox"><h3>Wege <small id="kWaySum"></small></h3><div id="kWays"></div><div id="kSugg"></div></div>
+        <!-- Meldung M-20261109-160341-3d3671: einmal eingestellt, selten geaendert - daher unten bei der Stueckliste statt ueber der Auswahl -->
+        <details id="kSpecBox">
+          <summary><b>Küchenmaße</b><span id="kSpecSum"></span><span class="ed">ändern</span></summary>
+          <div class="tgrid" id="kSpecGrid"></div>
+          <p class="tnote">Standard nach nobilia/Neff: Sockel 15, Korpus 72, Platte 4 cm, Tiefe mit Front 58 cm. Hängeschränke schließen oben mit den Hochschränken ab. Armatur: Höhe über der Platte (für den Fensterflügel).</p>
+          <div class="trow"><button id="kSpecReset">Standard</button></div>
+        </details>
         <details id="kStockBox"><summary>Stückliste</summary><div id="kStock"></div></details>
         <div id="kEnd"><button id="kClear" title="Zweimal klicken: der erste Klick fragt nach">Alle Küchenteile entfernen</button></div>
       </section>
@@ -18651,7 +18661,7 @@ function dimSpec(c, it, widths){
     opts: tbl ? [700,800,900,1000,1100,1200] : it.kind==='island' ? uniq([600,900,1000,1200,std.d]) : it.kind==='wall' ? uniq([300,350,std.d,400]) : uniq([std.d]),
     tip: tbl ? 'Abstand zwischen zwei Gegenübersitzenden' : fz ? 'Tiefe samt Tür, wie im Datenblatt' : 'Tiefe mit Front, ab Wand'});
   F.push({id:'kH', key:'h', label:'Höhe', val:H, std:Hs, lim:[100,3000],
-    ro: it.kind==='base' ? `Arbeitshöhe ${Math.round(H)} aus den Küchenmaßen – oben unter „ändern“ einstellen` : null,
+    ro: it.kind==='base' ? `Arbeitshöhe ${Math.round(H)} aus den Küchenmaßen – unten unter „Küchenmaße“ einstellen` : null,
     opts: tbl ? [720,750,900,1050] : it.kind==='wall' ? uniq([360,576,Hs,900]) : it.kind==='tall' && !fz ? uniq([1440,1800,Hs,2232]) : fz && fz.single ? uniq([1760,Hs,2030]) : it.kind==='island' ? uniq([Hs,950,1050]) : uniq([Hs]),
     tip: tbl ? 'Tischhöhe (Esstisch 720–750, Bar 1050)' : 'Höhe ab Boden'});
   if(it.kind==='wall') F.push({id:'kZ', key:'z', label:'Unterkante', val:cur.z0, std:std.z0, lim:[0,3000], opts:uniq([std.z0, std.z0-100, std.z0+100]),
@@ -19108,13 +19118,16 @@ function renderAna(c){
   if(KS.anaKey===key) return;
   KS.anaKey=key;
   const ref=KS.ref;
-  let h=`<div class="ka-head"><div><div class="ka-big">${fmtKm(R.kmYear)} <small>km/Jahr</small></div>`
-    +`<div class="ka-sub">${R.complete} von ${R.flows.length} Abläufen vollständig${ref?` · Referenz ${fmtKm(ref.kmYear)} (${fmtD(R.kmYear-ref.kmYear)})`:''}${kid?` · mit Kind im Weg ${fmtKm(kid.R.kmYear)} (${fmtD(kid.R.kmYear-R.kmYear)})${kid.R.flows.some(f=>f.blocked)?', Weg gesperrt':''}`:''}</div></div>`
-    +`<div class="ka-ctl"><label>Personen</label><div class="seg">${[1,2,3].map(n=>`<button data-pers="${n}" aria-pressed="${persons===n}" title="${n===1?'Eine Person kocht':n+' Personen gleichzeitig: Gang nach NKBA mind. 1219 mm, Begegnungen unten'}">${n}</button>`).join('')}</div>`
-    +`<button class="tog" data-kid aria-pressed="${KS.kid}" title="Ein Kind steht am meistbelaufenen Punkt (Heatmap-Spitze): wie viel länger werden die Wege, wird einer gesperrt?">Kind im Weg</button>`
-    +`<button class="tog" data-heat aria-pressed="${KS.heat}" title="Heatmap im Plan: wo wie oft gelaufen wird">Heatmap <span class="ka-heatlg"></span></button>`
+  // Kopf: Summe, darunter nur, was vom Normalfall abweicht (unvollständig, Referenz, Kind).
+  const sub=[R.complete<R.flows.length ? `${R.complete} von ${R.flows.length} Abläufen vollständig` : '',
+    ref ? `Referenz ${fmtKm(ref.kmYear)} (${fmtD(R.kmYear-ref.kmYear)})` : '',
+    kid ? `mit Kind im Weg ${fmtKm(kid.R.kmYear)} (${fmtD(kid.R.kmYear-R.kmYear)})${kid.R.flows.some(f=>f.blocked)?', Weg gesperrt':''}` : ''].filter(Boolean).join(' · ');
+  let h=`<div class="ka-head"><div class="ka-big">${fmtKm(R.kmYear)} <small>km/Jahr</small></div>${sub?`<div class="ka-sub">${sub}</div>`:''}</div>`
+    +`<div class="ka-ctl"><span class="ka-grp" title="Annahmen der Rechnung"><label>Personen</label><div class="seg">${[1,2,3].map(n=>`<button data-pers="${n}" aria-pressed="${persons===n}" title="${n===1?'Eine Person kocht':n+' Personen gleichzeitig: Gang nach NKBA mind. 1219 mm, Begegnungen unten'}">${n}</button>`).join('')}</div>`
+    +`<button class="tog" data-kid aria-pressed="${KS.kid}" title="Ein Kind steht am meistbelaufenen Punkt (Heatmap-Spitze): wie viel länger werden die Wege, wird einer gesperrt?">Kind im Weg</button></span>`
+    +`<span class="ka-grp"><button class="tog" data-heat aria-pressed="${KS.heat}" title="Heatmap im Plan: wo wie oft gelaufen wird">Heatmap <span class="ka-heatlg"></span></button>`
     +(ref?`<button data-ref="0" title="Vergleich beenden">Referenz löschen</button>`:`<button data-ref="1" title="Jetzigen Stand merken; danach zeigen Balken und Summe den Unterschied">Referenz merken</button>`)
-    +`</div></div>`;
+    +`</span></div>`;
   // 1. Abläufe im Vergleich
   const mode=KS.anaMode, val=f=>mode==='week' ? f.week*52/1e6 : f.m/1000;
   const rows=R.flows.filter(f=>f.complete).sort((p,q)=>val(q)-val(p) || (p.key<q.key?-1:1));
@@ -19128,22 +19141,10 @@ function renderAna(c){
         +`<span class="vl">${mode==='week'?fmtKm(v):fmtKm(v)+' m'}${r!=null&&Math.abs(v-r)>=0.05?` <em>${fmtD(v-r)}</em>`:''}</span>`; }).join('')}</div>`
       +`<div class="ka-legend">${Object.entries(KX.GROUPS).map(([k,l])=>`<span><i style="background:${KINK.grp[k]}"></i>${l}</span>`).join('')}${ref?'<span><i style="background:var(--ink);width:2px"></i>Referenz</span>':''}</div>`;
   } else h+=`<p class="ka-note">Noch kein Ablauf vollständig – unten steht, was fehlt.</p>`;
-  // 2. Was steht wo – Stationen × Abläufe
-  const roles=[]; KX.FLOWS.forEach(F=>F.chains.flat().forEach(r=>{ if(!roles.includes(r)) roles.push(r); }));
-  const order=['eingang','tisch','sink','dw','hob','kuehl','prep'];
-  roles.sort((a,b)=>{ const ia=order.indexOf(a), ib=order.indexOf(b); return (ia<0?99:ia)-(ib<0?99:ib) || (KX.ROLE_LABEL[a]||a).localeCompare(KX.ROLE_LABEL[b]||b,'de'); });
   const St=R.stations, nmId=id=>{ const t=c.K.items.find(x=>x.id===id); return t?nm(t):''; };
-  const missN=roles.filter(r=>!(St[r]||[]).length).length;
-  h+=`<h4>Was steht wo <small>${missN?`${missN} fehlt${missN>1?'en':''}`:'alles gesetzt'} · Inhalte rechts am Schrank wählen</small></h4>`;
-  h+=`<table class="ka-mx"><thead><tr><th></th><th></th>${KX.FLOWS.map(F=>`<th class="v" title="${escapeHtml(F.label)}">${escapeHtml(FSHORT[F.key]||F.label)}</th>`).join('')}</tr></thead><tbody>`
-    +roles.map(r=>{ const at=St[r]||[], miss=!at.length;
-      const where = miss ? 'fehlt' : r==='eingang' ? 'Tür' : [...new Set(at.map(x=>x.id).filter(x=>x!=null).map(nmId))].join(', ');
-      return `<tr><td class="r">${escapeHtml(KX.ROLE_LABEL[r]||r)}</td><td class="w${miss?' miss':''}" title="${escapeHtml(where)}">${escapeHtml(where)}</td>`
-        +KX.FLOWS.map(F=>F.chains.flat().includes(r) ? `<td><span class="ka-dot${miss?' miss':''}" title="${escapeHtml(F.label)} braucht ${escapeHtml(KX.ROLE_LABEL[r]||r)}${miss?' – fehlt':''}"></span></td>` : '<td></td>').join('')+'</tr>'; }).join('')
-    +`</tbody></table>`;
-  // 3. Verschieben und optimieren
-  h+=`<h4>Verschieben und vergleichen${it?` <small>${escapeHtml(nm(it))}</small>`:''}</h4>`;
-  if(!it) h+=`<p class="ka-note">Ein Teil im Plan wählen: die Kurve zeigt km/Jahr für jede Lage, an der es Platz hat. Klick in die Kurve setzt es dorthin.</p>`;
+  // 2. Verschieben und optimieren
+  h+=`<h4 title="Gerechnet, nicht geschätzt: feste Schritte, bei Gleichstand die Lage nächst der jetzigen – dieselbe Küche ergibt immer dasselbe Optimum.">Verschieben und vergleichen${it?` <small>${escapeHtml(nm(it))}</small>`:''}</h4>`;
+  if(!it) h+=`<p class="ka-note">Ein Teil im Plan wählen: die Kurve zeigt km/Jahr für jede Lage, an der es Platz hat.</p>`;
   else if(it.corner) h+=`<p class="ka-note">Eckschränke bleiben in ihrer Ecke.</p>`;
   else if(sw==='pending' || !sw) h+=`<p class="ka-note">Rechne …</p>`;
   else {
@@ -19158,16 +19159,30 @@ function renderAna(c){
     const sws=(sw.swaps||[]).filter(x=>x.ok && x.d<-0.05).slice(0,3);
     if(sws.length) h+=sws.map(x=>`<div class="ka-row"><span>Platz tauschen mit ${escapeHtml(nmId(x.with))}: ${fmtKm(x.km)} km/Jahr (${fmtD(x.d)})</span><button data-swap="${x.with}">Tauschen</button></div>`).join('');
     else if(sw.swaps && sw.swaps.length) h+=`<p class="ka-note">Tauschen mit gleich breiten Teilen bringt nichts.</p>`;
-    h+=`<p class="ka-note">Gerechnet, nicht geschätzt: feste Schritte, bei Gleichstand die Lage nächst der jetzigen – dieselbe Küche ergibt immer dasselbe Optimum. Das Optimum bringt keinen neuen Befund in der Prüfung und versperrt keinen Weg.${KS.kid?' Mit Kind im Weg gerechnet.':''}</p>`;
+    h+=`<p class="ka-note">Das Optimum bringt keinen neuen Befund in der Prüfung und versperrt keinen Weg.${KS.kid?' Mit Kind im Weg gerechnet.':''}</p>`;
   }
-  // 4. Zu zweit
+  // 3. Zu zweit
   if(persons>=2){
     const C=anaConfl(c).filter(x=>x.ok), cm=Math.max(1,...C.map(x=>x.len));
-    h+=`<h4>Zu zweit in der Küche <small>Begegnungen: Wegstück, auf dem die andere Person näher als 60 cm läuft</small></h4>`;
+    h+=`<h4 title="Begegnung: Wegstück, auf dem die andere Person näher als 60 cm läuft. Welche Abläufe gleichzeitig laufen, ist eine Annahme.">Zu zweit in der Küche <small>Meter je Durchgang, auf denen man sich begegnet</small></h4>`;
     h+= C.length ? `<div class="ka-bars">${C.map(x=>`<span class="lb">${escapeHtml(x.label)}</span><span class="tr" title="${escapeHtml(x.label)}: ${fmtKm(x.len/1000)} m je Durchgang im Weg"><span class="br" style="width:${(x.len/cm*100).toFixed(1)}%;background:#c98a1a"></span></span><span class="vl">${fmtKm(x.len/1000)} m</span>`).join('')}</div>`
-      +`<p class="ka-note">Im Plan gelb: wo es eng wird. Gang zu zweit nach NKBA mind. 1219 mm (steht in der Prüfung). Welche Abläufe gleichzeitig laufen, ist eine Annahme.</p>`
+      +`<p class="ka-note">Im Plan gelb: wo es eng wird. Die Gangbreite zu zweit steht rechts in der Prüfung.</p>`
       : `<p class="ka-note">Erst wenn Kochen und ein zweiter Ablauf vollständig sind.</p>`;
   }
+  // 4. Was steht wo – Stationen × Abläufe. Nachschlagen, nicht Ergebnis: zu,
+  // solange alles gesetzt ist; offen, sobald etwas fehlt – bis man selbst klickt.
+  const roles=[]; KX.FLOWS.forEach(F=>F.chains.flat().forEach(r=>{ if(!roles.includes(r)) roles.push(r); }));
+  const order=['eingang','tisch','sink','dw','hob','kuehl','prep'];
+  roles.sort((a,b)=>{ const ia=order.indexOf(a), ib=order.indexOf(b); return (ia<0?99:ia)-(ib<0?99:ib) || (KX.ROLE_LABEL[a]||a).localeCompare(KX.ROLE_LABEL[b]||b,'de'); });
+  const missN=roles.filter(r=>!(St[r]||[]).length).length;
+  const mxOpen=KS.mxOpen ?? missN>0;
+  h+=`<details class="ka-mxbox"${mxOpen?' open':''}><summary class="ka-sum">Was steht wo <small>${missN?`${missN} fehlt${missN>1?'en':''}`:'alles gesetzt'} · Inhalte am gewählten Schrank rechts</small></summary>`;
+  h+=`<table class="ka-mx"><thead><tr><th></th><th></th>${KX.FLOWS.map(F=>`<th class="v" title="${escapeHtml(F.label)}">${escapeHtml(FSHORT[F.key]||F.label)}</th>`).join('')}</tr></thead><tbody>`
+    +roles.map(r=>{ const at=St[r]||[], miss=!at.length;
+      const where = miss ? 'fehlt' : r==='eingang' ? 'Tür' : [...new Set(at.map(x=>x.id).filter(x=>x!=null).map(nmId))].join(', ');
+      return `<tr><td class="r">${escapeHtml(KX.ROLE_LABEL[r]||r)}</td><td class="w${miss?' miss':''}" title="${escapeHtml(where)}">${escapeHtml(where)}</td>`
+        +KX.FLOWS.map(F=>F.chains.flat().includes(r) ? `<td><span class="ka-dot${miss?' miss':''}" title="${escapeHtml(F.label)} braucht ${escapeHtml(KX.ROLE_LABEL[r]||r)}${miss?' – fehlt':''}"></span></td>` : '<td></td>').join('')+'</tr>'; }).join('')
+    +`</tbody></table></details>`;
   const st=box.scrollTop;
   box.innerHTML=h; box.scrollTop=st;
   // Verdrahtung
@@ -19176,6 +19191,9 @@ function renderAna(c){
   const hb=box.querySelector('[data-heat]'); if(hb) hb.onclick=()=>{ KS.heat=!KS.heat; render(); };
   const rb=box.querySelector('[data-ref]'); if(rb) rb.onclick=()=>{ KS.ref = rb.dataset.ref==='1' ? {kmYear:R.kmYear, flows:Object.fromEntries(R.flows.map(f=>[f.key,{week:f.week,m:f.m}]))} : null; render(); };
   box.querySelectorAll('[data-seg="anaMode"] button').forEach(b=>b.onclick=()=>{ KS.anaMode=b.dataset.v; render(); });
+  // innerHTML baut neu: den Auf/Zu-Zustand selbst merken; das toggle-Ereignis
+  // beim Einsetzen mit "open" ist kein Klick und zählt nicht.
+  const mxb=box.querySelector('.ka-mxbox'); if(mxb) mxb.ontoggle=()=>{ if(mxb.open!==mxOpen) KS.mxOpen=mxb.open; };
   box.querySelectorAll('[data-fl]').forEach(el=>{
     el.onclick=()=>{ KS.flow = KS.flow===el.dataset.fl ? null : el.dataset.fl; if(!KS.paths){ KS.paths=true; lsSet('raumaufmass.kwege','1'); syncToggles(); } render(); };
     el.onmouseenter=()=>{ if(KS.flow) return; KS.hoverFlow=el.dataset.fl; redraw(); };
