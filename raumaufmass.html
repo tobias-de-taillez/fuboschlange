@@ -9029,6 +9029,29 @@ globalThis.KITCHEN={ FRIDGE, DOORT_LIM, SWINGS, swingOf, isCold, fzOf, hasHinge,
 Object.assign(globalThis.KITCHEN, { CORNER, CSHAPE, shapeOf, cornerBlind, cornerPlace, cornerType, crossAt, cornerWing });
 Object.assign(globalThis.KITCHEN, { PLAN_TXT, planLabels, stationLabel, stationBlock, contentCands, headCands, nomCm, devTag, dimFits, chartBox, rectIn });
 Object.assign(globalThis.KITCHEN, { snapIsland, islandTops, topsTouch, partsClash });
+// Geruest Rest-Fixes (Anker, werden nach dem Zusammenfuehren entfernt)
+Object.assign(globalThis.KITCHEN, { /* rest-decke */ });
+//
+Object.assign(globalThis.KITCHEN, { /* rest-eck */ });
+//
+Object.assign(globalThis.KITCHEN, { /* rest-masskette */ });
+//
+Object.assign(globalThis.KITCHEN, { /* rest-platte */ });
+//
+Object.assign(globalThis.KITCHEN, { /* rest-pruef */ });
+//
+Object.assign(globalThis.KITCHEN, { /* rest-wege */ });
+//
+Object.assign(globalThis.KITCHEN, { /* rest-inhalte */ });
+//
+Object.assign(globalThis.KITCHEN, { /* rest-3d */ });
+//
+Object.assign(globalThis.KITCHEN, { /* rest-zustand */ });
+//
+Object.assign(globalThis.KITCHEN, { /* rest-bedienung */ });
+//
+Object.assign(globalThis.KITCHEN, { /* rest-etiketten */ });
+//
 })();
 </script>
 <script id="store">
@@ -24599,6 +24622,62 @@ globalThis.selfChecks=function(){
       const r7=lay([A]);
       chk('kueche-insel: einzelne Insel – Platte unverändert', isTops(r7).length===1 && !isTops(r7)[0].joined && isTops(r7)[0].poly===r7.L.byId.get(1).poly);
     }catch(err){ chk('kueche-insel: ohne Ausnahme ('+err.message+')', false); }
+    // === Geruest fuer die Rest-Fixes: jede Gruppe fuellt NUR ihren Block (Anker, werden nach dem Zusammenfuehren entfernt) ===
+    // --- Rest-Fix decke ---
+    try{
+      // TESTS-decke
+    }catch(err){ chk('kueche: Rest-Fix decke ohne Ausnahme ('+err.message+')', false); }
+    //
+    // --- Rest-Fix eck ---
+    try{
+      // TESTS-eck
+    }catch(err){ chk('kueche: Rest-Fix eck ohne Ausnahme ('+err.message+')', false); }
+    //
+    // --- Rest-Fix masskette ---
+    try{
+      // TESTS-masskette
+    }catch(err){ chk('kueche: Rest-Fix masskette ohne Ausnahme ('+err.message+')', false); }
+    //
+    // --- Rest-Fix platte ---
+    try{
+      // TESTS-platte
+    }catch(err){ chk('kueche: Rest-Fix platte ohne Ausnahme ('+err.message+')', false); }
+    //
+    // --- Rest-Fix pruef ---
+    try{
+      // TESTS-pruef
+    }catch(err){ chk('kueche: Rest-Fix pruef ohne Ausnahme ('+err.message+')', false); }
+    //
+    // --- Rest-Fix wege ---
+    try{
+      // TESTS-wege
+    }catch(err){ chk('kueche: Rest-Fix wege ohne Ausnahme ('+err.message+')', false); }
+    //
+    // --- Rest-Fix inhalte ---
+    try{
+      // TESTS-inhalte
+    }catch(err){ chk('kueche: Rest-Fix inhalte ohne Ausnahme ('+err.message+')', false); }
+    //
+    // --- Rest-Fix 3d ---
+    try{
+      // TESTS-3d
+    }catch(err){ chk('kueche: Rest-Fix 3d ohne Ausnahme ('+err.message+')', false); }
+    //
+    // --- Rest-Fix zustand ---
+    try{
+      // TESTS-zustand
+    }catch(err){ chk('kueche: Rest-Fix zustand ohne Ausnahme ('+err.message+')', false); }
+    //
+    // --- Rest-Fix bedienung ---
+    try{
+      // TESTS-bedienung
+    }catch(err){ chk('kueche: Rest-Fix bedienung ohne Ausnahme ('+err.message+')', false); }
+    //
+    // --- Rest-Fix etiketten ---
+    try{
+      // TESTS-etiketten
+    }catch(err){ chk('kueche: Rest-Fix etiketten ohne Ausnahme ('+err.message+')', false); }
+    //
   }
   return {ok, out};
 };
