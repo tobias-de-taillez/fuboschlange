@@ -7204,6 +7204,60 @@ function freeAhead(E, L, g, p, skipId, info){
   if(info) info.hit=hit;
   return t;
 }
+// Plattenkante statt Korpusfront: NKBA Guideline 6 misst den Gang zwischen
+// „counter frontage, tall cabinets and/or appliances“, und die Platte steht
+// bei topD > baseD vor dem Korpus über. topOf = Platte der Zeile, in der der
+// Unterschrank g steht (Insel und Hochschrank tragen ihre Kante selbst);
+// frontage = was an g Platz braucht (Korpus bzw. Insel samt Tresen, dazu die Platte).
+function topOf(L, g){
+  if(g.free || g.it.kind!=='base' || !g.Wf) return null;
+  return L.tops.find(t=>!t.island && !t.patch && t.Wf && t.Wf.key===g.Wf.key && t.ids.includes(g.it.id)) || null;
+}
+const frontage=(L, g)=>{ const t=topOf(L,g); return t ? [g.foot||g.poly, t.poly] : [g.foot||g.poly]; };
+// Arbeitsfläche zwischen Spüle a und Kochfeld b (Blum: Vorbereitungszone, NKBA
+// Guideline 12): die längste durchgehende Platte zwischen ihren Kanten, ohne
+// Strecken, die andere Spülen oder Kochfelder belegen; Hochschränke, Lücken und
+// leere Wand zählen nicht. An einer rechtwinkligen Innenecke läuft die Platte
+// beider Wände zusammen (das Eckquadrat einmal). null = nicht messbar (Insel:
+// die Lage des Geräts darin ist nicht modelliert; nicht benachbarte Wände;
+// schiefe oder äußere Ecke).
+function prepBetween(L, a, b){
+  if(a.free || b.free || !a.Wf || !b.Wf) return null;
+  const depthOf=Wf=>Math.max(0, ...L.tops.filter(t=>!t.island && !t.patch && t.Wf && t.Wf.key===Wf.key).map(t=>t.depth));
+  // Teil des Polygons P im Tiefenstreifen der Wand Wf, als Strecke entlang Wf.
+  const span=(P, Wf, d)=>{
+    if(!(d>0)) return null;
+    const cut=TL.clipConvex(P, [wpt(Wf,-1e5,0), wpt(Wf,1e5,0), wpt(Wf,1e5,d), wpt(Wf,-1e5,d)]); if(cut.length<3) return null;
+    const pr=cut.map(p=>dot(sub(p,Wf.A),Wf.u)), lo=Math.min(...pr), hi=Math.max(...pr);
+    return hi-lo>1 ? [lo,hi] : null; };
+  // Platten entlang Wf (eigene, dazu die Eckquadrate der Nachbarwände), zusammengefasst.
+  const cover=Wf=>{ const d=depthOf(Wf), iv=[];
+    L.tops.forEach(t=>{ if(t.island || t.patch || !t.Wf) return; const s=t.Wf.key===Wf.key ? [t.s0,t.s1] : span(t.poly,Wf,d); if(s) iv.push(s); });
+    iv.sort((p,q)=>p[0]-q[0]);
+    const out=[]; iv.forEach(s=>{ const l=out[out.length-1]; if(l && s[0]<=l[1]+1) l[1]=Math.max(l[1],s[1]); else out.push([s[0],s[1]]); });
+    return out; };
+  // Spülen und Kochfelder belegen die Platte (die Spülmaschine liegt darunter).
+  const occ=Wf=>{ const d=depthOf(Wf); return L.G.filter(h=>!h.free && !h.wing && h.it.kind==='base' && (h.it.dev==='sink' || h.it.dev==='hob')).map(h=>span(h.poly,Wf,d)).filter(Boolean); };
+  // Stücke der Platte in [lo,hi] ohne die belegten Strecken.
+  const pieces=(Wf, lo, hi)=>{ let segs=[]; cover(Wf).forEach(([c0,c1])=>{ const x0=Math.max(c0,lo), x1=Math.min(c1,hi); if(x1-x0>0) segs.push([x0,x1]); });
+    occ(Wf).forEach(([o0,o1])=>{ const nx=[]; segs.forEach(([x0,x1])=>{ if(o1<=x0 || o0>=x1){ nx.push([x0,x1]); return; } if(o0>x0) nx.push([x0,o0]); if(o1<x1) nx.push([o1,x1]); }); segs=nx; });
+    return segs; };
+  const longest=ps=>ps.reduce((m,s)=>Math.max(m,s[1]-s[0]), 0);
+  const A=a.Wf, B=b.Wf;
+  if(A.key===B.key){
+    const [p,q]=a.s0<=b.s0 ? [a,b] : [b,a];
+    return q.s0>p.s1 ? longest(pieces(A, p.s1, q.s0)) : 0;
+  }
+  const c=[A.a,A.b].find(id=>id===B.a || id===B.b); if(!c) return null;
+  const atA0=c===A.a, atB0=c===B.a, ua=atA0 ? A.u : mul(A.u,-1), ub=atB0 ? B.u : mul(B.u,-1);
+  if(Math.abs(dot(A.u,B.u))>0.05 || dot(ub,A.n)<0.9 || dot(ua,B.n)<0.9) return null;
+  const pa=pieces(A, atA0 ? 0 : a.s1, atA0 ? a.s0 : A.L), pb=pieces(B, atB0 ? 0 : b.s1, atB0 ? b.s0 : B.L);
+  // Das Stück, das bis in die Ecke reicht, setzt sich an der Nachbarwand fort.
+  const ta=pa.find(s=>atA0 ? s[0]<=1.5 : s[1]>=A.L-1.5), tb=pb.find(s=>atB0 ? s[0]<=1.5 : s[1]>=B.L-1.5);
+  let best=Math.max(longest(pa), longest(pb));
+  if(ta && tb) best=Math.max(best, (ta[1]-ta[0])+(tb[1]-tb[0])-Math.max(depthOf(A),depthOf(B)));
+  return best;
+}
 
 // Tresen: Knieraum je Platz nach NKBA Kitchen Planning Guideline 9 (2022):
 // 30″-Tisch 457 mm, 36″-Theke 381 mm, 42″-Bar 305 mm tief, je 610 mm breit.
@@ -7582,15 +7636,31 @@ function check(E, K, L){
   // 7. Gänge vor den Zeilen
   G.filter(g=>g.it.kind!=='wall' && g.it.kind!=='table').forEach(g=>{
     const [p,q]=g.front, w=len(sub(q,p)); let min=Infinity;
+    // Der Gang beginnt an der Plattenkante (counter frontage), nicht an der
+    // Korpusfront: die Platte steht bei topD > baseD vor – eigene wie gegenüber.
+    const own=topOf(L,g), ov=own ? Math.max(0, own.depth-g.d) : 0;
     for(const t of [0.15,0.5,0.85]){
-      const s=add(p, mul(sub(q,p),t)), probe=add(s,mul(g.n,2));
+      const s0=add(p, mul(sub(q,p),t)), s=add(s0, mul(g.n,ov)), probe=add(s0,mul(g.n,2));
       // Teil der Front, vor dem direkt ein anderes Teil steht (Blindecke):
       // dort ist kein Gang - das meldet die Eckprüfung.
       if(L.G.some(h=>h!==g && h.it.kind!=='wall' && TL.pointInRing(probe,h.foot||h.poly))) continue;
-      const info={}, ta=freeAhead(E,L,g,add(s,mul(g.n,1)),g.it.id,info);
-      // Knapp vor einer Querzeile (Passblende in der Innenecke): Blindecke, kein Gang.
-      if(ta<300 && info.hit && !info.hit.free && !g.free && Math.abs(dot(g.n,info.hit.n))<0.7) continue;
-      min=Math.min(min, ta); }
+      // Der Gang: von der Plattenkante bis zur Kante gegenüber (Platte, Korpus,
+      // Wand). Liegt die Plattenkante schon in einem anderen Teil samt Platte
+      // (ein Strahl begänne darin): bei einer Querzeile ist das die Blindecke,
+      // sonst stoßen die Kanten aneinander – kein Gang.
+      const cross=h=>Math.abs(dot(g.n,h.n))<0.7, pt=add(s,mul(g.n,2));
+      const inn=L.G.filter(h=>h!==g && h.it.kind!=='wall' && frontage(L,h).some(P=>TL.pointInRing(pt,P)));
+      if(inn.some(cross)) continue;
+      let tc=0;
+      if(!inn.length){
+        const o1=add(s,mul(g.n,1)), info={}; tc=freeAhead(E,L,g,o1,g.it.id,info); let hit=info.hit;
+        L.G.forEach(h=>{ const tp=h.it.id!==g.it.id && topOf(L,h); if(!tp) return;
+          const r=rayPoly(o1,g.n,tp.poly); if(r!=null && r<tc){ tc=r; hit=h; } });
+        // Knapp vor einer Querzeile (Passblende in der Innenecke): Blindecke, kein
+        // Gang. Der Abstand zählt ab der Korpusfront (tc + ov), wie bisher.
+        if(tc+ov<300 && hit && !hit.free && !g.free && cross(hit)) continue;
+      }
+      min=Math.min(min, tc); }
     if(!(w>0) || !isFinite(min)) return;
     // NKBA Guideline 6: Arbeitsgang 42″ (1067) für eine Person, 48″ (1219)
     // für mehrere Köche.
@@ -7608,13 +7678,22 @@ function check(E, K, L){
       else if(t<813) add_('warn',[g.it.id], `Tisch: hinter den Stühlen ${mm(t)} mm – NKBA 813, zum Vorbeigehen 1118`, s.mid);
     });
   });
-  // Tresen: hinter den Hockern Platz (NKBA 813, zum Vorbeigehen 1118)
+  // Tresen: hinter den Hockern Platz (NKBA 813, zum Vorbeigehen 1118; Fehler
+  // unter 750 wie am Tisch). Gemessen wird über die ganze Hockerkante: an den
+  // Enden und an jeder Ecke eines Hindernisses (Teile samt Platten, Wandring),
+  // dort liegt das Minimum.
   G.filter(g=>g.bar>0).forEach(g=>{
-    const m=mul(add(g.foot[0],g.foot[1]),0.5), dir=mul(g.n,-1), o=add(m, mul(dir,-2));
-    let t=Infinity; const r=TL.rayToRing(E.ring, o, dir); if(r) t=r.t-2;
-    L.G.forEach(h=>{ if(h!==g && h.it.kind!=='wall'){ const x=rayPoly(o,dir,h.foot||h.poly); if(x!=null && x-2<t) t=x-2; } });
+    const [a,b]=g.foot, ab=sub(b,a), l2=dot(ab,ab), dir=mul(g.n,-1);
+    const obs=[]; L.G.forEach(h=>{ if(h!==g && h.it.kind!=='wall') frontage(L,h).forEach(P=>obs.push(P)); });
+    const us=[1/Math.sqrt(l2), 1-1/Math.sqrt(l2)], addU=v=>{ const u=dot(sub(v,a),ab)/l2; if(u>0 && u<1) us.push(u); };
+    obs.forEach(P=>P.forEach(addU)); TL.ringsOf(E.ring).forEach(R=>R.forEach(addU));
+    let t=Infinity, m=mul(add(a,b),0.5);
+    us.forEach(u=>{ const pu=add(a,mul(ab,u)), o=add(pu, mul(dir,-2)); let tu=Infinity;
+      const r=TL.rayToRing(E.ring, o, dir); if(r) tu=r.t-2;
+      obs.forEach(P=>{ const x=rayPoly(o,dir,P); if(x!=null && x-2<tu) tu=x-2; });
+      if(tu<t){ t=tu; m=pu; } });
     t=Math.max(0,t);
-    if(t<600) add_('bad',[g.it.id], `Tresen: hinter den Hockern nur ${mm(t)} mm (NKBA 813)`, m);
+    if(t<750) add_('bad',[g.it.id], `Tresen: hinter den Hockern nur ${mm(t)} mm (mind. 750, NKBA 813)`, m);
     else if(t<813) add_('warn',[g.it.id], `Tresen: hinter den Hockern ${mm(t)} mm – NKBA 813, zum Vorbeigehen 1118`, m);
   });
   // Dunstabzug ohne Kochfeld darunter
@@ -7634,20 +7713,26 @@ function check(E, K, L){
   (L.fillers||[]).forEach(f=>add_('info', f.between||[], `${f.corner?'Passblende Ecke':'Passleiste'} ${mm(f.w)} mm${f.between?' zwischen zwei Schränken':''}`, wpt(f.Wf,(f.s0+f.s1)/2,300)));
   // Schlauchlängen zum Wasseranschluss (Meldung M-20261109-150408-6c7165)
   hoseCheck(E, K, L).forEach(f=>add_(f.lvl, f.ids, f.txt, f.at));
-  // 9. Ergonomie (NKBA, Blum, Neff) – nur, wenn die Geräte da sind
-  const dev=k=>G.filter(g=>g.it.dev===k);
-  const [sink]=dev('sink'), [hob]=dev('hob'), [dw]=dev('dw'), [fridge]=dev('fridge');
-  if(dw && sink){
-    const d=gapBetween(dw,sink);
-    if(d>914) add_('warn',[dw.it.id,sink.it.id], `Spülmaschine ${mm(d)} mm von der Spüle – höchstens 914 mm (NKBA), am besten direkt daneben`, dw.frontMid);
+  // 9. Ergonomie (NKBA, Blum, Neff) – nur, wenn die Geräte da sind. Von einer
+  // Art kann es mehrere geben (zwei Spülen, zwei Kochfelder): Regeln am Gerät
+  // (Fenster, Abstellfläche, Hängeschrank darüber, Kühlschrank) gelten für
+  // jedes; Regeln zwischen Geräten (Spülmaschine – Spüle, Spüle – Kochfeld,
+  // Arbeitsdreieck) sind erfüllt, wenn irgendeine Kombination sie erfüllt.
+  const dev=k=>G.filter(g=>g.it.dev===k && !g.wing);
+  const snk=dev('sink'), hbs=dev('hob'), dws=dev('dw'), frs=dev('fridge');
+  if(dws.length && snk.length){
+    // NKBA Guideline 13: das Hauptgerät steht höchstens 914 mm von einer Spüle.
+    let best=null; dws.forEach(a=>snk.forEach(s=>{ const d=gapBetween(a,s); if(!best || d<best.d) best={d, dw:a, sink:s}; }));
+    if(best.d>914) add_('warn',[best.dw.it.id,best.sink.it.id], `Spülmaschine ${mm(best.d)} mm von der Spüle – höchstens 914 mm (NKBA), am besten direkt daneben`, best.dw.frontMid);
   }
-  if(hob){
+  hbs.forEach(hob=>{
     E.openings.filter(o=>o.kind==='window' && !(o.swing && o.swing.type==='fix')).forEach(o=>{ if(!hob.free){ const on=openingOn(E,o,hob.Wf); if(on && hob.s0<on.s1 && on.s0<hob.s1)
       add_('bad',[hob.it.id], `Kochfeld unter einem Fenster (NKBA: nicht unter einem Fenster, das sich öffnen lässt)`, hob.c); } });
     if(!hob.free){
       const side=s=>landing(L,hob,s);
       const l=side(-1), r=side(1);
-      if(Math.min(l,r)<300) add_('warn',[hob.it.id], `Neben dem Kochfeld ${mm(Math.min(l,r))} mm Abstellfläche – je Seite mind. 300 mm (NKBA)`, hob.frontMid);
+      // Die Vorgabe (Spec) ist je Seite 300; NKBA Guideline 17 nennt 305 und 381.
+      if(Math.min(l,r)<300) add_('warn',[hob.it.id], `Neben dem Kochfeld ${mm(Math.min(l,r))} mm Abstellfläche – je Seite mind. 300 mm (NKBA: 305 mm auf einer, 381 mm auf der anderen Seite)`, hob.frontMid);
     }
     // Über dem Kochfeld: Dunstabzug statt Hängeschrank. Abstand nach Neff:
     // Flachschirm (Elektro) ab 430, Wandhaube 550, Gas 650 mm.
@@ -7661,15 +7746,15 @@ function check(E, K, L){
       else add_('warn',[g.it.id,hob.it.id], `${labelOf(g.it)} hängt über dem Kochfeld – dort gehört der Dunstabzug hin${off<=50&&wide?'':' (mittig darüber)'}`, g.c,
         off<=50 && wide ? {label:'Als Dunstabzug', id:g.it.id, set:{dev:'hood', front:'open'}, del:['store']} : null);
     });
+  });
+  if(snk.length && hbs.length){
+    // Arbeitsfläche = durchgehende Platte zwischen beiden (auch über Eck). Teile
+    // auf der Insel und nicht benachbarte Wände lassen sich nicht messen: dann kein Befund.
+    let best=null, unk=false;
+    snk.forEach(s=>hbs.forEach(h=>{ const m=prepBetween(L,s,h); if(m==null) unk=true; else if(!best || m>best.m) best={m, s, h}; }));
+    if(best && !unk && best.m<900) add_('warn',[best.s.it.id,best.h.it.id], `Zwischen Spüle und Kochfeld ${mm(best.m)} mm Arbeitsfläche – Blum/NKBA: mind. 900 mm`, centroid([best.s.c,best.h.c]));
   }
-  if(sink && hob && !sink.free && !hob.free){
-    if(sink.Wf.key===hob.Wf.key){
-      const a=Math.min(sink.s1,hob.s1), b=Math.max(sink.s0,hob.s0);
-      const free=b-a;   // Abstand zwischen den beiden
-      if(free<900) add_('warn',[sink.it.id,hob.it.id], `Zwischen Spüle und Kochfeld ${mm(Math.max(0,free))} mm Arbeitsfläche – Blum/NKBA: mind. 900 mm`, centroid([sink.c,hob.c]));
-    }
-  }
-  if(fridge){
+  frs.forEach(fridge=>{
     // Griffseite gegenüber der Angel, in Wandrichtung ausgedrückt
     const {L:pl,R:pr}=frontLR(fridge), grip=fridge.it.hinge==='right'?pl:pr;
     const hs=fridge.free ? 1 : (dot(sub(grip,fridge.frontMid),fridge.u)>0 ? 1 : -1);
@@ -7677,11 +7762,17 @@ function check(E, K, L){
     // die Abstellfläche „on either side“; für French Door gilt dasselbe.
     const l=fzOf(fridge.it) ? Math.max(landing(L,fridge,-1), landing(L,fridge,1)) : landing(L,fridge,hs);
     if(l<380 && !fridge.free) add_('warn',[fridge.it.id], fzOf(fridge.it) ? `${nameOf(fridge.it)}: auf keiner Seite Abstellfläche (mind. 380 mm, NKBA)` : `Kühlschrank: neben dem Griff keine Abstellfläche (mind. 380 mm, NKBA)`, fridge.frontMid);
-  }
-  if(sink && hob && fridge){
-    const st=g=>g.frontMid, a=len(sub(st(sink),st(hob))), b=len(sub(st(hob),st(fridge))), c=len(sub(st(fridge),st(sink)));
-    const sum=a+b+c, bad=[a,b,c].filter(x=>x<1200||x>2700).length;
-    if(sum>7900 || bad) add_('warn',[sink.it.id,hob.it.id,fridge.it.id], `Arbeitsdreieck ${(sum/1000).toFixed(1).replace('.',',')} m (Schenkel ${[a,b,c].map(x=>(x/1000).toFixed(1).replace('.',',')).join(' / ')} m) – NKBA: Summe ≤ 7,9 m, je Schenkel 1,2–2,7 m`, centroid([st(sink),st(hob),st(fridge)]));
+  });
+  if(snk.length && hbs.length && frs.length){
+    // NKBA Guideline 3 nennt metrisch selbst 7,9 m und je Schenkel 1,2 bis 2,7 m.
+    // Gibt es mehrere Geräte, zählt die Kombination mit den wenigsten Verstößen.
+    const st=g=>g.frontMid, mf=x=>(x/1000).toFixed(2).replace('.',','); let best=null;
+    snk.forEach(s=>hbs.forEach(h=>frs.forEach(f=>{
+      const a=len(sub(st(s),st(h))), b=len(sub(st(h),st(f))), c=len(sub(st(f),st(s))), sum=a+b+c, n=[a,b,c].filter(x=>x<1200||x>2700).length+(sum>7900?1:0);
+      if(!best || n<best.n || (n===best.n && sum<best.sum)) best={s,h,f,a,b,c,sum,n}; })));
+    // Schenkel mit zwei Nachkommastellen und dem Verstoß benannt: „2,72“ neben der Grenze 2,7 war nicht zu deuten.
+    const leg=(nm,x)=>`${nm} ${mf(x)} m${x<1200?' (zu kurz)':x>2700?' (zu lang)':''}`;
+    if(best.n) add_('warn',[best.s.it.id,best.h.it.id,best.f.it.id], `Arbeitsdreieck ${mf(best.sum)} m${best.sum>7900?' (zu lang)':''} – Schenkel ${leg('Spüle–Kochfeld',best.a)}, ${leg('Kochfeld–Kühlschrank',best.b)}, ${leg('Kühlschrank–Spüle',best.c)} – NKBA: Summe ≤ 7,9 m, je Schenkel 1,2–2,7 m`, centroid([st(best.s),st(best.h),st(best.f)]));
   }
   // Doppelte Meldungen (über Eck) zusammenfassen
   const byKey=new Map();
@@ -24645,7 +24736,94 @@ globalThis.selfChecks=function(){
     //
     // --- Rest-Fix pruef ---
     try{
-      // TESTS-pruef
+      // E1-E6 (Prüfregeln): Gang an der Plattenkante, mehrere Geräte einer Art,
+      // Spüle-Kochfeld über die Platte, Tresen, Dreieck-Meldung. Eigene Räume:
+      // der gemeinsame hat Fenster und Tür.
+      const mkE=(w,h,opens)=>{ const r=rect(w,h); return KX.makeEnv(r.pts,r.walls,opens||[],[]); };
+      const lay2=(Ev,items,spec)=>{ const K=KX.normKitchen({spec,items}); const L=KX.layout(Ev,K); return {K,L,F:KX.check(Ev,K,L)}; };
+      {
+        // E1: NKBA Guideline 6 misst den Gang an der „counter frontage“, die Platte steht vor dem Korpus über.
+        const Eg=mkE(4000,2380), gal=topD=>lay2(Eg,[{id:1,kind:'base',a:'A',b:'B',x:1000,w:1200},{id:2,kind:'base',a:'C',b:'D',x:1000,w:1200}],{topD}).F;
+        chk('kueche-pruef: Gang zwischen den Platten – 600er Platten lassen 1180 mm, das ist unter 1200 (gelb)', has(gal(600),/Gang vor Unterschrank 120 11\d\d mm/,'warn'));
+        chk('kueche-pruef: Gang zwischen den Platten – 700er lassen 980 mm (gelb), 900er nur 580 mm (rot)',
+          has(gal(700),/Gang vor Unterschrank 120 9\d\d mm/,'warn') && has(gal(900),/Vor Unterschrank 120 nur 5\d\d mm Platz/,'bad'));
+        chk('kueche-pruef: Gang – Platte bündig zum Korpus (topD 580), 1219 mm zwischen den Fronten: kein Befund', !has(gal(580),/Gang|Platz/));
+        // Innenecke mit Passblende: die Querplatte stößt an die Vorderkante der durchlaufenden, dort ist kein Gang.
+        const rL=lay2(mkE(4000,3000),[{id:1,kind:'base',a:'D',b:'A',x:1800,w:1200,front:'door'},{id:2,kind:'base',a:'A',b:'B',x:630,w:600},{id:3,kind:'base',a:'A',b:'B',x:1230,w:900}]);
+        chk('kueche-pruef: Gang – L-Küche mit Passblende in der Ecke: keine Gangbefunde (Blindecke bleibt Blindecke)', !has(rL.F,/Gang|Platz/));
+        // Platten, die sich berühren oder überlappen, sind kein Gang: weiter rot, nicht still (Strahl begänne in der Platte gegenüber).
+        const gk=H=>{ const Eh=mkE(4000,H); return lay2(Eh,[{id:1,kind:'base',a:'A',b:'B',x:1000,w:1200},{id:2,kind:'base',a:'C',b:'D',x:1000,w:1200}]).F; };
+        chk('kueche-pruef: Gang – Zeilen gegenüber, Platten berühren sich (Körper 40 mm auseinander) oder überlappen: rot mit wenigen mm', has(gk(1200),/Vor Unterschrank 120 nur \d{1,2} mm Platz/,'bad') && has(gk(1180),/Vor Unterschrank 120 nur \d{1,2} mm Platz/,'bad'));
+        const ins=gap=>lay2(mkE(4000,3000),[{id:1,kind:'base',a:'A',b:'B',x:1000,w:1200},{id:2,kind:'island',x:1600,y:580+gap+300,rot:180,w:1200,d:600}]).F;
+        chk('kueche-pruef: Gang – Insel 15 mm vor dem Korpus (in der Plattenkante der Zeile): rot, nicht still', has(ins(15),/Vor Insel 120 nur \d{1,2} mm Platz/,'bad') && has(ins(15),/Vor Unterschrank 120 nur \d{1,2} mm Platz/,'bad'));
+      }
+      {
+        // E2: von einer Art mehrere Geräte
+        const E6=mkE(6000,3000), sk=(id,x)=>({id,kind:'base',dev:'sink',a:'A',b:'B',x,w:600}), dwx=(x)=>({id:9,kind:'base',dev:'dw',a:'A',b:'B',x,w:600});
+        chk('kueche-pruef: zwei Spülen – Spülmaschine neben der zweiten: keine Warnung, in jeder Reihenfolge',
+          !has(lay2(E6,[sk(1,0),sk(2,3000),dwx(3600)]).F,/Spülmaschine .* von der Spüle/) && !has(lay2(E6,[sk(2,3000),sk(1,0),dwx(3600)]).F,/Spülmaschine .* von der Spüle/));
+        chk('kueche-pruef: zwei Spülen – Spülmaschine weit weg: die Warnung nennt den Abstand zur nächsten Spüle',
+          has(lay2(E6,[sk(1,0),sk(2,3000),dwx(4700)]).F,/Spülmaschine 1100 mm von der Spüle/,'warn'));
+        const win2={id:'o1',kind:'window',a:'A',b:'B',x:2000,w:1000,y:1000,h:1200,swing:{type:'turntilt',hinge:'left',out:false}}, Ew=mkE(4000,3000,[win2]);
+        const hb=(id,x)=>({id,kind:'base',dev:'hob',a:'A',b:'B',x,w:600});
+        chk('kueche-pruef: zwei Kochfelder – das zweite unter dem Fenster ist rot', has(lay2(Ew,[hb(1,0),hb(2,2200)]).F,/Kochfeld unter einem Fenster/,'bad'));
+        const E4=mkE(4000,3000), bs=(id,x,w)=>({id,kind:'base',a:'A',b:'B',x,w});
+        chk('kueche-pruef: zwei Kochfelder – Abstellfläche je Kochfeld: das zweite ohne Platte daneben wird gemeldet',
+          has(lay2(E4,[bs(1,0,450),hb(2,450),bs(3,1050,450),hb(4,2500)]).F,/Neben dem Kochfeld 0 mm Abstellfläche/,'warn') && !has(lay2(E4,[bs(1,0,450),hb(2,450),bs(3,1050,450)]).F,/Neben dem Kochfeld/));
+        const fr=(id,x)=>({id,kind:'tall',dev:'fridge',a:'A',b:'B',x,w:600,hinge:'left'});
+        chk('kueche-pruef: zwei Kühlschränke – Abstellfläche je Gerät: der zweite ohne Platte neben dem Griff wird gemeldet',
+          has(lay2(E4,[fr(1,0),bs(2,600,600),fr(3,3000)]).F,/Kühlschrank: neben dem Griff keine Abstellfläche/,'warn') && !has(lay2(E4,[fr(1,0),bs(2,600,600)]).F,/Abstellfläche/));
+        // Arbeitsdreieck: die Kombination mit den wenigsten Verstößen zählt (erste Spüle weit, zweite gut)
+        const E8=mkE(8000,4000), tr3=items=>lay2(E8,items).F;
+        const tri=[{id:1,kind:'tall',dev:'fridge',a:'A',b:'B',x:0,w:600,hinge:'left'},{id:2,kind:'base',dev:'hob',a:'A',b:'B',x:1230,w:600}];
+        chk('kueche-pruef: zwei Spülen – Dreieck: die zweite bildet ein gutes Dreieck, die erste weit weg stört nicht',
+          !has(tr3([...tri, sk(3,7000), sk(4,2460)]),/Arbeitsdreieck/) && has(tr3([...tri, sk(3,7000)]),/Arbeitsdreieck/,'warn'));
+      }
+      {
+        // E3: Arbeitsfläche zwischen Spüle und Kochfeld = durchgehende Platte dazwischen
+        const E4=mkE(4000,3000), sk=x=>({id:1,kind:'base',dev:'sink',a:'A',b:'B',x,w:600}), hb=x=>({id:2,kind:'base',dev:'hob',a:'A',b:'B',x,w:600});
+        const sp=(items)=>lay2(E4,items).F, re=/Zwischen Spüle und Kochfeld (\d+) mm Arbeitsfläche/;
+        const mmOf=F=>{ const f=F.find(x=>re.test(x.txt)); return f ? +re.exec(f.txt)[1] : null; };
+        chk('kueche-pruef: Spüle – Kochfeld – leere Wand dazwischen zählt nicht als Arbeitsfläche (0 mm)', mmOf(sp([sk(0),hb(1600)]))===0);
+        chk('kueche-pruef: Spüle – Hochschrank – Unterschrank – Kochfeld: nur die 300 mm Platte zählen',
+          mmOf(sp([sk(0),{id:3,kind:'tall',a:'A',b:'B',x:600,w:600},{id:4,kind:'base',a:'A',b:'B',x:1200,w:300},hb(1500)]))===300);
+        chk('kueche-pruef: Spüle – 300er Unterschrank – Kochfeld: 300 mm (wie bisher)', mmOf(sp([sk(0),{id:4,kind:'base',a:'A',b:'B',x:600,w:300},hb(900)]))===300);
+        chk('kueche-pruef: Spüle – Spülmaschine und Unterschrank 900 mm – Kochfeld: genug Platte, keine Meldung',
+          mmOf(sp([sk(0),{id:3,kind:'base',dev:'dw',a:'A',b:'B',x:600,w:600},{id:4,kind:'base',a:'A',b:'B',x:1200,w:300},hb(1500)]))===null);
+        // über Eck: Spüle an A–B in der Ecke B, Kochfeld an B–C
+        const hbC=(x)=>({id:2,kind:'base',dev:'hob',a:'B',b:'C',x,w:600});
+        chk('kueche-pruef: L-Küche – Spüle in der Ecke, Kochfeld gleich dahinter: 20 mm Platte dazwischen (früher kein Befund)', mmOf(sp([sk(3400),hbC(600)]))===20);
+        chk('kueche-pruef: L-Küche – Platte läuft durch die Ecke: 600 + 930 − Eckquadrat 600 = 930 mm, genug; mit 330 mm blanker Wand vor dem Kochfeld nur 600 mm',
+          mmOf(sp([sk(2800),{id:3,kind:'base',a:'A',b:'B',x:3400,w:600},{id:4,kind:'base',a:'B',b:'C',x:630,w:300},hbC(930)]))===null && mmOf(sp([sk(2800),{id:3,kind:'base',a:'A',b:'B',x:3400,w:600},hbC(930)]))===600);
+        chk('kueche-pruef: L-Küche – Kochfeld näher an der Ecke: 630 mm Platte (gelb)',
+          mmOf(sp([sk(2800),{id:3,kind:'base',a:'A',b:'B',x:3400,w:600},hbC(630)]))===630);
+        chk('kueche-pruef: Spüle auf der Insel – Lage im Gerät nicht modelliert, kein Befund',
+          mmOf(sp([{id:1,kind:'island',dev:'sink',x:2000,y:1500,rot:0,w:1200,d:900},hb(0)]))===null);
+      }
+      {
+        // E4: die Vorgabe (je Seite 300) bleibt, der Text nennt NKBA richtig (Guideline 17: 305 und 381)
+        const E4=mkE(4000,3000), bs=(id,x,w)=>({id,kind:'base',a:'A',b:'B',x,w}), hb=(id,x)=>({id,kind:'base',dev:'hob',a:'A',b:'B',x,w:600});
+        chk('kueche-pruef: Abstellfläche am Kochfeld – 300 mm je Seite bleiben ohne Befund (Spec), ohne Platte der Text mit NKBA 305/381',
+          !has(lay2(E4,[bs(1,500,300),hb(2,800),bs(3,1400,300)]).F,/Neben dem Kochfeld/) && has(lay2(E4,[hb(2,850)]).F,/Neben dem Kochfeld 0 mm Abstellfläche – je Seite mind\. 300 mm \(NKBA: 305 mm auf einer, 381 mm auf der anderen Seite\)/,'warn'));
+      }
+      {
+        // E5: Tresen – Fehler unter 750 wie am Tisch; gemessen über die ganze Hockerkante
+        const Et=mkE(4000,3000), bar=y=>lay2(Et,[{id:1,kind:'island',x:2000,y,rot:180,w:1800,d:900,bar:300}]).F;
+        chk('kueche-pruef: Tresen – 650 mm hinter den Hockern ist rot (mind. 750 wie am Tisch), 780 mm gelb',
+          has(bar(1600),/Tresen: hinter den Hockern nur 650 mm \(mind\. 750, NKBA 813\)/,'bad') && has(bar(1470),/Tresen: hinter den Hockern 780 mm/,'warn') && !has(bar(1400),/Tresen/));
+        const isl={id:1,kind:'island',x:2000,y:1000,rot:180,w:1800,d:900,bar:300}, tr=extra=>lay2(Et,[isl,...extra]).F;
+        chk('kueche-pruef: Tresen – Schrank hinter dem Ende der Hockerkante (nicht hinter der Mitte) wird erkannt',
+          has(tr([{id:2,kind:'base',a:'C',b:'D',x:1100,w:600}]),/Tresen: hinter den Hockern nur 6\d\d mm \(mind\. 750/,'bad'));
+        chk('kueche-pruef: Tresen – Schrank jenseits des Endes der Hockerkante: kein Tresenbefund', !has(tr([{id:2,kind:'base',a:'C',b:'D',x:0,w:600}]),/Tresen/));
+      }
+      {
+        // E6: Arbeitsdreieck – NKBA Guideline 3 nennt metrisch selbst 7,9 m und 1,2 bis 2,7 m; die Meldung zeigt, welcher Schenkel falsch ist
+        const E8=mkE(8000,4000), tri=xs=>lay2(E8,[{id:1,kind:'base',dev:'sink',a:'A',b:'B',x:xs[0],w:600},{id:2,kind:'base',dev:'hob',a:'A',b:'B',x:xs[1],w:600},{id:3,kind:'tall',dev:'fridge',a:'A',b:'B',x:xs[2],w:600}]).F;
+        chk('kueche-pruef: Arbeitsdreieck – Schenkel 2720 mm steht als „2,72 m (zu lang)“, nicht als „2,7“ neben der Grenze 2,7',
+          has(tri([0,2720,1360]),/Schenkel Spüle–Kochfeld 2,72 m \(zu lang\), Kochfeld–Kühlschrank 1,36 m, Kühlschrank–Spüle 1,36 m – NKBA: Summe ≤ 7,9 m, je Schenkel 1,2–2,7 m/,'warn'));
+        chk('kueche-pruef: Arbeitsdreieck – Schenkel 2700 und 1200 mm (NKBA 2,7 und 1,2 m) bleiben ohne Befund', !has(tri([0,2700,1350]),/Arbeitsdreieck/) && !has(tri([0,2400,1200]),/Arbeitsdreieck/));
+        chk('kueche-pruef: Arbeitsdreieck – zu kurzer Schenkel (0,9 m) wird benannt', has(tri([0,1500,2100]),/Kochfeld–Kühlschrank 0,60 m \(zu kurz\)/,'warn'));
+      }
     }catch(err){ chk('kueche: Rest-Fix pruef ohne Ausnahme ('+err.message+')', false); }
     //
     // --- Rest-Fix wege ---
