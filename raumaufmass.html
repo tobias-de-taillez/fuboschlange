@@ -7991,13 +7991,16 @@ function inflate(poly, r){
 }
 function planner(E, L, extra){
   const room=TL.insetRoom(E.ring, ()=>BODY_R);
-  const obs=L.G.filter(g=>g.it.kind!=='wall').map(g=>({id:g.it.id, poly:inflate(g.foot||g.poly, BODY_R)}));
+  // core: der Körper selbst, poly: um die halbe Körperbreite aufgeweitet.
+  const obs=L.G.filter(g=>g.it.kind!=='wall').map(g=>{ const core=g.foot||g.poly; return {id:g.it.id, core, poly:inflate(core, BODY_R)}; });
   // Zusätzliche Hindernisse (Kind im Weg): schon als Körper-Umriss.
-  (extra||[]).forEach((poly,i)=>obs.push({id:'x'+i, poly:inflate(poly, BODY_R)}));
+  (extra||[]).forEach((poly,i)=>obs.push({id:'x'+i, core:poly, poly:inflate(poly, BODY_R)}));
   // Inseln des Raums sind schon in room.holes (nach außen aufgeweitet).
+  // Dritter Wert: das Hindernis (Eintrag, nicht nur die id: Hauptteil und
+  // Schenkel eines Eckschranks teilen sich eine), null bei der Raumwand.
   const segs=[];
   TL.ringsOf(room).forEach(R=>R.forEach((p,i)=>segs.push([p,R[(i+1)%R.length],null])));
-  obs.forEach(o=>o.poly.forEach((p,i)=>segs.push([p,o.poly[(i+1)%o.poly.length],o.id])));
+  obs.forEach(o=>o.poly.forEach((p,i)=>segs.push([p,o.poly[(i+1)%o.poly.length],o])));
   const nodes=[];
   const push=(p,owner)=>nodes.push({x:p.x,y:p.y,owner});
   // Raumecken liegen genau auf dem Rand - dort entscheidet pointInRoom
@@ -8013,10 +8016,13 @@ function planner(E, L, extra){
   }));
   obs.forEach(o=>{ const c=centroid(o.poly); o.poly.forEach(p=>push(add(p, mul(unit(sub(p,c)),2)), o.id)); });
   const inObs=(p,skip)=>obs.find(o=>!skip.has(o.id) && TL.pointInRing(p,o.poly));
-  const visible=(p,q,skip)=>{
-    for(const [a,b,id] of segs){ if(id!=null && skip.has(id)) continue; if(C.segCross(p,q,a,b)) return false; }
+  // R: Hindernis -> kleinere Aufweitung (Polygon) für diese Strecke, siehe
+  // relaxOf; [] heißt: das Hindernis zählt nicht.
+  const visible=(p,q,R)=>{
+    for(const [a,b,o] of segs){ if(o && R && R.has(o)) continue; if(C.segCross(p,q,a,b)) return false; }
+    if(R) for(const P of R.values()) for(let i=0;i<P.length;i++) if(C.segCross(p,q,P[i],P[(i+1)%P.length])) return false;
     const m=mul(add(p,q),0.5);
-    if(inObs(m,skip)) return false;
+    for(const o of obs) if(TL.pointInRing(m, (R&&R.get(o))||o.poly)) return false;
     if(!TL.pointInRoom(m, room)) return false;
     return true;
   };
@@ -8024,7 +8030,7 @@ function planner(E, L, extra){
   const usable=nodes.filter(n=>TL.pointInRoom(n, room) && !inObs(n,new Set([n.owner])));
   const vis=new Map();
   const nb=i=>{ if(vis.has(i)) return vis.get(i); const out=[];
-    for(let j=0;j<usable.length;j++) if(j!==i && visible(usable[i],usable[j],new Set())) out.push([j,len(sub(usable[i],usable[j]))]);
+    for(let j=0;j<usable.length;j++) if(j!==i && visible(usable[i],usable[j])) out.push([j,len(sub(usable[i],usable[j]))]);
     vis.set(i,out); return out; };
   // Punkt im Wandsaum oder in einer Pfeiler-Aufweitung: auf den Rand der
   // begehbaren Fläche ziehen; das Stück dorthin zählt mit.
@@ -8033,31 +8039,106 @@ function planner(E, L, extra){
     const nr=TL.nearestOnRing(room, p); if(!nr) return p;
     const d=unit(sub(nr.q,p)); return add(nr.q, mul(d,1));
   };
+  // Start/Ziel in der Aufweitung eines Hindernisses (Stand neben einem
+  // Hochschrank, Platz am Tisch, Kind): dort kann man stehen, also auch dicht
+  // vorbeigehen. Früher zählte so ein Hindernis für den ganzen Weg nicht
+  // (skip): die Wege liefen mitten durch Hochschrank, Insel und Kind. Jetzt
+  // gilt für diesen Weg eine kleinere Aufweitung: je Kante nur so weit, wie
+  // der Punkt von ihrer Geraden schon entfernt steht. Je Kante, nicht
+  // einheitlich: wer in der Ecke vor einem Nachbarn steht, kommt nach vorn
+  // weg, auch wenn er seitlich 300 mm Platz hat. R: Hindernis -> Polygon.
+  // Steht der Punkt im Körper selbst (das Kind auf dem Standpunkt,
+  // überlappende Teile), gilt [] (das Hindernis zählt nicht): ab dort kann man
+  // es nur verlassen, und eine Gerade verlässt einen konvexen Körper einmal.
+  const relaxPoly=(core, ts)=>{
+    const xs=core.map(q=>q.x), ys=core.map(q=>q.y), x0=Math.min(...xs)-1500, x1=Math.max(...xs)+1500, y0=Math.min(...ys)-1500, y1=Math.max(...ys)+1500;
+    let P=[{x:x0,y:y0},{x:x1,y:y0},{x:x1,y:y1},{x:x0,y:y1}];
+    TL.edgesOf(core).forEach((e,i)=>{ const off=ts[i]>1 ? Math.min(BODY_R, ts[i]-0.5) : ts[i]>0 ? ts[i]/2 : BODY_R;
+      P=TL.clipHalf(P, add(e.a, mul(e.n,off)), mul(e.n,-1)); });
+    return P;
+  };
+  const relaxOf=p=>{
+    let R=null;
+    obs.forEach(o=>{
+      const ts=TL.edgesOf(o.core).map(e=>dot(sub(p,e.a),e.n)), tm=Math.max(...ts);
+      if(tm>=BODY_R+1) return;
+      (R=R||new Map()).set(o, tm<=0 ? [] : relaxPoly(o.core, ts));
+    });
+    return R;
+  };
+  // Ohne die Körper, in denen der Punkt selbst steht: für Strecken, die nicht
+  // bei ihm beginnen (wer den Körper verlassen hat, kommt nicht zurück).
+  const outsideR=R=>{ if(!R) return null; const M=new Map(); R.forEach((P,o)=>{ if(P.length) M.set(o,P); }); return M.size ? M : null; };
+  // Beide Enden gelockert: je Hindernis die kleinere Aufweitung.
+  const bothR=(R1,R2)=>{
+    if(!R1 || !R2) return R1||R2;
+    const M=new Map(R1);
+    R2.forEach((P,o)=>{ const Q=M.get(o); if(!Q || !P.length || (Q.length && Math.abs(TL.polyArea(P))<Math.abs(TL.polyArea(Q)))) M.set(o,P); });
+    return M;
+  };
+  // Ein Endpunkt (je Punkt einmal gerechnet): gelockerte Hindernisse und, wenn
+  // es welche gibt, die Ecken der kleineren Aufweitung als Umlenkpunkte. S:
+  // Punkt und Ecken mit kürzester Länge d von ihm (über chain die
+  // Zwischenpunkte); d/via je Knoten: kürzester Weg vom Punkt über die Ecken
+  // zu diesem Knoten (Infinity: keiner).
+  const endMemo=new Map();
+  const endOf=p0=>{
+    const key=p0.x.toFixed(2)+','+p0.y.toFixed(2); let e=endMemo.get(key); if(e) return e;
+    const p=snapIn(p0), R=relaxOf(p), Rx=outsideR(R), S=[{p, d:0, chain:[]}];
+    e={A: p===p0 ? [p0] : [p0,p], stub:len(sub(p,p0)), p, R, Rx, S, d:null, via:null};
+    if(R){
+      R.forEach(P=>{ if(!P.length) return; const c=centroid(P);
+        P.forEach(q=>{ const n=add(q, mul(unit(sub(q,c)),2));
+          if(TL.pointInRoom(n, room) && !obs.some(o=>TL.pointInRing(n,(Rx&&Rx.get(o))||o.poly))) S.push({p:n, d:Infinity, chain:null}); }); });
+      const done=new Set();
+      for(;;){
+        let i=-1; S.forEach((x,k)=>{ if(!done.has(k) && x.d<Infinity && (i<0 || x.d<S[i].d)) i=k; });
+        if(i<0) break;
+        done.add(i);
+        S.forEach((y,k)=>{ if(done.has(k)) return; const t=S[i].d+len(sub(S[i].p,y.p));
+          if(t<y.d && visible(S[i].p,y.p,i ? Rx : R)){ y.d=t; y.chain=[...S[i].chain, y.p]; } });
+      }
+      e.d=new Float64Array(usable.length).fill(Infinity); e.via=new Array(usable.length).fill(null);
+      S.forEach((x,i)=>{ if(x.d===Infinity) return;
+        usable.forEach((u,j)=>{ const t=x.d+len(sub(x.p,u)); if(t<e.d[j] && visible(x.p,u,i ? Rx : R)){ e.d[j]=t; e.via[j]=x.chain; } }); });
+    }
+    endMemo.set(key,e); return e;
+  };
   function route(a0, b0){
-    const a=snapIn(a0), b=snapIn(b0), stub=len(sub(a,a0))+len(sub(b,b0));
-    // Start/Ziel in einem aufgeweiteten Hindernis (Stand vor einer Zeile
-    // unter einem Hängeschrank, Platz am Tisch): diese zählen nicht.
-    const skip=new Set();
-    obs.forEach(o=>{ if(TL.pointInRing(a0,o.poly)||TL.pointInRing(b0,o.poly)||TL.pointInRing(a,o.poly)||TL.pointInRing(b,o.poly)) skip.add(o.id); });
-    const wrap=(core,l)=>({len:l+stub, path:[a0,...core,b0].filter((p,i,arr)=>i===0||len(sub(p,arr[i-1]))>0.5), ok:true});
-    if(visible(a,b,skip)) return wrap([a,b], len(sub(a,b)));
+    const ea=endOf(a0), eb=endOf(b0), a=ea.p, b=eb.p, stub=ea.stub+eb.stub;
+    const wrap=(core,l)=>({len:l+stub, path:[...ea.A.slice(0,-1),...core,...eb.A.slice(0,-1).reverse()].filter((p,i,arr)=>i===0||len(sub(p,arr[i-1]))>0.5).map(p=>({x:p.x,y:p.y})), ok:true});
+    if(visible(a,b,bothR(ea.R,eb.R))) return wrap([a,b], len(sub(a,b)));
+    // Ohne Knoten dazwischen: von einer Ecke der einen Seite zu einer der anderen.
+    let best=Infinity, meet=null;
+    if(ea.S.length>1 || eb.S.length>1) ea.S.forEach((x,i)=>eb.S.forEach((y,k)=>{
+      const t=x.d+len(sub(x.p,y.p))+y.d;
+      if((i||k) && t<best && x.d<Infinity && y.d<Infinity && visible(x.p,y.p,bothR(i ? ea.Rx : ea.R, k ? eb.Rx : eb.R))){ best=t; meet=[x,y]; } }));
     const N=usable.length, dist=new Float64Array(N+1).fill(Infinity), prev=new Int32Array(N+1).fill(-1), done=new Uint8Array(N+1);
-    for(let j=0;j<N;j++) if(visible(a,usable[j],skip)) { dist[j]=len(sub(a,usable[j])); prev[j]=-2; }
-    let best=Infinity, bestFrom=-1;
+    for(let j=0;j<N;j++){
+      if(ea.d){ if(ea.d[j]<Infinity){ dist[j]=ea.d[j]; prev[j]=-2; } }
+      else if(visible(a,usable[j])) { dist[j]=len(sub(a,usable[j])); prev[j]=-2; }
+    }
+    let bestFrom=-1;
     for(;;){
       let i=-1, m=Infinity;
       for(let j=0;j<N;j++) if(!done[j] && dist[j]<m){ m=dist[j]; i=j; }
       if(i<0 || m>=best) break;
       done[i]=1;
-      if(visible(usable[i], b, skip)){ const t=m+len(sub(usable[i],b)); if(t<best){ best=t; bestFrom=i; } }
+      const tail=eb.d ? eb.d[i] : visible(usable[i], b) ? len(sub(usable[i],b)) : Infinity;
+      if(tail<Infinity){ const t=m+tail; if(t<best){ best=t; bestFrom=i; } }
       for(const [j,w] of nb(i)) if(!done[j] && m+w<dist[j]){ dist[j]=m+w; prev[j]=i; }
     }
     // Kein Durchkommen (Engstelle < 600 mm): ehrlich als gesperrt melden.
-    if(bestFrom<0) return {len:len(sub(a0,b0)), path:[a0,b0], ok:false};
-    const core=[b]; let k=bestFrom;
-    while(k>=0){ core.push(usable[k]); k=prev[k]; }
+    if(bestFrom<0 && !meet) return {len:len(sub(a0,b0)), path:[a0,b0], ok:false};
+    if(bestFrom<0) return wrap([a, ...meet[0].chain, ...meet[1].chain.slice().reverse(), b], best);
+    const core=[b]; let k=bestFrom, first=k;
+    while(k>=0){ core.push(usable[k]); first=k; k=prev[k]; }
     core.push(a); core.reverse();
-    return wrap(core.map(p=>({x:p.x,y:p.y})), best);
+    const out=core.slice();
+    // über die Ecken einer kleineren Aufweitung hinaus bzw. hinein
+    if(ea.via && ea.via[first]) out.splice(1,0,...ea.via[first]);
+    if(eb.via && eb.via[bestFrom]) out.splice(out.length-1,0,...eb.via[bestFrom].slice().reverse());
+    return wrap(out, best);
   }
   return {route};
 }
@@ -8076,10 +8157,14 @@ function stations(E, K, L){
     const it=g.it;
     if(g.wing) return;                                  // zweiter Schenkel: Stationen am Hauptteil
     if(it.kind==='table'){
-      // Am Tisch: die Seite, die zur Küche zeigt (nächster Schrank).
+      // Am Tisch: die Seite, die zur Küche zeigt (nächster Schrank), und zwar
+      // eine mit Stuhlraum: an einer zugestellten (Stirn an Stirn mit der Insel,
+      // Wand) läge der Stand im anderen Möbel. Ohne offene Seite die mit dem
+      // meisten Platz.
       const others=L.G.filter(h=>h.it.kind!=='table' && h.it.kind!=='wall');
       const ref=others.length ? centroid(others.map(h=>h.frontMid)) : add(g.c, g.n);
-      const side=tableSides(g,E,L).sort((p,q)=>len(sub(p.mid,ref))-len(sub(q.mid,ref)))[0];
+      const room=s=>Math.min(s.room, SEAT_ROOM);
+      const side=tableSides(g,E,L).sort((p,q)=>room(q)-room(p) || len(sub(p.mid,ref))-len(sub(q.mid,ref)))[0];
       put('tisch', add(side.mid, mul(side.n, STAND)), it.id);
       return;
     }
@@ -8093,10 +8178,13 @@ function stations(E, K, L){
   // Arbeitsfläche: Platte ohne Gerät, am nächsten zur Mitte Spüle–Herd.
   const sink=(S.sink||[])[0], hob=(S.hob||[])[0];
   const ref=sink&&hob ? mul(add(sink.p,hob.p),0.5) : (sink||hob) ? (sink||hob).p : null;
+  // Stand wie bei allen Stationen (standAt): bei Über-Eck und Halbeck liegt
+  // er nicht vor der Frontmitte des Hauptteils (Nachbarschrank, Blende).
   const preps=L.G.filter(g=>(g.it.kind==='base'||g.it.kind==='island') && !g.it.dev && !g.wing);
   if(preps.length){
-    const g=ref ? preps.sort((p,q)=>len(sub(p.frontMid,ref))-len(sub(q.frontMid,ref)))[0] : preps[0];
-    put('prep', add(g.frontMid, mul(g.n, STAND)), g.it.id);
+    const at=g=>standAt(g, K.spec);
+    const g=ref ? preps.sort((p,q)=>len(sub(at(p),ref))-len(sub(at(q),ref)))[0] : preps[0];
+    put('prep', at(g), g.it.id);
   }
   // Eingang: gewählte Tür, sonst die erste. 450 mm im Raum vor der Tür.
   const doors=entries(E);
@@ -9040,7 +9128,7 @@ Object.assign(globalThis.KITCHEN, { /* rest-platte */ });
 //
 Object.assign(globalThis.KITCHEN, { /* rest-pruef */ });
 //
-Object.assign(globalThis.KITCHEN, { /* rest-wege */ });
+Object.assign(globalThis.KITCHEN, { standAt });
 //
 Object.assign(globalThis.KITCHEN, { /* rest-inhalte */ });
 //
@@ -24650,7 +24738,83 @@ globalThis.selfChecks=function(){
     //
     // --- Rest-Fix wege ---
     try{
-      // TESTS-wege
+      // F1: Start/Ziel in der Aufweitung eines Hindernisses zählte das Hindernis
+      // für den ganzen Weg nicht (skip) - Wege liefen mitten durch Tisch, Schrank, Kind.
+      const inPoly=(p,P)=>TILES.pointInRing(p,P);
+      const along=(path,f)=>{ for(let i=1;i<path.length;i++){ const a=path[i-1], b=path[i], n=Math.max(2,Math.ceil(Math.hypot(b.x-a.x,b.y-a.y)/20));
+        for(let t=0;t<=n;t++) if(f({x:a.x+(b.x-a.x)*t/n, y:a.y+(b.y-a.y)*t/n})) return true; } return false; };
+      const foot=g=>g.foot||g.poly;
+      {
+        // Tisch 520 mm vor der Zeile: das Besteck steht in der Aufweitung des Tischs, der Tisch-Stand daneben.
+        // Früher 1284 mm quer durch die Tischecke; der ehrliche Weg um sie liegt bei ≈ 1670 mm.
+        const r=lay([{id:1,kind:'base',dev:'dw',a:'A',b:'B',x:100,w:600},{id:2,kind:'base',a:'A',b:'B',x:700,w:600,store:['besteck']},
+          {id:3,kind:'base',a:'B',b:'C',x:2200,w:600,store:['teller']},{id:4,kind:'base',a:'A',b:'B',x:3300,w:600,store:['glaeser']},
+          {id:5,kind:'table',x:1200,y:1500,rot:0,w:1200,d:800,seats:4}]);
+        const St=KX.stations(E,r.K,r.L), w=KX.planner(E,r.L).route(St.besteck[0].p, St.tisch[0].p), tb=foot(r.L.byId.get(5));
+        chk('kueche-wege: Start in der Aufweitung des Tischs – der Weg läuft um die Tischecke, nicht hindurch (und nicht kilometerweit außen herum)',
+          w.ok && !along(w.path,p=>inPoly(p,tb)) && w.len>1284+100 && w.len<2000);
+      }
+      const Ea=KX.makeEnv(R.pts,R.walls,[door],[]);
+      const Ka=KX.normKitchen({items:[
+        {id:1,kind:'base',dev:'sink',a:'A',b:'B',x:600,w:600,store:['muell']},{id:2,kind:'base',dev:'dw',a:'A',b:'B',x:1200,w:600},
+        {id:3,kind:'base',dev:'hob',a:'A',b:'B',x:2400,w:600},{id:4,kind:'base',a:'A',b:'B',x:1800,w:600,store:['besteck','messer']},
+        {id:5,kind:'tall',dev:'fridge',a:'B',b:'C',x:0,w:600},{id:6,kind:'wall',a:'A',b:'B',x:1800,w:600,store:['teller','glaeser']},
+        {id:7,kind:'base',a:'A',b:'B',x:3000,w:600,store:['toepfe','gewuerze']},{id:8,kind:'tall',a:'B',b:'C',x:600,w:600,store:['vorrat','tassen']},
+        {id:9,kind:'table',x:2000,y:2000,rot:0,w:1200,d:800}]});
+      const La=KX.layout(Ea,Ka), Ra=KX.flows(Ea,Ka,La);
+      {
+        // Ohne Kind: kein Weg läuft durch den Körper eines Teils, in dem keiner seiner Endpunkte steht
+        // (die Kühlschrank-Station dieses Layouts liegt im Körper von Unterschrank 7: dort beginnt der Weg im Körper).
+        const bodies=La.G.filter(g=>g.it.kind!=='wall').map(g=>foot(g));
+        const through=Ra.flows.flatMap(f=>f.legs).filter(l=>l.ok && bodies.some(P=>!inPoly(l.path[0],P) && !inPoly(l.path[l.path.length-1],P) && along(l.path,p=>inPoly(p,P))));
+        chk('kueche-wege: Wege laufen nicht durch fremde Schränke (Stand in der Aufweitung eines Nachbarn: ihn kurz verlassen, nicht durchqueren)', through.length===0);
+        const leg=(R2,f,a,b)=>R2.flows.find(x=>x.key===f).legs.find(l=>l.from===a && l.to===b);
+        chk('kueche-wege: Stand unter dem Hängeschrank (in der Aufweitung der Zeile) – der Weg weg vom Schrank bleibt gerade, kein Umweg',
+          leg(Ra,'decken','teller','tisch').ok && leg(Ra,'decken','teller','tisch').len<560 && leg(Ra,'ausraeumen','dw','teller').len<700);
+        // Kind mitten im Gang (Platz im Raum wie früher am Heatmap-Gipfel): was nicht im Körper des Kindes beginnt oder endet,
+        // läuft nicht durch ihn - sondern außen herum oder ist gesperrt.
+        const kc={x:2050,y:950}, Rk=KX.flows(Ea,Ka,La,{planner:KX.planner(Ea,La,[KX.kidPoly(kc)])});
+        const ins=300*Math.cos(Math.PI/8);   // Innenkreis des Achtecks (≈ 277)
+        const cut=Rk.flows.flatMap(f=>f.legs).filter(l=>l.ok && Math.hypot(l.path[0].x-kc.x,l.path[0].y-kc.y)>=300 && Math.hypot(l.path[l.path.length-1].x-kc.x,l.path[l.path.length-1].y-kc.y)>=300
+          && along(l.path,p=>Math.hypot(p.x-kc.x,p.y-kc.y)<ins-1));
+        const hobTisch=leg(Rk,'servieren','hob','tisch');
+        chk('kueche-wege: Kind im Gang – Wege ohne Start oder Ziel im Kind laufen nicht durch es (Herd–Tisch außen herum oder gesperrt)',
+          cut.length===0 && (!hobTisch.ok || hobTisch.len>leg(Ra,'servieren','hob','tisch').len) && Rk.flows.some(f=>f.blocked>0));
+      }
+      {
+        // Zwei Aufgaben am selben Standpunkt im Körper des Kindes: man bleibt stehen (Länge 0).
+        const pl=KX.planner(Ea,La,[KX.kidPoly({x:2050,y:950})]), p={x:2100,y:930};
+        chk('kueche-wege: derselbe Standpunkt im Körper des Kindes – Weg 0', pl.route(p,p).ok && pl.route(p,p).len===0);
+      }
+      // F2: 'prep' nahm Frontmitte + 350 statt des Stands der Station (Über-Eck, Halbeck).
+      {
+        const items=[{id:1,kind:'base',corner:true,ctype:'L',a:'A',b:'B',x:0,w:900,store:['teller']},{id:4,kind:'base',a:'A',b:'D',x:900,w:600,dev:'dw'},
+          {id:2,kind:'base',dev:'sink',a:'B',b:'C',x:1200,w:600},{id:3,kind:'base',dev:'hob',a:'A',b:'B',x:1500,w:600}];
+        const r=lay(items), St=KX.stations(E,r.K,r.L), p=St.prep[0].p, t=St.teller[0].p;
+        chk('kueche-wege: Über-Eck-Schrank als Arbeitsfläche – Stand auf der Diagonalen (wie seine Inhalte), nicht im Nachbarschrank',
+          St.prep[0].id===1 && near(p.x,t.x,1e-6) && near(p.y,t.y,1e-6) && near(p.x,987,1) && !r.L.G.some(g=>g.it.id!==1 && inPoly(p,foot(g)))
+          && typeof KX.standAt==='function' && near(KX.standAt(r.L.byId.get(1),r.K.spec).x,p.x,1e-6));
+        const h=lay([{id:1,kind:'base',corner:true,a:'D',b:'A',x:2000,w:1000,front:'door',store:['teller']},{id:2,kind:'base',dev:'sink',a:'B',b:'C',x:1200,w:600},{id:3,kind:'base',dev:'hob',a:'B',b:'C',x:2000,w:600}]),
+          Sh=KX.stations(E,h.K,h.L);
+        chk('kueche-wege: Halbeck als Arbeitsfläche – Stand vor der Tür, nicht vor der Blende (wie Teller im selben Schrank)',
+          Sh.prep[0].id===1 && near(Sh.prep[0].p.x,Sh.teller[0].p.x,1e-6) && near(Sh.prep[0].p.y,Sh.teller[0].p.y,1e-6));
+        const g=lay([{id:1,kind:'base',dev:'sink',a:'A',b:'B',x:600,w:600},{id:2,kind:'base',a:'A',b:'B',x:1200,w:600},{id:3,kind:'base',dev:'hob',a:'A',b:'B',x:1800,w:600}]), Sg=KX.stations(E,g.K,g.L), g2=g.L.byId.get(2);
+        chk('kueche-wege: gerade Zeile – Arbeitsfläche unverändert 350 mm vor der Frontmitte', near(Sg.prep[0].p.x,g2.frontMid.x+g2.n.x*350,1e-6) && near(Sg.prep[0].p.y,g2.frontMid.y+g2.n.y*350,1e-6));
+      }
+      // F3: 'tisch' nahm die küchennächste Seite auch dann, wenn dort kein Stuhlraum ist (Stand im Nachbarmöbel).
+      {
+        const T3=items=>{ const r=lay(items), g=r.L.G.find(h=>h.it.kind==='table'), St=KX.stations(E,r.K,r.L), p=St.tisch[0].p, sd=KX.tableSides(g,E,r.L);
+          return {r, g, p, sd, side:sd.find(s=>near(Math.hypot(p.x-s.mid.x,p.y-s.mid.y),350,1e-6) && near(Math.hypot(p.x-s.mid.x-s.n.x*350,p.y-s.mid.y-s.n.y*350),0,1e-6))}; };
+        const a=T3([{id:1,kind:'base',dev:'sink',a:'A',b:'B',x:600,w:600},{id:2,kind:'island',x:1900,y:1500,rot:0,w:1800,d:900},{id:3,kind:'table',x:3400,y:1500,rot:0,w:1200,d:800}]);
+        chk('kueche-wege: Tisch Stirn an Stirn mit der Insel – der Stand liegt an einer Seite mit Stuhlraum, nicht in der Insel',
+          !!a.side && a.side.open && !a.r.L.G.some(h=>h.it.kind!=='table' && h.it.kind!=='wall' && inPoly(a.p,foot(h))) && TILES.pointInRing(a.p,E.ring));
+        const b=T3([{id:1,kind:'base',dev:'sink',a:'A',b:'B',x:600,w:600},{id:3,kind:'table',x:2000,y:2000,rot:0,w:1200,d:800}]);
+        const fm=b.r.L.G.filter(h=>h.it.kind!=='table' && h.it.kind!=='wall').map(h=>h.frontMid), c0={x:fm.reduce((s,q)=>s+q.x,0)/fm.length, y:fm.reduce((s,q)=>s+q.y,0)/fm.length};
+        const old=b.sd.slice().sort((p,q)=>Math.hypot(p.mid.x-c0.x,p.mid.y-c0.y)-Math.hypot(q.mid.x-c0.x,q.mid.y-c0.y))[0];
+        chk('kueche-wege: frei stehender Tisch (alle Seiten offen) – Stand wie bisher an der küchennächsten Seite', b.sd.every(s=>s.open) && near(b.p.x,old.mid.x+old.n.x*350,1e-6) && near(b.p.y,old.mid.y+old.n.y*350,1e-6));
+        const z=T3([{id:1,kind:'base',dev:'sink',a:'A',b:'B',x:1700,w:600},{id:3,kind:'table',x:2000,y:1500,rot:0,w:3400,d:2800}]);
+        chk('kueche-wege: Tisch an allen Seiten zugestellt – trotzdem ein Stand, an der Seite mit dem meisten Platz', !!z.side && z.sd.every(s=>!s.open) && z.side.room===Math.max(...z.sd.map(s=>s.room)));
+      }
     }catch(err){ chk('kueche: Rest-Fix wege ohne Ausnahme ('+err.message+')', false); }
     //
     // --- Rest-Fix inhalte ---
