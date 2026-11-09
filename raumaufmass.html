@@ -8974,8 +8974,8 @@ function stationLabel(LP, q, roles, o){
   // (D16 in Rangfolge, danach dieselbe Folge um 11,25°, 5,625° und 16,875° gedreht).
   const GAP=[7,16,28,44,64,90], D16=[0,180,270,90,315,45,225,135,337.5,22.5,202.5,157.5,292.5,67.5,247.5,112.5];
   const DIR=[...D16, ...D16.map(a=>a+11.25), ...D16.map(a=>a+5.625), ...D16.map(a=>a+16.875)];
-  const ring=(t,k,any)=>{ const gap=GAP[k]*dpr, w=o.measure(t,f)+8*dpr;
-    return DIR.map(a=>{ const dx=Math.cos(a*Math.PI/180), dy=Math.sin(a*Math.PI/180), e=gap+(Math.abs(dx)*w+Math.abs(dy)*h)/2;
+  const ring=(t,k,any,D=DIR)=>{ const gap=GAP[k]*dpr, w=o.measure(t,f)+8*dpr;
+    return D.map(a=>{ const dx=Math.cos(a*Math.PI/180), dy=Math.sin(a*Math.PI/180), e=gap+(Math.abs(dx)*w+Math.abs(dy)*h)/2;
       return {x:q.x+dx*e-w/2, y:q.y+dy*e-h/2, w, h, txt:t, k}; }).filter(r=>any || onView(r)); };
   // Nah zuerst: voll in den ersten beiden Ringen, dann kurz; weiter außen je Ring voll, kurz.
   const K=GAP.map((g,k)=>k), T=short!==full ? [[full,0],[full,1],[short,0],[short,1], ...K.slice(2).flatMap(k=>[[full,k],[short,k]])] : K.map(k=>[full,k]);
@@ -9022,7 +9022,7 @@ function stationLabel(LP, q, roles, o){
     // Überdeckung je Kandidat: hart zählt wie unendlich, sonst die Fläche.
     const ov=(a,b)=>Math.max(0, Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x))*Math.max(0, Math.min(a.y+a.h,b.y+b.h)-Math.max(a.y,b.y));
     const cost=c=>LP.rects.reduce((s,b)=>{ const a=ov(c,b); return s + (a>1e-3 && b.hard ? 1e9 : a); }, 0);
-    let S=K.flatMap(k=>ring(short,k)); if(!S.length) S=ring(short,0,true);
+    let S=K.flatMap(k=>ring(short,k,false,D16)); if(!S.length) S=ring(short,0,true,D16);   // Notlösung: nur die 16 Hauptrichtungen (Kosten wie früher)
     r=LP.occupy(S.map(c=>({c, v:cost(c)})).sort((a,b)=>a.v-b.v)[0].c); forced=true;
   }
   // Führungslinie zum gewählten Randpunkt des Kastens (meist der nächste), wenn er weiter weg steht.
