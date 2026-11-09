@@ -1,0 +1,702 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-09T21:06:30.507Z",
+  "title": "Design System: Raumaufmaß (Werkzeugfamilie)",
+  "source": "docs/superpowers/prototypes/raumaufmass-hauptweg.html",
+  "extensions": {
+    "colorMeta": {
+      "paper": {
+        "role": "neutral",
+        "displayName": "Tischfläche",
+        "canonical": "oklch(93.1% 0.011 90)",
+        "tonalRamp": [
+          "oklch(15% 0.007 90)",
+          "oklch(26% 0.009 90)",
+          "oklch(38% 0.011 90)",
+          "oklch(50% 0.011 90)",
+          "oklch(62% 0.011 90)",
+          "oklch(74% 0.009 90)",
+          "oklch(86% 0.007 90)",
+          "oklch(95% 0.005 90)"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Blatt",
+        "canonical": "oklch(98.2% 0.004 91)",
+        "tonalRamp": [
+          "oklch(15% 0.002 91)",
+          "oklch(26% 0.003 91)",
+          "oklch(38% 0.004 91)",
+          "oklch(50% 0.004 91)",
+          "oklch(62% 0.004 91)",
+          "oklch(74% 0.003 91)",
+          "oklch(86% 0.002 91)",
+          "oklch(95% 0.002 91)"
+        ]
+      },
+      "canvas": {
+        "role": "neutral",
+        "displayName": "Zeichenfläche",
+        "canonical": "oklch(96.4% 0.008 91)",
+        "tonalRamp": [
+          "oklch(15% 0.005 91)",
+          "oklch(26% 0.007 91)",
+          "oklch(38% 0.008 91)",
+          "oklch(50% 0.008 91)",
+          "oklch(62% 0.008 91)",
+          "oklch(74% 0.007 91)",
+          "oklch(86% 0.005 91)",
+          "oklch(95% 0.004 91)"
+        ]
+      },
+      "floor": {
+        "role": "neutral",
+        "displayName": "Raumfläche",
+        "canonical": "oklch(98.5% 0.004 91)",
+        "tonalRamp": [
+          "oklch(15% 0.002 91)",
+          "oklch(26% 0.003 91)",
+          "oklch(38% 0.004 91)",
+          "oklch(50% 0.004 91)",
+          "oklch(62% 0.004 91)",
+          "oklch(74% 0.003 91)",
+          "oklch(86% 0.002 91)",
+          "oklch(95% 0.002 91)"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Tinte",
+        "canonical": "oklch(25.2% 0.01 89)",
+        "tonalRamp": [
+          "oklch(15% 0.006 89)",
+          "oklch(26% 0.008 89)",
+          "oklch(38% 0.01 89)",
+          "oklch(50% 0.01 89)",
+          "oklch(62% 0.01 89)",
+          "oklch(74% 0.008 89)",
+          "oklch(86% 0.006 89)",
+          "oklch(95% 0.004 89)"
+        ]
+      },
+      "ink2": {
+        "role": "neutral",
+        "displayName": "Tinte hell",
+        "canonical": "oklch(39.9% 0.016 87)",
+        "tonalRamp": [
+          "oklch(15% 0.009 87)",
+          "oklch(26% 0.012 87)",
+          "oklch(38% 0.016 87)",
+          "oklch(50% 0.016 87)",
+          "oklch(62% 0.016 87)",
+          "oklch(74% 0.012 87)",
+          "oklch(86% 0.009 87)",
+          "oklch(95% 0.007 87)"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Gedämpft",
+        "canonical": "oklch(52.5% 0.019 88)",
+        "tonalRamp": [
+          "oklch(15% 0.012 88)",
+          "oklch(26% 0.015 88)",
+          "oklch(38% 0.019 88)",
+          "oklch(50% 0.019 88)",
+          "oklch(62% 0.019 88)",
+          "oklch(74% 0.015 88)",
+          "oklch(86% 0.011 88)",
+          "oklch(95% 0.008 88)"
+        ]
+      },
+      "pencil": {
+        "role": "neutral",
+        "displayName": "Bleistift",
+        "canonical": "oklch(69.7% 0.02 86)",
+        "tonalRamp": [
+          "oklch(15% 0.012 86)",
+          "oklch(26% 0.016 86)",
+          "oklch(38% 0.02 86)",
+          "oklch(50% 0.02 86)",
+          "oklch(62% 0.02 86)",
+          "oklch(74% 0.016 86)",
+          "oklch(86% 0.012 86)",
+          "oklch(95% 0.009 86)"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Linie",
+        "canonical": "oklch(86.7% 0.018 89)",
+        "tonalRamp": [
+          "oklch(15% 0.011 89)",
+          "oklch(26% 0.015 89)",
+          "oklch(38% 0.018 89)",
+          "oklch(50% 0.018 89)",
+          "oklch(62% 0.018 89)",
+          "oklch(74% 0.015 89)",
+          "oklch(86% 0.011 89)",
+          "oklch(95% 0.008 89)"
+        ]
+      },
+      "line2": {
+        "role": "neutral",
+        "displayName": "Haarlinie",
+        "canonical": "oklch(91.9% 0.014 89)",
+        "tonalRamp": [
+          "oklch(15% 0.009 89)",
+          "oklch(26% 0.011 89)",
+          "oklch(38% 0.014 89)",
+          "oklch(50% 0.014 89)",
+          "oklch(62% 0.014 89)",
+          "oklch(74% 0.011 89)",
+          "oklch(86% 0.008 89)",
+          "oklch(95% 0.006 89)"
+        ]
+      },
+      "hover": {
+        "role": "neutral",
+        "displayName": "Hover",
+        "canonical": "oklch(93.7% 0.014 89)",
+        "tonalRamp": [
+          "oklch(15% 0.009 89)",
+          "oklch(26% 0.011 89)",
+          "oklch(38% 0.014 89)",
+          "oklch(50% 0.014 89)",
+          "oklch(62% 0.014 89)",
+          "oklch(74% 0.011 89)",
+          "oklch(86% 0.008 89)",
+          "oklch(95% 0.006 89)"
+        ]
+      },
+      "press": {
+        "role": "neutral",
+        "displayName": "Gedrückt",
+        "canonical": "oklch(90.4% 0.017 88)",
+        "tonalRamp": [
+          "oklch(15% 0.01 88)",
+          "oklch(26% 0.014 88)",
+          "oklch(38% 0.017 88)",
+          "oklch(50% 0.017 88)",
+          "oklch(62% 0.017 88)",
+          "oklch(74% 0.014 88)",
+          "oklch(86% 0.01 88)",
+          "oklch(95% 0.007 88)"
+        ]
+      },
+      "accent": {
+        "role": "primary",
+        "displayName": "Verbranntes Orange",
+        "canonical": "oklch(55.3% 0.174 38)",
+        "tonalRamp": [
+          "oklch(15% 0.105 38)",
+          "oklch(26% 0.138 38)",
+          "oklch(38% 0.174 38)",
+          "oklch(50% 0.174 38)",
+          "oklch(62% 0.174 38)",
+          "oklch(74% 0.138 38)",
+          "oklch(86% 0.102 38)",
+          "oklch(95% 0.076 38)"
+        ]
+      },
+      "accent-hover": {
+        "role": "primary",
+        "displayName": "Orange gedrückt",
+        "canonical": "oklch(49.8% 0.155 39)",
+        "tonalRamp": [
+          "oklch(15% 0.094 39)",
+          "oklch(26% 0.123 39)",
+          "oklch(38% 0.155 39)",
+          "oklch(50% 0.155 39)",
+          "oklch(62% 0.155 39)",
+          "oklch(74% 0.123 39)",
+          "oklch(86% 0.092 39)",
+          "oklch(95% 0.068 39)"
+        ]
+      },
+      "accent-bg": {
+        "role": "primary",
+        "displayName": "Orange-Papier",
+        "canonical": "oklch(93.9% 0.025 54)",
+        "tonalRamp": [
+          "oklch(15% 0.015 54)",
+          "oklch(26% 0.02 54)",
+          "oklch(38% 0.025 54)",
+          "oklch(50% 0.025 54)",
+          "oklch(62% 0.025 54)",
+          "oklch(74% 0.02 54)",
+          "oklch(86% 0.015 54)",
+          "oklch(95% 0.011 54)"
+        ]
+      },
+      "accent-line": {
+        "role": "primary",
+        "displayName": "Orange-Linie",
+        "canonical": "oklch(83.2% 0.065 52)",
+        "tonalRamp": [
+          "oklch(15% 0.039 52)",
+          "oklch(26% 0.051 52)",
+          "oklch(38% 0.065 52)",
+          "oklch(50% 0.065 52)",
+          "oklch(62% 0.065 52)",
+          "oklch(74% 0.051 52)",
+          "oklch(86% 0.038 52)",
+          "oklch(95% 0.028 52)"
+        ]
+      },
+      "good": {
+        "role": "secondary",
+        "displayName": "Geprüft-Grün",
+        "canonical": "oklch(46.6% 0.116 150)",
+        "tonalRamp": [
+          "oklch(15% 0.07 150)",
+          "oklch(26% 0.092 150)",
+          "oklch(38% 0.116 150)",
+          "oklch(50% 0.116 150)",
+          "oklch(62% 0.116 150)",
+          "oklch(74% 0.092 150)",
+          "oklch(86% 0.068 150)",
+          "oklch(95% 0.05 150)"
+        ]
+      },
+      "bad": {
+        "role": "secondary",
+        "displayName": "Fehler-Rot",
+        "canonical": "oklch(50.1% 0.178 29)",
+        "tonalRamp": [
+          "oklch(15% 0.108 29)",
+          "oklch(26% 0.142 29)",
+          "oklch(38% 0.178 29)",
+          "oklch(50% 0.178 29)",
+          "oklch(62% 0.178 29)",
+          "oklch(74% 0.142 29)",
+          "oklch(86% 0.105 29)",
+          "oklch(95% 0.078 29)"
+        ]
+      },
+      "white": {
+        "role": "neutral",
+        "displayName": "Weiß",
+        "canonical": "oklch(100% 0 90)",
+        "tonalRamp": [
+          "oklch(15% 0 90)",
+          "oklch(26% 0 90)",
+          "oklch(38% 0 90)",
+          "oklch(50% 0 90)",
+          "oklch(62% 0 90)",
+          "oklch(74% 0 90)",
+          "oklch(86% 0 90)",
+          "oklch(95% 0 90)"
+        ]
+      },
+      "sheet-ink": {
+        "role": "neutral",
+        "displayName": "Drucktinte",
+        "canonical": "oklch(22.2% 0.006 92)",
+        "tonalRamp": [
+          "oklch(15% 0.004 92)",
+          "oklch(26% 0.005 92)",
+          "oklch(38% 0.006 92)",
+          "oklch(50% 0.006 92)",
+          "oklch(62% 0.006 92)",
+          "oklch(74% 0.005 92)",
+          "oklch(86% 0.003 92)",
+          "oklch(95% 0.003 92)"
+        ]
+      },
+      "sheet-muted": {
+        "role": "neutral",
+        "displayName": "Druck gedämpft",
+        "canonical": "oklch(51.2% 0.018 86)",
+        "tonalRamp": [
+          "oklch(15% 0.011 86)",
+          "oklch(26% 0.014 86)",
+          "oklch(38% 0.018 86)",
+          "oklch(50% 0.018 86)",
+          "oklch(62% 0.018 86)",
+          "oklch(74% 0.014 86)",
+          "oklch(86% 0.011 86)",
+          "oklch(95% 0.008 86)"
+        ]
+      },
+      "sheet-line": {
+        "role": "neutral",
+        "displayName": "Drucklinie",
+        "canonical": "oklch(91.3% 0.011 90)",
+        "tonalRamp": [
+          "oklch(15% 0.007 90)",
+          "oklch(26% 0.009 90)",
+          "oklch(38% 0.011 90)",
+          "oklch(50% 0.011 90)",
+          "oklch(62% 0.011 90)",
+          "oklch(74% 0.009 90)",
+          "oklch(86% 0.007 90)",
+          "oklch(95% 0.005 90)"
+        ]
+      },
+      "sheet-floor": {
+        "role": "neutral",
+        "displayName": "Druck-Raumfläche",
+        "canonical": "oklch(96.1% 0.008 91)",
+        "tonalRamp": [
+          "oklch(15% 0.005 91)",
+          "oklch(26% 0.007 91)",
+          "oklch(38% 0.008 91)",
+          "oklch(50% 0.008 91)",
+          "oklch(62% 0.008 91)",
+          "oklch(74% 0.007 91)",
+          "oklch(86% 0.005 91)",
+          "oklch(95% 0.004 91)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "ergebnis": {
+        "displayName": "Ergebnis",
+        "purpose": "Fläche und Umfang unter dem Stand; Name des Gebäudes auf dem Startbildschirm."
+      },
+      "titel": {
+        "displayName": "Titel",
+        "purpose": "Satz des Stands, Raumname, aktiver Schritt, Kopf der Karte, Hauptaktion."
+      },
+      "text": {
+        "displayName": "Text",
+        "purpose": "Grundgröße für Knöpfe, Felder, Zeilen und Menüpunkte."
+      },
+      "nebentext": {
+        "displayName": "Nebentext",
+        "purpose": "Begründungen, Hinweise, Stand in der Raumzeile, Abweichungen, Toast."
+      },
+      "beschriftung": {
+        "displayName": "Beschriftung",
+        "purpose": "Gruppenbeschriftungen (600), Längen im Plan, Maßstab, Schrittziffern, Tastenkürzel."
+      }
+    },
+    "shadows": [
+      {
+        "name": "am-objekt",
+        "value": "0 4px 16px rgba(36,34,29,.14)",
+        "purpose": "Karte am Objekt und Eingabe an der Strecke."
+      },
+      {
+        "name": "menu",
+        "value": "0 6px 20px rgba(36,34,29,.14)",
+        "purpose": "Menü unter der Leiste."
+      },
+      {
+        "name": "dialog",
+        "value": "0 12px 40px rgba(36,34,29,.2)",
+        "purpose": "Hilfe und QR-Code; Hintergrund rgba(36,34,29,.28)."
+      },
+      {
+        "name": "blatt",
+        "value": "0 1px 2px rgba(36,34,29,.12), 0 8px 24px rgba(36,34,29,.10)",
+        "purpose": "Aufmaßblatt auf der Fläche; entfällt im Druck."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease",
+        "value": "cubic-bezier(.16,1,.3,1)",
+        "purpose": "Der eine Verlauf (--ease): schnell los, lang auslaufend."
+      },
+      {
+        "name": "ink",
+        "value": "600ms var(--ease)",
+        "purpose": "Wand bekommt ein Maß: Strich blitzt in Akzent mit 4 px auf und wird Tinte."
+      },
+      {
+        "name": "inkfade",
+        "value": "1200ms var(--ease) forwards",
+        "purpose": "Diagonale bekommt ein Maß: Akzent 3 px, dann Tinte, dann unsichtbar."
+      },
+      {
+        "name": "morph",
+        "value": "420ms, 1-(1-t)^4 im Skript",
+        "purpose": "Form wird eindeutig: die Skizze gleitet in die gemessene Form. Kein Gleiten beim Laden eines Raums."
+      },
+      {
+        "name": "arrive",
+        "value": "400ms var(--ease)",
+        "purpose": "Fläche und Umfang erscheinen: einblenden, 5 px von unten."
+      },
+      {
+        "name": "schalter",
+        "value": "transform 150ms var(--ease)",
+        "purpose": "Knopf des Schalters gleitet 12 px."
+      },
+      {
+        "name": "aufklappwinkel",
+        "value": "rotate 150ms",
+        "purpose": "Winkel der Aufklappzeile; ohne --ease (uneinheitlich)."
+      },
+      {
+        "name": "toast",
+        "value": "opacity 200ms, sichtbar 2200ms",
+        "purpose": "Rückmeldung am Objekt; ohne --ease (uneinheitlich)."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "animation:none; transition:none",
+        "purpose": "Bei prefers-reduced-motion entfällt jede Bewegung; die Skizze springt in die gemessene Form."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "min-breite",
+        "value": "860px",
+        "purpose": "Mindestbreite der Oberfläche. Keine Umbrüche, Mobile ist nicht Teil des Systems."
+      }
+    ],
+    "strokes": [
+      {
+        "name": "wand-mit-mass",
+        "value": "stroke: var(--ink); stroke-width: 2; stroke-linecap: round",
+        "purpose": "Wand mit Maß: Tinte."
+      },
+      {
+        "name": "wand-ohne-mass",
+        "value": "stroke: var(--pencil); stroke-width: 1.25; stroke-dasharray: 5 4",
+        "purpose": "Wand ohne Maß, Gummiband, angenommene Höhe: Bleistift."
+      },
+      {
+        "name": "naechste-strecke",
+        "value": "stroke: var(--accent); stroke-width: 2.5",
+        "purpose": "Die Strecke, die als Nächstes dran ist."
+      },
+      {
+        "name": "falsches-mass",
+        "value": "stroke: var(--bad); stroke-width: 2.5; stroke-dasharray: 9 4",
+        "purpose": "Strecke, deren Maß nicht passt."
+      },
+      {
+        "name": "diagonale",
+        "value": "stroke: var(--ink2); stroke-width: 1; opacity: .55",
+        "purpose": "Diagonale an einer angefassten Ecke; sonst unsichtbar."
+      },
+      {
+        "name": "raster",
+        "value": "stroke: var(--line2); stroke-width: 1; 1 m",
+        "purpose": "Raster des Plans."
+      },
+      {
+        "name": "icon",
+        "value": "16px; stroke: currentColor; stroke-width: 1.6; round",
+        "purpose": "Inline-SVG-Icons."
+      },
+      {
+        "name": "fokus",
+        "value": "outline: 2px solid var(--accent); outline-offset: 1px",
+        "purpose": "Fokus überall; im Plan Band in --accent-line (Strecke) oder Ring 2 px in --accent (Ecke)."
+      }
+    ],
+    "keyLabels": {
+      "mac": {
+        "undo": "⌘Z",
+        "redo": "⇧⌘Z",
+        "save": "⌘S",
+        "open": "⌘O",
+        "del": "⌫",
+        "zoom": "⌘"
+      },
+      "other": {
+        "undo": "Strg+Z",
+        "redo": "Strg+Y",
+        "save": "Strg+S",
+        "open": "Strg+O",
+        "del": "Entf",
+        "zoom": "Strg"
+      }
+    },
+    "outOfScope": [
+      "#proto und #demo (Gerüst des Prototyps)",
+      "Mobile und Fenster unter 860 px"
+    ]
+  },
+  "components": [
+    {
+      "name": "Schaltfläche",
+      "kind": "button",
+      "refersTo": "button",
+      "description": "Normale Aktion. 28 px hoch, 1 px Rand, flach; Zustände wechseln ohne Übergang.",
+      "html": "<button class=\"ds-btn\">Eintragen</button> <button class=\"ds-btn ds-btn-danger\">Löschen <kbd class=\"ds-kbd\">⌫</kbd></button>",
+      "css": ".ds-btn{font:13px/1.4 system-ui,-apple-system,\"Segoe UI\",Roboto,sans-serif;font-variant-numeric:tabular-nums;color:#24221d;background:#faf9f6;border:1px solid #d8d3c6;border-radius:4px;padding:0 10px;min-height:28px;cursor:pointer} .ds-btn:hover{background:#eeeae0} .ds-btn:active{background:#e4dfd3} .ds-btn:focus-visible{outline:2px solid #c2410c;outline-offset:1px} .ds-btn-danger{color:#b3261e} .ds-kbd{font:inherit;font-size:11px;color:#6f6a5e}"
+    },
+    {
+      "name": "Hauptaktion",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Die eine Aktion in Akzent je Ansicht, etwa „Weiter: Wände“.",
+      "html": "<button class=\"ds-btn-primary\">Weiter: Wände</button>",
+      "css": ".ds-btn-primary{font:13px/1.4 system-ui,-apple-system,\"Segoe UI\",Roboto,sans-serif;font-variant-numeric:tabular-nums;color:#24221d;background:#c2410c;border:1px solid #c2410c;color:#fff;font-weight:600;border-radius:4px;padding:0 10px;min-height:28px;cursor:pointer} .ds-btn-primary:hover{background:#a8380a;border-color:#a8380a} .ds-btn-primary:focus-visible{outline:2px solid #c2410c;outline-offset:1px}"
+    },
+    {
+      "name": "Eingabe an der Strecke",
+      "kind": "input",
+      "refersTo": "eingabe-an-der-strecke",
+      "description": "Sitzt im Schritt Maße im Plan neben der nächsten Strecke. Enter trägt ein und springt weiter.",
+      "html": "<div class=\"ds-entry\"><b>A–B</b><input class=\"ds-entry-in\" type=\"text\" inputmode=\"decimal\" placeholder=\"Maß\" aria-label=\"Maß in Metern\"><span class=\"ds-entry-u\">m</span><button class=\"ds-entry-ok\">OK</button></div>",
+      "css": ".ds-entry{font:13px/1.4 system-ui,-apple-system,\"Segoe UI\",Roboto,sans-serif;font-variant-numeric:tabular-nums;color:#24221d;display:inline-flex;align-items:center;gap:6px;padding:6px 6px 6px 10px;background:#faf9f6;border:1px solid #d8d3c6;border-radius:6px;box-shadow:0 4px 16px rgba(36,34,29,.14)} .ds-entry b{font-weight:600;white-space:nowrap} .ds-entry-in{font:inherit;color:#24221d;width:86px;height:28px;padding:0 7px;text-align:right;border:1px solid #d8d3c6;border-radius:4px;background:#fff;caret-color:#c2410c} .ds-entry-in:focus{outline:none;border-color:#c2410c} .ds-entry-in::placeholder{color:#6f6a5e;font-style:italic;opacity:1} .ds-entry-u{color:#6f6a5e} .ds-entry-ok{font:inherit;font-weight:600;color:#fff;background:#c2410c;border:1px solid #c2410c;border-radius:4px;padding:0 10px;min-height:28px;cursor:pointer} .ds-entry-ok:hover{background:#a8380a;border-color:#a8380a} .ds-entry-ok:focus-visible{outline:2px solid #c2410c;outline-offset:1px}"
+    },
+    {
+      "name": "Leiste mit Schritten",
+      "kind": "nav",
+      "refersTo": "leiste",
+      "description": "44 px. Der aktive Schritt ist Tinte in 600 mit 2-px-Strich auf der Unterkante; kein Akzent.",
+      "html": "<nav class=\"ds-bar\" aria-label=\"Schritte\"><b class=\"ds-bar-name\">Wohnküche</b><div class=\"ds-steps\"><button class=\"ds-step\"><i>1</i>Skizze</button><button class=\"ds-step\" aria-current=\"step\"><i>2</i>Maße</button><button class=\"ds-step\"><i>3</i>Wände</button><svg class=\"ds-step-arrow\" viewBox=\"0 0 16 16\" aria-hidden=\"true\"><path d=\"M3 8h9M9 5l3 3-3 3\"/></svg><button class=\"ds-step\">Ausgabe</button></div></nav>",
+      "css": ".ds-bar{font:13px/1.4 system-ui,-apple-system,\"Segoe UI\",Roboto,sans-serif;font-variant-numeric:tabular-nums;color:#24221d;display:flex;align-items:stretch;height:44px;padding:0 8px 0 6px;background:#faf9f6;border-bottom:1px solid #d8d3c6} .ds-bar-name{align-self:center;font-weight:600;padding:4px 6px} .ds-steps{display:flex;align-items:stretch;margin-left:14px;padding-left:8px;border-left:1px solid #e8e4da} .ds-step{position:relative;display:flex;align-items:center;gap:6px;font:inherit;border:0;background:none;padding:0 12px;color:#4b473e;cursor:pointer} .ds-step i{font-style:normal;font-size:11px;color:#6f6a5e} .ds-step:hover{color:#24221d;background:#eeeae0} .ds-step:focus-visible{outline:2px solid #c2410c;outline-offset:1px} .ds-step[aria-current=step]{color:#24221d;font-weight:600} .ds-step[aria-current=step]::after{content:'';position:absolute;left:10px;right:10px;bottom:-1px;height:2px;background:#24221d} .ds-step-arrow{width:16px;height:16px;align-self:center;margin:0 2px;stroke:#a39d90;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}"
+    },
+    {
+      "name": "Stand",
+      "kind": "custom",
+      "refersTo": "stand",
+      "description": "Oberste Zeile des Panels: Punkt und ein Satz, darunter Fläche und Umfang. Offen ist ein hohler Ring, geprüft ein grüner Punkt, falsch rot.",
+      "html": "<div class=\"ds-standcol\"><button class=\"ds-stand\" data-tone=\"warn\"><span class=\"ds-stand-txt\">Noch 3 Maße, dann ist die Form eindeutig.</span></button><button class=\"ds-stand\" data-tone=\"good\"><span class=\"ds-stand-txt\">Geprüft ± 5,6 mm</span><span class=\"ds-geo\"><span><small>Fläche</small><b>65,40<i>m²</i></b></span><span><small>Umfang</small><b>52,17<i>m</i></b></span></span></button><button class=\"ds-stand\" data-tone=\"bad\"><span class=\"ds-stand-txt\">Ein Maß passt nicht: J–B weicht 87 mm ab.</span></button></div>",
+      "css": ".ds-standcol{width:320px;background:#faf9f6;border-left:1px solid #d8d3c6} .ds-stand{font:13px/1.4 system-ui,-apple-system,\"Segoe UI\",Roboto,sans-serif;font-variant-numeric:tabular-nums;color:#24221d;display:block;width:100%;text-align:left;border:0;border-bottom:1px solid #d8d3c6;background:none;padding:14px 16px;cursor:pointer} .ds-stand:hover{background:#eeeae0} .ds-stand:focus-visible{outline:2px solid #c2410c;outline-offset:1px} .ds-stand-txt{display:flex;gap:9px;align-items:flex-start;font-weight:600;line-height:1.35} .ds-stand-txt::before{content:'';flex:none;width:8px;height:8px;border-radius:50%;margin-top:5px;background:#a39d90} .ds-stand[data-tone=good] .ds-stand-txt::before{background:#1a6b34} .ds-stand[data-tone=warn] .ds-stand-txt::before{background:none;box-shadow:inset 0 0 0 1.5px #4b473e} .ds-stand[data-tone=bad] .ds-stand-txt::before{background:#b3261e} .ds-stand[data-tone=bad] .ds-stand-txt{color:#b3261e} .ds-geo{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0 0 17px} .ds-geo small{display:block;font-size:11px;color:#6f6a5e} .ds-geo b{font-size:20px;font-weight:600;letter-spacing:-.01em} .ds-geo i{font-style:normal;font-size:12px;font-weight:400;color:#6f6a5e;margin-left:3px}"
+    },
+    {
+      "name": "Karte am Objekt",
+      "kind": "card",
+      "refersTo": "karte-am-objekt",
+      "description": "Dieselbe Karte an Ecke, Strecke, Wand und Öffnung in allen Schritten: Maße mit Schalter, weiteres Maß, Öffnungen als Segmente.",
+      "html": "<div class=\"ds-card\"><header><b>Wand A–B</b><span>7,842 m</span></header><div class=\"ds-mrow\"><span>7,842 m</span><span class=\"ds-dev\">−6 mm</span><button class=\"ds-sw\" role=\"switch\" aria-checked=\"true\" aria-label=\"Maß verwenden\"></button></div><div class=\"ds-mrow ds-off\"><span>7,930 m</span><span class=\"ds-dev\"></span><button class=\"ds-sw\" role=\"switch\" aria-checked=\"false\" aria-label=\"Maß verwenden\"></button></div><div class=\"ds-row\"><input class=\"ds-in\" type=\"text\" placeholder=\"weiteres Maß\" aria-label=\"Maß in Metern\"><span>m</span><button class=\"ds-cbtn\">+ Maß</button></div><div class=\"ds-sub\"><p>An dieser Wand</p><div class=\"ds-seg\"><button class=\"ds-cbtn\">Tür</button><button class=\"ds-cbtn\">Fenster</button><button class=\"ds-cbtn\">Loch</button><button class=\"ds-cbtn\">Anschluss</button></div></div><div class=\"ds-sub\"><div class=\"ds-row\"><label>Band</label><div class=\"ds-seg\"><button class=\"ds-cbtn\" aria-pressed=\"true\">links</button><button class=\"ds-cbtn\" aria-pressed=\"false\">rechts</button></div></div></div></div>",
+      "css": ".ds-card{font:13px/1.4 system-ui,-apple-system,\"Segoe UI\",Roboto,sans-serif;font-variant-numeric:tabular-nums;color:#24221d;width:292px;padding:10px 12px 12px;background:#faf9f6;border:1px solid #d8d3c6;border-radius:6px;box-shadow:0 4px 16px rgba(36,34,29,.14)} .ds-card header{display:flex;align-items:baseline;gap:8px;margin-bottom:8px} .ds-card header b{font-weight:600} .ds-card header span{color:#6f6a5e} .ds-mrow{display:grid;grid-template-columns:1fr auto auto;align-items:center;gap:10px;min-height:28px;border-top:1px solid #e8e4da} .ds-mrow.ds-off span{color:#6f6a5e;text-decoration:line-through} .ds-dev{color:#6f6a5e;font-size:12px} .ds-sw{width:28px;height:16px;padding:0;border-radius:8px;border:1px solid #d8d3c6;background:#e4dfd3;position:relative;cursor:pointer} .ds-sw::after{content:'';position:absolute;left:1px;top:1px;width:12px;height:12px;border-radius:50%;background:#fff;transition:transform .15s cubic-bezier(.16,1,.3,1)} .ds-sw[aria-checked=true]{background:#24221d;border-color:#24221d} .ds-sw[aria-checked=true]::after{transform:translateX(12px)} .ds-sw:focus-visible,.ds-cbtn:focus-visible{outline:2px solid #c2410c;outline-offset:1px} .ds-row{display:flex;align-items:center;gap:6px;min-height:30px;border-top:1px solid #e8e4da;padding-top:6px} .ds-sub .ds-row{border-top:0;padding-top:0} .ds-row label{color:#4b473e;min-width:74px} .ds-in{flex:1;min-width:0;font:inherit;color:#24221d;height:28px;padding:0 7px;text-align:right;border:1px solid #d8d3c6;border-radius:4px;background:#fff} .ds-in:focus{outline:none;border-color:#c2410c} .ds-in::placeholder{color:#6f6a5e;font-style:italic;opacity:1} .ds-cbtn{font:inherit;color:#24221d;background:#faf9f6;border:1px solid #d8d3c6;border-radius:4px;padding:0 10px;min-height:28px;cursor:pointer} .ds-cbtn:hover{background:#eeeae0} .ds-cbtn[aria-pressed=true]{background:#24221d;border-color:#24221d;color:#fff} .ds-seg{display:flex;gap:4px;flex-wrap:wrap} .ds-sub{margin-top:10px;padding-top:8px;border-top:1px solid #e8e4da} .ds-sub>p{margin:0 0 6px;font-size:12px;color:#6f6a5e}"
+    },
+    {
+      "name": "Menü",
+      "kind": "custom",
+      "refersTo": "menu",
+      "description": "Alles, was den ganzen Raum betrifft. Gruppen mit Beschriftung, Kürzel rechts, eingeschaltet als Punkt in Akzent.",
+      "html": "<div class=\"ds-menu\" role=\"menu\"><h3>Ansicht</h3><button role=\"menuitemcheckbox\" aria-checked=\"true\">Maßhaltig zeichnen</button><button role=\"menuitem\">Ansicht drehen</button><hr><h3>Weitergeben</h3><button role=\"menuitem\">Als Datei sichern<kbd>⌘S</kbd></button><button role=\"menuitem\" class=\"ds-menu-danger\">Raum leeren</button></div>",
+      "css": ".ds-menu{font:13px/1.4 system-ui,-apple-system,\"Segoe UI\",Roboto,sans-serif;font-variant-numeric:tabular-nums;color:#24221d;width:232px;padding:4px;background:#faf9f6;border:1px solid #d8d3c6;border-radius:6px;box-shadow:0 6px 20px rgba(36,34,29,.14)} .ds-menu h3{margin:0;font-size:11px;font-weight:600;color:#6f6a5e;padding:8px 8px 3px} .ds-menu button{display:flex;align-items:center;justify-content:space-between;gap:16px;width:100%;min-height:28px;font:inherit;color:#24221d;border:0;background:none;text-align:left;padding:0 8px;border-radius:4px;cursor:pointer} .ds-menu button:hover{background:#eeeae0} .ds-menu button:focus-visible{outline:2px solid #c2410c;outline-offset:1px} .ds-menu button[aria-checked=true]::after{content:'';width:6px;height:6px;border-radius:50%;background:#c2410c} .ds-menu kbd{font:inherit;font-size:11px;color:#6f6a5e} .ds-menu hr{border:0;border-top:1px solid #e8e4da;margin:4px 0} .ds-menu .ds-menu-danger{color:#b3261e}"
+    },
+    {
+      "name": "Raumzeile",
+      "kind": "custom",
+      "refersTo": "raumzeile",
+      "description": "Zeile der Raumliste auf dem Startbildschirm: Miniatur, Name, Stand, Folgewerkzeuge. Skizzen als Bleistift.",
+      "html": "<div class=\"ds-rooms\"><div class=\"ds-room\" tabindex=\"0\"><svg viewBox=\"0 0 64 44\"><path d=\"M4 6h56v32H4z\"/></svg><div><b>Wintergarten</b><span class=\"ds-st ds-good\">Geprüft ± 3,1 mm · 29,45 m²</span></div><button class=\"ds-quiet\">Fliesenplan</button></div><div class=\"ds-room\" tabindex=\"0\"><svg viewBox=\"0 0 64 44\"><path d=\"M4 4h56v14H30v22H4z\"/></svg><div><b>Flur</b><span class=\"ds-st ds-warn\">Noch 3 Maße</span></div><span></span></div><div class=\"ds-room\" tabindex=\"0\"><svg viewBox=\"0 0 64 44\"><path class=\"ds-pencil\" d=\"M8 6l46 2-3 30-44-2z\"/></svg><div><b>Bad</b><span class=\"ds-st\">Skizze, 4 Ecken</span></div><span></span></div></div>",
+      "css": ".ds-rooms{font:13px/1.4 system-ui,-apple-system,\"Segoe UI\",Roboto,sans-serif;font-variant-numeric:tabular-nums;color:#24221d;width:520px;background:#faf9f6;border:1px solid #d8d3c6;border-radius:6px} .ds-room{display:grid;grid-template-columns:64px minmax(0,1fr) auto;align-items:center;gap:14px;padding:10px 8px 10px 12px;border-top:1px solid #e8e4da;cursor:pointer} .ds-room:first-child{border-top:0} .ds-room:hover{background:#eeeae0} .ds-room:focus-visible{outline:2px solid #c2410c;outline-offset:1px} .ds-room svg{width:64px;height:44px} .ds-room path{fill:#fbfaf7;stroke:#24221d;stroke-width:1.5;stroke-linejoin:round} .ds-room path.ds-pencil{stroke:#a39d90;stroke-dasharray:3 3;fill:none} .ds-room b{display:block;font-weight:600} .ds-st{display:flex;align-items:center;gap:7px;color:#4b473e;font-size:12px} .ds-st::before{content:'';width:7px;height:7px;border-radius:50%;background:#a39d90} .ds-st.ds-good::before{background:#1a6b34} .ds-st.ds-warn::before{background:none;box-shadow:inset 0 0 0 1.5px #4b473e} .ds-quiet{font:inherit;font-size:12px;color:#4b473e;min-height:26px;padding:0 10px;border:1px solid transparent;border-radius:4px;background:none;cursor:pointer} .ds-quiet:hover{background:#e4dfd3;color:#24221d}"
+    },
+    {
+      "name": "Strecken im Plan",
+      "kind": "custom",
+      "refersTo": "karte-am-objekt",
+      "description": "Zeichenkonvention: Wand mit Maß in Tinte, ohne Maß als Bleistift, nächste Strecke in Akzent, falsches Maß rot gestrichelt.",
+      "html": "<svg class=\"ds-plan\" viewBox=\"0 0 360 150\" role=\"img\" aria-label=\"Wand mit Maß, Wand ohne Maß, nächste Strecke, falsches Maß\"><rect width=\"360\" height=\"150\" class=\"ds-plan-bg\"/><path class=\"ds-plan-floor\" d=\"M40 30H250V120H40z\"/><line class=\"ds-wall\" x1=\"40\" y1=\"30\" x2=\"250\" y2=\"30\"/><line class=\"ds-wall\" x1=\"250\" y1=\"30\" x2=\"250\" y2=\"120\"/><line class=\"ds-wall ds-pencil\" x1=\"250\" y1=\"120\" x2=\"40\" y2=\"120\"/><line class=\"ds-wall ds-next\" x1=\"40\" y1=\"120\" x2=\"40\" y2=\"30\"/><line class=\"ds-wall ds-bad\" x1=\"40\" y1=\"30\" x2=\"250\" y2=\"120\"/><text x=\"145\" y=\"22\" text-anchor=\"middle\">5,962</text><text x=\"278\" y=\"79\" text-anchor=\"middle\">3,077</text><text class=\"ds-devl\" x=\"155\" y=\"68\">+87 mm</text><circle class=\"ds-ecke ds-act\" cx=\"40\" cy=\"30\" r=\"4.5\"/><circle class=\"ds-ecke\" cx=\"250\" cy=\"30\" r=\"3.5\"/><circle class=\"ds-ecke\" cx=\"250\" cy=\"120\" r=\"3.5\"/><circle class=\"ds-ecke ds-act\" cx=\"40\" cy=\"120\" r=\"4.5\"/></svg>",
+      "css": ".ds-plan{width:360px;height:150px;display:block} .ds-plan-bg{fill:#f5f3ed} .ds-plan-floor{fill:#fbfaf7} .ds-plan text{font:11px system-ui,-apple-system,\"Segoe UI\",Roboto,sans-serif;font-variant-numeric:tabular-nums;fill:#4b473e;paint-order:stroke;stroke:#f5f3ed;stroke-width:3px;stroke-linejoin:round} .ds-plan text.ds-devl{fill:#b3261e;font-weight:600} .ds-wall{stroke:#24221d;stroke-width:2;stroke-linecap:round} .ds-wall.ds-pencil{stroke:#a39d90;stroke-width:1.25;stroke-dasharray:5 4} .ds-wall.ds-next{stroke:#c2410c;stroke-width:2.5} .ds-wall.ds-bad{stroke:#b3261e;stroke-width:2.5;stroke-dasharray:9 4} .ds-ecke{fill:#24221d} .ds-ecke.ds-act{fill:#c2410c}"
+    },
+    {
+      "name": "Rückmeldung am Objekt",
+      "kind": "custom",
+      "refersTo": "toast",
+      "description": "Eine Zeile, weiß auf Tinte, erscheint für 2,2 s am Ort der Aktion.",
+      "html": "<div class=\"ds-toast\" role=\"status\">Tür an Wand A–B gesetzt</div>",
+      "css": ".ds-toast{display:inline-block;font:12px/1.4 system-ui,-apple-system,\"Segoe UI\",Roboto,sans-serif;white-space:nowrap;padding:7px 12px;background:#24221d;color:#fff;border-radius:4px}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Messwerkzeug auf Papier",
+    "overview": "Die Oberfläche zeigt nur den Stand und den nächsten Schritt. Alles andere liegt an dem Ding, das man anfasst: an der Ecke, der Strecke, der Wand, der Öffnung. Der Plan ist ein Blatt, auf dem mit Bleistift skizziert und mit Tinte festgehalten wird. Eine Wand ohne Maß ist ein dünner gestrichelter Bleistiftstrich, eine Wand mit Maß ein Tintenstrich. Dieser Wechsel ist die Signatur der Familie.\n\nDie Flächen sind warmweiß und flach, getrennt durch 1-px-Linien. Es gibt eine Schrift (die des Systems), zwei Schriftstärken, vier Schriftgrößen und genau einen Akzent, ein verbranntes Orange. Der Akzent ist selten: im Plan zeigt er, welche Strecke als Nächstes dran ist und was angefasst ist; in der Bedienung trägt er die eine Hauptaktion und den Fokus. Zustände haben je eine Farbe mit einer Aufgabe. Was offen ist, bekommt keine Warnfarbe, sondern einen hohlen Ring.\n\nGegenüber dem Bestand entfallen die Statuszeile, die Schalter in der Leiste, Grün und Rot als Linienfarben für „gemessen“ und „fehlt“ sowie Bernstein für „offen“. Was als Nächstes zu tun ist, sagen der Stand und der Plan.",
+    "keyCharacteristics": [
+      "Bleistift wird Tinte, sobald eine Strecke ein Maß hat.",
+      "Ein Akzent, im Plan nur für die nächste Strecke und die Auswahl.",
+      "Diagonalen sind unsichtbar, außer sie sind dran, angefasst oder falsch.",
+      "Der Stand ist ein Satz mit einem Punkt davor; Statistik liegt dahinter.",
+      "Bedienung liegt am Objekt (Karte, Eingabe), nicht in der Leiste.",
+      "Flach, 1-px-Linien, Radien 4 und 6 px, Systemschrift, tabellarische Ziffern.",
+      "Am Ende liegt ein Blatt: das Aufmaßblatt als weißes Papier auf der Fläche."
+    ],
+    "rules": [
+      {
+        "name": "Die Bleistift-wird-Tinte-Regel",
+        "body": "Eine Strecke ohne Maß ist Bleistift (gestrichelt, dünn), eine Strecke mit Maß ist Tinte (durchgezogen, 2 px). „Gemessen“ hat keine eigene Farbe.",
+        "section": "colors"
+      },
+      {
+        "name": "Die Ein-Akzent-Regel",
+        "body": "Orange zeigt im Plan nur zwei Dinge: was als Nächstes dran ist und was angefasst ist. In der Bedienung trägt es die eine Hauptaktion je Ansicht und den Fokus. Es färbt keine Flächen, keine Überschriften, keine Zustände.",
+        "section": "colors"
+      },
+      {
+        "name": "Die Hohler-Ring-Regel",
+        "body": "„Offen“ ist kein Alarm. Ein fehlendes Maß bekommt einen hohlen Ring in Tinte, kein Bernstein. Rot erscheint erst, wenn ein Maß den anderen widerspricht.",
+        "section": "colors"
+      },
+      {
+        "name": "Die Grün-ist-ein-Punkt-Regel",
+        "body": "Grün gibt es nur als Punkt vor „Geprüft“.",
+        "section": "colors"
+      },
+      {
+        "name": "Die Vier-Größen-Regel",
+        "body": "20, 13, 12, 11 px. Eine fünfte Größe braucht einen Grund, der hier eingetragen wird.",
+        "section": "typography"
+      },
+      {
+        "name": "Die Zwei-Stärken-Regel",
+        "body": "400 und 600. Kein Kursiv außer im Platzhalter eines Felds, keine Versalien, keine gesperrte Schrift.",
+        "section": "typography"
+      },
+      {
+        "name": "Die Schwebt-oder-Papier-Regel",
+        "body": "Schatten nur an Karte, Eingabe, Menü, Dialog und Blatt. Leiste, Panel, Raumliste, Knöpfe und Felder sind flach, auch bei Hover und Fokus.",
+        "section": "elevation"
+      },
+      {
+        "name": "Die Diagonalen-Regel",
+        "body": "Eine Diagonale ist nur sichtbar, wenn sie dran, angefasst oder falsch ist. Der Plan zeigt den Raum, nicht das Messnetz.",
+        "section": "shapes"
+      },
+      {
+        "name": "Die Platz-Regel für Zahlen",
+        "body": "Eine Länge steht nur dort, wo sie nichts schneidet. Fehlt der Platz, fehlt die Zahl; sie steht dann in der Karte und in der Liste.",
+        "section": "shapes"
+      },
+      {
+        "name": "Die Am-Objekt-Regel",
+        "body": "Was eine Ecke, Strecke, Wand oder Öffnung betrifft, steht auf ihrer Karte. Was den ganzen Raum betrifft, steht im Menü. In der Leiste stehen nur Ort, Schritte, Rückgängig und Menü.",
+        "section": "components"
+      },
+      {
+        "name": "Die Eine-Hauptaktion-Regel",
+        "body": "Je Ansicht höchstens ein Knopf in Akzent.",
+        "section": "components"
+      },
+      {
+        "name": "Die Sofort-und-umkehrbar-Regel",
+        "body": "Eine Aktion passiert sofort und ohne Rückfrage; Rückgängig holt sie zurück. Nachgefragt wird nur beim Löschen eines Raums aus der Liste, und zwar in der Zeile.",
+        "section": "components"
+      }
+    ],
+    "dos": [
+      "Do Wände mit Maß in Tinte (2 px) und Wände ohne Maß als Bleistift (1,25 px, gestrichelt 5 4) zeichnen. Dieselbe Unterscheidung gilt für alles Angenommene, etwa eine Raumhöhe ohne Maß.",
+      "Do den Akzent im Plan für genau zwei Dinge verwenden: die nächste Strecke und die Auswahl.",
+      "Do „offen“ als hohlen Ring in Tinte zeigen und „geprüft“ als grünen Punkt; Rot erst, wenn ein Maß nicht passt.",
+      "Do den Stand als einen Satz schreiben und Statistik dahinter legen.",
+      "Do Karte, Eingabe und Rückmeldung an das Objekt legen, quer zur Strecke, sodass sie mit ihrer Länge sichtbar bleibt.",
+      "Do bei den vier Größen 20, 13, 12, 11 px und den Stärken 400 und 600 bleiben; Zahlen tabellarisch, Dezimalkomma, echtes Minus, Halbgeviertstrich zwischen Ecken.",
+      "Do Radien 4 px für Bedienelemente und 6 px für Flächen verwenden, Ränder 1 px.",
+      "Do Tastenkürzel nach Plattform beschriften (⌘Z oder Strg+Z) und aus der gemeinsamen Tabelle holen.",
+      "Do jede Bewegung bei `prefers-reduced-motion` abschalten.",
+      "Do die Begriffe aus `GLOSSARY.md` verwenden: Ecke, Strecke, Wand, Diagonale, Maß, Länge, Stand, Öffnung, Anschluss, Skizze, Aufmaßblatt, Folgewerkzeug, Raum, Geschoss, Gebäude."
+    ],
+    "donts": [
+      "Don't eine Statuszeile bauen. Was zu tun ist, sagen der Stand und der Plan; Rückmeldungen erscheinen kurz am Ort der Aktion.",
+      "Don't Schalter, Modi oder Werkzeugknöpfe in die Leiste legen. Kein Expertenmodus.",
+      "Don't Karten in Karten setzen. Gruppen in einer Karte und Zeilen in einer Liste trennt eine Haarlinie.",
+      "Don't Verläufe, Glas, Unschärfe oder Glühen verwenden. Flächen sind einfarbig.",
+      "Don't Webfonts laden oder eine zweite Schriftfamilie einführen.",
+      "Don't einen Dialog für eine Aufgabe öffnen, die am Objekt oder in der Zeile Platz hat. Dialoge sind für Hilfe und QR-Code.",
+      "Don't Schatten an Leiste, Panel, Knöpfe oder Felder geben; Schatten haben nur Karte, Eingabe, Menü, Dialog und Blatt.",
+      "Don't Grün oder Rot als Linienfarbe für „gemessen“ und „fehlt“ verwenden und kein Bernstein für „offen“; das war der Bestand.",
+      "Don't Diagonalen dauerhaft einblenden.",
+      "Don't eine Länge in den Plan schreiben, wenn sie eine Wand oder eine andere Zahl schneidet.",
+      "Don't Akzent als Fläche, Überschriftenfarbe oder Zustandsfarbe einsetzen und keinen zweiten Akzent einführen.",
+      "Don't Versalien, gesperrte Schrift, Etiketten-Pillen oder farbige Zustandsflächen verwenden.",
+      "Don't einen Radius über 6 px setzen (außer am Schalter und an Punkten).",
+      "Don't für schmale Fenster oder Mobile umbauen; unter 860 px ist die Oberfläche nicht vorgesehen."
+    ]
+  }
+}

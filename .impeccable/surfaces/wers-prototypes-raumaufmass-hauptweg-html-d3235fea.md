@@ -23,6 +23,6 @@ STORY: Der Besucher versteht in jedem Moment, was fehlt, tippt nur Zahlen, sieht
 
 FIRST VIEWPORT: Leiste 44 px (Räume, Raumname, drei Schritte, Ausgabe, Rückgängig, Menü). Darunter links der Plan über die volle Höhe, rechts ein 320-px-Panel, das oben den Stand als einen Satz mit Fläche und Umfang zeigt und darunter den Inhalt des Schritts. Im Schritt Maße sitzt die Eingabe an der hervorgehobenen Strecke im Plan.
 
-FORM: Aufbau direkt aus dem vom Nutzer bestätigten Anforderungspapier (Leiste, Plan, Panel, Karte am Objekt, Menü). Es wurde kein Konzept-Wurf ausgeführt, weil der Aufbau dort schon festgelegt war; eine Freigabe des Nutzers für diesen Verzicht liegt nicht in eigenen Worten vor. Signatur: Bleistift wird Tinte, sobald eine Strecke ein Maß hat; in der Ausgabe liegt das Aufmaßblatt als Blatt auf der Fläche.
+FORM: Aufbau direkt aus dem vom Nutzer bestätigten Anforderungspapier (Leiste, Plan, Panel, Karte am Objekt, Menü). Es wurde kein Konzept-Wurf ausgeführt, weil der Aufbau dort schon festgelegt war. Am 09.11.2026 gefragt „Taugt dieser Prototyp als Vorlage für den Umbau?“, mit der Alternative „Erst Varianten“, antwortete der Nutzer: „Ja, weiter so“. Signatur: Bleistift wird Tinte, sobald eine Strecke ein Maß hat; in der Ausgabe liegt das Aufmaßblatt als Blatt auf der Fläche.
 
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
