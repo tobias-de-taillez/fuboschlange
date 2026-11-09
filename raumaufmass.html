@@ -17991,8 +17991,6 @@ function renderCorner(c){
   const nearCorner=()=>[true,false].some(a=>{ const cr=KX.crossAt(c.E,c.K,c.L.G,g,a); return cr && (a ? g.s0 : g.Wf.L-g.s1) < cr.d+50; });
   const can = !!(g && !g.free && C && (it.corner || !(it.dev && !(it.kind==='base' && it.dev==='sink')) && nearCorner()));
   if(!can){ box.hidden=true; box.innerHTML=''; box.dataset.key=''; return; }
-  // Breite steht im Konfigurator (Korpus); die allgemeine Zeile ausblenden.
-  if(it.corner && $('kW')) $('kW').closest('.krow').hidden=true;
   const key=JSON.stringify([it, c.key]);
   if(box.dataset.key===key && !box.hidden) return;
   box.dataset.key=key; box.hidden=false;
