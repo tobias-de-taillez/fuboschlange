@@ -8945,9 +8945,19 @@ function planLabels(L, o){
   //    Stelle des Hängeschranks, sonst fehlte er im Plan ganz (Gegenprüfung).
   wallA.forEach((A,g)=>{ if(done.has(g) || !out.some(l=>l.id===g.it.id && l.role==='wall')) return; const P=scr(g);
     contentCands(g.it).some(s=>{ const b=mbox(s,fWS,0,0); return A(b.w, b.h).some(a=>sub(g,P,s,a.x,a.y,fWS)); }); });
+  // Waagerechte Schnitte des Teils (Bildschirm): die x-Werte, an denen der Umriss die Höhe yy kreuzt, aufsteigend.
+  const cut=(P,yy)=>P.flatMap((p,i)=>{ const q=P[(i+1)%P.length]; return (p.y<=yy)!==(q.y<=yy) ? [p.x+(yy-p.y)/(q.y-p.y)*(q.x-p.x)] : []; }).sort((a,b)=>a-b);
+  // Mitten, an denen der Kern des Inhalts s (Mitte y) zwischen den Schnitten oben und unten Platz hat: erst x selbst
+  // (unter der Kopfzeile), dann die zu x nächste und die mittlere Stelle des freien Stücks – im schrägen Teil rückt
+  // der Schnitt mit y, ein Kasten genau unter der Kopfzeile ragt sonst an einer Seite heraus.
+  const xs=(P,s,f,x,y)=>{ const wc=Math.max(...s.map(t=>o.measure(t,f))), hc=(s.length-1)*lh(f)+f.px, A=cut(P,y-hc/2), B=cut(P,y+hc/2), X=[x];
+    for(let i=0; i+1<A.length; i+=2) for(let j=0; j+1<B.length; j+=2){ const lo=Math.max(A[i],B[j])+wc/2, hi=Math.min(A[i+1],B[j+1])-wc/2;
+      if(lo<=hi) X.push(Math.min(Math.max(x,lo),hi), (lo+hi)/2); }
+    return X.filter((v,i)=>X.indexOf(v)===i); };
   // 5. Teile mit Kopfzeile, aber ohne Inhalt, weil Kopfzeile + Inhalt als Block
   //    nirgends ganz (mit Rand) ins Teil passen – schräge Ansicht, kleiner
-  //    Maßstab: der Inhalt unter oder über die Kopfzeile, nur der Kern im Teil
+  //    Maßstab: der Inhalt unter oder über die Kopfzeile (wo der Schnitt des
+  //    schrägen Teils es verlangt, seitlich gerückt), nur der Kern im Teil
   //    (1,0 em, wegen Unterlängen und Umlauten). Sonst Kopfzeile + Inhalt neu
   //    als Block mit Kern im Teil (die Kopfzeile darf rücken, alle anderen
   //    stehen schon); gelingt beides nicht, bleibt alles, wie es war. Die
@@ -8956,7 +8966,7 @@ function planLabels(L, o){
   G.forEach(g=>{ const mine=out.filter(l=>l.id===g.it.id);
     if(!contentCands(g.it).length || !mine.length || mine.some(l=>l.role==='sub') || !mine.every(l=>occ.has(l))) return;
     const wall=g.it.kind==='wall', f=wall ? fWS : fS, P=scr(g), x=mine[0].x, top=Math.min(...mine.map(l=>occ.get(l).y)), bot=Math.max(...mine.map(l=>occ.get(l).y+occ.get(l).h));
-    if(contentCands(g.it).some(s=>{ const h=s.length*lh(f); return [bot+h/2, top-h/2].some(y=>sub(g,P,s,x,y,f,true,1)); })) return;
+    if(contentCands(g.it).some(s=>{ const h=s.length*lh(f); return [bot+h/2, top-h/2].some(y=>xs(P,s,f,x,y).some(px=>sub(g,P,s,px,y,f,true,1))); })) return;
     const hc=headCands(g,L), cur=hc.findIndex(H=>H.length===mine.length && H.every((t,i)=>mine[i].txt===t));
     const np=pend.length; drop(mine); const m=out.length;
     if(block(g, P, wall ? wallA.get(g) : baseA.get(g), cur<0 ? hc : hc.slice(0,cur+1), wall ? fW : fH, true, 1) && pend.length>np){
@@ -24815,6 +24825,17 @@ globalThis.selfChecks=function(){
         const toScrD=p=>({x:(p.x*cd-p.y*snd)*sd*dd+589.6680780686438, y:(p.x*snd+p.y*cd)*sd*dd+532.8586620278656});
         const labD=KX.planLabels(Ld,{toScr:toScrD, dpr:dd, measure:m2}).labels.filter(l=>l.id===4);
         chk('kueche: Schritt 5 kürzt die Kopfzeile nicht (Hängeschrank bleibt „H 45“, kein „H“ mit „+4“)', labD.some(l=>l.role==='wall' && l.txt==='H 45'));
+      }
+      {
+        // Inhalt in schräger Ansicht rückt zur Seite, wo der waagerechte Schnitt des schrägen Teils unter der
+        // Kopfzeile nicht reicht: Insel 1,2 m × 0,6 m mit „Besteck“, 35–55°, Maßstab 0,075. Früher fiel er ganz weg,
+        // weil nur genau unter der Kopfzeile gesucht wurde.
+        const Ei=KX.makeEnv([{id:'A',x:0,y:0},{id:'B',x:4500,y:0},{id:'C',x:4500,y:3500},{id:'D',x:0,y:3500}],[['A','B'],['B','C'],['C','D'],['D','A']],[],[]);
+        const Li=KX.layout(Ei,KX.normKitchen({items:[{id:1,kind:'island',front:'drawer',w:1200,d:600,x:2200,y:1700,rot:0,store:['besteck']}]}));
+        const okI=deg=>{ const c=Math.cos(deg*Math.PI/180), sn=Math.sin(deg*Math.PI/180), toScr=p=>({x:(p.x*c-p.y*sn)*0.075+400, y:(p.x*sn+p.y*c)*0.075+400});
+          const lab=KX.planLabels(Li,{toScr, dpr:1, measure}).labels, g=Li.byId.get(1), P=(g.outline||g.poly).map(toScr), head=lab.find(l=>l.role==='head'), sub=lab.filter(l=>l.role==='sub');
+          return !!head && sub.length===1 && sub[0].txt==='Besteck' && KX.rectIn(sub[0].r,P) && !ovA(sub[0].r,head.r) && Math.abs(sub[0].x-head.x)>1; };
+        chk('kueche: Inhalt rückt in schräger Ansicht zur Seite, wo unter der Kopfzeile der Schnitt des schrägen Teils nicht reicht (Insel 35–55°)', [35,45,55].every(okI));
       }
       {
         // Punkt des Eingangs gegen seine Pille: berührt er sie (mit 3 px Luft), entfällt er – früher ragte er als halbe
