@@ -11158,11 +11158,14 @@ function drawWallView(){
   // abgeschnitten, sobald die Wand die Flaeche gut ausnutzt.
   ctx.font=`${12*dpr}px system-ui`; ctx.fillStyle=INK.scale;
   const hL=WV.flip?shape.hb:shape.ha, hR=WV.flip?shape.ha:shape.hb;
+  // Sehr niedrige Kante (Dreieck, Hoehe 0): Wert UEBER die Spitze, sonst
+  // laege er auf der Eckbeschriftung unter dem Boden.
+  const hy=h=>h*WV.s<34*dpr ? yb-h*WV.s-8*dpr : yb-h*WV.s+16*dpr;
   ctx.textAlign='left';
-  ctx.fillText(`${fmtM(hL)} m`, xl+8*dpr, yb-hL*WV.s+16*dpr);
+  ctx.fillText(`${fmtM(hL)} m`, xl+8*dpr, hy(hL));
   if(Math.abs(shape.ha-shape.hb)>1){
     ctx.textAlign='right';
-    ctx.fillText(`${fmtM(hR)} m`, xr-8*dpr, yb-hR*WV.s+16*dpr);
+    ctx.fillText(`${fmtM(hR)} m`, xr-8*dpr, hy(hR));
   }
   ctx.textAlign='start';
   // Titel: welche Wand, von wo gesehen.
