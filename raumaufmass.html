@@ -2,22 +2,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <title>Raumaufmaß</title>
-<script id="meldung-log">
-// Fehlerprotokoll fuer "Fehler melden": ab dem ersten Byte mitschneiden, was
-// der Browser an Fehlern wirft, damit eine Meldung zeigt, was vorher schiefging.
-// Ringpuffer, nur im Speicher; geht nur mit einer Meldung raus.
-(function(){
-  const L=globalThis.MELDUNG_LOG=[], MAX=80, t0=Date.now();
-  const s=v=>{ try{ return v instanceof Error ? (v.stack||String(v)) : typeof v==='string' ? v : JSON.stringify(v); }catch(e){ return String(v); } };
-  const add=(art,teile)=>{ L.push({t:Date.now()-t0, art, text:teile.map(s).join(' ').slice(0,4000)}); if(L.length>MAX) L.shift(); };
-  addEventListener('error',e=>add('error',[e.message, (e.filename||'')+':'+e.lineno+':'+e.colno, e.error&&e.error.stack||'']));
-  addEventListener('unhandledrejection',e=>add('promise',[e.reason]));
-  for(const k of ['error','warn']){
-    const orig=console[k];
-    console[k]=function(...a){ add('console.'+k,a); return orig.apply(this,a); };
-  }
-})();
-</script>
+<script src="raum-meldung.js"></script>
 <style>
   /* Gestaltungslinie: Messwerkzeug auf Papier, fuer den Schreibtisch.
      Warmweiss, Tinte, genau ein Akzent (Auswahl, Hauptaktion, ein-
@@ -145,9 +130,6 @@
   /* ---------- Zeichenflaeche ---------- */
   #cv{position:absolute;inset:0;width:100%;height:100%;display:block;background:var(--canvas);
     cursor:crosshair;touch-action:none}
-  /* Situative Knoepfe unten rechts im Plan: Ring schliessen, Entwirren. */
-  #ring,#untangle{position:absolute;right:10px;bottom:10px;z-index:4;box-shadow:0 2px 8px rgba(36,34,29,.12)}
-  #untangle{color:var(--bad);border-color:#e2c4be;display:none}
   #empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
     pointer-events:none;padding:24px}
   #empty p{max-width:380px;margin:0;color:var(--ink2);font-size:13px;line-height:1.55}
@@ -218,12 +200,6 @@
   #wpopThick:empty{display:none}
   #wpopThick .muted{color:var(--muted)}
   #wpopThick button{min-height:24px;padding:0 8px;font-size:12px}
-  /* Laufmessung: nur auf dem Telefon sichtbar, siehe Skriptblock "imu". */
-  #imuRow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;padding-top:8px;
-    border-top:1px solid var(--line2);font-size:12px}
-  #imuMsg{flex:1;min-width:100%;color:var(--muted)}
-  #imuMsg.run{color:var(--accent)}
-  #imuMsg.bad{color:var(--warn)}
   #pop{display:flex;gap:10px;align-items:center;padding:6px 6px 6px 10px;white-space:nowrap;z-index:7}
   #popDel{color:#fff;background:var(--bad);border-color:var(--bad)}
   #popDel:hover{background:#962019}
@@ -665,35 +641,6 @@
 #tPalette{display:flex;gap:5px;flex-wrap:wrap} #tPalette svg,#tSetList svg{width:42px;height:30px;display:block}
   #tSetList{display:grid;gap:6px;margin:10px 0} .tile-set-row{display:flex;gap:6px;align-items:center} .tile-set-row>button:first-child{flex:1;display:flex;align-items:center;gap:8px;text-align:left} .tile-set-row button[aria-pressed=true]{border-color:var(--accent);background:#fff1df} .tile-set-row small{display:block;color:var(--ink2)} #tPalette button{min-width:48px;padding:5px 8px} #tShape,#tNewShape{max-width:100%;padding:6px} #tName{min-width:0}
 
-  /* ---------- Fehler melden: schwebender Knopf unten links, ueber allem ---------- */
-  #mldFab{position:fixed;left:12px;bottom:40px;z-index:60;display:flex;align-items:center;
-    background:var(--surface);border:1px solid var(--line);border-radius:6px;
-    box-shadow:0 2px 10px rgba(36,34,29,.16);opacity:.82;transition:opacity .15s}
-  #mldFab:hover,#mldFab:focus-within{opacity:1}
-  #mldFab button{border:0;background:none;min-height:28px}
-  #mldOpen{display:flex;align-items:center;gap:6px;padding:0 8px 0 9px;font-size:12px;color:var(--ink2)}
-  #mldOpen svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
-  #mldOpen:hover{color:var(--accent);background:var(--hover)}
-  #mldHide{width:22px;padding:0;color:var(--muted);font-size:13px;line-height:1;border-left:1px solid var(--line2)!important;border-radius:0 6px 6px 0}
-  #mldHide:hover{color:var(--ink);background:var(--hover)}
-  #mldwrap{z-index:70}
-  #mldbox{width:min(620px,calc(100vw - 32px));max-height:calc(100vh - 32px)}
-  #mldbody{padding:12px 16px 4px;display:grid;gap:10px}
-  #mldbody .seg{display:flex;gap:0}
-  #mldbody .seg button{border-radius:0;margin-left:-1px} #mldbody .seg button:first-child{border-radius:4px 0 0 4px;margin-left:0} #mldbody .seg button:last-child{border-radius:0 4px 4px 0}
-  #mldbody .seg button[aria-pressed=true]{background:var(--accent-bg);color:var(--accent);border-color:var(--accent-line);position:relative}
-  #mldText{width:100%;min-height:110px;resize:vertical;font:inherit;padding:8px;border:1px solid var(--line);border-radius:4px;background:#fff;color:var(--ink)}
-  #mldKontakt{width:100%;height:28px;padding:0 8px;border:1px solid var(--line);border-radius:4px;background:#fff}
-  #mldShot{display:grid;grid-template-columns:160px minmax(0,1fr);gap:12px;align-items:start}
-  #mldShot img{width:160px;max-height:110px;object-fit:contain;background:var(--canvas);border:1px solid var(--line);border-radius:4px}
-  #mldShot p{margin:6px 0 0}
-  #mldbody .chk{display:flex;gap:8px;align-items:flex-start;font-size:12px;color:var(--ink2)} #mldbody .chk input{margin-top:2px}
-  #mldEinw{color:var(--ink)!important} #mldEinw a{color:var(--accent)}
-  #mldMsg{font-size:12px;min-height:16px} #mldMsg.bad{color:var(--bad)} #mldMsg.good{color:var(--good)}
-  #mldToast{position:fixed;left:12px;bottom:76px;z-index:61;max-width:min(360px,calc(100vw - 24px));padding:8px 12px;font-size:12px;
-    background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--good);border-radius:6px;box-shadow:0 2px 10px rgba(36,34,29,.16);cursor:pointer}
-  #mldfoot{display:flex;justify-content:flex-end;gap:8px;padding:10px 16px;border-top:1px solid var(--line2);position:sticky;bottom:0;background:var(--surface)}
-  @media print{ #mldFab,#mldwrap,#mldToast{display:none!important} }
   /* =====================================================================
      Werkzeugfamilie (DESIGN.md): Leiste mit Schritten, Menü, Stand, Karten.
      Die Regeln stehen bewusst am Ende und überschreiben die ältere Leiste.
@@ -790,6 +737,7 @@
     rotate:45deg;margin-right:4px;transition:rotate .15s var(--ease)}
   #wlbox[open] summary::after{rotate:225deg}
   #why{margin:0 0 8px}
+  body[data-tool=aufmass][data-mode=draw] #wlsec{display:none}
   .wrow .wn.todo{color:var(--muted)}
 
   /* ---------- Weiter ---------- */
@@ -812,6 +760,17 @@
   .intent .tr:first-of-type{border-top:0}
   .intent .tr small{display:block;font-size:12px;color:var(--muted)}
 
+  /* ---------- Karte am Objekt: Wand, Diagonale, Ecke ---------- */
+  .kgrp{margin-top:10px;padding-top:8px;border-top:1px solid var(--line2)}
+  .kgrp>span{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+  .kgrp>div{display:flex;gap:4px;flex-wrap:wrap}
+  .kend{display:flex;gap:6px;align-items:center;margin-top:10px;padding-top:8px;border-top:1px solid var(--line2)}
+  .kend .danger{margin-left:auto;color:var(--bad)}
+  #wpopNorth{margin-left:0;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:0 10px}
+  #wpopThick{align-items:center}
+  #wpopThick .thk{width:64px;height:28px;padding:0 7px;border:1px solid var(--line);border-radius:4px;background:#fff;
+    text-align:right;font-variant-numeric:tabular-nums}
+  #wpopTitle,#cpopTitle,#opplTitle{font-size:13px}
 </style>
 
 <div id="app">
@@ -913,14 +872,17 @@
           <div id="wpopAdd">
             <input id="wpopVal" inputmode="decimal" autocomplete="off" enterkeyhint="done" placeholder="Maß">
             <button class="unit" title="Einheit umschalten: m, cm, mm">m</button>
-            <button id="wpopOk">+ Wert</button>
-            <button id="wpopNorth" title="Diese Wand parallel zur oberen Bildkante drehen">Einnorden</button>
+            <button id="wpopOk">+ Maß</button>
           </div>
-          <div id="imuRow" hidden>
-            <button id="imuBtn">Laufmessung</button>
-            <span id="imuMsg"></span>
+          <div id="wpopOps" class="kgrp">
+            <span>An dieser Wand</span>
+            <div><button data-op="door">Tür</button><button data-op="window">Fenster</button><button data-op="hole">Loch</button><button data-op="water">Anschluss</button></div>
           </div>
           <div id="wpopThick"></div>
+          <div id="wpopEnd" class="kend">
+            <button id="wpopNorth" title="Die Ansicht so drehen, dass diese Wand oben liegt">Einnorden</button>
+            <button id="wpopDel" class="danger">Löschen</button>
+          </div>
         </div>
         <div id="cpop" class="popover" hidden>
           <div id="cpopHead"><b id="cpopTitle"></b><span id="cpopIst"></span><button id="cpopX" aria-label="Schließen" title="Schließen (Esc)">✕</button></div>
@@ -931,6 +893,7 @@
             <button id="cpopFree" class="rowbtn" hidden>lösen</button>
           </div>
           <div id="cpopHint"></div>
+          <div class="kend"><button id="cpopDel" class="danger">Löschen</button></div>
         </div>
       </div>
       <footer id="statusbar">
@@ -1106,15 +1069,10 @@
       </section>
       <div id="gosec" hidden><button id="goNext" class="primary"></button></div>
       <input id="filepick" type="file" accept=".json,application/json" hidden>
-      <!-- Bedienelemente der alten Leiste, deren Verdrahtung noch am Element hängt.
-           Unsichtbar; sie verschwinden mit dem Aufräumen der zugehörigen Funktionen. -->
+      <!-- Wandauswahl der alten Leiste. Unsichtbar: gewählt wird im Lageplan und mit den Pfeiltasten;
+           renderWallBar füllt die Liste weiter, weil die Reihenfolge der Wände daran hängt. -->
       <div id="altlast" hidden>
-        <button id="lib"></button><button id="roomNew"></button><button id="fileopen"></button>
-        <button id="exp"></button><button id="imp"></button><button id="mldMenu"></button>
-        <button id="wheelBtn"></button><button id="keysBtn"></button>
-        <div id="pAdd"><button data-padd="door"></button><button data-padd="window"></button><button data-padd="hole"></button></div>
         <div id="wallbar"><button id="wPrev"></button><select id="wPick"></select><button id="wNext"></button></div>
-        <button id="ring"></button><button id="untangle"></button>
       </div>
     </aside>
   </div>
@@ -1219,34 +1177,6 @@
     </div>
   </div>
 </div>
-<div id="mldFab" role="group" aria-label="Fehler melden">
-  <button id="mldOpen" title="Fehler melden oder fehlende Funktion wünschen"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 5.2v3.6M8 10.9v.1"/><path d="M8 1.8 14.6 13.5H1.4z"/></svg>Fehler / Wunsch melden</button>
-  <button id="mldHide" aria-label="Ausblenden" title="Für diese Sitzung ausblenden (bleibt im Raum-Menü erreichbar)">×</button>
-</div>
-<div id="mldwrap" class="scrim" hidden>
-  <div id="mldbox" class="dlg" role="dialog" aria-modal="true" aria-labelledby="mldTitle">
-    <div class="dlghead"><h2 id="mldTitle">Fehler oder Wunsch melden</h2><button id="mldClose" class="ib" aria-label="Schließen" title="Schließen (Esc)"><svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg></button></div>
-    <div id="mldbody">
-      <div class="seg" id="mldArt" role="group" aria-label="Art der Meldung">
-        <button data-art="fehler" aria-pressed="true">Fehler</button><button data-art="wunsch" aria-pressed="false">Wunsch</button>
-      </div>
-      <textarea id="mldText" maxlength="20000" aria-label="Beschreibung" placeholder="Was ist passiert, was hast du erwartet?"></textarea>
-      <input id="mldKontakt" type="text" maxlength="200" autocomplete="email" aria-label="Kontakt für Rückfragen (freiwillig)" placeholder="Kontakt für Rückfragen (freiwillig)">
-      <div id="mldShot">
-        <img id="mldImg" alt="Vorschau des Bildes, das mitgeschickt wird">
-        <div>
-          <label class="chk"><input type="checkbox" id="mldImgOn" checked><span id="mldImgNote">Bild mitsenden</span></label>
-          <p><button id="mldWin" type="button" title="Der Browser fragt, was aufgenommen werden soll – diesen Tab wählen">Ganzes Fenster aufnehmen …</button></p>
-        </div>
-      </div>
-      <label class="chk" id="mldDatenRow" title="Ohne Zustand lässt sich der Fehler meist nicht nachstellen"><input type="checkbox" id="mldDaten" checked><span id="mldDatenTxt">App-Zustand mitsenden</span></label>
-      <label class="chk" id="mldEinw"><input type="checkbox" id="mldOk"><span>Ich willige ein, dass meine Meldung (Text und, wenn angehakt, Bild und App-Zustand) nur zur Fehlersuche gespeichert und danach gelöscht wird. <a href="datenschutz-meldung.html" target="_blank" rel="noopener">Datenschutz</a></span></label>
-      <div id="mldMsg" role="status"></div>
-    </div>
-    <div id="mldfoot"><button id="mldCancel" type="button">Abbrechen</button><button id="mldSend" type="button" class="primary" disabled>Senden</button></div>
-  </div>
-</div>
-<div id="mldToast" role="status" hidden></div>
 <dialog id="measDlg" aria-labelledby="mTitle">
   <form method="dialog" class="mhead"><h3 id="mTitle">Fliese einmessen</h3><button class="ib" aria-label="Schließen" value="x">×</button></form>
   <div class="mbody">
@@ -6388,6 +6318,9 @@ function northWall(a,b,force){
 // Welches Werkzeug der Familie diese Seite gerade ist: 'aufmass' (Skizze,
 // Maße, Wände, Ausgabe), 'fliesen' oder 'kueche'. Siehe setTool().
 let TOOL='aufmass';
+// Freiheitsgrade beim vorigen Rechnen: daran erkennt recompute den Moment,
+// in dem die Form eindeutig WIRD (und nur dann gleitet der Plan).
+let lastDof={room:null, dof:Infinity};
 function recompute(){
   const hadFit=!!M.fit;
   // Ecke der Küchen-Bezugsecken gelöscht: freie Teile im noch alten Fit auf
@@ -6413,6 +6346,16 @@ function recompute(){
     } else { M.fit=C.solve(M.pts, M.meas, M.angs); M.orthoInfo=null; }
     M.an=C.analyze(M.fit.pts, M.meas, M.angs);
     const I=C.idx(M.pts);
+    // Maßhaltig von selbst: solange die Form nicht eindeutig ist, bleibt die
+    // Skizze liegen (man verliert sich sonst beim Messen); sobald sie es ist,
+    // zeigt der Plan die gemessene Form. Abschaltbar über M.snapOff.
+    const soll=!M.snapOff && M.an.dof===0;
+    if(soll!==M.snapfit){
+      if(soll && lastDof.room===currentRoom && lastDof.dof>0 && !matchMedia('(prefers-reduced-motion:reduce)').matches)
+        M.glide={from:M.pts.map(p=>({id:p.id,x:p.x,y:p.y})), t0:performance.now()};
+      M.snapfit=soll; syncSnapfitBtn();
+    }
+    lastDof={room:currentRoom, dof:M.an.dof};
     if(M.snapfit){
       // Skizze auf den Fit ziehen: solve() liefert frische Punkte in mm, M.pts
       // bliebe sonst auf Klick-Pixeln stehen, waehrend render/hit/autofit ab
@@ -6430,7 +6373,7 @@ function recompute(){
         const p=M.pts[I[sp.id]]; if(p){ p.x=sp.x; p.y=sp.y; }
       });
     }
-  } else { M.fit=null; M.an=null; }
+  } else { M.fit=null; M.an=null; lastDof={room:currentRoom, dof:Infinity}; }
   // Mit der ersten Messung springen die Koordinaten von Skizzenpixeln auf
   // Millimeter (scaleSketch) - eine gemerkte Nutzer-Ansicht zeigte dann ins
   // Leere. Neue Szene, neue Einpassung.
@@ -6493,6 +6436,7 @@ function recompute(){
   }
   if(wpopPair && !(gibt(wpopPair.a)&&gibt(wpopPair.b))){ wpopPair=null; $('wpop').hidden=true; }
   render();
+  if(M.glide){ const lauf=()=>{ redraw(); if(M.glide) requestAnimationFrame(lauf); }; requestAnimationFrame(lauf); }
 }
 
 // ================= Raumbibliothek (Anbindung) =================
@@ -6516,6 +6460,7 @@ function openRoom(id){
   // druecken - recompute() wirft dann bei jedem Bild.
   closeEntry();
   hidePop();
+  $('wlbox').open=false; $('standMore').hidden=true;
   deserialize(r.data);
   userView=false;
   hoverRoom=null;
@@ -6683,24 +6628,14 @@ function drawNeighbors(dpr){
 // Vorgabe-Rechteck, sondern genau die geerbte Wand: zwei Punkte, um die
 // Wanddicke nach aussen versetzt, und ihre Laenge als fertige Messung.
 // Alles Weitere zeichnet der Nutzer wie gewohnt.
-function fragWanddicke(vorschlag){
-  const s=prompt('Wie dick ist diese Wand? Angabe in mm.\n'
-    +'Üblich: '+WALL_THICKNESS.join(', '), String(vorschlag));
-  if(s===null) return null;                    // Abbruch heisst Abbruch
-  const t=parseFloat(String(s).replace(',','.'));
-  if(!isFinite(t) || t<20 || t>1000){
-    setHint('Wanddicke muss zwischen 20 und 1000 mm liegen, Eingabe verworfen.');
-    return null;
-  }
-  return t;
-}
 function createNeighborRoom(opId){
   const o=M.openings.find(x=>x.id===opId);
   if(!o || !currentRoom) return;
   const P=viewPts();
   const k=wallKey(o.a, o.b);
-  const t=fragWanddicke(M.thick[k] || 240);
-  if(t==null) return;
+  // Keine Abfrage: die eingetragene Dicke gilt, sonst die angenommene. Ändern
+  // lässt sie sich jederzeit auf der Karte der Wand.
+  const t=M.thick[k] || THICK_DEFAULT;
   // Der Quellraum wird mit dem ersten Nachbarn zum Gebaeude. {0,0,0} ist
   // die einzige sinnvolle Verankerung: sein eigenes System wird das des
   // Gebaeudes.
@@ -7410,7 +7345,6 @@ function setPlanAdd(kind){
   document.querySelectorAll('#pAdd button').forEach(b=>b.setAttribute('aria-pressed', String(b.dataset.padd===planAdd)));
   render();
 }
-document.querySelectorAll('#pAdd button').forEach(b=>{ b.onclick=()=>setPlanAdd(b.dataset.padd); });
 function planAddAt(e){
   const d=evDev(e), w=toWorld(d.x,d.y), hit=planWallAt(w.x,w.y);
   if(!hit){ setHint('Auf eine Wand klicken, um die Öffnung dort zu setzen.'); return; }
@@ -7418,7 +7352,7 @@ function planAddAt(e){
   planAdd=null; planGhost=null;
   document.querySelectorAll('#pAdd button').forEach(b=>b.setAttribute('aria-pressed','false'));
   const o=insertOpening(kind, hit.a, hit.b, hit.t);
-  if(o) setHint(`${OPEN_LABEL[kind]} in Wand ${hit.a}–${hit.b} gesetzt · ziehen verschiebt · Feinjustage in der Wandansicht`);
+  if(o) setHint(`${OPEN_LABEL[kind]} in Wand ${hit.a}–${hit.b} gesetzt.`);
   else render();
 }
 // Vorschau beim Werkzeug: wo die Oeffnung landen wuerde.
@@ -7699,11 +7633,15 @@ function drawCanvas(){
     nearIds.add([a,b].sort().join('|')); nearIds.add([c,d].sort().join('|'));
   });
   ctx.lineCap='round';
+  // Bleistift wird Tinte: eine Wand ohne Maß ist dünn und gestrichelt, mit
+  // Maß durchgezogen. „Gemessen“ hat keine eigene Farbe (DESIGN.md).
+  const mitMass=new Set(C.activeMeas(M.meas).map(m=>wallKey(m.a,m.b)));
   M.walls.forEach(([a,b])=>{
     if(I[a]==null||I[b]==null) return;
-    const hot=nearIds.has([a,b].sort().join('|'));
-    ctx.strokeStyle=hot?INK.mode:INK.wall;
-    ctx.lineWidth=(hot?4:2.5)*dpr;
+    const hot=nearIds.has([a,b].sort().join('|')), tinte=mitMass.has(wallKey(a,b));
+    ctx.strokeStyle=hot?INK.mode:tinte?INK.wall:INK.pencil;
+    ctx.lineWidth=(hot?4:tinte?2:1.25)*dpr;
+    ctx.setLineDash(tinte||hot ? [] : [5*dpr,4*dpr]);
     // Oeffnungen unterbrechen die Wandlinie - so sieht man im Grundriss,
     // wo eine Tuer oder ein Fenster sitzt, nicht nur in der Wandansicht.
     // Oeffnungen unterbrechen die Wandlinie - auch die des Raums auf der
@@ -7722,6 +7660,7 @@ function drawCanvas(){
     ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y);
     ctx.stroke();
   });
+  ctx.setLineDash([]);
   drawOrthoMarks(P, I, dpr);
   drawFixAngles(P, I, dpr);
   drawUnfolded(P, I, dpr);
@@ -7738,7 +7677,7 @@ function drawCanvas(){
   if(M.highlight && I[M.highlight.a]!=null && I[M.highlight.b]!=null){
     const p=toScr(P[I[M.highlight.a]]), q=toScr(P[I[M.highlight.b]]);
     ctx.save();
-    ctx.strokeStyle=INK.accent; ctx.globalAlpha=.30; ctx.lineWidth=7*dpr; ctx.lineCap='round';
+    ctx.strokeStyle=INK.accent; ctx.lineWidth=2.5*dpr; ctx.lineCap='round';
     ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
     ctx.restore();
   }
@@ -7767,11 +7706,13 @@ function drawCanvas(){
   actM.forEach((m,mi)=>{
     if(I[m.a]==null||I[m.b]==null) return;
     const hl=same(M.highlight,m.a,m.b), sus=M.suspects.has(mi), isWall=wallSet.has(wallKey(m.a,m.b));
-    if(!hl && !sus && (isWall || !(measuring||check))) return;
-    ctx.setLineDash(hl||sus ? [6*dpr,4*dpr] : []);
-    ctx.strokeStyle = sus ? (hl?INK.measBadHl:INK.measBad) : (hl?INK.measHl:INK.meas);
-    ctx.globalAlpha = hl||sus ? 1 : .4;
-    ctx.lineWidth   = (hl?3 : sus?2.5 : 1)*dpr;
+    const anEcke=!isWall && cpopId!=null && (m.a===cpopId || m.b===cpopId);
+    const frisch=!isWall && frischKey===wallKey(m.a,m.b) ? frischAnteil() : 0;
+    if(!hl && !sus && !anEcke && !frisch && (isWall || !check)) return;
+    ctx.setLineDash(sus ? [9*dpr,4*dpr] : []);
+    ctx.strokeStyle = sus ? INK.measBad : hl ? INK.accent : INK.lab;
+    ctx.globalAlpha = hl||sus ? 1 : frisch ? frisch : .55;
+    ctx.lineWidth   = (hl||sus ? 2.5 : frisch ? 1.5 : 1)*dpr;
     const p=toScr(P[I[m.a]]), q=toScr(P[I[m.b]]);
     ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
   });
@@ -7784,10 +7725,10 @@ function drawCanvas(){
       if(I[sg.a]==null||I[sg.b]==null) return;
       const hl=same(M.highlight,sg.a,sg.b)||same(hov,sg.a,sg.b);
       if(i>0 && !hl && !check) return;
-      ctx.strokeStyle = hl ? INK.todoHl : INK.todo;
-      ctx.lineWidth   = (hl||i===0?2:1.5)*dpr;
+      ctx.strokeStyle = (hl || i===0) ? INK.accent : INK.pencil;
+      ctx.lineWidth   = (hl?2.5:1.5)*dpr;
       const p=toScr(P[I[sg.a]]), q=toScr(P[I[sg.b]]);
-      ctx.setLineDash(sg.why==='bestimmt' ? [2*dpr,4*dpr] : [1*dpr,6*dpr]);
+      ctx.setLineDash(hl ? [] : [2*dpr,5*dpr]);
       ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
     });
     ctx.setLineDash([]);
@@ -7845,30 +7786,49 @@ function drawCanvas(){
     placed.push(r);
     ctx.fillStyle=L.sus?INK.labelBadBg:INK.labelBg;
     ctx.fillRect(r.x, r.y, r.w, r.h);
-    ctx.fillStyle=L.sus?INK.measBad:L.hl?INK.measHl:INK.meas;
+    ctx.fillStyle=L.sus?INK.measBad:L.hl?INK.accent:INK.lab;
     ctx.fillText(L.txt, r.x+r.w/2, r.y+h/2+4*dpr);
   });
   ctx.textAlign='start';
   // Punkte: heller Rand haelt den Marker auf Linien lesbar. Auswahl und
   // aktiver Zeichenzug in der Akzentfarbe; die Ecke unter dem Zeiger waechst.
   const hovPt=hoverTarget && hoverTarget.t==='pt' ? hoverTarget.id : null;
+  let zielEcke=null;
+  if(M.mode==='draw' && M.chain!=null && P.length>=3 && !C.wallPolygonRing(M.pts, M.walls)){
+    const grad={}; M.walls.forEach(([a,b])=>{ grad[a]=(grad[a]||0)+1; grad[b]=(grad[b]||0)+1; });
+    const enden=P.filter(p=>grad[p.id]===1 && p.id!==M.chain);
+    if(enden.length===1) zielEcke=enden[0].id;
+  }
   P.forEach(pt=>{
     const p=toScr(pt), big=hovPt===pt.id || M.drag===pt.id;
     const r=(big?6:4.5)*dpr;
     ctx.fillStyle=INK.canvas;
     ctx.beginPath(); ctx.arc(p.x,p.y,r+2.5*dpr,0,7); ctx.fill();
-    ctx.fillStyle=M.sel.includes(pt.id)?INK.accent:INK.point;
+    ctx.fillStyle=(M.sel.includes(pt.id) || cpopId===pt.id || M.chain===pt.id)?INK.accent:INK.point;
     ctx.beginPath(); ctx.arc(p.x,p.y,r,0,7); ctx.fill();
-    if(M.chain===pt.id){
-      ctx.strokeStyle=INK.accent; ctx.lineWidth=2*dpr;
-      ctx.beginPath(); ctx.arc(p.x,p.y,r+4.5*dpr,0,7); ctx.stroke();
+    // Offener Zug mit mindestens drei Ecken: die erste Ecke ist das Ziel.
+    if(zielEcke===pt.id){
+      ctx.strokeStyle=INK.accent; ctx.lineWidth=1.5*dpr;
+      ctx.beginPath(); ctx.arc(p.x,p.y,r+5.5*dpr,0,7); ctx.stroke();
     }
-    ctx.font=`600 ${12*dpr}px ${CANVAS_FONT}`;
+    ctx.font=`${11*dpr}px ${CANVAS_FONT}`;
     ctx.strokeStyle=INK.canvas; ctx.lineWidth=4*dpr; ctx.lineJoin='round';
     ctx.strokeText(pt.id, p.x+9*dpr, p.y-8*dpr);
-    ctx.fillStyle=INK.point;
+    ctx.fillStyle=INK.muted;
     ctx.fillText(pt.id, p.x+9*dpr, p.y-8*dpr);
   });
+  // Leerer Start: eine Ecke mit dem Ansatz der ersten Wand zeigt, was der
+  // erste Klick tut. Ohne Text.
+  if(!P.length && M.mode==='draw'){
+    const x=cv.width/2-85*dpr, y=cv.height/2+20*dpr;
+    ctx.strokeStyle=INK.muted; ctx.fillStyle=INK.muted; ctx.lineWidth=1.5*dpr;
+    ctx.setLineDash([6*dpr,5*dpr]);
+    ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x+170*dpr,y-22*dpr); ctx.stroke();
+    ctx.setLineDash([3*dpr,3*dpr]);
+    ctx.beginPath(); ctx.arc(x+170*dpr,y-22*dpr,9*dpr,0,7); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath(); ctx.arc(x,y,4*dpr,0,7); ctx.fill();
+  }
   if(M.drag && M.dragMode){
     setHintLive({frei:'Skizze frei, noch keine Messung',
       moden:'Ecke folgt den Messungen',
@@ -7932,6 +7892,21 @@ function drawCanvas(){
     ctx.font=`${11*dpr}px ${CANVAS_FONT}`; ctx.textAlign='left'; ctx.fillStyle=INK.scale;
     ctx.fillText(`Ellipsen ${exagg}-fach überhöht`, 14*dpr, 40*dpr);
   }
+}
+
+// Eine gemessene Diagonale bleibt nicht im Plan stehen. Damit das Maß nicht
+// spurlos verschwindet, zeigt sie sich nach der Eingabe kurz in Tinte.
+let frischKey=null, frischT0=0;
+const FRISCH_MS=1200;
+function frischAnteil(){
+  const k=(performance.now()-frischT0)/FRISCH_MS;
+  return k>=1 ? 0 : k<.4 ? 1 : 1-(k-.4)/.6;
+}
+function zeigeFrisch(a,b){
+  if(matchMedia('(prefers-reduced-motion:reduce)').matches) return;
+  frischKey=wallKey(a,b); frischT0=performance.now();
+  const lauf=()=>{ if(!frischKey) return; if(frischAnteil()<=0){ frischKey=null; redraw(); return; } redraw(); requestAnimationFrame(lauf); };
+  requestAnimationFrame(lauf);
 }
 
 // ================= Treffer =================
@@ -8023,7 +7998,7 @@ function enterMeasurement(a,b,guided=false){
   M.highlight={a,b};
   const vorhanden=M.meas.filter(m=>(m.a===a&&m.b===b)||(m.a===b&&m.b===a));
   $('entryLabel').textContent = vorhanden.length
-    ? `${a}–${b}, bisher ${vorhanden.map(m=>fmtLen(m.d)).join(' · ')} ${unit}. Weiterer Wert:`
+    ? `${a}–${b}, bisher ${vorhanden.map(m=>fmtLen(m.d)).join(' · ')} ${unit}. Weiteres Maß:`
     : `Strecke ${a}–${b}`;
   const box=$('entry');
   box.hidden=false;
@@ -8096,16 +8071,16 @@ function commitEntry(){
   if(!zuKurzFrage(d,'kurz',100)) return;
   snapshot();
   M.meas.push({a:entryPair.a, b:entryPair.b, d, sigma:C.SIGMA_DEF, on:true});
-  const wasGuided=entryGuided;
+  const wasGuided=entryGuided, fa=entryPair.a, fb=entryPair.b;
   closeEntry();
   recompute();
+  if(!istWand(fa,fb)) zeigeFrisch(fa,fb);
   // Der gefuehrte Fluss laeuft die Vorschlagsliste ab, bis sie leer ist.
   // Kein Endlos-Risiko: jede bestaetigte Messung verkuerzt die Liste.
   if(wasGuided && M.sugg.length){
     const s=M.sugg[0];
     enterMeasurement(s.a, s.b, true);
   } else if(wasGuided){
-    setHint('Nichts mehr zu messen: Form bestimmt und geprüft.');
   }
 }
 $('entryOk').onclick=()=>{ if(knickAt) commitKnick(); else if(opMeasEdge) commitOpMeasure(); else if(heightAt) commitHeight();
@@ -8174,10 +8149,10 @@ function deleteWall(a,b){
 // auf die Strecke im Plan oder auf ihre Zeile in der Wandliste.
 let wpopPair=null;
 
-function openWallPopup(a,b){
+function openWallPopup(a,b,mitte){
   closeEntry();
   hidePop();
-  wpopPair={a,b};
+  wpopPair={a,b}; wpopMitte = mitte==null ? null : mitte;
   M.highlight={a,b};
   renderWallPopup();
   $('wpop').hidden=false;
@@ -8216,9 +8191,10 @@ function renderWallPopup(){
   // Laenge aus dem Ausgleich, nicht aus der Skizze (viewPts ist bei
   // ausgeschaltetem Ausrichten die Skizze).
   const P=fitPts(), I=C.idx(P);
-  $('wpopTitle').textContent=(isWall?'Wand ':'Strecke ')+a+'–'+b;
+  $('wpopTitle').textContent=(isWall?'Wand ':'Diagonale ')+a+'–'+b;
+  $('wpopOps').hidden=!isWall; $('wpopNorth').hidden=!isWall;
   $('wpopLen').textContent=(M.fit && I[a]!=null && I[b]!=null)
-    ? (M.an && M.an.dof>0 ? '≈ ' : '')+fmtLenU(C.dist(P[I[a]],P[I[b]]))+' ausgeglichen' : '';
+    ? (M.an && M.an.dof>0 ? '≈ ' : '')+fmtLenU(C.dist(P[I[a]],P[I[b]])) : '';
   const act=C.activeMeas(M.meas);
   const tb=document.querySelector('#wpopTbl tbody');
   tb.innerHTML='';
@@ -8239,7 +8215,7 @@ function renderWallPopup(){
       +`<td>${m.von==='nachbar' ? 'vom Nachbarn' : (sus && w!=null ? 'w '+fmtGrad(w) : '')}</td>`
       +`<td>${badge}</td>`
       +`<td><button class="rowbtn tog fix" aria-pressed="${!!m.fix}" title="Exakt: dieses Maß gilt genau so, der Ausgleich verteilt Abweichungen auf die übrigen">exakt</button></td>`
-      +`<td><button class="rowbtn del" title="Diesen Messwert löschen">×</button></td>`;
+      +`<td><button class="rowbtn del" title="Dieses Maß löschen">×</button></td>`;
     tr.querySelector('.fix').onclick=()=>{
       snapshot();
       if(m.fix) delete m.fix; else m.fix=true;
@@ -8255,7 +8231,7 @@ function renderWallPopup(){
       else { inp.value=fmtLen(m.d); setHint('Ungültig: Maß muss eine Zahl größer 0 sein.'); }
     };
     if(sus) attachTip(tr.children[2],
-      `w = ${fmtGrad(w)}: weicht am stärksten vom Rest ab, vermutlich falsch gemessen oder vertippt. × löscht den Wert.`);
+      `w = ${fmtGrad(w)}: weicht am stärksten vom Rest ab, vermutlich falsch gemessen oder vertippt. × löscht das Maß.`);
     const offBtn=m.on===false ? tr.querySelector('button.badge') : null;
     if(offBtn) offBtn.onclick=()=>{ snapshot(); m.on=true; recompute(); };
     tr.querySelector('.del').onclick=()=>{
@@ -8266,7 +8242,7 @@ function renderWallPopup(){
     tb.appendChild(tr);
   });
   if(!tb.children.length){
-    tb.innerHTML='<tr><td style="text-align:left;color:var(--muted)">Noch kein Messwert.</td></tr>';
+    tb.innerHTML='<tr><td style="text-align:left;color:var(--muted)">Noch kein Maß.</td></tr>';
   }
   // Wanddicke. Nur fuer echte Waende - eine Diagonale hat keine.
   const tw=$('wpopThick');
@@ -8286,11 +8262,12 @@ function renderWallPopup(){
                            : `Wanddicke ${THICK_DEFAULT} mm (angenommen)`;
     if(!(t>0)) span.className='muted';
   }
-  const btn=document.createElement('button');
-  btn.textContent = t>0 ? 'ändern' : 'eintragen';
-  btn.onclick=()=>{
-    const neu=fragWanddicke(t>0?t:THICK_DEFAULT);
-    if(neu==null) return;
+  const btn=document.createElement('input');
+  btn.className='thk'; btn.inputMode='numeric'; btn.setAttribute('aria-label','Wanddicke in Millimetern');
+  btn.placeholder=String(THICK_DEFAULT); btn.value = t>0 ? String(t) : '';
+  btn.onchange=()=>{
+    const neu=parseFloat(String(btn.value).replace(',','.'));
+    if(!isFinite(neu) || neu<20 || neu>1000){ sag('Wanddicke zwischen 20 und 1000 mm.'); btn.value = t>0 ? String(t) : ''; return; }
     snapshot();
     M.thick[k]=neu;
     // Die Wand gehoert zwei Raeumen, also den Wert drueben mitfuehren.
@@ -8308,7 +8285,7 @@ function renderWallPopup(){
     recompute();          // sichert, leitet die Nachbarlagen neu ab, zeichnet
     renderWallPopup();
   };
-  tw.append(span, btn);
+  if(kante && kante.quer>0) tw.append(span); else { span.textContent = t>0 ? 'Wanddicke' : 'Wanddicke (angenommen)'; const mm=document.createElement('span'); mm.textContent='mm'; tw.append(span, btn, mm); }
   // Grenzt diese Wand an einen Nachbarn, ohne dass es eine Verbindung gibt?
   const kand=(M.nahwaende||[]).find(x=>wallKey(x.a,x.b)===k);
   if(kand){
@@ -8365,6 +8342,25 @@ function renderWallPopup(){
   zeile.appendChild(uebn);
 }
 $('wpopX').onclick=closeWallPopup;
+// Tür, Fenster, Loch und Anschluss entstehen an der Wand, die man angefasst
+// hat: an der Stelle des Klicks, sonst in der Mitte.
+let wpopMitte=null;
+document.querySelectorAll('#wpopOps button').forEach(b=>{ b.onclick=()=>{
+  if(!wpopPair) return;
+  if(!wallTabReady()){ sag('Türen, Fenster und Anschlüsse lassen sich setzen, sobald die Form eindeutig ist.', b); return; }
+  const {a, b:b2}=wpopPair, kind=b.dataset.op, mitte=wpopMitte;
+  closeWallPopup();
+  if(kind==='water'){ insertWater(a, b2); render(); return; }
+  const o=insertOpening(kind, a, b2, mitte);
+  if(o){ M.openSel=o.id; render(); }
+}; });
+$('wpopDel').onclick=()=>{
+  if(!wpopPair) return;
+  const {a, b}=wpopPair, wand=istWand(a,b);
+  closeWallPopup();
+  if(wand){ deleteWall(a,b); setHint(`Wand ${a}–${b} gelöscht · ⌘Z holt sie zurück`); }
+  else { snapshot(); M.meas=M.meas.filter(m=>wallKey(m.a,m.b)!==wallKey(a,b)); recompute(); setHint(`Maße der Diagonale ${a}–${b} gelöscht · ⌘Z holt sie zurück`); }
+};
 $('wpopOk').onclick=()=>{
   if(!wpopPair) return;
   const inp=$('wpopVal');
@@ -8373,14 +8369,8 @@ $('wpopOk').onclick=()=>{
   if(!zuKurzFrage(d,'kurz',100)) return;
   inp.style.borderColor='';
   snapshot();
-  // Steht hier noch unveraendert der Vorschlag aus der Laufmessung, ist das
-  // keine Lasermessung - er geht mit seiner eigenen, viel groesseren
-  // Standardabweichung in den Ausgleich, sonst zieht eine Schaetzung den Raum
-  // so hart wie ein Messwert mit +-5 mm.
-  const ausLauf = globalThis.IMU && IMU.guess!=null && IMU.guess===inp.value;
   M.meas.push({a:wpopPair.a, b:wpopPair.b, d,
-    sigma: ausLauf ? IMU.SIGMA_LAUF : C.SIGMA_DEF, on:true});
-  if(globalThis.IMU) IMU.guess=null;
+    sigma:C.SIGMA_DEF, on:true});
   inp.value='';
   recompute();
 };
@@ -8538,11 +8528,6 @@ cv.addEventListener('pointerdown',e=>{
       gesture={t:'point',id:h.id,x0:e.clientX,y0:e.clientY,lx:e.clientX,ly:e.clientY,
                moved:false,snap:serialize(),popOpen};
       M.drag=h.id; M.dragMode=null;
-      if(touch) armLongpress(()=>{
-        gesture=null; M.drag=null; M.dragMode=null;
-        const s=toScr(M.fit?M.fit.pts[C.idx(M.fit.pts)[h.id]]:h);
-        showPop(s.x,s.y,`Ecke ${h.id} löschen?`,()=>deletePoint(h.id));
-      });
     } else {
       gesture={t:'selpt',id:h.id,x0:e.clientX,y0:e.clientY,lx:e.clientX,ly:e.clientY,moved:false,popOpen};
     }
@@ -8550,14 +8535,6 @@ cv.addEventListener('pointerdown',e=>{
   }
   const wall=nearestWall(w.x,w.y);
   gesture={t:'bg',x0:e.clientX,y0:e.clientY,lx:e.clientX,ly:e.clientY,moved:false,wall,popOpen};
-  if(wall && M.mode==='draw' && touch){
-    armLongpress(()=>{
-      gesture=null;
-      const P=viewPts(), I=C.idx(P);
-      const mid=toScr({x:(P[I[wall.a]].x+P[I[wall.b]].x)/2, y:(P[I[wall.a]].y+P[I[wall.b]].y)/2});
-      showPop(mid.x,mid.y,`Wand ${wall.a}–${wall.b} löschen?`,()=>deleteWall(wall.a,wall.b));
-    });
-  }
 });
 
 // Maus ueber dem Plan: Ziel fuer Entf merken; ein Nachbarraum schimmert
@@ -8791,38 +8768,9 @@ cv.addEventListener('pointercancel',endPointer);
 // Rechtsklick: Loeschen anbieten - fuer Ecke oder Wand im Plan, fuer die
 // Oeffnung in der Wandansicht. Auf dem Mac auch Zwei-Finger-Klick und
 // Strg+Klick; unter Windows die Rechtsklick-Zone des Touchpads.
-cv.addEventListener('contextmenu',e=>{
-  e.preventDefault();
-  if(lastPtrType!=='mouse' || M.mode==='tiles' || M.mode==='kitchen') return;
-  const d=evDev(e);
-  if(M.mode==='wall'){
-    const kh=knickHit(d);
-    if(kh){ showPop(d.x,d.y,'Knick löschen?',()=>deleteKnick(kh.id)); return; }
-    const ww=wToWall(d.x,d.y), o=openingAt(ww.x,ww.y);
-    if(o){
-      M.openSel=o.id; render();
-      showPop(d.x,d.y,`${OPEN_LABEL[o.kind]} löschen?`,()=>{ M.openSel=o.id; $('opDel').click(); });
-    }
-    return;
-  }
-  const w=toWorld(d.x,d.y);
-  const h=hit(w.x,w.y);
-  if(h){
-    const s=toScr(h);
-    showPop(s.x,s.y,`Ecke ${h.id} löschen?`,()=>deletePoint(h.id));
-    return;
-  }
-  const op=planEditable() ? planOpeningAt(w.x,w.y) : null;
-  if(op){
-    M.openSel=op.id; render();
-    showPop(d.x,d.y,`${OPEN_LABEL[op.kind]} löschen?`,()=>{ M.openSel=op.id; $('opplDel').click(); });
-    return;
-  }
-  const wall=nearestWall(w.x,w.y);
-  if(wall){
-    showPop(d.x,d.y,`Wand ${wall.a}–${wall.b} löschen?`,()=>deleteWall(wall.a,wall.b));
-  }
-});
+// Rechtsklick tut im Plan nichts mehr: gelöscht wird auf der Karte des
+// Objekts oder mit Entf (ein sichtbarer Weg, eine Taste).
+cv.addEventListener('contextmenu',e=>{ e.preventDefault(); });
 
 // ================= Rad, Touchpad, Pinch =================
 // Mausrad, Zwei-Finger-Wischen und Pinch kommen alle als wheel an, und kein
@@ -8836,9 +8784,8 @@ cv.addEventListener('contextmenu',e=>{
 //   entschieden (150 ms Pause = neuer Strom), damit der Nachlauf eines
 //   Wischers nicht ins Zoomen kippt. Schlaegt die Erkennung fehl (Maus mit
 //   Feinscrollen, altes Touchpad mit Rad-Emulation), legt man es fest.
-const WHEEL_PREFS=['auto','zoom','pan'];
-let wheelPref='auto';
-try{ const v=localStorage.getItem('raumaufmass.wheel'); if(WHEEL_PREFS.includes(v)) wheelPref=v; }catch{}
+// Früher einstellbar; „automatisch“ gilt jetzt fest (ein Rad zoomt, ein Touchpad verschiebt).
+const wheelPref='auto';
 const wheelState={cls:null, lastT:-1e9, hint:null, hintT:-1e9, gesture:false};
 function wheelClass(mode,dx,dy,t){
   if(mode!==0) return 'mouse';               // Zeilen oder Seiten liefert nur ein Rad
@@ -8890,8 +8837,8 @@ cv.addEventListener('gestureend',e=>{ e.preventDefault(); wheelState.gesture=fal
 // Kettenende laesst den Zug los.
 function tapPointDraw(id){
   hidePop();
-  if(M.chain==null){ M.chain=id; setHint('Zug aufgenommen. Klick setzt oder verbindet die nächste Ecke.'); render(); return; }
-  if(M.chain===id){ M.chain=null; setHint('Zug abgelegt.'); render(); return; }
+  if(M.chain==null){ M.chain=id; render(); return; }
+  if(M.chain===id){ M.chain=null; render(); return; }
   const a=M.chain, b=id;
   const k=[a,b].sort().join('|');
   const at=M.walls.findIndex(w=>[w[0],w[1]].sort().join('|')===k);
@@ -8939,7 +8886,7 @@ function openCornerPop(id){
   const P=fitPts(), g=angOf(id);
   const ist=C.idx(P)[k.a]!=null ? C.angleDeg(P, k) : null;
   $('cpopTitle').textContent='Ecke '+id;
-  $('cpopIst').textContent = ist==null ? '' : (M.an && M.an.dof>0 ? '≈ ' : '')+fmtGrad(ist)+'° ausgeglichen';
+  $('cpopIst').textContent = ist==null ? '' : (M.an && M.an.dof>0 ? '≈ ' : '')+fmtGrad(ist)+'°';
   // Vorschlag: was der Nutzer meistens meint. Nahe 90 -> 90, sonst die
   // ausgeglichene Zahl gerundet; ein festgelegter Wert steht schon drin.
   const vor = g ? g.deg : ist==null ? 90 : Math.abs(ist-90)<15 ? 90 : Math.round(ist);
@@ -8947,8 +8894,8 @@ function openCornerPop(id){
   $('cpopOk').textContent = g ? 'ändern' : 'festlegen';
   $('cpopFree').hidden=!g;
   $('cpopHint').textContent = g
-    ? `Fest auf ${fmtGrad(g.deg).replace(/,0$/,'')}°. Zweite Ecke antippen für eine Diagonale.`
-    : 'Exakt so festlegen, oder zweite Ecke antippen für eine Diagonale.';
+    ? `Fest auf ${fmtGrad(g.deg).replace(/,0$/,'')}°. Eine zweite Ecke anklicken öffnet die Diagonale.`
+    : 'Eine zweite Ecke anklicken öffnet die Diagonale.';
   $('cpop').hidden=false;
   placeNear($('cpop'), id, id);
 }
@@ -8970,6 +8917,7 @@ function fixCornerAngle(){
   setHint(`Winkel an ${id} auf ${fmtGrad(deg).replace(/,0$/,'')}° festgelegt.`);
 }
 $('cpopOk').onclick=fixCornerAngle;
+$('cpopDel').onclick=()=>{ const id=cpopId; if(!id) return; M.sel=[]; closeCornerPop(); deletePoint(id); setHint(`Ecke ${id} gelöscht · ⌘Z holt sie zurück`); };
 $('cpopFree').onclick=()=>{
   const id=cpopId; if(!id) return;
   snapshot();
@@ -9011,9 +8959,8 @@ function finishIfClosed(){
   // fuehrt die Eingabe von Vorschlag zu Vorschlag. Esc steigt aus.
   if(!M.meas.length && M.walls.length){
     const [a,b]=M.walls[0];
-    setHint(`Wandzug geschlossen. Erstes Maß: Wand ${a}–${b}, danach führt die Eingabe weiter.`);
     setTimeout(()=>{ if(M.mode==='measure' && !M.meas.length && !entryPair && !wpopPair) enterMeasurement(a,b,true); },0);
-  } else setHint('Wandzug geschlossen.');
+  }
 }
 
 // ================= Modi, Werkzeuge =================
@@ -9167,8 +9114,7 @@ document.querySelectorAll('#wAdd button[data-add]').forEach(b=>{
   b.onclick=()=>{
     if(!M.wallSel) return;
     const kind=b.dataset.add;
-    if(insertOpening(kind, M.wallSel.a, M.wallSel.b, null))
-      setHint(`${OPEN_LABEL[kind]} eingesetzt. Zum Positionieren ziehen.`);
+    insertOpening(kind, M.wallSel.a, M.wallSel.b, null);
   };
 });
 // ================= Wasseranschluss =================
@@ -9196,7 +9142,7 @@ function insertWater(a, b){
   const w={id:'w'+n, a, b, x:Math.round(Math.max(0,Math.min(shape.L,x))), y:WATER_Y};
   M.water.push(w); M.waterSel=w.id; M.openSel=null;
   recompute();
-  setHint(`Wasseranschluss gesetzt${sink?' unter der Spüle':''}. Ziehen verschiebt, rechts Lage und Höhe in mm.`);
+  setHint(`Wasseranschluss gesetzt${sink?' unter der Spüle':''}.`);
   return w;
 }
 $('wWater').onclick=()=>{ if(M.wallSel) insertWater(M.wallSel.a, M.wallSel.b); };
@@ -9292,14 +9238,14 @@ function commitHeight(){
   const d=parseLen(inp.value);
   if(!isFinite(d)||d<0){ inp.classList.add('bad'); return; }
   // 0 ist erlaubt (Dreieckswand), aber eine Rueckfrage wert.
-  if(d===0 && !confirm('Höhe 0 an dieser Ecke: die Wand läuft hier spitz zu (Dreieck). So übernehmen?')) return;
+  if(d===0) setTimeout(()=>sag('Höhe 0: die Wand läuft an dieser Ecke spitz zu. ⌘Z nimmt es zurück.'), 0);
   if(d>0 && !zuKurzFrage(d,'niedrig',1000)) return;
   snapshot();
   M.hmeas.push({kind:'h', at:heightAt, d, sigma:C.SIGMA_DEF, on:true});
   heightAt=null;
   $('entry').hidden=true;
   recompute();
-  setHint('Höhe übernommen.');
+  
 }
 $('wHeight').onclick=()=>{ if(M.wallSel) enterHeight(wallSidesView().left.id); };
 
@@ -9368,7 +9314,7 @@ function commitKnick(){
   knickAt=null;
   $('entry').hidden=true;
   recompute();
-  setHint('Knick übernommen. Ziehen verschiebt ihn, Rechtsklick löscht.');
+  
 }
 function deleteKnick(id){
   const m=knickById(id); if(!m) return;
@@ -9806,11 +9752,6 @@ function setMode(mode){
     { const w0=wallList()[0]; M.wallSel={a:w0.a, b:w0.b}; }
     wallUserView=false;
   }
-  // Beide Schwebeknoepfe erst mal weg; renderPanel entscheidet gleich, ob
-  // einer davon etwas zu tun hat. Hier nur zu verstecken statt zu setzen
-  // vermeidet ein Aufblitzen beim Moduswechsel.
-  $('ring').style.display='none';
-  $('untangle').style.display='none';
   document.querySelectorAll('#modes button[data-mode]').forEach(x=>
     x.setAttribute('aria-pressed', String(x.dataset.mode===mode)));
   // Der Modus steht am body: CSS zeigt danach nur die Werkzeuge und
@@ -9822,39 +9763,6 @@ function setMode(mode){
 document.querySelectorAll('#modes button[data-mode]').forEach(b=>{
   b.onclick=()=>setMode(b.dataset.mode);
 });
-
-// Entwirren: kreuzungsfreie Lage suchen (siehe untangle im store-Block).
-// Jeder Klick wuerfelt mit neuem Seed - gefaellt die Loesung nicht,
-// nochmal druecken. Undo nimmt sie komplett zurueck.
-let untangleSeed=1;
-$('untangle').onclick=()=>{
-  const u=untangle(M.pts, M.walls, M.meas, 24, untangleSeed++, M.angs);
-  if(u) snapshot();
-  if(!u){
-    setHint('Keine kreuzungsfreie Anordnung gefunden. Einige Ecken von Hand ziehen, dann erneut entwirren.');
-    return;
-  }
-  const I=C.idx(M.pts);
-  u.forEach(p=>{ const q=M.pts[I[p.id]]; if(q){ q.x=p.x; q.y=p.y; } });
-  recompute();
-  // Die eingenordete Wand bleibt oben-parallel liegen - daran orientiert
-  // man sich; ohne Nordwand einfach neu einpassen.
-  if(northWallPair) northWall(northWallPair.a, northWallPair.b, true);
-  else { userView=false; autofit(); }
-  render();
-  setHint('Entwirrt: Maße gehalten, Wände kreuzungsfrei.');
-};
-
-$('ring').onclick=()=>{
-  if(M.pts.length<3){ setHint('Mindestens 3 Ecken nötig.'); return; }
-  snapshot();
-  // In Anlegereihenfolge verbinden - genau so, wie der Nutzer den Raum
-  // abgelaufen ist. Ersetzt den bestehenden Zug, statt ihn zu ergaenzen.
-  M.walls=M.pts.map((p,i)=>[p.id, M.pts[(i+1)%M.pts.length].id]);
-  M.chain=null;
-  finishIfClosed();
-  recompute();
-};
 
 $('undo').onclick=doUndo;
 $('redo').onclick=doRedo;
@@ -9903,18 +9811,18 @@ $('mirror').onclick=()=>{
 // Vorschlaege, Residuen und Flaeche kommen weiter aus dem Fit.
 function syncSnapfitBtn(){
   const b=$('snapfit');
-  b.setAttribute('aria-pressed', String(!!M.snapfit));
-  b.title = 'Skizze folgt den Messungen. Aus: Ecken bleiben, wo sie gezeichnet wurden; gerechnet wird weiter.';
+  b.setAttribute('aria-pressed', String(!M.snapOff));
+  b.title = 'An: sobald die Form eindeutig ist, zeigt der Plan die gemessene Form. Aus: Ecken bleiben, wo sie gezeichnet wurden; gerechnet wird weiter.';
 }
 $('snapfit').onclick=()=>{
   snapshot();
-  M.snapfit=!M.snapfit;
+  M.snapOff=!M.snapOff;
   syncSnapfitBtn();
   userView=false;
   recompute();
-  setHint(M.snapfit
-    ? 'Maßhaltig: die Skizze zieht sich auf die gemessene Form.'
-    : 'Skizze bleibt liegen; gerechnet wird weiter.');
+  setHint(M.snapOff
+    ? 'Die Skizze bleibt liegen, auch wenn die Form eindeutig ist. Gerechnet wird weiter.'
+    : 'Sobald die Form eindeutig ist, zeigt der Plan die gemessene Form.');
 };
 // Pruefansicht (showEllipses, oben deklariert).
 $('ellipses').onclick=()=>{
@@ -9970,7 +9878,6 @@ $('roomname').onclick=renameCurrentRoom;
 // Neuer Raum ohne Dialog: er heisst erst einmal so, der Name ist sofort
 // zum Ueberschreiben markiert.
 function newRoomInline(){ closeLib(); newRoom('Neuer Raum'); renameCurrentRoom(); }
-$('roomNew').onclick=newRoomInline;
 
 // ================= Raum-Menue =================
 // Alles, was man pro Raum einmal tut (oeffnen, sichern, teilen, spiegeln,
@@ -10062,7 +9969,6 @@ function renderLib(){
 }
 function openLib(){ renderLib(); $('libwrap').hidden=false; }
 function closeLib(){ $('libwrap').hidden=true; }
-$('lib').onclick=openLib;
 $('libclose').onclick=closeLib;
 $('libnew').onclick=newRoomInline;
 $('libwrap').addEventListener('pointerdown',e=>{ if(e.target===$('libwrap')) closeLib(); });
@@ -10123,7 +10029,7 @@ addEventListener('keydown',e=>{
   }
   // ⌘S sichert als Datei, ⌘O oeffnet eine - statt des Browser-Dialogs.
   if(mod && !e.altKey && !e.shiftKey && (k==='s' || k==='o')){
-    e.preventDefault(); $(k==='s'?'filesave':'fileopen').click(); return;
+    e.preventDefault(); $(k==='s'?'filesave':'filepick').click(); return;
   }
   // Eine fokussierte Auswahlliste braucht ihre Tasten (Pfeile, Buchstaben,
   // Leertaste); Esc und Entf wirken weiter.
@@ -10261,17 +10167,16 @@ $('stepsave').onclick=()=>{
   const h=r.hoehen.map(v=>v.toLocaleString('de-DE')).join(' / ');
   setHint(`Exportiert als ${fname} (Downloads), ${S.length} Körper. Raumhöhe ${h} mm${r.gemessen==='keine'?' – angenommen, nicht gemessen':r.gemessen==='teils'?' – an ungemessenen Ecken angenommen':''}.${r.hinweise.length?' '+r.hinweise.join('; ')+'.':''}`);
 };
-$('fileopen').onclick=()=>$('filepick').click();
 $('filepick').onchange=async()=>{
   const f=$('filepick').files[0];
   $('filepick').value='';
   if(!f) return;
   let o=null;
-  try{ o=JSON.parse(await f.text()); }catch(e){ alert('Das ist keine gültige JSON-Datei.'); return; }
+  try{ o=JSON.parse(await f.text()); }catch(e){ sag('Das ist keine gültige JSON-Datei. Eine mit „Als Datei sichern“ erzeugte Datei wählen.'); return; }
   const name=(o && typeof o.name==='string' && o.name.trim()) ? o.name.trim()
     : f.name.replace(/\.json$/i,'');
   const err=importAsNewRoom(name, o);
-  if(err) alert('Datei hat nicht die erwartete Form: '+err);
+  if(err) sag('Die Datei hat nicht die erwartete Form: '+err);
   else setHint(`„${name}“ importiert und als eigener Raum gespeichert.`);
 };
 
@@ -10341,9 +10246,12 @@ const fmtLenU=mm=>fmtLen(mm)+' '+unit;
 // Ein Mass unterhalb dieser Schwelle ist vermutlich in der falschen Einheit
 // getippt. Die Rueckfrage muss mitwandern: in Metern faellt "3" statt "3000"
 // sofort auf, in Millimetern ist dieselbe 3 nur ein sehr kurzes Mass.
-const zuKurzFrage=(mm,was,grenze)=>
-  unit==='mm' || mm>=grenze ||
-  confirm(`${fmtLenU(mm)} ist sehr ${was}. Als ${unit} gemeint?\n\nOK = so übernehmen`);
+// Keine Rückfrage mehr: das Maß gilt sofort, eine Rückmeldung am Ort nennt
+// den Verdacht, und Rückgängig nimmt es zurück.
+const zuKurzFrage=(mm,was,grenze)=>{
+  if(!(unit==='mm' || mm>=grenze)) setTimeout(()=>sag(`${fmtLenU(mm)} ist sehr ${was}. Falls anders gemeint: ⌘Z nimmt es zurück.`), 0);
+  return true;
+};
 function setUnit(u){
   if(!UNITS[u]) return;
   unit=u;
@@ -10599,22 +10507,13 @@ function renderPanel(){
   const wwEl=$('wallwarn');
   const ring=C.wallPolygonRing(M.pts, M.walls);
   const ringBroken = M.walls.length>0 && !C.wallPolygon(M.pts, M.walls);
-  // Entwirren nur anbieten, wenn es etwas zu entwirren gibt: geschlossener
-  // Zug, der sich kreuzt, im Zeichnen-Modus.
-  $('untangle').style.display =
-    (M.mode==='draw' && ring && C.ringSelfIntersects(ring)) ? 'block' : 'none';
-  // Schliessen nur anbieten, solange der Zug OFFEN ist. Ein geschlossener
-  // Ring hat nichts mehr zu schliessen, und der Knopf stand bisher trotzdem
-  // die ganze Zeit da. Unter drei Ecken gibt es noch keinen Raum zu schliessen.
-  $('ring').style.display =
-    (M.mode==='draw' && M.pts.length>=3 && !ring) ? '' : 'none';
   // Ein offener Zug ist beim Zeichnen der Normalfall, keine Warnung wert -
   // erst beim Messen (oder wenn sich Waende kreuzen) ist er eine.
   const kreuzt=!!(ring && C.ringSelfIntersects(ring));
   const warnen=ringBroken && (kreuzt || M.mode==='measure');
   wwEl.style.display = warnen ? 'block' : 'none';
   if(warnen) wwEl.textContent = kreuzt
-    ? 'Wände kreuzen sich. Fläche und Vorschläge sind ausgesetzt, bis der Zug entwirrt ist.'
+    ? 'Wände kreuzen sich. Fläche und Vorschläge sind ausgesetzt, bis sie es nicht mehr tun: eine Ecke ziehen.'
     : 'Wandzug nicht geschlossen. Vorschläge können Strecken enthalten, die sich nicht direkt messen lassen.';
 
   // Widersprueche zu den Nachbarraeumen. Bewusst eine eigene Meldung neben
@@ -10881,42 +10780,15 @@ function renderPanel(){
 
 // ================= Daten =================
 
-// JSON kopieren ist dieselbe Nutzlast wie "Als Datei sichern" (mit
-// Oeffnungen, Hoehen, Fliesen ...) - frueher fehlte alles ausser Ecken,
-// Waenden und Massen, und ein Wiedereinfuegen ergab einen halben Raum.
-$('exp').onclick=async()=>{
-  const payload=currentRoom && roomFilePayload(currentRoom);
-  if(!payload) return;
-  try{ await navigator.clipboard.writeText(JSON.stringify(payload,null,2)); setHint('Raum als JSON in der Zwischenablage.'); }
-  catch{ setHint('Zwischenablage nicht erreichbar. Als Datei sichern geht immer.'); }
-};
-$('imp').onclick=async()=>{
-  let txt='';
-  try{ txt=await navigator.clipboard.readText(); }
-  catch{ setHint('Zwischenablage nicht lesbar. Datei öffnen geht immer.'); return; }
-  let o; try{ o=JSON.parse(txt); }catch{ setHint('In der Zwischenablage liegt kein Raum-JSON.'); return; }
-  const name=(o && typeof o.name==='string' && o.name.trim()) ? o.name.trim() : 'Eingefügter Raum';
-  const err=importAsNewRoom(name, o);
-  setHint(err ? 'JSON hat nicht die erwartete Form: '+err : `„${name}“ eingefügt, als eigener Raum.`);
-};
-// Zweimal klicken: der erste Klick schaerft den Eintrag (4 s), erst der
-// zweite leert. Rueckgaengig gilt nur bis zum Raumwechsel - darum fragt
-// er nach, ohne einen Dialog aufzumachen.
-let clrArmed=null;
-$('clr').onclick=e=>{
+// Sofort und umkehrbar: kein zweiter Klick, kein Dialog. Rückgängig holt
+// alles zurück, solange der Raum offen ist.
+$('clr').onclick=()=>{
   if(!M.pts.length) return;
-  const b=$('clr');
-  if(!clrArmed){
-    e.stopPropagation();                 // Menue bleibt fuer den zweiten Klick offen
-    b.textContent='Wirklich alles verwerfen?'; b.classList.add('arm');
-    clrArmed=setTimeout(()=>{ clrArmed=null; b.textContent='Raum leeren'; b.classList.remove('arm'); },4000);
-    return;
-  }
-  clearTimeout(clrArmed); clrArmed=null; b.textContent='Raum leeren'; b.classList.remove('arm');
   snapshot();
   deserialize({pts:[],walls:[],meas:[]});
   userView=false;
   recompute();
+  setMode('draw');
   setHint('Raum geleert · ⌘Z holt alles zurück');
 };
 
@@ -10967,7 +10839,6 @@ function renderKeys(){
 }
 function toggleKeys(){ const w=$('keyswrap'); if(w.hidden) renderKeys(); w.hidden=!w.hidden; }
 function closeKeys(){ const w=$('keyswrap'); if(w.hidden) return false; w.hidden=true; return true; }
-$('keysBtn').onclick=toggleKeys;
 $('keysclose').onclick=closeKeys;
 $('keyswrap').addEventListener('pointerdown',e=>{ if(e.target===$('keyswrap')) closeKeys(); });
 // Hilfe: der Ablauf in Worten, statisch im Markup.
@@ -10980,21 +10851,7 @@ $('helpBtn').onclick=toggleHelp;
 $('helpclose').onclick=closeHelp;
 $('helpwrap').addEventListener('pointerdown',e=>{ if(e.target===$('helpwrap')) closeHelp(); });
 
-// ================= Statuszeile =================
-const WHEEL_LABEL={auto:'Scrollen: automatisch', zoom:'Scrollen: zoomt', pan:'Scrollen: verschiebt'};
-function syncWheelBtn(){
-  $('wheelBtn').textContent=WHEEL_LABEL[wheelPref];
-  $('wheelBtn').title=plat('Was Mausrad und Zwei-Finger-Wischen ohne Taste tun. Automatisch: ein Rad zoomt, ein Touchpad verschiebt. '
-    +'Klicken wechselt. Zoomen geht immer mit ⌘ oder Pinch, verschieben mit Leertaste oder Mitteltaste.');
-}
-$('wheelBtn').onclick=()=>{
-  wheelPref=WHEEL_PREFS[(WHEEL_PREFS.indexOf(wheelPref)+1)%WHEEL_PREFS.length];
-  try{ localStorage.setItem('raumaufmass.wheel', wheelPref); }catch{}
-  syncWheelBtn();
-  setHint({auto:'Scrollen automatisch: ein Mausrad zoomt, Touchpad-Wischen verschiebt.',
-           zoom:'Scrollen zoomt immer (Mausrad).', pan:'Scrollen verschiebt immer (Touchpad).'}[wheelPref]);
-};
-syncWheelBtn();
+// ================= Ansicht drehen =================
 // Drehwinkel der Ansicht steht im Knopf; in der Wandansicht gibt es keinen.
 function syncRotateBtn(){
   const b=$('rotate');
@@ -15165,590 +15022,6 @@ Object.assign(globalThis, { kitchenReady, kitchenDown, kitchenMove, kitchenUp, k
   kitchenResetSession:()=>{ KS.sel=null; KS.flow=null; KS.hl=null; KS.drag=false; KS.ctxKey=''; KS.ctx=null; G3.camFor=''; } });
 })();
 </script>
-<script id="imu">
-"use strict";
-// ================= Laufmessung =================
-// Schaetzt die Strecke zwischen zwei Wandtipps aus den sechs IMU-Zeitreihen des
-// Telefons und schreibt sie ins Maß-Feld des Wand-Popups. Sie ersetzt den Laser
-// NICHT - sie fuellt das Feld vor, damit auf der Baustelle ein Wert dasteht, den
-// der Laser gleich ueberschreiben kann. Der Wert wird nicht selbst uebernommen;
-// dafuer bleibt "+ Wert" zustaendig.
-//
-// Warum das ueber fuenf Sekunden ueberhaupt gehen kann: beide Tipps sind echte
-// Null-Geschwindigkeits-Ereignisse. Ein KONSTANTER Beschleunigungsfehler (aus
-// einem Lagefehler bei der Ausrichtung) erzeugt einen LINEAREN
-// Geschwindigkeitsfehler, und den zieht die Randbedingung v(T)=0 vollstaendig
-// ab. Uebrig bleibt im Wesentlichen der Gyro-Restbias, der mit (1/12)*g*b*T^3
-// eingeht. Die Mathematik ist eine Kopie aus probe-imu.mjs im Hauptverzeichnis,
-// wo sie gegen synthetische Bahnen mit bekannter Wahrheit geprueft wird.
-(function(){
-
-// --- Quaternionen: q=[w,x,y,z], dreht vom Body- ins Nav-Frame ---
-const qmul=(a,b)=>[
-  a[0]*b[0]-a[1]*b[1]-a[2]*b[2]-a[3]*b[3],
-  a[0]*b[1]+a[1]*b[0]+a[2]*b[3]-a[3]*b[2],
-  a[0]*b[2]-a[1]*b[3]+a[2]*b[0]+a[3]*b[1],
-  a[0]*b[3]+a[1]*b[2]-a[2]*b[1]+a[3]*b[0]];
-const qnorm=q=>{ const n=Math.hypot(...q); return q.map(c=>c/n); };
-// Exponentialabbildung: exakt fuer konstante Drehrate im Intervall. Beim Gehen
-// erreicht die Drehrate 200-300 grad/s, da ist die Kleinwinkelnaeherung falsch.
-const expq=rv=>{
-  const th=Math.hypot(...rv);
-  if(th<1e-12) return [1,rv[0]/2,rv[1]/2,rv[2]/2];
-  const s=Math.sin(th/2)/th;
-  return [Math.cos(th/2),rv[0]*s,rv[1]*s,rv[2]*s];
-};
-const qrot=(q,v)=>{
-  const [w,x,y,z]=q;
-  const tx=2*(y*v[2]-z*v[1]), ty=2*(z*v[0]-x*v[2]), tz=2*(x*v[1]-y*v[0]);
-  return [v[0]+w*tx+(y*tz-z*ty), v[1]+w*ty+(z*tx-x*tz), v[2]+w*tz+(x*ty-y*tx)];
-};
-const qBetween=(u,v)=>{
-  const d=u[0]*v[0]+u[1]*v[1]+u[2]*v[2];
-  if(d>1-1e-12) return [1,0,0,0];
-  return qnorm([1+d, u[1]*v[2]-u[2]*v[1], u[2]*v[0]-u[0]*v[2], u[0]*v[1]-u[1]*v[0]]);
-};
-
-// --- Strapdown-Integration ---
-// samples: [{t:s, f:[m/s^2] spezifische Kraft im Body-Frame, w:[rad/s]}]
-// segment: [tA,tB] die beiden Tipps. Die Lage laeuft schon ab Ende der
-//   Ruhephase mit (das Aufnehmen des Telefons dreht es), Geschwindigkeit und
-//   Position starten aber erst bei tA auf null.
-function integrate(samples, opts={}){
-  const {staticSec=2, zupt=true, segment=null, coning=true,
-         injectTiltDeg=0, injectTiltAxis=[0,1,0]}=opts;
-
-  const t0=samples[0].t;
-  const stat=samples.filter(s=>s.t-t0<staticSec);
-  if(stat.length<10) throw new Error('Ruhephase zu kurz');
-  const mean=get=>[0,1,2].map(i=>stat.reduce((a,s)=>a+get(s)[i],0)/stat.length);
-
-  const bg=mean(s=>s.w);                    // im Stillstand ist die Wahrheit null
-  const fs=mean(s=>s.f);
-  const g=Math.hypot(...fs);                // lokales g, absorbiert den Skalenfehler
-  // Die gemittelte spezifische Kraft zeigt im Stillstand nach oben. Das Heading
-  // bleibt frei - pro Segment zaehlt nur der relative Verschiebungsvektor.
-  let q=qBetween(fs.map(c=>c/g),[0,0,1]);
-  if(injectTiltDeg!==0){
-    const a=Math.hypot(...injectTiltAxis);
-    q=qmul(q, expq(injectTiltAxis.map(c=>(c/a)*injectTiltDeg*Math.PI/180)));
-  }
-
-  const tA=segment?segment[0]:t0+staticSec, tB=segment?segment[1]:Infinity;
-  const traj=[]; let v=[0,0,0], p=[0,0,0], prev=null;
-
-  for(const s of samples){
-    if(s.t-t0<staticSec) continue;
-    if(s.t>tB) break;
-    if(prev){
-      const dt=s.t-prev.t;
-      if(!(dt>0)) continue;
-      const w1=[0,1,2].map(i=>prev.w[i]-bg[i]), w2=[0,1,2].map(i=>s.w[i]-bg[i]);
-      const rv=[0,1,2].map(i=>(w1[i]+w2[i])/2*dt);
-      if(coning){
-        // Zweite Ordnung. Bei 400 Hz egal, bei den 50-100 Hz eines Browsers
-        // nicht mehr: theta += (1/12)(w_{k-1} x w_k) dt^2
-        const c=[w1[1]*w2[2]-w1[2]*w2[1], w1[2]*w2[0]-w1[0]*w2[2], w1[0]*w2[1]-w1[1]*w2[0]];
-        for(let i=0;i<3;i++) rv[i]+=c[i]*dt*dt/12;
-      }
-      q=qnorm(qmul(q,expq(rv)));
-    }
-    const fNav=qrot(q,s.f);
-    const aNav=[fNav[0],fNav[1],fNav[2]-g];
-    if(s.t<tA){ prev={...s,aNav}; continue; }
-    if(!traj.length){ prev={...s,aNav}; traj.push({t:s.t,v:[...v],p:[...p]}); continue; }
-    const dt=s.t-prev.t;
-    // Trapez statt Euler - kostet nichts, halbiert den Diskretisierungsfehler.
-    const vN=[0,1,2].map(i=>v[i]+(aNav[i]+prev.aNav[i])/2*dt);
-    p=[0,1,2].map(i=>p[i]+(vN[i]+v[i])/2*dt);
-    v=vN;
-    prev={...s,aNav};
-    traj.push({t:s.t,v:[...v],p:[...p]});
-  }
-  if(traj.length<2) throw new Error('Messsegment zu kurz');
-  const raw={p:[...p],v:[...v],q,g,bg};
-  if(!zupt) return raw;
-
-  // Zwei-Punkt-ZUPT: beide Tipps sind v=0, der Rest bei tB ist reiner Fehler.
-  const T=traj[traj.length-1].t-traj[0].t, vT=traj[traj.length-1].v;
-  const vc=k=>{ const f=(traj[k].t-traj[0].t)/T;
-                return [0,1,2].map(i=>traj[k].v[i]-f*vT[i]); };
-  let pc=[0,0,0];
-  for(let k=1;k<traj.length;k++){
-    const dt=traj[k].t-traj[k-1].t, v1=vc(k-1), v2=vc(k);
-    pc=[0,1,2].map(i=>pc[i]+(v1[i]+v2[i])/2*dt);
-  }
-  return {...raw, p:pc, pRaw:raw.p, T};
-}
-globalThis.IMU={integrate};
-
-// ================= Aufnahme =================
-const RUHE_S=5;        // Kalibrierung des Gyro-Bias und Ausrichtung nach dem Lot
-const STILL_W=0.25;    // rad/s, darunter gilt das Telefon als ruhig liegend
-const TIPP_G=35;       // |f| darueber ist ein Wandtipp (Gehen bleibt darunter)
-const TIPP_SPERRE=1.0; // s Sperre nach einem Tipp
-// Der Aufprall ist ein Ausschlag von 40 m/s^2 und mehr, dauert aber nur wenige
-// Millisekunden - bei 60 Hz landet davon EIN Sample, das ueber ein ganzes
-// Intervall gestreckt wird und daraus fast einen Meter pro Sekunde Geschwindig-
-// keit macht, die es nie gab. Deshalb faengt das Segment erst an, wenn der
-// Ausschlag abgeklungen ist. Weiter darf das Fenster nicht reichen: schon kurz
-// nach dem Tipp laeuft das Telefon wieder, und dann gilt die Randbedingung
-// v=0 nicht mehr, auf der die ganze Rechnung steht.
-const RUHIG_F=15;      // m/s^2, darunter gilt der Aufprall als abgeklungen
-const BLEND_MAX=0.3;   // s, laenger wird nicht gewartet
-// Eine Laufmessung ist keine Lasermessung. Sie geht mit ihrer eigenen, viel
-// groesseren Standardabweichung in den Ausgleich, sonst zieht eine Schaetzung
-// den ganzen Raum so hart wie ein Messwert mit +-5 mm. Der Wert ist ein
-// Platzhalter, bis echte Laeufe eine Streuung liefern.
-const SIGMA_LAUF=200;  // mm
-const MIN_M=0.3, MAX_M=30;   // ausserhalb ist das Ergebnis kein Maß, sondern Muell
-
-let phase='aus', samples=[], t0=0, ruheAb=null, tA=0, tB0=0, lastTip=-9, paar=null, flip=false;
-
-const msg=(txt,cls='')=>{ const e=$('imuMsg'); e.textContent=txt; e.className=cls; };
-const buzz=n=>{ try{ navigator.vibrate?.(n); }catch{} };
-
-function stop(txt,cls){
-  window.removeEventListener('devicemotion',onMotion);
-  phase='aus'; samples=[]; paar=null;
-  $('imuBtn').textContent='Laufmessung';
-  $('imuBtn').disabled=false;
-  if(txt) msg(txt,cls);
-}
-
-function onMotion(e){
-  const a=e.accelerationIncludingGravity, r=e.rotationRate;
-  if(!a||a.x==null||!r) return;
-  // Popup zu oder andere Wand gewaehlt: die Messung gehoert dann nirgends mehr
-  // hin, also abbrechen statt still weiterlaufen.
-  if($('wpop').hidden||!wpopPair||!paar||wpopPair.a!==paar.a||wpopPair.b!==paar.b){
-    stop('Abgebrochen — die Strecke wurde gewechselt oder das Popup geschlossen.','bad');
-    return;
-  }
-  const t=performance.now()/1000, s=flip?-1:1;
-  samples.push({t, f:[s*a.x,s*a.y,s*a.z],
-    w:[(r.beta||0)*Math.PI/180,(r.gamma||0)*Math.PI/180,(r.alpha||0)*Math.PI/180]});
-  tick(t);
-}
-
-function tick(t){
-  const last=samples[samples.length-1];
-  const wm=Math.hypot(...last.w);
-
-  if(phase==='ruhe'){
-    // Erst wenn das Telefon wirklich liegt, laeuft die Ruhephase an - sonst
-    // wandert die Handbewegung als Bias in jede Messung.
-    if(wm>STILL_W){ ruheAb=null; msg('Telefon flach ablegen …'); return; }
-    if(ruheAb===null){ ruheAb=t; t0=t; samples=samples.slice(-1); return; }
-    const rest=RUHE_S-(t-ruheAb);
-    if(rest>0){ msg('Ruhig liegen lassen … '+Math.ceil(rest)+' s'); return; }
-    // iOS meldet accelerationIncludingGravity mit umgekehrtem Vorzeichen. Der
-    // Integrator erwartet die spezifische Kraft: flach liegend +g, nicht -g.
-    const z=samples.slice(-40).reduce((s,x)=>s+x.f[2],0)/Math.min(40,samples.length);
-    if(z<0){ flip=true; samples.forEach(x=>x.f=x.f.map(c=>-c)); }
-    phase='bereit'; buzz(80);
-    $('imuBtn').textContent='Tipp auslösen';
-    $('imuBtn').disabled=false;
-    msg('Aufnehmen, mit der oberen linken Ecke gegen die erste Wand tippen.','run');
-    return;
-  }
-
-  if(phase==='ende'){
-    // Nach dem zweiten Tipp weiter aufnehmen, bis der Aufprall abgeklungen ist.
-    // Erst dort steht das Telefon nachweislich wieder still, und nur an einem
-    // ruhenden Endpunkt gilt die Randbedingung v=0, auf der alles beruht. Das
-    // Abbremsen selbst gehoert dabei INS Segment - es ist echte Physik.
-    if(Math.hypot(...last.f)<RUHIG_F || t-tB0>BLEND_MAX) fertig(tA,t);
-    return;
-  }
-
-  if((phase==='bereit'||phase==='laeuft') && Math.hypot(...last.f)>TIPP_G
-     && t-lastTip>TIPP_SPERRE) tipp(t);
-}
-
-function tipp(t){
-  if(phase!=='bereit'&&phase!=='laeuft') return;
-  lastTip=t;
-  if(phase==='bereit'){
-    tA=t; phase='laeuft'; buzz(80);
-    msg('Läuft — zur zweiten Wand gehen und antippen.','run');
-  } else {
-    tB0=t; phase='ende'; buzz([80,60,80]);
-    msg('Kurz an der Wand halten …','run');
-  }
-}
-
-// Erstes Sample ab t, dessen |f| wieder normal ist. Nur fuer den ERSTEN Tipp:
-// dort liegt der Aufprall vor der Strecke und gehoert nicht hinein. Am zweiten
-// Tipp ist das Abbremsen Teil der Strecke, dort wird nicht geschnitten.
-function nachImpuls(t){
-  for(const s of samples){
-    if(s.t<t) continue;
-    if(s.t-t>BLEND_MAX) break;
-    if(Math.hypot(...s.f)<RUHIG_F) return s.t;
-  }
-  return t;
-}
-
-function fertig(a,b){
-  let r;
-  try { r=integrate(samples,{staticSec:RUHE_S, segment:[nachImpuls(a),b], zupt:true}); }
-  catch(err){ stop('Messung unbrauchbar: '+err.message,'bad'); return; }
-  const m=Math.hypot(...r.p);
-  // Ein unplausibler Wert darf nicht ins Maßfeld: von dort landet er per
-  // "+ Wert" im Ausgleich und verzieht den ganzen Raum.
-  if(!(m>=MIN_M&&m<=MAX_M)){
-    stop('Ergebnis unplausibel ('+m.toFixed(2)+' m) — verworfen.','bad'); return;
-  }
-  const inp=$('wpopVal');
-  inp.value=fmtLen(m*1000);
-  inp.select?.();
-  // Merken, WELCHER Text aus der Laufmessung stammt: bleibt er unveraendert
-  // stehen, geht der Wert mit SIGMA_LAUF statt mit Laser-Genauigkeit in den
-  // Ausgleich (siehe wpopOk).
-  globalThis.IMU.guess=inp.value;
-  const hz=samples.filter(s=>s.t>=a&&s.t<=b).length/(b-a);
-  // Die Restgeschwindigkeit ist die Diagnose: an beiden Tipps steht das Telefon,
-  // also ist alles, was hier ueber null steht, aufgelaufener Fehler. Grosse
-  // Werte heissen, dass der Aufprall bei dieser Abtastrate nicht sauber
-  // erfasst wurde - dann ist die Zahl darueber nichts wert.
-  stop('Schätzung '+fmtLenU(m*1000)+' in '+(b-a).toFixed(1)+' s bei '+hz.toFixed(0)
-    +' Hz, Rest '+Math.hypot(...r.v).toFixed(2)+' m/s — mit dem Laser überschreiben.');
-}
-
-// ================= Verdrahtung =================
-async function start(){
-  if(!wpopPair){ msg('Erst eine Strecke im Plan wählen.','bad'); return; }
-  // iOS verlangt die Freigabe aus einer echten Nutzeraktion heraus.
-  if(typeof DeviceMotionEvent.requestPermission==='function'){
-    let g; try{ g=await DeviceMotionEvent.requestPermission(); }catch{ g='denied'; }
-    if(g!=='granted'){ msg('Zugriff auf die Bewegungssensoren abgelehnt.','bad'); return; }
-  }
-  paar={...wpopPair}; samples=[]; flip=false; ruheAb=null; lastTip=-9;
-  phase='ruhe';
-  $('imuBtn').textContent='Abbrechen';
-  msg('Telefon flach ablegen …');
-  window.addEventListener('devicemotion',onMotion);
-}
-// Der Recorder haengt am globalen IMU, nicht nur am Knopf: sonst laesst sich
-// der Ablauf nur auf einem echten Telefon ausloesen, und genau der Zustands-
-// automat ist das, was auf der Baustelle bricht.
-// phase als Funktion, nicht als Getter: Object.assign wuerde einen Getter
-// auswerten und den Wert einfrieren, statt ihn durchzureichen.
-Object.assign(globalThis.IMU, {start, tipp, stop, phase:()=>phase, SIGMA_LAUF, guess:null});
-
-// Knopf nur am Telefon zeigen: am Schreibtisch gibt es keine Sensoren, und er
-// waere dort nur ein Versprechen, das die Seite nicht halten kann.
-if(typeof DeviceMotionEvent!=='undefined' && matchMedia('(pointer:coarse)').matches){
-  $('imuRow').hidden=false;
-  $('imuBtn').onclick=()=>{
-    if(phase==='bereit'||phase==='laeuft') tipp(performance.now()/1000);
-    else if(phase!=='aus') stop('Abgebrochen.');
-    else start();
-  };
-}
-})();
-</script>
-
-<script id="meldung">
-"use strict";
-// ================= Fehler / Wunsch melden =================
-// Schwebender Knopf unten links, in jedem Zustand sichtbar (ueber allen
-// Overlays), per x fuer die laufende Sitzung ausblendbar; das Raum-Menue
-// fuehrt immer hin. Die Meldung traegt Text, ein Bild der Zeichenflaeche und
-// den genauen Zustand (Raum, Ansicht, Auswahl, Rueckgaengig, Einstellungen,
-// Fehlerprotokoll) - genug, um sie lokal mit ?meldung=<datei> nachzustellen.
-// Empfaenger ist bugreport.php neben der Seite; ohne den (lokal, file://)
-// wird die Meldung als Datei gesichert.
-(function(){
-// Ersetzt scripts/deploy-hetzner.sh durch den Commit von main.
-const MELDUNG_STAND='__MELDUNG_STAND__';
-const stand=()=>MELDUNG_STAND.startsWith('__') ? 'lokal' : MELDUNG_STAND;
-const K_AUS='raumaufmass.meldung.aus', K_NACH='raumaufmass.meldung.nachstellen';
-const ss={ get(k){ try{ return sessionStorage.getItem(k); }catch(e){ return null; } },
-           set(k,v){ try{ sessionStorage.setItem(k,v); return true; }catch(e){ return false; } },
-           del(k){ try{ sessionStorage.removeItem(k); }catch(e){} } };
-const fab=$('mldFab'), wrap=$('mldwrap');
-let art='fehler', bildPlan=null, bildFenster=null, sendet=false;
-
-// --- Knopf ein-/ausblenden (nur fuer diese Sitzung)
-let ausImSpeicher=false;
-const fabSync=()=>{ fab.hidden = ausImSpeicher || ss.get(K_AUS)==='1'; };
-$('mldHide').onclick=()=>{ if(!ss.set(K_AUS,'1')) ausImSpeicher=true; fabSync();
-  setHint('„Fehler / Wunsch melden“ ausgeblendet – bis zum Schließen des Tabs. Weiterhin im Raum-Menü.'); };
-fabSync();
-
-// --- Bild der Zeichenflaeche. Der Canvas ist durchsichtig (Hintergrund kommt
-// aus CSS), also erst mit der Flaechenfarbe fuellen. JPEG und hoechstens
-// 1600 px breit: ein Retina-Canvas als PNG waere schnell mehrere MB.
-function planBild(){
-  try{
-    const w=cv.width, h=cv.height; if(!w || !h) return null;
-    const f=Math.min(1, 1600/w), c=document.createElement('canvas');
-    c.width=Math.round(w*f); c.height=Math.round(h*f);
-    const g=c.getContext('2d');
-    g.fillStyle=getComputedStyle(cv).backgroundColor||'#f5f3ed'; g.fillRect(0,0,c.width,c.height);
-    g.drawImage(cv,0,0,c.width,c.height);
-    return c.toDataURL('image/jpeg',0.85);
-  }catch(e){ return null; }
-}
-// Ganzes Fenster: nur ueber die Bildschirmfreigabe des Browsers (fragt selbst
-// nach). Der Dialog geht dafuer kurz weg, damit er nicht im Bild steht.
-async function fensterBild(){
-  let st=null;
-  wrap.hidden=true; fab.hidden=true;
-  try{
-    st=await navigator.mediaDevices.getDisplayMedia({video:{displaySurface:'browser'}, audio:false,
-      preferCurrentTab:true, selfBrowserSurface:'include'});
-    const v=document.createElement('video'); v.muted=true; v.playsInline=true; v.srcObject=st;
-    await v.play(); await new Promise(r=>setTimeout(r,350));
-    const f=Math.min(1, 1920/(v.videoWidth||1)), c=document.createElement('canvas');
-    c.width=Math.round(v.videoWidth*f); c.height=Math.round(v.videoHeight*f);
-    c.getContext('2d').drawImage(v,0,0,c.width,c.height);
-    return c.width ? c.toDataURL('image/jpeg',0.85) : null;
-  }catch(e){ return null; }
-  finally{ if(st) st.getTracks().forEach(t=>t.stop()); wrap.hidden=false; fabSync(); }
-}
-
-// --- Zustand. Sets/Maps als Listen, DOM-Knoten und Funktionen raus.
-function roh(v){
-  const seen=new WeakSet();
-  return JSON.parse(JSON.stringify(v,(k,x)=>{
-    if(x instanceof Set) return [...x];
-    if(x instanceof Map) return [...x.entries()];
-    if(typeof x==='function' || (typeof Node!=='undefined' && x instanceof Node)) return undefined;
-    if(x && typeof x==='object'){ if(seen.has(x)) return '[zyklisch]'; seen.add(x); }
-    return x;
-  }) ?? 'null');
-}
-const g=(f,d=null)=>{ try{ const v=f(); return v===undefined?d:v; }catch(e){ return d; } };
-function andereRaeume(){ return g(()=>STORE.list().filter(r=>r.id!==currentRoom).length, 0); }
-function speicher(alle){
-  const out={};
-  try{
-    for(let i=0;i<localStorage.length;i++){
-      const k=localStorage.key(i);
-      if(!k || !k.startsWith('raumaufmass') || k===K_AUS) continue;
-      let v=localStorage.getItem(k);
-      if(k==='raumaufmass.rooms' && !alle){
-        try{ v=JSON.stringify((JSON.parse(v)||[]).filter(r=>r && r.id===currentRoom)); }catch(e){ v='[]'; }
-      }
-      out[k]=v;
-    }
-  }catch(e){ out._fehler=String(e); }
-  return out;
-}
-function sichtbar(){
-  const ids=['entry','pop','wpop','cpop','opop','roommenu','libwrap','qrwrap','keyswrap','helpwrap','tip','measDlg'];
-  const o={};
-  for(const id of ids){
-    const el=$(id); if(!el) continue;
-    const auf = el.tagName==='DIALOG' ? el.open : !el.hidden;
-    if(auf) o[id]=(el.innerText||'').slice(0,4000);
-  }
-  return o;
-}
-function zustand(alle){
-  return {
-    stand:stand(), zeit:new Date().toISOString(),
-    seite:location.origin+location.pathname,
-    umgebung:{
-      ua:navigator.userAgent,
-      uaData:g(()=>navigator.userAgentData ? {brands:navigator.userAgentData.brands, mobile:navigator.userAgentData.mobile, platform:navigator.userAgentData.platform} : null),
-      sprache:navigator.language, zeitzone:g(()=>Intl.DateTimeFormat().resolvedOptions().timeZone),
-      fenster:[innerWidth,innerHeight], bildschirm:[screen.width,screen.height], dpr:devicePixelRatio,
-      canvas:[cv.width,cv.height], touch:navigator.maxTouchPoints||0,
-      speicherOk:g(()=>STORE.storageOk), seitDemLaden_ms:Math.round(performance.now()),
-    },
-    ui:roh({
-      mode:M.mode, sel:M.sel, chain:M.chain, wallSel:M.wallSel, openSel:M.openSel,
-      highlight:M.highlight, querHl:M.querHl, suspects:M.suspects,
-      VIEW, WV, userView, wallUserView, unfoldOn, showEllipses, diagOpen,
-      unit, wheelPref, currentRoom, currentRoomName,
-      wpopPair:g(()=>wpopPair), cpopId:g(()=>cpopId), entryPair:g(()=>entryPair),
-      ts:g(()=>({tool:TS.tool, sel:TS.sel, vec:TS.vec, lines:TS.lines})), activeTileId:g(()=>activeTileId),
-      andereRaeume:andereRaeume(), nachbarn:g(()=>neighbors.length,0),
-    }),
-    raum:g(()=>JSON.parse(serialize())),
-    undo:undoStack.slice(), redo:redoStack.slice(),
-    speicher:speicher(alle),
-    log:(globalThis.MELDUNG_LOG||[]).slice(),
-    hinweis:g(()=>$('hint').textContent,''),
-    sichtbar:sichtbar(),
-    panel:g(()=>$('panel').innerText.slice(0,30000),''),
-  };
-}
-
-// --- Dialog
-const msg=(t,cls='')=>{ const m=$('mldMsg'); m.textContent=t; m.className=cls; };
-function bildZeigen(){
-  const b=bildFenster||bildPlan;
-  $('mldImg').src=b||''; $('mldImg').hidden=!b;
-  $('mldImgOn').disabled=!b;
-  $('mldImgNote').textContent = bildFenster ? 'Bild des Fensters mitsenden' : b ? 'Bild mitsenden' : 'Kein Bild verfügbar';
-}
-function sendSync(){
-  const b=$('mldSend');
-  b.disabled = sendet || !$('mldOk').checked || !$('mldText').value.trim();
-  b.title = !$('mldText').value.trim() ? 'Erst beschreiben, worum es geht.'
-    : !$('mldOk').checked ? 'Erst die Einwilligung anhaken.' : '';
-}
-function artSetzen(a){
-  art=a;
-  for(const b of $('mldArt').querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.art===a));
-  $('mldText').placeholder = a==='fehler' ? 'Was ist passiert, was hast du erwartet?' : 'Was fehlt dir, und wofür?';
-}
-function oeffnen(){
-  if(!wrap.hidden) return;
-  g(()=>hidePop());
-  bildPlan=planBild(); bildFenster=null; bildZeigen();
-  $('mldWin').hidden=!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
-  const n=andereRaeume();
-  $('mldDatenTxt').textContent = n===0 ? 'App-Zustand mitsenden (Raum, Ansicht, Browser)'
-    : `App-Zustand mitsenden, mit allen ${n+1} Räumen`;
-  $('mldDaten').checked=true;
-  $('mldOk').checked=false; sendet=false; msg('');
-  $('mldSend').textContent='Senden';
-  sendSync();
-  wrap.hidden=false;
-  $('mldText').focus();
-}
-function schliessen(){ wrap.hidden=true; }
-$('mldOpen').onclick=oeffnen;
-$('mldMenu').onclick=oeffnen;
-$('mldClose').onclick=schliessen;
-$('mldCancel').onclick=schliessen;
-// Klick daneben schliesst nur, solange nichts geschrieben ist - sonst waere
-// ein verrutschter Klick der Verlust des Textes (der bleibt aber ohnehin bis
-// zum Senden stehen).
-wrap.addEventListener('pointerdown',e=>{ if(e.target===wrap && !sendet && !$('mldText').value.trim()) schliessen(); });
-$('mldArt').onclick=e=>{ const b=e.target.closest('button'); if(b) artSetzen(b.dataset.art); };
-$('mldText').oninput=sendSync; $('mldOk').onchange=sendSync;
-$('mldImgOn').onchange=()=>{ $('mldImg').style.opacity=$('mldImgOn').checked?'':'.25'; };
-$('mldWin').onclick=async()=>{
-  const b=await fensterBild();
-  if(b){ bildFenster=b; $('mldImgOn').checked=true; $('mldImg').style.opacity=''; }
-  else msg('Fenster-Aufnahme abgebrochen oder nicht erlaubt – das Bild der Zeichenfläche bleibt.');
-  bildZeigen();
-};
-// Solange der Dialog offen ist, gehoeren ihm alle Tasten: App-Kuerzel (1-4,
-// Entf, H ...) duerfen dahinter nichts veraendern. Esc schliesst.
-addEventListener('keydown',e=>{
-  if(wrap.hidden) return;
-  if(e.key==='Escape'){ e.preventDefault(); e.stopPropagation(); if(!sendet) schliessen(); return; }
-  if(!wrap.contains(e.target)) e.stopPropagation();
-},true);
-wrap.addEventListener('keydown',e=>e.stopPropagation());
-// Ein modaler <dialog> (Fliese einmessen) macht alles ausserhalb inert, egal
-// welcher z-index. Solange er offen ist, ziehen Knopf und Meldedialog in ihn
-// um, damit "Fehler melden" auch dort geht; beim Schliessen zurueck.
-for(const dlg of document.querySelectorAll('dialog')){
-  const umzug=()=>{
-    const ziel = dlg.open && dlg.matches(':modal') ? dlg : document.body;
-    if(fab.parentNode!==ziel){ ziel.appendChild(fab); ziel.appendChild(wrap); ziel.appendChild($('mldToast')); }
-  };
-  new MutationObserver(umzug).observe(dlg,{attributes:true, attributeFilter:['open']});
-}
-
-// Nach dem Senden: Dialog zu, Felder leer, kurze Bestaetigung mit der
-// Meldungsnummer unten links (verschwindet von selbst oder per Klick).
-let toastT=0;
-function fertig(t){
-  sendet=false; $('mldText').value=''; $('mldKontakt').value=''; $('mldOk').checked=false;
-  schliessen();
-  const el=$('mldToast'); el.textContent=t; el.hidden=false;
-  clearTimeout(toastT); toastT=setTimeout(()=>{ el.hidden=true; }, 12000);
-}
-$('mldToast').onclick=()=>{ $('mldToast').hidden=true; };
-
-function alsDatei(payload){
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(new Blob([JSON.stringify(payload)],{type:'application/json'}));
-  a.download=`meldung-lokal-${new Date().toISOString().replace(/[:.]/g,'-')}.json`;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(()=>URL.revokeObjectURL(a.href), 10000);
-}
-$('mldSend').onclick=async()=>{
-  if($('mldSend').disabled) return;
-  // Ohne Zustand nur Stand und Zeit: der Empfaenger verlangt ein Objekt,
-  // und die Version braucht es, um den Text einzuordnen.
-  const z=$('mldDaten').checked ? zustand(true) : {stand:stand(), zeit:new Date().toISOString(), ohneDaten:true, undo:[], redo:[]};
-  const payload={ v:1, art, text:$('mldText').value.trim(), kontakt:$('mldKontakt').value.trim()||null,
-    einwilligung:true, bild:$('mldImgOn').checked ? (bildFenster||bildPlan) : null, zustand:z };
-  // Obergrenze des Empfaengers ist 15 MB: notfalls zuerst den Rueckgaengig-
-  // Verlauf kuerzen (aelteste zuerst), der ist am ehesten verzichtbar.
-  let body=JSON.stringify(payload);
-  while(body.length>14e6 && (z.undo.length || z.redo.length)){
-    if(z.undo.length) z.undo.splice(0, Math.max(1, z.undo.length>>1)); else z.redo.length=0;
-    z.undoGekuerzt=true; body=JSON.stringify(payload);
-  }
-  if(body.length>14e6){ msg('Die Meldung ist zu groß (über 14 MB). Bild oder App-Zustand weglassen.','bad'); return; }
-  sendet=true; sendSync(); $('mldSend').textContent='Sendet …'; msg('');
-  let r=null, j=null;
-  try{
-    r=await fetch('bugreport.php',{method:'POST', headers:{'Content-Type':'application/json'}, body, credentials:'same-origin'});
-    j=await r.json().catch(()=>null);
-  }catch(e){ r=null; }
-  if(r && r.ok && j && j.ok){ fertig(`Danke! Meldung ${j.id} ist angekommen.`); return; }
-  sendet=false; $('mldSend').textContent='Senden'; sendSync();
-  const live=/(^|\.)irazari-te\.ch$/.test(location.hostname);
-  if(!live && (!r || [404,405,501].includes(r.status))){
-    alsDatei(payload);
-    fertig('Lokale Fassung ohne Empfänger: Meldung als Datei gesichert.');
-    return;
-  }
-  msg(j && j.fehler ? `Senden fehlgeschlagen: ${j.fehler}` : `Senden fehlgeschlagen${r?` (Status ${r.status})`:' (keine Verbindung)'}. Bitte später noch einmal versuchen.`,'bad');
-};
-
-// --- Nachstellen (nur lokal): raumaufmass.html?meldung=bugreports/<datei>.json
-// ersetzt die Raeume dieses Browsers durch die der Meldung, laedt neu und
-// stellt danach Raum, Ansicht, Auswahl und Rueckgaengig wieder her.
-const lokal=/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
-const q=new URLSearchParams(location.search).get('meldung');
-if(lokal && q){
-  (async()=>{
-    let o;
-    try{ o=await (await fetch(q,{cache:'no-store'})).json(); }
-    catch(e){ setHintLive(`Meldung ${q} nicht lesbar: ${e.message}`); return; }
-    const z=o && o.zustand;
-    if(z && z.ohneDaten){ setHintLive(`Meldung ${o.id||q} ohne App-Zustand, nichts nachzustellen: „${String(o.text||'').slice(0,200)}“`); return; }
-    if(!z || !z.speicher){ setHintLive(`${q} ist keine Meldung.`); return; }
-    if(!confirm(`Meldung ${o.id||q} nachstellen?\n\n„${String(o.text||'').slice(0,300)}“\n\nDas ersetzt ALLE Räume dieses Browsers (${location.host}) durch die aus der Meldung.`)) return;
-    try{
-      for(const k of Object.keys(localStorage)) if(k.startsWith('raumaufmass')) localStorage.removeItem(k);
-      for(const [k,v] of Object.entries(z.speicher)) if(k.startsWith('raumaufmass') && typeof v==='string') localStorage.setItem(k,v);
-    }catch(e){ setHintLive('localStorage nicht beschreibbar: '+e.message); return; }
-    if(!ss.set(K_NACH, JSON.stringify({id:o.id||q, ui:z.ui, raum:z.raum, undo:z.undo, redo:z.redo}))){ setHintLive('sessionStorage nicht beschreibbar.'); return; }
-    location.replace(location.pathname);
-  })();
-}
-const nach=ss.get(K_NACH);
-if(lokal && nach){
-  ss.del(K_NACH);
-  try{
-    const o=JSON.parse(nach), u=o.ui||{};
-    if(u.currentRoom && u.currentRoom!==currentRoom && STORE.load(u.currentRoom)) openRoom(u.currentRoom);
-    if(o.raum && serialize()!==JSON.stringify(o.raum)){ deserialize(o.raum); recompute(); }
-    undoStack.length=0; undoStack.push(...(o.undo||[]));
-    redoStack.length=0; redoStack.push(...(o.redo||[]));
-    if(u.mode && u.mode!==M.mode) setMode(u.mode);
-    if(Array.isArray(u.sel)) M.sel=u.sel;
-    M.chain=u.chain??null; M.wallSel=u.wallSel??null; M.openSel=u.openSel??null;
-    if(u.ts){ TS.tool=u.ts.tool||TS.tool; TS.sel=new Set(u.ts.sel||[]); }
-    if(u.activeTileId!==undefined) activeTileId=u.activeTileId;
-    if(typeof u.unfoldOn==='boolean' && u.unfoldOn!==unfoldOn) $('unfold').click();
-    if(typeof u.showEllipses==='boolean' && u.showEllipses!==showEllipses) $('ellipses').click();
-    // Die Ansicht nur uebernehmen, wenn der Nutzer sie selbst gestellt hatte;
-    // sonst war sie eingepasst und wird es hier auch.
-    if(u.VIEW && u.userView){ VIEW={...VIEW,...u.VIEW}; userView=true; }
-    if(u.WV && u.wallUserView){ WV={...WV,...u.WV}; wallUserView=true; }
-    render();
-    setHintLive(`Meldung ${o.id} nachgestellt (Modus ${u.mode}). Die Ansicht stammt vom Gerät des Nutzers – 0 passt ein.`);
-  }catch(e){ setHintLive('Nachstellen fehlgeschlagen: '+e.message); console.error(e); }
-}
-})();
-</script>
-
 <script id="checks">
 "use strict";
 // Die Assert-Funktion heisst chk, nicht A - in mehreren Tests weiter unten
@@ -15757,45 +15030,6 @@ globalThis.selfChecks=function(){
   const C=globalThis.CORE, out=[]; let ok=true;
   const chk=(n,c)=>{ ok=ok&&!!c; out.push((c?'PASS ':'FAIL ')+n); };
   const near=(a,b,t)=>Math.abs(a-b)<=t;
-  // --- Laufmessung: Integrator ---
-  // Faengt eine kaputte Kopie der Strapdown-Mathematik ab. Synthetische Bahn
-  // mit bekannter Wahrheit: 4 m, Kosinusprofil, v=0 an beiden Enden.
-  {
-    const T=5, D=4, g=9.81, dt=1/200, sm=[];
-    for(let t=0;t<2;t+=dt) sm.push({t, f:[0,0,g], w:[0,0,0]});
-    for(let k=0;k*dt<=T;k++){ const t=k*dt;
-      sm.push({t:2+t, f:[D*Math.PI**2/(2*T**2)*Math.cos(Math.PI*t/T),0,g], w:[0,0,0]}); }
-    const len=o=>Math.hypot(...globalThis.IMU.integrate(sm,o).p);
-    chk('imu: perfekte Sensoren -> 4 m', near(len({zupt:false}),D,1e-3));
-    // Ein konstanter Lagefehler DREHT das Ergebnis, verkuerzt es aber nicht:
-    // die Zwei-Punkt-Randbedingung raeumt den linearen Anteil vollstaendig ab.
-    chk('imu: 1° Lagefehler + ZUPT -> Länge bleibt 4 m',
-      near(len({zupt:true,injectTiltDeg:1}),D,1e-3));
-    // Ohne die Randbedingung sind es 0.5*g*sin(1°)*T^2 = 2.14 m Fehler.
-    chk('imu: 1° Lagefehler ohne ZUPT -> 2,14 m daneben',
-      near(len({zupt:false,injectTiltDeg:1})-D, 0.5*g*Math.sin(Math.PI/180)*T*T, 0.02));
-  }
-  {
-    // Das Abbremsen an der zweiten Wand gehoert INS Segment. Profil laeuft von
-    // 0 auf V hoch und trifft die Wand mit V; ein einzelnes Sample vernichtet
-    // genau diesen Impuls. Wird es abgeschnitten, endet das Segment bei v=V,
-    // die Randbedingung v=0 ist verletzt und die Strecke faellt um V*T/2 = 3 m
-    // zu kurz aus. Genau diese Grenze war schon einmal falsch gesetzt.
-    const T=5, g=9.81, dt=1/60, V=4*Math.PI/(2*T), sm=[];
-    for(let t=0;t<2;t+=dt) sm.push({t, f:[0,0,g], w:[0,0,0]});
-    let k=0;
-    for(;k*dt<T;k++) sm.push({t:2+k*dt,
-      f:[V*Math.PI/(2*T)*Math.cos(Math.PI*k*dt/(2*T)),0,g], w:[0,0,0]});
-    sm.push({t:2+k*dt, f:[-V/dt,0,g], w:[0,0,0]});          // Aufprall
-    sm.push({t:2+(k+1)*dt, f:[0,0,g], w:[0,0,0]});          // steht an der Wand
-    // Segmentende ist das erste RUHIGE Sample nach dem Aufprall, nicht der
-    // Aufprall selbst: das Trapez mittelt jedes Sample mit seinem Nachbarn,
-    // ein Segment, das auf dem Ausschlag endet, sieht nur den halben Impuls.
-    // Genau darum wartet der Recorder nach dem zweiten Tipp noch kurz ab.
-    const rr=globalThis.IMU.integrate(sm,{segment:[2, 2+(k+1)*dt], zupt:true});
-    chk('imu: Aufprall am Ziel eingerechnet -> 4 m', near(Math.hypot(...rr.p),4,0.05));
-    chk('imu: Restgeschwindigkeit danach ~0', Math.hypot(...rr.v)<0.05);
-  }
   // --- residuals ---
   {
     const pts=[{id:'A',x:0,y:0},{id:'B',x:3000,y:4000}];

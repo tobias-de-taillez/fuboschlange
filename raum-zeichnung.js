@@ -16,6 +16,9 @@ const INK = {
   point:'#24221d', accent:'#c2410c', grid:'#e6e2d5', scale:'#4b473e',
   ellMeasured:'#4b473e', ellAssumed:'#8a857a', mode:'#8a5a10',
   canvas:'#f5f3ed', labelBg:'rgba(245,243,237,.92)', hover:'rgba(36,34,29,.10)',
+  // Leiser Plan (DESIGN.md): Bleistift für nur Skizziertes, Tinte hell für
+  // Maßzahlen und ruhende Diagonalen, gedämpft für Eckbuchstaben.
+  pencil:'#a39d90', lab:'#4b473e', muted:'#6f6a5e',
 };
 const CANVAS_FONT='system-ui,-apple-system,"Segoe UI",Roboto,sans-serif';
 

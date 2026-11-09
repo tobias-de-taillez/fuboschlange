@@ -18,6 +18,10 @@ const M={ pts:[], walls:[], meas:[], mode:'draw', sel:[], chain:null,
           // Zieht sich die Skizze auf die ausgeglichene Form? Standard: nein.
           // Siehe den Ausrichten-Knopf und den Rueckschrieb in recompute().
           snapfit:false,
+          // Maßhaltig geschieht von selbst, sobald die Form eindeutig ist
+          // (recompute setzt dann snapfit). snapOff: der Mensch hat das
+          // abgeschaltet. glide: laufendes Gleiten in die gemessene Form.
+          snapOff:false, glide:null,
           // Rechte Winkel annehmen (orthoFit): Ecken innerhalb ORTHO_TOL von
           // 90 Grad werden gesetzt, sofern die Messungen es zulassen.
           ortho:false, orthoInfo:null,
@@ -55,7 +59,23 @@ const wallKey=(a,b)=>[a,b].sort().join('|');
 // hinterher. Ausdruecklich NICHT dasselbe wie "was die Messungen beweisen" -
 // Flaeche, Wandlaengen, Oeffnungslagen und Vorschlaege lesen weiter direkt
 // M.fit.pts, damit Kontroll- und Fehlerlinien in beiden Stellungen stimmen.
-const viewPts=()=>(M.drag || !M.snapfit) ? M.pts : (M.fit ? M.fit.pts : M.pts);
+const GLIDE_MS=420;
+const viewPts=()=>{
+  // Gleiten: für einen Augenblick liegen die sichtbaren Ecken zwischen der
+  // Skizze und der gemessenen Form.
+  if(M.glide && !M.drag && M.fit){
+    const k=(performance.now()-M.glide.t0)/GLIDE_MS;
+    if(k<1){
+      const e=1-Math.pow(1-k,4), F=M.glide.from;
+      return M.fit.pts.map((p,i)=>{
+        const f=(F[i] && F[i].id===p.id) ? F[i] : (F.find(q=>q.id===p.id) || p);
+        return {id:p.id, x:f.x+(p.x-f.x)*e, y:f.y+(p.y-f.y)*e};
+      });
+    }
+    M.glide=null;
+  }
+  return (M.drag || !M.snapfit) ? M.pts : (M.fit ? M.fit.pts : M.pts);
+};
 // Fuer Zahlen (Flaeche, Laengen): der Ausgleich, solange es einen gibt.
 const fitPts=()=>(M.fit && M.fit.pts) ? M.fit.pts : M.pts;
 
@@ -82,6 +102,7 @@ const serialize=()=>JSON.stringify({
   opmeas:M.opmeas.map(m=>({...m})),
   thick:{...M.thick}, shared:{...M.shared},
   snapfit:M.snapfit,
+  snapOff:M.snapOff || undefined,
   ortho:M.ortho || undefined,
   qmeas:M.qmeas.map(m=>({...m})),
   angs:M.angs.length ? M.angs.map(g=>({...g})) : undefined,
@@ -135,6 +156,7 @@ function deserialize(o){
   // ausgerichtet bleiben, waehrend der naechste frisch skizziert wird. Aeltere
   // Raeume und Fremdimporte kennen das Feld nicht - Standard ist aus.
   M.snapfit = o.snapfit===true;
+  M.snapOff = o.snapOff===true; M.glide=null;
   M.ortho = o.ortho===true;
   if(typeof o.idSeq==='number') idSeq=o.idSeq;
   if(typeof o.openSeq==='number') openSeq=o.openSeq;
