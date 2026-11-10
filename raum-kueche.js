@@ -1602,8 +1602,12 @@ function zoneHit(g, z){
   const k=z.on.o.kind;
   return `${nameOf(g.it)} steht vor ${k==='window'?'einem Fenster':k==='door'?'einer Tür':'einem Durchgang'}${g.free?'':' an der Nachbarwand'}`;
 }
-function check(E, K, L){
+// rec (optional): Liste, in die check die gemessenen Abstände legt, auch die guten:
+// {k, a, b, val, lim, lvl:'ok'|'warn'|'bad', why}. Der Plan zeichnet sie als Schalter „Abstände“
+// (NKBA); die Befunde selbst bleiben unverändert.
+function check(E, K, L, rec){
   const S=K.spec, D=L.D, out=[];
+  const gap_=(k, ids, a, dir, val, lim, lvl, why)=>{ if(rec) rec.push({k, ids, a, b:add(a, mul(dir, val)), val, lim, lvl, why}); };
   const add_=(lvl, ids, txt, at, fix)=>out.push({lvl, ids, txt, at, fix});
   const G=L.G;
   L.orphans.forEach(it=>add_('bad',[it.id], `${nameOf(it)} hängt an einer Wand, die es nicht mehr gibt`, null));
@@ -1775,7 +1779,7 @@ function check(E, K, L){
   }));
   // 7. Gänge vor den Zeilen
   G.filter(g=>g.it.kind!=='wall' && g.it.kind!=='table').forEach(g=>{
-    const [p,q]=g.front, w=len(sub(q,p)); let min=Infinity;
+    const [p,q]=g.front, w=len(sub(q,p)); let min=Infinity, minAt=null;
     // Der Gang beginnt an der Plattenkante (counter frontage), nicht an der
     // Korpusfront: die Platte steht bei topD > baseD vor – eigene wie gegenüber.
     const own=topOf(L,g), ov=own ? Math.max(0, own.depth-g.d) : 0;
@@ -1804,11 +1808,14 @@ function check(E, K, L){
         // Gang von genau 1200 mm als „1199“ im Plan (gelb), genau 900 mm als „899“ (rot).
         tc+=1;
       }
-      min=Math.min(min, tc); }
+      if(tc<min){ min=tc; minAt=s; } }
     if(!(w>0) || !isFinite(min)) return;
     // Verglichen wird, was die Meldung zeigt (ganze mm): in gedrehten Räumen
     // liegt ein Strahl um 1e-9 neben dem Sollwert, „900 mm“ dürfte nicht rot sein.
     min=mm(min);
+    { const rc=S.persons>=2?1219:1200;
+      gap_('gang', [g.it.id], minAt, g.n, min, rc, min<900?'bad':min<rc?'warn':'ok',
+        min<900 ? 'Gang unter 900 mm' : min<rc ? `Gang unter empfohlenen ${rc} mm${min<1067?' (NKBA mind. 1067)':''}` : ''); }
     // NKBA Guideline 6: Arbeitsgang 42″ (1067) für eine Person, 48″ (1219)
     // für mehrere Köche.
     if(min<900) add_('bad',[g.it.id], `Vor ${nameOf(g.it)} nur ${mm(min)} mm Platz (Gang mind. 900, empfohlen ${S.persons>=2?1219:1200})`, g.frontMid);
@@ -1821,6 +1828,7 @@ function check(E, K, L){
     if(!sides.some(s=>s.seats>0)) add_('warn',[g.it.id], `Tisch: an keiner Seite Platz für einen Stuhl (mind. ${SEAT_ROOM} mm)`, g.c);
     sides.filter(s=>s.seats>0).forEach(s=>{
       const t=mm(s.room);
+      gap_('tisch', [g.it.id], s.mid, s.n, t, 813, t<750?'bad':t<813?'warn':'ok', t<750?'Stuhl: unter 750 mm':t<813?'Stuhl: unter NKBA 813 mm':'');
       if(t<750) add_('bad',[g.it.id], `Tisch: hinter den Stühlen nur ${mm(t)} mm (mind. 750, NKBA 813)`, s.mid);
       else if(t<813) add_('warn',[g.it.id], `Tisch: hinter den Stühlen ${mm(t)} mm – NKBA 813, zum Vorbeigehen 1118`, s.mid);
     });
@@ -1842,6 +1850,7 @@ function check(E, K, L){
       obs.forEach(P=>{ const x=rayPoly(o,dir,P); if(x!=null && x-2<tu) tu=x-2; });
       if(tu<t){ t=tu; m=pu; } });
     t=Math.max(0,mm(t));
+    gap_('tresen', [g.it.id], m, dir, t, 813, t<750?'bad':t<813?'warn':'ok', t<750?'Hocker: unter 750 mm':t<813?'Hocker: unter NKBA 813 mm':'');
     if(t<750) add_('bad',[g.it.id], `Tresen: hinter den Hockern nur ${mm(t)} mm (mind. 750, NKBA 813)`, m);
     else if(t<813) add_('warn',[g.it.id], `Tresen: hinter den Hockern ${mm(t)} mm – NKBA 813, zum Vorbeigehen 1118`, m);
   });
@@ -1925,6 +1934,9 @@ function check(E, K, L){
       if(!best || n<best.n || (n===best.n && sum<best.sum-0.5)) best={s,h,f,a,b,c,sum,n}; })));
     // Schenkel mit zwei Nachkommastellen und dem Verstoß benannt: „2,72“ neben der Grenze 2,7 war nicht zu deuten.
     const leg=(nm,x)=>`${nm} ${mf(x)} m${lo(x)?' (zu kurz)':hi(x)?' (zu lang)':''}`;
+    if(rec){ const P=[[st(best.s),st(best.h),best.a],[st(best.h),st(best.f),best.b],[st(best.f),st(best.s),best.c]];
+      P.forEach(([u,v,x])=>{ const bad=lo(x)||hi(x); rec.push({k:'dreieck', ids:[best.s.it.id,best.h.it.id,best.f.it.id], a:u, b:v, val:Math.round(x), lim:'1,2–2,7 m', lvl:bad?'warn':'ok', why:lo(x)?'Schenkel unter 1,2 m':hi(x)?'Schenkel über 2,7 m':''}); });
+      rec.push({k:'summe', ids:[], a:centroid([st(best.s),st(best.h),st(best.f)]), val:Math.round(best.sum), lim:'7,9 m', lvl:cm(best.sum)>7900?'warn':'ok', why:cm(best.sum)>7900?'Summe über 7,9 m':''}); }
     if(best.n) add_('warn',[best.s.it.id,best.h.it.id,best.f.it.id], `Arbeitsdreieck ${mf(best.sum)} m${cm(best.sum)>7900?' (zu lang)':''} – Schenkel ${leg('Spüle–Kochfeld',best.a)}, ${leg('Kochfeld–Kühlschrank',best.b)}, ${leg('Kühlschrank–Spüle',best.c)} – NKBA: Summe ≤ 7,9 m, je Schenkel 1,2–2,7 m`, centroid([st(best.s),st(best.h),st(best.f)]));
   }
   // Doppelte Meldungen (über Eck) zusammenfassen

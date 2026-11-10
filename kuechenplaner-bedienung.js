@@ -12,7 +12,7 @@ const KX=globalThis.KITCHEN;
 const KS={ sel:null, hover:null, hl:null, flow:null, lastWall:null, palDrag:null, drag:false,
   show3d:lsGet('raumaufmass.k3d','1')==='1', paths:lsGet('raumaufmass.kwege','1')==='1', open:false,
   ana:lsGet('raumaufmass.kana','0')==='1', heat:true, anaMode:'week', ref:null, kid:false, anaKey:'', sw:null, swKey:'', swT:0,
-  ctxKey:'', ctx:null, flowKey:'', flowRes:null, suggKey:'', sugg:null, selKey:'', clearArmed:null, clip:null, ptr:null };
+  abst:lsGet('raumaufmass.kabst','0')==='1', ctxKey:'', ctx:null, flowKey:'', flowRes:null, suggKey:'', sugg:null, selKey:'', clearArmed:null, clip:null, ptr:null };
 function lsGet(k,d){ try{ const v=localStorage.getItem(k); return v==null?d:v; }catch(e){ return d; } }
 function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
 function kitchenData(){ if(!M.kitchen) M.kitchen=KX.normKitchen(null); return M.kitchen; }
@@ -30,10 +30,10 @@ function kctx(){
   if(key===KS.ctxKey && KS.ctx && KS.ctx.K===M.kitchen) return KS.ctx;
   const E=kitchenEnv();
   if(!E){ KS.ctxKey=key; KS.ctx=null; return null; }
-  const K=kitchenData(), L=KX.layout(E,K), F=KX.check(E,K,L);
+  const K=kitchenData(), L=KX.layout(E,K), NK=[], F=KX.check(E,K,L,NK);
   const bad=new Set(), warn=new Set();
   F.forEach(f=>f.ids.forEach(id=>(f.lvl==='bad'?bad:warn).add(id)));
-  KS.ctxKey=key; KS.ctx={E,K,L,F,bad,warn,key};
+  KS.ctxKey=key; KS.ctx={E,K,L,F,NK,bad,warn,key};
   return KS.ctx;
 }
 function kitchenSave(){
@@ -351,6 +351,7 @@ function drawKitchenView(){
       if(sel){ const R=KX.leafRect(lf, lf.full*Math.PI/180); poly(R); ctx.setLineDash([2*dpr,3*dpr]); ctx.stroke(); ctx.setLineDash([]); }
     });
   });
+  if(KS.abst) drawGaps(c, dpr);
   // Befunde mit Ort: kleine Marke
   c.F.forEach(f=>{ if(!f.at || f.lvl==='info') return; const p=toScr(f.at);
     ctx.beginPath(); ctx.arc(p.x,p.y,4*dpr,0,2*Math.PI); ctx.fillStyle=f.lvl==='bad'?KINK.bad:KINK.warn; ctx.fill(); });
@@ -362,6 +363,7 @@ function drawKitchenView(){
       ctx.strokeStyle=INK.accent; ctx.fillStyle=INK.accent; ctx.lineWidth=3*dpr;
       ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x-d.x*s,q.y-d.y*s); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(q.x,q.y); ctx.lineTo(q.x-d.x*s-d.y*s*0.6,q.y-d.y*s+d.x*s*0.6); ctx.lineTo(q.x-d.x*s+d.y*s*0.6,q.y-d.y*s-d.x*s*0.6); ctx.closePath(); ctx.fill(); } }
+  drawRuler(c, dpr);
 }
 // Maßkette für die Wand des gewählten Teils: Wand – Teile – Lücken – Wand,
 // vor der Front, im Höhenband des Teils; an den Enden bis zur Wand, die man
@@ -615,6 +617,7 @@ function hits(c, w){
 let gestureK=null;
 function kitchenDown(e){
   const c=kctx(); if(!c) return false;
+  if(rulerDown(e, c)) return true;             // Lineal liegt oben und greift zuerst
   const d=evDev(e), dh=dimHitAt(d);
   // Der Treffer stammt aus den Maßen von vor diesem Klick; ist ein Maßfeld offen,
   // setzt openDimEdit dessen Wert zuerst und liest das Maß danach frisch.
@@ -717,6 +720,9 @@ function kitchenHover(e){
   const c=kctx(); if(!c) return;
   const d=evDev(e), w=toWorld(d.x,d.y), hs=hits(c,w);
   KS.ptr=d;
+  const rh=rulerHit(c, d);
+  if(rh){ cv.style.cursor=rh==='body'?'move':'grab'; KS.rulerCur=true; return; }
+  if(KS.rulerCur){ cv.style.cursor=''; KS.rulerCur=false; }
   const wd = hs.length ? null : wallDimAt(c,w);
   cv.style.cursor = hs.length || (wd && wd.hit) || dimHitAt(d) ? 'pointer' : '';
 }
@@ -733,6 +739,8 @@ function kitchenKey(e){
   if(lk==='v'){ toggle3d(); return true; }
   if(lk==='w'){ togglePaths(); return true; }
   if(lk==='o'){ toggleOpen(); return true; }
+  if(lk==='n'){ toggleGaps(); return true; }
+  if(lk==='l'){ rulerToggle(); return true; }
   if(lk==='a'){ toggleAna(); return true; }
   if(!it) return false;
   if(k==='Escape'){ KS.sel=null; render(); return true; }
@@ -809,10 +817,12 @@ Object.assign(globalThis, { kitchenUiState, kitchenUiRestore });
 function toggle3d(){ KS.show3d=!KS.show3d; lsSet('raumaufmass.k3d',KS.show3d?'1':'0'); syncToggles(); render(); }
 function togglePaths(){ KS.paths=!KS.paths; lsSet('raumaufmass.kwege',KS.paths?'1':'0'); syncToggles(); render(); }
 function toggleOpen(){ KS.open=!KS.open; syncToggles(); render(); }
+function toggleGaps(){ KS.abst=!KS.abst; lsSet('raumaufmass.kabst',KS.abst?'1':'0'); syncToggles(); render();
+  setHint(KS.abst ? 'Abstände: Gänge, Arbeitsdreieck, Sitzplätze nach NKBA – rot und gelb, wo es eng wird' : 'Abstände aus.'); }
 function toggleAna(){ KS.ana=!KS.ana; lsSet('raumaufmass.kana',KS.ana?'1':'0'); KS.anaKey=''; syncToggles(); render(); }
 function syncToggles(){
   const set=(id,v)=>{ const b=$(id); if(b) b.setAttribute('aria-pressed',String(!!v)); };
-  set('k3dBtn',KS.show3d); set('kWayBtn',KS.paths); set('kOpenBtn',KS.open); set('kAnaBtn',KS.ana);
+  set('k3dBtn',KS.show3d); set('kWayBtn',KS.paths); set('kOpenBtn',KS.open); set('kAnaBtn',KS.ana); set('kAbstBtn',KS.abst); set('kRulerBtn',KR.on);
   // Wege-Uebersicht im Panel nur, wenn "Wege" oben an ist (Meldung M-20261109-133312-e804a0);
   // mit Analyse steht alles rechts neben dem Plan, das Panel bleibt schlank.
   { const wb=$('kWayBox'); if(wb) wb.hidden=!KS.paths || KS.ana; }
@@ -1530,7 +1540,7 @@ function disarmClear(){
   const b=$('kClear'); b.textContent='Alle Küchenteile entfernen'; b.classList.remove('arm');
 }
 function kitchenLeave(){ KS.sel=null; KS.drag=false; document.body.classList.remove('k3d'); document.body.classList.remove('kana'); }
-$('k3dBtn').onclick=toggle3d; $('kWayBtn').onclick=togglePaths; $('kOpenBtn').onclick=toggleOpen; $('kAnaBtn').onclick=toggleAna;
+$('k3dBtn').onclick=toggle3d; $('kWayBtn').onclick=togglePaths; $('kOpenBtn').onclick=toggleOpen; $('kAnaBtn').onclick=toggleAna; $('kAbstBtn').onclick=toggleGaps; $('kRulerBtn').onclick=()=>rulerToggle();
 $('kSelX').onclick=()=>{ KS.sel=null; render(); };
 $('kClear').onclick=()=>{
   const K=kitchenData(), b=$('kClear'); if(!K.items.length) return;
@@ -1745,12 +1755,212 @@ cv3.addEventListener('wheel',e=>{
 // Größe ändert die Geometrie nicht: k3dDraw passt Canvas und Viewport selbst an.
 if(typeof ResizeObserver==='function') new ResizeObserver(()=>{ if(M.mode==='kitchen') k3dSchedule(); }).observe(cv3);
 
+// ---------- Abstände (NKBA) ----------
+// Die Messwerte kommen aus check (c.NK): Gang vor jeder Zeile, Arbeitsdreieck, Platz hinter Tisch und
+// Tresen. Gezeichnet wird jeder als Maßlinie; grün, wenn der Wert reicht, gelb unter der Empfehlung,
+// rot unter dem Mindestmaß. Bei den engen steht der Grund dabei.
+const m2=v=>(v/1000).toFixed(2).replace('.',',');
+const GAP_INK={ ok:'rgba(70,110,80,.75)', warn:'#b8860b', bad:'#c0392b' };
+function drawGaps(c, dpr){
+  const pills=[];
+  const lab=r=>r.k==='summe' ? `Summe ${m2(r.val)} m` : r.k==='dreieck' ? `${m2(r.val)} m` : `${r.val} mm`;
+  c.NK.forEach(r=>{
+    const col=GAP_INK[r.lvl], a=toScr(r.a), b=toScr(r.b), tri=r.k==='dreieck';
+    if(r.k!=='summe'){
+      ctx.save(); ctx.strokeStyle=col; ctx.fillStyle=col; ctx.lineWidth=(r.lvl==='ok'?1.4:2.4)*dpr; ctx.setLineDash(tri?[6*dpr,4*dpr]:[]);
+      ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke(); ctx.setLineDash([]);
+      if(!tri){ const L=Math.hypot(b.x-a.x,b.y-a.y)||1, nx=-(b.y-a.y)/L*4*dpr, ny=(b.x-a.x)/L*4*dpr;      // Endstriche
+        [a,b].forEach(q=>{ ctx.beginPath(); ctx.moveTo(q.x-nx,q.y-ny); ctx.lineTo(q.x+nx,q.y+ny); ctx.stroke(); }); }
+      ctx.restore();
+    }
+    const m=r.k==='summe' ? a : {x:(a.x+b.x)/2, y:(a.y+b.y)/2};
+    pills.push({m, col, txt:lab(r)+(r.why?' · '+r.why:''), tight:r.lvl!=='ok'});
+  });
+  // Enge zuletzt, damit ihre Schilder oben liegen.
+  pills.sort((p,q)=>p.tight-q.tight).forEach(p=>{
+    ctx.save(); ctx.font=`600 ${11*dpr}px ${CANVAS_FONT}`; ctx.textAlign='center'; ctx.textBaseline='middle';
+    const w=ctx.measureText(p.txt).width+10*dpr, h=17*dpr;
+    ctx.fillStyle='rgba(251,250,246,.92)'; ctx.strokeStyle=p.col; ctx.lineWidth=1.2*dpr;
+    ctx.beginPath(); ctx.roundRect(p.m.x-w/2, p.m.y-h/2, w, h, 4*dpr); ctx.fill(); ctx.stroke();
+    ctx.fillStyle=p.tight?p.col:'#3b4a40'; ctx.fillText(p.txt, p.m.x, p.m.y+0.5*dpr); ctx.restore();
+  });
+}
+
+// ---------- Lineal ----------
+// Wie im Fliesenplan: halbdurchsichtig, mm-/cm-Teilung, Körper ziehen verschiebt, ein Ende ziehen streckt
+// und dreht (⇧: nur drehen), rastet an Ecken und Kanten von Wänden und Küchenteilen und im rechten Winkel
+// dazu; ⌘/Strg hält frei. Lage je Raum im Browser, nicht im Raum und nicht im Rückgängig. Rechnung in
+// Weltmillimetern (der Fliesenplan rechnet im Raumrahmen: eigener Speicher, keine Vermischung).
+const RULER_STORE='raumaufmass-kueche-lineal', RULER_PX=34, RUL_ANG=2*Math.PI/180;
+const KR={on:false, a:null, b:null, snap:null, room:undefined};
+const kTol=()=>16*DPR()/VIEW.s;
+const rulerLen=L=>`${(Math.round(L*10)/10).toLocaleString('de-DE')} mm`;
+function rulerSave(){
+  try{ const all=JSON.parse(localStorage.getItem(RULER_STORE)||'{}')||{};
+       if(currentRoom && KR.a) all[currentRoom]={a:KR.a, b:KR.b};
+       localStorage.setItem(RULER_STORE, JSON.stringify(all)); }catch(e){}
+}
+function rulerLoad(){
+  let all={}; try{ all=JSON.parse(localStorage.getItem(RULER_STORE)||'{}')||{}; }catch(e){}
+  const r=currentRoom && all[currentRoom];
+  KR.a=r?.a||null; KR.b=r?.b||null; KR.room=currentRoom;
+}
+// Neu ins Bild: 1 m (höchstens 60 % der Bildbreite), waagerecht in der Bildmitte.
+function rulerPlace(){
+  const cx=cv.width/2, cy=cv.height/2, c=toWorld(cx,cy), q=toWorld(cx+1,cy);
+  const L=Math.hypot(q.x-c.x,q.y-c.y)||1, u={x:(q.x-c.x)/L, y:(q.y-c.y)/L}, len=Math.min(1000, 0.6*cv.width/VIEW.s);
+  KR.a={x:c.x-u.x*len/2, y:c.y-u.y*len/2}; KR.b={x:c.x+u.x*len/2, y:c.y+u.y*len/2};
+}
+function rulerToggle(on=!KR.on){
+  if(!kctx()) return;
+  if(KR.room!==currentRoom) rulerLoad();
+  KR.on=on;
+  if(on && !KR.a) rulerPlace();
+  rulerSave(); syncToggles(); render();
+  setHint(on ? 'Lineal: Körper ziehen verschiebt, Enden ziehen strecken und drehen (⇧: nur drehen). Rastet an Wänden, Küchenteilen, rechten Winkeln; ⌘/Strg frei.' : 'Lineal aus.');
+}
+function rulerScr(){
+  const a=toScr(KR.a), b=toScr(KR.b), L=Math.hypot(b.x-a.x,b.y-a.y)||1;
+  const u={x:(b.x-a.x)/L, y:(b.y-a.y)/L}, n={x:u.y, y:-u.x}, W=RULER_PX*DPR();
+  return {a, b, u, n, L, W, poly:[a, b, {x:b.x+n.x*W, y:b.y+n.y*W}, {x:a.x+n.x*W, y:a.y+n.y*W}]};
+}
+function rulerHit(c, d){
+  if(!KR.on || !KR.a || KR.room!==currentRoom) return null;
+  const s=rulerScr(), tol=12*DPR();
+  if(Math.hypot(d.x-s.a.x, d.y-s.a.y)<=tol) return 'a';
+  if(Math.hypot(d.x-s.b.x, d.y-s.b.y)<=tol) return 'b';
+  const t=(d.x-s.a.x)*s.u.x+(d.y-s.a.y)*s.u.y, h=(d.x-s.a.x)*s.n.x+(d.y-s.a.y)*s.n.y;
+  return t>=0 && t<=s.L && h>=-4*DPR() && h<=s.W ? 'body' : null;
+}
+// Fangziele: Ecken und Kanten der Wände und aller Küchenteile (Korpus, bei Tresen die Hockerkante).
+function rulerTargets(c){
+  const pts=[], edges=[];
+  const add=R=>R.forEach((p,i)=>{ const q=R[(i+1)%R.length]; pts.push(p); edges.push({a:p, b:q}); });
+  TILES.ringsOf(c.E.ring).forEach(add);
+  c.L.G.forEach(g=>{ add(g.poly); if(g.foot) add(g.foot); });
+  return {pts, edges};
+}
+function rulerSnapDir(edges, O, P){
+  const L=Math.hypot(P.x-O.x, P.y-O.y); if(L<1e-6) return null;
+  const ang=Math.atan2(P.y-O.y, P.x-O.x);
+  let best=null, bdA=RUL_ANG;
+  edges.forEach(e=>{ const ea=Math.atan2(e.b.y-e.a.y, e.b.x-e.a.x);
+    for(let k=0;k<4;k++){ const cc=ea+k*Math.PI/2, dA=Math.abs(Math.atan2(Math.sin(ang-cc), Math.cos(ang-cc)));
+      if(dA<bdA){ bdA=dA; best={dir:cc, line:e, how:k%2?'rechtwinklig':'parallel'}; } } });
+  return best;
+}
+// Ende P an fester Ecke O: Ecke > Richtung (parallel/rechtwinklig) > Ende auf einer Kante.
+function rulerSnapEnd(g, O, P, tol){
+  let best=null, bd=tol;
+  g.tg.pts.forEach(q=>{ const dd=Math.hypot(q.x-P.x, q.y-P.y); if(dd<bd){ bd=dd; best=q; } });
+  if(best) return {p:{x:best.x, y:best.y}, how:'Ecke', pt:best};
+  const L=Math.hypot(P.x-O.x, P.y-O.y); if(L<1e-6) return {p:P};
+  const sd=rulerSnapDir(g.tg.edges, O, P);
+  let p=P;
+  if(sd) p={x:O.x+Math.cos(sd.dir)*L, y:O.y+Math.sin(sd.dir)*L};
+  const ux=(p.x-O.x)/L, uy=(p.y-O.y)/L; let bt=tol, hit=null;
+  g.tg.edges.forEach(e=>{ const ex=e.b.x-e.a.x, ey=e.b.y-e.a.y, den=ux*ey-uy*ex; if(Math.abs(den)<1e-9) return;
+    const t=((e.a.x-O.x)*ey-(e.a.y-O.y)*ex)/den, s=((e.a.x-O.x)*uy-(e.a.y-O.y)*ux)/den;
+    if(s<-1e-9||s>1+1e-9) return; if(Math.abs(t-L)<bt){ bt=Math.abs(t-L); hit={t,e}; } });
+  if(hit) return {p:{x:O.x+ux*hit.t, y:O.y+uy*hit.t}, how:sd?sd.how+' · bis Kante':'bis Kante', line:hit.e};
+  return {p, how:sd?.how, line:sd?.line};
+}
+// Ganzes Lineal: mit einem Ende auf eine Ecke, sonst an eine fast parallele Kante anlegen.
+function rulerSnapBody(g, a, b, tol){
+  for(const P of [a,b]){
+    let best=null, bd=tol;
+    g.tg.pts.forEach(q=>{ const dd=Math.hypot(q.x-P.x, q.y-P.y); if(dd<bd){ bd=dd; best=q; } });
+    if(best){ const dx=best.x-P.x, dy=best.y-P.y; return {a:{x:a.x+dx,y:a.y+dy}, b:{x:b.x+dx,y:b.y+dy}, how:'Ecke', pt:best}; }
+  }
+  const L=Math.hypot(b.x-a.x,b.y-a.y), ang=Math.atan2(b.y-a.y,b.x-a.x), m={x:(a.x+b.x)/2, y:(a.y+b.y)/2};
+  let best=null, bd=tol;
+  g.tg.edges.forEach(e=>{ const ea=Math.atan2(e.b.y-e.a.y, e.b.x-e.a.x);
+    if(Math.abs(Math.sin(ang-ea))>Math.sin(RUL_ANG)) return;
+    const Le=Math.hypot(e.b.x-e.a.x,e.b.y-e.a.y)||1, nx=-(e.b.y-e.a.y)/Le, ny=(e.b.x-e.a.x)/Le;
+    const off=(m.x-e.a.x)*nx+(m.y-e.a.y)*ny, s=((m.x-e.a.x)*(e.b.x-e.a.x)+(m.y-e.a.y)*(e.b.y-e.a.y))/Le;
+    if(s<-L/2||s>Le+L/2) return;
+    if(Math.abs(off)<bd){ bd=Math.abs(off); best={e, nx, ny, off, ea}; } });
+  if(!best) return {a, b};
+  const cc=Math.cos(ang-best.ea)>=0 ? best.ea : best.ea+Math.PI, ux=Math.cos(cc), uy=Math.sin(cc);
+  const mp={x:m.x-best.nx*best.off, y:m.y-best.ny*best.off};
+  return {a:{x:mp.x-ux*L/2, y:mp.y-uy*L/2}, b:{x:mp.x+ux*L/2, y:mp.y+uy*L/2}, how:'an Kante', line:best.e};
+}
+function rulerDown(e, c){
+  const d=evDev(e), part=rulerHit(c, d); if(!part) return false;
+  gesture={t:'kruler', part, x0:e.clientX, y0:e.clientY, moved:false, p0:toWorld(d.x,d.y), a0:{...KR.a}, b0:{...KR.b}, tg:rulerTargets(c)};
+  return true;
+}
+function rulerMove(e, g, c){
+  if(!c) return;
+  const d=evDev(e), p=toWorld(d.x,d.y), free=e.metaKey||e.ctrlKey, tol=kTol(), R=KR;
+  let sn={};
+  if(g.part==='body'){
+    const dx=p.x-g.p0.x, dy=p.y-g.p0.y, a={x:g.a0.x+dx,y:g.a0.y+dy}, b={x:g.b0.x+dx,y:g.b0.y+dy};
+    sn=free ? {a,b} : rulerSnapBody(g, a, b, tol);
+    R.a=sn.a; R.b=sn.b;
+  } else {
+    const O=g.part==='a' ? g.b0 : g.a0, P0=g.part==='a' ? g.a0 : g.b0;
+    let P={x:P0.x+p.x-g.p0.x, y:P0.y+p.y-g.p0.y};
+    if(e.shiftKey){
+      const L0=Math.hypot(P0.x-O.x,P0.y-O.y), L=Math.hypot(P.x-O.x,P.y-O.y)||1;
+      P={x:O.x+(P.x-O.x)*L0/L, y:O.y+(P.y-O.y)*L0/L};
+      const sd=free ? null : rulerSnapDir(g.tg.edges, O, P);
+      if(sd){ P={x:O.x+Math.cos(sd.dir)*L0, y:O.y+Math.sin(sd.dir)*L0}; sn={how:sd.how, line:sd.line}; }
+    } else if(!free){ sn=rulerSnapEnd(g, O, P, tol); P=sn.p; }
+    if(Math.hypot(P.x-O.x,P.y-O.y)<10) return;            // nicht auf null zusammenschieben
+    if(g.part==='a') R.a=P; else R.b=P;
+  }
+  R.snap=sn.how ? {how:sn.how, pt:sn.pt, line:sn.line} : null;
+  setHintLive(`Lineal ${rulerLen(Math.hypot(R.b.x-R.a.x, R.b.y-R.a.y))}${R.snap?' · '+R.snap.how:''} · ⌘/Strg: frei${g.part!=='body'?' · ⇧: nur drehen':''}`);
+  render();
+}
+function drawRuler(c, dpr){
+  const R=KR;
+  if(!R.on) return;
+  if(R.room!==currentRoom){ rulerLoad(); if(!R.a) rulerPlace(); }
+  const s=rulerScr(), L=Math.hypot(R.b.x-R.a.x, R.b.y-R.a.y);
+  ctx.save();
+  ctx.fillStyle='rgba(247,214,120,.55)'; ctx.strokeStyle='rgba(110,82,20,.85)'; ctx.lineWidth=1*dpr;
+  ctx.beginPath(); s.poly.forEach((q,i)=>i?ctx.lineTo(q.x,q.y):ctx.moveTo(q.x,q.y)); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.lineWidth=1.6*dpr; ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
+  ctx.lineWidth=1*dpr;
+  // Teilung: kleinster Schritt mit mindestens 5 px, beschriftet alle >= 48 px.
+  const steps=[1,2,5,10,20,50,100,200,500,1000,2000,5000];
+  const minor=steps.find(st=>st*VIEW.s>=5*dpr)||5000;
+  const major=steps.find(st=>st>=minor*5 && st%minor===0 && st*VIEW.s>=48*dpr)||minor*10;
+  const mid=(major/2)%minor===0 && major/2>minor ? major/2 : 0;
+  const pxPerMm=s.L/(L||1), unitCm=major>=10 && major%10===0;
+  ctx.fillStyle='rgba(60,44,10,.95)'; ctx.font=`${10*dpr}px ${CANVAS_FONT}`; ctx.textAlign='center'; ctx.textBaseline='top';
+  const n=Math.floor(L/minor+1e-9);
+  for(let i=0;i<=n;i++){
+    const t=i*minor, isMaj=t%major===0, isMid=mid && t%mid===0;
+    const h=(isMaj?14:isMid?10:6)*dpr, x=s.a.x+s.u.x*t*pxPerMm, y=s.a.y+s.u.y*t*pxPerMm;
+    ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x+s.n.x*h, y+s.n.y*h); ctx.stroke();
+    if(isMaj && t>0 && t<L-major*0.3){
+      ctx.save(); ctx.translate(x+s.n.x*(h+1*dpr), y+s.n.y*(h+1*dpr)); ctx.rotate(Math.atan2(s.u.y,s.u.x));
+      ctx.fillText(unitCm ? String(t/10) : String(t), 0, 0); ctx.restore();
+    }
+  }
+  const deg=((Math.atan2(R.b.y-R.a.y, R.b.x-R.a.x)*180/Math.PI)%180+180)%180;
+  const label=`${rulerLen(L)} · ${(Math.round(deg*10)/10).toLocaleString('de-DE')}°${unitCm?' · Teilung in cm':' · Teilung in mm'}`;
+  let rot=Math.atan2(s.u.y,s.u.x); if(rot>Math.PI/2||rot<-Math.PI/2) rot+=Math.PI;
+  ctx.save(); ctx.translate((s.a.x+s.b.x)/2+s.n.x*s.W*0.74, (s.a.y+s.b.y)/2+s.n.y*s.W*0.74); ctx.rotate(rot);
+  ctx.textBaseline='middle'; ctx.font=`600 ${11*dpr}px ${CANVAS_FONT}`; ctx.fillText(label,0,0); ctx.restore();
+  [s.a,s.b].forEach(q=>{ ctx.fillStyle='#fff'; ctx.strokeStyle=INK.accent; ctx.lineWidth=2*dpr; ctx.beginPath(); ctx.arc(q.x,q.y,6*dpr,0,7); ctx.fill(); ctx.stroke(); });
+  if(R.snap && gesture && gesture.t==='kruler'){
+    ctx.strokeStyle=INK.accent; ctx.globalAlpha=.7; ctx.lineWidth=4*dpr;
+    if(R.snap.line){ const a=toScr(R.snap.line.a), b=toScr(R.snap.line.b); ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke(); }
+    if(R.snap.pt){ const q=toScr(R.snap.pt); ctx.beginPath(); ctx.arc(q.x,q.y,9*dpr,0,7); ctx.stroke(); }
+  }
+  ctx.restore();
+}
+
 // Hinweis je Zustand (modeHint liest KITCHEN_HINT)
 function kitchenHint(){
   const it=selItem();
   if(it) return it.a ? `${nm(it)}: ziehen schiebt an der Wand (⌥ ohne Einrasten) · ←/→ 1 cm, ⇧ 10 cm${hasHinge(it)?' · F Anschlag':''} · ⌘D daneben · ⌘C/⌘V kopieren · Entf löscht`
                      : `${nm(it)}: ziehen verschiebt · Q/E dreht 15° · Pfeile 1 cm · ⌘C/⌘V kopieren · Entf löscht`;
-  return 'Schrank aus der Leiste ziehen oder klicken · V 3D · W Wege · O Fronten offen · A Analyse';
+  return 'Schrank aus der Leiste ziehen oder klicken · V 3D · W Wege · O Fronten offen · N Abstände · L Lineal · A Analyse';
 }
 
 // Anmeldung bei der Seite (meldeAn im Block ui): so ruft sie den Küchenplaner, ohne ihn zu kennen.
@@ -1760,7 +1970,7 @@ meldeAn('kitchen', {
     ['Teil setzen','Klick oder Ziehen aus der Leiste'], ['An der Wand schieben','Ziehen · ← →, mit ⇧ 10 cm'],
     ['Ohne Einrasten ziehen','⌥+Ziehen'], ['Tisch, Insel drehen','Q  E'], ['Anschlag tauschen','F'],
     ['Daneben duplizieren','⌘D'], ['Kopieren, unter dem Zeiger einfügen','⌘C  ⌘V'], ['Teil löschen','Entf'],
-    ['3D · Wege · Fronten offen','V · W · O'], ['3D drehen, verschieben, zoomen','Ziehen · Rechts-Ziehen · Rad'],
+    ['3D · Wege · Fronten offen','V · W · O'], ['Abstände (NKBA) · Lineal','N · L'], ['3D drehen, verschieben, zoomen','Ziehen · Rechts-Ziehen · Rad'],
   ]]
   ],
   bereit:kitchenReady, absage:'Küche erst, wenn der Grundriss eindeutig eingemessen ist.',
@@ -1785,9 +1995,9 @@ meldeAn('kitchen', {
   entf(){ const it=selItem(); if(!it) return false; removeItem(it); return true; },
   down:kitchenDown, hover:kitchenHover, tap:kitchenTap,
   // 'kdim': die Maß-Eingabe ist offen, Ziehen und Loslassen tun nichts.
-  gesten:['kitchen','kdim'],
-  move(e, g){ if(g.t==='kitchen') kitchenMove(e, g); },
-  up(e, g){ if(g.t==='kitchen') kitchenUp(e, g); },
+  gesten:['kitchen','kdim','kruler'],
+  move(e, g){ if(g.t==='kitchen') kitchenMove(e, g); else if(g.t==='kruler') rulerMove(e, g, kctx()); },
+  up(e, g){ if(g.t==='kitchen') kitchenUp(e, g); else if(g.t==='kruler'){ KR.snap=null; if(g.moved) rulerSave(); render(); } },
   pinch(g){ if(g.t==='kitchen' && g.moved) kitchenUp(null, g); },
 });
 })();

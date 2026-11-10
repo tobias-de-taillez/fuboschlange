@@ -198,7 +198,7 @@ const ABLAEUFE={
     pruef('Fliesenplan öffnet', await p.evaluate(()=>TOOL==='fliesen' && document.title.includes('Fliesenplan')));
     await p.evaluate(()=>setTool('kueche')); await sleep(1400);
     await p.setViewportSize({width:1100, height:800}); await sleep(300);
-    pruef('Küchenplaner öffnet, Leiste passt bei 1100 px', await p.evaluate(()=>{ const t=document.getElementById('tools'); return TOOL==='kueche' && t.scrollWidth<=t.clientWidth; }));
+    pruef('Küchenplaner öffnet, Leiste passt bei 1100 px', await p.evaluate(()=>{ const t=document.getElementById('tools'); return TOOL==='kueche' && t.scrollWidth<=t.clientWidth; }), await p.evaluate(()=>{ const t=document.getElementById('tools'); return `scrollWidth ${t.scrollWidth}, clientWidth ${t.clientWidth}`; }));
     await p.setViewportSize({width:1440, height:900});
     await p.evaluate(()=>setTool('aufmass')); await sleep(1200);
     await p.click('#backHome'); await sleep(900);
@@ -510,6 +510,26 @@ const ABLAEUFE={
     const befund=p.locator('#kChecks .kfind.bad:not([aria-current])').first(), bt=await befund.textContent(); await befund.click(); await sleep(300);
     const bf=await p.evaluate(t=>{ const b=[...document.querySelectorAll('#kChecks .kfind')].find(b=>b.textContent===t); return {an:b ? b.getAttribute('aria-current') : '', sel:document.getElementById('kSelBox').hidden ? '' : document.getElementById('kSelInfo').textContent}; }, bt);
     pruef('Klick auf einen Befund wählt das Teil, das er nennt', bf.sel!=='' && bt.includes(bf.sel) && bf.an==='true', bt+' → '+bf.sel);
+    // Abstände (NKBA) und Lineal: Schalter, Bild, Ziehen, Speicher
+    { await p.keyboard.press('Escape'); await sleep(150);
+      const bn=()=>p.evaluate(()=>({n:document.getElementById('kAbstBtn').getAttribute('aria-pressed'), l:document.getElementById('kRulerBtn').getAttribute('aria-pressed')}));
+      const a0=await p.locator('#cv').screenshot();
+      await p.keyboard.press('n'); await sleep(350); const an1=await bn(), a1=await p.locator('#cv').screenshot();
+      await p.click('#kAbstBtn'); await sleep(300); const an2=await bn();
+      pruef('Abstände: Taste N zeichnet Maßlinien in den Plan, der Knopf schaltet sie wieder aus', an1.n==='true' && an2.n==='false' && await unterschied(p, a0, a1)>=0.0003, JSON.stringify([an1, an2, await unterschied(p, a0, a1)]));
+      const kk=await kueche(p), box=await p.locator('#cv').boundingBox(), cx=box.x+box.width/2, cy=box.y+box.height/2;
+      const r0=await p.locator('#cv').screenshot();
+      await p.keyboard.press('l'); await sleep(350); const l1=await bn(), r1=await p.locator('#cv').screenshot();
+      await p.mouse.move(cx, cy-15); await sleep(80); await p.mouse.down(); await p.mouse.move(cx+20, cy-5, {steps:3}); await p.mouse.move(cx+120, cy+45, {steps:8}); await sleep(100); await p.mouse.up(); await sleep(300);
+      const r2=await p.locator('#cv').screenshot(), kl=await kueche(p), sp=await p.evaluate(()=>{ try{ const o=JSON.parse(localStorage.getItem('raumaufmass-kueche-lineal')||'{}'); return Object.values(o).length ? Object.values(o)[0] : null; }catch(e){ return null; } });
+      pruef('Lineal: Taste L blendet es ein, Ziehen am Körper verschiebt es, ohne ein Küchenteil zu bewegen, die Lage bleibt im Browser', l1.l==='true' && await unterschied(p, r0, r1)>=0.0003 && await unterschied(p, r1, r2)>=0.0003 && kl.undo===kk.undo && sp && Math.abs(sp.b.x-sp.a.x)+Math.abs(sp.b.y-sp.a.y)>100, JSON.stringify([l1, kk.undo, kl.undo, sp]));
+      { const vs=p.viewportSize(), out=[];
+        for(const w of [1180, 1280, 1440, 1920]){ await p.setViewportSize({width:w, height:vs.height}); await sleep(350);
+          out.push(await p.evaluate(()=>{ const t=document.getElementById('tools'); return `${innerWidth}: ${t.scrollWidth}/${t.clientWidth}`; })); }
+        await p.setViewportSize(vs); await sleep(300);
+        pruef('Küchenleiste mit Abstände und Lineal passt bei 1180, 1280, 1440 und 1920 px', out.every(x=>{ const m=x.match(/(\d+)\/(\d+)$/); return +m[1]<=+m[2]; }), out.join(' · ')); }
+      await p.click('#kRulerBtn'); await sleep(300); const l2=await bn();
+      pruef('Lineal: der Knopf blendet es wieder aus', l2.l==='false', JSON.stringify(l2)); }
     // Offenes Menü: die Pfeile gehören dem Menü, nicht dem gewählten Teil
     await waehleTeil(p, insel.id); k=await kueche(p); const i0=await teilNr(p, insel.id);
     await p.click('#roommenuBtn'); await sleep(250);
