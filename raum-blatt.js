@@ -897,8 +897,14 @@ function drucken(opt){
       const w=f.contentWindow, d=w.document;
       d.open(); d.write(doc); d.close();
       // Aufräumen erst nach dem Dialog; bleibt das Ereignis aus, räumt der
-      // nächste Druck auf.
-      w.addEventListener('afterprint', ()=>setTimeout(()=>{ if(f.isConnected) f.remove(); }, 500));
+      // nächste Druck auf. Der Fokus geht dabei zurück an die Seite (an das
+      // Element, das ihn hatte): sonst bliebe er im unsichtbaren Rahmen, und
+      // die Tasten der Seite wären tot, bis jemand hineinklickt.
+      const vorher=document.activeElement;
+      w.addEventListener('afterprint', ()=>{
+        try{ window.focus(); if(vorher && vorher.isConnected && vorher.focus) vorher.focus({preventScroll:true}); }catch(e){}
+        setTimeout(()=>{ if(f.isConnected) f.remove(); }, 500);
+      });
       w.focus();
       w.print();
       return {ok:true, weg:'rahmen', blaetter:n};

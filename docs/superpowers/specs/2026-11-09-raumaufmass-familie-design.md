@@ -296,3 +296,5 @@ Bekannt und offen geblieben, jeweils mit Umweg und ohne Datenverlust:
 - **Die Seite antwortet auch ohne https.** Umgeleitet wird nicht, weil der Browser-Speicher je Adresse gilt: Räume, die jemand unter http angelegt hat, wären nach einer Umleitung nicht mehr zu sehen.
 - **Nicht geprüft:** der Druckdialog des Betriebssystems mit einem echten Drucker, Safari selbst (nur seine Engine), echte Touch-Geräte, Zwei-Finger-Zoom.
 
+Die Bedienung hat seit dem 10.11.2026 einen eigenen Test: `node test/browser.mjs [chromium|webkit|firefox]` fährt Hauptweg, Eingabe, Ansicht, zwei Fenster und die unvollständig geladene Seite mit echten Klicks und Tasten (45 Prüfungen). Er braucht Playwright, das nicht zum Repo gehört; der Kopf der Datei sagt, wie er es findet.
+

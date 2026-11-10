@@ -27,7 +27,7 @@ Gemessen am Stand `c96f1ee` mit acorn und eslint-scope (freie Bezeichner je Bloc
 - **`ui` verdrahtet beim Laden 112 Anweisungen, 54 davon an Elemente, die nur das Aufmaß hat** (47 ids). Eine Seite ohne dieses Markup wirft beim Laden.
 - **Umgekehrt ruft `ui` 11 Einhängepunkte des Fliesenplans und 15 des Küchenplaners**, und das Aufmaß braucht beide Kerne weiter: `raum-modell.js` ruft `TILES.normTiles` und `KITCHEN.normKitchen`, `recompute` und `deletePoint` pflegen die Bezugsecken der Küche.
 - **Markup und CSS:** Von 421 Markup-Zeilen sind 68 gemeinsame Schale, 215 Aufmaß, 94 Fliesenplan, 43 Küchenplaner. Von 629 CSS-Regeln sind 92 Schale. Ein Muster für geteiltes CSS zwischen Seiten gibt es im Repo nicht.
-- **Kein Test lädt die Bedienung.** Die 9326 Zeilen von `ui`, `tiles-ui` und `kitchen-ui` sind nur im Browser prüfbar.
+- **Kein Node-Test lädt die Bedienung.** Die 9326 Zeilen von `ui`, `tiles-ui` und `kitchen-ui` sind nur im Browser prüfbar. Seit dem 10.11.2026 gibt es dafür `test/browser.mjs` (45 Prüfungen: Hauptweg, Eingabe, Ansicht, zwei Fenster, unvollständig geladene Seite, Selbstchecks im Browser; grün in Chromium, WebKit und Firefox). Er deckt das Raumaufmaß, von Fliesenplan und Küchenplaner nur das Öffnen.
 
 ## Drei Entwürfe, drei Kritiken
 
@@ -42,7 +42,7 @@ Gemeinsamer Befund: Eigene Seiten kosten sechs bis zehn Arbeitstage und sind ohn
 1. **Gilt „kein Fliesen- und Küchencode in `raumaufmass.html`“ für den Text der Datei oder auch für das, was sie lädt?** Das Aufmaß braucht beide Kerne, solange Fliesen- und Küchendaten am Raum bleiben.
 2. **Der Werkzeugwechsel wird ein Seitenwechsel.** Rückgängig je Werkzeug oder gemeinsam, Ansicht und Auswahl nach dem Wechsel, Verhalten der Zurück-Taste, Raumübergabe bei zwei Fenstern.
 3. **Geteilte Schale:** CSS als eigene Datei (Nachtrag zum ADR, Upload-Skript, `vercel.json`) oder je Seite; Hilfe und Tastenliste gemeinsam oder je Werkzeug.
-4. **Ein fester Browser-Test im Repo** mit einer reinen Entwicklungs-Abhängigkeit. Die Abnahme vom 10.11.2026 lief mit Playwright aus dem npx-Cache; ihre Abläufe liegen nicht im Repo.
+4. **Der Browser-Test** `test/browser.mjs` braucht Playwright, das nicht zum Repo gehört (er sucht es im Suchpfad von Node oder über die Variable `PLAYWRIGHT`). Soll es eine feste Entwicklungs-Abhängigkeit werden? Vor dem Schnitt durch `ui` braucht der Test außerdem Abläufe für Fliesenplan und Küchenplaner (Vorlagen: die Vergleichsläufe alt gegen neu vom 10.11.2026 mit 319 und 310 Schritten liegen nicht im Repo).
 5. **Selbstchecks:** weiter an jeder Auslieferung (418 kB) oder nur bei `?test` nachladen.
 6. **Dateinamen:** `raum-*.js` lädt jedes Werkzeug, `<werkzeug>-*.js` gehört einem allein. Ein späteres Umbenennen trifft jeden offenen Zweig noch einmal.
 
@@ -50,6 +50,6 @@ Gemeinsamer Befund: Eigene Seiten kosten sechs bis zehn Arbeitstage und sind ohn
 
 1. Die Entscheidungen oben.
 2. Messaufbau „Fliesen-Bedienung ohne Aufmaß“: Schale, geteilte Dateien und `tiles-ui` auf einer Probeseite, um die Naht von `ui` am laufenden Code zu finden statt am Reißbrett.
-3. Den Browser-Abgleich alt gegen neu als festen Test.
+3. `test/browser.mjs` um Fliesenplan und Küchenplaner erweitern, als Netz für den Schnitt.
 4. `ui` in der einen Seite auftrennen (Plan-Skript, drei Anmeldungen), jeder Zwischenstand live.
 5. Erst dann die Seiten schneiden und umschalten; alte Adressen `raumaufmass.html#fliesen` und `#kueche` leiten weiter.
