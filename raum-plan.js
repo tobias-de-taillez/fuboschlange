@@ -1400,9 +1400,12 @@ function starteSeite(tool){
       // dieses Fensters, nicht der zuletzt irgendwo geöffnete.
       try{
         const nav=performance.getEntriesByType('navigation')[0], eigen=sessionStorage.getItem('raumaufmass.fenster');
+        // Die Übergabe gilt nur, wenn wirklich eine Werkzeugseite hierher geführt hat: bliebe sie nach einem
+        // abgebrochenen Wechsel liegen, überstimmte sie später die Wahl auf dem Startbildschirm.
         const uebergabe=sessionStorage.getItem('raumaufmass.uebergabe');
         sessionStorage.removeItem('raumaufmass.uebergabe');
-        if(uebergabe && STORE.load(uebergabe)) cur=uebergabe;
+        const vonWerkzeug=/\/(raumaufmass|fliesenplan|kuechenplaner)\.html([?#]|$)/.test(document.referrer);
+        if(uebergabe && vonWerkzeug && STORE.load(uebergabe)) cur=uebergabe;
         else if(nav && (nav.type==='reload' || nav.type==='back_forward') && eigen && STORE.load(eigen)) cur=eigen;
       }catch(e){}
       if(cur && STORE.load(cur)) openRoom(cur);

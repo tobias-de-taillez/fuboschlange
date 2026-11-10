@@ -113,6 +113,14 @@ async function lauf(stand, seiten, variante, viewport){
   await schritt('fliesen-lineal', async()=>{ await p.click('#tRuler'); await sleep(250); });
   await schritt('fliesen-zoom', async()=>{ const q=await eigen('#cv'); await p.mouse.move(q.x,q.y); await p.mouse.wheel(0,-400); await sleep(200); });
   await schritt('fliesen-spezifikation', async()=>{ await p.click('#tSpecBox > summary'); await sleep(250); });
+  await schritt('fliesen-spezifikation-zu', async()=>{ await p.click('#tSpecBox > summary'); await sleep(250); });
+  await schritt('fliesen-stueckliste', async()=>{ await p.click('#tDetails > summary'); await sleep(300); });
+  await schritt('fliesen-einmessen', async()=>{ await p.click('#tMeasure'); await sleep(500); });
+  await schritt('fliesen-einmessen-zu', async()=>{ await p.keyboard.press('Escape'); await sleep(300); });
+  await schritt('fliesen-qr', async()=>{ await p.click('#roommenuBtn'); await sleep(200); await p.click('#shareqr'); await sleep(500); });
+  await schritt('fliesen-qr-zu', async()=>{ await p.keyboard.press('Escape'); await sleep(300); });
+  await schritt('fliesen-melden', async()=>{ await p.click('#mldOpen'); await sleep(500); });
+  await schritt('fliesen-melden-zu', async()=>{ await p.keyboard.press('Escape'); await sleep(300); });
   // Küchenplaner
   await p.goto(URL_[stand]+'/'+seiten.kueche); await sleep(1200);
   await ruhe(); await knipse('kueche-start');
@@ -121,6 +129,13 @@ async function lauf(stand, seiten, variante, viewport){
   await schritt('kueche-gewaehlt', async()=>{ const q=await teil(); if(q){ await p.mouse.click(q.x,q.y); await sleep(300); } });
   await schritt('kueche-rueckgaengig-leer', async()=>{ await p.keyboard.press('Escape'); });
   await schritt('kueche-zoom', async()=>{ const q=await eigen('#cv'); await p.mouse.move(q.x,q.y); await p.mouse.wheel(0,-300); await sleep(200); });
+  await schritt('kueche-spezifikation', async()=>{ await p.click('#kSpecBox > summary'); await sleep(300); });
+  await schritt('kueche-stueckliste', async()=>{ await p.click('#kStockBox > summary'); await sleep(300); });
+  await schritt('kueche-ohne-3d', async()=>{ await p.click('#k3dBtn'); await sleep(500); });
+  await schritt('kueche-wege', async()=>{ await p.click('#kWayBtn'); await sleep(500); });
+  await schritt('kueche-offen', async()=>{ await p.click('#kOpenBtn'); await sleep(500); });
+  await schritt('kueche-analyse', async()=>{ await p.click('#kAnaBtn'); await sleep(800); });
+  await schritt('kueche-melden', async()=>{ await p.click('#mldOpen'); await sleep(500); });
   const fehl=[...new Set(fehler)];
   await ctx.close();
   return {bilder, fehl};

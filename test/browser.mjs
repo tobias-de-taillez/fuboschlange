@@ -274,8 +274,8 @@ const ABLAEUFE={
     const raum=[{id:'r1', name:'Bestand', updated:'2026-11-10T00:00:00.000Z', area:12, data:{idSeq:4,
       pts:[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:3000},{id:'D',x:0,y:3000}], walls:[['A','B'],['B','C'],['C','D'],['D','A']],
       meas:[['A','B',4000],['B','C',3000],['C','D',4000],['D','A',3000],['A','C',5000],['B','D',5000]].map(([a,b,d])=>({a,b,d,on:true}))}}];
-    const kerne=['raum-kern.js','raum-fliesen.js','fliesenplan-einmessen.js','raum-kueche.js','raum-geometrie.js','raum-speicher.js','raum-modell.js','raum-zeichnung.js','raum-plan.js'];
-    for(const datei of [...kerne, 'raum-checks.js', 'raum-blatt.js']){
+    const kerne=['raum-kern.js','raum-fliesen.js','raum-kueche.js','raum-geometrie.js','raum-speicher.js','raum-modell.js','raum-zeichnung.js','raum-plan.js'];
+    for(const datei of [...kerne, 'fliesenplan-einmessen.js', 'raum-checks.js', 'raum-blatt.js']){
       const f=await fenster(); const p=f.page;
       await f.context.addInitScript(r=>{ if(!localStorage.getItem('raumaufmass.rooms')){ localStorage.setItem('raumaufmass.rooms', JSON.stringify(r)); localStorage.setItem('raumaufmass.current', 'r1'); } }, raum);
       await f.context.route('**/'+datei, r=>r.fulfill({status:404, body:''}));
@@ -598,6 +598,16 @@ const ABLAEUFE={
     }
     pruef('keine Fehler in der Konsole', f.stoer.length===0, f.stoer.join(' | '));
     await f.browser.close();
+    // eine liegengebliebene Übergabe (abgebrochener Wechsel) überstimmt nicht die Wahl auf dem Startbildschirm
+    {
+      const g=await fenster(); const q=g.page;
+      const zwei=[raum, {id:'zweiter', name:'Zweiter', updated:'2026-11-10T09:00:00.000Z', area:null, data:{pts:[], walls:[], meas:[], idSeq:0}}];
+      await g.context.addInitScript(r=>{ if(!localStorage.getItem('raumaufmass.rooms')){ localStorage.setItem('raumaufmass.rooms', JSON.stringify(r)); localStorage.setItem('raumaufmass.current', 'zweiter'); sessionStorage.setItem('raumaufmass.uebergabe', 'probe'); } }, zwei);
+      await q.goto(BASE+'/raumaufmass.html'); await sleep(1200);
+      const z=await q.evaluate(()=>({raum:currentRoom, schluessel:sessionStorage.getItem('raumaufmass.uebergabe')}));
+      pruef('eine liegengebliebene Übergabe gilt nicht, wenn keine Werkzeugseite hierher geführt hat', z.raum==='zweiter' && z.schluessel===null, JSON.stringify(z));
+      await g.browser.close();
+    }
     // fehlt dem Fliesenplan oder dem Küchenplaner eine Kerndatei oder der Plan, startet er nicht und lässt den Speicher in Ruhe
     for(const [url, datei] of [['fliesenplan.html','raum-plan.js'], ['fliesenplan.html','raum-modell.js'], ['kuechenplaner.html','raum-plan.js'], ['kuechenplaner.html','raum-kueche.js']]){
       const g=await fenster(); const q=g.page;

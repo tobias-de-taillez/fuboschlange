@@ -298,7 +298,6 @@
 
 <script src="raum-fliesen.js"></script>
 
-<script src="fliesenplan-einmessen.js"></script>
 
 <script src="raum-kueche.js"></script>
 <script src="raum-geometrie.js"></script>
@@ -312,7 +311,7 @@
 // Anfrage, Upload mitten im Laden), darf es nicht halb starten: der Boot hielte
 // den fehlenden Baustein für verbogene Raumdaten, legte still einen leeren Raum
 // an und machte ihn zum aktuellen. Dann startet es gar nicht und sagt es.
-// Geprüft wird je Datei, was sie als Letztes anlegt. Ohne diese neun läuft
+// Geprüft wird je Datei, was sie als Letztes anlegt. Ohne diese acht läuft
 // nichts (Fliesen- und Küchendaten bleiben am Raum, das Modell braucht ihre
 // Kerne); die übrigen (Meldung, QR und Link, Gebäude, Blatt, Selbstchecks)
 // sind Zugaben.
@@ -320,7 +319,6 @@
   const fehlt=[
     ['raum-kern.js',      ()=>typeof CORE.labelPlacer==='function'],
     ['raum-fliesen.js',   ()=>typeof TILES.normTiles==='function'],
-    ['fliesenplan-einmessen.js', ()=>typeof TILEMEAS.measure==='function'],
     ['raum-kueche.js',    ()=>typeof KITCHEN.pillTouch==='function'],
     ['raum-geometrie.js', ()=>typeof sharedWallFit==='function' && THICK_DEFAULT>0],
     ['raum-speicher.js',  ()=>typeof STORE.create==='function'],
@@ -354,5 +352,9 @@
 
 <script>
 // Die Selbstchecks (418 kB) laden nur mit ?test; sie laufen dann gleich und schreiben in die Konsole.
-if(location.search.includes('test')){ const s=document.createElement('script'); s.src='raum-checks.js'; document.body.append(s); }
+if(location.search.includes('test')){
+  // Der Selbstcheck des Fliesen-Einmessens braucht seinen Kern, den nur der Fliesenplan sonst lädt.
+  if(typeof TILEMEAS==='undefined'){ const e=document.createElement('script'); e.src='fliesenplan-einmessen.js'; e.async=false; document.body.append(e); }
+  const s=document.createElement('script'); s.src='raum-checks.js'; s.async=false; document.body.append(s);
+}
 </script>
