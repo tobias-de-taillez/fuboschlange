@@ -2884,6 +2884,16 @@ globalThis.selfChecks=function(){
         return !has(r.F, /hinter den Stühlen/) && sd.filter(s=>!s.open).length===1 && KX.tableSeats(g,E,r.L)===3; })());
     chk('kueche: Tisch 600 mm vor der Wand – Stuhlraum zu knapp wird gemeldet',
       has(lay([{id:1,kind:'table',x:2000,y:1000,rot:0,w:1200,d:800}]).F, /hinter den Stühlen nur 600 mm/, 'bad'));
+    chk('kueche: Schrank hinter dem Ende der Tischseite wird erkannt, auch wenn die Mitte frei ist',
+      [0,180].every(rot=>{ const r=lay([{id:1,kind:'table',x:2000,y:1200,rot,w:1600,d:800},
+        {id:2,kind:'base',a:'A',b:'B',x:1000,w:600}]), gaps=[];
+        KX.check(E,r.K,r.L,gaps);
+        return has(r.F,/Tisch: hinter den Stühlen nur 220 mm/,'bad') &&
+          gaps.some(g=>g.k==='tisch' && g.val===220 && g.a.x>=1200 && g.a.x<=1600 && near(g.a.y,800,1)); }));
+    chk('kueche: Schrank neben dem Tisch, außerhalb der Tischkante, löst keine Stuhlraumwarnung aus',
+      (()=>{ const r=lay([{id:1,kind:'table',x:2000,y:1400,rot:0,w:1600,d:800},
+        {id:2,kind:'base',a:'A',b:'B',x:100,w:600}]);
+        return !has(r.F,/hinter den Stühlen/); })());
     chk('kueche: Plätze aus den Maßen (120×80: 4, 160×90: 6, 340×120: 12, 140×80: 4, 200×100: 6)',
       [[1200,800,4],[1600,900,6],[3400,1200,12],[1400,800,4],[2000,1000,6]].every(([w,d,n])=>{ const p=KX.seatPlan(w,d); return 2*p.long+2*p.end===n; }));
     chk('kueche: Drehung rastet an 0/90° und an einer schiefen Wand ein, sonst frei',

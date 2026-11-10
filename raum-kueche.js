@@ -1827,10 +1827,10 @@ function check(E, K, L, rec){
     const sides=tableSides(g,E,L);
     if(!sides.some(s=>s.seats>0)) add_('warn',[g.it.id], `Tisch: an keiner Seite Platz für einen Stuhl (mind. ${SEAT_ROOM} mm)`, g.c);
     sides.filter(s=>s.seats>0).forEach(s=>{
-      const t=mm(s.room);
-      gap_('tisch', [g.it.id], s.mid, s.n, t, 813, t<750?'bad':t<813?'warn':'ok', t<750?'Stuhl: unter 750 mm':t<813?'Stuhl: unter NKBA 813 mm':'');
-      if(t<750) add_('bad',[g.it.id], `Tisch: hinter den Stühlen nur ${mm(t)} mm (mind. 750, NKBA 813)`, s.mid);
-      else if(t<813) add_('warn',[g.it.id], `Tisch: hinter den Stühlen ${mm(t)} mm – NKBA 813, zum Vorbeigehen 1118`, s.mid);
+      const narrow=seatClearance(E,L,g,s), t=mm(narrow.room);
+      gap_('tisch', [g.it.id], narrow.at, s.n, t, 813, t<750?'bad':t<813?'warn':'ok', t<750?'Stuhl: unter 750 mm':t<813?'Stuhl: unter NKBA 813 mm':'');
+      if(t<750) add_('bad',[g.it.id], `Tisch: hinter den Stühlen nur ${mm(t)} mm (mind. 750, NKBA 813)`, narrow.at);
+      else if(t<813) add_('warn',[g.it.id], `Tisch: hinter den Stühlen ${mm(t)} mm – NKBA 813, zum Vorbeigehen 1118`, narrow.at);
     });
   });
   // Tresen: hinter den Hockern Platz (NKBA 813, zum Vorbeigehen 1118; Fehler
@@ -2093,6 +2093,21 @@ function seatRoom(E, L, g, s){
   const r=TL.rayToRing(E.ring, o, s.n); if(r) t=r.t-2;
   L.G.forEach(h=>{ if(h!==g && h.it.id!==g.it.id && h.it.kind!=='wall'){ const x=rayPoly(o,s.n,h.foot||h.poly); if(x!=null && x-2<t) t=x-2; } });
   return Math.max(0,t);
+}
+// Prüfung über die Tischkante: auch Hindernisse neben dem Mittelstrahl erfassen.
+// Die Platzanzahl verwendet weiterhin seatRoom in der Mitte; ein Hindernis an
+// einem Ende soll nicht pauschal alle Plätze dieser Seite entfernen.
+function seatClearance(E,L,g,s){
+  const ab=sub(s.b,s.a), l2=dot(ab,ab);
+  if(l2<4) return {room:seatRoom(E,L,g,s),at:s.mid};
+  const edge=1/Math.sqrt(l2), us=[edge,0.5,1-edge];
+  const addU=v=>{ const u=dot(sub(v,s.a),ab)/l2; if(u>edge && u<1-edge) us.push(u); };
+  TL.ringsOf(E.ring).forEach(R=>R.forEach(addU));
+  L.G.forEach(h=>{ if(h!==g && h.it.id!==g.it.id && h.it.kind!=='wall') (h.foot||h.poly).forEach(addU); });
+  let best={room:Infinity,at:s.mid};
+  us.forEach(u=>{ const at=add(s.a,mul(ab,u)), room=seatRoom(E,L,g,{mid:at,n:s.n});
+    if(room<best.room) best={room,at}; });
+  return best;
 }
 // Tischseiten: Mitte, Außennormale, Plätze. Mit E, L zählen nur Seiten mit
 // Stuhlraum; room ist dann der freie Raum dahinter.

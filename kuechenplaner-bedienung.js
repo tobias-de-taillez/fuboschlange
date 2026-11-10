@@ -1074,7 +1074,8 @@ function renderSel(c){
   if(rs){
     // Live drehen ohne Panel-Neubau (der risse den Schieber mitten im Ziehen
     // weg) und mit einem Rückgängig-Schritt je Geste.
-    const ptr=e=>{ KS.rotPtr = e.type!=='pointerup'; KS.rotAlt=e.altKey; };
+    let pointerKey=false;
+    const ptr=e=>{ KS.rotPtr = e.type!=='pointerup'; KS.rotAlt=e.altKey; if(KS.rotPtr) pointerKey=false; };
     rs.onpointerdown=ptr; rs.onpointermove=e=>{ if(KS.rotPtr) KS.rotAlt=e.altKey; }; rs.onpointerup=ptr;
     rs.oninput=()=>{ const cur=selItem(); if(!cur) return;
       if(KS.rotDrag!==cur.id){ snapshot(); KS.rotDrag=cur.id; }
@@ -1090,11 +1091,12 @@ function renderSel(c){
     // zieht: ⌥ (frei drehen) oder eine andere Taste darf die Geste weder spalten noch mit der nächsten verschmelzen.
     const own=e=>KX.controlOwnsKey(e.key,'INPUT','range');
     rs.onkeydown=e=>{
-      if(own(e)){ if(!KS.rotPtr) KS.rotKey=true; return; }
+      if(own(e)){ if(KS.rotPtr) pointerKey=true; else KS.rotKey=true; return; }
       // ⌘Z / ⌘⇧Z / Strg+Y mitten im Halten springen im Verlauf: das beendet die Geste, die nächste Drehung bekommt
       // wieder einen eigenen Schnappschuss (sonst fehlte ihr Rückgängig-Schritt und Wiederholen träfe den alten Winkel).
       if((e.ctrlKey || e.metaKey) && /^[zy]$/i.test(e.key)){ KS.rotKey=false; KS.rotDrag=null; } };
     rs.onkeyup=e=>{ if(!own(e)) return;
+      if(KS.rotPtr){ pointerKey=false; return; }
       KS.rotKey=false; KS.rotDrag=null;
       if(!nudgeSave.pending) kitchenSave(); };      // Ruhe-Timer schon durch (Taste über 400 ms ohne Wiederholung): Speicher und Panel nachziehen
     // Fokus weg (Tab, Klick, Fenster) vor dem Loslassen: war der Ruhe-Timer schon durch, kommt kein keyup mehr an den Regler,
@@ -1102,6 +1104,7 @@ function renderSel(c){
     rs.onblur=()=>{ const had=KS.rotDrag; KS.rotKey=false; KS.rotDrag=null;
       if(had!=null && !KS.rotPtr && !nudgeSave.pending) kitchenSave(); };
     rs.onchange=()=>{
+      if(KS.rotPtr && pointerKey) return;
       if(KS.rotKey && !KS.rotPtr){ KS.ctxKey=''; nudgeSave.mark(); return; }
       KS.rotDrag=null; KS.rotPtr=false; kitchenSave(); };
   }

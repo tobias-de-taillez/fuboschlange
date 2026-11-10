@@ -488,6 +488,29 @@ const ABLAEUFE={
     await p.keyboard.press('e'); await sleep(250); const r1=(await teilNr(p, insel.id)).rot;
     await p.click('#kR90'); await sleep(300); const r2=(await teilNr(p, insel.id)).rot;
     pruef('Insel: E dreht um 15°, „↻ 90°“ um weitere 90°', insel.kind==='island' && insel.wand==='' && r1===15 && r2===105, `${r1}°, ${r2}°`);
+    // Pfeil während einer Mausgeste darf den Rückgängig-Schritt nicht teilen.
+    const beforeRot=await kueche(p);
+    await p.evaluate(()=>{ const rs=document.getElementById('kRs');
+      rs.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));
+      rs.value='110'; rs.dispatchEvent(new Event('input',{bubbles:true}));
+      rs.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));
+      rs.value='111'; rs.dispatchEvent(new Event('input',{bubbles:true}));
+      rs.dispatchEvent(new Event('change',{bubbles:true}));
+      rs.dispatchEvent(new KeyboardEvent('keyup',{key:'ArrowRight',bubbles:true}));
+      rs.value='120'; rs.dispatchEvent(new Event('input',{bubbles:true}));
+      rs.dispatchEvent(new PointerEvent('pointerup',{bubbles:true}));
+      rs.dispatchEvent(new Event('change',{bubbles:true})); });
+    await sleep(350); const afterRot=await kueche(p);
+    await p.keyboard.press(MOD+'+z'); await sleep(350);
+    const undoneRot=await teilNr(p,insel.id);
+    pruef('Pfeiltaste beim Ziehen des Drehreglers teilt die Geste nicht: einmal Rückgängig stellt den Ausgangswinkel wieder her',
+      afterRot.undo===beforeRot.undo+1 && undoneRot.rot===r2, `Schritte ${beforeRot.undo} → ${afterRot.undo}, Winkel nach Rückgängig ${undoneRot.rot}°`);
+    await p.focus('#kRs'); const beforeKey=await kueche(p);
+    await p.keyboard.down('ArrowRight'); await p.keyboard.down('ArrowRight'); await p.keyboard.up('ArrowRight'); await sleep(600);
+    const afterKey=await kueche(p), movedKey=await teilNr(p,insel.id);
+    await p.keyboard.press(MOD+'+z'); await sleep(350); const undoneKey=await teilNr(p,insel.id);
+    pruef('gehaltene Pfeiltaste am Drehregler bleibt ein Rückgängig-Schritt',
+      afterKey.undo===beforeKey.undo+1 && movedKey.rot>r2 && undoneKey.rot===r2, `${r2}° → ${movedKey.rot}° → ${undoneKey.rot}°`);
     // Duplizieren, Löschen, Rückgängig, Wiederherstellen
     await waehleTeil(p, schrank.id); k=await kueche(p);
     await p.keyboard.press(MOD+'+d'); await sleep(350); k2=await kueche(p); const kopie=k2.teile[k2.teile.length-1];

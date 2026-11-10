@@ -213,7 +213,7 @@ Die Wände sind einseitig (Culling), deshalb verschwinden sie, wenn man von auß
 - Rückt ein Halbeckschrank von der Ecke ab, meldet die Platte den toten Winkel dahinter als „Passleiste“. Bei nobilia deckt das der Winkelpassstück-Bereich hinter der Querzeile ab, ein Bauteil ist es nicht.
 - Inseln rasten beim Ziehen ein: die Stirnseite dockt bündig an eine Wand, wenn die Insel höchstens 35° von der Senkrechten zur Wand abweicht (also mindestens 55° zur Wand steht), die Seite an eine andere Insel (längs, Seite an Seite oder quer, die Drehung wird übernommen, Platte an Platte; bei gleicher Höhe läuft die Arbeitsplatte durch). ⌥ schaltet das Einrasten ab. Der Tisch rastet nicht ein.
 - Bei gestufter Inselplatte rechnet die Stückliste Gesamtlänge mal größte Tiefe, und bei vier oder mehr Inseln im Ring füllt der Plan die Lücke in der Mitte mit Platte.
-- Der Stuhlraum am Tisch misst nur den Mittelstrahl jeder Seite, der Tresen die ganze Hockerkante; eine enge Stelle neben der Mitte fällt am Tisch nicht auf.
+- Die Stuhlraum-Warnung am Tisch prüft die ganze Tischkante; die Zahl der Plätze nutzt weiterhin den Freiraum in der Mitte jeder Seite. Ein Hindernis an einem Ende vermindert die Platzzahl daher nicht anteilig.
 - Es gibt keinen Druck, keine Wandansicht von vorn und keine Auswahl in 3D.
 
 ## Quellen
