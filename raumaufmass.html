@@ -15018,11 +15018,18 @@ function renderSel(c){
     // Nur Tasten, die der Regler selbst verbraucht (Pfeile, Pos1/Ende, Bild auf/ab), und nicht während die Maus
     // zieht: ⌥ (frei drehen) oder eine andere Taste darf die Geste weder spalten noch mit der nächsten verschmelzen.
     const own=e=>KX.controlOwnsKey(e.key,'INPUT','range');
-    rs.onkeydown=e=>{ if(own(e) && !KS.rotPtr) KS.rotKey=true; };
+    rs.onkeydown=e=>{
+      if(own(e)){ if(!KS.rotPtr) KS.rotKey=true; return; }
+      // ⌘Z / ⌘⇧Z / Strg+Y mitten im Halten springen im Verlauf: das beendet die Geste, die nächste Drehung bekommt
+      // wieder einen eigenen Schnappschuss (sonst fehlte ihr Rückgängig-Schritt und Wiederholen träfe den alten Winkel).
+      if((e.ctrlKey || e.metaKey) && /^[zy]$/i.test(e.key)){ KS.rotKey=false; KS.rotDrag=null; } };
     rs.onkeyup=e=>{ if(!own(e)) return;
       KS.rotKey=false; KS.rotDrag=null;
       if(!nudgeSave.pending) kitchenSave(); };      // Ruhe-Timer schon durch (Taste über 400 ms ohne Wiederholung): Speicher und Panel nachziehen
-    rs.onblur=()=>{ KS.rotKey=false; KS.rotDrag=null; };
+    // Fokus weg (Tab, Klick, Fenster) vor dem Loslassen: war der Ruhe-Timer schon durch, kommt kein keyup mehr an den Regler,
+    // also hier Speicher und Panel nachziehen (läuft der Timer noch, erledigt er es).
+    rs.onblur=()=>{ const had=KS.rotDrag; KS.rotKey=false; KS.rotDrag=null;
+      if(had!=null && !KS.rotPtr && !nudgeSave.pending) kitchenSave(); };
     rs.onchange=()=>{
       if(KS.rotKey && !KS.rotPtr){ KS.ctxKey=''; nudgeSave.mark(); return; }
       KS.rotDrag=null; KS.rotPtr=false; kitchenSave(); };
