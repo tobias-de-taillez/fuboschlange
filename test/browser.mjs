@@ -292,7 +292,7 @@ const ABLAEUFE={
     await p.goto(BASE+'/raumaufmass.html'); await sleep(900);
     const r=await p.evaluate(()=>{ const r=selfChecks(); return {n:r.out.length, ok:r.ok, rot:r.out.filter(z=>z.startsWith('FAIL')).slice(0,3)}; });
     pruef(`Selbstchecks im Browser (${r.n})`, r.ok && r.n>1000, r.rot.join(' | '));
-    pruef('geladen sind 14 Skripte, keine Karte', await p.evaluate(()=>document.querySelectorAll('script[src]').length===14 && !globalThis.RAUM_UNVOLLSTAENDIG));
+    pruef('geladen sind 16 Skripte, keine Karte', await p.evaluate(()=>document.querySelectorAll('script[src]').length===16 && !globalThis.RAUM_UNVOLLSTAENDIG));
     await f.browser.close();
   },
   // Fliesenplan: setzen, schieben, drehen, vervielfältigen, einmessen, Stückliste; die Fliesen überstehen Menü, Neuladen und Startbildschirm.
