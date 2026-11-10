@@ -264,5 +264,23 @@ Umgesetzt in `raeume.html` (Startbildschirm), `raumaufmass.html` (Werkzeug) und 
 - **Datei öffnen** geht zusätzlich im Werkzeug über die Taste (⌘O bzw. Strg+O); sichtbar steht es nur auf dem Startbildschirm.
 - **Plausibilitätsfragen** (sehr kurzes Maß, Höhe 0) fragen nicht mehr nach. Das Maß gilt sofort, eine Rückmeldung am Ort nennt den Verdacht.
 - **Rückmeldungen** der früheren Statuszeile erscheinen kurz am Ort der Aktion. Reine Bedienhinweise sind gestrichen.
-- **Die alte Raumliste im Werkzeug** ist nicht mehr erreichbar; ihr Code liegt noch in der Datei und fällt beim Aufräumen weg.
+- **Die alte Raumliste im Werkzeug** ist entfernt. Räume wechselt man über den Startbildschirm oder per Klick in einen Nachbarraum.
+- **Ein Maß abschalten** geht über den Knopf „aus“ an der Maßzeile der Karte, nicht über einen Schiebeschalter. In „Alle Strecken“ steht dann „n aus“.
+- **Eine Rückmeldung ohne Ort** (Tastenkürzel, Menü) steht unten mittig im Plan. Startmeldungen und die Warnung „Speichern fehlgeschlagen“ bleiben stehen, bis die nächste Aktion etwas meldet.
+- **Maßeingabe.** Der ganze Text muss eine Zahl sein. Eine angehängte Einheit (m, cm, mm) gilt für diese eine Eingabe; in Millimetern ist ein einzelner Punkt oder ein Komma vor genau drei Ziffern ein Tausendertrenner. Über 100 m Länge oder 20 m Höhe nennt eine Rückmeldung den Verdacht.
+- **Der Raum bleibt liegen.** Ändert sich die Form nicht, behält der Raum seine Lage im Plan und im Speicher; nur ein Maß, das die Form ändert, bewegt ihn.
+- **Fehlt eine der geteilten Dateien**, startet das Werkzeug nicht und sagt es („Die Seite ist unvollständig geladen.“), statt mit einem leeren Raum zu beginnen.
+
+### Abnahme vor dem Live-Gang
+
+Der Stand ist zweimal im Browser abgenommen worden: einmal der Hauptweg, einmal aus sieben Blickwinkeln (Hauptweg, Zusammenspiel der Korrekturen, alte Daten und Rückweg, Fliesenplan und Küchenplaner, Diff, Upload-Paket, Tastatur). Jeder ernste Befund wurde unabhängig nachgestellt, bevor er behoben wurde; die Korrekturen sind danach noch einmal gegengeprüft.
+
+Bekannt und offen geblieben, jeweils mit Umweg und ohne Datenverlust:
+
+- **Öffnung an einer Wand, die nachträglich kürzer wird:** Die Öffnung bleibt stehen, wo sie war, und kann neben der Wand liegen; das Blatt nennt dann eine negative Lage. Wie geschätzte Öffnungen mitrücken sollen, ist eine eigene Entscheidung.
+- **Räume anderer Gebäude** erscheinen im Plan als graue Nachbarn, wenn sie verankert sind; gezeichnet wird alles Verankerte, ohne Blick auf Gebäude und Geschoss.
+- **Zwei Fenster mit demselben Raum:** Das zuletzt bediente überschreibt das andere.
+- **Tastatur:** Wände und Diagonalen sind nur mit der Maus anwählbar; die Leertaste löst keine Knöpfe aus (sie verschiebt die Ansicht); Dialoge halten den Fokus nicht fest.
+- **Nach einem Zurückrollen** auf das alte Werkzeug bleibt `raeume.html` erreichbar und zeigt veraltete Stände; die Einstellung „Maßhaltig zeichnen: aus“ überlebt den Rückweg nicht.
+- **Nicht geprüft:** der echte Druckdialog und das Papierbild, Safari und Firefox, Touch.
 

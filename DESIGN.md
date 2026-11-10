@@ -512,6 +512,7 @@ Stellen, an denen die freigegebene Datei sich selbst widerspricht. Sie sind oben
 - **Zwei Verläufe und zwei Standardübergänge.** Das Gleiten in die gemessene Form rechnet im Skript mit einem eigenen Auslauf statt `--ease`; Toast und Aufklappwinkel laufen ohne `--ease`.
 - **Schatten und Radius schwebender Teile.** Karte (`0 4px 16px`) und Menü (`0 6px 20px`) unterscheiden sich kaum; der Toast hat 4 px Radius, alle anderen schwebenden Teile 6 px.
 - **Höhen.** Normale Knöpfe 28 px, Icon-Knöpfe 30 px, stille Knöpfe in der Raumzeile 26 px.
+- **Schalter am Maß.** Gebaut ist an der Maßzeile der Karte ein Umschaltknopf „aus“ (gedrückt, solange das Maß abgeschaltet ist) statt des Schiebeschalters „Maß verwenden“; ein Schiebeschalter kommt im Werkzeug nirgends vor.
 - **Größen auf dem Blatt.** 15 px im Kopf und 14 px im Fuß für dieselbe Rolle.
 - **Planschrift in der Wandansicht** hat keinen Lichthof, die im Plan schon.
 - **Tastatur.** Öffnungen in der Wandansicht und die Wände im Lageplan sind nicht fokussierbar (Wände nur über ← →); die Raumzeile ist ein fokussierbares `div` ohne Rolle; der Stand ist ein `button`, der Blockelemente enthält.
