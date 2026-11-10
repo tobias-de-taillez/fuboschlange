@@ -1437,7 +1437,7 @@ function autofit(){
   // Rand zu rechnen waere zirkulaer (Rand braucht den Massstab, den er
   // selbst bestimmt) und lieferte einen negativen Massstab.
   let auf=0;
-  if(unfoldOn && M.openings.length){
+  if(ALLE.some(w=>w.aufgeklappt && w.aufgeklappt()) && M.openings.length){
     const H=cornerHeights(P, M.hmeas);
     auf=Math.max(...Object.values(H).map(x=>x.h), 0)*UNFOLD_MAX;
   }
@@ -1462,22 +1462,37 @@ function zoomAt(dx,dy,f){
 // unsichtbaren Plan, und zurueck im Plan war die Ansicht verstellt.
 function viewZoomAt(x,y,f){
   if(!(f>0) || !isFinite(f)) return;
-  if(M.mode==='wall'){
-    WV.s*=f; WV.ox=x+(WV.ox-x)*f; WV.oy=y+(WV.oy-y)*f; wallUserView=true;
-    return;
-  }
+  const werk=werkzeug();
+  if(werk && werk.zoom && werk.zoom(x,y,f)) return;
   const s=VIEW.s*f;
   if(s<1e-3 || s>40) return;             // Weltmeter bis Millimeterpapier, mehr nicht
   zoomAt(x,y,f);
 }
 function viewPanBy(dx,dy){
-  if(M.mode==='wall'){ WV.ox+=dx; WV.oy+=dy; wallUserView=true; }
-  else { VIEW.ox+=dx; VIEW.oy+=dy; userView=true; }
+  const werk=werkzeug();
+  if(werk && werk.pan && werk.pan(dx,dy)) return;
+  VIEW.ox+=dx; VIEW.oy+=dy; userView=true;
 }
 function fitActiveView(){
-  if(M.mode==='wall') wallUserView=false;
-  else { userView=false; autofit(); }
+  const werk=werkzeug();
+  if(!(werk && werk.einpassen && werk.einpassen())){ userView=false; autofit(); }
   render();
+}
+// Die Ansicht der Wandansicht (Anmeldung zoom, pan, einpassen, aufgeklappt): sie hat ihren eigenen Maßstab WV.
+function aufmassZoom(x,y,f){
+  if(M.mode!=='wall') return false;
+  WV.s*=f; WV.ox=x+(WV.ox-x)*f; WV.oy=y+(WV.oy-y)*f; wallUserView=true;
+  return true;
+}
+function aufmassPan(dx,dy){
+  if(M.mode!=='wall') return false;
+  WV.ox+=dx; WV.oy+=dy; wallUserView=true;
+  return true;
+}
+function aufmassEinpassen(){
+  if(M.mode!=='wall') return false;
+  wallUserView=false;
+  return true;
 }
 // Einnorden: die Wand a-b parallel zur oberen Bildschirmkante drehen.
 // Reine Ansichtssache. Dieselbe Wand nochmal einnorden dreht zurueck auf 0.
@@ -2251,6 +2266,9 @@ function stepSwim(now){
 //   bereit()    darf der Raum so geöffnet werden?        absage: Text der Hinweiszeile, wenn nicht
 //   zeichne()   die Zeichenfläche                        panel(): Abschnitt im Panel; true = der Modus
 //   vorZeichnen() / nachZeichnen()  vor und nach dem Zeichnen (jede Anmeldung, nicht nur die des Modus)
+//   modusAbgelehnt(modus) true = der Wechsel wurde mit einer Rückmeldung abgelehnt; vorModus() vor jedem Wechsel;
+//   modusGewechselt(modus) danach; zoom/pan/einpassen(...) true = die Ansicht des Werkzeugs, nicht VIEW; aufgeklappt()
+//   hinweisBelegt() true = die Hinweiszeile zeigt gerade etwas Eigenes
 //   hinweis()   Standardtext der Hinweiszeile            wurde verlassen, die Seite rendert nicht weiter
 //   Jede Funktion ist freiwillig: wer eine nicht hat, wird dort übergangen.
 //   verlassen() beim Wechsel in einen anderen Modus
@@ -2280,10 +2298,12 @@ const werkFuerGeste=g=>(g && ALLE.find(w=>w.gesten && w.gesten.includes(g.t)))||
 // Hier, vor dem Boot: schon der erste Raum und das erste Bild gehen durch sie.
 meldeAn(['draw','measure','wall'], {
   vorZeichnen:aufmassVorZeichnen, zeichne:aufmassZeichne, nachZeichnen:aufmassNachZeichnen,
-  panel:aufmassPanel,
+  modusAbgelehnt:aufmassModusAbgelehnt, vorModus:closeOut, modusGewechselt:aufmassModusGewechselt,
+  panel:aufmassPanel, hinweis:aufmassHinweis, hinweisBelegt:()=>plusHover,
   vorDruecken:aufmassVorDruecken, down:aufmassDown, hover:aufmassHover, zeigerWeg:aufmassZeigerWeg, ohneGeste:aufmassOhneGeste,
   gesten:['planOp','point','selpt'], move:aufmassMove, up:aufmassUp, leer:aufmassLeer,
   popOffen:()=>!$('pop').hidden, popSchliessen:hidePop,
+  zoom:aufmassZoom, pan:aufmassPan, einpassen:aufmassEinpassen, aufgeklappt:()=>unfoldOn,
   esc:aufmassEsc, taste:aufmassTaste, pfeil:aufmassPfeil, entf:aufmassEntf, nachResize:placeEntry,
   vorRueckgaengig:aufmassVorRueckgaengig, nachRueckgaengig:aufmassNachRueckgaengig, nachWiederherstellen:aufmassNachWiederherstellen,
   folgen:folgenAufmass,
@@ -5088,23 +5108,23 @@ addEventListener('pointerup',()=>{
   if(wallDrag){ const m=wallDrag.moved && !wallDrag.fest; wallDrag=null; if(m) recompute(); }
 });
 
+// Der Standardhinweis kommt vom Werkzeug des Modus (Anmeldung hinweis). Er haengt am Zustand, nicht nur
+// am Modus: ein laufender Zeichenzug oder ein Fliesen-Werkzeug erklaert sich selbst - und zwar solange
+// es aktiv ist, nicht nur vier Sekunden.
+function modeHint(){
+  const werk=werkzeug();
+  return werk && werk.hinweis ? werk.hinweis() : undefined;
+}
 const MODE_HINTS={
   draw:'Klick setzt eine Ecke · Klick auf eine Ecke verbindet · Ziehen verschiebt · Rechtsklick oder Entf löscht',
   measure:'Wand oder Strecke anklicken, Maß eintippen, Enter · zwei Ecken nacheinander für eine Diagonale',
   wall:'Öffnung ziehen verschiebt sie · Kante links oder rechts anklicken: Höhe dort · ←/→ nächste Wand',
-  tiles:'Fliese aus der Leiste ziehen · ⇧+Ziehen: Rahmen · Q/E drehen · ⌘D Muster fortsetzen',
-  kitchen:'Schrank aus der Leiste ziehen oder klicken · V 3D · W Wege · O Fronten offen · A Analyse',
 };
-// Der Standardhinweis haengt am Zustand, nicht nur am Modus: ein laufender
-// Zeichenzug oder ein Fliesen-Werkzeug erklaert sich selbst - und zwar
-// solange es aktiv ist, nicht nur vier Sekunden.
-function modeHint(){
+function aufmassHinweis(){
   if(planMode() && M.openSel!=null && M.openings.some(o=>o.id===M.openSel))
     return 'Öffnung ziehen verschiebt sie entlang der Wand · Entf löscht · Esc hebt die Auswahl auf';
   if(M.mode==='draw' && M.chain!=null)
     return `Zug ab ${M.chain}: Klick setzt die nächste Ecke · Klick auf die erste schließt den Raum · Esc beendet den Zug`;
-  const werk=werkzeug();
-  if(werk && werk.hinweis){ const t=werk.hinweis(); if(t) return t; }
   return MODE_HINTS[M.mode];
 }
 let hintTimer=null, hintLive=false;
@@ -5125,28 +5145,41 @@ function setHintLive(txt){ clearTimeout(hintTimer); hintTimer=null; hintLive=tru
 // Steht keine Meldung, folgt die Zeile dem Zustand (bei jedem render).
 function refreshHint(){
   if(TOOL==='aufmass'){ if(sagLive && !hintLive){ sagLive=false; sag(null); } return; }
-  if(!hintTimer && !hintLive && !plusHover){ const t=plat(modeHint()); $('hint').textContent=t; $('hint').title=t; } }
+  if(!hintTimer && !hintLive && !ALLE.some(w=>w.hinweisBelegt && w.hinweisBelegt())){ const t=plat(modeHint()); $('hint').textContent=t; $('hint').title=t; } }
 
 function setMode(mode){
-  if(mode==='wall' && !wallTabReady()){
-    sag(M.an && !C.wallPolygonRing(M.pts, M.walls) ? 'Wände gibt es, sobald der Raum geschlossen ist.'
-        : 'Wände gibt es, sobald die Form eindeutig ist.'+(M.an && M.an.dof>0 ? ' '+statusText()[0] : ''),
-        document.querySelector('#modes button[data-mode="wall"]'));
-    return;
-  }
-  if(mode==='measure' && TOOL==='aufmass' && !C.wallPolygonRing(M.pts, M.walls) && !M.meas.length){
-    sag('Maße gibt es, sobald der Raum geschlossen ist.', document.querySelector('#modes button[data-mode="measure"]'));
-    return;
-  }
+  if(ALLE.some(w=>w.modusAbgelehnt && w.modusAbgelehnt(mode))) return;
   // Eine Rückmeldung gehört zu dem Schritt, in dem sie entstand.
   sag(null);
-  closeOut();
+  alleWerkzeuge('vorModus');
   const ziel=werkzeug(mode);
   if(ziel && ziel.bereit && !ziel.bereit()){ setHint(ziel.absage); return; }
   // Beim Verlassen eines Werkzeugs: aufräumen (Fliesen: Werkzeug zurück, Auswahl weg).
   const alt=werkzeug();
   if(alt && mode!==M.mode && alt.verlassen) alt.verlassen();
   M.mode=mode; M.sel=[];
+  for(const w of ALLE) if(w.modusGewechselt) w.modusGewechselt(mode);
+  // Der Modus steht am body: CSS zeigt danach nur die Werkzeuge und
+  // Panel-Abschnitte, die zu ihm gehoeren.
+  document.body.dataset.mode=mode;
+  setHint(null);
+  render();
+}
+// Die Schritte des Raumaufmaßes beim Moduswechsel (Anmeldung modusAbgelehnt, vorModus, modusGewechselt).
+function aufmassModusAbgelehnt(mode){
+  if(mode==='wall' && !wallTabReady()){
+    sag(M.an && !C.wallPolygonRing(M.pts, M.walls) ? 'Wände gibt es, sobald der Raum geschlossen ist.'
+        : 'Wände gibt es, sobald die Form eindeutig ist.'+(M.an && M.an.dof>0 ? ' '+statusText()[0] : ''),
+        document.querySelector('#modes button[data-mode="wall"]'));
+    return true;
+  }
+  if(mode==='measure' && TOOL==='aufmass' && !C.wallPolygonRing(M.pts, M.walls) && !M.meas.length){
+    sag('Maße gibt es, sobald der Raum geschlossen ist.', document.querySelector('#modes button[data-mode="measure"]'));
+    return true;
+  }
+  return false;
+}
+function aufmassModusGewechselt(mode){
   if(mode!=='draw') M.chain=null;
   if(!$('entry').hidden && !(entryPair && mode==='measure')) closeEntry();
   if(wpopPair) closeWallPopup();
@@ -5159,11 +5192,6 @@ function setMode(mode){
   }
   document.querySelectorAll('#modes button[data-mode]').forEach(x=>
     x.setAttribute('aria-pressed', String(x.dataset.mode===mode)));
-  // Der Modus steht am body: CSS zeigt danach nur die Werkzeuge und
-  // Panel-Abschnitte, die zu ihm gehoeren.
-  document.body.dataset.mode=mode;
-  setHint(null);
-  render();
 }
 document.querySelectorAll('#modes button[data-mode]').forEach(b=>{
   b.onclick=()=>setMode(b.dataset.mode);
@@ -8927,7 +8955,7 @@ meldeAn('tiles', {
     renderTilesPanel();
     return false;
   },
-  hinweis(){ const h=TILE_TOOL_HINTS[TS.tool]; return h && h(); },
+  hinweis(){ const h=TILE_TOOL_HINTS[TS.tool]; return h ? h() : 'Fliese aus der Leiste ziehen · ⇧+Ziehen: Rahmen · Q/E drehen · ⌘D Muster fortsetzen'; },
   key:tilesKey,
   down:tilesDown, hover:tilesHover, tap:tilesTap,
   gesten:['tiles'], move:tilesMove, up:tilesUp,
