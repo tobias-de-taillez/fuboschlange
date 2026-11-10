@@ -420,6 +420,12 @@ addEventListener('keydown',e=>{
   if(!wrap.contains(e.target)) e.stopPropagation();
 },true);
 wrap.addEventListener('keydown',e=>e.stopPropagation());
+// Der offene Dialog hält den Fokus: Tab wandert nicht in die Seite dahinter.
+document.addEventListener('focusin', e=>{
+  if(wrap.hidden || wrap.contains(e.target)) return;
+  const ziel=wrap.querySelector('button, input, textarea, select');
+  if(ziel) ziel.focus({preventScroll:true});
+});
 // Ein modaler <dialog> (Fliese einmessen) macht alles außerhalb inert, egal
 // welcher z-index. Solange er offen ist, ziehen Knopf und Meldedialog in ihn
 // um, damit „Fehler melden“ auch dort geht; beim Schließen zurück.

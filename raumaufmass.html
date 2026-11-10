@@ -7269,15 +7269,27 @@ function lageHalten(F, P){
 // mit seiner nächsten Änderung den alten Stand darüber. Solange es nicht das
 // bediente Fenster ist, lädt es den Raum deshalb still neu. Ohne zu speichern
 // (recompute.still): sonst weckten sich zwei Fenster gegenseitig.
+// Ob es DIESEN Raum trifft, sagt das Ereignis selbst (Speicher vorher und
+// nachher): ein Schreiben an einem anderen Raum lässt dieses Fenster in Ruhe.
+// Der Vergleich mit dem eigenen Stand taugt dafür nicht, weil der Ausgleich
+// die Ecken beim Laden in den letzten Stellen anders rechnet.
 addEventListener('storage', e=>{
   if(e.key!==null && e.key!=='raumaufmass.rooms') return;
   if(!currentRoom || document.hasFocus()) return;
   const r=STORE.load(currentRoom);
   if(!r){ location.replace('raeume.html'); return; }          // dort gelöscht
+  if(e.key!==null){
+    const raum=v=>{ try{ const l=JSON.parse(v||'[]'); return Array.isArray(l) ? l.find(x=>x && x.id===currentRoom) : null; }catch(err){ return null; } };
+    const vor=raum(e.oldValue), nach=raum(e.newValue);
+    if(vor && nach && JSON.stringify(vor.data)===JSON.stringify(nach.data)) return;
+  }
   if(JSON.stringify(r.data)===serialize()) return;
   if(typeof kitchenResetSession==='function') kitchenResetSession();   // nichts Vorgemerktes über den neuen Stand schreiben
+  const inAusgabe=OUT.on;
   recompute.still=true;
   try{ openRoom(currentRoom); } finally{ recompute.still=false; }
+  // Stand das Fenster in der Ausgabe (Blatt als Vorschau daneben), bleibt es dort.
+  if(inAusgabe && raumGeschlossen()) openOut();
 });
 
 function speicherWarnung(){
@@ -7292,7 +7304,13 @@ function openRoom(id){
   if(!r) return;
   currentRoom=id;
   currentRoomName=r.name;
-  STORE.setCurrent(id);
+  // Das stille Neuladen eines Fensters im Hintergrund schreibt nichts: „zuletzt
+  // geöffnet“ gehört dem bedienten Fenster (sonst öffnete dort „Neuer Raum“
+  // oder ein Neuladen den Raum dieses Fensters).
+  if(!recompute.still) STORE.setCurrent(id);
+  // Welcher Raum in DIESEM Fenster offen ist: ein Neuladen bleibt bei ihm,
+  // auch wenn ein anderes Fenster inzwischen einen anderen geöffnet hat.
+  try{ sessionStorage.setItem('raumaufmass.fenster', id); }catch(e){}
   // Einnordung gehoert zum Raum, nicht zur Sitzung: sonst haengt die
   // Ansicht des naechsten Raums an einer Wand, die es dort nicht gibt
   // (browser-gesehen: schraeges Raster im frisch geoeffneten Raum).
@@ -8990,6 +9008,7 @@ let wpopPair=null;
 function openWallPopup(a,b,mitte){
   closeEntry();
   hidePop();
+  wpopZeile=null;
   // Eine angefangene Zahl gehört zur vorigen Strecke und landet nicht bei dieser.
   if(!wpopPair || wallKey(wpopPair.a,wpopPair.b)!==wallKey(a,b)){ $('wpopVal').value=''; $('wpopVal').classList.remove('bad'); $('wpopVal').style.borderColor=''; }
   wpopPair={a,b}; wpopMitte = mitte==null ? null : mitte;
@@ -9003,11 +9022,16 @@ function openWallPopup(a,b,mitte){
   $('wpopVal').focus({preventScroll:true});
   redraw();
 }
+// Aus der Liste mit der Tastatur geöffnet: nach dem Schließen steht der Fokus
+// wieder auf der Zeile, damit Tab dort weitergeht.
+let wpopZeile=null;
 function closeWallPopup(){
+  const z=wpopZeile; wpopZeile=null;
   wpopPair=null;
   $('wpop').hidden=true;
   if(!entryPair) M.highlight=null;
   redraw();
+  if(z){ const r=[...$('wl').querySelectorAll('.wrow')].find(x=>x.dataset.a===z.a && x.dataset.b===z.b); if(r) r.focus({preventScroll:true}); }
 }
 function placeWpop(){
   const box=$('wpop');
@@ -10827,7 +10851,7 @@ function zoomCenter(f){ viewZoomAt(cv.width/2, cv.height/2, f); redraw(); }
 // gleichen Ecken), geht es in der Skizze weiter, und der Zug laeuft.
 // Wiederherstellen schliesst wieder und fuehrt wie der Klick nach Maße.
 function doUndo(){
-  const aus=OUT.on;
+  const aus=OUT.on, fremd=fremdStand();
   const zu=!!C.wallPolygonRing(M.pts, M.walls), ecken=M.pts.length, waende=M.walls.length;
   if(!undo()){ setHint('Nichts mehr rückgängig zu machen.'); return; }
   if(TOOL==='aufmass' && planMode() && zu && M.pts.length===ecken && M.walls.length===waende-1
@@ -10835,13 +10859,27 @@ function doUndo(){
     M.chain=zugEnde(); setMode('draw');
   }
   ausgabeNurGeschlossen(aus);
+  sagFremd(fremd, 'zurückgenommen', '⇧⌘Z stellt ihn wieder her');
 }
 function doRedo(){
-  const aus=OUT.on;
+  const aus=OUT.on, fremd=fremdStand();
   const offen=!C.wallPolygonRing(M.pts, M.walls), ecken=M.pts.length, waende=M.walls.length;
   if(!redo()){ setHint('Nichts wiederherzustellen.'); return; }
   if(TOOL==='aufmass' && M.mode==='draw' && offen && M.pts.length===ecken && M.walls.length===waende+1) finishIfClosed();
   ausgabeNurGeschlossen(aus);
+  sagFremd(fremd, 'wiederhergestellt', '⌘Z nimmt ihn zurück');
+}
+// Fliesenplan, Küchenplaner und Raumaufmaß teilen sich einen Rückgängig-Stapel.
+// Trifft ein Schritt im Raumaufmaß etwas, das hier nicht zu sehen ist (eine
+// Fliese, ein Küchenteil), sagt die Rückmeldung, wo er lag.
+function fremdStand(){
+  return TOOL==='aufmass' ? [JSON.stringify(M.tiles||null), JSON.stringify(M.kitchen||null)] : null;
+}
+function sagFremd(vor, was, weg){
+  if(!vor || TOOL!=='aufmass') return;
+  const nach=fremdStand();
+  const wo=vor[1]!==nach[1] ? 'Küchenplaner' : vor[0]!==nach[0] ? 'Fliesenplan' : null;
+  if(wo) sag(`Der Schritt lag im ${wo} und ist ${was} · ${weg}`);
 }
 // Öffnet Rückgängig oder Wiederherstellen den Raum, während die Ausgabe offen
 // ist, geht sie zu: ein Blatt gibt es erst vom geschlossenen Raum.
@@ -10901,6 +10939,10 @@ addEventListener('keydown',e=>{
   // und behaelt den Fokus. Nach einem Mausklick hat er ihn schon abgegeben
   // (change-Listener oben), dort verschiebt die Leertaste weiter.
   if(e.code==='Space' && t && t.tagName==='INPUT' && t.type==='checkbox'){ hakenTaste=t; return; }
+  // Leertaste auf einem Knopf, den man mit Tab erreicht hat (sichtbarer Fokus):
+  // er löst nativ aus. Nach einem Mausklick ist der Fokus nicht sichtbar, dort
+  // verschiebt die Leertaste weiter.
+  if(e.code==='Space' && t && t.tagName==='BUTTON' && t.matches(':focus-visible')) return;
   // Leertaste gehalten: Ziehen verschiebt. preventDefault, sonst loest ein
   // fokussierter Knopf beim Loslassen aus.
   if(e.code==='Space'){
@@ -11546,7 +11588,7 @@ function renderPanel(){
       row.onclick=()=>openWallPopup(row.dataset.a,row.dataset.b);
       // Mit Tab erreichbar: Enter oder Leertaste öffnet die Karte der Strecke.
       row.onfocus=row.onmouseenter; row.onblur=row.onmouseleave;
-      row.onkeydown=e=>{ if(e.key==='Enter' || e.key===' '){ e.preventDefault(); e.stopPropagation(); openWallPopup(row.dataset.a,row.dataset.b); } };
+      row.onkeydown=e=>{ if(e.key==='Enter' || e.key===' '){ e.preventDefault(); e.stopPropagation(); openWallPopup(row.dataset.a,row.dataset.b); wpopZeile={a:row.dataset.a, b:row.dataset.b}; } };
     });
   }
 
@@ -11782,6 +11824,14 @@ function toggleHelp(){ const w=$('helpwrap');
   if(!w.hidden){ const b=$('helpbox'); b.tabIndex=-1; b.style.outline='none'; b.scrollTop=0; b.focus({preventScroll:true}); } }
 function closeHelp(){ const w=$('helpwrap'); if(w.hidden) return false; w.hidden=true; return true; }
 $('helpBtn').onclick=toggleHelp;
+// Ein offener Dialog hält den Fokus: Tab wandert nicht in die verdeckte Seite
+// (dort löste Enter sonst Knöpfe aus, die man nicht sieht).
+document.addEventListener('focusin', e=>{
+  const w=[$('helpwrap'), $('qrwrap'), $('keyswrap')].find(x=>x && !x.hidden);
+  if(!w || w.contains(e.target) || (e.target.closest && e.target.closest('#mldwrap'))) return;
+  const ziel=w.querySelector('button, [href], input, select, [tabindex]');
+  if(ziel) ziel.focus({preventScroll:true});
+});
 $('helpclose').onclick=closeHelp;
 $('helpwrap').addEventListener('pointerdown',e=>{ if(e.target===$('helpwrap')) closeHelp(); });
 
@@ -11821,6 +11871,9 @@ function setTool(tool, boot){
     history.replaceState(null,'',location.pathname+location.search+hash);
   closeOut();
   $('hint').textContent='';
+  // Die Planfläche ist je Werkzeug eine andere (der Küchenplaner teilt sie mit
+  // 3D): eine gemerkte Ansicht passte dort nicht mehr, also neu einpassen.
+  if(!boot) userView=false;
   if(tool==='fliesen') setMode('tiles');
   else if(tool==='kueche') setMode('kitchen');
   // Im Raumaufmaß beginnt man dort, wo der Raum steht: offen in der Skizze,
@@ -12003,7 +12056,12 @@ if(!currentRoom){
   // deserialize() wirft auf manuell verbogenen Storage-Daten - das darf
   // den Boot nicht toeten, sonst bleibt die Seite leer statt leerzustarten.
   try{
-    const cur=STORE.currentId();
+    let cur=STORE.currentId();
+    // Neuladen: der Raum dieses Fensters, nicht der zuletzt irgendwo geöffnete.
+    try{
+      const nav=performance.getEntriesByType('navigation')[0], eigen=sessionStorage.getItem('raumaufmass.fenster');
+      if(nav && nav.type==='reload' && eigen && STORE.load(eigen)) cur=eigen;
+    }catch(e){}
     if(cur && STORE.load(cur)) openRoom(cur);
     else {
       const l=STORE.list();
