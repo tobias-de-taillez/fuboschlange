@@ -2252,6 +2252,18 @@ function stepSwim(now){
   render();
 }
 
+// ================= Anmeldung der Werkzeuge =================
+// Fliesenplan und Küchenplaner melden sich hier an (meldeAn), und die Seite ruft sie
+// über diese Anmeldung, ohne sie zu kennen. Der Schlüssel ist der Modus (M.mode):
+//   bereit()    darf der Raum so geöffnet werden?        absage: Text der Hinweiszeile, wenn nicht
+//   zeichne()   die Zeichenfläche                        panel(): Abschnitt im Panel; true = der Modus
+//   hinweis()   Standardtext der Hinweiszeile            wurde verlassen, die Seite rendert nicht weiter
+//   verlassen() beim Wechsel in einen anderen Modus
+// Die Anmeldung selbst steht beim Werkzeug; die Seite lädt es nach diesem Block.
+const WERKZEUGE={};
+function meldeAn(modus, werk){ WERKZEUGE[modus]=werk; }
+const werkzeug=modus=>WERKZEUGE[modus===undefined ? M.mode : modus]||null;
+
 function render(){
   redraw();
   renderPanel();
@@ -2885,8 +2897,7 @@ function drawQuer(P, I, dpr){
 }
 
 function drawCanvas(){
-  if(M.mode==='tiles'){ drawTilesView(); return; }
-  if(M.mode==='kitchen' && typeof drawKitchenView==='function'){ drawKitchenView(); k3dSchedule(); return; }
+  const werk=werkzeug(); if(werk){ werk.zeichne(); return; }
   const dpr=DPR();
   sizeCanvas(dpr);
   // 0x0-Canvas (verstecktes oder noch nicht angeschlossenes Layout):
@@ -5032,8 +5043,8 @@ function modeHint(){
     return 'Öffnung ziehen verschiebt sie entlang der Wand · Entf löscht · Esc hebt die Auswahl auf';
   if(M.mode==='draw' && M.chain!=null)
     return `Zug ab ${M.chain}: Klick setzt die nächste Ecke · Klick auf die erste schließt den Raum · Esc beendet den Zug`;
-  if(M.mode==='tiles' && typeof TILE_TOOL_HINTS!=='undefined' && TILE_TOOL_HINTS[TS.tool]) return TILE_TOOL_HINTS[TS.tool]();
-  if(M.mode==='kitchen' && typeof kitchenHint==='function') return kitchenHint();
+  const werk=werkzeug();
+  if(werk && werk.hinweis){ const t=werk.hinweis(); if(t) return t; }
   return MODE_HINTS[M.mode];
 }
 let hintTimer=null, hintLive=false;
@@ -5070,17 +5081,11 @@ function setMode(mode){
   // Eine Rückmeldung gehört zu dem Schritt, in dem sie entstand.
   sag(null);
   closeOut();
-  if(mode==='tiles' && !tilesReady()){
-    setHint('Fliesen erst, wenn der Raum geschlossen und eingemessen ist.');
-    return;
-  }
-  if(mode==='kitchen' && !(typeof kitchenReady==='function' && kitchenReady())){
-    setHint('Küche erst, wenn der Grundriss eindeutig eingemessen ist.');
-    return;
-  }
-  if(M.mode==='kitchen' && mode!=='kitchen' && typeof kitchenLeave==='function') kitchenLeave();
-  // Beim Verlassen des Fliesen-Modus: Werkzeug zurueck, Auswahl weg.
-  if(M.mode==='tiles' && mode!=='tiles'){ TS.sel.clear(); TS.tool='move'; TS.draft=null; TS.lines=[]; }
+  const ziel=werkzeug(mode);
+  if(ziel && !ziel.bereit()){ setHint(ziel.absage); return; }
+  // Beim Verlassen eines Werkzeugs: aufräumen (Fliesen: Werkzeug zurück, Auswahl weg).
+  const alt=werkzeug();
+  if(alt && mode!==M.mode && alt.verlassen) alt.verlassen();
   M.mode=mode; M.sel=[];
   if(mode!=='draw') M.chain=null;
   if(!$('entry').hidden && !(entryPair && mode==='measure')) closeEntry();
@@ -5834,25 +5839,9 @@ function renderPanel(){
   const wt=document.querySelector('#modes button[data-mode="wall"]');
   if(wt){ const ok=wallTabReady(); wt.setAttribute('aria-disabled', String(!ok));
     wt.title = ok ? 'Wände (3)' : M.an && !C.wallPolygonRing(M.pts, M.walls) ? 'Wände (3): erst, wenn der Raum geschlossen ist' : 'Wände (3): erst, wenn die Form eindeutig ist'; }
-  // Der tiles-ui-Block laedt NACH diesem - beim ersten Bild waehrend des
-  // Boots gibt es ihn noch nicht. Danach rendert er seinen Teil selbst mit.
-  if(typeof renderTilesPanel==='function'){
-    const ft=document.querySelector('#modes button[data-mode="tiles"]');
-    if(ft){ const ok=tilesReady(); ft.setAttribute('aria-disabled', String(!ok));
-      ft.title = ok ? 'Fliesen (4)' : 'Fliesen (4): erst, wenn der Raum geschlossen und eingemessen ist'; }
-    // Fliesen-Modus ohne gueltigen Grundriss (z.B. nach Rueckgaengig): raus.
-    if(M.mode==='tiles' && !tilesReady()){ setTool('aufmass'); return; }
-    renderTilesPanel();
-  }
-  // Küche wie Wände: nur mit eindeutiger Form. Fällt sie weg, raus.
-  if(typeof renderKitchenPanel==='function'){
-    const kt=document.querySelector('#modes button[data-mode="kitchen"]');
-    const ok=kitchenReady();
-    if(kt){ kt.setAttribute('aria-disabled', String(!ok));
-      kt.title = ok ? 'Küche (5)' : 'Küche (5): erst, wenn der Grundriss eindeutig eingemessen ist'; }
-    if(M.mode==='kitchen' && !ok){ setTool('aufmass'); sag('Küchenplaner verlassen: die Form ist nicht mehr eindeutig.'); return; }
-    renderKitchenPanel();
-  }
+  // Die Werkzeuge laden NACH diesem Block - beim ersten Bild waehrend des
+  // Boots gibt es sie noch nicht. Danach rendern sie ihren Teil selbst mit.
+  for(const werk of Object.values(WERKZEUGE)) if(werk.panel && werk.panel()) return;
   // Wie bei den Fliesen: faellt die Bedingung weg (Raumwechsel, Rueckgaengig),
   // verlaesst die App den Modus selbst, statt Skizzenmasse zu zeigen.
   if(M.mode==='wall' && !wallTabReady()){
@@ -6298,7 +6287,7 @@ function setTool(tool, boot){
   let absage=null;
   if(tool==='fliesen' && !tilesReady()){
     tool='aufmass'; absage='Der Fliesenplan braucht einen geschlossenen, eingemessenen Raum.'; }
-  if(tool==='kueche' && !(typeof kitchenReady==='function' && kitchenReady())){
+  if(tool==='kueche' && !kitchenReady()){
     tool='aufmass'; absage='Der Küchenplaner braucht eine eindeutige Form.'; }
   TOOL=tool; document.body.dataset.tool=tool;
   $('toolname').hidden = tool==='aufmass';
@@ -6450,7 +6439,7 @@ function renderOut(){
   }
   // raum-blatt.js kam nicht an: sagen, statt eine leere Fläche zu zeigen.
   else sh.innerHTML='<p style="margin:48px auto;max-width:28em;text-align:center;color:var(--ink2)">Das Aufmaßblatt ist nicht geladen. Die Seite neu laden.</p>';
-  const fl=tilesReady(), ku=typeof kitchenReady==='function' && kitchenReady();
+  const fl=tilesReady(), ku=kitchenReady();
   const nFl=M.tiles && M.tiles.items ? M.tiles.items.length : 0, nKu=M.kitchen && M.kitchen.items ? M.kitchen.items.length : 0;
   $('outTiles').disabled=!fl; $('outKitchen').disabled=!ku;
   $('outTilesNote').textContent = !fl ? 'braucht einen geschlossenen, eingemessenen Raum' : nFl ? `${nFl} ${nFl===1?'Fliese':'Fliesen'} verlegt` : 'noch nicht begonnen';
@@ -6578,7 +6567,6 @@ function tilesCtx(){
   const layCut=TL.insetRoom(ring, (a,b)=>{ const w=wallJointOf(T,a,b); return w ? w.width : T.spec.edgeGap/2; });
   return {F, ringW, ring, lay, layCut};
 }
-const tilesReady=()=>!!tilesCtx();
 const wallJointOf=(T,a,b)=>(T.wallJoints||[]).find(w=>(w.a===a&&w.b===b)||(w.a===b&&w.b===a));
 const tScr=(K,p)=>toScr(TL.toWorldF(K.F,p));
 const tEvLocal=(K,e)=>{ const d=evDev(e); return TL.toLocal(K.F, toWorld(d.x,d.y)); };
@@ -8839,6 +8827,23 @@ function drawRuler(K, dpr){
 }
 $('tRuler').onclick=()=>rulerToggle();
 
+// Anmeldung bei der Seite (meldeAn im Block ui): so ruft sie den Fliesenplan, ohne ihn zu kennen.
+meldeAn('tiles', {
+  bereit:tilesReady, absage:'Fliesen erst, wenn der Raum geschlossen und eingemessen ist.',
+  zeichne:drawTilesView,
+  panel(){
+    const ft=document.querySelector('#modes button[data-mode="tiles"]');
+    if(ft){ const ok=tilesReady(); ft.setAttribute('aria-disabled', String(!ok));
+      ft.title = ok ? 'Fliesen (4)' : 'Fliesen (4): erst, wenn der Raum geschlossen und eingemessen ist'; }
+    // Fliesen-Modus ohne gueltigen Grundriss (z.B. nach Rueckgaengig): raus.
+    if(M.mode==='tiles' && !tilesReady()){ setTool('aufmass'); return true; }
+    renderTilesPanel();
+    return false;
+  },
+  hinweis(){ const h=TILE_TOOL_HINTS[TS.tool]; return h && h(); },
+  // Beim Verlassen des Fliesen-Modus: Werkzeug zurueck, Auswahl weg.
+  verlassen(){ TS.sel.clear(); TS.tool='move'; TS.draft=null; TS.lines=[]; },
+});
 // Erstes Bild nach dem Boot: jetzt kennt renderPanel den Fliesen-Knopf. Ganz am
 // Ende des Blocks, damit alles steht, was das Zeichnen der Fliesenansicht braucht
 // (TS.ruler, RULER_PX, rulerLen ...): vorher gelang das Bild nur, weil die Seite
@@ -8864,7 +8869,7 @@ function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
 function kitchenData(){ if(!M.kitchen) M.kitchen=KX.normKitchen(null); return M.kitchen; }
 // Nur mit eindeutiger Form: Schränke an Skizzenlinien wären Erfindung.
 function kitchenEnv(){
-  if(!(M.fit && M.fit.pts && M.an && M.an.dof===0 && M.walls.length)) return null;
+  if(!kitchenReady()) return null;
   return KX.makeEnv(M.fit.pts, M.walls, M.openings, M.hmeas, M.water, M.kitchen && M.kitchen.frame);
 }
 // Alles Abgeleitete einmal je Zustand: Layout und Prüfung. Wege und
@@ -8882,7 +8887,6 @@ function kctx(){
   KS.ctxKey=key; KS.ctx={E,K,L,F,bad,warn,key};
   return KS.ctx;
 }
-const kitchenReady=()=>!!kitchenEnv();
 function kitchenSave(){
   KS.ctxKey='';
   nudgeSave.cancel();                              // ein volles Speichern erledigt auch das Vorgemerkte
@@ -10600,7 +10604,23 @@ function kitchenHint(){
   return 'Schrank aus der Leiste ziehen oder klicken · V 3D · W Wege · O Fronten offen · A Analyse';
 }
 
-Object.assign(globalThis, { kitchenReady, kitchenDown, kitchenMove, kitchenUp, kitchenTap, kitchenHover, kitchenKey,
+// Anmeldung bei der Seite (meldeAn im Block ui): so ruft sie den Küchenplaner, ohne ihn zu kennen.
+meldeAn('kitchen', {
+  bereit:kitchenReady, absage:'Küche erst, wenn der Grundriss eindeutig eingemessen ist.',
+  zeichne(){ drawKitchenView(); k3dSchedule(); },
+  panel(){
+    const kt=document.querySelector('#modes button[data-mode="kitchen"]');
+    const ok=kitchenReady();
+    if(kt){ kt.setAttribute('aria-disabled', String(!ok));
+      kt.title = ok ? 'Küche (5)' : 'Küche (5): erst, wenn der Grundriss eindeutig eingemessen ist'; }
+    if(M.mode==='kitchen' && !ok){ setTool('aufmass'); sag('Küchenplaner verlassen: die Form ist nicht mehr eindeutig.'); return true; }
+    renderKitchenPanel();
+    return false;
+  },
+  hinweis:kitchenHint,
+  verlassen:kitchenLeave,
+});
+Object.assign(globalThis, { kitchenDown, kitchenMove, kitchenUp, kitchenTap, kitchenHover, kitchenKey,
   drawKitchenView, renderKitchenPanel, kitchenLeave, k3dSchedule, kitchenHint, kitchenData,
   kitchenDeleteSel:()=>{ const it=selItem(); if(!it) return false; removeItem(it); return true; },
   // Vor dem Raumwechsel (openRoom, solange currentRoom noch der alte Raum ist): Vorgemerktes Speichern ausführen.

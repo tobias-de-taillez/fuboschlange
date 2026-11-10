@@ -331,3 +331,13 @@ function polyAreaM2(){
   if(!poly) return null;
   return C.roomArea(poly)/1e6;              // abzueglich Inseln
 }
+
+// --- Bereitschaft der Folgewerkzeuge: dürfen Fliesenplan und Küchenplaner diesen Raum öffnen?
+// Hier statt bei den Werkzeugen, weil auch das Raumaufmaß (Ausgabe, Werkzeugwechsel) es fragt.
+// Fliesen: ausgeglichene, geschlossene Form. Küche: eindeutige Form (Schränke an Skizzenlinien wären Erfindung).
+const tilesReady=()=>{
+  if(!M.fit) return false;
+  const F=globalThis.TILES.frameOf(M.fit.pts, M.walls);
+  return !!(F && C.wallPolygon(M.fit.pts, M.walls));
+};
+const kitchenReady=()=>!!(M.fit && M.fit.pts && M.an && M.an.dof===0 && M.walls.length);
