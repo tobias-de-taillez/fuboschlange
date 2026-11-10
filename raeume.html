@@ -541,6 +541,13 @@ globalThis.RAUMZEILE=(function(){
   function menuWahl(t){
     const id=menuRaum, d=t.dataset, schonDa=t.getAttribute('aria-checked')==='true', fk='ort:'+id;
     schliesseMenu();
+    // Manuell verknüpfte Türen gehören zum selben Geschoss. Ein Raumwechsel
+    // darf sie nicht heimlich über Geschosse oder Gebäude hinweg verbinden.
+    const r=STORE.load(id), linked=Object.values(r?.data?.shared||{}).some(s=>s && s.manuell);
+    if(!schonDa && linked){
+      zeigeHinweis('Raum ist über eine Tür verbunden.', 'Bitte zuerst die Türverbindung in der Wandansicht lösen. Danach lässt sich der Raum einem anderen Geschoss zuordnen.');
+      return;
+    }
     let ok=true;
     if(d.m==='g'){ if(!schonDa) ok=HAUS.ordneZu(id, d.id); }
     else if(d.m==='einzeln'){ if(!schonDa) ok=HAUS.loese(id); }

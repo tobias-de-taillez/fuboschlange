@@ -280,6 +280,13 @@ const ABLAEUFE={
       openRoom(a); setMode('wall'); M.wallSel={a:'F',b:'A'}; M.openSel='o1'; render(); return result; },ids);
     pruef('Import als Kopie übernimmt keine fremde Türverbindung und lässt das Originalpaar intakt',
       !copied.err && !copied.copy && copied.a===ids.b && copied.b===ids.a,JSON.stringify(copied));
+    const home=await f.context.newPage(); f.horche(home); await home.goto(BASE+'/raeume.html'); await sleep(600);
+    await home.locator(`[data-room="${ids.a}"] [data-ort]`).click();
+    await home.locator('#ortmenu button',{hasText:'Obergeschoss'}).click(); await sleep(200);
+    pruef('Ein verbundener Raum kann nicht unbemerkt in ein anderes Geschoss verschoben werden',
+      /zuerst die Türverbindung/.test(await home.locator('body').innerText()) &&
+      await home.evaluate(({a,b})=>HAUS.ort(a).geschoss.id===HAUS.ort(b).geschoss.id,ids));
+    await home.close();
     await p.reload(); await sleep(800);
     await p.evaluate(()=>{ setMode('wall'); M.wallSel={a:'F',b:'A'}; M.openSel='o1'; render(); });
     pruef('Verbindung bleibt beim Neuladen sichtbar',await p.locator('#opConnection').innerText().then(s=>s.includes('Flur')));

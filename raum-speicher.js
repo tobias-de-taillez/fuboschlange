@@ -99,6 +99,8 @@ globalThis.STORE_FACTORY=function makeStore(storage){
     linkDoors(id, data, opId, otherId, otherOpId, thickness){
       const rooms=readRooms(), a=rooms.find(r=>r.id===id), b=rooms.find(r=>r.id===otherId);
       if(!a || !b || a===b || !data || !b.data) return {ok:false, reason:'Raum nicht gefunden.'};
+      if(JSON.stringify(a.data?.shared||{})!==JSON.stringify(data.shared||{}))
+        return {ok:false, reason:'Die Raumverbindungen haben sich geändert; bitte Raum neu laden.'};
       const door=(d,i)=>Array.isArray(d.openings) && d.openings.filter(o=>o && o.id===i && o.kind==='door');
       const aa=door(data,opId), bb=door(b.data,otherOpId);
       if(!aa || aa.length!==1 || !bb || bb.length!==1) return {ok:false, reason:'Tür nicht eindeutig gefunden.'};
@@ -118,7 +120,10 @@ globalThis.STORE_FACTORY=function makeStore(storage){
       if(!a || !sh || !sh.manuell || !Array.isArray(sh.wall)) return {ok:false, reason:'Verbindung nicht gefunden.'};
       const b=rooms.find(r=>r.id===sh.room), k=[...sh.wall].sort().join('|');
       const back=b && b.data && b.data.shared && b.data.shared[k];
-      if(b && (!back || !back.manuell || back.room!==id)) return {ok:false, reason:'Die Gegenseite hat sich geändert; bitte Raum neu laden.'};
+      const stored=a.data && a.data.shared && a.data.shared[wall];
+      if(!stored || !stored.manuell || stored.room!==sh.room || stored.tuer?.op!==sh.tuer?.op ||
+         (b && (!back || !back.manuell || back.room!==id || !Array.isArray(back.wall) || [...back.wall].sort().join('|')!==wall)))
+        return {ok:false, reason:'Die Verbindung hat sich geändert; bitte Raum neu laden.'};
       const shared={...data.shared}; delete shared[wall];
       a.data={...data,shared}; a.updated=new Date().toISOString();
       if(b){ const s={...b.data.shared}; delete s[k]; b.data={...b.data,shared:s}; b.updated=a.updated; }

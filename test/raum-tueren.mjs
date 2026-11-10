@@ -18,6 +18,7 @@ assert.equal(S.linkDoors(a,source,'o1',b,'missing',175).ok,false);
 assert.equal(m.get('raumaufmass.rooms'),before,'failed connection does not change either room');
 assert.equal(S.linkDoors(a,source,'o1',b,'o2',175).ok,true);
 let A=S.load(a), B=S.load(b);
+assert.equal(S.linkDoors(a,source,'o1',b,'o2',175).ok,false,'stale room data cannot overwrite a new connection');
 assert.equal(A.data.shared['A|B'].tuer.op,'o1');
 assert.equal(B.data.shared['A|B'].tuer.op,'o2');
 assert.equal(A.data.shared['A|B'].room,b); assert.equal(B.data.shared['A|B'].room,a);
@@ -30,6 +31,8 @@ const loop=x=>schlussFehler([A,B],{origins:{[a]:{x:0,y:0,rot:0},[b]:{...T,x:T.x+
 assert.ok(loop(0).versatz<1e-6,'closure compares door centres rather than unequal wall ends');
 assert.ok(Math.abs(loop(100).versatz-100)<1e-6,'a real 100 mm displacement is reported');
 assert.equal(S.linkDoors(a,A.data,'o1',b,'o2',175).ok,false,'occupied walls cannot be replaced');
+const altered={...A.data,shared:{...A.data.shared,'A|B':{...A.data.shared['A|B'],room:'other'}}};
+assert.equal(S.unlinkDoors(a,altered,'A|B').ok,false,'stale or mismatched links cannot delete another connection');
 assert.equal(S.unlinkDoors(a,A.data,'A|B').ok,true);
 A=S.load(a); B=S.load(b);
 assert.deepEqual(A.data.shared,{}); assert.deepEqual(B.data.shared,{});
