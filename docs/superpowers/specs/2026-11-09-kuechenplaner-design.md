@@ -133,7 +133,7 @@ Quelle: nobilia Kurztypenliste (Halbeckschränke UED/UE/UEDSA, Wand-Eckschränke
 - Kochfeld unter einem Fenster, das sich öffnen lässt
 
 **warn (gelb)** heißt „Richtwert verfehlt“:
-- Gang unter 1200 (Fehler unter 900), von Plattenkante zu Plattenkante gemessen (NKBA Guideline 6) und in ganzen mm verglichen: genau 1200 oder 900 mm lösen nichts aus. Zu zweit kochen: 1219. Eine Insel oder ein Tisch quer zur Zeile (45–135°), deren Kante in der Plattenkante steht, zählt als 0 mm (rot). Der Inselabstand der Maßkette misst bis zur selben Plattenkante.
+- Gang unter 1200 (Fehler unter 900), von Plattenkante zu Plattenkante gemessen (NKBA Guideline 6) und in ganzen mm verglichen: genau 1200 oder 900 mm lösen nichts aus. Zu zweit kochen: 1219. Steht die Kante einer Insel oder eines Tischs schon in der Plattenkante der Zeile, zählt der Gang als 0 mm (rot), auch bei schräger oder querer Stellung. Der Inselabstand der Maßkette misst bis zur selben Plattenkante.
 - Stuhlraum unter 813 (Fehler unter 750), gemessen vom Mittelstrahl jeder Tischseite
 - Tresen: Platz hinter den Hockern unter 813 (Fehler unter 750), entlang der ganzen Hockerkante
 - Halbeckschrank
@@ -211,7 +211,7 @@ Die Wände sind einseitig (Culling), deshalb verschwinden sie, wenn man von auß
 - Über Eck: Die beiden Türen schwenken im Modell je 90° um ihr äußeres Ende. Die echten 165°-Falttüren brauchen etwas anderen Platz im Eckfeld.
 - Über Eck und Diagonal gehen nur in rechtwinkligen Innenecken (±3°) und mit gleich langen Schenkeln.
 - Rückt ein Halbeckschrank von der Ecke ab, meldet die Platte den toten Winkel dahinter als „Passleiste“. Bei nobilia deckt das der Winkelpassstück-Bereich hinter der Querzeile ab, ein Bauteil ist es nicht.
-- Inseln rasten beim Ziehen ein: die Stirnseite dockt bündig an eine Wand, wenn die Insel schon ungefähr quer dazu steht (ab 35°), die Seite an eine andere Insel (längs, Seite an Seite oder quer, die Drehung wird übernommen, Platte an Platte; bei gleicher Höhe läuft die Arbeitsplatte durch). ⌥ schaltet das Einrasten ab. Der Tisch rastet nicht ein.
+- Inseln rasten beim Ziehen ein: die Stirnseite dockt bündig an eine Wand, wenn die Insel höchstens 35° von der Senkrechten zur Wand abweicht (also mindestens 55° zur Wand steht), die Seite an eine andere Insel (längs, Seite an Seite oder quer, die Drehung wird übernommen, Platte an Platte; bei gleicher Höhe läuft die Arbeitsplatte durch). ⌥ schaltet das Einrasten ab. Der Tisch rastet nicht ein.
 - Bei gestufter Inselplatte rechnet die Stückliste Gesamtlänge mal größte Tiefe, und bei vier oder mehr Inseln im Ring füllt der Plan die Lücke in der Mitte mit Platte.
 - Der Stuhlraum am Tisch misst nur den Mittelstrahl jeder Seite, der Tresen die ganze Hockerkante; eine enge Stelle neben der Mitte fällt am Tisch nicht auf.
 - Es gibt keinen Druck, keine Wandansicht von vorn und keine Auswahl in 3D.
