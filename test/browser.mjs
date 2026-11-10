@@ -2,7 +2,8 @@
 // ein Mensch (echte Klicks und Tasten) und prüft, was die Node-Tests nicht
 // sehen: die Bedienung. Die 1018 Selbstchecks decken die Rechenkerne; dieser
 // Lauf deckt den Weg Skizze, Maße, Wände, Ausgabe, zwei Fenster, eine
-// unvollständig geladene Seite, den Fliesenplan und den Küchenplaner.
+// unvollständig geladene Seite, den Fliesenplan und den Küchenplaner, und (Ablauf
+// „stabil“) dass das gespeicherte Aufmaß beim Öffnen und Arbeiten nicht wandert.
 //
 //   node test/browser.mjs                 alle Abläufe in Chromium
 //   node test/browser.mjs webkit          in WebKit (firefox ebenso)
@@ -16,7 +17,7 @@
 // Fehlt es, endet der Lauf mit 2 und sagt das. Der Test liefert die Seiten
 // selbst aus (eigener Port, leerer Speicher) und fasst keine andere Adresse an.
 import http from 'node:http';
-import {readFile} from 'node:fs/promises';
+import {readFile, readdir} from 'node:fs/promises';
 import {createRequire} from 'node:module';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
@@ -544,6 +545,48 @@ const ABLAEUFE={
     pruef('der Knopf „Küche“ öffnet den Küchenplaner mit den Teilen', wieder.tool==='kueche' && wieder.items===vorher && wieder.zeilen>=1, JSON.stringify([wieder.tool, wieder.hash, wieder.zeilen]));
     pruef('keine Fehler in der Konsole', f.stoer.length===0, f.stoer.join(' | '));
     await f.browser.close();
+  },
+  // Das gespeicherte Aufmaß bleibt beim Öffnen und Arbeiten stabil. Neun Räume
+  // (test/daten/stabil: L-Raum mit Messfehlern, 90°-Ausgleich, eigene Skizze,
+  // Küche, Nachbarraum, zwei Räume aus dem alten Werkzeug ohne Stand, großer Raum
+  // mit Insel, Wintergarten mit Schräge) werden in jedem der drei Werkzeuge
+  // geöffnet, bearbeitet (Fliese bzw. Küchenteil setzen, Rückgängig,
+  // Wiederherstellen) und dreimal neu geladen. Jede Seite, die den Raum rechnet,
+  // muss ihn wie das Aufmaß rechnen: sonst wandern die Maße im Speicher (gemessen
+  // an einer Probeseite ohne lageHalten: bis 1,3 mm je Öffnen). Prüfstand für
+  // jeden Schnitt durch recompute (docs/superpowers/plans/2026-11-10-familie-schritt-3.md).
+  async stabil(){
+    const ordner=path.join(WURZEL, 'test', 'daten', 'stabil');
+    const MOD=process.platform==='darwin' ? 'Meta' : 'Control';
+    const ptsAbstand=(a,b)=>{ if(!a||!b||a.length!==b.length) return Infinity; let m=0; for(let i=0;i<a.length;i++){ if(a[i].id!==b[i].id) return Infinity; m=Math.max(m, Math.hypot(a[i].x-b[i].x, a[i].y-b[i].y)); } return m; };
+    const gespeichert=(p,id)=>p.evaluate(id=>JSON.parse(localStorage.getItem('raumaufmass.rooms')).find(r=>r.id===id), id);
+    for(const datei of (await readdir(ordner)).filter(n=>n.endsWith('.json')).sort()){
+      const fall=JSON.parse(await readFile(path.join(ordner, datei), 'utf8')), name=datei.replace(/\.json$/, '');
+      const id=fall.ls['raumaufmass.current'], start=JSON.parse(fall.ls['raumaufmass.rooms']).find(r=>r.id===id);
+      for(const [hash, soll] of [['', 'aufmass'], ['#fliesen', 'fliesen'], ['#kueche', 'kueche']]){
+        const f=await fenster(); const p=f.page, wo=`${name} ${soll}`;
+        await f.context.addInitScript(ls=>{ if(!localStorage.getItem('raumaufmass.rooms')) for(const k in ls) localStorage.setItem(k, ls[k]); }, fall.ls);
+        await p.goto(BASE+'/raumaufmass.html'+hash); await sleep(1300);
+        const da=await p.evaluate(()=>({tool:TOOL, ecken:M.pts.length, raum:currentRoom}));
+        if(da.tool!==soll || da.raum!==id){ pruef(`${wo}: öffnet im richtigen Werkzeug und Raum`, false, JSON.stringify(da)); await f.browser.close(); continue; }
+        const r1=await gespeichert(p, id);
+        pruef(`${wo}: bloßes Öffnen verschiebt das gespeicherte Aufmaß höchstens 0,01 mm`, ptsAbstand(r1.data.pts, start.data.pts)<=0.01, ptsAbstand(r1.data.pts, start.data.pts).toExponential(2)+' mm');
+        pruef(`${wo}: der Stand ist gespeichert`, !!(r1.stand && r1.stand.text && r1.stand.text!=='—'), JSON.stringify(r1.stand));
+        // Arbeiten: ein Teil setzen, zurück, vor
+        if(soll==='fliesen'){
+          if(!await p.locator('#tPalette .tpal').count()){ await p.evaluate(()=>{ document.getElementById('tSpecBox').open=true; }); await p.click('#tSetAdd'); await sleep(300); }
+          await p.locator('#tPalette .tpal').first().click(); await sleep(450);
+        } else if(soll==='kueche'){ await p.locator('#kPalette button').first().click(); await sleep(450); }
+        if(soll!=='aufmass'){ await p.keyboard.press(MOD+'+z'); await sleep(400); await p.keyboard.press(MOD+'+Shift+z'); await sleep(400); }
+        const r2=await gespeichert(p, id), teile=r=>JSON.stringify(soll==='kueche' ? r.data.kitchen : r.data.tiles);
+        for(let i=0;i<3;i++){ await p.reload(); await sleep(1100); }
+        const r3=await gespeichert(p, id);
+        pruef(`${wo}: nach Arbeiten und dreimal Neuladen höchstens 0,01 mm`, ptsAbstand(r3.data.pts, start.data.pts)<=0.01, ptsAbstand(r3.data.pts, start.data.pts).toExponential(2)+' mm');
+        if(soll!=='aufmass') pruef(`${wo}: Teile nach Rückgängig und Wiederherstellen bleiben beim Neuladen`, teile(r2)===teile(r3));
+        pruef(`${wo}: keine Fehler in der Konsole`, f.stoer.length===0, f.stoer.join(' | '));
+        await f.browser.close();
+      }
+    }
   },
 };
 
