@@ -83,9 +83,10 @@ if(was==='umziehen'){
   console.log('geschrieben nach', b+':', Object.keys(dateien).join(', '));
 } else if(was==='pruefen' && a){
   // Beweis: jede Datei ist Kopf (nur Kommentar) + Blockinhalt Byte für Byte, und
-  // die HTML-Datei ist die alte mit genau den vier ersetzten Blöcken - ab dem
-  // ersten Block. Davor und dahinter darf sie sich seither geändert haben; der
-  // Vergleich meldet deshalb nur, ob die BLÖCKE unverändert umgezogen sind.
+  // die HTML-Datei ist die alte mit genau den vier ersetzten Blöcken. Der Block
+  // "vollstaendig" bleibt beim Vergleich außen vor: er nennt seit dem Umzug die
+  // drei Kerne als Pflichtdateien. Weicht die Seite sonst ab (sie wurde seither
+  // weiterbearbeitet), sagt die letzte Zeile das, ohne den Beweis der Blöcke zu kippen.
   const alt=ausGit(a, 'raumaufmass.html');
   let ok=true;
   for(const [id, datei] of PLAN){
@@ -98,9 +99,10 @@ if(was==='umziehen'){
     console.log((gleich && nurKommentar && weg ? 'ok   ' : 'ROT  ')+datei.padEnd(26)+'Block '+id.padEnd(12)+(m ? sha(m[1]).slice(0,16) : 'fehlt im alten Stand')
       +'  Kopf '+(kopf.split('\n').length-1)+' Zeilen'+(weg ? '' : '  (Block steht noch in der HTML-Datei)'));
   }
-  const erwartet=zerlege(alt).html, ist=readFileSync(pfad('raumaufmass.html'),'utf8');
-  const g=erwartet===ist; 
-  console.log((g ? 'ok   ' : 'anders ')+'raumaufmass.html '+(g ? 'ist der alte Stand mit genau vier ersetzten Blöcken, sonst Byte für Byte gleich' : 'weicht außerhalb der vier Blöcke vom alten Stand ab (seither geändert)'));
+  const ohne=s=>s.replace(block('vollstaendig'), '<script id="vollstaendig"></script>');
+  const erwartet=ohne(zerlege(alt).html), ist=ohne(readFileSync(pfad('raumaufmass.html'),'utf8'));
+  const g=erwartet===ist;
+  console.log((g ? 'ok   ' : 'anders ')+'raumaufmass.html '+(g ? 'ist der alte Stand mit genau vier ersetzten Blöcken, sonst Byte für Byte gleich (Block "vollstaendig" ausgenommen)' : 'weicht außerhalb der vier Blöcke und des Blocks "vollstaendig" vom alten Stand ab (seither weiterbearbeitet)'));
   process.exit(ok ? 0 : 1);
 } else {
   console.error('Aufruf: node scripts/umzug-kerne.mjs umziehen | pruefen <Stand> | aus <Stand> <Ordner>');

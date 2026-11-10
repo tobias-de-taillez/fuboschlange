@@ -18,6 +18,8 @@
 #   scripts/deploy-hetzner.sh live-vor-familie-kueche
 # Lädt genau diesen Stand (raumaufmass.html wieder als index.html); neuere Dateien
 # (raeume.html, raum-haus.js, raum-blatt.js, raum-meldung.js) bleiben liegen und werden genannt.
+# Rückweg nur vor das Auslagern der Fliesen-, Küchen- und Check-Blöcke (gleiches
+# Verhalten, die Blöcke wieder in der Seite): scripts/deploy-hetzner.sh vor-kerne
 # Ältere Tags: live-vor-familie (5d6d409, die eine Datei vor den Küchen-Fixes),
 # vor-familie-umbau (510d02f, main vor dem Umbau; war nie live).
 #
