@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// (Historisch: „pruefen vor-kerne“ gilt nur für den Stand bis zum Tag x1-bedienung-dateien; danach hat sich raumaufmass.html weiter verändert, siehe scripts/umzug-plan.mjs.)
 // Auslagern der vier DOM-freien Skriptblöcke aus raumaufmass.html in geteilte
 // Dateien (docs/adr/0001-familie-mit-geteilten-js-dateien.md), wörtlich und
 // per Prüfsumme beweisbar:

@@ -2,6 +2,29 @@
 
 Stand 10.11.2026. Schritt 3 der „Reihenfolge“ im Anforderungspapier (`docs/superpowers/specs/2026-11-09-raumaufmass-familie-design.md`) heißt: Fliesenplan und Küchenplaner ziehen unverändert in eigene Dateien. Dieses Dokument hält fest, was davon getan ist, was die Vermessung des Codes ergeben hat und was vor dem Rest zu entscheiden ist.
 
+## Ergebnis (10.11.2026): der Rest von Schritt 3 ist getan, nicht live
+
+Zweig `feat/familie-schritt-3` (ab `main` 237c2d1), nichts gepusht, nichts hochgeladen. Rückweg-Tags: `vor-plan` (Plan-Skript noch im Block `ui`, ein Commit vor dem Umzug), `x1-bedienung-dateien` (Bedienungen als Dateien, noch eine Seite), `vor-kerne` und `live-vor-familie-kueche` wie bisher.
+
+**Gemacht, in der Folge des Plans:**
+1. `recompute` in `rechneRaum`, `sichereRaum` und die Folgen des Aufmaßes zerlegt.
+2. `raum-modell.js` läuft ohne `opMeasSeq`, `syncSnapfitBtn`, `syncOrthoBtn` (`test/raum-modell.mjs`, gegen den alten Stand rot); das erste Bild der Fliesenansicht steht hinter `TS.ruler`.
+3. Anmeldung der Werkzeuge im Block `ui` (`meldeAn`): Zeichnen, Panel, Hinweis, Bereitschaft, Verlassen, Zeiger (Drücken, Bewegen, Loslassen, Verlassen, Pinch), Tasten, Entf, Rückgängig, Moduswechsel, Ansicht der Wandansicht, Raumwechsel, Boot; auch das Raumaufmaß meldet sich so an. Je Schritt ein Commit, jeder mit allen Tests, Browser-Test in drei Engines und Bildvergleich.
+4. Der Plan-Anteil von `ui` (151 Anweisungen, rund 1100 Zeilen) per Skript nach `raum-plan.js`, danach `tiles-ui` und `kitchen-ui` als `fliesenplan-bedienung.js` und `kuechenplaner-bedienung.js`. Beweis: `node scripts/umzug-plan.mjs pruefen vor-plan`.
+5. Der Messaufbau, wiederholt mit dem Probe-Raum `test/fixtures/raum-voll.json` (ungenau gemessen, 90°-Ausgleich, Höhe, Tür, Wasser, 2 Fliesen, 4 Küchenteile) und einer Abwandlung mit Diagonalen und Ausreißer: `scripts/bildvergleich.mjs` vergleicht den Altstand (eine Seite) mit den drei neuen Seiten, 98 Vergleiche, in Chromium, WebKit und Firefox bildgleich.
+6. Seiten geschnitten: `fliesenplan.html`, `kuechenplaner.html`, Markup und CSS je Seite, gemeinsames `raum-schale.css`, `raumaufmass.html` ohne Bedienung, Markup und CSS der beiden. Alte Adressen leiten weiter, `raeume.html` und die Ausgabe verlinken die neuen Seiten, Deploy-Skript (`--probe`: 26 Dateien, per Hash geprüft), `vercel.json`, `package.json`, Selbstchecks nur mit `?test`.
+
+**Wichtige Befunde auf dem Weg:**
+- Die Zeilennummern der Wurzeln für den Umzug waren veraltet (Messung) beziehungsweise um eins verschoben (Skript): Der erste Umzug (4376f56) hat die Ausgabe in `raum-plan.js` gezogen. Die Auswahl läuft jetzt über den Text der Anweisung (`wurzeln.mjs`), der Umzug wurde wiederholt (52de613). Die Tests hatten es nicht gesehen, weil damals noch alles in einer Seite lief.
+- Zwei harmlose, aber echte Unterschiede zum alten Bild: Rückgängig beginnt je Seite leer (Entscheidung 2a), und nach einem Seitenwechsel steht der Fokus nicht mehr auf dem Menü-Knopf. Der Bildvergleich gleicht beides vorher an.
+- Die Tastenliste und die Hilfe zeigen je Seite nur ihr Werkzeug; im Aufmaß steht „Schritte“ (1–4) als eigene Gruppe vor „Allgemein“.
+
+**Bewusst nicht getan oder offen:**
+- Live gestellt ist nichts. Vorher zu entscheiden: ob der Dateiname `raum-plan.js` bleibt (das Glossar reserviert „Plan“ für den Fliesenplan; es ist ein Dateiname, kein Begriff der Oberfläche), und ob `package-lock.json` mit ins Repo soll (er liegt bei).
+- Der Menü-Eintrag „Hilfe und Tasten“ und der Text des Abschnitts „Menü“ in der Hilfe nennen noch Punkte des Aufmaß-Menüs; auf den Folgeseiten fehlen die Punkte.
+- Nicht geprüft: Touch, Drucken auf den neuen Seiten, zwei Fenster in den Folgewerkzeugen (die Logik ist die des Aufmaßes, `storage`-Ereignis in `raum-plan.js`), Safari selbst.
+- `scripts/umzug-kerne.mjs pruefen vor-kerne` gilt nur noch für den Stand bis `x1-bedienung-dateien`.
+
 ## Getan: die Kerne sind geteilte Dateien
 
 Die vier DOM-freien Skriptblöcke sind wörtlich aus `raumaufmass.html` ausgelagert:
