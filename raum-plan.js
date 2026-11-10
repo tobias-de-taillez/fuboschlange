@@ -86,6 +86,7 @@ function fixVerletzt(){
   });
   return out;
 }
+const TAP_SLOP = 4;      // mehr Bewegung als das: kein Klick mehr, sondern Zug
 
 // Plattform. Kuerzel heissen auf dem Mac ⌘ und ⌥, sonst Strg und Alt.
 // Strg+Klick ist auf dem Mac ein Rechtsklick und taugt dort nicht als
@@ -99,6 +100,7 @@ function plat(s){
   if(IS_MAC) return s.replace(/Strg\+?/g,'⌘').replace(/\bAlt\b/g,'⌥').replace(/\bEntf\b/g,'⌫');
   return s.replace(/⌘\+?/g,'Strg+').replace(/Strg\+(?=[\s:·,.)\/]|$)/g,'Strg').replace(/⌥/g,'Alt');
 }
+let swim=null;         // laufende Fahrt zum Nachbarraum
 
 function autofit(){
   const P=viewPts();
@@ -328,6 +330,39 @@ function lageHalten(F, P){
   F.forEach((f,i)=>{ f.x=neu[i].x; f.y=neu[i].y; });
 }
 
+// ================= Raumbibliothek (Anbindung) =================
+
+// Derselbe Raum, in einem anderen Fenster geändert: dieses Fenster zöge sonst
+// mit seiner nächsten Änderung den alten Stand darüber. Solange es nicht das
+// bediente Fenster ist, lädt es den Raum deshalb still neu. Ohne zu speichern
+// (recompute.still): sonst weckten sich zwei Fenster gegenseitig.
+// Ob es DIESEN Raum trifft, sagt das Ereignis selbst (Speicher vorher und
+// nachher): ein Schreiben an einem anderen Raum lässt dieses Fenster in Ruhe.
+// Der Vergleich mit dem eigenen Stand taugt dafür nicht, weil der Ausgleich
+// die Ecken beim Laden in den letzten Stellen anders rechnet.
+addEventListener('storage', e=>{
+  if(e.key!==null && e.key!=='raumaufmass.rooms') return;
+  if(!currentRoom || document.hasFocus()) return;
+  const r=STORE.load(currentRoom);
+  if(!r){ location.replace('raeume.html'); return; }          // dort gelöscht
+  // Umbenannt (der Name liegt neben den Daten): Kopfzeile und Titel nachziehen.
+  if(r.name!==currentRoomName){ currentRoomName=r.name; renderPanel(); }
+  if(e.key!==null){
+    const raum=v=>{ try{ const l=JSON.parse(v||'[]'); return Array.isArray(l) ? l.find(x=>x && x.id===currentRoom) : null; }catch(err){ return null; } };
+    // Auf ein Millionstel Millimeter gerundet: schon das bloße Öffnen im anderen
+    // Fenster schreibt die Ecken mit anderen letzten Stellen zurück.
+    const kern=x=>JSON.stringify(x.data, (k,v)=>typeof v==='number' ? Math.round(v*1e6)/1e6 : v);
+    const vor=raum(e.oldValue), nach=raum(e.newValue);
+    if(vor && nach && kern(vor)===kern(nach)) return;
+  }
+  if(JSON.stringify(r.data)===serialize()) return;
+  alleWerkzeuge('neuerStand');   // nichts Vorgemerktes über den neuen Stand schreiben
+  const zustand=ALLE.map(w=>w.vorNeuladen ? w.vorNeuladen() : undefined);
+  recompute.still=true;
+  try{ openRoom(currentRoom); } finally{ recompute.still=false; }
+  ALLE.forEach((w,i)=>{ if(w.nachNeuladen) w.nachNeuladen(zustand[i]); });
+});
+
 function speicherWarnung(){
   // Verzögert gerufen: hat inzwischen ein Speichern geklappt, entfällt sie.
   if(recompute.quotaWarned) setHintLive('Speichern fehlgeschlagen (Speicher voll?). Raum als Datei oder Link sichern.');
@@ -505,6 +540,61 @@ function startPan(e, mid){
   cv.style.cursor='grabbing';
 }
 
+cv.addEventListener('pointerdown',e=>{
+  // Verschieben ohne etwas anzufassen - in jedem Modus, auf die Ansicht,
+  // die man sieht: mittlere Maustaste, oder Leertaste + Ziehen.
+  if(e.pointerType==='mouse' && e.button===1){ startPan(e,true); return; }
+  if(spaceHeld && e.button===0){ startPan(e,false); return; }
+  // Nur die Primaertaste zeichnet. Ein Rechtsklick kommt hier ebenfalls als
+  // pointerdown an und wuerde sonst beim Loslassen eine Ecke setzen - der
+  // gehoert dem contextmenu-Handler. Strg+Klick ist auf dem Mac ein
+  // Rechtsklick und meldet sich trotzdem als Taste 0.
+  if(e.pointerType==='mouse' && (e.button!==0 || (IS_MAC && e.ctrlKey))){ lastPtrType='mouse'; return; }
+  const werk=werkzeug();
+  if(werk && werk.vorDruecken && werk.vorDruecken(e)) return;
+  cv.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  lastPtrType=e.pointerType;
+  // Ein Klick, der nur das offene Loesch-Popover wegdrueckt, darf nicht
+  // nebenbei eine Ecke setzen oder eine Eingabe oeffnen.
+  const popOpen=ALLE.some(w=>w.popOffen && w.popOffen());
+  alleWerkzeuge('popSchliessen');
+  if(pointers.size===2){ startPinch(); return; }
+  if(pointers.size>2 || pinch) return;
+  if(werk && werk.down){
+    if(!werk.down(e, popOpen)) gesture={t:'bg',x0:e.clientX,y0:e.clientY,lx:e.clientX,ly:e.clientY,moved:false,wall:null,popOpen};
+    return;
+  }
+});
+cv.addEventListener('pointerleave',()=>alleWerkzeuge('zeigerWeg'));
+
+cv.addEventListener('pointermove',e=>{
+  if(!pointers.has(e.pointerId)){
+    if(spaceHeld){ cv.style.cursor='grab'; return; }
+    const werk=werkzeug(); if(werk && werk.hover) werk.hover(e);
+    return;
+  }
+  pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pinch){ if(pointers.size>=2) updatePinch(); return; }
+  if(!gesture) return;
+  const moved=Math.hypot(e.clientX-gesture.x0,e.clientY-gesture.y0)>TAP_SLOP;
+  if(moved && !gesture.moved){ gesture.moved=true; cancelLongpress(); }
+  if(gesture.t==='pan'){
+    const dpr=DPR();
+    viewPanBy((e.clientX-gesture.lx)*dpr, (e.clientY-gesture.ly)*dpr);
+    gesture.lx=e.clientX; gesture.ly=e.clientY;
+    redraw(); return;
+  }
+  const gw=werkFuerGeste(gesture); if(gw){ gw.move(e, gesture); return; }
+  // Zug im Leeren verschiebt die Ansicht.
+  if(gesture.t==='bg' && gesture.moved){
+    const dpr=DPR();
+    viewPanBy((e.clientX-gesture.lx)*dpr, (e.clientY-gesture.ly)*dpr);
+    gesture.lx=e.clientX; gesture.ly=e.clientY;
+    redraw();
+  }
+});
+
 function endPointer(e){
   pointers.delete(e.pointerId);
   cancelLongpress();
@@ -535,6 +625,29 @@ function endPointer(e){
   }
 }
 cv.addEventListener('pointerup',endPointer);
+cv.addEventListener('pointercancel',endPointer);
+
+// Rechtsklick: Loeschen anbieten - fuer Ecke oder Wand im Plan, fuer die
+// Oeffnung in der Wandansicht. Auf dem Mac auch Zwei-Finger-Klick und
+// Strg+Klick; unter Windows die Rechtsklick-Zone des Touchpads.
+// Rechtsklick tut im Plan nichts mehr: gelöscht wird auf der Karte des
+// Objekts oder mit Entf (ein sichtbarer Weg, eine Taste).
+cv.addEventListener('contextmenu',e=>{ e.preventDefault(); });
+
+// ================= Rad, Touchpad, Pinch =================
+// Mausrad, Zwei-Finger-Wischen und Pinch kommen alle als wheel an, und kein
+// Browser sagt, welches Geraet es war.
+// - Strg/⌘ und Pinch (Mac und Windows melden ihn als Strg-wheel): zoomen.
+// - Umschalt: waagerecht verschieben.
+// - sonst entscheidet die Einstellung "Scrollen" (Statuszeile):
+//   automatisch: Rastungen (Zeilen-Deltas oder |dy| >= 40 ohne dx) sind ein
+//   Mausrad und zoomen um den Zeiger (CAD-Konvention); feine Deltas oder ein
+//   seitlicher Anteil sind ein Touchpad und verschieben. Je Strom einmal
+//   entschieden (150 ms Pause = neuer Strom), damit der Nachlauf eines
+//   Wischers nicht ins Zoomen kippt. Schlaegt die Erkennung fehl (Maus mit
+//   Feinscrollen, altes Touchpad mit Rad-Emulation), legt man es fest.
+// Früher einstellbar; „automatisch“ gilt jetzt fest (ein Rad zoomt, ein Touchpad verschiebt).
+const wheelPref='auto';
 const wheelState={cls:null, lastT:-1e9, hint:null, hintT:-1e9, gesture:false};
 function wheelClass(mode,dx,dy,t){
   if(mode!==0) return 'mouse';               // Zeilen oder Seiten liefert nur ein Rad
@@ -543,10 +656,40 @@ function wheelClass(mode,dx,dy,t){
   const frisch=wheelState.hint==='mouse' ? t-wheelState.hintT<4000 : !!wheelState.hint;
   return frisch ? wheelState.hint : 'trackpad';
 }
+cv.addEventListener('wheel',e=>{
+  e.preventDefault();
+  if(swim) return;
+  const mode=e.deltaMode;                    // zuerst lesen: Firefox rechnet sonst um
+  const k=mode===1?16:mode===2?cv.clientHeight:1, dpr=DPR();
+  const dx=e.deltaX*k, dy=e.deltaY*k;
+  const d=evDev(e);
+  const notch=mode!==0 || Math.abs(dy)>=40;
+  if(e.ctrlKey||e.metaKey){
+    if(wheelState.gesture) return;           // Safari: derselbe Pinch kam schon als Geste
+    viewZoomAt(d.x,d.y, notch ? (dy<0?1.15:1/1.15) : Math.exp(-dy/100));
+    redraw(); return;
+  }
+  if(e.shiftKey){ viewPanBy(-(dx||dy)*dpr, 0); redraw(); return; }
+  // Seitlicher Anteil oder gebrochene Deltas sind eindeutig Touchpad.
+  if(mode===0 && (dx!==0 || dy%1!==0)) wheelState.hint=null;
+  if(e.timeStamp-wheelState.lastT>150) wheelState.cls=wheelClass(mode,dx,dy,e.timeStamp);
+  wheelState.lastT=e.timeStamp;
+  const dev = wheelPref==='auto' ? wheelState.cls : wheelPref==='zoom' ? 'mouse' : 'trackpad';
+  if(dev==='mouse' && dx===0) viewZoomAt(d.x,d.y, notch ? (dy<0?1.15:1/1.15) : Math.exp(-dy*0.0015));
+  else viewPanBy(-dx*dpr, -dy*dpr);
+  redraw();
+},{passive:false});
 // Safari meldet Pinch als eigene Gesten. Ohne preventDefault zoomt die
 // ganze Seite; mit preventDefault schickt Safari kein Strg-wheel mehr.
 let gestLast=1;
 cv.addEventListener('gesturestart',e=>{ e.preventDefault(); wheelState.gesture=true; wheelState.hint='trackpad'; gestLast=1; });
+cv.addEventListener('gesturechange',e=>{
+  e.preventDefault();
+  const d=e.clientX!=null ? evDev(e) : {x:cv.width/2, y:cv.height/2};
+  viewZoomAt(d.x,d.y, e.scale/gestLast); gestLast=e.scale;
+  redraw();
+});
+cv.addEventListener('gestureend',e=>{ e.preventDefault(); wheelState.gesture=false; });
 // Eine Ecke im Sinne des Winkels: genau zwei Waende treffen sich.
 function cornerOf(id){
   const nb=M.walls.filter(([x,y])=>x===id||y===id).map(([x,y])=>x===id?y:x);
@@ -623,18 +766,9 @@ function histKnopf(e, tun){
   if(e && e.detail && e.currentTarget) e.currentTarget.blur();
   danach.forEach(f=>{ if(f) f(); });
 }
-
-// Ausrichten: laesst die Skizze den Messungen folgen. AUS ist der Normalfall -
-// beim ersten Durchgang durch einen verwinkelten Raum ist die Skizze die
-// Orientierung, und Ecken, die unter der Hand wegwandern, machen das Messen
-// schwerer statt leichter. Der Solver laeuft in beiden Stellungen; nur das
-// Ergebnis wird nicht in die Zeichnung zurueckgeschrieben. Kontrolllinien,
-// Vorschlaege, Residuen und Flaeche kommen weiter aus dem Fit.
-function syncSnapfitBtn(){
-  const b=$('snapfit');
-  b.setAttribute('aria-pressed', String(!M.snapOff));
-  b.title = 'An: sobald die Form eindeutig ist, zeigt der Plan die gemessene Form. Aus: Ecken bleiben, wo sie gezeichnet wurden; gerechnet wird weiter.';
-}
+$('undo').onclick=e=>histKnopf(e, doUndo);
+$('redo').onclick=e=>histKnopf(e, doRedo);
+$('fitview').onclick=fitActiveView;
 // Umbenennen direkt am Namen in der Kopfleiste (auch ueber den Namen im
 // Plan erreichbar). Enter oder Wegklicken uebernimmt, Esc verwirft.
 function renameCurrentRoom(){
@@ -653,6 +787,7 @@ function renameCurrentRoom(){
   inp.addEventListener('keydown',e=>{ e.stopPropagation(); if(e.key==='Enter') done(true); else if(e.key==='Escape') done(false); });
   inp.addEventListener('blur',()=>done(true));
 }
+$('roomname').onclick=renameCurrentRoom;
 // ================= Raum-Menue =================
 // Alles, was man pro Raum einmal tut (oeffnen, sichern, teilen, spiegeln,
 // leeren), wohnt hier statt dauerhaft in der Leiste.
@@ -663,6 +798,24 @@ function openRoomMenu(on){
   // und nähmen den Fokus nicht an - die Pfeile liefen dann am Menü vorbei in den Plan.
   if(on){ const f=[...m.querySelectorAll('button')].find(b=>b.offsetParent!==null); if(f) f.focus({preventScroll:true}); }
 }
+$('roommenuBtn').onclick=()=>openRoomMenu($('roommenu').hidden);
+$('roommenu').addEventListener('click',e=>{ if(e.target.closest('button')) openRoomMenu(false); });
+addEventListener('pointerdown',e=>{
+  if(!$('roommenu').hidden && !e.target.closest('#histctl')) openRoomMenu(false);
+},true);
+$('roommenu').addEventListener('keydown',e=>{
+  // Nur sichtbare Punkte: ein versteckter nähme den Fokus nicht an, und die Pfeile blieben davor hängen.
+  const items=[...$('roommenu').querySelectorAll('button')].filter(b=>b.offsetParent!==null);
+  const i=items.indexOf(document.activeElement);
+  if(e.key==='ArrowDown'||e.key==='ArrowUp'){
+    e.preventDefault(); e.stopPropagation();
+    items[(i+(e.key==='ArrowDown'?1:-1)+items.length)%items.length].focus();
+  } else if(e.key==='Escape'){ e.preventDefault(); e.stopPropagation(); openRoomMenu(false); $('roommenuBtn').focus(); }
+  // Solange der Fokus im Menü liegt, gehört die Taste dem Menü: sonst verschöben
+  // Pfeil links/rechts dahinter die gewählte Fliese oder das gewählte Teil.
+  // Enter und Leertaste lösen den Menüpunkt weiter aus, Tab wandert weiter.
+  else e.stopPropagation();
+});
 
 // Die Hotkeys sind auf window gebunden, damit sie ueberall wirken - aber
 // genau deshalb bubbelt auch ein Tastendruck in einem Eingabefeld bis
@@ -673,6 +826,15 @@ function openRoomMenu(on){
 // waren frueher alle Kuerzel tot.
 const isText=t=>!!t && ((t.tagName==='INPUT' && !['checkbox','radio','button','range','color','file'].includes(t.type))
   || t.tagName==='TEXTAREA' || t.isContentEditable);
+// Auswahllisten und Checkboxen geben den Fokus nach der Wahl ab - ausser
+// der Haken wurde mit der Leertaste geschaltet (hakenTaste, siehe keydown).
+let hakenTaste=null;
+document.addEventListener('change',e=>{
+  const t=e.target;
+  if(t && t===hakenTaste){ hakenTaste=null; return; }
+  hakenTaste=null;
+  if(t && (t.tagName==='SELECT' || (t.tagName==='INPUT' && t.type==='checkbox'))) t.blur();
+});
 function zoomCenter(f){ viewZoomAt(cv.width/2, cv.height/2, f); redraw(); }
 function doUndo(){
   const vor=ALLE.map(w=>w.vorRueckgaengig ? w.vorRueckgaengig() : undefined);
@@ -691,6 +853,86 @@ function deleteTarget(){
   const werk=werkzeug();
   return !!(werk && werk.entf && werk.entf());
 }
+addEventListener('keydown',e=>{
+  const t=e.target;
+  if(isText(t)) return;
+  const mod=e.ctrlKey||e.metaKey, k=e.key.toLowerCase();
+  // Raeume, QR-Code und Kuerzel-Uebersicht sind modal: dahinter darf keine
+  // Taste etwas veraendern, was man nicht sieht. Esc schliesst, ? auch.
+  if(!$('qrwrap').hidden || !$('keyswrap').hidden || !$('helpwrap').hidden){
+    if(e.key==='Escape'){ alleWerkzeuge('popSchliessen'); if(closeKeys()) return; if(closeHelp()) return; if(!$('qrwrap').hidden){ $('qrwrap').hidden=true; return; } }
+    else if((e.key==='?' || k==='h') && !$('helpwrap').hidden) toggleHelp();
+    return;
+  }
+  // Rueckgaengig ⌘Z/Strg+Z; Wiederherstellen ⇧⌘Z, Strg+⇧Z und Strg+Y -
+  // ueberall ausser in Textfeldern. AltGr kommt unter Windows als Strg+Alt:
+  // nie als Kuerzel lesen.
+  if(mod && !e.altKey && (k==='z' || k==='y')){
+    e.preventDefault();
+    if(k==='y' || e.shiftKey) doRedo(); else doUndo();
+    return;
+  }
+  // ⌘S sichert als Datei, ⌘O oeffnet eine - statt des Browser-Dialogs.
+  if(mod && !e.altKey && !e.shiftKey && (k==='s' || k==='o')){
+    e.preventDefault(); $(k==='s'?'filesave':'filepick').click(); return;
+  }
+  // Eine fokussierte Auswahlliste braucht ihre Tasten (Pfeile, Buchstaben,
+  // Leertaste); Esc und Entf wirken weiter.
+  if(t && t.tagName==='SELECT' && !['Escape','Delete','Backspace'].includes(e.key)) return;
+  // Leertaste im Menue: der Eintrag loest nativ aus.
+  if(e.code==='Space' && t && t.closest && t.closest('#roommenu')) return;
+  // Leertaste auf einem Haken, den man mit Tab erreicht hat: er schaltet nativ
+  // und behaelt den Fokus. Nach einem Mausklick hat er ihn schon abgegeben
+  // (change-Listener oben), dort verschiebt die Leertaste weiter.
+  if(e.code==='Space' && t && t.tagName==='INPUT' && t.type==='checkbox'){ hakenTaste=t; return; }
+  // Leertaste gehalten: Ziehen verschiebt. preventDefault, sonst loest ein
+  // fokussierter Knopf beim Loslassen aus.
+  if(e.code==='Space'){
+    e.preventDefault();
+    if(t && t.tagName==='BUTTON') t.blur();
+    if(!spaceHeld){ spaceHeld=true; if(!gesture) cv.style.cursor='grab'; }
+    return;
+  }
+  if(e.key==='Escape'){
+    alleWerkzeuge('popSchliessen');
+    if(!$('roommenu').hidden){ openRoomMenu(false); return; }
+    if(typeof closeKeys==='function' && closeKeys()) return;
+    if(!$('qrwrap').hidden){ $('qrwrap').hidden=true; return; }
+    if(ALLE.some(w=>w.esc && w.esc())) return;
+  }
+  { const werk=werkzeug(); if(werk && werk.key && werk.key(e)) return; }
+  if(mod || e.altKey) return;
+  if(e.key==='?' || k==='h'){ toggleHelp(); return; }
+  // Ansicht: 0 oder ⇧1 passt ein, + und − zoomen um die Bildmitte.
+  if(e.key==='0' || (e.shiftKey && e.code==='Digit1')){ e.preventDefault(); fitActiveView(); return; }
+  if(e.key==='+' || e.key==='='){ zoomCenter(1.25); return; }
+  if(e.key==='-'){ zoomCenter(1/1.25); return; }
+  // Die Tasten des Werkzeugs, die nach den Ansichtstasten kommen (Raumaufmaß: Schritte 1–4; in der Ausgabe ruhen Löschen und Pfeile).
+  if(ALLE.some(w=>w.taste && w.taste(e))) return;
+  if(e.key==='Delete' || e.key==='Backspace'){ if(deleteTarget()) e.preventDefault(); return; }
+  if(e.key.startsWith('Arrow')){
+    e.preventDefault();
+    // Wandansicht: ←/→ wechselt die Wand. Sonst verschieben die Pfeile die
+    // Ansicht (mit ⇧ weiter).
+    if(ALLE.some(w=>w.pfeil && w.pfeil(e))) return;
+    const st=80*DPR()*(e.shiftKey?4:1);
+    const v={ArrowLeft:[st,0],ArrowRight:[-st,0],ArrowUp:[0,st],ArrowDown:[0,-st]}[e.key];
+    viewPanBy(v[0],v[1]); redraw();
+  }
+});
+addEventListener('keyup',e=>{
+  if(e.code==='Space' && spaceHeld){
+    e.preventDefault();
+    spaceHeld=false;
+    if(!gesture || gesture.t!=='pan') cv.style.cursor='';
+  }
+});
+// Fenster verliert den Fokus, waehrend die Leertaste unten ist: das keyup
+// kommt nie an.
+const dropSpace=()=>{ if(spaceHeld){ spaceHeld=false; cv.style.cursor=''; } };
+addEventListener('blur', dropSpace);
+document.addEventListener('visibilitychange', dropSpace);
+addEventListener('resize',()=>{ render(); alleWerkzeuge('nachResize'); });
 
 // ================= Datei sichern / oeffnen =================
 const slug=s=>String(s||'raum').toLowerCase()
@@ -726,6 +968,20 @@ async function exportRoomAsFile(id){
   setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
   setHint(`Gespeichert als ${fname} (Downloads).`);
 }
+$('filesave').onclick=()=>{ if(currentRoom) exportRoomAsFile(currentRoom); };
+$('filepick').onchange=async()=>{
+  const f=$('filepick').files[0];
+  $('filepick').value='';
+  if(!f) return;
+  let o=null;
+  try{ o=JSON.parse(await f.text()); }catch(e){ sag('Das ist keine gültige JSON-Datei. Eine mit „Als Datei sichern“ erzeugte Datei wählen.'); return; }
+  const name=(o && typeof o.name==='string' && o.name.trim()) ? o.name.trim()
+    : f.name.replace(/\.json$/i,'');
+  const err=importAsNewRoom(name, o);
+  if(err===IMPORT_VOLL) sag(`„${name}“ ließ sich nicht speichern. ${err}`);
+  else if(err) sag('Die Datei hat nicht die erwartete Form: '+err);
+  else setHint(STORE.storageOk ? `„${name}“ importiert und als eigener Raum gespeichert.` : `„${name}“ geöffnet. Auf diesem Gerät wird nichts gespeichert.`);
+};
 
 // ================= Link teilen + QR =================
 function shareUrl(){
@@ -735,6 +991,38 @@ function shareUrl(){
   // Der Link führt auf den Startbildschirm: dort kommt ein geteilter Raum an.
   return new URL('raeume.html', location.href).href.split('#')[0]+'#raum='+encodeShare({name:r.name, data:r.data});
 }
+$('sharelink').onclick=async()=>{
+  const url=shareUrl();
+  if(!url) return;
+  try{ await navigator.clipboard.writeText(url); setHint('Link in der Zwischenablage.'); }
+  catch(e){ setHint(url.length<2300 ? 'Zwischenablage nicht erreichbar. Der QR-Code enthält denselben Link.'
+                                    : 'Zwischenablage nicht erreichbar. Als Datei sichern (⌘S) geht immer.'); }
+};
+$('shareqr').onclick=()=>{
+  const url=shareUrl();
+  if(!url) return;
+  // QR-Kapazitaet (Version 40, Level M, Binary) liegt bei ~2,3 KB - ein
+  // normaler Raum (1-3 KB JSON) ist komprimiert weit darunter. Wird es doch
+  // zu viel, sagt der Dialog das, statt einen unlesbaren Code zu malen.
+  try{
+    const q=qrcode(0,'M');
+    q.addData(url);
+    q.make();
+    const n=q.getModuleCount(), cvq=$('qrcv');
+    const s=Math.max(2, Math.floor(300/n)), pad=8;
+    cvq.width=cvq.height=n*s+2*pad;
+    const c=cvq.getContext('2d');
+    c.fillStyle='#fff'; c.fillRect(0,0,cvq.width,cvq.height);
+    c.fillStyle='#000';
+    for(let r2=0;r2<n;r2++) for(let col=0;col<n;col++)
+      if(q.isDark(r2,col)) c.fillRect(pad+col*s, pad+r2*s, s, s);
+    $('qrwrap').hidden=false;
+  }catch(e){
+    setHint('Raum zu groß für einen QR-Code. Link kopieren oder als Datei sichern (⌘S).');
+  }
+};
+$('qrclose').onclick=()=>{ $('qrwrap').hidden=true; };
+$('qrwrap').addEventListener('pointerdown',e=>{ if(e.target===$('qrwrap')) $('qrwrap').hidden=true; });
 // Millimeter -> Zahl OHNE Kuerzel, fuer Eingabefelder, deren Inhalt wieder
 // durch parseLen laeuft.
 // Datum für Dateinamen in Ortszeit: toISOString() ist UTC und trüge kurz nach Mitternacht den Vortag.
@@ -858,6 +1146,10 @@ function showTip(el, text){
   tip.style.left=x+'px'; tip.style.top=y+'px';
 }
 function hideTip(){ $('tip').hidden=true; }
+addEventListener('pointerdown',e=>{
+  // Tap ausserhalb einer Tip-Zelle schliesst das Kaestchen (Touch-Pfad).
+  if(!(e.target.closest && e.target.closest('[data-tip]'))) hideTip();
+});
 function attachTip(el, text){
   if(!text) return;
   el.dataset.tip='1';
@@ -865,6 +1157,49 @@ function attachTip(el, text){
   el.onmouseleave=hideTip;
   el.addEventListener('pointerdown',()=>showTip(el, text));
 }
+
+// ================= Hover-Texte =================
+// Die title-Tooltips des Browsers kommen erst nach 1-2 s. Fuer Maus und Stift
+// zeigt dasselbe Info-Kaestchen den title-Text nach kurzer Pause; solange
+// liegt der title in data-ttl, damit der Browser nicht zusaetzlich seinen
+// zeigt. Von einem Hover-Text zum naechsten geht es ohne Pause weiter.
+(()=>{
+  const PAUSE=300, WARM=500;
+  let cur=null, t=0, zuletzt=-1e9;
+  const zurueck=el=>{
+    if(el.dataset.ttl==null) return;
+    if(!el.hasAttribute('title')) el.setAttribute('title', el.dataset.ttl);
+    delete el.dataset.ttl;
+  };
+  const weg=()=>{
+    clearTimeout(t);
+    if(!cur) return;
+    zurueck(cur); cur=null;
+    if(!$('tip').hidden){ hideTip(); zuletzt=performance.now(); }
+  };
+  const zeigen=el=>{
+    if(cur!==el || !el.isConnected) return;
+    // Hat der Code den title inzwischen neu gesetzt, gilt der neue.
+    if(el.hasAttribute('title')){ el.dataset.ttl=el.getAttribute('title'); el.removeAttribute('title'); }
+    const tip=$('tip'), host=el.closest('dialog[open]') || document.body;
+    if(tip.parentNode!==host) host.appendChild(tip);
+    showTip(el, el.dataset.ttl);
+  };
+  addEventListener('pointerover',e=>{
+    if(e.pointerType==='touch') return;
+    const el=e.target.closest && e.target.closest('[data-ttl],[title]:not([data-tip])');
+    if(el===cur) return;
+    weg();
+    if(!el || !el.getAttribute('title')) return;
+    cur=el; el.dataset.ttl=el.getAttribute('title'); el.removeAttribute('title');
+    t=setTimeout(()=>zeigen(el), performance.now()-zuletzt<WARM ? 0 : PAUSE);
+  });
+  addEventListener('pointerout',e=>{ if(!e.relatedTarget) weg(); });
+  addEventListener('pointerdown',weg,true);
+  addEventListener('wheel',weg,{passive:true,capture:true});
+  addEventListener('keydown',weg,true);
+  addEventListener('blur',weg);
+})();
 
 // Die Schale des Panels: Raumname, Titel, Rückgängig; den Rest malt jedes Werkzeug selbst (panel).
 // Die Werkzeuge laden NACH diesem Block - beim ersten Bild waehrend des Boots gibt es sie noch nicht.
@@ -921,6 +1256,9 @@ function renderKeys(){
   $('keysbody').innerHTML='<h3>Tasten und Maus</h3>'+KEYS.map(([h,rows])=>`<section class="kgrp"><h4>${escapeHtml(h)}</h4>`
     +rows.map(([d,k])=>`<p><span>${escapeHtml(d)}</span><kbd>${escapeHtml(plat(k))}</kbd></p>`).join('')+'</section>').join('');
 }
+function closeKeys(){ const w=$('keyswrap'); if(w.hidden) return false; w.hidden=true; return true; }
+$('keysclose').onclick=closeKeys;
+$('keyswrap').addEventListener('pointerdown',e=>{ if(e.target===$('keyswrap')) closeKeys(); });
 // Hilfe: der Ablauf in Worten, statisch im Markup.
 function toggleHelp(){ const w=$('helpwrap');
   // Ein Nachschlage-Dialog: die Tastenliste steht unter dem Ablauf.
@@ -928,6 +1266,8 @@ function toggleHelp(){ const w=$('helpwrap');
   w.hidden=!w.hidden;
   // Fokus in den Dialog: sonst rollen Pfeile und Bild-Tasten nichts.
   if(!w.hidden){ const b=$('helpbox'); b.tabIndex=-1; b.style.outline='none'; b.scrollTop=0; b.focus({preventScroll:true}); } }
+function closeHelp(){ const w=$('helpwrap'); if(w.hidden) return false; w.hidden=true; return true; }
+$('helpBtn').onclick=toggleHelp;
 // Ein offener Dialog hält den Fokus: Tab wandert nicht in die verdeckte Seite
 // (dort löste Enter sonst Knöpfe aus, die man nicht sieht).
 document.addEventListener('focusin', e=>{
@@ -938,21 +1278,18 @@ document.addEventListener('focusin', e=>{
   // Von vorn hinaus (⇧Tab auf dem ersten): weiter am Ende; sonst an den Anfang.
   (e.relatedTarget===alle[0] ? alle[alle.length-1] : alle[0]).focus({preventScroll:true});
 });
-
-// ================= Ansicht drehen =================
-// Drehwinkel der Ansicht steht im Knopf; in der Wandansicht gibt es keinen.
-function syncRotateBtn(){
-  const b=$('rotate');
-  b.hidden = M.mode==='wall';
-  const deg=Math.round(((VIEW.rot*180/Math.PI)%360+360)%360)%360;
-  b.textContent = deg ? 'Ansicht drehen · '+deg+'°' : 'Ansicht drehen';
-}
+$('helpclose').onclick=closeHelp;
+$('helpwrap').addEventListener('pointerdown',e=>{ if(e.target===$('helpwrap')) closeHelp(); });
+// Kuerzel und Tooltips in der Schreibweise der Plattform.
+document.querySelectorAll('kbd[data-k]').forEach(k=>{ k.textContent=plat(k.dataset.k); });
+document.querySelectorAll('[title]').forEach(el=>{ el.title=plat(el.title); });
 
 // ================= Werkzeugfamilie =================
 // Diese Datei ist drei Werkzeuge: das Raumaufmaß und, solange Fliesenplan und
 // Küchenplaner noch keine eigene Datei haben, auch diese beiden. Welches sie
 // gerade ist, steht in der Adresse (#fliesen, #kueche) und am body.
 const TOOLNAME={aufmass:'', fliesen:'Fliesenplan', kueche:'Küchenplaner'};
+const toolFromHash=()=>location.hash==='#fliesen' ? 'fliesen' : location.hash==='#kueche' ? 'kueche' : 'aufmass';
 const raumGeschlossen=()=>!!C.wallPolygonRing(M.pts, M.walls);
 function setTool(tool, boot){
   // Der Wechsel räumt jede ältere Rückmeldung weg (setMode); die eigene
@@ -980,12 +1317,15 @@ function setTool(tool, boot){
   else setMode((raumGeschlossen() || M.meas.length) ? 'measure' : 'draw');
   if(absage) sag(absage);
 }
+$('toAufmass').onclick=()=>setTool('aufmass');
 
 // ================= Rückmeldung am Ort =================
 // Es gibt keine Statuszeile mehr. Was eine Aktion zurückmeldet, erscheint
 // kurz dort, wo sie ausgelöst wurde: am Anker, über der offenen Karte oder am
 // Zeiger.
 let sagTimer=null, sagLive=false, lastPtr=null;
+addEventListener('pointerdown',e=>{ lastPtr={x:e.clientX, y:e.clientY, t:performance.now(),
+  plan:!!(e.target.closest && e.target.closest('#canvaswrap'))}; }, true);
 function sag(txt, anker, bleibt){
   const el=$('toast');
   clearTimeout(sagTimer);
@@ -1035,25 +1375,7 @@ function standInfo(){
           text, eindeutig, geprueft: cls==='good'};
 }
 function standKurz(){ const s=standInfo(); return {tone:s.tone, text:s.text, eindeutig:s.eindeutig}; }
-function renderOut(){
-  const sh=$('sheets');
-  if(typeof BLATT!=='undefined'){
-    if(!$('blattcss')){ const st=document.createElement('style'); st.id='blattcss'; st.textContent=BLATT.css; document.head.appendChild(st); }
-    // Der Stapel bekommt einen eigenen Kasten ohne feste Höhe: als Raster direkt
-    // im Rollbereich drückt der Browser die Blätter auf dessen Höhe zusammen.
-    sh.innerHTML='<div class="bl-stapel">'+BLATT.html(BLATT.modell(), {mitMassliste:$('outList').checked})+'</div>';
-  }
-  // raum-blatt.js kam nicht an: sagen, statt eine leere Fläche zu zeigen.
-  else sh.innerHTML='<p style="margin:48px auto;max-width:28em;text-align:center;color:var(--ink2)">Das Aufmaßblatt ist nicht geladen. Die Seite neu laden.</p>';
-  const fl=tilesReady(), ku=kitchenReady();
-  const nFl=M.tiles && M.tiles.items ? M.tiles.items.length : 0, nKu=M.kitchen && M.kitchen.items ? M.kitchen.items.length : 0;
-  $('outTiles').disabled=!fl; $('outKitchen').disabled=!ku;
-  $('outTilesNote').textContent = !fl ? 'braucht einen geschlossenen, eingemessenen Raum' : nFl ? `${nFl} ${nFl===1?'Fliese':'Fliesen'} verlegt` : 'noch nicht begonnen';
-  $('outKitchenNote').textContent = !ku ? 'braucht eine eindeutige Form' : nKu ? `${nKu} ${nKu===1?'Teil':'Teile'} gestellt` : 'noch nicht begonnen';
-  $('outStepNote').textContent = 'Wände als Körper'+(M.hmeas.length ? '' : ' · Höhe angenommen');
-}
-$('outList').onchange=()=>renderOut();
-$('outTiles').onclick=()=>setTool('fliesen');
+$('roomname').onkeydown=e=>{ if(e.key==='Enter' || e.key===' '){ e.preventDefault(); renameCurrentRoom(); } };
 // Geteilter Link: beim Kaltstart UND als blosse Hash-Aenderung im offenen
 // Tab (same-document navigation, kein Reload) - ein Pfad fuer beides.
 function importFromHash(){
@@ -1069,5 +1391,56 @@ function importFromHash(){
 
 // Der Boot: läuft, wenn die Seite alle ihre Skripte geladen hat (Aufruf am Ende des letzten Bedien-Skripts).
 function starteSeite(){
+
+  // ================= Boot =================
+  // Reihenfolge: migrieren -> Fragment-Import -> Raum laden -> UI aufbauen -
+  // und ERST DANN die Hinweise: setMode() setzt den Modus-Standardhinweis,
+  // jeder frueher gesetzte Text waere vor dem ersten Bild wieder weg.
+  STORE.migrate();
+  const bootMsg=importFromHash();
+  addEventListener('hashchange',()=>{
+    const msg=importFromHash();
+    if(msg) setHint(msg);
+    else if(toolFromHash()!==TOOL) setTool(toolFromHash());
+  });
+  if(!currentRoom){
+    // deserialize() wirft auf manuell verbogenen Storage-Daten - das darf
+    // den Boot nicht toeten, sonst bleibt die Seite leer statt leerzustarten.
+    try{
+      let cur=STORE.currentId();
+      // Neuladen, Zurück und Vor: der Raum dieses Fensters, nicht der zuletzt irgendwo geöffnete.
+      try{
+        const nav=performance.getEntriesByType('navigation')[0], eigen=sessionStorage.getItem('raumaufmass.fenster');
+        if(nav && (nav.type==='reload' || nav.type==='back_forward') && eigen && STORE.load(eigen)) cur=eigen;
+      }catch(e){}
+      if(cur && STORE.load(cur)) openRoom(cur);
+      else {
+        const l=STORE.list();
+        if(l.length) openRoom(l[0].id);
+      }
+    }catch(e){ currentRoom=null; }
+    if(!currentRoom){
+      currentRoom=STORE.create('Neuer Raum');
+      STORE.setCurrent(currentRoom);
+      currentRoomName='Neuer Raum';
+    }
+  }
+  TOOL=toolFromHash(); document.body.dataset.tool=TOOL;
+  setMode('draw');
+  alleWerkzeuge('start');
   recompute();
+  // Fliesen und Küche laden nach diesem Block; erst danach steht fest, ob das
+  // gewünschte Werkzeug den Raum schon öffnen kann.
+  // setHintLive statt setHint: Boot-Meldungen duerfen nicht nach vier
+  // Sekunden verschwinden, bevor ueberhaupt jemand hingesehen hat - sie
+  // stehen, bis die erste Aktion etwas meldet. Erst NACH setTool: der
+  // Werkzeugwechsel raeumt jede Rueckmeldung weg (setMode).
+  addEventListener('DOMContentLoaded',()=>{
+    setTool(TOOL, true);
+    if(bootMsg) setHintLive(bootMsg);
+    if(!STORE.storageOk)
+      setHintLive('Speichern auf diesem Gerät nicht möglich (privater Modus?). Räume als Datei oder Link sichern.');
+    else if(recompute.quotaWarned)
+      setHintLive('Speichern fehlgeschlagen (Speicher voll?). Raum als Datei oder Link sichern.');
+  });
 }
