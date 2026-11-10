@@ -1,17 +1,10 @@
-// Prueft den Block "tilemeasure" der Raumaufmass-App gegen synthetische
+// Prueft fliesenplan-einmessen.js (frueher Block "tilemeasure") gegen synthetische
 // Fliesen mit bekannter Wahrheit - fuer jede Form des Fliesensets.
-import {readFileSync, existsSync} from 'node:fs';
+import {readFileSync} from 'node:fs';
 
-const file=['raumaufmass.html','raumaufmass_opus.html'].find(f=>existsSync(new URL('../'+f, import.meta.url)));
-const html=readFileSync(new URL('../'+file, import.meta.url),'utf8');
-const pick=id=>{
-  const m=html.match(new RegExp(`<script id="${id}">([\\s\\S]*?)</script>`));
-  if(!m) throw new Error(`Script-Block "${id}" nicht gefunden`);
-  return m[1];
-};
-// Der Rechenkern liegt als geteilte Datei neben der HTML-Datei (docs/adr/0001).
-const kern=readFileSync(new URL('../raum-kern.js', import.meta.url),'utf8');
-new Function('"use strict";\n'+kern+'\n'+pick('tiles')+'\n'+pick('tilemeasure'))();
+// Rechenkern, Fliesen-Geometrie und Einmessen liegen als Dateien neben der HTML-Datei (docs/adr/0001).
+const lies=f=>readFileSync(new URL('../'+f, import.meta.url),'utf8');
+new Function('"use strict";\n'+lies('raum-kern.js')+'\n'+lies('raum-fliesen.js')+'\n'+lies('fliesenplan-einmessen.js'))();
 const M=globalThis.TILEMEAS, TL=globalThis.TILES;
 
 const out=[]; let ok=true;

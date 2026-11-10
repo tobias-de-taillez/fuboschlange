@@ -1,12 +1,9 @@
 // Kante einer angeschnittenen Fliese herausziehen: ein frueherer, verdeckter
 // Schnitt darf sie nicht aufhalten.
-import {readFileSync, existsSync} from 'node:fs';
-const file=['raumaufmass.html','raumaufmass_opus.html'].find(f=>existsSync(new URL('../'+f, import.meta.url)));
-const h=readFileSync(new URL('../'+file, import.meta.url),'utf8');
-const pick=id=>h.match(new RegExp(`<script id="${id}">([\\s\\S]*?)</script>`))[1];
-// Der Rechenkern liegt als geteilte Datei neben der HTML-Datei (docs/adr/0001).
-const kern=readFileSync(new URL('../raum-kern.js', import.meta.url),'utf8');
-new Function(kern+'\n'+pick('tiles'))(); const T=globalThis.TILES;
+import {readFileSync} from 'node:fs';
+// Rechenkern und Fliesen-Geometrie liegen als Dateien neben der HTML-Datei (docs/adr/0001).
+const lies=f=>readFileSync(new URL('../'+f, import.meta.url),'utf8');
+new Function(lies('raum-kern.js')+'\n'+lies('raum-fliesen.js'))(); const T=globalThis.TILES;
 const b={w:150,l:850,angle:45,joint:2,edgeGap:10,expWidth:8,sameColor:0,thick:10}, S={...b,set:[{id:'legacy',name:'C',shape:'chevron',...b}]};
 let ok=true; const chk=(n,c,i='')=>{ ok=ok&&!!c; console.log((c?'ok   ':'ROT  ')+n+(i!==''?'  ('+i+')':'')); };
 const it={id:1,kind:'L',x:0,y:0,rot:0,cuts:[{p:{x:500,y:0},n:{x:-1,y:0}},{p:{x:300,y:0},n:{x:-1,y:0}}]};
