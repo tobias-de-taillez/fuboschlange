@@ -273,7 +273,7 @@ const ABLAEUFE={
     const raum=[{id:'r1', name:'Bestand', updated:'2026-11-10T00:00:00.000Z', area:12, data:{idSeq:4,
       pts:[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:3000},{id:'D',x:0,y:3000}], walls:[['A','B'],['B','C'],['C','D'],['D','A']],
       meas:[['A','B',4000],['B','C',3000],['C','D',4000],['D','A',3000],['A','C',5000],['B','D',5000]].map(([a,b,d])=>({a,b,d,on:true}))}}];
-    const kerne=['raum-kern.js','raum-fliesen.js','fliesenplan-einmessen.js','raum-kueche.js','raum-geometrie.js','raum-speicher.js','raum-modell.js','raum-zeichnung.js'];
+    const kerne=['raum-kern.js','raum-fliesen.js','fliesenplan-einmessen.js','raum-kueche.js','raum-geometrie.js','raum-speicher.js','raum-modell.js','raum-zeichnung.js','raum-plan.js'];
     for(const datei of [...kerne, 'raum-checks.js', 'raum-blatt.js']){
       const f=await fenster(); const p=f.page;
       await f.context.addInitScript(r=>{ if(!localStorage.getItem('raumaufmass.rooms')){ localStorage.setItem('raumaufmass.rooms', JSON.stringify(r)); localStorage.setItem('raumaufmass.current', 'r1'); } }, raum);
@@ -292,7 +292,7 @@ const ABLAEUFE={
     await p.goto(BASE+'/raumaufmass.html'); await sleep(900);
     const r=await p.evaluate(()=>{ const r=selfChecks(); return {n:r.out.length, ok:r.ok, rot:r.out.filter(z=>z.startsWith('FAIL')).slice(0,3)}; });
     pruef(`Selbstchecks im Browser (${r.n})`, r.ok && r.n>1000, r.rot.join(' | '));
-    pruef('geladen sind 13 Skripte, keine Karte', await p.evaluate(()=>document.querySelectorAll('script[src]').length===13 && !globalThis.RAUM_UNVOLLSTAENDIG));
+    pruef('geladen sind 14 Skripte, keine Karte', await p.evaluate(()=>document.querySelectorAll('script[src]').length===14 && !globalThis.RAUM_UNVOLLSTAENDIG));
     await f.browser.close();
   },
   // Fliesenplan: setzen, schieben, drehen, vervielfältigen, einmessen, Stückliste; die Fliesen überstehen Menü, Neuladen und Startbildschirm.
