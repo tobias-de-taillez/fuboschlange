@@ -7190,8 +7190,12 @@ function recompute(){
   // Groessen unter einer Millisekunde. VOR dem Ableiten der Nachbarlagen -
   // die lesen den Speicher und braeuchten sonst den Stand von vorhin.
   if(currentRoom){
-    if(STORE.save(currentRoom, {data:JSON.parse(serialize()), area:polyAreaM2(), stand:standKurz()}))
-      recompute.quotaWarned=false;   // klappt es wieder, warnt der naechste Ausfall erneut
+    if(STORE.save(currentRoom, {data:JSON.parse(serialize()), area:polyAreaM2(), stand:standKurz()})){
+      // Klappt es wieder, warnt der naechste Ausfall erneut - und die stehende
+      // Warnung behauptet nichts Falsches mehr.
+      if(recompute.quotaWarned && $('toast').textContent.startsWith('Speichern fehlgeschlagen')) sag(null);
+      recompute.quotaWarned=false;
+    }
     else if(!recompute.quotaWarned){
       // Einmal je Ausfall warnen, nicht je Aenderung - aber nie still
       // schlucken: sonst ist ein 30-Minuten-Aufmass beim Reload weg, ohne dass
@@ -7245,7 +7249,8 @@ function lageHalten(F, P){
 // ================= Raumbibliothek (Anbindung) =================
 
 function speicherWarnung(){
-  setHintLive('Speichern fehlgeschlagen (Speicher voll?). Raum als Datei oder Link sichern.');
+  // Verzögert gerufen: hat inzwischen ein Speichern geklappt, entfällt sie.
+  if(recompute.quotaWarned) setHintLive('Speichern fehlgeschlagen (Speicher voll?). Raum als Datei oder Link sichern.');
 }
 function openRoom(id){
   // Gehaltene Pfeil-/Dreh-Taste: das Vorgemerkte noch in den ALTEN Raum schreiben (currentRoom zeigt auf ihn, M hält
@@ -7471,7 +7476,7 @@ function createNeighborRoom(opId){
   if(globalThis.HAUS){
     // Erst die Erstbefüllung (Räume, die längst über Wände verbunden sind):
     // legte neuesGebaeude den Schlüssel vorher an, liefe sie nie mehr.
-    const alle=STORE.allRooms();
+    const alle=STORE.allRooms().filter(r=>r.id!==id);
     HAUS.gliederung(alle, alle.map(r=>r.id));
     const ort=HAUS.ort(currentRoom);
     const geschoss=ort ? ort.geschoss.id : (HAUS.neuesGebaeude(currentRoom)||{}).geschoss;
@@ -8928,7 +8933,7 @@ $('entryVal').addEventListener('keydown',e=>{
   // Leeres Feld: ⌘Z meint den letzten Schritt der App, nicht den Text.
   const kk=e.key.toLowerCase();
   if((e.ctrlKey||e.metaKey) && !e.altKey && (kk==='z'||kk==='y') && !$('entryVal').value){
-    e.preventDefault(); closeEntry(); if(kk==='y'||e.shiftKey) doRedo(); else doUndo(); return;
+    e.preventDefault(); histKnopf(null, (kk==='y'||e.shiftKey) ? doRedo : doUndo); return;
   }
   if(e.key==='Enter'){ if(knickAt) commitKnick(); else if(opMeasEdge) commitOpMeasure(); else if(heightAt) commitHeight();
                        else if(crossPair) commitCross(); else commitEntry(); }
@@ -10654,10 +10659,10 @@ document.querySelectorAll('#modes button[data-mode]').forEach(b=>{
 
 // Per Knopf: der Klick nimmt dem Eingabefeld den Fokus und lässt ihn auf dem
 // Knopf - die nächste Zahl verpuffte, und Enter löste den Knopf noch einmal aus.
-// Wie ⌘Z im Feld schließt der Knopf deshalb die offene Eingabe; lief die
-// geführte Eingabe, geht sie beim ersten Vorschlag weiter. Nach einem
-// Zeigerklick (detail>0) gibt der Knopf den Fokus ab; mit der Tastatur
-// ausgelöst behält er ihn, damit man wiederholen kann.
+// Der Knopf schließt deshalb die offene Eingabe; lief die geführte Eingabe,
+// geht sie beim ersten Vorschlag weiter und nimmt den Fokus. ⌘Z im Feld der
+// Eingabe geht denselben Weg (e fehlt dann). Nach einem Zeigerklick (detail>0)
+// gibt der Knopf den Fokus ab; ohne geführte Eingabe behält ihn die Tastatur.
 function histKnopf(e, tun){
   const offen=!$('entry').hidden, gefuehrt=offen && entryGuided && !!entryPair;
   if(offen) closeEntry();
@@ -10784,7 +10789,9 @@ $('roomname').onclick=renameCurrentRoom;
 function openRoomMenu(on){
   const m=$('roommenu'), b=$('roommenuBtn');
   m.hidden=!on; b.setAttribute('aria-expanded', String(!!on));
-  if(on){ const f=m.querySelector('button'); if(f) f.focus({preventScroll:true}); }
+  // Der erste SICHTBARE Punkt: im Fliesenplan und im Küchenplaner sind die oberen (nurAufmass) versteckt
+  // und nähmen den Fokus nicht an - die Pfeile liefen dann am Menü vorbei in den Plan.
+  if(on){ const f=[...m.querySelectorAll('button')].find(b=>b.offsetParent!==null); if(f) f.focus({preventScroll:true}); }
 }
 $('roommenuBtn').onclick=()=>openRoomMenu($('roommenu').hidden);
 $('roommenu').addEventListener('click',e=>{ if(e.target.closest('button')) openRoomMenu(false); });
@@ -10826,25 +10833,28 @@ function zoomCenter(f){ viewZoomAt(cv.width/2, cv.height/2, f); redraw(); }
 // gleichen Ecken), geht es in der Skizze weiter, und der Zug laeuft.
 // Wiederherstellen schliesst wieder und fuehrt wie der Klick nach Maße.
 function doUndo(){
+  const aus=OUT.on;
   const zu=!!C.wallPolygonRing(M.pts, M.walls), ecken=M.pts.length, waende=M.walls.length;
   if(!undo()){ setHint('Nichts mehr rückgängig zu machen.'); return; }
   if(TOOL==='aufmass' && planMode() && zu && M.pts.length===ecken && M.walls.length===waende-1
      && !C.wallPolygonRing(M.pts, M.walls)){
     M.chain=zugEnde(); setMode('draw');
   }
-  ausgabeNurGeschlossen();
+  ausgabeNurGeschlossen(aus);
 }
 function doRedo(){
+  const aus=OUT.on;
   const offen=!C.wallPolygonRing(M.pts, M.walls), ecken=M.pts.length, waende=M.walls.length;
   if(!redo()){ setHint('Nichts wiederherzustellen.'); return; }
   if(TOOL==='aufmass' && M.mode==='draw' && offen && M.pts.length===ecken && M.walls.length===waende+1) finishIfClosed();
-  ausgabeNurGeschlossen();
+  ausgabeNurGeschlossen(aus);
 }
 // Öffnet Rückgängig oder Wiederherstellen den Raum, während die Ausgabe offen
 // ist, geht sie zu: ein Blatt gibt es erst vom geschlossenen Raum.
-function ausgabeNurGeschlossen(){
-  if(!OUT.on || raumGeschlossen()) return;
-  closeOut(); renderPanel(); redraw();
+function ausgabeNurGeschlossen(war){
+  if(!war || raumGeschlossen()) return;
+  // Meist hat der Schrittwechsel (setMode) sie schon geschlossen; gesagt wird es hier.
+  if(OUT.on){ closeOut(); renderPanel(); redraw(); }
   sag('Raum ist offen. Die Ausgabe gibt es, sobald er geschlossen ist.', $('outTab'));
 }
 // Entf/⌫: loescht, was unter dem Zeiger liegt (Ecke vor Wand), in der
@@ -11038,7 +11048,7 @@ $('filepick').onchange=async()=>{
   const err=importAsNewRoom(name, o);
   if(err===IMPORT_VOLL) sag(`„${name}“ ließ sich nicht speichern. ${err}`);
   else if(err) sag('Die Datei hat nicht die erwartete Form: '+err);
-  else setHint(`„${name}“ importiert und als eigener Raum gespeichert.`);
+  else setHint(STORE.storageOk ? `„${name}“ importiert und als eigener Raum gespeichert.` : `„${name}“ geöffnet. Auf diesem Gerät wird nichts gespeichert.`);
 };
 
 // ================= Link teilen + QR =================
@@ -11110,7 +11120,7 @@ const parseLen=s=>{
   const u=m[2] ? m[2].toLowerCase() : unit;
   let z=m[1];
   if(/^\d{1,3}(?:\.\d{3})+,/.test(z)) z=z.replace(/\./g,'');
-  else if(u==='mm' && /^\d{1,3}[.,]\d{3}$/.test(z)) z=z.replace(/[.,]/,'');
+  else if(u==='mm' && /^[1-9]\d{0,2}[.,]\d{3}$/.test(z)) z=z.replace(/[.,]/,'');
   return parseFloat(z.replace(',','.'))*UNITS[u].f;
 };
 // Millimeter -> Zahl OHNE Kuerzel, fuer Eingabefelder, deren Inhalt wieder
@@ -11256,7 +11266,7 @@ function statusText(){
   const txtS=M.an.sigmaHat.toFixed(1).replace('.',',');
   if(netFails()){
     if(M.suspects.size!==1)
-      return [`Die Maße streuen mit ± ${txtS} mm mehr als erwartet. Die Vorschläge grenzen den Fehler ein.`,'warn'];
+      return [`Die Maße streuen mit ± ${txtS} mm mehr als erwartet. Die Vorschläge grenzen den Fehler ein${M.angs.length || C.activeMeas(M.meas).some(m=>m.fix) ? '; auch das Festgelegte kann es sein' : ''}.`,'warn'];
     // Genau ein Verdächtiger: die Strecke beim Namen nennen (Index über
     // activeMeas, wie M.suspects), in der Schreibweise der Liste: die Wand
     // wie gezeichnet, die Diagonale wie zuerst gemessen.
@@ -11773,7 +11783,7 @@ function toggleHelp(){ const w=$('helpwrap');
   if(w.hidden){ renderKeys(); if($('keysbody').parentNode!==$('helpbody')) $('helpbody').appendChild($('keysbody')); }
   w.hidden=!w.hidden;
   // Fokus in den Dialog: sonst rollen Pfeile und Bild-Tasten nichts.
-  if(!w.hidden){ const b=$('helpbox'); b.tabIndex=-1; b.style.outline='none'; b.focus({preventScroll:true}); } }
+  if(!w.hidden){ const b=$('helpbox'); b.tabIndex=-1; b.style.outline='none'; b.scrollTop=0; b.focus({preventScroll:true}); } }
 function closeHelp(){ const w=$('helpwrap'); if(w.hidden) return false; w.hidden=true; return true; }
 $('helpBtn').onclick=toggleHelp;
 $('helpclose').onclick=closeHelp;
@@ -11982,7 +11992,8 @@ function importFromHash(){
   const err=importAsNewRoom(shared.name, shared.data);
   return err===IMPORT_VOLL ? 'Der Raum aus dem Link ließ sich nicht speichern. '+err
        : err ? 'Geteilter Link ungültig: '+err
-             : 'Geteilter Raum importiert und als eigener Raum gespeichert.';
+             : STORE.storageOk ? 'Geteilter Raum importiert und als eigener Raum gespeichert.'
+             : 'Geteilter Raum geöffnet. Auf diesem Gerät wird nichts gespeichert.';
 }
 const bootMsg=importFromHash();
 addEventListener('hashchange',()=>{
@@ -12030,6 +12041,7 @@ addEventListener('DOMContentLoaded',()=>{
 
 <script id="tiles-ui">
 "use strict";
+if(globalThis.RAUM_UNVOLLSTAENDIG) throw new Error('Fliesenplan startet nicht: unvollständig geladen.');
 // ================= Fliesen: Bedienung =================
 // Haengt am ui-Block: M, VIEW, toScr/toWorld, snapshot/pushSnapshot, STORE.
 // Der Modus 'tiles' zeichnet ueber drawTilesView() (Einstieg ganz oben in
@@ -14338,6 +14350,7 @@ $('tRuler').onclick=()=>rulerToggle();
 
 <script id="kitchen-ui">
 "use strict";
+if(globalThis.RAUM_UNVOLLSTAENDIG) throw new Error('Küchenplaner startet nicht: unvollständig geladen.');
 // ================= Küche: Bedienung =================
 // Hängt am ui-Block wie tiles-ui: M, VIEW, toScr/toWorld, snapshot,
 // STORE. Eigene Namen bleiben in der IIFE; nach außen gehen nur die
@@ -15702,8 +15715,8 @@ function sweepSvg(ax, unit, from, cssW){
   // Saubere Ticks
   const tick=(a,b,n)=>{ const r=(b-a)/n, m=Math.pow(10,Math.floor(Math.log10(r))), st=[1,2,5,10].map(k=>k*m).find(k=>k>=r)||r; const out=[]; for(let v=Math.ceil(a/st)*st; v<=b+1e-9; v+=st) out.push(+v.toFixed(6)); return out; };
   let g='';
-  tick(y0,y1,3).forEach(v=>{ g+=`<line x1="${pl}" x2="${W-pr}" y1="${Y(v)}" y2="${Y(v)}" stroke="#e7e3d8" stroke-width="1"/><text x="${pl-6}" y="${Y(v)+3.5}" text-anchor="end" font-size="${fs}" fill="#7c766a">${String(+v.toFixed(2)).replace('.',',')}</text>`; });
-  tick(x0,x1,5).forEach(v=>{ g+=`<text x="${X(v)}" y="${H-8}" text-anchor="middle" font-size="${fs}" fill="#7c766a">${unit(v)}</text>`; });
+  tick(y0,y1,3).forEach(v=>{ g+=`<line x1="${pl}" x2="${W-pr}" y1="${Y(v)}" y2="${Y(v)}" stroke="#e7e3d8" stroke-width="1"/><text x="${pl-6}" y="${Y(v)+3.5}" text-anchor="end" font-size="${fs}" fill="#6f6a5e">${String(+v.toFixed(2)).replace('.',',')}</text>`; });
+  tick(x0,x1,5).forEach(v=>{ g+=`<text x="${X(v)}" y="${H-8}" text-anchor="middle" font-size="${fs}" fill="#6f6a5e">${unit(v)}</text>`; });
   // Lücken (gesperrte Lagen) unterbrechen die Linie; Rasterschritt aus KX.sweepGaps
   // (nicht der kleinste Abstand: die jetzige Lage liegt meist neben dem Raster).
   const br=KX.sweepGaps(P, ax.cur);
@@ -15712,7 +15725,7 @@ function sweepSvg(ax, unit, from, cssW){
   // Lagen, die etwas verschlechtern (Weg gesperrt, neuer Befund): hohler Ring.
   P.filter(p=>!p.ok).forEach(p=>{ g+=`<circle cx="${X(p.v)}" cy="${Y(p.km)}" r="3.5" fill="#faf9f6" stroke="#b3261e" stroke-width="1.5"><title>${p.blocked?'Weg gesperrt':'neuer Befund in der Prüfung'}</title></circle>`; });
   const cur=P.find(p=>Math.abs(p.v-ax.cur)<1);
-  if(cur) g+=`<line x1="${X(cur.v)}" x2="${X(cur.v)}" y1="${pt}" y2="${H-pb}" stroke="#7c766a" stroke-width="1"/><circle cx="${X(cur.v)}" cy="${Y(cur.km)}" r="5" fill="#7c766a" stroke="#faf9f6" stroke-width="2"/><text x="${X(cur.v)+6}" y="${pt+9}" font-size="${fs}" fill="#4b473e">jetzt</text>`;
+  if(cur) g+=`<line x1="${X(cur.v)}" x2="${X(cur.v)}" y1="${pt}" y2="${H-pb}" stroke="#6f6a5e" stroke-width="1"/><circle cx="${X(cur.v)}" cy="${Y(cur.km)}" r="5" fill="#6f6a5e" stroke="#faf9f6" stroke-width="2"/><text x="${X(cur.v)+6}" y="${pt+9}" font-size="${fs}" fill="#4b473e">jetzt</text>`;
   if(ax.best && (!cur || Math.abs(ax.best.v-cur.v)>=1)) g+=`<circle cx="${X(ax.best.v)}" cy="${Y(ax.best.km)}" r="5" fill="#2e7d4f" stroke="#faf9f6" stroke-width="2"/><text x="${X(ax.best.v)}" y="${Y(ax.best.km)+16}" text-anchor="middle" font-size="${fs}" fill="#24221d">Optimum</text>`;
   g+=`<rect class="ka-hit" x="${pl}" y="${pt}" width="${W-pl-pr}" height="${H-pt-pb}" fill="transparent" style="cursor:crosshair"/><line class="ka-cross" x1="0" x2="0" y1="${pt}" y2="${H-pb}" stroke="#4b473e" stroke-width="1" visibility="hidden"/>`;
   return `<div class="ka-chart" data-ax="${ax.key}" data-from="${from}"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${escapeHtml(ax.label)}: km pro Jahr je Lage">${g}</svg><div class="ka-tip"></div></div>`;

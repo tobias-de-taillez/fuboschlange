@@ -71,7 +71,7 @@ const $=id=>document.getElementById(id);
 const CSS=`
 #mldFab,#mldwrap,#mldToast{
   --mld-surface:var(--surface,#faf9f6); --mld-canvas:var(--canvas,#f5f3ed);
-  --mld-ink:var(--ink,#24221d); --mld-ink2:var(--ink2,#4b473e); --mld-muted:var(--muted,#7c766a);
+  --mld-ink:var(--ink,#24221d); --mld-ink2:var(--ink2,#4b473e); --mld-muted:var(--muted,#6f6a5e);
   --mld-line:var(--line,#d8d3c6); --mld-line2:var(--line2,#e8e4da);
   --mld-hover:var(--hover,#eeeae0); --mld-press:var(--press,#e4dfd3);
   --mld-accent:var(--accent,#c2410c); --mld-accent-hover:var(--accent-hover,#a8380a);
@@ -517,7 +517,8 @@ if(lokal && nach && kannNachstellen()){
     if(o.raum && serialize()!==JSON.stringify(o.raum)){ deserialize(o.raum); recompute(); }
     undoStack.length=0; undoStack.push(...(o.undo||[]));
     redoStack.length=0; redoStack.push(...(o.redo||[]));
-    if(u.mode && u.mode!==M.mode) setMode(u.mode);
+    // Fliesenplan und Küchenplaner sind eigene Werkzeuge: der Schritt allein führte zurück ins Aufmaß.
+    if(u.mode && u.mode!==M.mode){ const w={tiles:'fliesen', kitchen:'kueche'}[u.mode]; if(w && typeof setTool==='function') setTool(w); else setMode(u.mode); }
     // Nach openRoom/deserialize/setMode: openRoom setzt die Küchenauswahl zurück.
     if(u.kueche && typeof kitchenUiRestore==='function') kitchenUiRestore(u.kueche);
     if(Array.isArray(u.sel)) M.sel=u.sel;
