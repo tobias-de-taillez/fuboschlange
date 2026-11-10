@@ -3,7 +3,8 @@
 // Rückgängig-Stapel und Ecken-IDs. Unverändert aus dem früheren Block "ui"
 // von raumaufmass.html.
 // Braucht: raum-kern.js, raum-geometrie.js, raum-speicher.js sowie TILES
-// und KITCHEN (Fliesen- und Küchendaten bleiben am Raum).
+// (raum-fliesen.js) und KITCHEN (raum-kueche.js): Fliesen- und Küchendaten
+// bleiben am Raum.
 // Erwartet vom Werkzeug, das diese Datei lädt (erst beim Aufruf, nicht beim
 // Laden): opMeasSeq, recompute, render, syncOrthoBtn, syncSnapfitBtn.
 // Greift beim Aufruf auf raum-zeichnung.js zu: VIEW, userView.

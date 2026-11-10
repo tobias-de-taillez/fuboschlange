@@ -25,7 +25,7 @@
 # JS-Dateien (docs/adr/0001-familie-mit-geteilten-js-dateien.md):
 #   raeume.html       Startbildschirm; geht als raeume.html UND als index.html hoch
 #   raumaufmass.html  das Werkzeug, unter seinem eigenen Namen
-#   raum-*.js         was die Seiten per <script src> laden (aus den Seiten gelesen)
+#   raum-*.js, fliesenplan-*.js   was die Seiten per <script src> laden (aus den Seiten gelesen)
 #   fliese-einmessen.html, datenschutz-meldung.html, bugreport.php wie bisher
 # Gibt es im Stand kein raeume.html (alte Stände), ist raumaufmass.html die
 # Einstiegsseite und geht wie früher als index.html hoch.

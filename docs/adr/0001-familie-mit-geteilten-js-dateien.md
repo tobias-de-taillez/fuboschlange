@@ -21,5 +21,9 @@ Bis November 2026 galt: Jede Oberfläche ist eine einzelne, selbst-enthaltene HT
 
 ## Zwischenstand (10.11.2026)
 
-Startbildschirm (`raeume.html`) und Raumaufmaß (`raumaufmass.html`) sind getrennte Dateien auf den geteilten Skripten. Fliesenplan und Küchenplaner laufen noch in `raumaufmass.html`, umgeschaltet über `body[data-tool]` und die Adresse (`#fliesen`, `#kueche`). Das ist der Zustand „eine Datei, getrennte Ansichten“, den dieses ADR als Ziel verwirft; er gilt nur, bis beide ihr eigenes Anforderungspapier und damit ihre eigene Datei bekommen.
+Startbildschirm (`raeume.html`) und Raumaufmaß (`raumaufmass.html`) sind getrennte Dateien auf den geteilten Skripten. Fliesenplan und Küchenplaner laufen noch in `raumaufmass.html`, umgeschaltet über `body[data-tool]` und die Adresse (`#fliesen`, `#kueche`). Ihre Rechenkerne und die Selbstchecks sind seit dem 10.11.2026 geteilte Dateien (`raum-fliesen.js`, `fliesenplan-einmessen.js`, `raum-kueche.js`, `raum-checks.js`; wörtlich ausgelagert, Beweis mit `node scripts/umzug-kerne.mjs pruefen vor-kerne`); Bedienung, Markup und CSS beider Werkzeuge stehen weiter in der Seite. Für sie gilt noch der Zustand „eine Datei, getrennte Ansichten“, den dieses ADR als Ziel verwirft. Was eigene Seiten kosten und was vorher zu entscheiden ist, steht in `docs/superpowers/plans/2026-11-10-familie-schritt-3.md`.
+
+Namensregel: `raum-*.js` lädt jedes Werkzeug der Familie, `<werkzeug>-*.js` gehört einem Werkzeug allein.
+
+Zwei Folgen der ausgelagerten Kerne, beide oben schon genannt und jetzt auch für Fliesen und Küche wahr: Bei einem Upload lädt die alte Seite für Sekunden schon den neuen Kern. Und beim Start per Doppelklick (`file://`) meldet der Browser Fehler aus geteilten Dateien ohne Datei und Zeile.
 

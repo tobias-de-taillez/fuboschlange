@@ -257,7 +257,7 @@ Abgenommen wird gegen die drei Prüfkriterien, Bildschirm für Bildschirm. Einen
 
 Umgesetzt in `raeume.html` (Startbildschirm), `raumaufmass.html` (Werkzeug) und den geteilten Dateien `raum-*.js`. Wo die Umsetzung vom Papier abweicht, steht es hier:
 
-- **Fliesenplan und Küchenplaner wohnen noch in `raumaufmass.html`.** Sie sind eigene Werkzeuge mit eigener Leiste und eigener Adresse (`#fliesen`, `#kueche`), sehen aber aus wie bisher und haben weiter ihre Hinweiszeile. Eigene Dateien bekommen sie mit ihrem eigenen Papier; solange an der Küche parallel gearbeitet wird, bliebe ein Umzug der Blöcke ein Dauerkonflikt.
+- **Fliesenplan und Küchenplaner wohnen noch in `raumaufmass.html`.** Sie sind eigene Werkzeuge mit eigener Leiste und eigener Adresse (`#fliesen`, `#kueche`), sehen aber aus wie bisher und haben weiter ihre Hinweiszeile. Ihre Rechenkerne und die Selbstchecks sind geteilte Dateien (`raum-fliesen.js`, `fliesenplan-einmessen.js`, `raum-kueche.js`, `raum-checks.js`); Bedienung, Markup und CSS beider Werkzeuge stehen weiter in `raumaufmass.html`.
 - **Die Karte der Öffnung liegt im Schritt Wände im Panel**, direkt unter der Wand, nicht schwebend im Bild. Die Wandansicht bleibt so frei.
 - **In der Skizze gibt es keine Karte der Ecke.** Ein Klick auf eine Ecke setzt dort den Zug fort. Gelöscht wird mit Entf unter dem Zeiger oder mit Rückgängig; die Karte der Ecke gibt es ab dem Schritt Maße.
 - **„Geschoss schließt nicht“ und „Grenzt an Nachbarn“** sind eigene Abschnitte im Panel geblieben und nicht im Stand-Satz aufgegangen. Sie erscheinen nur, wenn es etwas zu melden gibt.
@@ -269,7 +269,7 @@ Umgesetzt in `raeume.html` (Startbildschirm), `raumaufmass.html` (Werkzeug) und 
 - **Eine Rückmeldung ohne Ort** (Tastenkürzel, Menü) steht unten mittig im Plan. Startmeldungen und die Warnung „Speichern fehlgeschlagen“ bleiben stehen, bis die nächste Aktion etwas meldet.
 - **Maßeingabe.** Der ganze Text muss eine Zahl sein. Eine angehängte Einheit (m, cm, mm) gilt für diese eine Eingabe; in Millimetern ist ein einzelner Punkt oder ein Komma vor genau drei Ziffern ein Tausendertrenner. Über 100 m Länge oder 20 m Höhe nennt eine Rückmeldung den Verdacht.
 - **Der Raum bleibt liegen.** Ändert sich die Form nicht, behält der Raum seine Lage im Plan und im Speicher; nur ein Maß, das die Form ändert, bewegt ihn.
-- **Fehlt eine der fünf Kerndateien** (Kern, Geometrie, Speicher, Modell, Zeichnung), startet das Werkzeug nicht und sagt es („Die Seite ist unvollständig geladen.“), statt mit einem leeren Raum zu beginnen. Fehlt eine der Zugaben (Blatt, Gebäude, Link und QR, Meldung), läuft es weiter; die Ausgabe sagt dann, dass das Aufmaßblatt nicht geladen ist.
+- **Fehlt eine der acht Kerndateien** (Kern, Fliesen-Geometrie, Einmessen, Küchen-Kern, Geometrie, Speicher, Modell, Zeichnung), startet das Werkzeug nicht und sagt es („Die Seite ist unvollständig geladen.“), statt mit einem leeren Raum zu beginnen. Fehlt eine der Zugaben (Blatt, Gebäude, Link und QR, Meldung, Selbstchecks), läuft es weiter; die Ausgabe sagt dann, dass das Aufmaßblatt nicht geladen ist.
 
 ### Abnahme vor dem Live-Gang
 
@@ -285,7 +285,7 @@ Nach der Abnahme der Live-Seite geschlossen:
 
 Bekannt und offen geblieben, jeweils mit Umweg und ohne Datenverlust:
 
-- **Schritt 3 der Reihenfolge steht aus:** Fliesenplan und Küchenplaner sind nicht in eigene Dateien gezogen. Sie teilen sich mit dem Raumaufmaß das Bedien-Skript (Plan zeichnen, Treffer, Rückgängig, Speichern); eine eigene Datei je Werkzeug verlangt, dieses Skript in einen geteilten und einen Aufmaß-Teil zu zerlegen. Solange an der Küche in mehreren Zweigen gearbeitet wird, trüge jeder dieser Zweige den Umzug als Konflikt.
+- **Schritt 3 der Reihenfolge ist nur zur ersten Stufe getan:** Die Rechenkerne von Fliesen und Küche und die Selbstchecks sind geteilte Dateien; eigene Seiten `fliesenplan.html` und `kuechenplaner.html` gibt es nicht. Vermessen am 10.11.2026: Die Bedienung beider Werkzeuge hängt nur an sieben Namen des Bedien-Skripts `ui`, über `render` aber an knapp drei Vierteln davon; `ui` verdrahtet beim Laden 48 Elemente, die nur das Aufmaß hat. Eigene Seiten verlangen, `ui` in ein Plan-Skript und die Aufmaß-Bedienung zu zerlegen, dazu Entscheidungen zum Seitenwechsel (Rückgängig je Werkzeug, Zurück-Taste, Raumübergabe). Geschätzt sechs bis zehn Arbeitstage. Messung, Entwürfe und offene Entscheidungen: `docs/superpowers/plans/2026-11-10-familie-schritt-3.md`.
 - **Tastatur:** Die Karte der Ecke (Winkel festlegen) öffnet nur die Maus. Die Leertaste löst keine Knöpfe aus (sie verschiebt die Ansicht); Enter löst aus.
 - **Rückgängig über Werkzeuggrenzen:** Raumaufmaß, Fliesenplan und Küchenplaner teilen sich einen Stapel. Rückgängig im Raumaufmaß kann einen Schritt aus einem der beiden anderen zurücknehmen, ohne dass man es dort sieht; Wiederherstellen holt ihn zurück.
 - **Übernommener Raum ohne Stand:** Ein Raum aus Datei oder Link zeigt auf dem Startbildschirm Ecken und Maße statt Stand und Fläche, bis er einmal geöffnet wurde.
