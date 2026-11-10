@@ -444,6 +444,10 @@ globalThis.RAUMZEILE=(function(){
     // das Raumaufmaß später doppelte ids.
     if(typeof data.idSeq!=='number')
       data.idSeq=data.pts.reduce((mx,p)=>Math.max(mx, idOrdinal(p.id)+1), 0);
+    // Erst die Erstanlage der Gebäude aus den vorhandenen Räumen (erster Besuch
+    // mit Räumen aus dem alten Werkzeug): liefe sie nach dem Import, landete
+    // die Kopie über ihre mitgebrachten Verbindungen im Gebäude der Originale.
+    try{ const alle=STORE.allRooms(); HAUS.gliederung(alle, alle.map(r=>r.id)); }catch(e){}
     const id=STORE.create(name || 'Importierter Raum');
     if(!STORE.save(id,{data}) || !STORE.load(id)){ STORE.remove(id); return {voll:true}; }
     return {id};

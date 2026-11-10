@@ -10806,6 +10806,10 @@ $('roommenu').addEventListener('keydown',e=>{
     e.preventDefault(); e.stopPropagation();
     items[(i+(e.key==='ArrowDown'?1:-1)+items.length)%items.length].focus();
   } else if(e.key==='Escape'){ e.preventDefault(); e.stopPropagation(); openRoomMenu(false); $('roommenuBtn').focus(); }
+  // Solange der Fokus im Menü liegt, gehört die Taste dem Menü: sonst verschöben
+  // Pfeil links/rechts dahinter die gewählte Fliese oder das gewählte Teil.
+  // Enter und Leertaste lösen den Menüpunkt weiter aus, Tab wandert weiter.
+  else e.stopPropagation();
 });
 
 // Die Hotkeys sind auf window gebunden, damit sie ueberall wirken - aber
