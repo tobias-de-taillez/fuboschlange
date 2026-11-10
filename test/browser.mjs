@@ -255,6 +255,7 @@ const ABLAEUFE={
         if(id===b){ for(const q of d.pts) { q.x*=1.2; q.y*=1.2; }
           if(d.sketch) for(const q of d.sketch) { q.x*=1.2; q.y*=1.2; }
           for(const m of d.meas) m.d*=1.2; for(const o of d.openings) o.x*=1.2; }
+        if(id===a || id===b) d.shared={'A|F':{room:'alter-fehlender-raum-'+id,wall:['A','B'],tuer:{op:'o1'}}};
         STORE.save(id,{data:d});
       }
       HAUS.gliederung(STORE.allRooms()); const h=HAUS.neuesGebaeude(a,'Haus');
@@ -262,8 +263,12 @@ const ABLAEUFE={
       openRoom(a); setMode('wall'); M.wallSel={a:'F',b:'A'}; M.openSel='o1'; render();
       return {a,b,c};
     },fixture.data);
+    pruef('Alte Türverbindung zu einem fehlenden Raum ist erklärbar und entfernbar',
+      /nicht vorhanden/.test(await p.locator('#opConnection').innerText()) && await p.getByRole('button',{name:'Alte Verbindung entfernen'}).isVisible());
+    await p.getByRole('button',{name:'Alte Verbindung entfernen'}).click(); await sleep(300);
+    pruef('Alte Verbindung entfernt, Tür und Raum bleiben erhalten',await p.evaluate(a=>!STORE.load(a).data.shared['A|F'] && STORE.load(a).data.openings.some(o=>o.id==='o1'),ids.a));
     const choices=await p.locator('#opConnection select option').allTextContents();
-    pruef('Tür-Auswahl bietet nur eine freie Tür im selben Geschoss', choices.length===1 && /Flur/.test(choices[0]) && !choices.some(s=>/Dach/.test(s)),choices.join(' | '));
+    pruef('Tür-Auswahl bietet eine Tür mit veraltetem Bezug im selben Geschoss an', choices.length===1 && /Flur/.test(choices[0]) && /alte Verbindung ersetzen/.test(choices[0]) && !choices.some(s=>/Dach/.test(s)),choices.join(' | '));
     await p.getByRole('button',{name:'Türen verbinden'}).click(); await sleep(300);
     let state=await p.evaluate(({a,b})=>({a:STORE.load(a).data.shared['A|F'], b:STORE.load(b).data.shared['A|F'], neighbors:neighbors.map(n=>n.id)}),ids);
     pruef('Verbinden schreibt beide Türseiten und stellt den Nachbarraum dar', state.a?.room===ids.b && state.b?.room===ids.a && state.a?.tuer.op==='o1' && state.b?.tuer.op==='o1' && state.neighbors.includes(ids.b),JSON.stringify(state));

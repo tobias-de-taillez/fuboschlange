@@ -3489,6 +3489,15 @@ function renderDoorConnection(o){
   const row=(tag,txt)=>{ const e=document.createElement(tag); e.textContent=txt; box.appendChild(e); return e; };
   if(sh){
     const r=STORE.load(sh.room);
+    if(!r){
+      row('p','Die alte Verbindung zeigt auf einen Raum, der in diesem Browser nicht vorhanden ist. Die Tür bleibt erhalten. Beim Entfernen wird der Rückgängig-Verlauf dieses Raums geleert.');
+      const b=row('button','Alte Verbindung entfernen'); b.type='button';
+      b.onclick=()=>{ const result=STORE.clearMissingLink(currentRoom,JSON.parse(serialize()),k);
+        if(!result.ok){ setHint(result.reason); return; }
+        M.shared={...STORE.load(currentRoom).data.shared}; undoStack.length=0; redoStack.length=0;
+        recompute(); setHint('Alte Verbindung entfernt. Die Tür bleibt erhalten und kann neu verbunden werden.'); };
+      return;
+    }
     row('p', `Wand verbunden mit „${r ? r.name : 'fehlender Raum'}“${sh.tuer && sh.tuer.op===o.id?' über diese Tür':''}.`);
     if(sh.manuell && sh.tuer && sh.tuer.op===o.id){
       row('p','Beim Lösen werden die bisherigen Rückgängig-Schritte dieses Raums geleert.');
@@ -3505,14 +3514,15 @@ function renderDoorConnection(o){
   const all=STORE.allRooms();
   const choices=all.filter(r=>r.id!==currentRoom && HAUS.ort(r.id)?.geschoss.id===ort.geschoss.id)
     .flatMap(r=>(Array.isArray(r.data?.openings)?r.data.openings:[])
-      .filter(d=>d.kind==='door' && !(r.data.shared||{})[wallKey(d.a,d.b)])
+      .filter(d=>{ const sh=(r.data.shared||{})[wallKey(d.a,d.b)]; return d.kind==='door' && (!sh || !STORE.load(sh.room)); })
       .map(d=>({room:r,door:d})));
   row('p','Diese Tür mit einer Tür im selben Geschoss verbinden. Die bisherigen Rückgängig-Schritte werden dabei geleert; die Verbindung lässt sich hier wieder lösen. Beim Import einer einzelnen Raumdatei muss sie neu gesetzt werden.');
   if(!choices.length){ row('p','Keine freie Tür in einem anderen Raum dieses Geschosses gefunden.'); return; }
   const label=row('label','Tür im anderen Raum '), sel=document.createElement('select');
   sel.setAttribute('aria-label','Tür im anderen Raum'); label.appendChild(sel);
   choices.forEach((c,i)=>{ const opt=document.createElement('option'); opt.value=String(i);
-    opt.textContent=`${c.room.name} · Wand ${c.door.a}–${c.door.b} · ${Math.round(c.door.w)} mm · ab ${c.door.a} ${Math.round(c.door.x)} mm`; sel.appendChild(opt); });
+    const stale=(c.room.data.shared||{})[wallKey(c.door.a,c.door.b)];
+    opt.textContent=`${c.room.name} · Wand ${c.door.a}–${c.door.b} · ${Math.round(c.door.w)} mm · ab ${c.door.a} ${Math.round(c.door.x)} mm${stale?' · alte Verbindung ersetzen':''}`; sel.appendChild(opt); });
   const info=row('p','');
   const show=()=>{ const c=choices[+sel.value], t=M.thick[k] || c.room.data.thick?.[wallKey(c.door.a,c.door.b)] || THICK_DEFAULT;
     const delta=Math.abs(o.w-c.door.w), otherT=c.room.data.thick?.[wallKey(c.door.a,c.door.b)];

@@ -8,6 +8,14 @@ const make=(offset,door)=>({pts:[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:
   walls:[['A','B'],['B','C'],['C','D'],['D','A']],meas:[{a:'A',b:'B',d:4000}],
   openings:[{id:door,kind:'door',a:'A',b:'B',x:offset,w:860,h:2000}],shared:{},thick:{}});
 S.save(a,{data:make(500,'o1')}); S.save(b,{data:make(1500,'o2')});
+const oldA={...S.load(a).data,shared:{'A|B':{room:'nicht-mehr-da',wall:['A','B'],tuer:{op:'o1'}}}};
+const oldB={...S.load(b).data,shared:{'A|B':{room:'alte-id',wall:['A','B'],tuer:{op:'o2'}}}};
+S.save(a,{data:oldA}); S.save(b,{data:oldB});
+assert.equal(S.clearMissingLink(a,oldA,'A|B').ok,true,'legacy connection to a missing room can be removed');
+assert.equal(S.load(a).data.openings[0].id,'o1','removing a stale reference retains the door');
+assert.equal(S.linkDoors(a,S.load(a).data,'o1',b,'o2',175).ok,true,'stale target connection can be replaced');
+assert.equal(S.clearMissingLink(a,S.load(a).data,'A|B').ok,false,'a live connection cannot be cleared as missing');
+assert.equal(S.unlinkDoors(a,S.load(a).data,'A|B').ok,true);
 const source=S.load(a).data, before=m.get('raumaufmass.rooms');
 const write=storage.setItem;
 storage.setItem=()=>{ throw new Error('storage full'); };

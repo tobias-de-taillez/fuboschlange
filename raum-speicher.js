@@ -107,13 +107,28 @@ globalThis.STORE_FACTORY=function makeStore(storage){
       const x=aa[0], y=bb[0], key=o=>[o.a,o.b].sort().join('|'), k=key(x), j=key(y);
       const wall=(d,o)=>Array.isArray(d.walls) && d.walls.some(w=>Array.isArray(w) && key({a:w[0],b:w[1]})===key(o));
       if(!wall(data,x) || !wall(b.data,y)) return {ok:false, reason:'Eine Tür hat keine gültige Wand.'};
-      if((data.shared||{})[k] || (b.data.shared||{})[j]) return {ok:false, reason:'Eine der Wände ist bereits verbunden.'};
+      const sourceLink=(data.shared||{})[k], targetLink=(b.data.shared||{})[j];
+      // Old imports can refer to room IDs from another browser or to rooms
+      // that have been deleted. A missing target is not an occupied wall;
+      // replacing that dead reference is safe in the same atomic write.
+      if((sourceLink && rooms.some(r=>r.id===sourceLink.room)) ||
+         (targetLink && rooms.some(r=>r.id===targetLink.room)))
+        return {ok:false, reason:'Eine der Wände ist bereits verbunden.'};
       const t=Number(thickness);
       if(!Number.isFinite(t) || t<20 || t>1000) return {ok:false, reason:'Wanddicke muss zwischen 20 und 1000 mm liegen.'};
       a.data={...data, shared:{...(data.shared||{}),[k]:{room:b.id,wall:[y.a,y.b],tuer:{op:x.id},manuell:true}}, thick:{...(data.thick||{}),[k]:t}};
       b.data={...b.data, shared:{...(b.data.shared||{}),[j]:{room:a.id,wall:[x.a,x.b],tuer:{op:y.id},manuell:true}}, thick:{...(b.data.thick||{}),[j]:t}};
       a.updated=b.updated=new Date().toISOString();
       return writeRooms(rooms) ? {ok:true} : {ok:false, reason:'Verbindung konnte nicht gespeichert werden.'};
+    },
+    clearMissingLink(id,data,wall){
+      const rooms=readRooms(), a=rooms.find(r=>r.id===id), sh=data?.shared?.[wall], stored=a?.data?.shared?.[wall];
+      if(!a || !sh || !stored || JSON.stringify(sh)!==JSON.stringify(stored))
+        return {ok:false,reason:'Die Verbindung hat sich geändert; bitte Raum neu laden.'};
+      if(rooms.some(r=>r.id===sh.room)) return {ok:false,reason:'Der Nachbarraum ist inzwischen vorhanden; bitte Raum neu laden.'};
+      const shared={...data.shared}; delete shared[wall];
+      a.data={...data,shared}; a.updated=new Date().toISOString();
+      return writeRooms(rooms) ? {ok:true} : {ok:false,reason:'Verbindung konnte nicht entfernt werden.'};
     },
     unlinkDoors(id, data, wall){
       const rooms=readRooms(), a=rooms.find(r=>r.id===id), sh=data && data.shared && data.shared[wall];
