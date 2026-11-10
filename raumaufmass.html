@@ -8492,8 +8492,6 @@ function tilesPrintHtml(){
   TS.printMaps={maps:ev.maps, K, T, ev};
   return html;
 }
-// Erstes Bild nach dem Boot: jetzt kennt renderPanel den Fliesen-Knopf.
-render();
 // ---------- Fliese einmessen ----------
 // Dialog am Fliesenset: Strecken der aktiven Variante eintragen, Werte mit ±
 // ansehen, uebernehmen. Rechnung in TILEMEAS; die Eingaben bleiben je
@@ -8841,6 +8839,11 @@ function drawRuler(K, dpr){
 }
 $('tRuler').onclick=()=>rulerToggle();
 
+// Erstes Bild nach dem Boot: jetzt kennt renderPanel den Fliesen-Knopf. Ganz am
+// Ende des Blocks, damit alles steht, was das Zeichnen der Fliesenansicht braucht
+// (TS.ruler, RULER_PX, rulerLen ...): vorher gelang das Bild nur, weil die Seite
+// beim Laden noch im Schritt Skizze steht.
+render();
 </script>
 
 <script id="kitchen-ui">
