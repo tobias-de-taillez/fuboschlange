@@ -102,7 +102,7 @@ async function lauf(stand, seiten, variante, viewport){
   await schritt('aufmass-menue-zu', async()=>{ await p.keyboard.press('Escape'); });
   // Fliesenplan und Küchenplaner brauchen einen eindeutig geprüften Raum; die Skizze ohne Maße bleibt im Aufmaß
   if(variante==='skizze'){ const fehl=[...new Set(fehler)]; await ctx.close(); return {bilder, fehl}; }
-  await p.goto(URL_[stand]+'/'+seiten.fliesen); await sleep(1000);
+  await p.goto(URL_[stand]+'/'+seiten.fliesen); await sleep(600); await p.reload(); await sleep(1000);   // frisch: eine Adressänderung #fliesen bliebe im selben Dokument
   await ruhe(); await knipse('fliesen-start');
   const kachel=async ()=>p.evaluate(()=>{ const T=M.tiles.items[0]; if(!T) return null; const K=tilesCtx(), P=TILES.tileCorners(M.tiles.spec,T), c={x:P.reduce((a,q)=>a+q.x,0)/P.length,y:P.reduce((a,q)=>a+q.y,0)/P.length}, s=toScr(TILES.toWorldF(K.F,c)), r=cv.getBoundingClientRect(), d=DPR(); return {x:r.left+s.x/d,y:r.top+s.y/d}; });
   await schritt('fliesen-hover', async()=>{ const q=await kachel(); if(q) await p.mouse.move(q.x,q.y); });
@@ -117,12 +117,12 @@ async function lauf(stand, seiten, variante, viewport){
   await schritt('fliesen-stueckliste', async()=>{ await p.click('#tDetails > summary'); await sleep(300); });
   await schritt('fliesen-einmessen', async()=>{ await p.click('#tMeasure'); await sleep(500); });
   await schritt('fliesen-einmessen-zu', async()=>{ await p.keyboard.press('Escape'); await sleep(300); });
-  await schritt('fliesen-qr', async()=>{ await p.click('#roommenuBtn'); await sleep(200); await p.click('#shareqr'); await sleep(500); });
+  await schritt('fliesen-qr', async()=>{ await p.click('#roommenuBtn'); await sleep(200); await p.click('#shareqr'); await sleep(500); await p.evaluate(()=>{ const c=document.getElementById('qrcv'); if(c) c.style.visibility='hidden'; }); });
   await schritt('fliesen-qr-zu', async()=>{ await p.keyboard.press('Escape'); await sleep(300); });
   await schritt('fliesen-melden', async()=>{ await p.click('#mldOpen'); await sleep(500); });
-  await schritt('fliesen-melden-zu', async()=>{ await p.keyboard.press('Escape'); await sleep(300); });
+  await schritt('fliesen-melden-zu', async()=>{ await p.keyboard.press('Escape'); await p.mouse.move(5,5); await sleep(300); });
   // Küchenplaner
-  await p.goto(URL_[stand]+'/'+seiten.kueche); await sleep(1200);
+  await p.goto(URL_[stand]+'/'+seiten.kueche); await sleep(600); await p.reload(); await sleep(1200);
   await ruhe(); await knipse('kueche-start');
   const teil=()=>p.evaluate(()=>{ const K=M.kitchen, it=K.items[0]; if(!it) return null; const E=KITCHEN.makeEnv(M.fit.pts,M.walls,M.openings,M.hmeas,M.water,K.frame), g=KITCHEN.geom(E,K,it); if(!g) return null; const r=cv.getBoundingClientRect(), d=DPR(), s=toScr(g.c); return {x:r.left+s.x/d,y:r.top+s.y/d}; });
   await schritt('kueche-hover', async()=>{ const q=await teil(); if(q) await p.mouse.move(q.x,q.y); });
