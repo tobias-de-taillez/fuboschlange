@@ -2259,10 +2259,14 @@ function stepSwim(now){
 //   zeichne()   die Zeichenfläche                        panel(): Abschnitt im Panel; true = der Modus
 //   hinweis()   Standardtext der Hinweiszeile            wurde verlassen, die Seite rendert nicht weiter
 //   verlassen() beim Wechsel in einen anderen Modus
+//   Zeiger: down(e) legt eine Geste an (true) oder lässt der Seite das Ziehen im Leeren; hover(e) ohne
+//   gedrückte Taste; move(e, g), up(e, g) und pinch(g) für Gesten, deren Typ g.t in gesten steht; tap(e)
+//   für einen Klick ohne Ziehen, wenn down keine Geste angelegt hat.
 // Die Anmeldung selbst steht beim Werkzeug; die Seite lädt es nach diesem Block.
 const WERKZEUGE={};
 function meldeAn(modus, werk){ WERKZEUGE[modus]=werk; }
 const werkzeug=modus=>WERKZEUGE[modus===undefined ? M.mode : modus]||null;
+const werkFuerGeste=g=>(g && Object.values(WERKZEUGE).find(w=>w.gesten && w.gesten.includes(g.t)))||null;
 
 function render(){
   redraw();
@@ -3728,7 +3732,7 @@ function startPinch(){
   cancelLongpress();
   // Ein laufender Küchen-Zug wird abgeschlossen (gespeichert), sonst bliebe
   // er halb liegen und das Panel eingefroren.
-  if(gesture && gesture.t==='kitchen' && gesture.moved && typeof kitchenUp==='function') kitchenUp(null, gesture);
+  const gw=werkFuerGeste(gesture); if(gw && gw.pinch) gw.pinch(gesture);
   gesture=null;
   if(M.drag){ M.drag=null; M.dragMode=null; }
 }
@@ -3800,12 +3804,9 @@ cv.addEventListener('pointerdown',e=>{
   hidePop();
   if(pointers.size===2){ startPinch(); return; }
   if(pointers.size>2 || pinch) return;
-  if(M.mode==='tiles'){
-    if(!tilesDown(e)) gesture={t:'bg',x0:e.clientX,y0:e.clientY,lx:e.clientX,ly:e.clientY,moved:false,wall:null,popOpen};
-    return;
-  }
-  if(M.mode==='kitchen'){
-    if(!kitchenDown(e)) gesture={t:'bg',x0:e.clientX,y0:e.clientY,lx:e.clientX,ly:e.clientY,moved:false,wall:null,popOpen};
+  const werk=werkzeug();
+  if(werk){
+    if(!werk.down(e)) gesture={t:'bg',x0:e.clientX,y0:e.clientY,lx:e.clientX,ly:e.clientY,moved:false,wall:null,popOpen};
     return;
   }
   // Langes Druecken loescht nur noch bei Finger und Stift. Mit Maus und
@@ -3888,8 +3889,7 @@ cv.addEventListener('pointerleave',()=>{
 cv.addEventListener('pointermove',e=>{
   if(!pointers.has(e.pointerId)){
     if(spaceHeld){ cv.style.cursor='grab'; return; }
-    if(M.mode==='tiles'){ tilesHover(e); return; }
-    if(M.mode==='kitchen'){ kitchenHover(e); return; }
+    const werk=werkzeug(); if(werk){ werk.hover(e); return; }
     if(e.pointerType==='mouse' && planMode() && planHover(e)) return;
     if(e.pointerType==='mouse' && M.mode!=='wall' && !swim) updateHover(e);
     return;
@@ -3905,8 +3905,7 @@ cv.addEventListener('pointermove',e=>{
     gesture.lx=e.clientX; gesture.ly=e.clientY;
     redraw(); return;
   }
-  if(gesture.t==='tiles'){ tilesMove(e, gesture); return; }
-  if(gesture.t==='kitchen'){ kitchenMove(e, gesture); return; }
+  const gw=werkFuerGeste(gesture); if(gw){ gw.move(e, gesture); return; }
   if(gesture.t==='planOp'){
     if(!gesture.moved) return;
     // Eingemessen liegt sie, wo ihr Mass sie hinlegt (wie in der Wandansicht).
@@ -4011,17 +4010,11 @@ function endPointer(e){
     if(!g.moved && !g.popOpen) tapPointMeasure(g.id);
     return;
   }
-  if(g.t==='tiles'){ tilesUp(e, g); return; }
-  if(g.t==='kitchen'){ kitchenUp(e, g); return; }
-  if(g.t==='kdim') return;                       // Maß-Eingabe ist offen
-  if(M.mode==='kitchen'){
+  const gw=werkFuerGeste(g); if(gw){ gw.up(e, g); return; }
+  const werk=werkzeug();
+  if(werk){
     if(g.moved) render();
-    else if(e.type!=='pointercancel') kitchenTap(e);
-    return;
-  }
-  if(M.mode==='tiles'){
-    if(g.moved) render();
-    else if(e.type!=='pointercancel') tilesTap(e);
+    else if(e.type!=='pointercancel') werk.tap(e);
     return;
   }
   // Wände-Modus: ein Klick ins Leere hebt die Auswahl der Oeffnung auf.
@@ -8841,6 +8834,8 @@ meldeAn('tiles', {
     return false;
   },
   hinweis(){ const h=TILE_TOOL_HINTS[TS.tool]; return h && h(); },
+  down:tilesDown, hover:tilesHover, tap:tilesTap,
+  gesten:['tiles'], move:tilesMove, up:tilesUp,
   // Beim Verlassen des Fliesen-Modus: Werkzeug zurueck, Auswahl weg.
   verlassen(){ TS.sel.clear(); TS.tool='move'; TS.draft=null; TS.lines=[]; },
 });
@@ -10619,6 +10614,12 @@ meldeAn('kitchen', {
   },
   hinweis:kitchenHint,
   verlassen:kitchenLeave,
+  down:kitchenDown, hover:kitchenHover, tap:kitchenTap,
+  // 'kdim': die Maß-Eingabe ist offen, Ziehen und Loslassen tun nichts.
+  gesten:['kitchen','kdim'],
+  move(e, g){ if(g.t==='kitchen') kitchenMove(e, g); },
+  up(e, g){ if(g.t==='kitchen') kitchenUp(e, g); },
+  pinch(g){ if(g.t==='kitchen' && g.moved) kitchenUp(null, g); },
 });
 Object.assign(globalThis, { kitchenDown, kitchenMove, kitchenUp, kitchenTap, kitchenHover, kitchenKey,
   drawKitchenView, renderKitchenPanel, kitchenLeave, k3dSchedule, kitchenHint, kitchenData,

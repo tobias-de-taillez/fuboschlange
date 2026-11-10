@@ -80,7 +80,10 @@ Gemeinsamer Befund: Eigene Seiten kosten sechs bis zehn Arbeitstage und sind ohn
 5. **Selbstchecks:** `raum-checks.js` lädt nur bei `?test` nach. `test/browser.mjs` ruft die Seite dafür mit `?test` auf.
 6. **Namen:** Bestehende Dateien bleiben. Neu: `raum-plan.js` und `raum-schale.css` (geteilt), `fliesenplan-bedienung.js` und `kuechenplaner-bedienung.js` (je einem Werkzeug); Seiten `fliesenplan.html`, `kuechenplaner.html`.
 
-## Empfohlene Folge für den Rest
+### Nachtrag (Widerspruch zweier Sitzungen, „entscheide du selbst“)
+
+Die Hauptsession meldete abweichende Antworten (Geltung auch für geladene Dateien, Zurück zur vorigen Seite, Playwright als devDependency, dazu: Stand auf Folge-Seiten wie heute voll neu rechnen, alte Räume beim ersten Öffnen migrieren). Tobias ließ die Entscheidung offen. Es gilt: (1) nur der Text der Datei, die Rechenkerne bleiben im Aufmaß; (2) **Zurück führt zur vorigen Seite**, jede Seite lädt bei `pageshow` mit `persisted` den Raum neu aus dem Speicher; (4) **Playwright als devDependency** in einer `package.json`; (7) volle Neuberechnung, (8) Migration wie im Aufmaß. Punkt 2c oben ist damit überholt.
+
 
 Getan sind der Messaufbau und das Netz (`test/browser.mjs` mit Abläufen für Fliesenplan und Küchenplaner). Es bleibt:
 
