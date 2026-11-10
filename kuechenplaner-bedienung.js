@@ -1761,7 +1761,8 @@ function drawGaps(c, dpr){
   const pills=[];
   const lab=r=>r.k==='summe' ? `Summe ${m2(r.val)} m` : r.k==='dreieck' ? `${m2(r.val)} m` : `${r.val} mm`;
   c.NK.forEach(r=>{
-    const col=GAP_INK[r.lvl], a=toScr(r.a), b=toScr(r.b), tri=r.k==='dreieck';
+    // Die Dreieckssumme ist ein einzelnes Schild und hat keinen Endpunkt b.
+    const col=GAP_INK[r.lvl], a=toScr(r.a), b=r.k==='summe' ? null : toScr(r.b), tri=r.k==='dreieck';
     if(r.k!=='summe'){
       ctx.save(); ctx.strokeStyle=col; ctx.fillStyle=col; ctx.lineWidth=(r.lvl==='ok'?1.4:2.4)*dpr; ctx.setLineDash(tri?[6*dpr,4*dpr]:[]);
       ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke(); ctx.setLineDash([]);

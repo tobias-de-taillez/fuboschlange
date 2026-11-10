@@ -301,6 +301,27 @@ const ABLAEUFE={
     pruef('keine Fehler in der Konsole', f.stoer.length===0, f.stoer.join(' | '));
     await f.browser.close();
   },
+  // Persistierte Abstands- und Analyseansicht einer vollständig eingerichteten Küche.
+  async kuechenstartDreieck(){
+    const f=await fenster(), p=f.page;
+    const fixture=JSON.parse(await readFile(path.join(WURZEL,'test/fixtures/raum-voll.json'),'utf8'));
+    fixture.data.kitchen.items[0].dev='hob';
+    fixture.data.kitchen.items[2].kind='tall'; fixture.data.kitchen.items[2].dev='fridge';
+    await p.addInitScript(room=>{
+      localStorage.setItem('raumaufmass.rooms',JSON.stringify([{id:'dreieck',name:'Küche',updated:new Date().toISOString(),...room}]));
+      localStorage.setItem('raumaufmass.current','dreieck');
+      localStorage.setItem('raumaufmass.kabst','1'); localStorage.setItem('raumaufmass.kana','1');
+      localStorage.setItem('raumaufmass.k3d','0'); localStorage.setItem('raumaufmass.kwege','0');
+    },fixture);
+    await p.goto(BASE+'/kuechenplaner.html'); await sleep(1400);
+    const z=await p.evaluate(()=>({palette:document.querySelectorAll('#kPalette button').length,
+      panel:document.querySelector('#kCheckCount').textContent, analyse:document.querySelector('#kAna').innerText,
+      teile:M.kitchen.items.filter(i=>['hob','sink','fridge'].includes(i.dev)).length}));
+    pruef('Küche mit Spüle, Herd und Kühlschrank startet mit gespeicherten Abständen und Analyse',
+      z.teile===3 && z.palette>=10 && z.panel!=='' && /Abläufe im Vergleich/.test(z.analyse) && f.stoer.length===0,
+      JSON.stringify({palette:z.palette,panel:z.panel,analyse:z.analyse.slice(0,60),fehler:f.stoer}));
+    await f.browser.close();
+  },
   // Zwei Fenster: das im Hintergrund lädt neu, schreibt nichts, bleibt bei seinem Raum.
   async fenster(){
     const f=await fenster(); const A=f.page; await gemessenerRaum(f); await A.keyboard.press('Escape');
