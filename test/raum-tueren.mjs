@@ -1,0 +1,29 @@
+import {readFileSync} from 'node:fs';
+import assert from 'node:assert/strict';
+const read=f=>readFileSync(new URL('../'+f,import.meta.url),'utf8');
+new Function(read('raum-fremd.js')+'\n'+read('raum-kern.js')+'\n'+read('raum-geometrie.js')+'\n'+read('raum-speicher.js'))();
+const m=new Map(), storage={getItem:k=>m.get(k)||null,setItem:(k,v)=>m.set(k,String(v)),removeItem:k=>m.delete(k)};
+const S=STORE_FACTORY(storage), a=S.create('Küche'), b=S.create('Flur');
+const make=(offset,door)=>({pts:[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:4000,y:3000},{id:'D',x:0,y:3000}],
+  walls:[['A','B'],['B','C'],['C','D'],['D','A']],meas:[{a:'A',b:'B',d:4000}],
+  openings:[{id:door,kind:'door',a:'A',b:'B',x:offset,w:860,h:2000}],shared:{},thick:{}});
+S.save(a,{data:make(500,'o1')}); S.save(b,{data:make(1500,'o2')});
+const source=S.load(a).data, before=m.get('raumaufmass.rooms');
+assert.equal(S.linkDoors(a,source,'o1',b,'missing',175).ok,false);
+assert.equal(m.get('raumaufmass.rooms'),before,'failed connection does not change either room');
+assert.equal(S.linkDoors(a,source,'o1',b,'o2',175).ok,true);
+let A=S.load(a), B=S.load(b);
+assert.equal(A.data.shared['A|B'].tuer.op,'o1');
+assert.equal(B.data.shared['A|B'].tuer.op,'o2');
+assert.equal(A.data.shared['A|B'].room,b); assert.equal(B.data.shared['A|B'].room,a);
+assert.equal(A.data.thick['A|B'],175); assert.equal(B.data.thick['A|B'],175);
+const T=ankopplung(A,B,'A|B','A|B');
+assert.ok(T && T.verankert,'both doors anchor the relative position');
+assert.equal(S.linkDoors(a,A.data,'o1',b,'o2',175).ok,false,'occupied walls cannot be replaced');
+assert.equal(S.unlinkDoors(a,A.data,'A|B').ok,true);
+A=S.load(a); B=S.load(b);
+assert.deepEqual(A.data.shared,{}); assert.deepEqual(B.data.shared,{});
+assert.equal(A.data.openings[0].id,'o1'); assert.equal(B.data.openings[0].id,'o2');
+assert.equal(S.linkDoors(a,A.data,'o1',b,'o2',175).ok,true);
+S.remove(b); assert.deepEqual(S.load(a).data.shared,{},'deleting a room removes the matching link');
+console.log('Room door connection checks passed.');

@@ -1,0 +1,54 @@
+/* Folgewerkzeuge: dieselbe Papier- und Tintenwelt wie das Raumaufmaß.
+   Alle Regeln sind auf ihre eigenen Werkzeuge begrenzt. */
+body[data-tool="fliesen"], body[data-tool="kueche"] { font-variant-numeric:tabular-nums; }
+body[data-tool="fliesen"] #tools, body[data-tool="kueche"] #tools { padding-left:8px; }
+body[data-tool="fliesen"] .tb, body[data-tool="kueche"] .tb {
+  background:transparent; border-color:transparent; border-radius:4px;
+}
+body[data-tool="fliesen"] .tb:hover, body[data-tool="kueche"] .tb:hover { background:var(--hover); }
+body[data-tool="fliesen"] .tog[aria-pressed="true"], body[data-tool="kueche"] .tog[aria-pressed="true"] {
+  background:var(--press); color:var(--ink); box-shadow:none;
+}
+body[data-tool="fliesen"] .tog[aria-pressed="true"]::before,
+body[data-tool="kueche"] .tog[aria-pressed="true"]::before { background:var(--ink); border-color:var(--ink); }
+
+/* Palette als Werkzeugleiste statt Reihe einzelner Karten. */
+#kPalette { gap:4px; }
+#kPalette .kpg { padding:0 5px; border-color:var(--line2); }
+#kPalette .kpg:first-child { padding-left:0; }
+#kPalette .kpg>span { font-size:10px; line-height:12px; letter-spacing:0; text-transform:none; padding-left:3px; }
+#kPalette .kpg>div { gap:2px; }
+#kPalette .kpal { border:1px solid transparent; background:transparent; border-radius:4px; }
+#kPalette .kpal:hover, #kPalette .kpal:focus-visible { background:var(--hover); }
+#tPalette .tpal { border-color:transparent; background:transparent; border-radius:4px; }
+#tPalette .tpal:hover { background:var(--hover); }
+
+/* Panelbereiche als ruhige Abschnitte, Auswahl bleibt klar erkennbar. */
+#tilesec>div, #tilesec>details { padding:14px 16px; border-bottom-color:var(--line2); }
+#tNextRow { padding:14px 16px; border-bottom-color:var(--line2); }
+#tSpecBox summary .ed, #kSpecBox summary .ed { color:var(--ink2); }
+#tSpecBox summary:hover .ed, #kSpecBox summary:hover .ed { color:var(--ink); text-decoration:underline; }
+#tSetList { gap:0; margin:10px 0; border:1px solid var(--line2); border-radius:6px; overflow:hidden; }
+#tSetList .tile-set-row { gap:0; border-bottom:1px solid var(--line2); }
+#tSetList .tile-set-row:last-child { border-bottom:0; }
+#tSetList .tile-set-row button { border:0; border-radius:0; background:transparent; min-height:38px; }
+#tSetList .tile-set-row button:hover { background:var(--hover); }
+#tSetList .tile-set-row>button:first-child[aria-pressed="true"] { background:var(--press); color:var(--ink); }
+#tDetails summary, #kStockBox summary { color:var(--ink2); }
+#kitchensec .kchips button { border-radius:4px; }
+#kitchensec #kCorner { border:0; border-top:1px solid var(--line2); border-bottom:1px solid var(--line2); border-radius:0; padding:8px 0; }
+#kitchensec .kdim input { height:28px; font-size:13px; border-radius:4px; background:#fff; }
+#kitchensec .kdim.dev input { border-color:var(--line); background:#fff; }
+#kitchensec .kdim.ro input { background:transparent; }
+#kitchensec .kflowgrp>b { color:var(--ink2)!important; font-weight:600; }
+#kitchensec .kflowgrp>b i { display:inline-block; width:7px; height:7px; margin:0 7px 1px 0; border-radius:50%; }
+#kitchensec .kflow[aria-pressed="true"], #kitchensec .kfind[aria-current="true"] { background:var(--press); }
+#kitchensec #kWayBox, #kitchensec #kSelBox { padding-bottom:14px; border-bottom:1px solid var(--line2); }
+#kitchensec #kSpecBox, #kitchensec #kStockBox { padding:12px 0; margin:0; border-bottom:1px solid var(--line2); }
+#kitchensec #kCheckBox { border-bottom-color:var(--line2); padding:2px 0 12px; }
+#kitchensec .kfix { color:var(--ink2); border-color:var(--line); background:var(--surface); }
+#kitchensec .kfix:hover { background:var(--hover); color:var(--ink); }
+@media (max-width:1180px) {
+  #kPalette { gap:0; }
+  #kPalette .kpg { padding:0 2px; }
+}

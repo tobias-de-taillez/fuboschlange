@@ -1497,9 +1497,6 @@ function renderTilesPanel(){
     : `<span>Einkauf</span><b class="main">${sqm(s.placed*tileA)} <small>m² · ${s.placed} ${s.placed===1 ? 'Fliese' : 'Fliesen'}</small></b>
        <span></span><b><small>${s.L.whole+s.L.cut} L, ${s.R.whole+s.R.cut} R, ohne Recycling (mit Recycling rechnet der Druck)</small></b>
        <span>Verschnitt</span><b>${fmt2(s.waste*100)} <small>%</small></b>`;
-  $('tKey').innerHTML += `<span>Fugenmörtel</span><b>≈ ${kg} <small>kg</small></b>
-       <span>Fugenkreuze</span><b>${ev0.spacers.mid} <small>Mittelstück · </small>${ev0.spacers.fan} <small>Halbfächer · </small>${ev0.spacers.sideA}/${ev0.spacers.sideB} <small>45° A/B</small></b>
-       <span>Belegt</span><b>${m2(s.covered)} <small>von ${m2(s.roomArea)} m²</small></b>`;
   const dash='<span class="tmut">—</span>';
   $('tStats').innerHTML=`<table class="ttab tfull">
     <tr><th></th><th>L</th><th>R</th><th>Σ</th></tr>
@@ -1527,9 +1524,10 @@ function renderTilesPanel(){
   if(T.spec.set.length!==1 || T.spec.set[0]?.id!=='legacy' || T.spec.set[0]?.shape!=='chevron'){
     const kinds=T.spec.set.flatMap(TL.tileKinds), rows=kinds.map(k=>{const q=s[k]||{whole:0,cut:0}, stocks=nest?nest.stocks.filter(st=>st.kind===k).length:q.cut; return {k,q,buy:q.whole+stocks};});
     const buyArea=rows.reduce((a,r)=>a+r.buy*TL.tileArea(T.spec,r.k),0), buyCount=rows.reduce((a,r)=>a+r.buy,0);
-    $('tKey').innerHTML=`<span>Einkauf</span><b class="main">${sqm(buyArea/1e6)} <small>m² · ${buyCount} ${buyCount===1 ? 'Fliese' : 'Fliesen'}</small></b><span>Verschnitt</span><b>${fmt2((buyArea?1-s.covered/buyArea:0)*100)} <small>%</small></b><span>Fugenmörtel</span><b>≈ ${kg} <small>kg</small></b><span>Belegt</span><b>${m2(s.covered)} <small>von ${m2(s.roomArea)} m²</small></b>`;
+    $('tKey').innerHTML=`<span>Einkauf</span><b class="main">${sqm(buyArea/1e6)} <small>m² · ${buyCount} ${buyCount===1 ? 'Fliese' : 'Fliesen'}</small></b><span>Verschnitt</span><b>${fmt2((buyArea?1-s.covered/buyArea:0)*100)} <small>%</small></b>`;
     $('tStats').innerHTML=`<table class="ttab tfull"><tr><th>Variante</th><th>ganz</th><th>Schnitt</th><th>Einkauf</th></tr>${rows.map(r=>`<tr><td>${escapeHtml(tileLabel(r.k))}<small> · ${TL.tileDef(T.spec,r.k).thick} mm</small></td><td>${r.q.whole}</td><td>${r.q.cut}</td><td>${r.buy}</td></tr>`).join('')}</table><div class="tnote">${nest?'Mit Recycling aus dem aktuellen Druck.':'Ohne Recycling; Schnittblätter berechnen die Wiederverwendung je Variante.'} Fugenvolumen mit der kleineren Dicke der angrenzenden Fliesen; ≈ 1,6 kg/l plus 10 %. Unterschiedliche Dicken erfordern einen Höhenausgleich.</div>`;
   }
+  $('tStats').insertAdjacentHTML('beforeend', `<table class="ttab tfull tkv"><tr><td>Fugenmörtel</td><td>≈ ${kg} kg</td></tr><tr><td>Fugenkreuze</td><td>${ev0.spacers.mid} Mittelstück · ${ev0.spacers.fan} Halbfächer · ${ev0.spacers.sideA}/${ev0.spacers.sideB} 45° A/B</td></tr><tr><td>Belegt</td><td>${m2(s.covered)} von ${m2(s.roomArea)} m²</td></tr></table>`);
   const bo=$('tOut');
   if(bo) bo.onclick=()=>{
     const ev=tilesEval(K);

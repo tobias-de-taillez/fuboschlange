@@ -244,6 +244,32 @@ const ABLAEUFE={
     pruef('keine Fehler in der Konsole', f.stoer.length===0, f.stoer.join(' | '));
     await f.browser.close();
   },
+  async tuerverbindung(){
+    const f=await fenster(), p=f.page;
+    const fixture=JSON.parse(await readFile(path.join(WURZEL,'test/fixtures/raum-voll.json'),'utf8'));
+    await p.goto(BASE+'/raumaufmass.html'); await sleep(800);
+    const ids=await p.evaluate(data=>{
+      const a=STORE.create('Küche'), b=STORE.create('Flur'), c=STORE.create('Dach');
+      for(const id of [a,b,c]) STORE.save(id,{data:structuredClone(data)});
+      HAUS.gliederung(STORE.allRooms()); const h=HAUS.neuesGebaeude(a,'Haus');
+      HAUS.ordneZu(b,h.geschoss); HAUS.neuesGeschoss(h.gebaeude,c,'Obergeschoss');
+      openRoom(a); setMode('wall'); M.wallSel={a:'F',b:'A'}; M.openSel='o1'; render();
+      return {a,b,c};
+    },fixture.data);
+    const choices=await p.locator('#opConnection select option').allTextContents();
+    pruef('Tür-Auswahl bietet nur eine freie Tür im selben Geschoss', choices.length===1 && /Flur/.test(choices[0]) && !choices.some(s=>/Dach/.test(s)),choices.join(' | '));
+    await p.getByRole('button',{name:'Türen verbinden'}).click(); await sleep(300);
+    let state=await p.evaluate(({a,b})=>({a:STORE.load(a).data.shared['A|F'], b:STORE.load(b).data.shared['A|F'], neighbors:neighbors.map(n=>n.id)}),ids);
+    pruef('Verbinden schreibt beide Türseiten und stellt den Nachbarraum dar', state.a?.room===ids.b && state.b?.room===ids.a && state.a?.tuer.op==='o1' && state.b?.tuer.op==='o1' && state.neighbors.includes(ids.b),JSON.stringify(state));
+    await p.reload(); await sleep(800);
+    await p.evaluate(()=>{ setMode('wall'); M.wallSel={a:'F',b:'A'}; M.openSel='o1'; render(); });
+    pruef('Verbindung bleibt beim Neuladen sichtbar',await p.locator('#opConnection').innerText().then(s=>s.includes('Flur')));
+    await p.getByRole('button',{name:'Verbindung lösen'}).click(); await sleep(300);
+    state=await p.evaluate(({a,b})=>({a:STORE.load(a).data.shared['A|F'], b:STORE.load(b).data.shared['A|F'], doors:[STORE.load(a).data.openings.length,STORE.load(b).data.openings.length]}),ids);
+    pruef('Lösen entfernt beide Verweise und behält beide Türen',!state.a && !state.b && state.doors[0]===1 && state.doors[1]===1,JSON.stringify(state));
+    pruef('keine Fehler in der Konsole', f.stoer.length===0, f.stoer.join(' | '));
+    await f.browser.close();
+  },
   // Zwei Fenster: das im Hintergrund lädt neu, schreibt nichts, bleibt bei seinem Raum.
   async fenster(){
     const f=await fenster(); const A=f.page; await gemessenerRaum(f); await A.keyboard.press('Escape');
@@ -383,10 +409,10 @@ const ABLAEUFE={
     await p.click('#tNext'); await sleep(400);
     // Stückliste und Einkauf
     const einkauf=(await txt('tKey')).replace(/\s+/g, ' ');
-    pruef('Einkauf nennt 0,14 m² in 2 Fliesen, 1 L und 1 R, im Raum von 9,00 m²', /Einkauf\s*0,14 m² · 2 Fliesen/.test(einkauf) && /1 L, 1 R, ohne Recycling/.test(einkauf) && /Belegt\s*0,14 von 9,00 m²/.test(einkauf), einkauf.slice(0, 90));
+    pruef('Einkauf nennt 0,14 m² in 2 Fliesen, 1 L und 1 R; Einzelheiten liegen dahinter', /Einkauf\s*0,14 m² · 2 Fliesen/.test(einkauf) && /1 L, 1 R, ohne Recycling/.test(einkauf) && !/Belegt/.test(einkauf), einkauf.slice(0, 90));
     await p.click('#tDetails > summary'); await sleep(250);
     const liste=await p.evaluate(()=>({hoch:document.getElementById('tStats').getBoundingClientRect().height, ganz:([...document.querySelectorAll('#tStats tr')].map(r=>[...r.cells].map(c=>c.textContent.trim())).find(r=>r[0]==='ganz')||[]).join(' ')}));
-    pruef('„Stückliste im Einzelnen“ klappt auf und zählt ganz: 1 L, 1 R, 2 zusammen', liste.hoch>0 && liste.ganz==='ganz 1 1 2', liste.ganz);
+    pruef('„Stückliste und Einzelheiten“ zeigt Stückzahl und belegte Fläche', liste.hoch>0 && liste.ganz==='ganz 1 1 2' && /Belegt\s*0,14 von 9,00 m²/.test((await txt('tStats')).replace(/\s+/g,' ')), liste.ganz);
     // Offenes Menü: die Pfeile gehören dem Menü
     const e1=await eine(erste.id);
     await p.mouse.move(e1.x, e1.y); await sleep(40); await p.mouse.click(e1.x, e1.y); await sleep(250);
@@ -520,8 +546,8 @@ const ABLAEUFE={
       const bn=()=>p.evaluate(()=>({n:document.getElementById('kAbstBtn').getAttribute('aria-pressed'), l:document.getElementById('kRulerBtn').getAttribute('aria-pressed')}));
       const a0=await p.locator('#cv').screenshot();
       await p.keyboard.press('n'); await sleep(350); const an1=await bn(), a1=await p.locator('#cv').screenshot();
-      await p.click('#kAbstBtn'); await sleep(300); const an2=await bn();
-      pruef('Abstände: Taste N zeichnet Maßlinien in den Plan, der Knopf schaltet sie wieder aus', an1.n==='true' && an2.n==='false' && await unterschied(p, a0, a1)>=0.0003, JSON.stringify([an1, an2, await unterschied(p, a0, a1)]));
+      await p.click('#roommenuBtn'); await p.click('#kAbstBtn'); await sleep(300); const an2=await bn();
+      pruef('Abstände: Taste N zeichnet Maßlinien, der Menüpunkt schaltet sie wieder aus', an1.n==='true' && an2.n==='false' && await unterschied(p, a0, a1)>=0.0003, JSON.stringify([an1, an2, await unterschied(p, a0, a1)]));
       const kk=await kueche(p), box=await p.locator('#cv').boundingBox(), cx=box.x+box.width/2, cy=box.y+box.height/2;
       const r0=await p.locator('#cv').screenshot();
       await p.keyboard.press('l'); await sleep(350); const l1=await bn(), r1=await p.locator('#cv').screenshot();
@@ -533,8 +559,8 @@ const ABLAEUFE={
           out.push(await p.evaluate(()=>{ const t=document.getElementById('tools'); return `${innerWidth}: ${t.scrollWidth}/${t.clientWidth}`; })); }
         await p.setViewportSize(vs); await sleep(300);
         pruef('Küchenleiste mit Abstände und Lineal passt bei 1180, 1280, 1440 und 1920 px', out.every(x=>{ const m=x.match(/(\d+)\/(\d+)$/); return +m[1]<=+m[2]; }), out.join(' · ')); }
-      await p.click('#kRulerBtn'); await sleep(300); const l2=await bn();
-      pruef('Lineal: der Knopf blendet es wieder aus', l2.l==='false', JSON.stringify(l2)); }
+      await p.click('#roommenuBtn'); await p.click('#kRulerBtn'); await sleep(300); const l2=await bn();
+      pruef('Lineal: der Menüpunkt blendet es wieder aus', l2.l==='false', JSON.stringify(l2)); }
     // Offenes Menü: die Pfeile gehören dem Menü, nicht dem gewählten Teil
     await waehleTeil(p, insel.id); k=await kueche(p); const i0=await teilNr(p, insel.id);
     await p.click('#roommenuBtn'); await sleep(250);

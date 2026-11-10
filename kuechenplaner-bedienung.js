@@ -1246,7 +1246,7 @@ function renderWays(c){
   if(doors.length>1) h+=`<div class="krow" title="Die Nummer steht im Plan an der Tür; ein Klick auf die Tür im Plan wählt sie auch."><label>Eingang</label><select id="kEntry">${KX.entryOptions(doors, c.K.spec.entry)}</select></div>`;
   else if(!doors.length) h+=`<p class="tnote">Ohne Tür gibt es keinen Eingang: Einkauf und Müll fehlen. Tür im Modus Wände setzen.</p>`;
   Object.entries(KX.GROUPS).forEach(([gk,gl])=>{
-    h+=`<div class="kflowgrp"><b style="color:${KINK.grp[gk]}">${gl}</b>`;
+    h+=`<div class="kflowgrp"><b><i style="background:${KINK.grp[gk]}"></i>${gl}</b>`;
     R.flows.filter(f=>f.group===gk).forEach(f=>{
       const miss=f.missing.length ? ` <em>fehlt: ${escapeHtml(KX.roleList(f.missing))}</em>` : '';
       const blk=f.blocked ? ` <em class="bad">${f.blocked} Weg${f.blocked>1?'e':''} gesperrt</em>` : '';
@@ -1288,7 +1288,7 @@ function renderWays(c){
       : `${escapeHtml(nmId(v.id))} ${v.why==='voll' ? `zu voll (höchstens ${capOf(v.id)})` : '– Fächer passen nicht'}`).join(' · ');
     const stay=[...O.kept.map(x=>x.c), ...O.dropped];
     if(O.same || !O.better) hs+=`<p class="tnote">${O.kept.length ? 'Optimal eingeräumt, soweit die Schränke es zulassen.' : 'Optimal eingeräumt – keine Einteilung hat kürzere Wege.'}${dup}</p>`;
-    else hs+=`<div class="ksugghead"><b>Optimal einräumen</b><button id="kOpt" class="primary">Einräumen</button></div>`
+    else hs+=`<div class="ksugghead"><b>Optimal einräumen</b><button id="kOpt">Einräumen</button></div>`
       +`<p class="tnote">Jeder Inhalt dorthin, wo die Wege aller Abläufe zusammen am kürzesten sind.${gain}${dup}</p>`
       +`<details class="kopt"><summary>Einteilung ansehen</summary><ul>${lines}</ul></details>`;
     if(O.violations.length) hs+=`<p class="tnote">Gegen die Regeln eingeräumt: ${viol}.${stay.length ? ` Bleibt, wo es ist, weil kein passender Platz frei ist: ${stay.map(lbl).join(' · ')}. Weitere Schränke setzen.` : ''}</p>`;
@@ -1296,7 +1296,7 @@ function renderWays(c){
     if(fresh.length) hs+=`<p class="tnote">Kein passender Schrank frei für: ${fresh.map(lbl).join(' · ')}${fresh.length>1?' (Häufiges geht vor)':''}.</p>`;
   }
   if(S.length){
-    hs+=`<div class="ksugghead"><b>${places.length?'Einräumen und umsortieren':'Umsortieren'}</b><button id="kSuggAll" class="primary">Alles übernehmen</button></div>`;
+    hs+=`<div class="ksugghead"><b>${places.length?'Einräumen und umsortieren':'Umsortieren'}</b><button id="kSuggAll">Alles übernehmen</button></div>`;
     if(moves.length && S.kmAfter<S.kmPlaced-0.05) hs+=`<p class="tnote">${places.length?'Nach dem Einräumen ':''}≈ ${km(S.kmPlaced)} → ${km(S.kmAfter)} km/Jahr (−${Math.round((1-S.kmAfter/S.kmPlaced)*100)} %)</p>`;
     else if(moves.length && S.kmAfter>S.kmPlaced+0.05) hs+=`<p class="tnote">Spart erst, wenn alle Abläufe vollständig sind (z. B. Tisch, Eingang); jetzt ≈ ${km(S.kmPlaced)} → ${km(S.kmAfter)} km/Jahr.</p>`;
     else if(moves.length && S.reachDelta<-0.05) hs+=`<p class="tnote">Wege etwa gleich, aber besser greifbar.</p>`;

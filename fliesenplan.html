@@ -101,6 +101,7 @@
 #tPalette{display:flex;gap:5px;flex-wrap:wrap} #tPalette svg,#tSetList svg{width:42px;height:30px;display:block}
   #tSetList{display:grid;gap:6px;margin:10px 0} .tile-set-row{display:flex;gap:6px;align-items:center} .tile-set-row>button:first-child{flex:1;display:flex;align-items:center;gap:8px;text-align:left} .tile-set-row button[aria-pressed=true]{border-color:var(--accent);background:#fff1df} .tile-set-row small{display:block;color:var(--ink2)} #tPalette button{min-width:48px;padding:5px 8px} #tShape,#tNewShape{max-width:100%;padding:6px} #tName{min-width:0}
 </style>
+<link rel="stylesheet" href="werkzeuge-gestaltung.css">
 
 
 <div id="app">
@@ -191,7 +192,7 @@
           <h3>Material</h3>
           <div id="tWarn"></div>
           <div id="tKey"></div>
-          <details id="tDetails"><summary>Stückliste im Einzelnen</summary><div id="tStats"></div></details>
+          <details id="tDetails"><summary>Stückliste und Einzelheiten</summary><div id="tStats"></div></details>
           <div id="tPrintRow">
             <button id="tPrint" class="primary">Plan und Schnittblätter drucken</button>
             <label><input type="checkbox" id="tNums" checked>Schnittnummern aus dem letzten Druck im Plan zeigen</label>

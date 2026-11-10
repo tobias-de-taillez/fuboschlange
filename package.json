@@ -3,7 +3,7 @@
   "private": true,
   "description": "Raumaufmaß, Fliesenplan und Küchenplaner: statische Seiten ohne Build. Diese Datei gibt nur die Entwicklungs-Werkzeuge an.",
   "scripts": {
-    "test": "node test/run.mjs && node test/raum-modell.mjs && node test/raumaufmass-einmessen.mjs && node test/raumaufmass-kanten.mjs && node test/raum-blatt.mjs && node test/raum-haus.mjs && node test/fliese-einmessen.mjs && node test/verlegeplan.mjs",
+    "test": "node test/run.mjs && node test/raum-modell.mjs && node test/raumaufmass-einmessen.mjs && node test/raumaufmass-kanten.mjs && node test/raum-blatt.mjs && node test/raum-haus.mjs && node test/raum-tueren.mjs && node test/fliese-einmessen.mjs && node test/verlegeplan.mjs",
     "test:browser": "node test/browser.mjs"
   },
   "devDependencies": {

@@ -88,8 +88,46 @@ globalThis.STORE_FACTORY=function makeStore(storage){
       return readRooms().filter(Boolean)
                         .map(r=>({id:r.id, name:r.name, origin:r.origin, data:r.data}));
     },
+    // Beide Raumseiten in einem einzigen localStorage-Schreibvorgang ändern.
+    // Eine Wand kann derzeit nur eine Raumverbindung tragen.
+    linkDoors(id, data, opId, otherId, otherOpId, thickness){
+      const rooms=readRooms(), a=rooms.find(r=>r.id===id), b=rooms.find(r=>r.id===otherId);
+      if(!a || !b || a===b || !data || !b.data) return {ok:false, reason:'Raum nicht gefunden.'};
+      const door=(d,i)=>Array.isArray(d.openings) && d.openings.filter(o=>o && o.id===i && o.kind==='door');
+      const aa=door(data,opId), bb=door(b.data,otherOpId);
+      if(!aa || aa.length!==1 || !bb || bb.length!==1) return {ok:false, reason:'Tür nicht eindeutig gefunden.'};
+      const x=aa[0], y=bb[0], key=o=>[o.a,o.b].sort().join('|'), k=key(x), j=key(y);
+      const wall=(d,o)=>Array.isArray(d.walls) && d.walls.some(w=>Array.isArray(w) && key({a:w[0],b:w[1]})===key(o));
+      if(!wall(data,x) || !wall(b.data,y)) return {ok:false, reason:'Eine Tür hat keine gültige Wand.'};
+      if((data.shared||{})[k] || (b.data.shared||{})[j]) return {ok:false, reason:'Eine der Wände ist bereits verbunden.'};
+      const t=Number(thickness);
+      if(!Number.isFinite(t) || t<20 || t>1000) return {ok:false, reason:'Wanddicke muss zwischen 20 und 1000 mm liegen.'};
+      a.data={...data, shared:{...(data.shared||{}),[k]:{room:b.id,wall:[y.a,y.b],tuer:{op:x.id},manuell:true}}, thick:{...(data.thick||{}),[k]:t}};
+      b.data={...b.data, shared:{...(b.data.shared||{}),[j]:{room:a.id,wall:[x.a,x.b],tuer:{op:y.id},manuell:true}}, thick:{...(b.data.thick||{}),[j]:t}};
+      a.updated=b.updated=new Date().toISOString();
+      return writeRooms(rooms) ? {ok:true} : {ok:false, reason:'Verbindung konnte nicht gespeichert werden.'};
+    },
+    unlinkDoors(id, data, wall){
+      const rooms=readRooms(), a=rooms.find(r=>r.id===id), sh=data && data.shared && data.shared[wall];
+      if(!a || !sh || !sh.manuell || !Array.isArray(sh.wall)) return {ok:false, reason:'Verbindung nicht gefunden.'};
+      const b=rooms.find(r=>r.id===sh.room), k=[...sh.wall].sort().join('|');
+      const back=b && b.data && b.data.shared && b.data.shared[k];
+      if(b && (!back || !back.manuell || back.room!==id)) return {ok:false, reason:'Die Gegenseite hat sich geändert; bitte Raum neu laden.'};
+      const shared={...data.shared}; delete shared[wall];
+      a.data={...data,shared}; a.updated=new Date().toISOString();
+      if(b){ const s={...b.data.shared}; delete s[k]; b.data={...b.data,shared:s}; b.updated=a.updated; }
+      return writeRooms(rooms) ? {ok:true} : {ok:false, reason:'Verbindung konnte nicht gelöst werden.'};
+    },
     remove(id){
-      writeRooms(readRooms().filter(r=>r.id!==id));
+      const remaining=readRooms().filter(r=>r.id!==id);
+      remaining.forEach(r=>{
+        const shared=r.data && r.data.shared;
+        if(!shared) return;
+        const next={...shared}; let changed=false;
+        Object.keys(next).forEach(k=>{ if(next[k] && next[k].manuell && next[k].room===id){ delete next[k]; changed=true; } });
+        if(changed) r.data={...r.data,shared:next};
+      });
+      writeRooms(remaining);
       if(this.currentId()===id){
         try{ storage.removeItem(K_CUR); }catch(e){}
       }

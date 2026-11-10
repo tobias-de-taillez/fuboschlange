@@ -146,6 +146,10 @@
   #opopHead{display:none}
   #opopHead b{flex:1}
   #opopX{width:24px;min-height:24px;padding:0;border:0;background:none;color:var(--muted)}
+  #opConnection{border-top:1px solid var(--line2);margin-top:10px;padding:8px 0;font-size:12px;color:var(--ink2)}
+  #opConnection p{margin:4px 0 8px}
+  #opConnection label{display:grid;gap:4px;margin-bottom:8px}
+  #opConnection select{max-width:100%;width:100%;min-width:0;height:28px;border:1px solid var(--line);border-radius:4px;background:#fff}
   .oprow{display:flex;gap:6px;align-items:center;margin-bottom:7px;flex-wrap:wrap}
   .oprow label{font-size:12px;color:var(--ink2);min-width:46px}
   .oprow select,.oprow input{padding:0 6px;height:28px;border:1px solid var(--line);
@@ -408,6 +412,7 @@
             </div>
             <div id="opMeasList"></div>
           </div>
+          <div id="opConnection" hidden></div>
           <div class="oprow"><button id="opDel">Öffnung löschen</button></div>
         </div>
       </section>
@@ -493,7 +498,7 @@
         <dt>Diagonale</dt><dd>Zwei Ecken nacheinander anklicken. Diagonalen stehen nicht dauernd im Plan. Sie erscheinen, wenn sie dran, angefasst oder auffällig sind, und unter „Alle Strecken“.</dd>
         <dt>Karte der Ecke</dt><dd>Eine Ecke anklicken: Winkel festlegen oder lösen, Ecke löschen.</dd>
         <dt>Ein Maß passt nicht</dt><dd>Die Strecke steht rot und gestrichelt im Plan. Auf ihrer Karte nachmessen, das Maß ändern, mit „aus“ abschalten oder mit × löschen.</dd>
-        <dt>Nachbarräume</dt><dd>Hinter einer Tür legt das „+“ einen Nachbarraum an. Die Räume eines Geschosses liegen über gemeinsame Wände und über Maße <b>durch die Tür</b> zueinander. Schließt ein Ring von Räumen nicht, meldet <b>Geschoss schließt nicht</b> den Schlussfehler, statt ihn zu verstecken.</dd>
+        <dt>Nachbarräume</dt><dd>Hinter einer Tür legt das „+“ einen Nachbarraum an. Sind beide Räume schon vorhanden, öffne die Tür in der Wandansicht und wähle „Türen verbinden“ mit der passenden Tür im selben Geschoss. Die Räume liegen über die Türmitten und Maße <b>durch die Tür</b> zueinander. Schließt ein Ring von Räumen nicht, meldet <b>Geschoss schließt nicht</b> den Schlussfehler, statt ihn zu verstecken.</dd>
       </dl>
 
       <h3><i>3</i>Wände</h3>
@@ -1690,6 +1695,9 @@ $('opplDir').querySelectorAll('button').forEach(b=>{
 });
 $('opplDel').onclick=()=>{
   const o=opplSel(); if(!o) return;
+  if(M.shared[wallKey(o.a,o.b)]?.manuell && M.shared[wallKey(o.a,o.b)]?.tuer?.op===o.id){
+    setHint('Bitte zuerst die Türverbindung in der Wandansicht lösen.'); return;
+  }
   snapshot();
   M.openings=M.openings.filter(x=>x.id!==o.id);
   M.opmeas=M.opmeas.filter(m=>m.op!==o.id);
@@ -2355,6 +2363,9 @@ function showPop(devX,devY,label,onDel){
 function hidePop(){ $('pop').hidden=true; }
 
 function deletePoint(id){
+  if(Object.entries(M.shared).some(([k,s])=>s && s.manuell && k.split('|').includes(id))){
+    setHint('Bitte zuerst die Türverbindung an dieser Ecke lösen.'); return false;
+  }
   snapshot();
   // Bezugsecke der Küche: freie Teile vorher umrechnen - im Fit, ohne Fit
   // (alle Messungen aus) in der Skizze. recompute() kann das nicht mehr.
@@ -2366,14 +2377,17 @@ function deletePoint(id){
   M.sel=[];
   if(M.chain===id) M.chain=null;
   recompute();
+  return true;
 }
 function deleteWall(a,b){
   const k=[a,b].sort().join('|');
+  if(M.shared[k]?.manuell){ setHint('Bitte zuerst die Türverbindung an dieser Wand lösen.'); return false; }
   const at=M.walls.findIndex(w=>[w[0],w[1]].sort().join('|')===k);
   if(at<0) return;
   snapshot();
   M.walls.splice(at,1);
   recompute();
+  return true;
 }
 
 // ================= Wand-Popup =================
@@ -2606,7 +2620,7 @@ $('wpopDel').onclick=()=>{
   if(!wpopPair) return;
   const {a, b}=wpopPair, wand=istWand(a,b);
   closeWallPopup();
-  if(wand){ deleteWall(a,b); setHint(`Wand ${a}–${b} gelöscht · ⌘Z holt sie zurück`); }
+  if(wand){ if(deleteWall(a,b)) setHint(`Wand ${a}–${b} gelöscht · ⌘Z holt sie zurück`); }
   else { snapshot(); M.meas=M.meas.filter(m=>wallKey(m.a,m.b)!==wallKey(a,b)); recompute(); setHint(`Maße der Diagonale ${a}–${b} gelöscht · ⌘Z holt sie zurück`); }
 };
 $('wpopOk').onclick=()=>{
@@ -2956,7 +2970,7 @@ function fixCornerAngle(){
   setHint(`Winkel an ${id} auf ${fmtGrad(deg).replace(/,0$/,'')}° festgelegt.`);
 }
 $('cpopOk').onclick=fixCornerAngle;
-$('cpopDel').onclick=()=>{ const id=cpopId; if(!id) return; M.sel=[]; closeCornerPop(); deletePoint(id); setHint(`Ecke ${id} gelöscht · ⌘Z holt sie zurück`); };
+$('cpopDel').onclick=()=>{ const id=cpopId; if(!id) return; M.sel=[]; closeCornerPop(); if(deletePoint(id)) setHint(`Ecke ${id} gelöscht · ⌘Z holt sie zurück`); };
 $('cpopFree').onclick=()=>{
   const id=cpopId; if(!id) return;
   snapshot();
@@ -3452,6 +3466,58 @@ const HAS_DIR=new Set(['turn','turntilt','tilt','top','pivot','stulp']);
 
 function selectedOpening(){ return M.openings.find(o=>o.id===M.openSel)||null; }
 
+// Existing rooms can be joined by identifying the two readings of one door.
+// The wall geometry still derives the room positions; neither room is redrawn.
+function renderDoorConnection(o){
+  const box=$('opConnection'); box.replaceChildren();
+  box.hidden=!o || o.kind!=='door' || !currentRoom;
+  if(box.hidden) return;
+  const k=wallKey(o.a,o.b), sh=M.shared[k];
+  const row=(tag,txt)=>{ const e=document.createElement(tag); e.textContent=txt; box.appendChild(e); return e; };
+  if(sh){
+    const r=STORE.load(sh.room);
+    row('p', `Wand verbunden mit „${r ? r.name : 'fehlender Raum'}“${sh.tuer && sh.tuer.op===o.id?' über diese Tür':''}.`);
+    if(sh.manuell && sh.tuer && sh.tuer.op===o.id){
+      const b=row('button','Verbindung lösen'); b.type='button';
+      b.onclick=()=>{ const result=STORE.unlinkDoors(currentRoom,JSON.parse(serialize()),k);
+        if(!result.ok){ setHint(result.reason); return; }
+        M.shared={...STORE.load(currentRoom).data.shared}; undoStack.length=0; redoStack.length=0;
+        recompute(); setHint('Türverbindung gelöst. Die Türen bleiben in beiden Räumen erhalten.'); };
+    }
+    return;
+  }
+  const ort=HAUS.ort(currentRoom);
+  if(!ort){ row('p','Ordne diesen Raum zuerst einem Geschoss zu, um eine vorhandene Tür zu verbinden.'); return; }
+  const all=STORE.allRooms();
+  const choices=all.filter(r=>r.id!==currentRoom && HAUS.ort(r.id)?.geschoss.id===ort.geschoss.id)
+    .flatMap(r=>(Array.isArray(r.data?.openings)?r.data.openings:[])
+      .filter(d=>d.kind==='door' && !(r.data.shared||{})[wallKey(d.a,d.b)])
+      .map(d=>({room:r,door:d})));
+  row('p','Diese Tür mit einer Tür im selben Geschoss verbinden. Die bisherigen Rückgängig-Schritte werden dabei geleert; die Verbindung lässt sich hier wieder lösen.');
+  if(!choices.length){ row('p','Keine freie Tür in einem anderen Raum dieses Geschosses gefunden.'); return; }
+  const label=row('label','Tür im anderen Raum '), sel=document.createElement('select');
+  sel.setAttribute('aria-label','Tür im anderen Raum'); label.appendChild(sel);
+  choices.forEach((c,i)=>{ const opt=document.createElement('option'); opt.value=String(i);
+    opt.textContent=`${c.room.name} · Wand ${c.door.a}–${c.door.b} · ${Math.round(c.door.w)} mm · ab ${c.door.a} ${Math.round(c.door.x)} mm`; sel.appendChild(opt); });
+  const info=row('p','');
+  const show=()=>{ const c=choices[+sel.value], t=M.thick[k] || c.room.data.thick?.[wallKey(c.door.a,c.door.b)] || THICK_DEFAULT;
+    const delta=Math.abs(o.w-c.door.w);
+    info.textContent=`Wanddicke ${Math.round(t)} mm${M.thick[k]?'':' (angenommen)'}. Die Türmitten werden aufeinander ausgerichtet.`
+      +(delta>1?` Die eingetragenen Türbreiten unterscheiden sich um ${Math.round(delta)} mm; bitte prüfen.`:''); };
+  sel.onchange=show; show();
+  const b=row('button','Türen verbinden'); b.type='button';
+  b.onclick=()=>{ const c=choices[+sel.value], t=M.thick[k] || c.room.data.thick?.[wallKey(c.door.a,c.door.b)] || THICK_DEFAULT;
+    const here=HAUS.ort(currentRoom), there=HAUS.ort(c.room.id);
+    if(!here || !there || here.geschoss.id!==there.geschoss.id){ setHint('Die Räume liegen nicht mehr im selben Geschoss.'); return; }
+    const result=STORE.linkDoors(currentRoom,JSON.parse(serialize()),o.id,c.room.id,c.door.id,t);
+    if(!result.ok){ setHint(result.reason); return; }
+    const saved=STORE.load(currentRoom); M.shared={...saved.data.shared}; M.thick={...saved.data.thick};
+    // Room-local undo cannot safely restore the other room. The explicit
+    // unlink action reverses this cross-room operation on both sides.
+    undoStack.length=0; redoStack.length=0; recompute();
+    setHint(`Tür mit „${c.room.name}“ verbunden. Die Raumlage folgt den Türmitten.`); };
+}
+
 function fillSel(el, werte, aktuell){
   el.innerHTML = werte.map(v=>`<option value="${v}"${v===aktuell?' selected':''}>${v} mm</option>`).join('')
     + `<option value="frei"${werte.includes(aktuell)?'':' selected'}>frei…</option>`;
@@ -3487,6 +3553,7 @@ function renderOpeningPopup(){
     b.setAttribute('aria-pressed', String(!!o.swing && sideView(o.swing.hinge,fl)===b.dataset.h)));
   $('opDir').querySelectorAll('button').forEach(b=>
     b.setAttribute('aria-pressed', String(!!(o.swing&&o.swing.out)===(b.dataset.o==='1'))));
+  renderDoorConnection(o);
 }
 // Groesse aendern heisst: neu in die Wand zwingen. Eine Tuer, die durch
 // die neue Breite hinausragen wuerde, wird geschoben statt abgeschnitten.
@@ -3547,6 +3614,9 @@ $('opDir').querySelectorAll('button').forEach(b=>{
 });
 $('opDel').onclick=()=>{
   const o=selectedOpening(); if(!o) return;
+  if(M.shared[wallKey(o.a,o.b)]?.manuell && M.shared[wallKey(o.a,o.b)]?.tuer?.op===o.id){
+    setHint('Bitte zuerst die Türverbindung lösen.'); return;
+  }
   snapshot();
   M.openings=M.openings.filter(x=>x.id!==o.id);
   M.opmeas=M.opmeas.filter(m=>m.op!==o.id);
@@ -3975,8 +4045,8 @@ function aufmassEntf(){
   const h=hoverTarget; if(!h) return false;
   if(h.t==='seg') return false;      // Diagonalen loescht man im Wand-Popup, Wert fuer Wert
   hoverTarget=null;
-  if(h.t==='pt'){ deletePoint(h.id); setHint(`Ecke ${h.id} gelöscht · ⌘Z holt sie zurück`); }
-  else { deleteWall(h.a,h.b); setHint(`Wand ${h.a}–${h.b} gelöscht · ⌘Z holt sie zurück`); }
+  if(h.t==='pt'){ if(deletePoint(h.id)) setHint(`Ecke ${h.id} gelöscht · ⌘Z holt sie zurück`); }
+  else { if(deleteWall(h.a,h.b)) setHint(`Wand ${h.a}–${h.b} gelöscht · ⌘Z holt sie zurück`); }
   return true;
 }
 // DXF nimmt das AUSGEGLICHENE Aufmass des offenen Raums, nie die Skizze und
