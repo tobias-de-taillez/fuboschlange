@@ -18,6 +18,7 @@ Für den Standardfall soll es einfach sein, komplex wird es nur bei Sonderwünsc
 - `M.kitchen = {spec, items, seq}`. `normKitchen` liest tolerant: kaputte Teile fallen einzeln weg, IDs werden eindeutig.
 - **Teile an Wänden** sind wie Öffnungen verankert, über Wandecken `a,b` und `x` (mm ab `a`). Der Rahmen ist kanonisch, die kleinere Ecken-ID steht zuerst. So überstehen die Teile jedes Nachmessen.
 - **Tisch und Insel** liegen im Raumrahmen (`TILES.frameOf`).
+- Die Unterkante eines Hängeschranks liegt nie unter dem Boden: sie wird bei 0 geklemmt, auch wenn Hochschrank und Hängeschrank zusammen höher wären.
 - Die Küche gibt es nur bei eindeutigem Grundriss (`dof===0`), wie die Wandansichten.
 
 ### Standardmaße
@@ -122,7 +123,7 @@ Quelle: nobilia Kurztypenliste (Halbeckschränke UED/UE/UEDSA, Wand-Eckschränke
 **bad (rot)** heißt „geht so nicht“:
 - Überlappung im selben Höhenband
 - Teil ragt aus dem Raum (0,5 mm Toleranz)
-- Decke zu niedrig
+- Decke zu niedrig (die niedrigste Stelle über dem Teil zählt; Giebel und Kehle über die Knickpunkte der Wand)
 - Teil vor Tür, Durchgang oder Fenster, auch auf der Nachbarwand
 - Fensterflügel (Dreh, Drehkipp, Stulp, nach innen) schlägt an die Armatur oder an Schränke
 - Zimmertür schlägt an
@@ -132,17 +133,20 @@ Quelle: nobilia Kurztypenliste (Halbeckschränke UED/UE/UEDSA, Wand-Eckschränke
 - Kochfeld unter einem Fenster, das sich öffnen lässt
 
 **warn (gelb)** heißt „Richtwert verfehlt“:
-- Gang unter 1200 (Fehler unter 900)
-- Stuhlraum unter 813 (Fehler unter 750)
+- Gang unter 1200 (Fehler unter 900), von Plattenkante zu Plattenkante gemessen (NKBA Guideline 6) und in ganzen mm verglichen: genau 1200 oder 900 mm lösen nichts aus. Zu zweit kochen: 1219. Steht die Kante einer Insel oder eines Tischs schon in der Plattenkante der Zeile, zählt der Gang als 0 mm (rot), auch bei schräger oder querer Stellung. Der Inselabstand der Maßkette misst bis zur selben Plattenkante.
+- Stuhlraum unter 813 (Fehler unter 750), gemessen vom Mittelstrahl jeder Tischseite
+- Tresen: Platz hinter den Hockern unter 813 (Fehler unter 750), entlang der ganzen Hockerkante
 - Halbeckschrank
 - Fronten über Eck oder gegenüber
 - Kühlschrank-Angel an der Wand (< 50 mm, nur Einbau)
 - Flügel geht 90°, aber nicht ganz auf (French Door 118°, Side by Side 130°)
 - Abstellfläche am Kochfeld < 300, am Kühlschrank < 380
 - Spülmaschine > 914 von der Spüle
-- Zwischen Spüle und Kochfeld < 900
+- Zwischen Spüle und Kochfeld < 900 durchgehende Arbeitsfläche: nur die Platte zählt, leere Wand und Hochschränke unterbrechen, um eine rechtwinklige Innenecke läuft sie weiter
 - Hängeschrank über dem Kochfeld
-- Arbeitsdreieck: Summe ≤ 7,9 m, je Schenkel 1,2 bis 2,7 m
+- Arbeitsdreieck: Summe ≤ 7,9 m, je Schenkel 1,2 bis 2,7 m (die Meldung nennt jede Strecke und sagt, welche zu lang oder zu kurz ist)
+
+Gibt es mehrere Spülen, Kochfelder oder Kühlschränke, wird jedes Gerät einzeln geprüft. Abstandsregeln gelten als erfüllt, wenn ein Paar passt.
 
 ## Wege
 
@@ -163,7 +167,7 @@ Die Häufigkeiten sind eine **Annahme für 4 Personen**. Eine Primärquelle gibt
 
 ### Berechnung
 
-- **Stationen** liegen 350 mm vor der Frontmitte (NKBA misst ab Frontmitte).
+- **Stationen** liegen 350 mm vor der Front: bei einem Eckschrank über Eck oder diagonal vor dem Eckpunkt der Front, bei einem Halbeck mit Blende vor dem nutzbaren Teil, sonst vor der Frontmitte (NKBA misst ab Frontmitte). Auch die Arbeitsfläche steht an diesem Stand.
 - **Wege:** Hindernisse und Raum werden um 300 mm aufgeweitet (halbe Körperbreite). Auf dieser Fläche läuft ein Sichtbarkeitsgraph mit Dijkstra (Lozano-Pérez & Wesley 1979).
 - Start und Ziel werden in die begehbare Fläche gezogen. Gesperrte Wege werden rot gestrichelt angezeigt und zählen nicht zu den km.
 - Je Kette wählt eine DP die günstigsten Stationen.
@@ -186,9 +190,12 @@ Die Wände sind einseitig (Culling), deshalb verschwinden sie, wenn man von auß
 - **Lage und Bedienung:** Die Lage steht als Zahl im Panel, im Plan gibt es eine Maßkette. Pfeiltasten wirken an jeder Wand in Bildrichtung. Nach dem Ziehen wird auf 10 mm gerundet.
 - **Eckschrank als Typ** (Halbeck: Blende plus eine Tür). Die Platte schließt an U- und L-Ecken ohne Loch. Die Abstellfläche zählt die Querplatte mit.
 - **Dunstabzug als Gerät** (Neff: Elektro ab 430, Gas 650 mm). Hängeschränke brauchen Kopffreiheit über der Platte, mindestens 500 mm.
-- **Passleisten:** Lücken und Restmaße bis 150 mm werden zu Passleisten. Die Platte läuft darüber durch, die Leiste steht in der Stückliste.
+- **Passleisten:** Lücken und Restmaße bis 150 mm werden zu Passleisten. Die Platte läuft darüber durch, außer in der Lücke steht ein Hochschrank: dort endet die Platte (zwei Platten), und ein Rest neben dem Hochschrank wird Passleiste am Plattenende. Die Leiste steht in der Stückliste.
 - **Abhilfe-Knöpfe** an Befunden: Vorfensterarmatur, Anschlag tauschen, Als Eckschrank, Als Dunstabzug. Ein Knopf erscheint nur, wenn die Abhilfe auch wirkt.
 - **Wege ehrlich:** Ein Ablauf zählt nur vollständig.
+- **Duplizieren (Strg/Cmd+D):** Wandteile kommen wie beim Einfügen neben das Original. Ein Eckschrank über Eck oder diagonal geht in die andere Ecke der Wand (mit Platz für den zweiten Schenkel), sonst gibt es keinen Platz. Inseln und Tische kommen daneben in ihrer Achse, nicht in eine Tür- oder Fensterzone.
+- **Maßkette in der Hängezeile:** Der Hochschrank steht in der Kette, ist dort aber Anker wie das Wandende und wird nur in seiner eigenen Zeile verstellt. Die Lücke zwischen Hochschrank und Hängeschrank hat ein Feld, das die Hängeschränke daneben verstellt (bündig bis 0 mm).
+- **Gehaltene Taste:** Pfeile und Q/E speichern einmal beim Loslassen (oder nach 400 ms Ruhe), ein Rückgängig nimmt die ganze Bewegung zurück. Beim Raumwechsel wird das Vorgemerkte noch gespeichert. Am Drehregler gilt dasselbe für die Pfeiltasten.
 - **Einräumen:** Fehlende Inhalte räumt das Programm selbst ein. Danach wird netto umsortiert:
   - Zusammenhängende Umzüge werden nur gemeinsam übernommen.
   - Besteck und Messer kommen nur in Schubladen.
@@ -200,11 +207,13 @@ Die Wände sind einseitig (Culling), deshalb verschwinden sie, wenn man von auß
 - Die Flügelachse sitzt in der Mitte der Türdicke. Echte Scharniere weichen je Hersteller ab: Liebherr nennt laut Suchergebnis 13 mm Wandabstand mit Griffmulde und 57 mm mit Hebelgriff. Das PDF ließ sich nicht laden.
 - Side by Side neben Möbeln: Bosch KAN93VIFP verlangt 50 mm Luft bei Möbeltiefe ≤ 650 und 53/96 mm bei 650–700. Das Modell braucht bei ≤ 600 keine Luft und liegt bei 650–700 etwa 15–20 mm darunter. Ein Side by Side bündig zwischen 58er Hochschränken bleibt deshalb ohne Befund.
 - Side by Side: Das Gefrierteil liegt immer links.
-- An stumpfen Ecken bleibt in der Arbeitsplatte eine kleine Dreieckslücke (keine Gehrung). Bei 1–2° Abweichung ist das unter 15 mm.
+- An stumpfen Ecken (über 90°) läuft die durchlaufende Platte als Fünfeck bis an die Nachbarwand, ab 10 mm Lücke; darunter bleibt sie ein Rechteck. Eine Gehrung gibt es nicht.
 - Über Eck: Die beiden Türen schwenken im Modell je 90° um ihr äußeres Ende. Die echten 165°-Falttüren brauchen etwas anderen Platz im Eckfeld.
 - Über Eck und Diagonal gehen nur in rechtwinkligen Innenecken (±3°) und mit gleich langen Schenkeln.
 - Rückt ein Halbeckschrank von der Ecke ab, meldet die Platte den toten Winkel dahinter als „Passleiste“. Bei nobilia deckt das der Winkelpassstück-Bereich hinter der Querzeile ab, ein Bauteil ist es nicht.
-- Insel und Tisch rasten nicht ein.
+- Inseln rasten beim Ziehen ein: die Stirnseite dockt bündig an eine Wand, wenn die Insel höchstens 35° von der Senkrechten zur Wand abweicht (also mindestens 55° zur Wand steht), die Seite an eine andere Insel (längs, Seite an Seite oder quer, die Drehung wird übernommen, Platte an Platte; bei gleicher Höhe läuft die Arbeitsplatte durch). ⌥ schaltet das Einrasten ab. Der Tisch rastet nicht ein.
+- Bei gestufter Inselplatte rechnet die Stückliste Gesamtlänge mal größte Tiefe, und bei vier oder mehr Inseln im Ring füllt der Plan die Lücke in der Mitte mit Platte.
+- Der Stuhlraum am Tisch misst nur den Mittelstrahl jeder Seite, der Tresen die ganze Hockerkante; eine enge Stelle neben der Mitte fällt am Tisch nicht auf.
 - Es gibt keinen Druck, keine Wandansicht von vorn und keine Auswahl in 3D.
 
 ## Quellen

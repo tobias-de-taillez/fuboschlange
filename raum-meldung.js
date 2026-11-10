@@ -337,6 +337,8 @@ function zustand(alle){
       unit:g(()=>unit), wheelPref:g(()=>wheelPref), currentRoom:offenerRaum(), currentRoomName:g(()=>currentRoomName),
       wpopPair:g(()=>wpopPair), cpopId:g(()=>cpopId), entryPair:g(()=>entryPair),
       ts:g(()=>({tool:TS.tool, sel:TS.sel, vec:TS.vec, lines:TS.lines})), activeTileId:g(()=>activeTileId),
+      // Küche: gewähltes Teil, Fronten offen, Ablauf, Analyse, Kind, Referenz (KS liegt in kitchen-ui).
+      kueche:g(()=>typeof kitchenUiState==='function' ? kitchenUiState() : null),
       andereRaeume:andereRaeume(), nachbarn:g(()=>neighbors.length,0),
     }),
     raum:typeof serialize==='function' ? g(()=>JSON.parse(serialize())) : null,
@@ -516,6 +518,8 @@ if(lokal && nach && kannNachstellen()){
     undoStack.length=0; undoStack.push(...(o.undo||[]));
     redoStack.length=0; redoStack.push(...(o.redo||[]));
     if(u.mode && u.mode!==M.mode) setMode(u.mode);
+    // Nach openRoom/deserialize/setMode: openRoom setzt die Küchenauswahl zurück.
+    if(u.kueche && typeof kitchenUiRestore==='function') kitchenUiRestore(u.kueche);
     if(Array.isArray(u.sel)) M.sel=u.sel;
     M.chain=u.chain??null; M.wallSel=u.wallSel??null; M.openSel=u.openSel??null;
     // Ab hier Namen der heutigen Bedienung: jeder nur, wenn es ihn gibt.
