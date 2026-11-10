@@ -414,7 +414,8 @@ globalThis.RAUMZEILE=(function(){
   // ---------- Öffnen, anlegen, löschen ----------
   function oeffne(id, werkzeug){
     STORE.setCurrent(id);
-    location.href=ZIEL+(werkzeug ? '#'+werkzeug : '');
+    // Jedes Werkzeug ist eine eigene Seite (Fliesenplan, Küchenplaner); ohne Angabe das Raumaufmaß.
+    location.href=werkzeug==='fliesen' ? 'fliesenplan.html' : werkzeug==='kueche' ? 'kuechenplaner.html' : ZIEL;
   }
   function neuerRaum(){
     const id=STORE.create('Neuer Raum');

@@ -1,0 +1,347 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<title>Fliesenplan</title>
+
+<script src="raum-meldung.js"></script>
+<link rel="stylesheet" href="raum-schale.css">
+<style>
+  .tpal{touch-action:none;cursor:grab}
+  /* Welche Abschnitte zu welchem Modus gehoeren. */
+  body.tilesmode #panel > section:not(#tilesec){display:none}
+  /* Im Fliesen-Modus ist das Aufmass fertig; seine Kennzahlen stehen im Material. */
+  body.tilesmode #status{display:none}
+
+  /* ---------- Fliesen ---------- */
+  #tilesec{padding:0}
+  #tilesec>div,#tilesec>details{padding:12px 14px;border-bottom:1px solid var(--line)}
+  #tSpecBox summary{display:flex;align-items:baseline;gap:8px;cursor:pointer;list-style:none}
+  #tSpecBox summary::-webkit-details-marker{display:none}
+  #tSpecBox summary b{font-size:12px;font-weight:600;color:var(--ink2)}
+  #tSpecSum{flex:1;font-variant-numeric:tabular-nums;color:var(--ink)}
+  #tSpecBox summary .ed{font-size:12px;color:var(--accent)}
+  #tSpecBox[open] summary .ed{color:var(--muted)}
+  #tSpecBox[open] summary{margin-bottom:10px}
+  .tmeas{margin-top:8px}
+  .tmeas .tnote{margin:0}
+  #measDlg .mhead{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--line2);margin:0}
+  #measDlg .mhead h3{margin:0;font-size:14px;font-weight:600}
+  #measDlg .mbody{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;padding:14px 16px}
+  #measDlg .mfoot{display:flex;justify-content:flex-end;gap:8px;padding:10px 16px;border-top:1px solid var(--line2);
+    position:sticky;bottom:0;background:var(--surface)}
+  #measDlg .mfoot button{height:30px;padding:0 14px}
+  #mSketch svg{display:block;width:100%;height:auto;margin-bottom:6px}
+  .ms-tile{fill:#ece0c8;opacity:.6}
+  .ms-edge{stroke:var(--ink);stroke-width:1.8}
+  .ms-diag,.ms-w{stroke:var(--muted);stroke-width:1.3;stroke-dasharray:5 4}
+  .ms-hit{stroke:transparent;stroke-width:14;cursor:pointer}
+  .ms-ang{fill:none;stroke:var(--muted);stroke-width:1}
+  .ms-key{font:600 11px var(--font);fill:var(--ink2);paint-order:stroke;stroke:var(--surface);stroke-width:3px}
+  .ms-pt{font:700 13px var(--font);fill:var(--ink)}
+  .ms-acute{fill:var(--accent)}
+  #mSketch g.on line:not(.ms-hit){stroke:var(--accent);stroke-width:3;stroke-dasharray:none}
+  #mSketch g.on .ms-key{fill:var(--accent)}
+  #mFields{display:grid;gap:3px}
+  .msigma{display:flex;align-items:center;gap:6px;margin-top:10px;font-size:12px;color:var(--ink2)}
+  .msigma input{width:4.2em!important;text-align:right}
+  .msigma button{margin-left:auto}
+  .mmsg{font-size:12px;color:var(--ink2);margin:8px 0 0}
+  .mmsg.good{color:var(--good);font-weight:600} .mmsg.warn{color:var(--warn)} .mmsg.bad{color:var(--bad);font-weight:600}
+  .mvals{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px}
+  .mvals span{display:block;font-size:12px;color:var(--ink2)}
+  .mvals b{display:block;font-size:22px;font-weight:650;font-variant-numeric:tabular-nums;line-height:1.25}
+  .mvals small{display:block;font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .mvals small.was{color:var(--ink2)}
+  #mReal h4{margin:16px 0 0;font-size:12px;font-weight:600;color:var(--ink2)}
+  .mfacts{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:3px 12px;margin:8px 0 0;font-size:12px;font-variant-numeric:tabular-nums}
+  .mfacts dt{color:var(--ink2)} .mfacts dd{margin:0}
+  #mTable table{width:100%;border-collapse:collapse;margin-top:14px;font-size:12px;font-variant-numeric:tabular-nums}
+  #mTable th,#mTable td{text-align:right;padding:3px 5px;border-bottom:1px solid var(--line2)}
+  #mTable th:first-child,#mTable td:first-child{text-align:left}
+  #mTable th{color:var(--ink2);font-weight:500}
+  #mTable small{color:var(--muted)}
+  #mTable .bad{color:var(--bad);font-weight:600} #mTable .warn{color:var(--warn)}
+  #tSelBox .trow button{display:inline-flex;align-items:center;gap:6px}
+  .jrow{display:grid;grid-template-columns:1fr auto auto;gap:6px;align-items:center;min-height:30px}
+  .jrow b{font-weight:600;font-variant-numeric:tabular-nums}
+  .jrow b small{font-weight:400;color:var(--muted)}
+  .jrow label{display:flex;align-items:center;gap:4px;font-size:12px;color:var(--ink2)}
+  .jrow input{width:3.4em;padding:0 5px;height:24px;border:1px solid var(--line);border-radius:4px;
+    background:#fff;text-align:right;font-variant-numeric:tabular-nums}
+  #tJList small{font-size:12px;color:var(--muted)}
+  #tCheck{margin-top:10px;padding-top:8px;border-top:1px solid var(--line2);display:grid;gap:3px;font-size:12px}
+  #tCheck b{font-weight:600;font-size:12px;color:var(--ink2);margin-bottom:2px}
+  #tCheck span{display:flex;align-items:center;gap:7px;font-variant-numeric:tabular-nums}
+  #tCheck i{width:10px;height:10px;border-radius:2px;flex:none}
+  #tWarn:empty{display:none}
+  #tWarn{margin-bottom:10px}
+  .twarn{color:var(--bad);font-size:12px;display:flex;align-items:center;gap:8px;margin-bottom:4px}
+  #tDetails{margin-top:10px}
+  #tDetails summary{font-size:12px;color:var(--ink2);cursor:pointer}
+  .ttab{border-collapse:collapse;font-size:12px;margin:6px 0;font-variant-numeric:tabular-nums}
+  .ttab td,.ttab th{padding:2px 6px;text-align:right;border-bottom:0;white-space:normal}
+  .ttab td:first-child{text-align:left}
+  .ttab.tfull{width:100%}
+  .ttab .tsub td{text-align:left;font-size:11px;font-weight:600;color:var(--muted);padding-top:8px;
+    border-bottom:1px solid var(--line2)}
+  .ttab .tsum td{border-top:1px solid var(--line2)}
+  .ttab .tmut{color:var(--muted)}
+  .ttab.tkv td:last-child{text-align:right}
+  #tPrintRow{display:grid;gap:8px;margin-top:12px}
+  #tPrintRow button{width:100%}
+  #tPrintRow label{font-size:12px;color:var(--ink2);display:flex;align-items:center;gap:5px}
+  #tEnd{display:flex;gap:6px;justify-content:flex-end}
+  #tEnd button{border:0;background:none;color:var(--muted);font-size:12px;min-height:24px;padding:0 6px}
+  #tEnd button:hover{color:var(--ink);background:var(--hover)}
+  #tClear.arm{background:var(--bad)!important;color:#fff!important}
+
+#tPalette{display:flex;gap:5px;flex-wrap:wrap} #tPalette svg,#tSetList svg{width:42px;height:30px;display:block}
+  #tSetList{display:grid;gap:6px;margin:10px 0} .tile-set-row{display:flex;gap:6px;align-items:center} .tile-set-row>button:first-child{flex:1;display:flex;align-items:center;gap:8px;text-align:left} .tile-set-row button[aria-pressed=true]{border-color:var(--accent);background:#fff1df} .tile-set-row small{display:block;color:var(--ink2)} #tPalette button{min-width:48px;padding:5px 8px} #tShape,#tNewShape{max-width:100%;padding:6px} #tName{min-width:0}
+</style>
+
+
+<div id="app">
+  <header id="topbar">
+    <div id="roomctl">
+      <a id="backHome" href="raeume.html" title="Alle Räume"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg>Räume</a>
+      <span id="roomname" role="button" tabindex="0" title="Umbenennen">—</span>
+      <span id="toolname" hidden></span>
+    </div>
+    <div id="tools">
+      <div class="tg" data-for="tiles">
+        <div id="tPalette" aria-label="Fliesenset dieses Raums"></div>
+        <i class="tsep"></i>
+        <button id="tAlign" class="tb tool" aria-pressed="false" title="Fluchten: erst Kante der Fliese, die sich bewegt, dann die Bezugskante">Fluchten <kbd>A</kbd></button>
+        <button id="tJC" class="tb tool" aria-pressed="false" title="Dehnungsfuge: Anfang und Ende auf Wand oder Ecke klicken">Dehnungsfuge <kbd>J</kbd></button>
+        <i class="tsep"></i>
+        <button id="tJCheck" class="tb tog" aria-pressed="false" title="Fugen markieren, die von der eingestellten Breite abweichen, dazu unbelegte Stellen und Fugenversatz">Fugencheck <kbd>K</kbd></button>
+        <button id="tRuler" class="tb tog" aria-pressed="false" title="Lineal einblenden: verschieben, an den Enden strecken und drehen, rastet an Fliesen und Wänden (⌘/Strg frei)">Lineal <kbd>L</kbd></button>
+      </div>
+    </div>
+    <div id="histctl">
+      <button id="undo" class="ib" title="Rückgängig (⌘Z)"><svg viewBox="0 0 16 16"><path d="M5.5 3.5 2.5 6.5l3 3"/><path d="M2.5 6.5h7a4 4 0 0 1 0 8h-2"/></svg></button>
+      <button id="redo" class="ib" title="Wiederherstellen (⇧⌘Z)"><svg viewBox="0 0 16 16"><path d="M10.5 3.5l3 3-3 3"/><path d="M13.5 6.5h-7a4 4 0 0 0 0 8h2"/></svg></button>
+      <button id="roommenuBtn" class="ib" aria-haspopup="menu" aria-expanded="false" title="Menü">
+        <svg viewBox="0 0 16 16"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/></svg>
+      </button>
+      <div id="roommenu" class="menu" role="menu" hidden>
+        <h4>Weitergeben</h4>
+        <button id="filesave" role="menuitem">Als Datei sichern<kbd data-k="⌘S"></kbd></button>
+        <button id="sharelink" role="menuitem">Link kopieren</button>
+        <button id="shareqr" role="menuitem">QR-Code zeigen …</button>
+        <hr>
+        <button id="toAufmass" class="nurFolge" role="menuitem">Zum Raumaufmaß</button>
+        <button id="helpBtn" role="menuitem">Hilfe und Tasten<kbd data-k="?"></kbd></button>
+      </div>
+    </div>
+  </header>
+
+  <div id="main">
+    <div id="stage">
+      <div id="canvaswrap">
+        <canvas id="cv"></canvas>
+        <button id="fitview" class="ib" title="Ansicht einpassen (0)" aria-label="Ansicht einpassen"><svg viewBox="0 0 16 16"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></svg></button>
+      </div>
+      <footer id="statusbar">
+        <div id="hint"></div>
+      </footer>
+    </div>
+
+    <aside id="panel">
+      <section id="tilesec" hidden>
+        <details id="tSpecBox">
+          <summary><b>Fliesenset</b><span id="tSpecSum"></span><span class="ed">ändern</span></summary>
+          <div id="tSetList"></div>
+          <div class="trow"><select id="tNewShape" aria-label="Neue Fliesenform"><option value="hexagon">Hexagon</option><option value="chevron">Chevron</option><option value="rectangle">Viereck</option><option value="triangle">Dreieck</option></select><button id="tSetAdd">Fliese hinzufügen</button></div>
+          <p class="tnote">Varianten auswählen und unten bearbeiten. Hexagon und Dreieck haben gleich lange Seiten; Breite und Höhe sind gekoppelt. Beim Hexagon wird die Breite über die Spitzen gemessen, beim Dreieck entlang der Grundseite. Bei Chevron bezeichnet Länge die Längskante.</p>
+          <div class="tgrid">
+            <label><span>Name</span><input id="tName" maxlength="60"></label>
+            <label><span>Form</span><select id="tShape"><option value="hexagon">Hexagon</option><option value="chevron">Chevron</option><option value="rectangle">Viereck</option><option value="triangle">Dreieck</option></select></label>
+            <label><span>Breite</span><input id="tW" inputmode="decimal"> mm</label>
+            <label><span>Länge</span><input id="tL" inputmode="decimal"> mm</label>
+            <label><span>Winkel</span><input id="tA" inputmode="decimal"> °</label>
+            <label><span>Fuge</span><input id="tJ" inputmode="decimal"> mm</label>
+            <label><span>Randfuge</span><input id="tE" inputmode="decimal"> mm</label>
+            <label><span>Stärke</span><input id="tT" inputmode="decimal"> mm</label>
+          </div>
+          <div class="trow tmeas"><button id="tMeasure" title="Maße der gewählten Variante aus Strecken ermitteln: Kanten, Diagonalen, Breite – kein Winkel nötig">Fliese einmessen…</button><span class="tnote">nur Strecken, kein Winkel</span></div>
+          <label class="tnote"><input type="checkbox" id="tSame">Chevron L und R aus einer Charge: Reste dürfen zwischen L und R wechseln</label>
+        </details>
+        <div id="tSelBox" hidden>
+          <h3><span id="tSelInfo"></span></h3>
+          <div class="trow">
+            <button id="tMiter" class="tool" title="Zwei überlappende Fliesen auf Gehrung schneiden">Gehrung <kbd>G</kbd></button>
+            <button id="tTrim" title="Fliesen, die die Auswahl überlappen, an ihr abschneiden (mit Fuge)">Anschneiden <kbd>T</kbd></button>
+            <button id="tUncut" title="Schnitte und Ausklinkungen der Auswahl entfernen">Schnitt entfernen</button>
+            <button id="tDel" title="Auswahl löschen (Entf)">Löschen <kbd data-k="Entf"></kbd></button>
+          </div>
+        </div>
+        <div id="tFugBox">
+          <h3>Fugen</h3>
+          <div id="tJList"></div>
+          <div id="tCheck" hidden></div>
+          <div class="trow" id="tXWRow"><label>Breite neuer Dehnungsfugen <input id="tXW" inputmode="decimal"> mm</label></div>
+        </div>
+        <div id="tResBox">
+          <h3>Material</h3>
+          <div id="tWarn"></div>
+          <div id="tKey"></div>
+          <details id="tDetails"><summary>Stückliste im Einzelnen</summary><div id="tStats"></div></details>
+          <div id="tPrintRow">
+            <button id="tPrint" title="Plan, Verlegemuster und je Rohfliese ein Schnittblatt (A4, als PDF sicherbar)">Plan und Schnittblätter drucken</button>
+            <label><input type="checkbox" id="tNums" checked>Schnittnummern aus dem letzten Druck im Plan zeigen</label>
+          </div>
+        </div>
+        <div id="tEnd"><button id="tClear" title="Zweimal klicken: der erste Klick fragt nach">Alle Fliesen entfernen</button></div>
+      </section>
+      <input id="filepick" type="file" accept=".json,application/json" hidden>
+      <!-- Wandauswahl der alten Leiste. Unsichtbar: gewählt wird im Lageplan und mit den Pfeiltasten;
+           renderWallBar füllt die Liste weiter, weil die Reihenfolge der Wände daran hängt. -->
+    </aside>
+  </div>
+</div>
+
+<div id="tip" hidden></div>
+<div id="toast" role="status"></div>
+<div id="qrwrap" class="scrim" hidden>
+  <div id="qrbox" class="dlg" role="dialog" aria-label="QR-Code">
+    <div id="qrhead" class="dlghead"><h2>Raum als QR-Code</h2><button id="qrclose" class="ib" aria-label="Schließen" title="Schließen (Esc)"><svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg></button></div>
+    <canvas id="qrcv" width="300" height="300"></canvas>
+    <div id="qrnote">Mit der Handy-Kamera scannen; der Raum öffnet sich dort als Kopie.</div>
+  </div>
+</div>
+<div id="keyswrap" class="scrim" hidden>
+  <div id="keysbox" class="dlg" role="dialog" aria-label="Tastenkürzel">
+    <div class="dlghead"><h2>Tastenkürzel und Maus</h2><button id="keysclose" class="ib" aria-label="Schließen" title="Schließen (Esc)"><svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg></button></div>
+    <div id="keysbody"></div>
+  </div>
+</div>
+<div id="helpwrap" class="scrim" hidden>
+  <div id="helpbox" class="dlg" role="dialog" aria-label="Hilfe">
+    <div class="dlghead"><h2>Hilfe und Tasten</h2><button id="helpclose" class="ib" aria-label="Schließen" title="Schließen (Esc)"><svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg></button></div>
+    <div id="helpbody">
+
+
+
+
+
+      <h3>Menü</h3>
+      <dl>
+        <dt>Rechte Winkel annehmen</dt><dd>Setzt Ecken, die innerhalb ±2° rechtwinklig sind, auf genau 90°, sofern die Maße nicht dagegen sprechen. Spart Diagonalen, ist aber eine Annahme: im Altbau lieber aus lassen und messen.</dd>
+        <dt>Maßhaltig zeichnen</dt><dd>An: sobald die Form eindeutig ist, zeigt der Plan die gemessene Form. Aus: Ecken bleiben, wo sie skizziert wurden. Gerechnet wird in beiden Fällen gleich.</dd>
+        <dt>Abwicklung</dt><dd>Klappt die Wände mit ihren Öffnungen im Grundriss nach außen und blendet Nachbarräume aus. Nur Ansicht.</dd>
+        <dt>Ansicht drehen</dt><dd>Dreht die Ansicht um 15°, mit ⇧ zurück. „Einnorden“ auf der Karte einer Wand legt diese Wand nach oben. Beides ändert nur die Ansicht, nicht die Maße.</dd>
+        <dt>Raum spiegeln</dt><dd>Für eine seitenverkehrt angelegte Skizze. Die Maße gelten unverändert weiter.</dd>
+        <dt>Weitergeben</dt><dd>Als Datei sichern, Link kopieren oder QR-Code zeigen. Räume liegen nur in diesem Browser; wichtige Aufmaße zusätzlich als Datei sichern.</dd>
+      </dl>
+
+      <h3>Fliesenplan</h3>
+      <p>Verlegt werden Parallelogramm-Fliesen als L und R (Chevron). Rechts stehen die Maße: Breite, Länge, Winkel, Fuge, Randfuge (Abstand zur Wand; die Schnittlinie liegt in ihrer Mitte, sie nimmt die Wandtoleranz auf) und Stärke. Fliesen aus der Leiste in den Plan ziehen oder klicken; Ziehen rastet an Kanten anderer Fliesen ein (⌥ ohne Einrasten).</p>
+      <dl>
+        <dt>Fliesenpiktogramme</dt><dd>Fliesenset je Raum konfigurieren: Hexagon, Chevron, Viereck oder Dreieck mit eigenen Maßen und Dicken. Piktogramm klicken oder in den Plan ziehen. F tauscht Chevron L und R, Q/E dreht. ⌘D setzt das Muster fort.</dd>
+        <dt>Fluchten (A)</dt><dd>Erst die Kante der Fliese, die sich bewegt, dann die Bezugskante. Mit ⇧ rechtwinklig statt fluchtend.</dd>
+        <dt>Dehnungsfuge (J)</dt><dd>Anfang und Ende auf Wand oder Ecke klicken. Schneidet durch bestehende Fliesen; Breite unter „Breite neuer Dehnungsfugen“.</dd>
+        <dt>Wandfuge (W)</dt><dd>Markiert die Fuge an einer Wand mit eigener Breite und Toleranz, statt der globalen Randfuge.</dd>
+        <dt>Fugencheck (K)</dt><dd>Markiert Fugen, die von der eingestellten Breite abweichen, unbelegte Stellen und Fugenversatz. Vor dem Drucken einschalten.</dd>
+        <dt>Gehrung (G)</dt><dd>Bei genau zwei überlappenden Fliesen: Schnittlinie mit zwei Punkten setzen, Enter nimmt die Diagonale automatisch.</dd>
+        <dt>Anschneiden (T)</dt><dd>Fliesen, die die Auswahl überlappen, an ihr abschneiden, mit Fuge. An Wänden passt sich der Schnitt der Wand an; an Ecken entsteht eine Ausklinkung statt zwei Teilen.</dd>
+        <dt>Verbinden (V)</dt><dd>Führt Stücke, die aus einer Fliese stammen, wieder zu einer zusammen.</dd>
+        <dt>Schnitt entfernen</dt><dd>Nimmt Schnitte und Ausklinkungen der Auswahl zurück.</dd>
+        <dt>Lineal (L)</dt><dd>Halbdurchsichtiges Lineal mit mm-/cm-Teilung über dem Plan. Körper ziehen verschiebt, ein Ende ziehen streckt und dreht um das andere Ende, mit ⇧ nur drehen. Rastet an Ecken und Kanten von Fliesen und Wänden und im rechten Winkel dazu; ⌘/Strg hält frei.</dd>
+        <dt>Fliese einmessen</dt><dd>Im Fliesenset: Maße der gewählten Variante nur aus Strecken ermitteln (Kanten, Diagonalen, rechtwinklige Breite), für jede Form. Zeigt die Werte mit Genauigkeit, die echte Form der Fliese und welche Messung nicht passt.</dd>
+        <dt>L und R aus einer Charge</dt><dd>An: Reste dürfen zwischen L und R wechseln (gleiche Glasur). Aus: L-Reste nur für L, R-Reste nur für R, weil Spiegeln nicht geht.</dd>
+        <dt>Material</dt><dd>Zählt ganze und geschnittene Fliesen. Mit Recycling werden Schnittstücke auf möglichst wenige Rohfliesen verteilt, aber nur, wenn sie im Raum höchstens 1,5 m auseinander liegen. Die Zahl mit Recycling stammt aus dem letzten Druck.</dd>
+        <dt>Drucken</dt><dd>Plan, Verlegemuster und je Rohfliese ein Schnittblatt mit nummerierten Stücken (A4, im Druckdialog „Als PDF sichern“, Skalierung 100 %). Die Nummern erscheinen danach auch im Plan.</dd>
+        <dt>Alle Fliesen entfernen</dt><dd>Zweimal klicken; ⌘Z holt sie zurück.</dd>
+      </dl>
+
+
+      <p class="hnote">Rückgängig gilt bis zum Wechsel des Raums.</p>
+    </div>
+  </div>
+</div>
+<dialog id="measDlg" aria-labelledby="mTitle">
+  <form method="dialog" class="mhead"><h3 id="mTitle">Fliese einmessen</h3><button class="ib" aria-label="Schließen" value="x">×</button></form>
+  <div class="mbody">
+    <div class="mleft">
+      <div id="mSketch"></div>
+      <div id="mFields"></div>
+      <div class="msigma"><label for="mSigma">Messgenauigkeit je Strecke ±</label><input id="mSigma" inputmode="decimal" autocomplete="off"><span>mm</span><button id="mClear" type="button">Leeren</button></div>
+      <p class="mmsg" id="mNote"></p>
+      <p class="mmsg">Mehrfach gemessen? Werte mit Leerzeichen trennen, z.&nbsp;B. „850,5 851“. Wiederholungen schärfen das Ergebnis und zeigen, welche Strecke falsch ist.</p>
+    </div>
+    <div class="mright">
+      <div id="mVals"></div>
+      <div id="mReal"></div>
+      <div id="mTable"></div>
+    </div>
+  </div>
+  <div class="mfoot"><button id="mCancel" type="button">Abbrechen</button><button id="mApply" type="button" class="primary">Maße übernehmen</button></div>
+</dialog>
+
+<!-- Geteilte Dateien der Werkzeugfamilie (docs/adr/0001-familie-mit-geteilten-js-dateien.md).
+     Klassische Skripte ohne Build und ohne Module: so startet die Seite auch per Doppelklick (file://). -->
+<script src="raum-fremd.js"></script>
+
+<script src="raum-kern.js"></script>
+
+<script src="raum-fliesen.js"></script>
+
+<script src="fliesenplan-einmessen.js"></script>
+
+<script src="raum-kueche.js"></script>
+<script src="raum-geometrie.js"></script>
+<script src="raum-speicher.js"></script>
+<script src="raum-modell.js"></script>
+<script src="raum-zeichnung.js"></script>
+<script src="raum-plan.js"></script>
+
+<script id="vollstaendig">
+// Das Werkzeug lädt geteilte Dateien nach. Kommt eine davon nicht an (abgerissene
+// Anfrage, Upload mitten im Laden), darf es nicht halb starten: der Boot hielte
+// den fehlenden Baustein für verbogene Raumdaten, legte still einen leeren Raum
+// an und machte ihn zum aktuellen. Dann startet es gar nicht und sagt es.
+// Geprüft wird je Datei, was sie als Letztes anlegt. Ohne diese neun läuft
+// nichts (Fliesen- und Küchendaten bleiben am Raum, das Modell braucht ihre
+// Kerne); die übrigen (Meldung, QR und Link, Gebäude, Blatt, Selbstchecks)
+// sind Zugaben.
+(function(){
+  const fehlt=[
+    ['raum-kern.js',      ()=>typeof CORE.labelPlacer==='function'],
+    ['raum-fliesen.js',   ()=>typeof TILES.normTiles==='function'],
+    ['fliesenplan-einmessen.js', ()=>typeof TILEMEAS.measure==='function'],
+    ['raum-kueche.js',    ()=>typeof KITCHEN.pillTouch==='function'],
+    ['raum-geometrie.js', ()=>typeof sharedWallFit==='function' && THICK_DEFAULT>0],
+    ['raum-speicher.js',  ()=>typeof STORE.create==='function'],
+    ['raum-modell.js',    ()=>Array.isArray(M.pts) && typeof polyAreaM2==='function'],
+    ['raum-zeichnung.js', ()=>typeof $==='function' && typeof drawFixAngles==='function'],
+    ['raum-plan.js',      ()=>typeof meldeAn==='function' && typeof starteSeite==='function'],
+  ].filter(([,da])=>{ try{ return !da(); }catch(e){ return true; } }).map(([name])=>name);
+  if(!fehlt.length) return;
+  globalThis.RAUM_UNVOLLSTAENDIG=fehlt;
+  const neu=(tag, text, stil)=>{ const e=document.createElement(tag); e.textContent=text; e.style.cssText=stil; return e; };
+  const decke=neu('div', '', 'position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:16px;background:var(--paper)');
+  const karte=neu('div', '', 'width:min(400px,100%);padding:14px 16px 16px;background:var(--surface);border:1px solid var(--line);border-radius:6px;box-shadow:0 4px 16px rgba(36,34,29,.14)');
+  karte.id='unvollstaendig';
+  karte.setAttribute('role','alert');
+  const knopf=neu('button', 'Neu laden', 'margin-top:12px');
+  knopf.className='primary';
+  knopf.onclick=()=>location.reload();
+  karte.append(
+    neu('b', 'Die Seite ist unvollständig geladen.', 'display:block;font-weight:600'),
+    neu('p', 'Lade sie neu. Gespeicherte Räume sind unverändert.', 'margin:4px 0 0;font-size:12px;color:var(--ink2)'),
+    neu('p', 'Nicht angekommen: '+fehlt.join(', '), 'margin:4px 0 0;font-size:12px;color:var(--muted);overflow-wrap:anywhere'),
+    knopf);
+  decke.append(karte);
+  document.body.append(decke);
+  knopf.focus();
+})();
+</script>
+
+<script src="fliesenplan-bedienung.js"></script>
+<script>starteSeite('fliesen');</script>
+
+<script>
+// Die Selbstchecks (418 kB) laden nur mit ?test; sie laufen dann gleich und schreiben in die Konsole.
+if(location.search.includes('test')){ const s=document.createElement('script'); s.src='raum-checks.js'; document.body.append(s); }
+</script>

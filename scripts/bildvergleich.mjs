@@ -80,6 +80,9 @@ async function lauf(stand, seiten, variante, viewport){
   const eigen=(sel)=>p.evaluate(s=>{ const e=document.querySelector(s); if(!e) return null; const r=e.getBoundingClientRect(); return {x:r.left+r.width/2, y:r.top+r.height/2}; }, sel);
   const lage=(a,b,t=.5)=>p.evaluate(([a,b,t])=>{ const P=viewPts(), A=P.find(q=>q.id===a), B=b?P.find(q=>q.id===b):A;
     const s=toScr({x:A.x+(B.x-A.x)*t,y:A.y+(B.y-A.y)*t}), r=cv.getBoundingClientRect(), d=DPR(); return {x:r.left+s.x/d,y:r.top+s.y/d}; },[a,b,t]);
+  // Nach einem Seitenwechsel liegt die Maus noch über dem Menü-Knopf und der Fokus ist weg: beides gleichziehen.
+  const ruhe=async ()=>{ await p.mouse.move(5,5); await p.evaluate(()=>{ if(document.activeElement && document.activeElement.blur) document.activeElement.blur(); if(typeof undoStack!=='undefined'){ undoStack.length=0; redoStack.length=0; render(); } }); };
+  // (Rückgängig beginnt je Seite neu; im Altstand lebt der Stapel über den Werkzeugwechsel hinweg: auch das gleichziehen.)
   const schritt=async (name, f)=>{ try{ await f(); }catch(e){ fehler.push(name+': '+e.message); } await knipse(name); };
   const ids=await (async()=>{ await p.goto(URL_[stand]+'/'+seiten.aufmass); await sleep(900); return p.evaluate(()=>M.pts.map(q=>q.id)); })();
   const [A,B,C]=ids;
@@ -100,7 +103,7 @@ async function lauf(stand, seiten, variante, viewport){
   // Fliesenplan und Küchenplaner brauchen einen eindeutig geprüften Raum; die Skizze ohne Maße bleibt im Aufmaß
   if(variante==='skizze'){ const fehl=[...new Set(fehler)]; await ctx.close(); return {bilder, fehl}; }
   await p.goto(URL_[stand]+'/'+seiten.fliesen); await sleep(1000);
-  await knipse('fliesen-start');
+  await ruhe(); await knipse('fliesen-start');
   const kachel=async ()=>p.evaluate(()=>{ const T=M.tiles.items[0]; if(!T) return null; const K=tilesCtx(), P=TILES.tileCorners(M.tiles.spec,T), c={x:P.reduce((a,q)=>a+q.x,0)/P.length,y:P.reduce((a,q)=>a+q.y,0)/P.length}, s=toScr(TILES.toWorldF(K.F,c)), r=cv.getBoundingClientRect(), d=DPR(); return {x:r.left+s.x/d,y:r.top+s.y/d}; });
   await schritt('fliesen-hover', async()=>{ const q=await kachel(); if(q) await p.mouse.move(q.x,q.y); });
   await schritt('fliesen-gewaehlt', async()=>{ const q=await kachel(); if(q){ await p.mouse.click(q.x,q.y); await sleep(250); } });
@@ -112,7 +115,7 @@ async function lauf(stand, seiten, variante, viewport){
   await schritt('fliesen-spezifikation', async()=>{ await p.click('#tSpecBox > summary'); await sleep(250); });
   // Küchenplaner
   await p.goto(URL_[stand]+'/'+seiten.kueche); await sleep(1200);
-  await knipse('kueche-start');
+  await ruhe(); await knipse('kueche-start');
   const teil=()=>p.evaluate(()=>{ const K=M.kitchen, it=K.items[0]; if(!it) return null; const E=KITCHEN.makeEnv(M.fit.pts,M.walls,M.openings,M.hmeas,M.water,K.frame), g=KITCHEN.geom(E,K,it); if(!g) return null; const r=cv.getBoundingClientRect(), d=DPR(), s=toScr(g.c); return {x:r.left+s.x/d,y:r.top+s.y/d}; });
   await schritt('kueche-hover', async()=>{ const q=await teil(); if(q) await p.mouse.move(q.x,q.y); });
   await schritt('kueche-gewaehlt', async()=>{ const q=await teil(); if(q){ await p.mouse.click(q.x,q.y); await sleep(300); } });

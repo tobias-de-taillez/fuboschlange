@@ -2,134 +2,20 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <title>Raumaufmaß</title>
+<script>
+// Alte Adressen: Fliesenplan und Küchenplaner sind eigene Seiten (raumaufmass.html#fliesen, #kueche).
+{ const h=location.hash; if(h==='#fliesen' || h==='#kueche') location.replace((h==='#fliesen' ? 'fliesenplan.html' : 'kuechenplaner.html')+location.search); }
+</script>
+
 <script src="raum-meldung.js"></script>
+<link rel="stylesheet" href="raum-schale.css">
 <style>
-  /* Gestaltungslinie: Messwerkzeug auf Papier, fuer den Schreibtisch.
-     Warmweiss, Tinte, genau ein Akzent (Auswahl, Hauptaktion, ein-
-     geschaltete Lampe), semantische Statusfarben, tabellarische Ziffern.
-     Vier Schriftgroessen: 11 Beschriftung, 12 Nebentext, 13 Text, 20 Ergebnis.
-     Bewusst NICHT: Verlaeufe, Glas, Glow, grosse Radien, Karten in Karten,
-     Webfonts, Etiketten-Pillen an jeder Zeile. */
-  :root{
-    --paper:#ebe8e0;    /* Rahmen hinter allem */
-    --surface:#faf9f6;  /* Leisten, Panel, Popover */
-    --canvas:#f5f3ed;   /* Zeichenflaeche */
-    --ink:#24221d;
-    --ink2:#4b473e;     /* Nebentext, gut lesbar */
-    --muted:#6f6a5e;
-    --line:#d8d3c6;
-    --line2:#e8e4da;    /* Haarlinien innerhalb von Listen */
-    --hover:#eeeae0;
-    --press:#e4dfd3;
-    --accent:#c2410c; --accent-bg:#f9e7dc; --accent-line:#ebbda2;
-    --good:#1a6b34; --good-bg:#e5efe3;
-    --warn:#8a5a10; --warn-bg:#f5ecd7; --warn-dot:#c98a1a;
-    --bad:#b3261e;  --bad-bg:#f7e4e0;
-    --meas:#2e7d4f;     /* gemessene Strecke im Plan */
-    --todo:#c73e2e;     /* fehlende Strecke im Plan */
-    --font:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
-  }
-  *{box-sizing:border-box}
-  [hidden]{display:none!important}
-  html,body{height:100%}
-  body{margin:0;font:13px/1.4 var(--font);background:var(--paper);color:var(--ink);
-    height:100vh;overflow:hidden;overscroll-behavior:none;-webkit-font-smoothing:antialiased}
-  /* Grundgeruest: Kopfleiste ueber allem, darunter Zeichenflaeche mit
-     Statuszeile und rechts das Panel. */
-  #app{height:100%;display:grid;grid-template-rows:auto minmax(0,1fr);min-width:760px}
-  #main{display:grid;grid-template-columns:minmax(0,1fr) 320px;min-height:0}
-  #stage{display:grid;grid-template-rows:minmax(0,1fr) auto;min-width:0;min-height:0}
-  #canvaswrap{position:relative;min-height:0;overflow:hidden}
-  #panel{overflow-y:auto;background:var(--surface);border-left:1px solid var(--line)}
-
-  /* Knoepfe. Desktop-Mass: 28 px hoch, 13 px Schrift. */
-  button{font:inherit;font-size:13px;color:var(--ink);background:var(--surface);
-    border:1px solid var(--line);border-radius:4px;padding:0 10px;min-height:28px;cursor:pointer}
-  button:hover{background:var(--hover)}
-  button:active{background:var(--press)}
-  button:disabled{opacity:.45;cursor:default;background:var(--surface)}
-  :focus-visible{outline:2px solid var(--accent);outline-offset:1px}
-  button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
-  button.primary:hover{background:#a8380a;border-color:#a8380a}
-  kbd{font:inherit;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
-  input,select{font:inherit;color:var(--ink)}
-  input[type=checkbox]{accent-color:var(--accent)}
-
-  /* ---------- Kopfleiste ---------- */
-  #topbar{display:flex;align-items:stretch;height:44px;padding:0 8px 0 6px;
-    background:var(--surface);border-bottom:1px solid var(--line);min-width:0}
-  #roomctl{position:relative;display:flex;align-items:center;gap:2px;flex:none;
-    max-width:260px;padding-right:10px;margin-right:4px;border-right:1px solid var(--line2)}
-  #roomname{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-    padding:4px 6px;border-radius:4px;cursor:text}
-  #roomname:hover{background:var(--hover)}
-  #roomnameEdit{font-weight:600;width:190px;padding:3px 5px;border:1px solid var(--accent);
-    border-radius:4px;background:#fff;outline:none}
-  .ib{width:30px;height:30px;min-height:0;padding:0;display:inline-grid;place-items:center;
-    border:0;background:none;border-radius:4px;color:var(--ink2)}
-  .ib svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;
-    stroke-linecap:round;stroke-linejoin:round}
-  .ib:hover{background:var(--hover);color:var(--ink)}
-  .ib:disabled{opacity:.3;background:none}
-  .ib[aria-expanded=true]{background:var(--press)}
-  /* Modi: Reiter mit Strich darunter, Ziffer = Taste. */
-  #modes{display:flex;align-items:stretch;margin-right:10px;flex:none}
-  #modes button{position:relative;display:flex;align-items:center;gap:6px;min-height:0;
-    border:0;border-radius:0;background:none;padding:0 11px;color:var(--ink2)}
-  #modes button i{font-style:normal;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
-  #modes button:hover{color:var(--ink);background:var(--hover)}
-  #modes button[aria-pressed=true]{color:var(--ink);font-weight:600}
-  #modes button[aria-pressed=true]::after{content:'';position:absolute;left:9px;right:9px;bottom:-1px;
-    height:2px;background:var(--ink)}
-  #modes button[aria-disabled=true]{opacity:.4}
-  #modes button[aria-disabled=true]:hover{background:none;color:var(--ink2)}
-  /* Werkzeuge des aktuellen Modus - nur die. */
-  /* Abgesetzt von den Reitern: Trennstrich davor, Knoepfe mit Rahmen -
-     Reiter sind Text mit Strich, Werkzeuge sind Knoepfe. */
-  #tools{flex:1;display:flex;align-items:center;gap:4px;min-width:0;overflow-x:auto;scrollbar-width:none;
-    align-self:center;padding-left:12px;border-left:1px solid var(--line2)}
-  #tools::-webkit-scrollbar{display:none}
-  .tg{display:flex;align-items:center;gap:4px;flex:none}
-  .tg[data-for]{display:none}
-  body[data-mode=draw] .tg[data-for~=draw],body[data-mode=measure] .tg[data-for~=measure],
-  body[data-mode=tiles] .tg[data-for~=tiles],body[data-mode=kitchen] .tg[data-for~=kitchen]{display:flex}
-  .tsep{width:1px;height:16px;align-self:center;margin:0 6px;background:var(--line);flex:none}
-  .tb{display:inline-flex;align-items:center;gap:6px;height:28px;min-height:0;padding:0 9px;
-    border:1px solid var(--line);border-radius:5px;background:var(--hover);white-space:nowrap}
-  .tb:hover{background:var(--press);border-color:var(--line2)}
-  .tb kbd{margin-left:1px}
-  /* Schalter (Zustand) tragen eine Lampe; Werkzeuge (temporaerer Modus)
-     faerben sich ein. Aktionen sehen aus wie Aktionen. */
-  .tog::before{content:'';flex:none;width:7px;height:7px;border:1.5px solid var(--muted);border-radius:1.5px}
-  .tog[aria-pressed=true]::before{background:var(--accent);border-color:var(--accent)}
-  .tool[aria-pressed=true]{background:var(--accent-bg);color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent-line)}
-  .tool[aria-pressed=true] kbd{color:var(--accent)}
-  .tpal{touch-action:none;cursor:grab}
-  /* Unter ~1250 px passt die Fliesen-Leiste sonst nicht; die Tasten stehen
-     auch im Tooltip und unter "?". */
-  @media (max-width:1250px){ .tb kbd{display:none} #modes button i{display:none} }
-  #histctl{display:flex;align-items:center;gap:2px;flex:none;margin-left:6px;padding-left:6px;
-    border-left:1px solid var(--line2)}
   /* Wandleiste (Modus Wände) sitzt in der Kopfleiste. */
   #wallbar{display:flex;align-items:center;gap:2px}
   #wPick{height:28px;padding:0 6px;border:1px solid var(--line);border-radius:4px;background:var(--surface);max-width:150px}
   #wPrev,#wNext{width:28px;padding:0;font-size:16px;line-height:1;justify-content:center}
-
-  /* Menue (Raum) */
-  .menu{position:absolute;top:38px;left:0;z-index:30;min-width:240px;padding:4px;
-    background:var(--surface);border:1px solid var(--line);border-radius:6px;
-    box-shadow:0 8px 24px rgba(36,34,29,.16)}
-  .menu button{display:flex;width:100%;align-items:center;gap:16px;min-height:28px;padding:0 10px;
-    border:0;border-radius:4px;background:none;text-align:left}
-  .menu button:hover,.menu button:focus-visible{background:var(--hover);outline:none}
-  .menu button kbd{margin-left:auto}
-  .menu hr{border:0;border-top:1px solid var(--line2);margin:4px 2px}
   .menu .danger{color:var(--bad)}
   .menu .danger.arm{background:var(--bad);color:#fff}
-
-  /* ---------- Zeichenflaeche ---------- */
-  #cv{position:absolute;inset:0;width:100%;height:100%;display:block;background:var(--canvas);
-    cursor:crosshair;touch-action:none}
   #empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
     pointer-events:none;padding:24px}
   #empty p{max-width:380px;margin:0;color:var(--ink2);font-size:13px;line-height:1.55}
@@ -140,19 +26,9 @@
   #empty .helpcue span{display:block;font-size:14px;margin-top:6px}
   #empty .helpcue svg{width:clamp(70px,9vw,120px);height:auto;flex:none;stroke:currentColor;fill:none;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;margin-bottom:-2px}
 
-  /* ---------- Statuszeile ---------- */
-  #statusbar{display:flex;align-items:center;gap:2px;height:28px;padding:0 6px 0 12px;
-    background:var(--surface);border-top:1px solid var(--line);font-size:12px;color:var(--ink2);min-width:0}
-  #hint{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .sb{height:22px;min-height:0;padding:0 7px;border:0;border-radius:3px;background:none;
-    font-size:12px;color:var(--ink2);white-space:nowrap;font-variant-numeric:tabular-nums}
-  .sb:hover{background:var(--hover);color:var(--ink)}
-  .sbsep{width:1px;height:16px;background:var(--line);margin:0 4px;flex:none}
-
   /* ---------- Popover: Masseingabe, Wand, Loeschen ---------- */
   .popover{position:absolute;z-index:6;background:var(--surface);border:1px solid var(--line);
     border-radius:6px;padding:10px;box-shadow:0 8px 24px rgba(36,34,29,.16)}
-  #entry{min-width:240px}
   #entryLabel{font-size:12px;color:var(--ink2);margin-bottom:6px}
   #entryRow{display:flex;gap:6px;align-items:center}
   #entryVal,#wpopVal{font-size:16px;font-variant-numeric:tabular-nums;text-align:right;
@@ -160,23 +36,16 @@
   #entryVal{width:110px}
   #wpopVal{width:96px}
   #entryVal.bad,#wpopVal.bad{border-color:var(--bad);background:var(--bad-bg)}
-  /* Die Einheit ist der Umschalter (m - cm - mm), sieht aber wie ein Etikett aus. */
-  .unit{min-height:0;height:24px;padding:0 2px;border:0;border-bottom:1px dotted var(--muted);border-radius:0;
-    background:none;color:var(--ink2);min-width:2.2em;text-align:left}
-  .unit:hover{background:none;color:var(--ink)}
   #entryOk,#wpopOk{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
   #entryOk:hover,#wpopOk:hover{background:#a8380a}
   #entryX,#wpopX{width:28px;padding:0;border:0;background:none;color:var(--muted)}
   #entryX:hover,#wpopX:hover{color:var(--ink);background:var(--hover)}
-  #wpop{min-width:270px}
-  #oppl{min-width:230px;padding:8px 10px}
   #opplHead{display:flex;align-items:center;gap:8px;margin-bottom:6px}
   #opplHead b{font-size:13px;flex:1}
   #opplX{width:26px;height:24px;padding:0;border:0;background:none;color:var(--muted)}
   #opplX:hover{color:var(--ink);background:var(--hover)}
   #oppl .oprow{display:flex;align-items:center;gap:8px;margin-top:6px}
   #oppl .oprow label{min-width:48px;font-size:12px;color:var(--ink2)}
-  #cpop{min-width:230px}
   #cpopHead{display:flex;align-items:baseline;gap:8px;margin-bottom:6px}
   #cpopHead b{font-size:13px}
   #cpopIst{color:var(--muted);font-size:12px;flex:1;font-variant-numeric:tabular-nums}
@@ -200,39 +69,8 @@
   #wpopThick:empty{display:none}
   #wpopThick .muted{color:var(--muted)}
   #wpopThick button{min-height:24px;padding:0 8px;font-size:12px}
-  #pop{display:flex;gap:10px;align-items:center;padding:6px 6px 6px 10px;white-space:nowrap;z-index:7}
   #popDel{color:#fff;background:var(--bad);border-color:var(--bad)}
   #popDel:hover{background:#962019}
-
-  /* ---------- Overlays: Raeume, QR, Tastenkuerzel ---------- */
-  .scrim{position:fixed;inset:0;z-index:40;background:rgba(36,34,29,.28);
-    display:flex;align-items:center;justify-content:center}
-  .dlg{background:var(--surface);border:1px solid var(--line);border-radius:8px;
-    box-shadow:0 12px 40px rgba(36,34,29,.22);max-height:80vh;overflow-y:auto}
-  .dlghead{display:flex;align-items:center;gap:8px;padding:12px 12px 10px 16px;border-bottom:1px solid var(--line2)}
-  .dlghead h2{font-size:13px;font-weight:600;margin:0;flex:1}
-  .dlghead .ib{width:28px;height:28px}
-  #qrbox{padding-bottom:12px;text-align:center;width:340px}
-  #qrcv{margin:12px auto 6px;display:block;image-rendering:pixelated;max-width:100%;height:auto}
-  #qrnote{font-size:12px;color:var(--muted);padding:0 16px}
-  #keysbox{width:740px}
-  #keysbody{columns:2;column-gap:28px;padding:12px 16px 16px}
-  #keysbody .kgrp{break-inside:avoid;padding:0;border:0;margin:0 0 12px}
-  #keysbody h4{margin:0 0 2px;font-size:11px;font-weight:600;color:var(--muted)}
-  #keysbody p{display:flex;justify-content:space-between;gap:12px;margin:0;padding:3px 0;border-bottom:1px solid var(--line2);font-size:12px}
-  #keysbody kbd{font-size:12px;color:var(--ink);white-space:nowrap}
-  #helpbox{width:760px}
-  #helpbody{padding:4px 18px 18px;font-size:12.5px;line-height:1.5}
-  #helpbody h3{display:block;font-size:13px;font-weight:600;margin:16px 0 4px;padding:0;border:0;text-transform:none;letter-spacing:0;color:var(--ink)}
-  #helpbody h3 i{font-style:normal;display:inline-block;min-width:18px;color:var(--accent)}
-  #helpbody p{margin:4px 0}
-  #helpbody dl{margin:4px 0;display:grid;grid-template-columns:150px 1fr;gap:3px 14px}
-  #helpbody dt{font-weight:600}
-  #helpbody dd{margin:0;color:var(--ink2)}
-  #helpbody .hnote{color:var(--muted)}
-
-  /* ---------- Panel ---------- */
-  #status{padding:12px 14px;border-bottom:1px solid var(--line)}
   #statustxt{display:flex;gap:8px;align-items:baseline;font-weight:600;line-height:1.35}
   #statustxt::before{content:'';flex:none;width:8px;height:8px;border-radius:50%;
     background:var(--muted);transform:translateY(-1px)}
@@ -240,37 +78,14 @@
   #status.warn #statustxt::before{background:var(--warn-dot)}
   #status.bad #statustxt::before{background:var(--bad)}
   #status.bad #statustxt{color:var(--bad)}
-  /* Ergebnis wie ein Schriftfeld: Beschriftung klein, Wert gross, Haarlinien. */
-  #geo{display:grid;grid-template-columns:1fr 1fr;margin-top:10px;border-top:1px solid var(--line2)}
-  #geo .kv{padding-top:7px;min-width:0}
-  #geo .kv+.kv{padding-left:12px;border-left:1px solid var(--line2)}
-  #geo .kv span{display:block;font-size:11px;color:var(--muted)}
-  #geo .kv b{font-size:20px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.01em;white-space:nowrap}
-  #geo .kv b small{font-size:12px;font-weight:400;color:var(--ink2);letter-spacing:0}
-  #geo .note{grid-column:1/-1;font-size:12px;color:var(--ink2);margin-top:6px}
-  #geo .ph{grid-column:1/-1;margin:8px 0 0;font-size:12px;color:var(--muted)}
   #wallwarn,#nbwarn{display:none;padding:8px 14px;background:var(--warn-bg);color:var(--warn);
     border-bottom:1px solid var(--line);font-size:12px}
   #nbwarn b{display:block;font-weight:600;margin-bottom:2px}
   #nbwarn ul{margin:0;padding-left:16px}
-  section{padding:12px 14px;border-bottom:1px solid var(--line)}
-  h3{margin:0 0 8px;font-size:12px;font-weight:600;color:var(--ink2);
-    display:flex;align-items:baseline;justify-content:space-between;gap:8px}
-  h3 small{font-size:11px;font-weight:400;color:var(--muted);font-variant-numeric:tabular-nums}
-  /* Welche Abschnitte zu welchem Modus gehoeren. */
-  body.tilesmode #panel > section:not(#tilesec){display:none}
-  /* Im Fliesen-Modus ist das Aufmass fertig; seine Kennzahlen stehen im Material. */
-  body.tilesmode #status{display:none}
-  body.kitchenmode #panel > section:not(#kitchensec){display:none}
-  body.kitchenmode #status{display:none}
   #wallsec{display:none}
   body[data-mode=wall] #wallsec{display:block}
   body[data-mode=wall] #panel > section:not(#wallsec){display:none}
   body[data-mode=draw] #nextsec{display:none}
-  /* Vorschlags-Chips */
-  #sugg .grp{margin-bottom:8px}
-  #sugg .grp:last-child{margin-bottom:0}
-  #sugg .grp b{display:block;font-size:12px;font-weight:400;color:var(--ink2);margin-bottom:5px}
   #sugg .chips,#querlist .chips,#nahlist .chips,#ringlist .chips{display:flex;flex-wrap:wrap;gap:5px}
   #sugg>span,#nahlist .hint,#querlist .hint{font-size:12px;color:var(--muted)}
   #ringlist .grp{margin-bottom:10px}
@@ -281,10 +96,6 @@
   #ringlist .weg,#ringlist .tipp{font-size:12px;color:var(--ink2);margin-bottom:5px}
   #nahlist .hint,#querlist .hint{margin-top:6px}
   #querlist .have{font-size:12px;color:var(--meas);margin-bottom:5px}
-  button.sg{min-height:24px;padding:0 8px;border:1px dashed var(--todo);color:var(--todo);
-    background:transparent;font-size:12px;font-variant-numeric:tabular-nums}
-  button.sg:hover{background:var(--bad-bg)}
-  button.sg.rep{border-style:dotted;border-color:var(--warn);color:var(--warn)}
   /* Wandliste: Ausnahmen markieren, nicht jede Zeile. */
   .wrow{display:grid;grid-template-columns:58px 1fr auto;align-items:center;gap:8px;
     min-height:26px;padding:0 6px;margin:0 -6px;border-radius:4px;cursor:pointer;
@@ -299,33 +110,14 @@
   .wrow .wlen{text-align:right}
   .wrow .wlen.approx{color:var(--muted)}
   .wrow.worst{background:var(--bad-bg)}
-  .wgrp{margin:10px 0 2px;font-size:11px;color:var(--muted)}
   #diagbox summary{cursor:pointer;list-style-position:inside}
   #diagbox summary small{font-size:11px}
-  #why{color:var(--ink2);font-size:12px;margin-top:8px}
-  /* Werte-Tabelle im Wand-Popup */
-  table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
-  th{font-size:11px;color:var(--muted);font-weight:600}
-  th,td{border-bottom:1px solid var(--line2);padding:4px 6px;text-align:right;white-space:nowrap}
-  th:first-child,td:first-child{text-align:left}
-  td input{font-variant-numeric:tabular-nums;text-align:right;border:1px solid transparent;
-    border-radius:4px;padding:3px 4px;background:transparent;width:70px}
-  td input:hover,td input:focus{border-color:var(--line);background:#fff}
-  tr.worst td{background:var(--bad-bg)}
   .badge{font-size:11px;border-radius:3px;padding:1px 5px;background:var(--line2);color:var(--ink2);
     border:0;min-height:0;white-space:nowrap}
   .badge.ok{background:var(--good-bg);color:var(--good)}
   .badge.unchecked{background:var(--warn-bg);color:var(--warn)}
   .badge.suspect{background:var(--bad-bg);color:var(--bad);font-weight:600}
   button.badge{cursor:pointer}
-  #tip{position:fixed;z-index:50;max-width:280px;background:var(--surface);border:1px solid var(--line);
-    border-radius:6px;padding:8px 10px;font-size:12px;line-height:1.45;color:var(--ink);
-    box-shadow:0 6px 18px rgba(36,34,29,.16);pointer-events:none}
-  .rowbtn{min-height:22px;padding:0 7px;font-size:12px}
-  .rowbtn.del{border:0;background:none;color:var(--muted)}
-  .rowbtn.tog{display:inline-flex;align-items:center;gap:5px;border:0;background:none;color:var(--ink2)}
-  .rowbtn.tog[aria-pressed=true]{color:var(--accent);font-weight:600}
-  .rowbtn.del:hover{color:var(--bad);background:var(--bad-bg)}
   /* Abgeschaltetes Maß: bleibt stehen, zählt nicht mit. Die Knopfspalten
      (exakt, aus, ×) rücken zusammen, damit die Karte mit dem Schalter kaum
      breiter wird. */
@@ -350,7 +142,6 @@
   #wallops .orow span.ok{color:var(--good)}
   #wallops .orow span.bad{color:var(--bad)}
   #wallops .none{font-size:12px;color:var(--muted)}
-  #opop{border-top:1px solid var(--line2);padding-top:10px}
   /* Der Kopf der Einstellungen ist die markierte Zeile darueber. */
   #opopHead{display:none}
   #opopHead b{flex:1}
@@ -360,10 +151,6 @@
   .oprow select,.oprow input{padding:0 6px;height:28px;border:1px solid var(--line);
     border-radius:4px;background:#fff;min-width:0;flex:1}
   .oprow input{font-variant-numeric:tabular-nums;text-align:right;flex:none;width:66px}
-  .seg{display:flex;border:1px solid var(--line);border-radius:4px;overflow:hidden}
-  .seg button{border:0;border-radius:0;min-height:28px;padding:0 10px;font-size:12px;background:var(--surface)}
-  .seg button+button{border-left:1px solid var(--line)}
-  .seg button[aria-pressed=true]{background:var(--ink);color:var(--surface)}
   #opDel{color:var(--bad);border:0;background:none;padding:0;font-size:12px;min-height:24px}
   #opDel:hover{text-decoration:underline}
   #opMeasBox{border-top:1px solid var(--line2);margin-top:8px;padding-top:8px}
@@ -375,338 +162,24 @@
   #opMeasList .mrow.bad{color:var(--bad);font-weight:600}
   #opMeasList .mrow span:nth-child(2){margin-left:auto}
   #opMeasList button{min-height:22px;padding:0 7px;font-size:12px}
-
-  /* ---------- Fliesen ---------- */
-  #tilesec{padding:0}
-  #tilesec>div,#tilesec>details{padding:12px 14px;border-bottom:1px solid var(--line)}
-  #tSpecBox summary{display:flex;align-items:baseline;gap:8px;cursor:pointer;list-style:none}
-  #tSpecBox summary::-webkit-details-marker{display:none}
-  #tSpecBox summary b{font-size:12px;font-weight:600;color:var(--ink2)}
-  #tSpecSum{flex:1;font-variant-numeric:tabular-nums;color:var(--ink)}
-  #tSpecBox summary .ed{font-size:12px;color:var(--accent)}
-  #tSpecBox[open] summary .ed{color:var(--muted)}
-  #tSpecBox[open] summary{margin-bottom:10px}
-  .tgrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px 12px}
-  .tgrid label{display:flex;align-items:center;gap:5px;min-width:0;font-size:12px;color:var(--ink2)}
-  .tgrid label span{flex:1}
-  /* Küchenmaße: lange Namen (Hängeschrank, Plattentiefe) passen mit Feld und Einheit nicht zu zweit in eine Panelzeile. */
-  #kSpecGrid{grid-template-columns:minmax(0,1fr)}
-  .tgrid input,.trow input{width:4.6em;padding:0 6px;height:26px;border:1px solid var(--line);border-radius:4px;
-    background:#fff;text-align:right;font-variant-numeric:tabular-nums}
-  .trow{display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin:4px 0}
-  .trow label{display:flex;align-items:center;gap:4px;font-size:12px;color:var(--ink2)}
-  .trow input{width:3.6em}
-  .tnote{font-size:12px;color:var(--ink2);margin-top:6px}
-  .tmeas{margin-top:8px}
-  .tmeas .tnote{margin:0}
-  #measDlg{width:min(860px,calc(100vw - 32px));max-height:calc(100vh - 32px);padding:0;border:1px solid var(--line);
-    border-radius:10px;background:var(--surface);color:var(--ink);box-shadow:0 18px 50px rgba(0,0,0,.22);overflow:auto}
-  #measDlg::backdrop{background:rgba(36,34,29,.35)}
-  #measDlg .mhead{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--line2);margin:0}
-  #measDlg .mhead h3{margin:0;font-size:14px;font-weight:600}
-  #measDlg .mbody{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;padding:14px 16px}
-  #measDlg .mfoot{display:flex;justify-content:flex-end;gap:8px;padding:10px 16px;border-top:1px solid var(--line2);
-    position:sticky;bottom:0;background:var(--surface)}
-  #measDlg .mfoot button{height:30px;padding:0 14px}
-  #measDlg button:disabled{opacity:.45;cursor:default}
-  #mSketch svg{display:block;width:100%;height:auto;margin-bottom:6px}
-  .ms-tile{fill:#ece0c8;opacity:.6}
-  .ms-edge{stroke:var(--ink);stroke-width:1.8}
-  .ms-diag,.ms-w{stroke:var(--muted);stroke-width:1.3;stroke-dasharray:5 4}
-  .ms-hit{stroke:transparent;stroke-width:14;cursor:pointer}
-  .ms-ang{fill:none;stroke:var(--muted);stroke-width:1}
-  .ms-key{font:600 11px var(--font);fill:var(--ink2);paint-order:stroke;stroke:var(--surface);stroke-width:3px}
-  .ms-pt{font:700 13px var(--font);fill:var(--ink)}
-  .ms-acute{fill:var(--accent)}
-  #mSketch g.on line:not(.ms-hit){stroke:var(--accent);stroke-width:3;stroke-dasharray:none}
-  #mSketch g.on .ms-key{fill:var(--accent)}
-  #mFields{display:grid;gap:3px}
-  .mrow{display:grid;grid-template-columns:28px minmax(0,1fr) 9.5em;align-items:center;gap:8px;font-size:12px;color:var(--ink2);
-    padding:1px 4px;border-radius:4px}
-  .mrow b{color:var(--ink);font-variant-numeric:tabular-nums}
-  .mrow.on{background:var(--accent-bg)} .mrow.on b,.mrow.on span{color:var(--accent)}
-  #measDlg input{height:26px;padding:0 6px;border:1px solid var(--line);border-radius:4px;background:#fff;
-    font-variant-numeric:tabular-nums;width:100%}
-  #measDlg input.bad{border-color:var(--bad);background:var(--bad-bg)}
-  .msigma{display:flex;align-items:center;gap:6px;margin-top:10px;font-size:12px;color:var(--ink2)}
-  .msigma input{width:4.2em!important;text-align:right}
-  .msigma button{margin-left:auto}
-  .mmsg{font-size:12px;color:var(--ink2);margin:8px 0 0}
-  .mmsg.good{color:var(--good);font-weight:600} .mmsg.warn{color:var(--warn)} .mmsg.bad{color:var(--bad);font-weight:600}
-  .mvals{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px}
-  .mvals span{display:block;font-size:12px;color:var(--ink2)}
-  .mvals b{display:block;font-size:22px;font-weight:650;font-variant-numeric:tabular-nums;line-height:1.25}
-  .mvals small{display:block;font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}
-  .mvals small.was{color:var(--ink2)}
-  #mReal h4{margin:16px 0 0;font-size:12px;font-weight:600;color:var(--ink2)}
-  .mfacts{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:3px 12px;margin:8px 0 0;font-size:12px;font-variant-numeric:tabular-nums}
-  .mfacts dt{color:var(--ink2)} .mfacts dd{margin:0}
-  #mTable table{width:100%;border-collapse:collapse;margin-top:14px;font-size:12px;font-variant-numeric:tabular-nums}
-  #mTable th,#mTable td{text-align:right;padding:3px 5px;border-bottom:1px solid var(--line2)}
-  #mTable th:first-child,#mTable td:first-child{text-align:left}
-  #mTable th{color:var(--ink2);font-weight:500}
-  #mTable small{color:var(--muted)}
-  #mTable .bad{color:var(--bad);font-weight:600} #mTable .warn{color:var(--warn)}
-  .tnote input{vertical-align:-2px;margin:0 6px 0 0}
-  #tSelBox .trow button{display:inline-flex;align-items:center;gap:6px}
-  .jrow{display:grid;grid-template-columns:1fr auto auto;gap:6px;align-items:center;min-height:30px}
-  .jrow b{font-weight:600;font-variant-numeric:tabular-nums}
-  .jrow b small{font-weight:400;color:var(--muted)}
-  .jrow label{display:flex;align-items:center;gap:4px;font-size:12px;color:var(--ink2)}
-  .jrow input{width:3.4em;padding:0 5px;height:24px;border:1px solid var(--line);border-radius:4px;
-    background:#fff;text-align:right;font-variant-numeric:tabular-nums}
-  #tJList small{font-size:12px;color:var(--muted)}
-  #tCheck{margin-top:10px;padding-top:8px;border-top:1px solid var(--line2);display:grid;gap:3px;font-size:12px}
-  #tCheck b{font-weight:600;font-size:12px;color:var(--ink2);margin-bottom:2px}
-  #tCheck span{display:flex;align-items:center;gap:7px;font-variant-numeric:tabular-nums}
-  #tCheck i{width:10px;height:10px;border-radius:2px;flex:none}
-  /* Material: Kennzahlen gross, Tabellen eingeklappt. */
-  #tKey{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;align-items:baseline;font-variant-numeric:tabular-nums}
-  #tKey span{font-size:12px;color:var(--ink2)}
-  #tKey b{font-size:13px;font-weight:600}
-  #tKey b small{font-size:12px;font-weight:400;color:var(--ink2)}
-  #tKey .main{font-size:20px}
-  #tWarn:empty{display:none}
-  #tWarn{margin-bottom:10px}
-  .twarn{color:var(--bad);font-size:12px;display:flex;align-items:center;gap:8px;margin-bottom:4px}
-  #tDetails{margin-top:10px}
-  #tDetails summary{font-size:12px;color:var(--ink2);cursor:pointer}
-  .ttab{border-collapse:collapse;font-size:12px;margin:6px 0;font-variant-numeric:tabular-nums}
-  .ttab td,.ttab th{padding:2px 6px;text-align:right;border-bottom:0;white-space:normal}
-  .ttab td:first-child{text-align:left}
-  .ttab.tfull{width:100%}
-  .ttab .tsub td{text-align:left;font-size:11px;font-weight:600;color:var(--muted);padding-top:8px;
-    border-bottom:1px solid var(--line2)}
-  .ttab .tsum td{border-top:1px solid var(--line2)}
-  .ttab .tmut{color:var(--muted)}
-  .ttab.tkv td:last-child{text-align:right}
-  #tPrintRow{display:grid;gap:8px;margin-top:12px}
-  #tPrintRow button{width:100%}
-  #tPrintRow label{font-size:12px;color:var(--ink2);display:flex;align-items:center;gap:5px}
-  #tEnd{display:flex;gap:6px;justify-content:flex-end}
-  #tEnd button{border:0;background:none;color:var(--muted);font-size:12px;min-height:24px;padding:0 6px}
-  #tEnd button:hover{color:var(--ink);background:var(--hover)}
-  #tClear.arm{background:var(--bad)!important;color:#fff!important}
-  /* ---------- Küche ---------- */
-  #cv3d{position:absolute;top:0;right:0;bottom:0;width:46%;height:100%;display:none;background:#f5f3ed;
-    border-left:1px solid var(--line);touch-action:none;cursor:grab}
-  #cv3d:active{cursor:grabbing}
-  body.kitchenmode.k3d #cv{width:54%;right:auto}
-  body.kitchenmode.k3d #cv3d{display:block}
-  body:not(.kitchenmode.k3d) #k3dMsg{display:none}
-  /* Wege-Analyse (Meldungen M-20261109-151457-68b975, -151540-54f941): statt 3D rechts neben dem Plan */
-  #kAna{position:absolute;top:0;right:0;bottom:0;width:46%;display:none;overflow-y:auto;background:var(--surface);
-    border-left:1px solid var(--line);padding:12px 16px 24px;box-sizing:border-box;font-variant-numeric:tabular-nums}
-  body.kitchenmode.kana #cv{width:54%;right:auto}
-  body.kitchenmode.kana #kAna{display:block}
-  body.kitchenmode.kana #cv3d, body.kitchenmode.kana #k3dMsg{display:none}
-  /* In der Analyse rechts nur, was sie braucht: Auswahl (Inhalte) und Prüfung (Gang, Dreieck).
-     Küchenmaße, Stückliste und "Alle entfernen" gehören zum Planen (M-20261109-160341-3d3671). */
-  body.kitchenmode.kana #kSpecBox, body.kitchenmode.kana #kStockBox, body.kitchenmode.kana #kEnd{display:none}
-  #kAna h4{margin:16px 0 6px;font-size:12px;font-weight:600;color:var(--ink2);display:flex;align-items:baseline;gap:8px}
-  #kAna h4 small{font-weight:400;color:var(--muted)}
-  #kAna h4 .seg{margin-left:auto}
-  .ka-big{font-size:26px;font-weight:600;line-height:1.1}
-  .ka-big small{font-size:12px;font-weight:400;color:var(--muted)}
-  .ka-sub{font-size:12px;color:var(--ink2)}
-  /* Zwei Gruppen statt einer Knopfreihe: links die Annahmen der Rechnung, rechts Ansicht/Vergleich */
-  .ka-ctl{display:flex;flex-wrap:wrap;gap:8px 20px;align-items:center;margin-top:10px}
-  .ka-grp{display:flex;gap:6px;align-items:center}
-  .ka-ctl label{font-size:12px;color:var(--ink2)}
-  #kAna summary.ka-sum{margin:16px 0 6px;font-size:12px;font-weight:600;color:var(--ink2);cursor:pointer}
-  #kAna summary.ka-sum small{font-weight:400;color:var(--muted);margin-left:6px}
-  .ka-bars{display:grid;grid-template-columns:auto 1fr auto;gap:3px 8px;align-items:center;font-size:12px}
-  .ka-bars .lb{white-space:nowrap;cursor:pointer}
-  .ka-bars .lb.on{font-weight:600}
-  .ka-bars .tr{position:relative;height:12px;cursor:pointer}
-  .ka-bars .br{position:absolute;left:0;top:0;bottom:0;border-radius:0 4px 4px 0}
-  .ka-bars .rf{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--ink)}
-  .ka-bars .vl{text-align:right;white-space:nowrap;color:var(--ink2)}
-  .ka-bars .vl em{font-style:normal;color:var(--muted)}
-  .ka-legend{display:flex;gap:12px;font-size:11px;color:var(--ink2);margin-top:6px;flex-wrap:wrap}
-  .ka-legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
-  .ka-mx{border-collapse:collapse;font-size:11px}
-  .ka-mx th{font-weight:400;color:var(--muted);padding:0 2px}
-  .ka-mx th.v{writing-mode:vertical-rl;transform:rotate(180deg);height:74px;text-align:left;vertical-align:bottom}
-  .ka-mx td{padding:1px 4px;text-align:center;border-top:1px solid var(--line)}
-  .ka-mx td.r{text-align:left;white-space:nowrap;color:var(--ink)}
-  .ka-mx td.w{text-align:left;white-space:nowrap;color:var(--ink2);max-width:150px;overflow:hidden;text-overflow:ellipsis}
-  .ka-mx td.w.miss{color:var(--bad);font-weight:600}
-  .ka-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ink2)}
-  .ka-dot.miss{background:none;border:2px solid var(--bad);width:6px;height:6px}
-  .ka-chart{position:relative}
-  .ka-chart svg{width:100%;height:auto;display:block}
-  .ka-tip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:2px 6px;font-size:11px;white-space:nowrap;display:none}
-  .ka-row{display:flex;gap:8px;align-items:center;justify-content:space-between;font-size:12px;padding:2px 0}
-  .ka-note{font-size:11px;color:var(--muted);margin:4px 0}
-  .ka-heatlg{display:inline-block;width:60px;height:8px;border-radius:2px;vertical-align:middle;background:linear-gradient(90deg,rgba(109,40,217,.06),rgba(109,40,217,.6))}
-  .kflow em.bad{color:var(--bad)}
-  #k3dMsg{position:absolute;right:12px;top:12px;z-index:3;max-width:40%;padding:8px 10px;font-size:12px;
-    background:var(--warn-bg);color:var(--warn);border:1px solid #e6d3a8;border-radius:6px}
-  #kPalette{display:flex;gap:2px;align-items:center}
-  /* Gruppe = kleine Überschrift über ihren Knöpfen (Kalt, Warm, Nass, Stauraum, Möbel) */
-  .kpg{display:flex;flex-direction:column;align-items:flex-start;padding:0 2px;border-left:1px solid var(--line)}
-  .kpg:first-child{border-left:0;padding-left:0}
-  .kpg>span{font-size:9px;line-height:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);padding-left:3px;pointer-events:none;white-space:nowrap}
-  .kpg>div{display:flex;gap:1px}
-  /* Schmale Bildschirme (MacBook 1440): Tastenkürzel stehen im Tooltip */
-  @media (max-width:1500px){ .tg[data-for~=kitchen] .tb kbd{display:none}
-    /* sonst ragt "Analyse" bei 1440 px 13 px aus der Leiste */
-    .tg[data-for~=kitchen] .tb.tog{padding-left:6px;padding-right:6px} }
-  /* Kleines Laptop-Fenster: die Leiste rückt zusammen, damit kein Knopf angeschnitten ist. */
-  @media (max-width:1180px){ .tg[data-for~=kitchen] .tb.tog{padding-left:3px;padding-right:3px;gap:3px}
-    .tg[data-for~=kitchen] .tsep{margin:0 2px} .kpg{padding:0 1px} #kPalette{gap:0} }
-  .kpal{padding:0 1px;cursor:grab;touch-action:none;color:var(--ink2);min-height:0;height:28px}
-  .kpal svg{width:27px;height:24px;display:block;fill:none;stroke:currentColor;stroke-width:1.3;stroke-linejoin:round;stroke-linecap:round}
-  .kpal:hover{color:var(--ink)}
-  #kSpecBox summary{display:flex;align-items:baseline;gap:8px;cursor:pointer;list-style:none;flex-wrap:wrap}
-  #kSpecBox summary::-webkit-details-marker{display:none}
-  #kSpecBox summary b{font-size:12px;font-weight:600;color:var(--ink2)}
-  #kSpecBox summary span{font-size:12px;color:var(--muted)}
-  #kSpecBox summary .ed{color:var(--accent)}
-  #kSpecBox[open] summary{margin-bottom:10px}
-  #kEmpty{font-size:12px;color:var(--ink2);margin:10px 0 0;line-height:1.5}
-  #kitchensec>div{margin-top:12px}
-  #kSpecBox{margin:16px 0 6px}
-  #kitchensec h3 button{min-height:22px;padding:0 6px;font-size:12px}
-  .krow{display:flex;align-items:center;gap:6px;margin:6px 0;font-size:12px;flex-wrap:wrap}
-  .krow>label{min-width:62px;color:var(--ink2)}
-  .krow .seg button{padding:0 7px}
-  .krow select{height:28px;padding:0 6px;border:1px solid var(--line);border-radius:4px;background:var(--surface);max-width:190px}
-  .krow input{width:5em;height:26px;padding:0 6px;border:1px solid var(--line);border-radius:4px}
-  .kgrp{margin:8px 0;font-size:12px} .kgrp>label{display:block;color:var(--ink2);margin-bottom:5px}
-  .kchips{display:flex;flex-wrap:wrap;gap:4px}
-  #kCorner{border:1px solid var(--line);border-radius:6px;padding:4px 8px 6px;margin:4px 0 8px}
-  #kCorner .kchead{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:12px;margin:2px 0 2px}
-  #kCorner .kchead small,#kCorner .knote{color:var(--ink2);font-size:11px}
-  #kCorner .knote{margin:2px 0 4px}
-  .kchips button{min-height:24px;padding:0 8px;font-size:12px;border-radius:12px}
-  .kchips button[aria-pressed=true]{background:var(--ink);color:var(--surface);border-color:var(--ink)}
-  /* Maße: Breite × Tiefe × Höhe als Kern des Teils, vorbelegt mit dem Standard */
-  .kdims{margin:2px 0 12px;padding-bottom:10px;border-bottom:1px solid var(--line)}
-  .kdh{display:flex;align-items:baseline;gap:6px;margin-bottom:6px}
-  .kdh b{font-size:12px;font-weight:600;color:var(--ink2)} .kdh small{font-size:11px;color:var(--muted)}
-  .kdh button{margin-left:auto;border:0;background:none;color:var(--accent);font-size:12px;min-height:22px;padding:0 4px;cursor:pointer}
-  .kdg{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
-  .kdg.k4{grid-template-columns:repeat(4,minmax(0,1fr))}
-  .kdim{position:relative;display:flex;flex-direction:column;gap:2px;font-size:11px;color:var(--ink2);min-width:0}
-  .kdim input{width:100%;box-sizing:border-box;height:32px;padding:0 8px;font-size:15px;font-variant-numeric:tabular-nums;text-align:right;
-    border:1px solid var(--line);border-radius:5px;background:var(--surface);color:var(--ink)}
-  .kdim input:focus{outline:2px solid var(--accent);outline-offset:-1px;border-color:transparent}
-  .kdim.dev input{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 7%,var(--surface))}
-  .kdim.ro input{background:transparent;color:var(--muted);border-style:dashed;cursor:default}
-  .kdim.ro input:focus{outline:0}
-  .kdr{position:absolute;right:-4px;top:-6px;border:0;background:none;color:var(--accent);font-size:13px;line-height:1;padding:4px 6px;min-height:0;border-radius:4px;cursor:pointer}
-  .kdr:hover{background:var(--hover)}
-  .kdo{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:6px;font-size:11px;color:var(--muted)}
-  .kdo button{min-height:22px;padding:0 7px;font-size:12px;font-variant-numeric:tabular-nums;border:1px solid var(--line);border-radius:11px;background:var(--surface);color:var(--ink2);cursor:pointer}
-  .kdo button.std{font-weight:600} .kdo button.on{border-color:var(--accent);color:var(--accent)}
-  .kdl{display:flex;align-items:center;gap:10px;margin-top:8px;font-size:12px;color:var(--ink2);flex-wrap:wrap}
-  .kdl>span{min-width:34px} .kdl label{display:flex;align-items:center;gap:4px}
-  .kdl input{width:5em;height:26px;padding:0 6px;text-align:right;font-variant-numeric:tabular-nums;border:1px solid var(--line);border-radius:4px;background:var(--surface)}
-  .kfind{display:flex;gap:8px;align-items:flex-start;width:100%;text-align:left;border:0;border-radius:4px;
-    background:none;padding:5px 6px;font-size:12px;line-height:1.4;min-height:0}
-  .kfind:hover{background:var(--hover)}
-  .kfrow{display:flex;align-items:flex-start;gap:4px} .kfrow .kfind{flex:1}
-  .kfix{flex:none;min-height:22px;padding:0 7px;font-size:11.5px;margin-top:2px;color:var(--accent);border-color:var(--accent-line);background:var(--accent-bg)}
-  .ksugghead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:10px 0 4px}
-  .ksugghead b{font-size:12px;font-weight:600;color:var(--ink2)} .ksugghead button{min-height:24px;font-size:12px;padding:0 8px}
-  .kflow:disabled{opacity:.55;cursor:default;background:none}
-  .kfind[aria-current=true]{background:var(--accent-bg)}
-  .kfind i{flex:none;width:8px;height:8px;border-radius:50%;margin-top:4px}
-  .kfind.bad i{background:var(--bad)} .kfind.warn i{background:var(--warn-dot)} .kfind.info i{background:var(--muted)}
-  .kfind.bad span{color:var(--ink)}
-  .kflowgrp{margin:8px 0 4px} .kflowgrp>b{display:block;font-size:12px;font-weight:600;margin-bottom:3px}
-  .kflow{display:flex;justify-content:space-between;gap:8px;width:100%;text-align:left;border:0;background:none;
-    border-radius:4px;padding:3px 6px;min-height:24px;font-size:12px}
-  .kflow:hover{background:var(--hover)}
-  .kflow[aria-pressed=true]{background:var(--accent-bg)}
-  .kflow small{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
-  .kflow em{font-style:normal;color:var(--warn)}
-  #kSugg>b{display:block;font-size:12px;font-weight:600;color:var(--ink2);margin:10px 0 4px}
-  details.kopt{font-size:12px;color:var(--ink2);margin:0 0 6px} details.kopt summary{cursor:pointer} details.kopt ul{margin:4px 0 0;padding-left:18px}
-  .ksugg{display:flex;gap:8px;align-items:center;font-size:12px;padding:4px 0;border-top:1px solid var(--line2)}
-  .ksugg span{flex:1}
-  .ksugg.kdep{padding-left:12px;border-top:0;color:var(--ink2)}
-  #kStockBox summary{cursor:pointer;font-size:12px;font-weight:600;color:var(--ink2)}
-  #kStock table{width:100%;border-collapse:collapse;font-size:12px;margin-top:6px}
-  #kStock td{padding:2px 0;border-bottom:1px solid var(--line2)} #kStock td+td{text-align:right;font-variant-numeric:tabular-nums}
-  #kClear.arm{background:var(--bad)!important;color:#fff!important}
-
-#tPalette{display:flex;gap:5px;flex-wrap:wrap} #tPalette svg,#tSetList svg{width:42px;height:30px;display:block}
-  #tSetList{display:grid;gap:6px;margin:10px 0} .tile-set-row{display:flex;gap:6px;align-items:center} .tile-set-row>button:first-child{flex:1;display:flex;align-items:center;gap:8px;text-align:left} .tile-set-row button[aria-pressed=true]{border-color:var(--accent);background:#fff1df} .tile-set-row small{display:block;color:var(--ink2)} #tPalette button{min-width:48px;padding:5px 8px} #tShape,#tNewShape{max-width:100%;padding:6px} #tName{min-width:0}
-
-  /* =====================================================================
-     Werkzeugfamilie (DESIGN.md): Leiste mit Schritten, Menü, Stand, Karten.
-     Die Regeln stehen bewusst am Ende und überschreiben die ältere Leiste.
-     body[data-tool] sagt, welches Werkzeug diese Datei gerade ist:
-     aufmass (Skizze, Maße, Wände, Ausgabe), fliesen oder kueche.
-     ===================================================================== */
-  :root{ --pencil:#a39d90; --floor:#fbfaf7; --ease:cubic-bezier(.16,1,.3,1); }
-  ::selection{background:var(--accent-bg);color:var(--ink)}
-  body{caret-color:var(--accent);scrollbar-color:var(--line) transparent;scrollbar-width:thin}
-  ::placeholder{color:var(--muted);opacity:1;font-style:italic}
-  button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
-  button.primary:hover{background:#a8380a;border-color:#a8380a}
-
-  /* ---------- Leiste ---------- */
-  #roomctl{gap:4px;max-width:360px;padding-right:12px}
-  #backHome{display:flex;align-items:center;gap:3px;height:28px;padding:0 8px 0 4px;border-radius:4px;
-    color:var(--ink2);text-decoration:none;white-space:nowrap;flex:none}
-  #backHome:hover{background:var(--hover);color:var(--ink)}
-  #backHome svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
-  #toolname{color:var(--ink2);white-space:nowrap;padding-left:10px;margin-left:4px;border-left:1px solid var(--line2)}
   #modes .steparrow{width:16px;height:16px;align-self:center;margin:0 2px;flex:none;
     stroke:var(--pencil);fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
-  #modes button[hidden]{display:none}
   body:not([data-tool=aufmass]) #modes{display:none}
   body[data-tool=aufmass] #tools{border-left:0}
   body[data-tool=aufmass] #statusbar{display:none}
-  #histctl{position:relative}
-  /* Menü: rechts, mit Gruppen. Eingeschaltetes trägt einen Punkt. */
-  .menu{left:auto;right:0;min-width:236px}
-  .menu h4{margin:0;padding:8px 10px 3px;font-size:11px;font-weight:600;color:var(--muted)}
-  .menu button[aria-pressed=true]::after{content:'';flex:none;width:6px;height:6px;border-radius:50%;
-    background:var(--accent);margin-left:auto}
   body:not([data-tool=aufmass]) .menu .nurAufmass{display:none}
-  body[data-tool=aufmass] .menu .nurFolge{display:none}
-
-  /* ---------- Plan ---------- */
-  #fitview{position:absolute;right:10px;top:8px;z-index:4}
   body.outmode #fitview{display:none}
   #empty{display:none!important}
-  #sheets{position:absolute;inset:0;z-index:5;overflow:auto;padding:28px 0 48px;background:var(--paper);display:none}
   body.outmode #sheets{display:block}
-  /* Rückmeldung erscheint dort, wo sie ausgelöst wurde */
-  #toast{position:fixed;left:0;top:0;z-index:60;max-width:min(520px,calc(100vw - 24px));
-    padding:7px 12px;background:var(--ink);color:#fff;border-radius:6px;font-size:12px;line-height:1.4;
-    pointer-events:none;opacity:0;transition:opacity .2s var(--ease)}
-  #toast.on{opacity:1}
   .popover{box-shadow:0 4px 16px rgba(36,34,29,.14)}
-
-  /* ---------- Stand ---------- */
-  #status{cursor:pointer;padding:14px 16px}
-  #status:hover{background:var(--hover)}
-  #status:focus-visible{outline-offset:-2px}
   #statustxt{align-items:flex-start;gap:9px}
   #statustxt::before{margin-top:5px;transform:none;background:var(--pencil)}
   #status.prog #statustxt::before,#status.warn #statustxt::before{background:none;box-shadow:inset 0 0 0 1.5px var(--ink2)}
-  #geo{border-top:0;margin:12px 0 0 17px;gap:12px}
-  #geo .kv{padding-top:0}
-  #geo .kv+.kv{padding-left:0;border-left:0}
-  #geo .ph{display:none}
-  #geo.in{animation:arrive .4s var(--ease)}
-  @keyframes arrive{from{opacity:0;transform:translateY(5px)}}
-  body.tilesmode #standMore,body.kitchenmode #standMore{display:none}
   #standMore{padding:10px 16px 12px;border-bottom:1px solid var(--line);background:var(--canvas);font-size:12px}
   #standFacts{display:grid;grid-template-columns:1fr auto;gap:4px 12px;margin:0 0 10px}
   #standFacts dt{color:var(--ink2)}
   #standFacts dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
   #standFacts .hd{grid-column:1/-1;margin-top:6px;font-size:11px;font-weight:600;color:var(--muted)}
-  #ellipses{display:flex;align-items:center;gap:8px;min-height:24px;padding:0;border:0;background:none;color:var(--ink2);font-size:12px}
-  #ellipses:hover{background:none;color:var(--ink)}
-  #ellipses::before{content:'';flex:none;width:13px;height:13px;border:1px solid var(--muted);border-radius:3px;background:#fff}
-  #ellipses[aria-pressed=true]::before{background:var(--accent);border-color:var(--accent);box-shadow:inset 0 0 0 2px #fff}
   #wallwarn,#nbwarn{background:var(--canvas);color:var(--ink2);padding:8px 16px}
   body[data-tool=aufmass] section{padding:14px 16px 12px;border-bottom:0}
   body[data-tool=aufmass] h3{font-size:11px;color:var(--muted);margin-bottom:6px}
@@ -732,7 +205,6 @@
   #wlbox summary::after{content:'';width:6px;height:6px;border-right:1.5px solid var(--muted);border-bottom:1.5px solid var(--muted);
     rotate:45deg;margin-right:4px;transition:rotate .15s var(--ease)}
   #wlbox[open] summary::after{rotate:225deg}
-  #why{margin:0 0 8px}
   body[data-tool=aufmass][data-mode=draw] #wlsec{display:none}
   .wrow .wn.todo{color:var(--muted)}
 
@@ -752,9 +224,6 @@
   /* Zwei IDs wie die Schrittregeln oben (body[data-mode=wall] #panel > section:not(#wallsec)),
      sonst bleibt die Ausgabe aus dem Schritt Wände heraus leer. */
   body.outmode #panel > section#outsec{display:block}
-  @media (prefers-reduced-motion:reduce){
-    *{animation:none!important;transition:none!important}
-  }
   body.outmode #gosec,body.outmode #wallwarn,body.outmode #nbwarn{display:none!important}
   .intent{padding:16px 16px 14px;border-bottom:1px solid var(--line2)}
   .intent h3{font-size:13px!important;font-weight:600;color:var(--ink)!important;margin-bottom:8px}
@@ -762,12 +231,6 @@
   .intent .tr{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:38px;border-top:1px solid var(--line2)}
   .intent .tr:first-of-type{border-top:0}
   .intent .tr small{display:block;font-size:12px;color:var(--muted)}
-
-  /* ---------- Karte am Objekt: Wand, Diagonale, Ecke ---------- */
-  .kgrp{margin-top:10px;padding-top:8px;border-top:1px solid var(--line2)}
-  .kgrp>span{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
-  .kgrp>div{display:flex;gap:4px;flex-wrap:wrap}
-  .kend{display:flex;gap:6px;align-items:center;margin-top:10px;padding-top:8px;border-top:1px solid var(--line2)}
   .kend .danger{margin-left:auto;color:var(--bad)}
   #wpopNorth{margin-left:0;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:0 10px}
   #wpopThick{align-items:center}
@@ -780,6 +243,7 @@
   #opState.warn{color:var(--ink2)}
   #opDel{color:var(--bad)}
 </style>
+
 
 <div id="app">
   <header id="topbar">
@@ -794,27 +258,8 @@
       <button data-mode="wall" aria-pressed="false" title="Wände (3)"><i>3</i>Wände</button>
       <svg class="steparrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M9 5l3 3-3 3"/></svg>
       <button id="outTab" aria-pressed="false" title="Ausgabe (4)">Ausgabe</button>
-      <button data-mode="tiles" aria-pressed="false" hidden>Fliesen</button>
-      <button data-mode="kitchen" aria-pressed="false" hidden>Küche</button>
     </nav>
     <div id="tools">
-      <div class="tg" data-for="tiles">
-        <div id="tPalette" aria-label="Fliesenset dieses Raums"></div>
-        <i class="tsep"></i>
-        <button id="tAlign" class="tb tool" aria-pressed="false" title="Fluchten: erst Kante der Fliese, die sich bewegt, dann die Bezugskante">Fluchten <kbd>A</kbd></button>
-        <button id="tJC" class="tb tool" aria-pressed="false" title="Dehnungsfuge: Anfang und Ende auf Wand oder Ecke klicken">Dehnungsfuge <kbd>J</kbd></button>
-        <i class="tsep"></i>
-        <button id="tJCheck" class="tb tog" aria-pressed="false" title="Fugen markieren, die von der eingestellten Breite abweichen, dazu unbelegte Stellen und Fugenversatz">Fugencheck <kbd>K</kbd></button>
-        <button id="tRuler" class="tb tog" aria-pressed="false" title="Lineal einblenden: verschieben, an den Enden strecken und drehen, rastet an Fliesen und Wänden (⌘/Strg frei)">Lineal <kbd>L</kbd></button>
-      </div>
-      <div class="tg" data-for="kitchen">
-        <div id="kPalette" aria-label="Küchenteile"></div>
-        <i class="tsep"></i>
-        <button id="k3dBtn" class="tb tog" aria-pressed="false" title="3D-Ansicht neben dem Plan (V)">3D <kbd>V</kbd></button>
-        <button id="kWayBtn" class="tb tog" aria-pressed="false" title="Laufwege der Abläufe im Plan zeigen (W)">Wege <kbd>W</kbd></button>
-        <button id="kOpenBtn" class="tb tog" aria-pressed="false" title="Alle Türen, Auszüge und Gerätetüren offen zeigen (O)">Offen <kbd>O</kbd></button>
-        <button id="kAnaBtn" class="tb tog" aria-pressed="false" title="Wege-Analyse statt 3D: Heatmap im Plan, Abläufe im Vergleich, was fehlt, Verschieben und Optimieren, zu zweit kochen (A)">Analyse <kbd>A</kbd></button>
-      </div>
     </div>
     <div id="histctl">
       <button id="undo" class="ib" title="Rückgängig (⌘Z)"><svg viewBox="0 0 16 16"><path d="M5.5 3.5 2.5 6.5l3 3"/><path d="M2.5 6.5h7a4 4 0 0 1 0 8h-2"/></svg></button>
@@ -838,7 +283,6 @@
         <button id="sharelink" role="menuitem">Link kopieren</button>
         <button id="shareqr" role="menuitem">QR-Code zeigen …</button>
         <hr>
-        <button id="toAufmass" class="nurFolge" role="menuitem">Zum Raumaufmaß</button>
         <button id="helpBtn" role="menuitem">Hilfe und Tasten<kbd data-k="?"></kbd></button>
       </div>
     </div>
@@ -848,9 +292,6 @@
     <div id="stage">
       <div id="canvaswrap">
         <canvas id="cv"></canvas>
-        <canvas id="cv3d" aria-label="3D-Ansicht der Küche: ziehen dreht, Rechtsklick-Ziehen verschiebt, Rad zoomt, Doppelklick setzt zurück"></canvas>
-        <div id="kAna" aria-label="Wege-Analyse"></div>
-        <div id="k3dMsg" hidden>Die 3D-Ansicht braucht WebGL2; dieser Browser bietet es nicht. Der Plan links funktioniert trotzdem.</div>
         <div id="empty"></div>
         <button id="fitview" class="ib" title="Ansicht einpassen (0)" aria-label="Ansicht einpassen"><svg viewBox="0 0 16 16"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></svg></button>
         <div id="sheets" aria-label="Aufmaßblatt"></div>
@@ -970,71 +411,6 @@
           <div class="oprow"><button id="opDel">Öffnung löschen</button></div>
         </div>
       </section>
-      <section id="tilesec" hidden>
-        <details id="tSpecBox">
-          <summary><b>Fliesenset</b><span id="tSpecSum"></span><span class="ed">ändern</span></summary>
-          <div id="tSetList"></div>
-          <div class="trow"><select id="tNewShape" aria-label="Neue Fliesenform"><option value="hexagon">Hexagon</option><option value="chevron">Chevron</option><option value="rectangle">Viereck</option><option value="triangle">Dreieck</option></select><button id="tSetAdd">Fliese hinzufügen</button></div>
-          <p class="tnote">Varianten auswählen und unten bearbeiten. Hexagon und Dreieck haben gleich lange Seiten; Breite und Höhe sind gekoppelt. Beim Hexagon wird die Breite über die Spitzen gemessen, beim Dreieck entlang der Grundseite. Bei Chevron bezeichnet Länge die Längskante.</p>
-          <div class="tgrid">
-            <label><span>Name</span><input id="tName" maxlength="60"></label>
-            <label><span>Form</span><select id="tShape"><option value="hexagon">Hexagon</option><option value="chevron">Chevron</option><option value="rectangle">Viereck</option><option value="triangle">Dreieck</option></select></label>
-            <label><span>Breite</span><input id="tW" inputmode="decimal"> mm</label>
-            <label><span>Länge</span><input id="tL" inputmode="decimal"> mm</label>
-            <label><span>Winkel</span><input id="tA" inputmode="decimal"> °</label>
-            <label><span>Fuge</span><input id="tJ" inputmode="decimal"> mm</label>
-            <label><span>Randfuge</span><input id="tE" inputmode="decimal"> mm</label>
-            <label><span>Stärke</span><input id="tT" inputmode="decimal"> mm</label>
-          </div>
-          <div class="trow tmeas"><button id="tMeasure" title="Maße der gewählten Variante aus Strecken ermitteln: Kanten, Diagonalen, Breite – kein Winkel nötig">Fliese einmessen…</button><span class="tnote">nur Strecken, kein Winkel</span></div>
-          <label class="tnote"><input type="checkbox" id="tSame">Chevron L und R aus einer Charge: Reste dürfen zwischen L und R wechseln</label>
-        </details>
-        <div id="tSelBox" hidden>
-          <h3><span id="tSelInfo"></span></h3>
-          <div class="trow">
-            <button id="tMiter" class="tool" title="Zwei überlappende Fliesen auf Gehrung schneiden">Gehrung <kbd>G</kbd></button>
-            <button id="tTrim" title="Fliesen, die die Auswahl überlappen, an ihr abschneiden (mit Fuge)">Anschneiden <kbd>T</kbd></button>
-            <button id="tUncut" title="Schnitte und Ausklinkungen der Auswahl entfernen">Schnitt entfernen</button>
-            <button id="tDel" title="Auswahl löschen (Entf)">Löschen <kbd data-k="Entf"></kbd></button>
-          </div>
-        </div>
-        <div id="tFugBox">
-          <h3>Fugen</h3>
-          <div id="tJList"></div>
-          <div id="tCheck" hidden></div>
-          <div class="trow" id="tXWRow"><label>Breite neuer Dehnungsfugen <input id="tXW" inputmode="decimal"> mm</label></div>
-        </div>
-        <div id="tResBox">
-          <h3>Material</h3>
-          <div id="tWarn"></div>
-          <div id="tKey"></div>
-          <details id="tDetails"><summary>Stückliste im Einzelnen</summary><div id="tStats"></div></details>
-          <div id="tPrintRow">
-            <button id="tPrint" title="Plan, Verlegemuster und je Rohfliese ein Schnittblatt (A4, als PDF sicherbar)">Plan und Schnittblätter drucken</button>
-            <label><input type="checkbox" id="tNums" checked>Schnittnummern aus dem letzten Druck im Plan zeigen</label>
-          </div>
-        </div>
-        <div id="tEnd"><button id="tClear" title="Zweimal klicken: der erste Klick fragt nach">Alle Fliesen entfernen</button></div>
-      </section>
-      <section id="kitchensec" hidden>
-        <p id="kEmpty"></p>
-        <div id="kSelBox" hidden>
-          <h3><span id="kSelInfo"></span><button id="kSelX" aria-label="Auswahl aufheben" title="Auswahl aufheben (Esc)">✕</button></h3>
-          <div id="kCorner" hidden></div>
-          <div id="kSelBody"></div>
-        </div>
-        <div id="kCheckBox"><h3>Prüfung <small id="kCheckCount"></small></h3><div id="kChecks"></div></div>
-        <div id="kWayBox"><h3>Wege <small id="kWaySum"></small></h3><div id="kWays"></div><div id="kSugg"></div></div>
-        <!-- Meldung M-20261109-160341-3d3671: einmal eingestellt, selten geaendert - daher unten bei der Stueckliste statt ueber der Auswahl -->
-        <details id="kSpecBox">
-          <summary><b>Küchenmaße</b><span id="kSpecSum"></span><span class="ed">ändern</span></summary>
-          <div class="tgrid" id="kSpecGrid"></div>
-          <p class="tnote">Standard nach nobilia/Neff: Sockel 15, Korpus 72, Platte 4 cm, Tiefe mit Front 58 cm. Hängeschränke schließen oben mit den Hochschränken ab. Armatur: Höhe über der Platte (für den Fensterflügel).</p>
-          <div class="trow"><button id="kSpecReset">Standard</button></div>
-        </details>
-        <details id="kStockBox"><summary>Stückliste</summary><div id="kStock"></div></details>
-        <div id="kEnd"><button id="kClear" title="Zweimal klicken: der erste Klick fragt nach">Alle Küchenteile entfernen</button></div>
-      </section>
       <section id="nextsec">
         <h3>Als Nächstes messen</h3>
         <div id="sugg">—</div>
@@ -1146,60 +522,10 @@
         <dt>Weitergeben</dt><dd>Als Datei sichern, Link kopieren oder QR-Code zeigen. Räume liegen nur in diesem Browser; wichtige Aufmaße zusätzlich als Datei sichern.</dd>
       </dl>
 
-      <h3>Fliesenplan</h3>
-      <p>Verlegt werden Parallelogramm-Fliesen als L und R (Chevron). Rechts stehen die Maße: Breite, Länge, Winkel, Fuge, Randfuge (Abstand zur Wand; die Schnittlinie liegt in ihrer Mitte, sie nimmt die Wandtoleranz auf) und Stärke. Fliesen aus der Leiste in den Plan ziehen oder klicken; Ziehen rastet an Kanten anderer Fliesen ein (⌥ ohne Einrasten).</p>
-      <dl>
-        <dt>Fliesenpiktogramme</dt><dd>Fliesenset je Raum konfigurieren: Hexagon, Chevron, Viereck oder Dreieck mit eigenen Maßen und Dicken. Piktogramm klicken oder in den Plan ziehen. F tauscht Chevron L und R, Q/E dreht. ⌘D setzt das Muster fort.</dd>
-        <dt>Fluchten (A)</dt><dd>Erst die Kante der Fliese, die sich bewegt, dann die Bezugskante. Mit ⇧ rechtwinklig statt fluchtend.</dd>
-        <dt>Dehnungsfuge (J)</dt><dd>Anfang und Ende auf Wand oder Ecke klicken. Schneidet durch bestehende Fliesen; Breite unter „Breite neuer Dehnungsfugen“.</dd>
-        <dt>Wandfuge (W)</dt><dd>Markiert die Fuge an einer Wand mit eigener Breite und Toleranz, statt der globalen Randfuge.</dd>
-        <dt>Fugencheck (K)</dt><dd>Markiert Fugen, die von der eingestellten Breite abweichen, unbelegte Stellen und Fugenversatz. Vor dem Drucken einschalten.</dd>
-        <dt>Gehrung (G)</dt><dd>Bei genau zwei überlappenden Fliesen: Schnittlinie mit zwei Punkten setzen, Enter nimmt die Diagonale automatisch.</dd>
-        <dt>Anschneiden (T)</dt><dd>Fliesen, die die Auswahl überlappen, an ihr abschneiden, mit Fuge. An Wänden passt sich der Schnitt der Wand an; an Ecken entsteht eine Ausklinkung statt zwei Teilen.</dd>
-        <dt>Verbinden (V)</dt><dd>Führt Stücke, die aus einer Fliese stammen, wieder zu einer zusammen.</dd>
-        <dt>Schnitt entfernen</dt><dd>Nimmt Schnitte und Ausklinkungen der Auswahl zurück.</dd>
-        <dt>Lineal (L)</dt><dd>Halbdurchsichtiges Lineal mit mm-/cm-Teilung über dem Plan. Körper ziehen verschiebt, ein Ende ziehen streckt und dreht um das andere Ende, mit ⇧ nur drehen. Rastet an Ecken und Kanten von Fliesen und Wänden und im rechten Winkel dazu; ⌘/Strg hält frei.</dd>
-        <dt>Fliese einmessen</dt><dd>Im Fliesenset: Maße der gewählten Variante nur aus Strecken ermitteln (Kanten, Diagonalen, rechtwinklige Breite), für jede Form. Zeigt die Werte mit Genauigkeit, die echte Form der Fliese und welche Messung nicht passt.</dd>
-        <dt>L und R aus einer Charge</dt><dd>An: Reste dürfen zwischen L und R wechseln (gleiche Glasur). Aus: L-Reste nur für L, R-Reste nur für R, weil Spiegeln nicht geht.</dd>
-        <dt>Material</dt><dd>Zählt ganze und geschnittene Fliesen. Mit Recycling werden Schnittstücke auf möglichst wenige Rohfliesen verteilt, aber nur, wenn sie im Raum höchstens 1,5 m auseinander liegen. Die Zahl mit Recycling stammt aus dem letzten Druck.</dd>
-        <dt>Drucken</dt><dd>Plan, Verlegemuster und je Rohfliese ein Schnittblatt mit nummerierten Stücken (A4, im Druckdialog „Als PDF sichern“, Skalierung 100 %). Die Nummern erscheinen danach auch im Plan.</dd>
-        <dt>Alle Fliesen entfernen</dt><dd>Zweimal klicken; ⌘Z holt sie zurück.</dd>
-      </dl>
-
-      <h3>Küchenplaner</h3>
-      <p>Erst verfügbar, wenn der Grundriss eindeutig ist. Teile aus der Leiste oben auf eine Wand ziehen oder anklicken, geordnet nach Kalt (Kühl-, Gefrierschrank), Warm (Herd, Backofen im Hochschrank, Mikrowelle, Dunstabzug), Nass (Spüle, Spülmaschine), Stauraum (Schrank, Eckschrank, Insel) und Möbel (Tisch). Ob ein Schrank unten steht, hängt oder hoch ist, wählt man danach rechts unter „Bauart“; die Spülmaschine geht auch hoch eingebaut (Hüfthöhe, mit Fächern darunter und darüber für Vorräte, Geschirr usw.), der Herd auch ohne Backofen (nur Kochfeld, darunter Schubladen). Sie rasten an Ecken (mit 5 cm Passblende), Nachbarn, Türen und mittig unter Fenstern ein; ein Klick setzt das Teil neben das gewählte, einen Hängeschrank darüber. Die Arbeitsplatte entsteht von selbst, auf der Insel samt Tresen-Überstand; Lücken bis 15 cm werden Passleisten. Die Lage steht im Panel als Zahl (ab Ecke … mm), die Maßkette im Plan. Die Standardmaße passen meist; rechts stellt man Breite, Front, Anschlag, Gerät und Inhalt ein, unter „Maße frei“ alles Übrige.</p>
-      <dl>
-        <dt>Prüfung</dt><dd>Meldet, was nicht geht (rot): Überlappungen, Schrank vor Tür oder Fenster, Fensterflügel gegen Armatur, Gerätetür gegen Insel, Zimmertür gegen Schrank oder Insel (im Plan bleibt die Tür am ersten Teil stehen, mit Winkel im Befund), Front in der Ecke verdeckt, Decke zu niedrig. Und Richtwerte (gelb): Schlauchweg von Spülmaschine und Festwasser-Kühlschrank zum Wasseranschluss (Raumaufmaß, Schritt Wände), Gänge 1200 mm, Stuhlraum am Tisch, Abstellflächen, Spülmaschine neben der Spüle, Arbeitsdreieck. Ein Klick wählt das Teil; wo es eine eindeutige Abhilfe gibt (Vorfensterarmatur, Anschlag tauschen, Als Eckschrank, Als Dunstabzug), steht ein Knopf daneben.</dd>
-        <dt>Maße und Abstände</dt><dd>Am gewählten Wandteil läuft die Maßkette bis zur Wand, die man an den Enden vor sich hat, bei Insel und Tisch zu allen vier Seiten. Ein Klick auf einen gestrichelt umrandeten Abstand öffnet ein Feld: Wert eintragen, Enter verschiebt das Teil (an der Wand den ganzen Block daneben).</dd>
-        <dt>Insel und Tisch</dt><dd>Drehen per Schieber im Panel (rastet an 0/45/90° und an schiefen Wänden ein, mit ⌥ frei) oder mit Q/E. Eine Insel, deren Stirnseite man an eine Wand zieht, dockt bündig an; ihre Auszüge gehen dann parallel zur Wand auf. Zieht man eine Insel an eine andere, rastet sie bündig ein (gleiche Drehung oder quer dazu, an den Enden oder mittig, ⌥ frei); gleich hohe Inseln bekommen dann eine durchgehende Platte, auch über Eck. „Tresen“ lässt die Platte hinten überstehen (NKBA: 38 cm bei 91 cm Höhe, 61 cm je Hocker). Die Tischplätze ergeben sich aus Länge und Breite (60 cm je Platz, Stirnseite ab 60 cm Breite), Seiten ohne Stuhlraum bleiben frei.</dd>
-        <dt>Offen (O)</dt><dd>Zeigt im Plan alle Schwenkbereiche und in 3D alle Türen, Auszüge und Gerätetüren offen, dazu offene Fensterflügel.</dd>
-        <dt>Inhalt und Wege (W)</dt><dd>Je Schrank wählen, was darin liegt (Besteck, Teller, Gläser …). Daraus rechnet das Programm die Laufwege typischer Abläufe: Einkauf einräumen, Müll, Kochen, Snack zubereiten, Servieren, Tisch decken, Abräumen in die Spülmaschine, Spülmaschine ausräumen, Kaffee und Getränke. Ein Klick auf einen Ablauf zeichnet ihn ein. Der Eingang ist im Plan grün markiert; ein Klick auf eine andere Tür macht sie zum Eingang. „Optimal einräumen“ verteilt alle Inhalte so, dass die Wege zusammen am kürzesten sind – exakt gerechnet, dieselbe Küche ergibt immer dieselbe Einteilung; doppelt Eingeräumtes bleibt stehen. „Umsortieren“ schlägt einzelne Umzüge vor (Besteck und Messer nur in Schubladen, Müll bleibt an der Spüle). Ein Ablauf zählt erst, wenn alle seine Stationen da sind; die Häufigkeiten sind eine Annahme für vier Personen.</dd>
-        <dt>Analyse (A)</dt><dd>Statt 3D rechts eine eigene Ansicht für die Wege. Oben die Summe in km/Jahr; „Referenz merken“ hält den Stand fest, danach zeigen Summe und Balken den Unterschied. „Abläufe im Vergleich“ stellt die Abläufe als Balken gegeneinander, je Jahr (Häufigkeit × Weg) oder je Durchgang: so sieht man, ob eine Aufteilung z. B. das Einräumen bevorzugt und das Kochen lang macht. Überfahren zeigt den Weg im Plan, Klick hält ihn. „Was steht wo“ zeigt je Station und Inhalt, welcher Ablauf ihn braucht und wo er liegt; Fehlendes ist rot. Im Plan liegt eine Heatmap: je dunkler, desto öfter läuft man dort. Ist ein Teil gewählt, zeigt „Verschieben und vergleichen“ die km/Jahr für jede Lage, an der es Platz hat (Insel und Tisch längs und quer); Klick in die Kurve setzt es dorthin, „Dorthin setzen“ nimmt das Optimum. Gerechnet in festen Schritten, gleiche Küche ergibt immer dasselbe Optimum; Lagen, die einen Weg versperren oder einen neuen Befund in der Prüfung bringen, zählen nicht (in der Kurve als Ring). In voller Zeile wird Tauschen mit gleich breiten Teilen vorgeschlagen. „Personen 2/3“: Gang nach NKBA mind. 1219 mm in der Prüfung und eine Liste, wo sich zwei gleichzeitige Abläufe begegnen (im Plan gelb). „Kind im Weg“ stellt ein Kind an den meistbelaufenen Punkt und rechnet alle Wege neu.</dd>
-        <dt>3D (V)</dt><dd>Ansicht neben dem Plan. Ziehen dreht, Rechts- oder ⇧-Ziehen verschiebt, Rad zoomt, Doppelklick setzt zurück. Wände, vor denen man steht, werden ausgeblendet.</dd>
-      </dl>
-
       <p class="hnote">Rückgängig gilt bis zum Wechsel des Raums.</p>
     </div>
   </div>
 </div>
-<dialog id="measDlg" aria-labelledby="mTitle">
-  <form method="dialog" class="mhead"><h3 id="mTitle">Fliese einmessen</h3><button class="ib" aria-label="Schließen" value="x">×</button></form>
-  <div class="mbody">
-    <div class="mleft">
-      <div id="mSketch"></div>
-      <div id="mFields"></div>
-      <div class="msigma"><label for="mSigma">Messgenauigkeit je Strecke ±</label><input id="mSigma" inputmode="decimal" autocomplete="off"><span>mm</span><button id="mClear" type="button">Leeren</button></div>
-      <p class="mmsg" id="mNote"></p>
-      <p class="mmsg">Mehrfach gemessen? Werte mit Leerzeichen trennen, z.&nbsp;B. „850,5 851“. Wiederholungen schärfen das Ergebnis und zeigen, welche Strecke falsch ist.</p>
-    </div>
-    <div class="mright">
-      <div id="mVals"></div>
-      <div id="mReal"></div>
-      <div id="mTable"></div>
-    </div>
-  </div>
-  <div class="mfoot"><button id="mCancel" type="button">Abbrechen</button><button id="mApply" type="button" class="primary">Maße übernehmen</button></div>
-</dialog>
 
 <!-- Geteilte Dateien der Werkzeugfamilie (docs/adr/0001-familie-mit-geteilten-js-dateien.md).
      Klassische Skripte ohne Build und ohne Module: so startet die Seite auch per Doppelklick (file://). -->
@@ -5213,10 +4539,10 @@ $('outPrint').onclick=()=>{
 };
 $('outTiles').onclick=()=>setTool('fliesen');
 $('outKitchen').onclick=()=>setTool('kueche');
-starteSeite();
+starteSeite('aufmass');
 </script>
 
-<script src="fliesenplan-bedienung.js"></script>
-
-<script src="kuechenplaner-bedienung.js"></script>
-<script src="raum-checks.js"></script>
+<script>
+// Die Selbstchecks (418 kB) laden nur mit ?test; sie laufen dann gleich und schreiben in die Konsole.
+if(location.search.includes('test')){ const s=document.createElement('script'); s.src='raum-checks.js'; document.body.append(s); }
+</script>

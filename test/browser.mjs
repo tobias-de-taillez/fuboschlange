@@ -35,7 +35,7 @@ async function ladePlaywright(){
 }
 
 // ---------- Auslieferung: der Ordner des Repos, „/“ ist der Startbildschirm ----------
-const TYP={'.html':'text/html; charset=utf-8', '.js':'text/javascript; charset=utf-8'};
+const TYP={'.html':'text/html; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.css':'text/css; charset=utf-8'};
 function server(){
   const s=http.createServer(async (req, res)=>{
     const p=decodeURIComponent(new URL(req.url, 'http://x').pathname);
@@ -193,13 +193,13 @@ const ABLAEUFE={
     pruef('in der Ausgabe liegt keine Karte über dem Blatt', await p.evaluate(()=>OUT.on && document.getElementById('oppl').hidden));
     await p.keyboard.press('Escape'); await p.keyboard.press('Escape');
     // Folgewerkzeuge
-    await p.evaluate(()=>setTool('fliesen')); await sleep(500);
+    await p.evaluate(()=>setTool('fliesen')); await sleep(1200);
     pruef('Fliesenplan öffnet', await p.evaluate(()=>TOOL==='fliesen' && document.title.includes('Fliesenplan')));
-    await p.evaluate(()=>setTool('kueche')); await sleep(600);
+    await p.evaluate(()=>setTool('kueche')); await sleep(1400);
     await p.setViewportSize({width:1100, height:800}); await sleep(300);
     pruef('Küchenplaner öffnet, Leiste passt bei 1100 px', await p.evaluate(()=>{ const t=document.getElementById('tools'); return TOOL==='kueche' && t.scrollWidth<=t.clientWidth; }));
     await p.setViewportSize({width:1440, height:900});
-    await p.evaluate(()=>setTool('aufmass')); await sleep(300);
+    await p.evaluate(()=>setTool('aufmass')); await sleep(1200);
     await p.click('#backHome'); await sleep(900);
     pruef('Startbildschirm zeigt den Raum mit Stand und Fläche', /Geprüft ± [\d,]+ mm · 9,00 m²/.test(await p.evaluate(()=>document.body.innerText)));
     pruef('keine Fehler in der Konsole', f.stoer.length===0, f.stoer.join(' | '));
@@ -289,10 +289,10 @@ const ABLAEUFE={
   // Die Selbstchecks laufen auch im Browser grün.
   async selbstchecks(){
     const f=await fenster(); const p=f.page;
-    await p.goto(BASE+'/raumaufmass.html'); await sleep(900);
+    await p.goto(BASE+'/raumaufmass.html?test'); await sleep(1500);
     const r=await p.evaluate(()=>{ const r=selfChecks(); return {n:r.out.length, ok:r.ok, rot:r.out.filter(z=>z.startsWith('FAIL')).slice(0,3)}; });
     pruef(`Selbstchecks im Browser (${r.n})`, r.ok && r.n>1000, r.rot.join(' | '));
-    pruef('geladen sind 16 Skripte, keine Karte', await p.evaluate(()=>document.querySelectorAll('script[src]').length===16 && !globalThis.RAUM_UNVOLLSTAENDIG));
+    pruef('geladen sind 14 Skripte (mit den Selbstchecks), keine Karte', await p.evaluate(()=>document.querySelectorAll('script[src]').length===14 && !globalThis.RAUM_UNVOLLSTAENDIG));
     await f.browser.close();
   },
   // Fliesenplan: setzen, schieben, drehen, vervielfältigen, einmessen, Stückliste; die Fliesen überstehen Menü, Neuladen und Startbildschirm.
@@ -306,9 +306,9 @@ const ABLAEUFE={
     // Aus der Ausgabe in den Fliesenplan
     await p.keyboard.press('4'); await sleep(400);
     pruef('Ausgabe (Taste 4) nennt den Fliesenplan „noch nicht begonnen“', await p.evaluate(()=>OUT.on && !document.getElementById('outTiles').disabled) && await txt('outTilesNote')==='noch nicht begonnen', await txt('outTilesNote'));
-    await p.click('#outTiles'); await sleep(500);
+    await p.click('#outTiles'); await sleep(1500);
     const leiste=await p.evaluate(()=>[...document.querySelectorAll('#tPalette button')].filter(b=>b.getBoundingClientRect().width>0).map(b=>b.getAttribute('aria-label')));
-    pruef('„Öffnen“ führt in den Fliesenplan, die Leiste bietet Chevron L, R und das Paar', await p.evaluate(()=>TOOL==='fliesen' && !OUT.on && document.title.includes('Fliesenplan') && !document.getElementById('tilesec').hidden) && leiste.join('|')==='Chevron L legen|Chevron R legen|Chevron als Paar legen', leiste.join('|'));
+    pruef('„Öffnen“ führt in den Fliesenplan, die Leiste bietet Chevron L, R und das Paar', await p.evaluate(()=>TOOL==='fliesen' && document.title.includes('Fliesenplan') && !document.getElementById('tilesec').hidden) && /fliesenplan\.html$/.test(p.url()) && leiste.join('|')==='Chevron L legen|Chevron R legen|Chevron als Paar legen', leiste.join('|'));
     // Setzen: Klick legt in die Bildmitte, Ziehen dorthin, wo man loslässt
     await p.locator('#tPalette button').nth(0).click(); await sleep(300);
     let F=await fliesenLage(p);
@@ -396,8 +396,8 @@ const ABLAEUFE={
     e2=await eine(erste.id);
     pruef('nach Esc ist das Menü zu, und der Pfeil schiebt die Fliese wieder 1 mm', await p.evaluate(()=>document.getElementById('roommenu').hidden) && Math.abs(weitMm(e2, e1)-1)<.01, weitMm(e2, e1).toFixed(3)+' mm');
     // Zurück zum Raumaufmaß, neu laden, Startbildschirm
-    await p.click('#roommenuBtn'); await sleep(250); await p.click('#toAufmass'); await sleep(500);
-    pruef('Menü „Zum Raumaufmaß“ führt zurück zu den Maßen', await p.evaluate(()=>TOOL==='aufmass' && M.mode==='measure' && document.title.includes('Raumaufmaß') && document.getElementById('tilesec').hidden && document.getElementById('toolname').hidden) && /^Geprüft ± /.test(await stand(p)), await stand(p));
+    await p.click('#roommenuBtn'); await sleep(250); await p.click('#toAufmass'); await sleep(1500);
+    pruef('Menü „Zum Raumaufmaß“ führt zurück zu den Maßen', await p.evaluate(()=>TOOL==='aufmass' && M.mode==='measure' && document.title.includes('Raumaufmaß') && !document.getElementById('tilesec') && document.getElementById('toolname').hidden) && /raumaufmass\.html$/.test(p.url()) && /^Geprüft ± /.test(await stand(p)), await stand(p));
     const bild=()=>p.evaluate(()=>JSON.stringify(M.tiles)); const gelegt=await bild();
     await p.reload(); await sleep(1000);
     pruef('nach dem Neuladen liegen beide Fliesen unverändert im Raum', await p.evaluate(()=>M.tiles.items.length===2) && await bild()===gelegt);
@@ -407,10 +407,10 @@ const ABLAEUFE={
     await p.click('#backHome'); await sleep(900);
     const start=await p.evaluate(()=>[...document.querySelectorAll('.room [data-werk]')].filter(b=>b.getBoundingClientRect().width>0).map(b=>b.textContent));
     pruef('der Startbildschirm zeigt am Raum den Knopf „Fliesenplan“', /raeume\.html/.test(p.url()) && start.join('|')==='Fliesenplan', start.join('|'));
-    await p.click('.room [data-werk=fliesen]'); await sleep(1200);
-    pruef('der Knopf öffnet den Fliesenplan mit beiden Fliesen', /raumaufmass\.html#fliesen$/.test(p.url()) && await p.evaluate(()=>TOOL==='fliesen' && document.title.includes('Fliesenplan')) && (await fliesenLage(p)).length===2 && await bild()===gelegt);
+    await p.click('.room [data-werk=fliesen]'); await sleep(1500);
+    pruef('der Knopf öffnet den Fliesenplan mit beiden Fliesen', /fliesenplan\.html$/.test(p.url()) && await p.evaluate(()=>TOOL==='fliesen' && document.title.includes('Fliesenplan')) && (await fliesenLage(p)).length===2 && await bild()===gelegt);
     await p.reload(); await sleep(1000);
-    pruef('Neuladen auf #fliesen bleibt im Fliesenplan bei beiden Fliesen', /#fliesen$/.test(p.url()) && await p.evaluate(()=>TOOL==='fliesen' && document.title.includes('Fliesenplan') && !document.getElementById('tilesec').hidden) && (await fliesenLage(p)).length===2 && await bild()===gelegt);
+    pruef('Neuladen auf der Seite des Fliesenplans bleibt im Fliesenplan bei beiden Fliesen', /fliesenplan\.html$/.test(p.url()) && await p.evaluate(()=>TOOL==='fliesen' && document.title.includes('Fliesenplan') && !document.getElementById('tilesec').hidden) && (await fliesenLage(p)).length===2 && await bild()===gelegt);
     pruef('keine Fehler in der Konsole', f.stoer.length===0, f.stoer.join(' | '));
     await f.browser.close();
   },
@@ -428,8 +428,8 @@ const ABLAEUFE={
     const w=await p.evaluate(()=>({mode:M.mode, h:M.hmeas.map(m=>m.d), tuer:M.openings.map(o=>o.kind+o.a+o.b), wasser:M.water.map(x=>x.a+x.b)}));
     pruef('Schritt Wände: Höhe 2,500 m, Tür und Wasseranschluss an zwei Wänden', w.mode==='wall' && w.h.join()==='2500' && w.tuer.length===1 && /^door/.test(w.tuer[0]) && w.wasser.length===1 && w.wasser[0]!==w.tuer[0].slice(4), JSON.stringify(w));
     // Ausgabe, Küchenplaner
-    await p.keyboard.press('4'); await sleep(500); await p.click('#outKitchen'); await sleep(700);
-    pruef('„Öffnen“ in der Ausgabe führt in den Küchenplaner mit Leiste', await p.evaluate(()=>TOOL==='kueche' && M.mode==='kitchen' && location.hash==='#kueche' && document.title.includes('Küchenplaner') && [...document.querySelectorAll('#kPalette button')].filter(b=>b.getBoundingClientRect().width>0).length>=10));
+    await p.keyboard.press('4'); await sleep(500); await p.click('#outKitchen'); await sleep(1600);
+    pruef('„Öffnen“ in der Ausgabe führt in den Küchenplaner mit Leiste', await p.evaluate(()=>TOOL==='kueche' && M.mode==='kitchen' && /kuechenplaner\.html$/.test(location.pathname) && document.title.includes('Küchenplaner') && [...document.querySelectorAll('#kPalette button')].filter(b=>b.getBoundingClientRect().width>0).length>=10));
     // Setzen
     const u0=(await kueche(p)).undo;
     const schrank=await ausLeiste(p, 'Schrank'); let k=await kueche(p);
@@ -515,8 +515,8 @@ const ABLAEUFE={
     for(const t of ['ArrowRight', 'ArrowLeft', 'ArrowLeft', 'ArrowDown']){ await p.keyboard.press(t); await sleep(120); }
     const mn=await p.evaluate(()=>({offen:!document.getElementById('roommenu').hidden, imMenue:!!document.activeElement.closest('#roommenu'), wo:document.activeElement.id||document.activeElement.textContent})); const i1=await teilNr(p, insel.id); k2=await kueche(p);
     pruef('im offenen Menü bewegen die Pfeiltasten die gewählte Insel nicht', k.sel===insel.id && mn.offen && mn.imMenue && i1.x===i0.x && i1.y===i0.y && k2.undo===k.undo, JSON.stringify([mn, i0, i1]));
-    await p.click('#toAufmass'); await sleep(500);
-    pruef('„Zum Raumaufmaß“ im Menü führt zurück ins Aufmaß', await p.evaluate(()=>TOOL==='aufmass' && M.mode!=='kitchen' && document.getElementById('roommenu').hidden && document.getElementById('kitchensec').hidden), await p.evaluate(()=>TOOL+' '+M.mode+' '+location.hash));
+    await p.click('#toAufmass'); await sleep(1500);
+    pruef('„Zum Raumaufmaß“ im Menü führt zurück ins Aufmaß', await p.evaluate(()=>TOOL==='aufmass' && M.mode!=='kitchen' && document.getElementById('roommenu').hidden && !document.getElementById('kitchensec')), await p.evaluate(()=>TOOL+' '+M.mode+' '+location.hash));
     // Ecke löschen und zurückholen
     const vorher=await p.evaluate(()=>JSON.stringify(M.kitchen.items));
     // Abstand der Insel zu drei Ecken, die bleiben (mm): gleich, solange sie im Raum steht, wo sie stand.
@@ -539,11 +539,74 @@ const ABLAEUFE={
     await p.click('#backHome'); await sleep(900);
     const start=await p.evaluate(()=>[...document.querySelectorAll('.room [data-werk]')].map(b=>({werk:b.dataset.werk, text:b.textContent, breit:b.getBoundingClientRect().width>0})));
     pruef('Startbildschirm zeigt am Raum den Knopf „Küche“', start.length===1 && start[0].werk==='kueche' && start[0].text==='Küche' && start[0].breit, JSON.stringify(start));
-    if(start.length){ await p.click('.room [data-werk=kueche]'); await sleep(1200); }
+    if(start.length){ await p.click('.room [data-werk=kueche]'); await sleep(1600); }
     const wieder=await p.evaluate(()=>typeof TOOL==='undefined' ? {} : {tool:TOOL, hash:location.hash, items:JSON.stringify(M.kitchen.items), zeilen:document.querySelectorAll('#kChecks .kfind').length});
     pruef('der Knopf „Küche“ öffnet den Küchenplaner mit den Teilen', wieder.tool==='kueche' && wieder.items===vorher && wieder.zeilen>=1, JSON.stringify([wieder.tool, wieder.hash, wieder.zeilen]));
     pruef('keine Fehler in der Konsole', f.stoer.length===0, f.stoer.join(' | '));
     await f.browser.close();
+  },
+  // Die drei Werkzeuge sind eigene Seiten: derselbe Raum lädt in allen unverändert, jede Seite enthält nur ihr Werkzeug,
+  // alte Adressen leiten weiter, Zurück führt zur vorigen Seite, Rückgängig beginnt je Seite neu.
+  async seiten(){
+    const fix=JSON.parse(await readFile(new URL('./fixtures/raum-voll.json', import.meta.url), 'utf8'));
+    const raum={id:'probe', name:fix.name, updated:'2026-11-10T08:00:00.000Z', area:fix.area, stand:fix.stand, data:fix.data};
+    const f=await fenster(); const p=f.page;
+    await f.context.addInitScript(r=>{ try{ if(!localStorage.getItem('raumaufmass.rooms')){ localStorage.setItem('raumaufmass.rooms', JSON.stringify([r])); localStorage.setItem('raumaufmass.current', r.id); sessionStorage.setItem('raumaufmass.fenster', r.id); } }catch(e){} }, raum);
+    const zustand=()=>p.evaluate(()=>({tool:TOOL, mode:M.mode, tiles:JSON.stringify(M.tiles), kitchen:JSON.stringify(M.kitchen), pts:M.pts.length, walls:M.walls.length,
+      undo:undoStack.length, titel:document.title,
+      fremd:{kachel:typeof drawTilesView!=='undefined', kueche:typeof drawKitchenView!=='undefined', wand:typeof drawWallView!=='undefined', aufmass:typeof aufmassPanel!=='undefined'},
+      elemente:{modes:!!document.getElementById('modes'), tilesec:!!document.getElementById('tilesec'), kitchensec:!!document.getElementById('kitchensec'), cv3d:!!document.getElementById('cv3d'), tools:!!document.getElementById('tPalette'), kpal:!!document.getElementById('kPalette'), wallsec:!!document.getElementById('wallsec')},
+      checks:typeof selfChecks}));
+    const seite=async (url)=>{ await p.goto(BASE+'/'+url); await sleep(1500); return zustand(); };
+    const a=await seite('raumaufmass.html'), fl=await seite('fliesenplan.html'), ku=await seite('kuechenplaner.html');
+    pruef('der Raum lädt in allen drei Werkzeugen mit denselben Fliesen und Küchenteilen',
+      a.tiles===fl.tiles && fl.tiles===ku.tiles && a.kitchen===fl.kitchen && fl.kitchen===ku.kitchen && JSON.parse(a.tiles).items.length===2 && JSON.parse(a.kitchen).items.length===4 && a.pts===fl.pts && fl.pts===ku.pts,
+      `${a.tiles.length}/${fl.tiles.length}/${ku.tiles.length}`);
+    pruef('jede Seite ist ihr Werkzeug (Titel, Modus)', a.tool==='aufmass' && fl.tool==='fliesen' && fl.mode==='tiles' && ku.tool==='kueche' && ku.mode==='kitchen' && /Raumaufmaß/.test(a.titel) && /Fliesenplan/.test(fl.titel) && /Küchenplaner/.test(ku.titel), [a.titel, fl.titel, ku.titel].join(' | '));
+    pruef('das Raumaufmaß enthält nichts von Fliesenplan und Küchenplaner (Bedienung, Markup)',
+      !a.fremd.kachel && !a.fremd.kueche && !a.elemente.tilesec && !a.elemente.kitchensec && !a.elemente.cv3d && !a.elemente.tools && !a.elemente.kpal && a.elemente.modes && a.elemente.wallsec, JSON.stringify([a.fremd, a.elemente]));
+    pruef('Fliesenplan und Küchenplaner enthalten nichts vom Aufmaß (Wandansicht, Schritte, Wandabschnitt)',
+      !fl.fremd.wand && !fl.fremd.aufmass && !ku.fremd.wand && !ku.fremd.aufmass && !fl.elemente.modes && !ku.elemente.modes && !fl.elemente.wallsec && !ku.elemente.wallsec && fl.elemente.tilesec && !fl.elemente.kitchensec && ku.elemente.kitchensec && !ku.elemente.tilesec, JSON.stringify([fl.fremd, ku.fremd, fl.elemente, ku.elemente]));
+    pruef('ohne ?test sind die Selbstchecks nicht geladen', a.checks==='undefined' && fl.checks==='undefined' && ku.checks==='undefined');
+    const gespeichert=await p.evaluate(()=>{ const r=JSON.parse(localStorage.getItem('raumaufmass.rooms'))[0]; return {tiles:JSON.stringify(r.data.tiles), kitchen:JSON.stringify(r.data.kitchen)}; });
+    pruef('im Speicher stehen nach dem Durchlauf durch alle drei Seiten dieselben Fliesen und Küchenteile', gespeichert.tiles===a.tiles && gespeichert.kitchen===a.kitchen);
+    // alte Adressen
+    for(const [alt, neu, werk] of [['raumaufmass.html#fliesen','fliesenplan.html','fliesen'], ['raumaufmass.html#kueche','kuechenplaner.html','kueche']]){
+      await p.goto(BASE+'/'+alt); await sleep(1500);
+      const z=await p.evaluate(()=>({tool:TOOL, pfad:location.pathname, hash:location.hash}));
+      pruef(`${alt} leitet auf ${neu} weiter`, z.pfad.endsWith('/'+neu) && z.tool===werk, JSON.stringify(z));
+    }
+    // Seitenwechsel: ein Rückgängig-Schritt im Fliesenplan, dann über das Menü ins Aufmaß und mit Zurück wieder hin
+    await p.goto(BASE+'/fliesenplan.html'); await sleep(1500);
+    const ort=await p.evaluate(()=>{ const K=tilesCtx(), T=M.tiles.items[0], P=TILES.tileCorners(M.tiles.spec, T), c={x:P.reduce((s,q)=>s+q.x,0)/P.length, y:P.reduce((s,q)=>s+q.y,0)/P.length}, s=toScr(TILES.toWorldF(K.F,c)), r=cv.getBoundingClientRect(), d=DPR(); return {x:r.left+s.x/d, y:r.top+s.y/d, id:T.id, mx:c.x}; });
+    await p.mouse.move(ort.x, ort.y); await sleep(60); await p.mouse.click(ort.x, ort.y); await sleep(250);
+    await p.keyboard.press('Shift+ArrowRight'); await sleep(300);
+    const nachSchub=await p.evaluate(()=>({undo:undoStack.length, tiles:JSON.stringify(M.tiles)}));
+    pruef('im Fliesenplan gibt es nach dem Schieben einen Rückgängig-Schritt', nachSchub.undo>=1 && nachSchub.tiles!==a.tiles, String(nachSchub.undo));
+    await p.click('#roommenuBtn'); await sleep(250); await p.click('#toAufmass'); await sleep(1500);
+    const imAufmass=await zustand();
+    pruef('im Aufmaß liegt die geschobene Fliese, Rückgängig beginnt dort leer', imAufmass.tool==='aufmass' && imAufmass.tiles===nachSchub.tiles && imAufmass.undo===0, `${imAufmass.undo}`);
+    await p.goBack(); await sleep(1500);
+    const zurueck=await zustand();
+    pruef('Zurück führt zum Fliesenplan, mit der geschobenen Fliese und leerem Rückgängig', zurueck.tool==='fliesen' && zurueck.tiles===nachSchub.tiles && zurueck.undo===0, zurueck.tool+' '+zurueck.undo);
+    // Selbstchecks gibt es auf jeder Seite mit ?test
+    for(const url of ['raumaufmass.html?test','fliesenplan.html?test','kuechenplaner.html?test']){
+      await p.goto(BASE+'/'+url); await sleep(2500);
+      const r=await p.evaluate(()=>typeof selfChecks==='function' ? (()=>{ const r=selfChecks(); return {n:r.out.length, ok:r.ok}; })() : null);
+      pruef(`${url}: die Selbstchecks laden und laufen grün`, !!r && r.ok && r.n>1000, JSON.stringify(r));
+    }
+    pruef('keine Fehler in der Konsole', f.stoer.length===0, f.stoer.join(' | '));
+    await f.browser.close();
+    // fehlt dem Fliesenplan oder dem Küchenplaner eine Kerndatei oder der Plan, startet er nicht und lässt den Speicher in Ruhe
+    for(const [url, datei] of [['fliesenplan.html','raum-plan.js'], ['fliesenplan.html','raum-modell.js'], ['kuechenplaner.html','raum-plan.js'], ['kuechenplaner.html','raum-kueche.js']]){
+      const g=await fenster(); const q=g.page;
+      await g.context.addInitScript(r=>{ if(!localStorage.getItem('raumaufmass.rooms')){ localStorage.setItem('raumaufmass.rooms', JSON.stringify([r])); localStorage.setItem('raumaufmass.current', r.id); } }, raum);
+      await g.context.route('**/'+datei, r=>r.fulfill({status:404, body:''}));
+      await q.goto(BASE+'/'+url); await sleep(900);
+      const z=await q.evaluate(()=>({karte:(document.getElementById('unvollstaendig')||{}).innerText||'', raeume:localStorage.getItem('raumaufmass.rooms')}));
+      pruef(`${url} ohne ${datei}: Karte nennt die Datei, der Raum bleibt unberührt`, z.karte.includes('unvollständig geladen') && z.karte.includes(datei) && JSON.parse(z.raeume).length===1 && JSON.stringify(JSON.parse(z.raeume)[0].data)===JSON.stringify(raum.data), z.karte.slice(-60)+' | n='+JSON.parse(z.raeume).length+' | Raum gleich: '+(JSON.stringify(JSON.parse(z.raeume)[0].data)===JSON.stringify(raum.data)));
+      await g.browser.close();
+    }
   },
 };
 

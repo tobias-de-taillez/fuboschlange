@@ -26,8 +26,10 @@
 # Die Seite ist eine Werkzeugfamilie aus mehreren HTML-Dateien und geteilten
 # JS-Dateien (docs/adr/0001-familie-mit-geteilten-js-dateien.md):
 #   raeume.html       Startbildschirm; geht als raeume.html UND als index.html hoch
-#   raumaufmass.html  das Werkzeug, unter seinem eigenen Namen
-#   raum-*.js, fliesenplan-*.js   was die Seiten per <script src> laden (aus den Seiten gelesen)
+#   raumaufmass.html, fliesenplan.html, kuechenplaner.html   die Werkzeuge, je unter ihrem eigenen Namen
+#                     (die beiden letzten holt der Upload über die Verweise in raeume.html und raum-plan.js)
+#   raum-*.js, fliesenplan-*.js, kuechenplaner-*.js   was die Seiten per <script src> laden (aus den Seiten gelesen)
+#   raum-schale.css   das gemeinsame Stylesheet, per <link rel="stylesheet"> aus den Seiten gelesen
 #   fliese-einmessen.html, datenschutz-meldung.html, bugreport.php wie bisher
 # Gibt es im Stand kein raeume.html (alte Stände), ist raumaufmass.html die
 # Einstiegsseite und geht wie früher als index.html hoch.
@@ -109,6 +111,11 @@ skripte_von() {
   LC_ALL=C grep -oE "<script[^>]*[[:space:]]src=[\"'][^\"']*[\"']" "$1" \
     | LC_ALL=C sed -E "s/^.*src=[\"']//; s/[\"']\$//" | sort -u || true
 }
+# Stylesheets, die eine Seite per <link rel="stylesheet" href="…"> lädt.
+stile_von() {
+  LC_ALL=C grep -oE "<link[^>]*[[:space:]]href=[\"'][^\"']*[\"']" "$1" \
+    | LC_ALL=C sed -E "s/^.*href=[\"']//; s/[\"']\$//" | sort -u || true
+}
 # Seiten und PHP-Dateien neben der Seite, auf die eine Datei verweist
 # (href="raeume.html", location='raumaufmass.html#…', fetch('bugreport.php')):
 # ein Name in Anführungszeichen, danach das Ende, ? oder #.
@@ -138,7 +145,12 @@ while [ "$i" -lt "${#DATEIEN[@]}" ]; do
       [ -n "$s" ] || continue
       [[ "$s" =~ ^[a-z0-9-]+\.js$ ]] || abbruch "Unerwartetes Skript in $f: $s (erwartet: Datei neben der Seite, nur a-z, 0-9, Bindestrich)."
       aufnehmen "$s" "$f"
-    done < <(skripte_von "$OUT/$f") ;;
+    done < <(skripte_von "$OUT/$f")
+    while IFS= read -r s; do
+      [ -n "$s" ] || continue
+      [[ "$s" =~ ^[a-z0-9-]+\.css$ ]] || abbruch "Unerwartetes Stylesheet in $f: $s (erwartet: Datei neben der Seite, nur a-z, 0-9, Bindestrich)."
+      aufnehmen "$s" "$f"
+    done < <(stile_von "$OUT/$f") ;;
   esac
   case "$f" in *.html|*.js)
     while IFS= read -r s; do
@@ -172,9 +184,9 @@ fi
 
 cp "$OUT/$EINSTIEG" "$OUT/index.html"
 cat > "$OUT/.htaccess" <<'HT'
-# HTML und geteilte Skripte immer frisch laden: neue Versionen sollen sofort
+# HTML, geteilte Skripte und Stylesheets immer frisch laden: neue Versionen sollen sofort
 # ankommen, und eine neue Seite darf nie auf alte Skripte aus dem Cache treffen.
-<FilesMatch "\.(html|js)$">
+<FilesMatch "\.(html|js|css)$">
   Header set Cache-Control "no-cache, must-revalidate"
 </FilesMatch>
 DirectoryIndex index.html

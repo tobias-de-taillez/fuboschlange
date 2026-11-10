@@ -1289,7 +1289,18 @@ document.querySelectorAll('[title]').forEach(el=>{ el.title=plat(el.title); });
 // Küchenplaner noch keine eigene Datei haben, auch diese beiden. Welches sie
 // gerade ist, steht in der Adresse (#fliesen, #kueche) und am body.
 const TOOLNAME={aufmass:'', fliesen:'Fliesenplan', kueche:'Küchenplaner'};
-const toolFromHash=()=>location.hash==='#fliesen' ? 'fliesen' : location.hash==='#kueche' ? 'kueche' : 'aufmass';
+// Jedes Werkzeug ist eine eigene Seite: ein anderes Werkzeug heißt eine andere Seite öffnen. Der Raum reist über
+// sessionStorage mit (uebergabe), die Rückmeldung einer Absage ebenso (absage). Rückgängig, Ansicht und
+// Auswahl beginnen auf der neuen Seite neu.
+const SEITEN={aufmass:'raumaufmass.html', fliesen:'fliesenplan.html', kueche:'kuechenplaner.html'};
+function wechsleSeite(tool, absage){
+  alleWerkzeuge('vorRaumwechsel');            // Vorgemerktes noch in diesen Raum schreiben
+  try{
+    sessionStorage.setItem('raumaufmass.uebergabe', currentRoom);
+    if(absage) sessionStorage.setItem('raumaufmass.absage', absage);
+  }catch(e){}
+  location.assign(SEITEN[tool]);
+}
 const raumGeschlossen=()=>!!C.wallPolygonRing(M.pts, M.walls);
 function setTool(tool, boot){
   // Der Wechsel räumt jede ältere Rückmeldung weg (setMode); die eigene
@@ -1299,12 +1310,10 @@ function setTool(tool, boot){
     tool='aufmass'; absage='Der Fliesenplan braucht einen geschlossenen, eingemessenen Raum.'; }
   if(tool==='kueche' && !kitchenReady()){
     tool='aufmass'; absage='Der Küchenplaner braucht eine eindeutige Form.'; }
-  TOOL=tool; document.body.dataset.tool=tool;
+  if(tool!==TOOL){ wechsleSeite(tool, absage); return; }
+  document.body.dataset.tool=tool;
   $('toolname').hidden = tool==='aufmass';
   $('toolname').textContent=TOOLNAME[tool];
-  const hash = tool==='fliesen' ? '#fliesen' : tool==='kueche' ? '#kueche' : '';
-  if(location.hash!==hash && !/^#raum=/.test(location.hash))
-    history.replaceState(null,'',location.pathname+location.search+hash);
   alleWerkzeuge('vorModus');
   $('hint').textContent='';
   // Die Planfläche ist je Werkzeug eine andere (der Küchenplaner teilt sie mit
@@ -1317,7 +1326,8 @@ function setTool(tool, boot){
   else setMode((raumGeschlossen() || M.meas.length) ? 'measure' : 'draw');
   if(absage) sag(absage);
 }
-$('toAufmass').onclick=()=>setTool('aufmass');
+// „Zum Raumaufmaß“ im Menü gibt es nur auf den Seiten der Folgewerkzeuge.
+if($('toAufmass')) $('toAufmass').onclick=()=>setTool('aufmass');
 
 // ================= Rückmeldung am Ort =================
 // Es gibt keine Statuszeile mehr. Was eine Aktion zurückmeldet, erscheint
@@ -1390,7 +1400,9 @@ function importFromHash(){
 }
 
 // Der Boot: läuft, wenn die Seite alle ihre Skripte geladen hat (Aufruf am Ende des letzten Bedien-Skripts).
-function starteSeite(){
+function starteSeite(tool){
+  // Fehlt eine Kerndatei (Karte der Seite „unvollständig geladen“), startet nichts: kein Raum, kein Speichern.
+  if(globalThis.RAUM_UNVOLLSTAENDIG) throw new Error('Die Seite startet nicht, unvollständig geladen: '+globalThis.RAUM_UNVOLLSTAENDIG.join(', '));
 
   // ================= Boot =================
   // Reihenfolge: migrieren -> Fragment-Import -> Raum laden -> UI aufbauen -
@@ -1401,17 +1413,20 @@ function starteSeite(){
   addEventListener('hashchange',()=>{
     const msg=importFromHash();
     if(msg) setHint(msg);
-    else if(toolFromHash()!==TOOL) setTool(toolFromHash());
   });
   if(!currentRoom){
     // deserialize() wirft auf manuell verbogenen Storage-Daten - das darf
     // den Boot nicht toeten, sonst bleibt die Seite leer statt leerzustarten.
     try{
       let cur=STORE.currentId();
-      // Neuladen, Zurück und Vor: der Raum dieses Fensters, nicht der zuletzt irgendwo geöffnete.
+      // Werkzeugwechsel: der Raum, den die vorige Seite übergeben hat. Neuladen, Zurück und Vor: der Raum
+      // dieses Fensters, nicht der zuletzt irgendwo geöffnete.
       try{
         const nav=performance.getEntriesByType('navigation')[0], eigen=sessionStorage.getItem('raumaufmass.fenster');
-        if(nav && (nav.type==='reload' || nav.type==='back_forward') && eigen && STORE.load(eigen)) cur=eigen;
+        const uebergabe=sessionStorage.getItem('raumaufmass.uebergabe');
+        sessionStorage.removeItem('raumaufmass.uebergabe');
+        if(uebergabe && STORE.load(uebergabe)) cur=uebergabe;
+        else if(nav && (nav.type==='reload' || nav.type==='back_forward') && eigen && STORE.load(eigen)) cur=eigen;
       }catch(e){}
       if(cur && STORE.load(cur)) openRoom(cur);
       else {
@@ -1425,7 +1440,7 @@ function starteSeite(){
       currentRoomName='Neuer Raum';
     }
   }
-  TOOL=toolFromHash(); document.body.dataset.tool=TOOL;
+  TOOL=tool; document.body.dataset.tool=TOOL;
   setMode('draw');
   alleWerkzeuge('start');
   recompute();
@@ -1437,6 +1452,9 @@ function starteSeite(){
   // Werkzeugwechsel raeumt jede Rueckmeldung weg (setMode).
   addEventListener('DOMContentLoaded',()=>{
     setTool(TOOL, true);
+    let absage=null;
+    try{ absage=sessionStorage.getItem('raumaufmass.absage'); sessionStorage.removeItem('raumaufmass.absage'); }catch(e){}
+    if(absage) sag(absage);
     if(bootMsg) setHintLive(bootMsg);
     if(!STORE.storageOk)
       setHintLive('Speichern auf diesem Gerät nicht möglich (privater Modus?). Räume als Datei oder Link sichern.');
@@ -1444,3 +1462,7 @@ function starteSeite(){
       setHintLive('Speichern fehlgeschlagen (Speicher voll?). Raum als Datei oder Link sichern.');
   });
 }
+
+// Aus dem Seitencache zurückgeholt (Zurück-Taste): das Modell dieser Seite ist alt, ein anderes Werkzeug hat den
+// Raum inzwischen geändert. Neu laden holt ihn aus dem Speicher (der Raum des Fensters bleibt über sessionStorage).
+addEventListener('pageshow', e=>{ if(e.persisted) location.reload(); });

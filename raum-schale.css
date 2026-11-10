@@ -1,0 +1,312 @@
+
+  /* Gestaltungslinie: Messwerkzeug auf Papier, fuer den Schreibtisch.
+     Warmweiss, Tinte, genau ein Akzent (Auswahl, Hauptaktion, ein-
+     geschaltete Lampe), semantische Statusfarben, tabellarische Ziffern.
+     Vier Schriftgroessen: 11 Beschriftung, 12 Nebentext, 13 Text, 20 Ergebnis.
+     Bewusst NICHT: Verlaeufe, Glas, Glow, grosse Radien, Karten in Karten,
+     Webfonts, Etiketten-Pillen an jeder Zeile. */
+  :root{
+    --paper:#ebe8e0;    /* Rahmen hinter allem */
+    --surface:#faf9f6;  /* Leisten, Panel, Popover */
+    --canvas:#f5f3ed;   /* Zeichenflaeche */
+    --ink:#24221d;
+    --ink2:#4b473e;     /* Nebentext, gut lesbar */
+    --muted:#6f6a5e;
+    --line:#d8d3c6;
+    --line2:#e8e4da;    /* Haarlinien innerhalb von Listen */
+    --hover:#eeeae0;
+    --press:#e4dfd3;
+    --accent:#c2410c; --accent-bg:#f9e7dc; --accent-line:#ebbda2;
+    --good:#1a6b34; --good-bg:#e5efe3;
+    --warn:#8a5a10; --warn-bg:#f5ecd7; --warn-dot:#c98a1a;
+    --bad:#b3261e;  --bad-bg:#f7e4e0;
+    --meas:#2e7d4f;     /* gemessene Strecke im Plan */
+    --todo:#c73e2e;     /* fehlende Strecke im Plan */
+    --font:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  [hidden]{display:none!important}
+  html,body{height:100%}
+  body{margin:0;font:13px/1.4 var(--font);background:var(--paper);color:var(--ink);
+    height:100vh;overflow:hidden;overscroll-behavior:none;-webkit-font-smoothing:antialiased}
+  /* Grundgeruest: Kopfleiste ueber allem, darunter Zeichenflaeche mit
+     Statuszeile und rechts das Panel. */
+  #app{height:100%;display:grid;grid-template-rows:auto minmax(0,1fr);min-width:760px}
+  #main{display:grid;grid-template-columns:minmax(0,1fr) 320px;min-height:0}
+  #stage{display:grid;grid-template-rows:minmax(0,1fr) auto;min-width:0;min-height:0}
+  #canvaswrap{position:relative;min-height:0;overflow:hidden}
+  #panel{overflow-y:auto;background:var(--surface);border-left:1px solid var(--line)}
+
+  /* Knoepfe. Desktop-Mass: 28 px hoch, 13 px Schrift. */
+  button{font:inherit;font-size:13px;color:var(--ink);background:var(--surface);
+    border:1px solid var(--line);border-radius:4px;padding:0 10px;min-height:28px;cursor:pointer}
+  button:hover{background:var(--hover)}
+  button:active{background:var(--press)}
+  button:disabled{opacity:.45;cursor:default;background:var(--surface)}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  button.primary:hover{background:#a8380a;border-color:#a8380a}
+  kbd{font:inherit;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+  input,select{font:inherit;color:var(--ink)}
+  input[type=checkbox]{accent-color:var(--accent)}
+
+  /* ---------- Kopfleiste ---------- */
+  #topbar{display:flex;align-items:stretch;height:44px;padding:0 8px 0 6px;
+    background:var(--surface);border-bottom:1px solid var(--line);min-width:0}
+  #roomctl{position:relative;display:flex;align-items:center;gap:2px;flex:none;
+    max-width:260px;padding-right:10px;margin-right:4px;border-right:1px solid var(--line2)}
+  #roomname{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    padding:4px 6px;border-radius:4px;cursor:text}
+  #roomname:hover{background:var(--hover)}
+  #roomnameEdit{font-weight:600;width:190px;padding:3px 5px;border:1px solid var(--accent);
+    border-radius:4px;background:#fff;outline:none}
+  .ib{width:30px;height:30px;min-height:0;padding:0;display:inline-grid;place-items:center;
+    border:0;background:none;border-radius:4px;color:var(--ink2)}
+  .ib svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;
+    stroke-linecap:round;stroke-linejoin:round}
+  .ib:hover{background:var(--hover);color:var(--ink)}
+  .ib:disabled{opacity:.3;background:none}
+  .ib[aria-expanded=true]{background:var(--press)}
+  /* Modi: Reiter mit Strich darunter, Ziffer = Taste. */
+  #modes{display:flex;align-items:stretch;margin-right:10px;flex:none}
+  #modes button{position:relative;display:flex;align-items:center;gap:6px;min-height:0;
+    border:0;border-radius:0;background:none;padding:0 11px;color:var(--ink2)}
+  #modes button i{font-style:normal;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+  #modes button:hover{color:var(--ink);background:var(--hover)}
+  #modes button[aria-pressed=true]{color:var(--ink);font-weight:600}
+  #modes button[aria-pressed=true]::after{content:'';position:absolute;left:9px;right:9px;bottom:-1px;
+    height:2px;background:var(--ink)}
+  #modes button[aria-disabled=true]{opacity:.4}
+  #modes button[aria-disabled=true]:hover{background:none;color:var(--ink2)}
+  /* Werkzeuge des aktuellen Modus - nur die. */
+  /* Abgesetzt von den Reitern: Trennstrich davor, Knoepfe mit Rahmen -
+     Reiter sind Text mit Strich, Werkzeuge sind Knoepfe. */
+  #tools{flex:1;display:flex;align-items:center;gap:4px;min-width:0;overflow-x:auto;scrollbar-width:none;
+    align-self:center;padding-left:12px;border-left:1px solid var(--line2)}
+  #tools::-webkit-scrollbar{display:none}
+  .tg{display:flex;align-items:center;gap:4px;flex:none}
+  .tg[data-for]{display:none}
+  body[data-mode=draw] .tg[data-for~=draw],body[data-mode=measure] .tg[data-for~=measure],
+  body[data-mode=tiles] .tg[data-for~=tiles],body[data-mode=kitchen] .tg[data-for~=kitchen]{display:flex}
+  .tsep{width:1px;height:16px;align-self:center;margin:0 6px;background:var(--line);flex:none}
+  .tb{display:inline-flex;align-items:center;gap:6px;height:28px;min-height:0;padding:0 9px;
+    border:1px solid var(--line);border-radius:5px;background:var(--hover);white-space:nowrap}
+  .tb:hover{background:var(--press);border-color:var(--line2)}
+  .tb kbd{margin-left:1px}
+  /* Schalter (Zustand) tragen eine Lampe; Werkzeuge (temporaerer Modus)
+     faerben sich ein. Aktionen sehen aus wie Aktionen. */
+  .tog::before{content:'';flex:none;width:7px;height:7px;border:1.5px solid var(--muted);border-radius:1.5px}
+  .tog[aria-pressed=true]::before{background:var(--accent);border-color:var(--accent)}
+  .tool[aria-pressed=true]{background:var(--accent-bg);color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent-line)}
+  .tool[aria-pressed=true] kbd{color:var(--accent)}
+  /* Unter ~1250 px passt die Fliesen-Leiste sonst nicht; die Tasten stehen
+     auch im Tooltip und unter "?". */
+  @media (max-width:1250px){
+  .tb kbd{display:none}
+  #modes button i{display:none}
+}
+
+  #histctl{display:flex;align-items:center;gap:2px;flex:none;margin-left:6px;padding-left:6px;
+    border-left:1px solid var(--line2)}
+
+  /* Menue (Raum) */
+  .menu{position:absolute;top:38px;left:0;z-index:30;min-width:240px;padding:4px;
+    background:var(--surface);border:1px solid var(--line);border-radius:6px;
+    box-shadow:0 8px 24px rgba(36,34,29,.16)}
+  .menu button{display:flex;width:100%;align-items:center;gap:16px;min-height:28px;padding:0 10px;
+    border:0;border-radius:4px;background:none;text-align:left}
+  .menu button:hover,.menu button:focus-visible{background:var(--hover);outline:none}
+  .menu button kbd{margin-left:auto}
+  .menu hr{border:0;border-top:1px solid var(--line2);margin:4px 2px}
+
+  /* ---------- Zeichenflaeche ---------- */
+  #cv{position:absolute;inset:0;width:100%;height:100%;display:block;background:var(--canvas);
+    cursor:crosshair;touch-action:none}
+
+  /* ---------- Statuszeile ---------- */
+  #statusbar{display:flex;align-items:center;gap:2px;height:28px;padding:0 6px 0 12px;
+    background:var(--surface);border-top:1px solid var(--line);font-size:12px;color:var(--ink2);min-width:0}
+  #hint{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sb{height:22px;min-height:0;padding:0 7px;border:0;border-radius:3px;background:none;
+    font-size:12px;color:var(--ink2);white-space:nowrap;font-variant-numeric:tabular-nums}
+  .sb:hover{background:var(--hover);color:var(--ink)}
+  .sbsep{width:1px;height:16px;background:var(--line);margin:0 4px;flex:none}
+  #entry{min-width:240px}
+  /* Die Einheit ist der Umschalter (m - cm - mm), sieht aber wie ein Etikett aus. */
+  .unit{min-height:0;height:24px;padding:0 2px;border:0;border-bottom:1px dotted var(--muted);border-radius:0;
+    background:none;color:var(--ink2);min-width:2.2em;text-align:left}
+  .unit:hover{background:none;color:var(--ink)}
+  #wpop{min-width:270px}
+  #oppl{min-width:230px;padding:8px 10px}
+  #cpop{min-width:230px}
+  #pop{display:flex;gap:10px;align-items:center;padding:6px 6px 6px 10px;white-space:nowrap;z-index:7}
+
+  /* ---------- Overlays: Raeume, QR, Tastenkuerzel ---------- */
+  .scrim{position:fixed;inset:0;z-index:40;background:rgba(36,34,29,.28);
+    display:flex;align-items:center;justify-content:center}
+  .dlg{background:var(--surface);border:1px solid var(--line);border-radius:8px;
+    box-shadow:0 12px 40px rgba(36,34,29,.22);max-height:80vh;overflow-y:auto}
+  .dlghead{display:flex;align-items:center;gap:8px;padding:12px 12px 10px 16px;border-bottom:1px solid var(--line2)}
+  .dlghead h2{font-size:13px;font-weight:600;margin:0;flex:1}
+  .dlghead .ib{width:28px;height:28px}
+  #qrbox{padding-bottom:12px;text-align:center;width:340px}
+  #qrcv{margin:12px auto 6px;display:block;image-rendering:pixelated;max-width:100%;height:auto}
+  #qrnote{font-size:12px;color:var(--muted);padding:0 16px}
+  #keysbox{width:740px}
+  #keysbody{columns:2;column-gap:28px;padding:12px 16px 16px}
+  #keysbody .kgrp{break-inside:avoid;padding:0;border:0;margin:0 0 12px}
+  #keysbody h4{margin:0 0 2px;font-size:11px;font-weight:600;color:var(--muted)}
+  #keysbody p{display:flex;justify-content:space-between;gap:12px;margin:0;padding:3px 0;border-bottom:1px solid var(--line2);font-size:12px}
+  #keysbody kbd{font-size:12px;color:var(--ink);white-space:nowrap}
+  #helpbox{width:760px}
+  #helpbody{padding:4px 18px 18px;font-size:12.5px;line-height:1.5}
+  #helpbody h3{display:block;font-size:13px;font-weight:600;margin:16px 0 4px;padding:0;border:0;text-transform:none;letter-spacing:0;color:var(--ink)}
+  #helpbody h3 i{font-style:normal;display:inline-block;min-width:18px;color:var(--accent)}
+  #helpbody p{margin:4px 0}
+  #helpbody dl{margin:4px 0;display:grid;grid-template-columns:150px 1fr;gap:3px 14px}
+  #helpbody dt{font-weight:600}
+  #helpbody dd{margin:0;color:var(--ink2)}
+  #helpbody .hnote{color:var(--muted)}
+
+  /* ---------- Panel ---------- */
+  #status{padding:12px 14px;border-bottom:1px solid var(--line)}
+  /* Ergebnis wie ein Schriftfeld: Beschriftung klein, Wert gross, Haarlinien. */
+  #geo{display:grid;grid-template-columns:1fr 1fr;margin-top:10px;border-top:1px solid var(--line2)}
+  #geo .kv{padding-top:7px;min-width:0}
+  #geo .kv+.kv{padding-left:12px;border-left:1px solid var(--line2)}
+  #geo .kv span{display:block;font-size:11px;color:var(--muted)}
+  #geo .kv b{font-size:20px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.01em;white-space:nowrap}
+  #geo .kv b small{font-size:12px;font-weight:400;color:var(--ink2);letter-spacing:0}
+  #geo .note{grid-column:1/-1;font-size:12px;color:var(--ink2);margin-top:6px}
+  #geo .ph{grid-column:1/-1;margin:8px 0 0;font-size:12px;color:var(--muted)}
+  section{padding:12px 14px;border-bottom:1px solid var(--line)}
+  h3{margin:0 0 8px;font-size:12px;font-weight:600;color:var(--ink2);
+    display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+  h3 small{font-size:11px;font-weight:400;color:var(--muted);font-variant-numeric:tabular-nums}
+  /* Vorschlags-Chips */
+  #sugg .grp{margin-bottom:8px}
+  #sugg .grp:last-child{margin-bottom:0}
+  #sugg .grp b{display:block;font-size:12px;font-weight:400;color:var(--ink2);margin-bottom:5px}
+  button.sg{min-height:24px;padding:0 8px;border:1px dashed var(--todo);color:var(--todo);
+    background:transparent;font-size:12px;font-variant-numeric:tabular-nums}
+  button.sg:hover{background:var(--bad-bg)}
+  button.sg.rep{border-style:dotted;border-color:var(--warn);color:var(--warn)}
+  .wgrp{margin:10px 0 2px;font-size:11px;color:var(--muted)}
+  #why{color:var(--ink2);font-size:12px;margin-top:8px}
+  /* Werte-Tabelle im Wand-Popup */
+  table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+  th{font-size:11px;color:var(--muted);font-weight:600}
+  th,td{border-bottom:1px solid var(--line2);padding:4px 6px;text-align:right;white-space:nowrap}
+  th:first-child,td:first-child{text-align:left}
+  td input{font-variant-numeric:tabular-nums;text-align:right;border:1px solid transparent;
+    border-radius:4px;padding:3px 4px;background:transparent;width:70px}
+  td input:hover,td input:focus{border-color:var(--line);background:#fff}
+  tr.worst td{background:var(--bad-bg)}
+  #tip{position:fixed;z-index:50;max-width:280px;background:var(--surface);border:1px solid var(--line);
+    border-radius:6px;padding:8px 10px;font-size:12px;line-height:1.45;color:var(--ink);
+    box-shadow:0 6px 18px rgba(36,34,29,.16);pointer-events:none}
+  .rowbtn{min-height:22px;padding:0 7px;font-size:12px}
+  .rowbtn.del{border:0;background:none;color:var(--muted)}
+  .rowbtn.tog{display:inline-flex;align-items:center;gap:5px;border:0;background:none;color:var(--ink2)}
+  .rowbtn.tog[aria-pressed=true]{color:var(--accent);font-weight:600}
+  .rowbtn.del:hover{color:var(--bad);background:var(--bad-bg)}
+  #opop{border-top:1px solid var(--line2);padding-top:10px}
+  .seg{display:flex;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+  .seg button{border:0;border-radius:0;min-height:28px;padding:0 10px;font-size:12px;background:var(--surface)}
+  .seg button+button{border-left:1px solid var(--line)}
+  .seg button[aria-pressed=true]{background:var(--ink);color:var(--surface)}
+  .tgrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px 12px}
+  .tgrid label{display:flex;align-items:center;gap:5px;min-width:0;font-size:12px;color:var(--ink2)}
+  .tgrid label span{flex:1}
+  .tgrid input,.trow input{width:4.6em;padding:0 6px;height:26px;border:1px solid var(--line);border-radius:4px;
+    background:#fff;text-align:right;font-variant-numeric:tabular-nums}
+  .trow{display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin:4px 0}
+  .trow label{display:flex;align-items:center;gap:4px;font-size:12px;color:var(--ink2)}
+  .trow input{width:3.6em}
+  .tnote{font-size:12px;color:var(--ink2);margin-top:6px}
+  #measDlg{width:min(860px,calc(100vw - 32px));max-height:calc(100vh - 32px);padding:0;border:1px solid var(--line);
+    border-radius:10px;background:var(--surface);color:var(--ink);box-shadow:0 18px 50px rgba(0,0,0,.22);overflow:auto}
+  #measDlg::backdrop{background:rgba(36,34,29,.35)}
+  #measDlg button:disabled{opacity:.45;cursor:default}
+  .mrow{display:grid;grid-template-columns:28px minmax(0,1fr) 9.5em;align-items:center;gap:8px;font-size:12px;color:var(--ink2);
+    padding:1px 4px;border-radius:4px}
+  .mrow b{color:var(--ink);font-variant-numeric:tabular-nums}
+  .mrow.on{background:var(--accent-bg)} .mrow.on b,.mrow.on span{color:var(--accent)}
+  #measDlg input{height:26px;padding:0 6px;border:1px solid var(--line);border-radius:4px;background:#fff;
+    font-variant-numeric:tabular-nums;width:100%}
+  #measDlg input.bad{border-color:var(--bad);background:var(--bad-bg)}
+  .tnote input{vertical-align:-2px;margin:0 6px 0 0}
+  /* Material: Kennzahlen gross, Tabellen eingeklappt. */
+  #tKey{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;align-items:baseline;font-variant-numeric:tabular-nums}
+  #tKey span{font-size:12px;color:var(--ink2)}
+  #tKey b{font-size:13px;font-weight:600}
+  #tKey b small{font-size:12px;font-weight:400;color:var(--ink2)}
+  #tKey .main{font-size:20px}
+  .kgrp{margin:8px 0;font-size:12px} .kgrp>label{display:block;color:var(--ink2);margin-bottom:5px}
+  .kdo{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:6px;font-size:11px;color:var(--muted)}
+  .kdo button{min-height:22px;padding:0 7px;font-size:12px;font-variant-numeric:tabular-nums;border:1px solid var(--line);border-radius:11px;background:var(--surface);color:var(--ink2);cursor:pointer}
+  .kdo button.std{font-weight:600} .kdo button.on{border-color:var(--accent);color:var(--accent)}
+
+  /* =====================================================================
+     Werkzeugfamilie (DESIGN.md): Leiste mit Schritten, Menü, Stand, Karten.
+     Die Regeln stehen bewusst am Ende und überschreiben die ältere Leiste.
+     body[data-tool] sagt, welches Werkzeug diese Datei gerade ist:
+     aufmass (Skizze, Maße, Wände, Ausgabe), fliesen oder kueche.
+     ===================================================================== */
+  :root{ --pencil:#a39d90; --floor:#fbfaf7; --ease:cubic-bezier(.16,1,.3,1); }
+  ::selection{background:var(--accent-bg);color:var(--ink)}
+  body{caret-color:var(--accent);scrollbar-color:var(--line) transparent;scrollbar-width:thin}
+  ::placeholder{color:var(--muted);opacity:1;font-style:italic}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  button.primary:hover{background:#a8380a;border-color:#a8380a}
+
+  /* ---------- Leiste ---------- */
+  #roomctl{gap:4px;max-width:360px;padding-right:12px}
+  #backHome{display:flex;align-items:center;gap:3px;height:28px;padding:0 8px 0 4px;border-radius:4px;
+    color:var(--ink2);text-decoration:none;white-space:nowrap;flex:none}
+  #backHome:hover{background:var(--hover);color:var(--ink)}
+  #backHome svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+  #toolname{color:var(--ink2);white-space:nowrap;padding-left:10px;margin-left:4px;border-left:1px solid var(--line2)}
+  #modes button[hidden]{display:none}
+  #histctl{position:relative}
+  /* Menü: rechts, mit Gruppen. Eingeschaltetes trägt einen Punkt. */
+  .menu{left:auto;right:0;min-width:236px}
+  .menu h4{margin:0;padding:8px 10px 3px;font-size:11px;font-weight:600;color:var(--muted)}
+  .menu button[aria-pressed=true]::after{content:'';flex:none;width:6px;height:6px;border-radius:50%;
+    background:var(--accent);margin-left:auto}
+  body[data-tool=aufmass] .menu .nurFolge{display:none}
+
+  /* ---------- Plan ---------- */
+  #fitview{position:absolute;right:10px;top:8px;z-index:4}
+  #sheets{position:absolute;inset:0;z-index:5;overflow:auto;padding:28px 0 48px;background:var(--paper);display:none}
+  /* Rückmeldung erscheint dort, wo sie ausgelöst wurde */
+  #toast{position:fixed;left:0;top:0;z-index:60;max-width:min(520px,calc(100vw - 24px));
+    padding:7px 12px;background:var(--ink);color:#fff;border-radius:6px;font-size:12px;line-height:1.4;
+    pointer-events:none;opacity:0;transition:opacity .2s var(--ease)}
+  #toast.on{opacity:1}
+
+  /* ---------- Stand ---------- */
+  #status{cursor:pointer;padding:14px 16px}
+  #status:hover{background:var(--hover)}
+  #status:focus-visible{outline-offset:-2px}
+  #geo{border-top:0;margin:12px 0 0 17px;gap:12px}
+  #geo .kv{padding-top:0}
+  #geo .kv+.kv{padding-left:0;border-left:0}
+  #geo .ph{display:none}
+  #geo.in{animation:arrive .4s var(--ease)}
+  @keyframes arrive{from{opacity:0;transform:translateY(5px)}}
+  body.tilesmode #standMore,body.kitchenmode #standMore{display:none}
+  #ellipses{display:flex;align-items:center;gap:8px;min-height:24px;padding:0;border:0;background:none;color:var(--ink2);font-size:12px}
+  #ellipses:hover{background:none;color:var(--ink)}
+  #ellipses::before{content:'';flex:none;width:13px;height:13px;border:1px solid var(--muted);border-radius:3px;background:#fff}
+  #ellipses[aria-pressed=true]::before{background:var(--accent);border-color:var(--accent);box-shadow:inset 0 0 0 2px #fff}
+  #why{margin:0 0 8px}
+  @media (prefers-reduced-motion:reduce){
+  *{animation:none!important;transition:none!important}
+}
+
+  /* ---------- Karte am Objekt: Wand, Diagonale, Ecke ---------- */
+  .kgrp{margin-top:10px;padding-top:8px;border-top:1px solid var(--line2)}
+  .kgrp>span{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+  .kgrp>div{display:flex;gap:4px;flex-wrap:wrap}
+  .kend{display:flex;gap:6px;align-items:center;margin-top:10px;padding-top:8px;border-top:1px solid var(--line2)}
