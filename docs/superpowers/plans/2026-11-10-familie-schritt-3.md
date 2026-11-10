@@ -19,9 +19,16 @@ Zweig `feat/familie-schritt-3` (ab `main` 237c2d1), nichts gepusht, nichts hochg
 - Zwei harmlose, aber echte Unterschiede zum alten Bild: Rückgängig beginnt je Seite leer (Entscheidung 2a), und nach einem Seitenwechsel steht der Fokus nicht mehr auf dem Menü-Knopf. Der Bildvergleich gleicht beides vorher an.
 - Die Tastenliste und die Hilfe zeigen je Seite nur ihr Werkzeug; im Aufmaß steht „Schritte“ (1–4) als eigene Gruppe vor „Allgemein“.
 
+**Nachweis „der Raum lädt unverändert“ (nach dem Schnitt gemessen):** Mit dem Probe-Raum und der Abwandlung mit Ausreißer ergeben `serialize()` und der gespeicherte Raum auf `raumaufmass.html`, `fliesenplan.html` und `kuechenplaner.html` genau dieselben Zeichen. Die alten Werkzeug-Modi (`#fliesen`, `#kueche` in der einen Seite) wichen davon in den letzten Stellen ab; das ist der Grund, warum der Bildvergleich im Fliesenplan an einer Stelle „−0,00 %“ gegen „0,00 %“ zeigt (Firefox, nach dem Drehen einer Fliese). `node test/vergleich-staende.mjs` (Altstand 237c2d1 gegen diesen Stand, neun Räume in je drei Fassungen): 27 Vergleiche gleich. Der Ablauf `stabil` (von `main` übernommen) läuft grün in drei Engines.
+
+**`main` wurde parallel bewegt** (Hauptsession, Vormittag): `recompute` in vier Teile (Rechnen, Bewerten, Sichern, Folgen), die Prüfstände `stabil` und `vergleich-staende`. Der Zweig enthält den Merge (e04d8a1). Seine Zerlegung steht anders (`rechneRaum` mit Bewerten, `sichereRaum`, Folgen als Anmeldung `folgen`); beide Prüfstände sind gleich, die Aufteilung in vier Funktionen wurde nicht übernommen.
+
+**Reste im Bildvergleich, alle erklärt:** (1) QR-Code: er enthält den Port der Adresse, der je Stand ein anderer ist (blendet die Harness aus). (2) Ein Rundungsunterschied von einer Stufe je Farbkanal an den Ecken eines Knopfes im Fliesenplan (16 Bildpunkte, Chromium). (3) „−0,00 %“, siehe oben. (4) Eine einzige zeitabhängige Abweichung in der Skizze ohne Maße beim Schritt Ausgabe (Chromium); nachgestellt mit denselben Tasten verhalten sich alter und neuer Stand gleich.
+
 **Bewusst nicht getan oder offen:**
 - Live gestellt ist nichts. Vorher zu entscheiden: ob der Dateiname `raum-plan.js` bleibt (das Glossar reserviert „Plan“ für den Fliesenplan; es ist ein Dateiname, kein Begriff der Oberfläche), und ob `package-lock.json` mit ins Repo soll (er liegt bei).
 - Der Menü-Eintrag „Hilfe und Tasten“ und der Text des Abschnitts „Menü“ in der Hilfe nennen noch Punkte des Aufmaß-Menüs; auf den Folgeseiten fehlen die Punkte.
+- `fliesenplan-einmessen.js` lädt nur noch der Fliesenplan (und `?test`); Aufmaß und Küchenplaner brauchen es nicht.
 - Nicht geprüft: Touch, Drucken auf den neuen Seiten, zwei Fenster in den Folgewerkzeugen (die Logik ist die des Aufmaßes, `storage`-Ereignis in `raum-plan.js`), Safari selbst.
 - `scripts/umzug-kerne.mjs pruefen vor-kerne` gilt nur noch für den Stand bis `x1-bedienung-dateien`.
 
