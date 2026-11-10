@@ -27,7 +27,32 @@ Gemessen am Stand `c96f1ee` mit acorn und eslint-scope (freie Bezeichner je Bloc
 - **`ui` verdrahtet beim Laden 112 Anweisungen, 54 davon an Elemente, die nur das Aufmaß hat** (47 ids). Eine Seite ohne dieses Markup wirft beim Laden.
 - **Umgekehrt ruft `ui` 11 Einhängepunkte des Fliesenplans und 15 des Küchenplaners**, und das Aufmaß braucht beide Kerne weiter: `raum-modell.js` ruft `TILES.normTiles` und `KITCHEN.normKitchen`, `recompute` und `deletePoint` pflegen die Bezugsecken der Küche.
 - **Markup und CSS:** Von 421 Markup-Zeilen sind 68 gemeinsame Schale, 215 Aufmaß, 94 Fliesenplan, 43 Küchenplaner. Von 629 CSS-Regeln sind 92 Schale. Ein Muster für geteiltes CSS zwischen Seiten gibt es im Repo nicht.
-- **Kein Node-Test lädt die Bedienung.** Die 9326 Zeilen von `ui`, `tiles-ui` und `kitchen-ui` sind nur im Browser prüfbar. Seit dem 10.11.2026 gibt es dafür `test/browser.mjs` (45 Prüfungen: Hauptweg, Eingabe, Ansicht, zwei Fenster, unvollständig geladene Seite, Selbstchecks im Browser; grün in Chromium, WebKit und Firefox). Er deckt das Raumaufmaß, von Fliesenplan und Küchenplaner nur das Öffnen.
+- **Kein Node-Test lädt die Bedienung.** Die 9326 Zeilen von `ui`, `tiles-ui` und `kitchen-ui` sind nur im Browser prüfbar. Seit dem 10.11.2026 gibt es dafür `test/browser.mjs` (104 Prüfungen in acht Abläufen: Hauptweg, Eingabe, Ansicht, zwei Fenster, unvollständig geladene Seite, Selbstchecks im Browser, Fliesenplan, Küchenplaner; grün in Chromium, WebKit und Firefox).
+
+## Messaufbau: die Fliesen-Bedienung ohne das Aufmaß
+
+Am 10.11.2026 gebaut und gemessen, außerhalb des Repos: eine Probeseite mit der gemeinsamen Schale, den geteilten Dateien und dem Block `tiles-ui` wörtlich, aber ohne `ui`.
+
+- **Ohne `ui` wirft die Seite beim Laden** (`render is not defined`), kein Raum, keine Handler.
+- **Mit einer geschnittenen Naht läuft sie.** 43 Einträge genügen: 163 Zeilen wörtlich aus `ui`, 49 Zeilen Ersatz. Damit lädt die Probeseite einen Raum, zeichnet den Plan, setzt und verschiebt eine Fliese, nimmt zurück, stellt wieder her und speichert, ohne Konsolenfehler.
+- **Im Vergleich mit `raumaufmass.html#fliesen` ist sie gleich:** `M.tiles`, `serialize()`, der Speicherstand, die Ansicht und die Zeichenfläche stimmen in allen sieben Schritten überein (0 von 927.360 Bildpunkten verschieden). Rad, Leertaste-Ziehen, Einpassen, Lineal und Einmess-Dialog verhalten sich gleich.
+- **Sichtbar fehlt nur Schale, die in `ui` verdrahtet ist:** Menü, Tooltip, Raum umbenennen, Hilfe, Melde-Knopf.
+
+Die Naht, wie der laufende Code sie zeigt:
+
+| gehört ins geteilte Plan-Skript | bringt das Werkzeug selbst mit | bleibt im Aufmaß |
+|---|---|---|
+| `render` (fünf Zeilen), Hinweiszeile (`setHint`, `setHintLive`), Zeigerführung und ihre Handler, Rad und Zoom, Tasten-Verteiler, Rückgängig, `openRoom`, Boot, der Rechenteil und das Sichern aus `recompute`, Menü, Tooltip, Hilfe, Datei/Link/QR, der Abgleich zweier Fenster | Zeichnen (`drawTilesView`), Panel, Standardtext der Hinweiszeile, Stand beim Speichern, die fünf Zeiger-Einstiege, Tasten, „bereit?“ | `sag`, `statusText`/`standInfo`, `setMode`/`setTool`, Karten, Eingabe, Wandansicht, Ausgabe |
+
+Drei Kopplungen hat nur der laufende Code gezeigt:
+
+1. `tiles-ui` ruft beim Laden `render()`, bevor `TS.ruler` angelegt ist. Das geht heute nur gut, weil die Seite dann noch im Schritt Skizze steht.
+2. Rückgängig und Wiederherstellen speichern ausschließlich über `recompute()` (`restoreSnapshot` in `raum-modell.js`). `recompute` trägt drei Aufgaben in einer Funktion: Form rechnen, sichern, Aufmaß-Folgen.
+3. `raum-modell.js` erwartet beim Laden eines Raums `opMeasSeq` und `syncSnapfitBtn` vom Werkzeug, ohne zu prüfen, ob es sie gibt.
+
+Nicht gemessen: Räume mit ungenauen Maßen, der 90°-Ausgleich, Küche, Nachbarräume, Touch, Drucken, zweites Fenster, WebKit und Firefox. Die Probe ist ein Messaufbau, keine Seite zum Ausliefern.
+
+Was das für den Aufwand heißt: Die Naht ist schmaler, als die Zählung über `render` vermuten ließ. Rund 210 Zeilen Plan-Skript tragen die Fliesen-Bedienung. Der Aufwand liegt im Zerschneiden von sieben Funktionen (`recompute`, `render`/`renderPanel`, `drawCanvas`, die Zeiger-Handler, der Tasten-Handler, `openRoom`, Boot), nicht in der Menge.
 
 ## Drei Entwürfe, drei Kritiken
 
@@ -42,14 +67,17 @@ Gemeinsamer Befund: Eigene Seiten kosten sechs bis zehn Arbeitstage und sind ohn
 1. **Gilt „kein Fliesen- und Küchencode in `raumaufmass.html`“ für den Text der Datei oder auch für das, was sie lädt?** Das Aufmaß braucht beide Kerne, solange Fliesen- und Küchendaten am Raum bleiben.
 2. **Der Werkzeugwechsel wird ein Seitenwechsel.** Rückgängig je Werkzeug oder gemeinsam, Ansicht und Auswahl nach dem Wechsel, Verhalten der Zurück-Taste, Raumübergabe bei zwei Fenstern.
 3. **Geteilte Schale:** CSS als eigene Datei (Nachtrag zum ADR, Upload-Skript, `vercel.json`) oder je Seite; Hilfe und Tastenliste gemeinsam oder je Werkzeug.
-4. **Der Browser-Test** `test/browser.mjs` braucht Playwright, das nicht zum Repo gehört (er sucht es im Suchpfad von Node oder über die Variable `PLAYWRIGHT`). Soll es eine feste Entwicklungs-Abhängigkeit werden? Vor dem Schnitt durch `ui` braucht der Test außerdem Abläufe für Fliesenplan und Küchenplaner (Vorlagen: die Vergleichsläufe alt gegen neu vom 10.11.2026 mit 319 und 310 Schritten liegen nicht im Repo).
+4. **Der Browser-Test** `test/browser.mjs` braucht Playwright, das nicht zum Repo gehört (er sucht es im Suchpfad von Node oder über die Variable `PLAYWRIGHT`). Soll es eine feste Entwicklungs-Abhängigkeit werden? Seine Grenzen: Er liest das Modell und die Texte der Oberfläche, die Zeichenfläche nur an wenigen Stellen; ein reiner Zeichenfehler im Fliesenplan fiele ihm nicht auf.
 5. **Selbstchecks:** weiter an jeder Auslieferung (418 kB) oder nur bei `?test` nachladen.
 6. **Dateinamen:** `raum-*.js` lädt jedes Werkzeug, `<werkzeug>-*.js` gehört einem allein. Ein späteres Umbenennen trifft jeden offenen Zweig noch einmal.
 
 ## Empfohlene Folge für den Rest
 
-1. Die Entscheidungen oben.
-2. Messaufbau „Fliesen-Bedienung ohne Aufmaß“: Schale, geteilte Dateien und `tiles-ui` auf einer Probeseite, um die Naht von `ui` am laufenden Code zu finden statt am Reißbrett.
-3. `test/browser.mjs` um Fliesenplan und Küchenplaner erweitern, als Netz für den Schnitt.
-4. `ui` in der einen Seite auftrennen (Plan-Skript, drei Anmeldungen), jeder Zwischenstand live.
-5. Erst dann die Seiten schneiden und umschalten; alte Adressen `raumaufmass.html#fliesen` und `#kueche` leiten weiter.
+Getan sind der Messaufbau und das Netz (`test/browser.mjs` mit Abläufen für Fliesenplan und Küchenplaner). Es bleibt:
+
+1. Die Entscheidungen oben. Neu dazu aus dem Messaufbau: Der Stand wird auf den Folgewerkzeugen weitergetragen, nicht neu bewertet.
+2. `recompute` in Rechnen, Sichern und Aufmaß-Folgen zerlegen, als eigener Schritt und ohne Verhaltensänderung, weil Rückgängig nur darüber speichert.
+3. `raum-modell.js` gegen ein Werkzeug ohne `opMeasSeq` und `syncSnapfitBtn` absichern; das `render()` beim Laden von `tiles-ui` hinter `TS.ruler` setzen.
+4. `ui` in der einen Seite auftrennen: ein Plan-Skript, bei dem sich jedes Werkzeug anmeldet (zeichnen, Panel, Hinweis, fünf Zeiger-Einstiege, Tasten, bereit). Der Boot läuft danach, nicht davor. Jeder Zwischenstand läuft und kann live gehen.
+5. Den Vergleich des Messaufbaus mit einem ungenau gemessenen Raum, mit 90°-Ausgleich und Küche wiederholen, auch in WebKit und Firefox.
+6. Erst dann die Seiten schneiden und umschalten; alte Adressen `raumaufmass.html#fliesen` und `#kueche` leiten weiter.

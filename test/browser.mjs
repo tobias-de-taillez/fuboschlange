@@ -2,7 +2,7 @@
 // ein Mensch (echte Klicks und Tasten) und prüft, was die Node-Tests nicht
 // sehen: die Bedienung. Die 1018 Selbstchecks decken die Rechenkerne; dieser
 // Lauf deckt den Weg Skizze, Maße, Wände, Ausgabe, zwei Fenster, eine
-// unvollständig geladene Seite.
+// unvollständig geladene Seite, den Fliesenplan und den Küchenplaner.
 //
 //   node test/browser.mjs                 alle Abläufe in Chromium
 //   node test/browser.mjs webkit          in WebKit (firefox ebenso)
@@ -92,6 +92,62 @@ async function messeGefuehrt(page){
 async function gemessenerRaum(f){
   await f.page.goto(BASE+'/'); await sleep(900);
   await skizziereL(f.page); await messeGefuehrt(f.page);
+}
+
+// Fliesenplan: je verlegter Fliese die Mitte im Raum (mm) und im Fenster (CSS-Pixel), Drehung, ob gewählt,
+// und wand: die Abstände ihrer Ecken zur nächsten Wand (mm), aufsteigend.
+const fliesenLage=page=>page.evaluate(()=>{
+  const T=M.tiles||{items:[]}, K=tilesCtx(), r=cv.getBoundingClientRect(), d=DPR(), R=K.ring;
+  const zurWand=q=>Math.min(...R.map((a,i)=>{ const b=R[(i+1)%R.length], vx=b.x-a.x, vy=b.y-a.y, t=Math.max(0, Math.min(1, ((q.x-a.x)*vx+(q.y-a.y)*vy)/(vx*vx+vy*vy||1))); return Math.hypot(q.x-a.x-t*vx, q.y-a.y-t*vy); }));
+  return T.items.map(it=>{
+    const P=TILES.tileCorners(T.spec, it), c={x:P.reduce((a,q)=>a+q.x, 0)/P.length, y:P.reduce((a,q)=>a+q.y, 0)/P.length}, s=toScr(TILES.toWorldF(K.F, c));
+    return {id:it.id, kind:it.kind, rot:it.rot, mx:c.x, my:c.y, x:r.left+s.x/d, y:r.top+s.y/d, gewaehlt:TS.sel.has(it.id), wand:P.map(zurWand).sort((a,b)=>a-b)};
+  });
+});
+// Mit gedrückter Maustaste von a nach b, in Schritten wie eine Hand.
+async function ziehe(page, a, b, n=10){
+  await page.mouse.move(a.x, a.y); await sleep(40); await page.mouse.down();
+  for(let i=1;i<=n;i++){ await page.mouse.move(a.x+(b.x-a.x)*i/n, a.y+(b.y-a.y)*i/n); await sleep(15); }
+  await page.mouse.up(); await sleep(300);
+}
+
+// ---------- Hilfen für den Küchenplaner ----------
+// Küchenteile, wie sie im Raum stehen, dazu das gewählte Teil und die Zahl der Rückgängig-Schritte.
+const kueche=page=>page.evaluate(()=>({sel:kitchenUiState().sel, undo:undoStack.length,
+  teile:((M.kitchen && M.kitchen.items)||[]).map(i=>({id:i.id, kind:i.kind, dev:i.dev||'', wand:i.a ? i.a+i.b : '', x:Math.round(i.x), y:Math.round(i.y||0), w:i.w, rot:i.rot||0}))}));
+const teilNr=async (page, id)=>(await kueche(page)).teile.find(t=>t.id===id);
+// Mitte eines Teils auf dem Bildschirm; für Wandteile die Richtung der Wand im Bild (u) und
+// die Pfeiltaste, die das Teil in dieser Richtung schiebt (plus) bzw. zurück (minus).
+const teilLage=(page, id)=>page.evaluate(id=>{
+  const K=M.kitchen, it=K.items.find(i=>i.id===id); if(!it) return null;
+  const E=KITCHEN.makeEnv(M.fit.pts, M.walls, M.openings, M.hmeas, M.water, K.frame), g=KITCHEN.geom(E, K, it); if(!g) return null;
+  const r=cv.getBoundingClientRect(), d=DPR(), s=toScr(g.c), o={x:r.left+s.x/d, y:r.top+s.y/d};
+  if(it.a){ const W=KITCHEN.wallFrame(E, it.a, it.b), a=toScr(W.A), b=toScr(W.B), l=Math.hypot(b.x-a.x, b.y-a.y), u={x:(b.x-a.x)/l, y:(b.y-a.y)/l}, quer=Math.abs(u.x)>=Math.abs(u.y);
+    Object.assign(o, {u, plus:quer ? (u.x>0 ? 'ArrowRight' : 'ArrowLeft') : (u.y>0 ? 'ArrowDown' : 'ArrowUp'), minus:quer ? (u.x>0 ? 'ArrowLeft' : 'ArrowRight') : (u.y>0 ? 'ArrowUp' : 'ArrowDown')}); }
+  return o;
+}, id);
+async function waehleTeil(page, id){ const q=await teilLage(page, id); await page.mouse.move(q.x, q.y); await sleep(60); await page.mouse.click(q.x, q.y); await sleep(300); return q; }
+async function ausLeiste(page, name){ await page.click(`#kPalette button[title="${name}"]`); await sleep(350); const k=await kueche(page); return k.teile[k.teile.length-1]; }
+// Welcher Anteil eines Elements auf dem Bildschirm nicht die häufigste Farbe (den Grund) zeigt
+// (Bildschirmfoto, grob gerastert): eine leere Fläche hat 0.
+async function bemalt(page, sel){
+  const png=(await page.locator(sel).screenshot()).toString('base64');
+  return page.evaluate(async b=>{ const im=new Image(); im.src='data:image/png;base64,'+b; await im.decode();
+    const c=document.createElement('canvas'); c.width=im.width; c.height=im.height; const x=c.getContext('2d'); x.drawImage(im, 0, 0);
+    const d=x.getImageData(0, 0, c.width, c.height).data, N=new Map(); let n=0;
+    for(let i=0;i<d.length;i+=28){ const f=(d[i]>>3)<<10 | (d[i+1]>>3)<<5 | d[i+2]>>3; N.set(f, (N.get(f)||0)+1); n++; }
+    return n ? 1-Math.max(...N.values())/n : 0; }, png);
+}
+// Bildschirmfoto eines kleinen Flecks um einen Punkt, und der Anteil der Bildpunkte, in denen
+// sich zwei gleich große Fotos deutlich unterscheiden (eine Auswahl-Tönung allein zählt nicht).
+const fleck=(page, q, r=8)=>page.screenshot({clip:{x:Math.round(q.x)-r, y:Math.round(q.y)-r, width:2*r, height:2*r}});
+async function unterschied(page, a, b){
+  return page.evaluate(async B=>{
+    const lies=async s=>{ const im=new Image(); im.src='data:image/png;base64,'+s; await im.decode();
+      const c=document.createElement('canvas'); c.width=im.width; c.height=im.height; const x=c.getContext('2d'); x.drawImage(im, 0, 0); return x.getImageData(0, 0, c.width, c.height).data; };
+    const P=await lies(B[0]), Q=await lies(B[1]); if(P.length!==Q.length) return -1; let d=0;
+    for(let i=0;i<P.length;i+=4) if(Math.abs(P[i]-Q[i])+Math.abs(P[i+1]-Q[i+1])+Math.abs(P[i+2]-Q[i+2])>60) d++;
+    return P.length ? d/(P.length/4) : 0; }, [a.toString('base64'), b.toString('base64')]);
 }
 
 // ---------- Abläufe ----------
@@ -237,6 +293,256 @@ const ABLAEUFE={
     const r=await p.evaluate(()=>{ const r=selfChecks(); return {n:r.out.length, ok:r.ok, rot:r.out.filter(z=>z.startsWith('FAIL')).slice(0,3)}; });
     pruef(`Selbstchecks im Browser (${r.n})`, r.ok && r.n>1000, r.rot.join(' | '));
     pruef('geladen sind 13 Skripte, keine Karte', await p.evaluate(()=>document.querySelectorAll('script[src]').length===13 && !globalThis.RAUM_UNVOLLSTAENDIG));
+    await f.browser.close();
+  },
+  // Fliesenplan: setzen, schieben, drehen, vervielfältigen, einmessen, Stückliste; die Fliesen überstehen Menü, Neuladen und Startbildschirm.
+  async fliesenplan(){
+    const f=await fenster(); const p=f.page; await gemessenerRaum(f); await p.keyboard.press('Escape');
+    const MOD=process.platform==='darwin' ? 'Meta' : 'Control';
+    const zahl=t=>parseFloat(String(t).replace(',', '.'));
+    const weit=(a,b)=>Math.hypot(a.x-b.x, a.y-b.y), weitMm=(a,b)=>Math.hypot(a.mx-b.mx, a.my-b.my);
+    const eine=async id=>(await fliesenLage(p)).find(t=>t.id===id);
+    const txt=id=>p.evaluate(id=>document.getElementById(id).textContent, id);
+    // Aus der Ausgabe in den Fliesenplan
+    await p.keyboard.press('4'); await sleep(400);
+    pruef('Ausgabe (Taste 4) nennt den Fliesenplan „noch nicht begonnen“', await p.evaluate(()=>OUT.on && !document.getElementById('outTiles').disabled) && await txt('outTilesNote')==='noch nicht begonnen', await txt('outTilesNote'));
+    await p.click('#outTiles'); await sleep(500);
+    const leiste=await p.evaluate(()=>[...document.querySelectorAll('#tPalette button')].filter(b=>b.getBoundingClientRect().width>0).map(b=>b.getAttribute('aria-label')));
+    pruef('„Öffnen“ führt in den Fliesenplan, die Leiste bietet Chevron L, R und das Paar', await p.evaluate(()=>TOOL==='fliesen' && !OUT.on && document.title.includes('Fliesenplan') && !document.getElementById('tilesec').hidden) && leiste.join('|')==='Chevron L legen|Chevron R legen|Chevron als Paar legen', leiste.join('|'));
+    // Setzen: Klick legt in die Bildmitte, Ziehen dorthin, wo man loslässt
+    await p.locator('#tPalette button').nth(0).click(); await sleep(300);
+    let F=await fliesenLage(p);
+    const mitte=await p.evaluate(()=>{ const r=cv.getBoundingClientRect(); return {x:r.left+r.width/2, y:r.top+r.height/2}; });
+    pruef('Klick in der Leiste legt eine Fliese nahe der Bildmitte, an die Wand gerastet (eine Ecke liegt auf der Wand), sie ist gewählt', F.length===1 && F[0].kind==='L' && F[0].gewaehlt && weit(F[0], mitte)<40 && F[0].wand[0]<.01 && await txt('tSelInfo')==='1 Fliese ausgewählt', JSON.stringify(F));
+    const erste=F[0];
+    const knopf=await p.locator('#tPalette button').nth(1).boundingBox();
+    const ort1=await lage(p, 'A', 'D');
+    await ziehe(p, {x:knopf.x+knopf.width/2, y:knopf.y+knopf.height/2}, ort1);
+    F=await fliesenLage(p);
+    const zweite=F.find(t=>t.id!==erste.id);
+    pruef('aus der Leiste gezogen liegt die zweite Fliese, wo sie losgelassen wurde', F.length===2 && !!zweite && zweite.kind==='R' && zweite.gewaehlt && weit(zweite, ort1)<6, JSON.stringify(zweite));
+    const id2=zweite ? zweite.id : -1;
+    // Verschieben mit Maus und Pfeiltasten
+    const ort2=await lage(p, 'F', 'D');
+    await ziehe(p, zweite, ort2);
+    let z=await eine(id2);
+    pruef('mit der Maus gezogen liegt sie am neuen Ort, die erste blieb liegen', weit(z, ort2)<6 && weitMm(z, zweite)>500 && weitMm(await eine(erste.id), erste)<.01, `${Math.round(weitMm(z, zweite))} mm`);
+    let vor=z; await p.keyboard.press('ArrowRight'); await sleep(150); z=await eine(id2);
+    pruef('Pfeil rechts schiebt die gewählte Fliese 1 mm nach rechts', Math.abs(weitMm(z, vor)-1)<.01 && z.x>vor.x && Math.abs(z.y-vor.y)<.01, weitMm(z, vor).toFixed(3)+' mm');
+    vor=z; await p.keyboard.press('Shift+ArrowDown'); await sleep(150); z=await eine(id2);
+    pruef('Umschalt+Pfeil unten schiebt 10 mm nach unten', Math.abs(weitMm(z, vor)-10)<.01 && z.y>vor.y && Math.abs(z.x-vor.x)<.01, weitMm(z, vor).toFixed(3)+' mm');
+    // Drehen, Duplizieren, Löschen, Rückgängig, Wiederherstellen
+    vor=z; await p.keyboard.press('e'); await sleep(150); z=await eine(id2);
+    pruef('E dreht die Fliese um 15° um ihre Mitte', Math.abs(((z.rot-vor.rot)%360+360)%360-15)<1e-6 && weitMm(z, vor)<.01, `${vor.rot} → ${z.rot}`);
+    await p.keyboard.press(MOD+'+d'); await sleep(250);
+    F=await fliesenLage(p);
+    const kopie0=F.find(t=>t.id!==erste.id && t.id!==id2);
+    // Eine Reihe weiter: quer zur Längskante um Breite + Fuge, längs so weit, dass die Schrägkanten fluchten.
+    const reihe=await p.evaluate(()=>{ const s=M.tiles.spec, d=s.set[0], h=d.w+s.joint; return {quer:h, laengs:h/Math.tan(d.angle*Math.PI/180)}; });
+    const w=z.rot*Math.PI/180, dv={x:kopie0.mx-z.mx, y:kopie0.my-z.my};
+    const quer=Math.abs(dv.y*Math.cos(w)-dv.x*Math.sin(w)), laengs=Math.abs(dv.x*Math.cos(w)+dv.y*Math.sin(w));
+    pruef('Duplizieren legt eine gleiche Fliese eine Reihe weiter (quer um Breite + Fuge) und wählt sie', F.length===3 && kopie0.kind===z.kind && kopie0.rot===z.rot && kopie0.gewaehlt && !F.find(t=>t.id===id2).gewaehlt && Math.abs(quer-reihe.quer)<.01 && Math.abs(laengs-reihe.laengs)<.01 && /^Duplikat/.test(await txt('hint')), `quer ${quer.toFixed(2)} von ${reihe.quer}, längs ${laengs.toFixed(2)} mm`);
+    // Ein Schritt zwischen Duplizieren und Löschen: sonst sähe „noch einmal rückgängig“ aus wie „wiederherstellen“.
+    await p.keyboard.press('ArrowUp'); await sleep(150);
+    const kopie=await eine(kopie0.id);
+    pruef('Pfeil hoch schiebt nur die Kopie 1 mm nach oben', Math.abs(weitMm(kopie, kopie0)-1)<.01 && kopie.y<kopie0.y && Math.abs(kopie.x-kopie0.x)<.01 && weitMm(await eine(id2), z)<1e-9, weitMm(kopie, kopie0).toFixed(3)+' mm');
+    await p.keyboard.press('Delete'); await sleep(250);
+    F=await fliesenLage(p);
+    pruef('Entf löscht die gewählte Fliese, die Auswahl ist leer', F.length===2 && !F.some(t=>t.id===kopie.id) && await p.evaluate(()=>document.getElementById('tSelBox').hidden));
+    await p.keyboard.press(MOD+'+z'); await sleep(300);
+    F=await fliesenLage(p);
+    const wieder=F.find(t=>t.id===kopie.id);
+    pruef('Rückgängig holt die gelöschte Fliese an ihren Platz zurück', F.length===3 && !!wieder && weitMm(wieder, kopie)<1e-6);
+    await p.keyboard.press(MOD+'+Shift+z'); await sleep(300);
+    F=await fliesenLage(p);
+    pruef('Wiederherstellen löscht sie wieder', F.length===2 && !F.some(t=>t.id===kopie.id));
+    // Spezifikation: Fuge
+    await p.click('#tSpecBox > summary'); await sleep(250);
+    await p.click('#tJ'); await p.keyboard.press(MOD+'+a'); await p.keyboard.type('3'); await p.keyboard.press('Tab'); await sleep(250);
+    pruef('Fuge 3 in der Spezifikation steht in der Kopfzeile des Fliesensets', await p.evaluate(()=>M.tiles.spec.joint===3) && /Fuge 3 mm$/.test(await txt('tSpecSum')), await txt('tSpecSum'));
+    // Fliese einmessen
+    await p.click('#tMeasure'); await sleep(300);
+    pruef('„Fliese einmessen…“ öffnet den Dialog, „Maße übernehmen“ wartet auf Strecken', await p.evaluate(()=>document.getElementById('measDlg').open && document.activeElement.dataset.k==='AB' && document.getElementById('mApply').disabled) && await txt('mTitle')==='Chevron einmessen', await txt('mTitle'));
+    for(const [k,v] of Object.entries({AB:'600,2 599,9 600,1', DC:'600,0', AD:'156,8', BC:'156,5', AC:'711,0', BD:'513,4', W:'120,1 119,9'})){
+      await p.click(`#mFields input[data-k="${k}"]`); await p.keyboard.type(v); await sleep(60);
+    }
+    await sleep(250);
+    const erg=await p.evaluate(()=>({
+      werte:Object.fromEntries([...document.querySelectorAll('#mVals .mvals > div')].map(d=>[d.querySelector('span').textContent, d.querySelector('b').textContent])),
+      form:document.getElementById('mReal').textContent,
+      ab:[...document.querySelectorAll('#mTable tbody tr')].map(r=>[...r.cells].map(c=>c.textContent.trim())).find(r=>r[0]==='AB')||[],
+      frei:!document.getElementById('mApply').disabled}));
+    pruef('die Messreihe ergibt Breite 120,0 mm, Länge 600,0 mm und Winkel 49,97°', erg.werte.Breite==='120,0 mm' && erg.werte['Länge']==='600,0 mm' && erg.werte.Winkel==='49,97°', JSON.stringify(erg.werte));
+    pruef('die drei Messungen von AB sind gemittelt, die Strecken passen zusammen', /^600,1\s*3×$/.test(erg.ab[1]||'') && /Strecken passen zusammen/.test(erg.form) && erg.frei, erg.ab.join(' '));
+    await p.click('#mApply'); await sleep(350);
+    const feld=await p.evaluate(()=>({zu:!document.getElementById('measDlg').open, b:document.getElementById('tW').value, l:document.getElementById('tL').value, a:document.getElementById('tA').value}));
+    pruef('„Maße übernehmen“ schließt den Dialog und trägt 120 × 600 mm und den Winkel 49,97° ins Fliesenset ein', feld.zu && zahl(feld.b)===120 && zahl(feld.l)===600 && feld.a==='49,97' && /eingemessene Maße übernommen/.test(await txt('hint')), `${feld.b} × ${feld.l}, ${feld.a}°`);
+    // Stückliste und Einkauf
+    const einkauf=(await txt('tKey')).replace(/\s+/g, ' ');
+    pruef('Einkauf nennt 0,14 m² in 2 Fliesen, 1 L und 1 R, im Raum von 9,00 m²', /Einkauf\s*0,14 m² · 2 Fliesen/.test(einkauf) && /1 L, 1 R, ohne Recycling/.test(einkauf) && /Belegt\s*0,14 von 9,00 m²/.test(einkauf), einkauf.slice(0, 90));
+    await p.click('#tDetails > summary'); await sleep(250);
+    const liste=await p.evaluate(()=>({hoch:document.getElementById('tStats').getBoundingClientRect().height, ganz:([...document.querySelectorAll('#tStats tr')].map(r=>[...r.cells].map(c=>c.textContent.trim())).find(r=>r[0]==='ganz')||[]).join(' ')}));
+    pruef('„Stückliste im Einzelnen“ klappt auf und zählt ganz: 1 L, 1 R, 2 zusammen', liste.hoch>0 && liste.ganz==='ganz 1 1 2', liste.ganz);
+    // Offenes Menü: die Pfeile gehören dem Menü
+    const e1=await eine(erste.id);
+    await p.mouse.move(e1.x, e1.y); await sleep(40); await p.mouse.click(e1.x, e1.y); await sleep(250);
+    await p.click('#roommenuBtn'); await sleep(250);
+    const punkt=()=>p.evaluate(()=>document.activeElement.closest('#roommenu') ? document.activeElement.id : '');
+    const punkt1=await punkt();
+    for(const t of ['ArrowRight','ArrowLeft','ArrowLeft','ArrowDown']){ await p.keyboard.press(t); await sleep(80); }
+    const punkt2=await punkt(); let e2=await eine(erste.id);
+    pruef('im offenen Menü wandern die Pfeile durch die Punkte, die gewählte Fliese bleibt liegen', await p.evaluate(()=>!document.getElementById('roommenu').hidden && document.getElementById('toAufmass').getBoundingClientRect().width>0) && e2.gewaehlt && weitMm(e2, e1)<1e-9 && punkt1!=='' && punkt2!=='' && punkt2!==punkt1, `${punkt1} → ${punkt2}, ${weitMm(e2, e1)} mm`);
+    await p.keyboard.press('Escape'); await sleep(200); await p.keyboard.press('ArrowRight'); await sleep(150);
+    e2=await eine(erste.id);
+    pruef('nach Esc ist das Menü zu, und der Pfeil schiebt die Fliese wieder 1 mm', await p.evaluate(()=>document.getElementById('roommenu').hidden) && Math.abs(weitMm(e2, e1)-1)<.01, weitMm(e2, e1).toFixed(3)+' mm');
+    // Zurück zum Raumaufmaß, neu laden, Startbildschirm
+    await p.click('#roommenuBtn'); await sleep(250); await p.click('#toAufmass'); await sleep(500);
+    pruef('Menü „Zum Raumaufmaß“ führt zurück zu den Maßen', await p.evaluate(()=>TOOL==='aufmass' && M.mode==='measure' && document.title.includes('Raumaufmaß') && document.getElementById('tilesec').hidden && document.getElementById('toolname').hidden) && /^Geprüft ± /.test(await stand(p)), await stand(p));
+    const bild=()=>p.evaluate(()=>JSON.stringify(M.tiles)); const gelegt=await bild();
+    await p.reload(); await sleep(1000);
+    pruef('nach dem Neuladen liegen beide Fliesen unverändert im Raum', await p.evaluate(()=>M.tiles.items.length===2) && await bild()===gelegt);
+    await p.keyboard.press('Escape'); await p.keyboard.press('4'); await sleep(400);
+    pruef('die Ausgabe nennt jetzt „2 Fliesen verlegt“', await p.evaluate(()=>OUT.on) && await txt('outTilesNote')==='2 Fliesen verlegt', await txt('outTilesNote'));
+    await p.keyboard.press('Escape'); await sleep(200);
+    await p.click('#backHome'); await sleep(900);
+    const start=await p.evaluate(()=>[...document.querySelectorAll('.room [data-werk]')].filter(b=>b.getBoundingClientRect().width>0).map(b=>b.textContent));
+    pruef('der Startbildschirm zeigt am Raum den Knopf „Fliesenplan“', /raeume\.html/.test(p.url()) && start.join('|')==='Fliesenplan', start.join('|'));
+    await p.click('.room [data-werk=fliesen]'); await sleep(1200);
+    pruef('der Knopf öffnet den Fliesenplan mit beiden Fliesen', /raumaufmass\.html#fliesen$/.test(p.url()) && await p.evaluate(()=>TOOL==='fliesen' && document.title.includes('Fliesenplan')) && (await fliesenLage(p)).length===2 && await bild()===gelegt);
+    await p.reload(); await sleep(1000);
+    pruef('Neuladen auf #fliesen bleibt im Fliesenplan bei beiden Fliesen', /#fliesen$/.test(p.url()) && await p.evaluate(()=>TOOL==='fliesen' && document.title.includes('Fliesenplan') && !document.getElementById('tilesec').hidden) && (await fliesenLage(p)).length===2 && await bild()===gelegt);
+    pruef('keine Fehler in der Konsole', f.stoer.length===0, f.stoer.join(' | '));
+    await f.browser.close();
+  },
+
+  // Küchenplaner: gemessener Raum mit Höhe, Tür und Wasser; Teile setzen, schieben, drehen,
+  // kopieren, löschen; Panel, Schalter, Menü; zurück ins Aufmaß, neu laden, Startbildschirm.
+  async kuechenplaner(){
+    const f=await fenster(); const p=f.page; await gemessenerRaum(f); await p.keyboard.press('Escape');
+    const MOD=process.platform==='darwin' ? 'Meta' : 'Control';
+    // Schritt Wände: Höhe an der linken Ecke, Tür, an der nächsten Wand der Wasseranschluss
+    await p.keyboard.press('3'); await sleep(400);
+    await p.click('#wHeights button[data-h]'); await sleep(250); await p.keyboard.type('2,5'); await p.keyboard.press('Enter'); await sleep(300);
+    await p.click('#wAdd [data-add=door]'); await sleep(250); await p.keyboard.press('Escape'); await sleep(150);
+    await p.keyboard.press('ArrowRight'); await sleep(250); await p.click('#wWater'); await sleep(250);
+    const w=await p.evaluate(()=>({mode:M.mode, h:M.hmeas.map(m=>m.d), tuer:M.openings.map(o=>o.kind+o.a+o.b), wasser:M.water.map(x=>x.a+x.b)}));
+    pruef('Schritt Wände: Höhe 2,500 m, Tür und Wasseranschluss an zwei Wänden', w.mode==='wall' && w.h.join()==='2500' && w.tuer.length===1 && /^door/.test(w.tuer[0]) && w.wasser.length===1 && w.wasser[0]!==w.tuer[0].slice(4), JSON.stringify(w));
+    // Ausgabe, Küchenplaner
+    await p.keyboard.press('4'); await sleep(500); await p.click('#outKitchen'); await sleep(700);
+    pruef('„Öffnen“ in der Ausgabe führt in den Küchenplaner mit Leiste', await p.evaluate(()=>TOOL==='kueche' && M.mode==='kitchen' && location.hash==='#kueche' && document.title.includes('Küchenplaner') && [...document.querySelectorAll('#kPalette button')].filter(b=>b.getBoundingClientRect().width>0).length>=10));
+    // Setzen
+    const u0=(await kueche(p)).undo;
+    const schrank=await ausLeiste(p, 'Schrank'); let k=await kueche(p);
+    pruef('Klick auf „Schrank“ stellt einen Unterschrank an eine Wand und wählt ihn', k.teile.length===1 && schrank.kind==='base' && schrank.wand!=='' && k.sel===schrank.id && k.undo===u0+1 && /Unterschrank/.test(await p.evaluate(()=>document.getElementById('kSelBox').hidden ? '' : document.getElementById('kSelInfo').textContent)), JSON.stringify(k));
+    const spuele=await ausLeiste(p, 'Spüle');
+    pruef('„Spüle“ steht daneben an derselben Wand', spuele.dev==='sink' && spuele.wand===schrank.wand && Math.abs(spuele.x-schrank.x)===600, JSON.stringify(spuele));
+    let hoch=await ausLeiste(p, 'Schrank'); await p.click('#kKind [data-kind="tall"]'); await sleep(300); hoch=await teilNr(p, hoch.id);
+    pruef('Bauart „hoch“ macht aus dem dritten Schrank einen Hochschrank', hoch.kind==='tall' && /Hochschrank/.test(await p.evaluate(()=>document.getElementById('kSelInfo').textContent)), JSON.stringify(hoch));
+    // Ziehen an der Wand
+    let q=await teilLage(p, hoch.id); k=await kueche(p); const b0=await fleck(p, q);
+    await p.mouse.move(q.x, q.y); await sleep(80); await p.mouse.down(); await p.mouse.move(q.x+8*q.u.x, q.y+8*q.u.y, {steps:3}); await p.mouse.move(q.x+90*q.u.x, q.y+90*q.u.y, {steps:10}); await sleep(120); await p.mouse.up(); await sleep(350);
+    let h2=await teilNr(p, hoch.id), k2=await kueche(p); const leer=await unterschied(p, b0, await fleck(p, q));
+    pruef('Ziehen schiebt den Hochschrank an seiner Wand entlang, im Plan ist sein alter Platz frei, ein Rückgängig-Schritt', h2.wand===hoch.wand && h2.x>hoch.x+700 && leer>=0.5 && k2.undo===k.undo+1 && k2.sel===hoch.id, `x ${hoch.x} → ${h2.x}, Schritte ${k.undo} → ${k2.undo}, alter Platz zu ${Math.round(leer*100)} % anders`);
+    // Pfeiltasten
+    q=await waehleTeil(p, hoch.id);
+    await p.keyboard.press(q.plus); await sleep(200); let h3=await teilNr(p, hoch.id);
+    await p.keyboard.press('Shift+'+q.minus); await sleep(200); let h4=await teilNr(p, hoch.id);
+    pruef('Pfeiltaste schiebt 1 cm, mit ⇧ 10 cm zurück', h3.x===h2.x+10 && h4.x===h3.x-100, `${h2.x} → ${h3.x} → ${h4.x}`);
+    k=await kueche(p);
+    for(let i=0;i<6;i++){ await p.keyboard.down(q.plus); await sleep(40); } await p.keyboard.up(q.plus); await sleep(600);
+    let h5=await teilNr(p, hoch.id); k2=await kueche(p);
+    await p.keyboard.press(MOD+'+z'); await sleep(350); let h6=await teilNr(p, hoch.id);
+    pruef('gehaltene Pfeiltaste schiebt weiter und ist ein einziger Rückgängig-Schritt', h5.x===h4.x+60 && k2.undo===k.undo+1 && h6.x===h4.x, `${h4.x} → ${h5.x} → ⌘Z ${h6.x}, Schritte ${k.undo} → ${k2.undo}`);
+    // Drehen (frei stehende Insel)
+    const insel=await ausLeiste(p, 'Insel');
+    await p.keyboard.press('e'); await sleep(250); const r1=(await teilNr(p, insel.id)).rot;
+    await p.click('#kR90'); await sleep(300); const r2=(await teilNr(p, insel.id)).rot;
+    pruef('Insel: E dreht um 15°, „↻ 90°“ um weitere 90°', insel.kind==='island' && insel.wand==='' && r1===15 && r2===105, `${r1}°, ${r2}°`);
+    // Duplizieren, Löschen, Rückgängig, Wiederherstellen
+    await waehleTeil(p, schrank.id); k=await kueche(p);
+    await p.keyboard.press(MOD+'+d'); await sleep(350); k2=await kueche(p); const kopie=k2.teile[k2.teile.length-1];
+    pruef('⌘D stellt eine Kopie des Unterschranks an dieselbe Wand und wählt sie', k.sel===schrank.id && k2.teile.length===k.teile.length+1 && kopie.kind==='base' && kopie.w===schrank.w && kopie.wand===schrank.wand && kopie.x!==schrank.x && k2.sel===kopie.id, JSON.stringify(kopie));
+    const qk=await teilLage(p, kopie.id);
+    await p.keyboard.press('Delete'); await sleep(300); let k3=await kueche(p); const b3=await fleck(p, qk);
+    pruef('Entf löscht das gewählte Teil und sagt, wie es zurückkommt', k3.teile.length===k.teile.length && !k3.teile.some(t=>t.id===kopie.id) && /Unterschrank 60 entfernt · (⌘|Strg\+)Z holt es zurück/.test(await p.evaluate(()=>document.getElementById('hint').textContent)), await p.evaluate(()=>document.getElementById('hint').textContent));
+    await p.keyboard.press(MOD+'+z'); await sleep(350); const k4=await kueche(p), b4=await fleck(p, qk);
+    await p.keyboard.press('Shift+'+MOD+'+z'); await sleep(350); const k5=await kueche(p), b5=await fleck(p, qk);
+    const da4=await unterschied(p, b3, b4), fort5=await unterschied(p, b3, b5);
+    pruef('⌘Z holt die Kopie zurück, ⇧⌘Z nimmt sie wieder, der Plan zeigt beides', k4.teile.some(t=>t.id===kopie.id) && k4.teile.length===k2.teile.length && !k5.teile.some(t=>t.id===kopie.id) && da4>=0.5 && fort5<=0.02, `${k3.teile.length} → ${k4.teile.length} → ${k5.teile.length}, Platz der Kopie zu ${Math.round(da4*100)} % anders, danach zu ${Math.round(fort5*100)} %`);
+    // Breite im Panel
+    await waehleTeil(p, hoch.id); await sleep(300);
+    const d0=await p.locator('#cv3d').screenshot(); await sleep(200); const d1=await p.locator('#cv3d').screenshot();
+    const breite=p.locator('#kW'); await breite.fill('800'); await breite.press('Enter'); await sleep(600);
+    const ruhe=await unterschied(p, d0, d1), in3d=await unterschied(p, d1, await p.locator('#cv3d').screenshot());
+    pruef('Breite „800“ im Panel macht den Hochschrank 80 cm breit, auch in 3D', (await teilNr(p, hoch.id)).w===800 && await p.evaluate(()=>document.getElementById('kSelInfo').textContent)==='Hochschrank 80' && in3d>=0.002 && in3d>ruhe, `3D zu ${(in3d*100).toFixed(2)} % anders, in Ruhe ${(ruhe*100).toFixed(2)} %`);
+    // Küchenmaße
+    await p.click('#kSpecBox summary'); await sleep(300);
+    const km=await p.evaluate(()=>{ const P=document.getElementById('panel').getBoundingClientRect(), I=[...document.querySelectorAll('#kSpecGrid input')].map(i=>i.getBoundingClientRect());
+      return {offen:document.getElementById('kSpecBox').open, n:I.length, drin:I.every(r=>r.width>20 && r.left>=P.left && r.right<=P.right), sum:document.getElementById('kSpecSum').textContent}; });
+    pruef('Küchenmaße klappen auf, alle neun Felder bleiben im Panel', km.offen && km.n===9 && km.drin, JSON.stringify(km));
+    const sockel=p.locator('#kS_plinth'); await sockel.fill('120'); await sockel.press('Tab'); await sleep(350);
+    const km2=await p.evaluate(()=>({sockel:M.kitchen.spec.plinth, offen:document.getElementById('kSpecBox').open, sum:document.getElementById('kSpecSum').textContent}));
+    pruef('Sockel „120“ senkt die Arbeitshöhe in der Zusammenfassung um 3 cm', km2.sockel===120 && km2.offen && km.sum.includes('Arbeitshöhe 910') && km2.sum.includes('Arbeitshöhe 880'), km.sum+' → '+km2.sum);
+    // 3D aus und an
+    await p.click('#k3dBtn'); await sleep(400);
+    const aus=await p.evaluate(()=>({b:document.getElementById('k3dBtn').getAttribute('aria-pressed'), w:document.getElementById('cv3d').getBoundingClientRect().width}));
+    await p.keyboard.press('v'); await sleep(900);
+    const an=await p.evaluate(()=>({b:document.getElementById('k3dBtn').getAttribute('aria-pressed'), w:document.getElementById('cv3d').getBoundingClientRect().width, h:document.getElementById('cv3d').getBoundingClientRect().height, msg:document.getElementById('k3dMsg').hidden}));
+    const nf=await bemalt(p, '#cv3d');
+    pruef('Knopf „3D“ blendet die Ansicht aus, Taste V wieder ein', aus.b==='false' && aus.w===0 && an.b==='true' && an.w>300 && an.h>300, JSON.stringify([aus, an]));
+    pruef('die 3D-Fläche ist gezeichnet, nicht leer', an.msg && nf>=0.1, Math.round(nf*100)+' % bemalt');
+    // Wege, Analyse, Stückliste, Prüfung
+    const wege=()=>p.evaluate(()=>({b:document.getElementById('kWayBtn').getAttribute('aria-pressed'), box:document.getElementById('kWayBox').getBoundingClientRect().height>0, n:document.querySelectorAll('#kWays [data-flow]').length, sum:document.getElementById('kWaySum').textContent, txt:document.getElementById('kWays').innerText.replace(/\n+/g,' | ').slice(0,200)}));
+    const w0=await wege(); await p.click('#kWayBtn'); await sleep(400); const w1=await wege(), pl1=await p.locator('#cv').screenshot();
+    await p.keyboard.press('w'); await sleep(400); const w2=await wege(), imPlan=await unterschied(p, pl1, await p.locator('#cv').screenshot());
+    await p.click('#kAnaBtn'); await sleep(900);
+    const ana=await p.evaluate(()=>{ const a=document.getElementById('kAna'), r=a.getBoundingClientRect(); return {b:document.getElementById('kAnaBtn').getAttribute('aria-pressed'), w:r.width, h:r.height, txt:a.innerText.replace(/\n+/g,' | ').slice(0,300), knoepfe:a.querySelectorAll('button').length, c3:document.getElementById('cv3d').getBoundingClientRect().width}; });
+    await p.keyboard.press('a'); await sleep(600);
+    const ana2=await p.evaluate(()=>({b:document.getElementById('kAnaBtn').getAttribute('aria-pressed'), w:document.getElementById('kAna').getBoundingClientRect().width, c3:document.getElementById('cv3d').getBoundingClientRect().width}));
+    await p.click('#kStockBox summary'); await sleep(300);
+    const st=await p.evaluate(()=>({offen:document.getElementById('kStockBox').open, zeilen:document.querySelectorAll('#kStock tr').length, txt:document.getElementById('kStock').innerText.replace(/\s*\n+\s*/g,' | ').slice(0,400)}));
+    const pr=await p.evaluate(()=>({n:document.querySelectorAll('#kChecks .kfind').length, cnt:document.getElementById('kCheckCount').textContent, html:document.getElementById('kChecks').innerHTML.slice(0,600), txt:document.getElementById('kChecks').innerText.replace(/\s*\n+\s*/g,' | ').slice(0,400)}));
+    pruef('„Wege“ schaltet die Wege im Plan und die Übersicht im Panel aus, Taste W wieder ein', w0.b==='true' && w0.box && w1.b==='false' && !w1.box && w2.b==='true' && w2.box && w2.n>=5 && /Abläufen/.test(w2.sum) && imPlan>=0.0001, JSON.stringify([w1.box, w2.box, w2.n, w2.sum])+`, Plan zu ${(imPlan*100).toFixed(2)} % anders`);
+    pruef('„Analyse“ zeigt die Wege-Analyse statt 3D, Taste A holt 3D zurück', ana.b==='true' && ana.w>300 && ana.c3===0 && /Abläufe im Vergleich/.test(ana.txt) && ana.knoepfe>=3 && ana2.b==='false' && ana2.w===0 && ana2.c3>300, JSON.stringify([ana.w, ana.c3, ana.knoepfe, ana2]));
+    pruef('Stückliste nennt Spüle, Hochschrank 80 cm, Insel und die Arbeitsplatte', st.offen && /Spüle 60 cm/.test(st.txt) && /Hochschrank 80 cm/.test(st.txt) && /Insel 180 cm/.test(st.txt) && /Arbeitsplatte/.test(st.txt), st.txt);
+    pruef('Prüfung meldet, was nicht geht, und nennt die Teile', pr.n>=1 && pr.cnt!=='' && /Insel 180|Spüle 60/.test(pr.txt), pr.cnt+': '+pr.txt.slice(0, 120));
+    const befund=p.locator('#kChecks .kfind.bad:not([aria-current])').first(), bt=await befund.textContent(); await befund.click(); await sleep(300);
+    const bf=await p.evaluate(t=>{ const b=[...document.querySelectorAll('#kChecks .kfind')].find(b=>b.textContent===t); return {an:b ? b.getAttribute('aria-current') : '', sel:document.getElementById('kSelBox').hidden ? '' : document.getElementById('kSelInfo').textContent}; }, bt);
+    pruef('Klick auf einen Befund wählt das Teil, das er nennt', bf.sel!=='' && bt.includes(bf.sel) && bf.an==='true', bt+' → '+bf.sel);
+    // Offenes Menü: die Pfeile gehören dem Menü, nicht dem gewählten Teil
+    await waehleTeil(p, insel.id); k=await kueche(p); const i0=await teilNr(p, insel.id);
+    await p.click('#roommenuBtn'); await sleep(250);
+    for(const t of ['ArrowRight', 'ArrowLeft', 'ArrowLeft', 'ArrowDown']){ await p.keyboard.press(t); await sleep(120); }
+    const mn=await p.evaluate(()=>({offen:!document.getElementById('roommenu').hidden, imMenue:!!document.activeElement.closest('#roommenu'), wo:document.activeElement.id||document.activeElement.textContent})); const i1=await teilNr(p, insel.id); k2=await kueche(p);
+    pruef('im offenen Menü bewegen die Pfeiltasten die gewählte Insel nicht', k.sel===insel.id && mn.offen && mn.imMenue && i1.x===i0.x && i1.y===i0.y && k2.undo===k.undo, JSON.stringify([mn, i0, i1]));
+    await p.click('#toAufmass'); await sleep(500);
+    pruef('„Zum Raumaufmaß“ im Menü führt zurück ins Aufmaß', await p.evaluate(()=>TOOL==='aufmass' && M.mode!=='kitchen' && document.getElementById('roommenu').hidden && document.getElementById('kitchensec').hidden), await p.evaluate(()=>TOOL+' '+M.mode+' '+location.hash));
+    // Ecke löschen und zurückholen
+    const vorher=await p.evaluate(()=>JSON.stringify(M.kitchen.items));
+    // Abstand der Insel zu drei Ecken, die bleiben (mm): gleich, solange sie im Raum steht, wo sie stand.
+    const inselOrt=()=>p.evaluate(()=>{ const K=M.kitchen, it=K.items.find(i=>i.kind==='island'), P=(M.fit && M.fit.pts)||M.pts, F=TILES.frameOf(P, null, K.frame); if(!it || !F) return null;
+      const w=TILES.toWorldF(F, {x:it.x, y:it.y}); return ['C','D','E'].map(id=>{ const q=P.find(p=>p.id===id); return Math.round(Math.hypot(q.x-w.x, q.y-w.y)); }); });
+    const o0=await inselOrt();
+    await p.keyboard.press('2'); await sleep(300);
+    const e=await lage(p, 'A'); await p.mouse.move(e.x+30, e.y-30); await sleep(60); await p.mouse.move(e.x, e.y, {steps:4}); await sleep(200);
+    await p.keyboard.press('Delete'); await sleep(600);
+    const weg=await p.evaluate(()=>({ecken:M.pts.length, teile:M.kitchen.items.length, stand:document.getElementById('statustxt').textContent})); weg.sagt=await meldung(p); const o1=await inselOrt();
+    await p.keyboard.press(MOD+'+z'); await sleep(600);
+    const da=await p.evaluate(()=>({ecken:M.pts.length, items:JSON.stringify(M.kitchen.items), stand:document.getElementById('statustxt').textContent}));
+    pruef('Entf über Ecke A löscht sie, der Raum ist offen, die vier Küchenteile bleiben, die Insel an ihrem Platz', weg.ecken===5 && /Ecke A gelöscht · (⌘|Strg\+)Z holt sie zurück/.test(weg.sagt) && /offen/.test(weg.stand) && weg.teile===4 && !!o0 && !!o1 && o0.every((d,i)=>Math.abs(d-o1[i])<=2), JSON.stringify(weg)+` Insel zu C, D, E: ${o0} → ${o1}`);
+    pruef('⌘Z holt die Ecke zurück, die Küchenteile stehen wie vorher', da.ecken===6 && da.items===vorher && /^Geprüft/.test(da.stand), da.stand+(da.items===vorher ? '' : ' '+da.items));
+    // Neu laden
+    await p.reload(); await sleep(1000);
+    const neu=await p.evaluate(()=>({tool:TOOL, items:JSON.stringify(M.kitchen.items), wasser:M.water.length, h:M.hmeas.length, hash:location.hash}));
+    pruef('nach dem Neuladen stehen dieselben Teile im Raum', neu.items===vorher && neu.wasser===1, neu.items.slice(0, 160));
+    // Startbildschirm
+    await p.click('#backHome'); await sleep(900);
+    const start=await p.evaluate(()=>[...document.querySelectorAll('.room [data-werk]')].map(b=>({werk:b.dataset.werk, text:b.textContent, breit:b.getBoundingClientRect().width>0})));
+    pruef('Startbildschirm zeigt am Raum den Knopf „Küche“', start.length===1 && start[0].werk==='kueche' && start[0].text==='Küche' && start[0].breit, JSON.stringify(start));
+    if(start.length){ await p.click('.room [data-werk=kueche]'); await sleep(1200); }
+    const wieder=await p.evaluate(()=>typeof TOOL==='undefined' ? {} : {tool:TOOL, hash:location.hash, items:JSON.stringify(M.kitchen.items), zeilen:document.querySelectorAll('#kChecks .kfind').length});
+    pruef('der Knopf „Küche“ öffnet den Küchenplaner mit den Teilen', wieder.tool==='kueche' && wieder.items===vorher && wieder.zeilen>=1, JSON.stringify([wieder.tool, wieder.hash, wieder.zeilen]));
+    pruef('keine Fehler in der Konsole', f.stoer.length===0, f.stoer.join(' | '));
     await f.browser.close();
   },
 };
