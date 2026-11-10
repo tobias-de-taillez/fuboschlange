@@ -1,6 +1,7 @@
 // Prueft fliese-einmessen.html gegen synthetische Fliesen mit bekannter
 // Wahrheit. Eine Abweichung hier liegt am Code, nicht am Massband.
-import {readFileSync, existsSync} from 'node:fs';
+import {readFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
 
 const read=f=>readFileSync(new URL('../'+f, import.meta.url),'utf8');
 const html=read('fliese-einmessen.html');
@@ -16,12 +17,15 @@ const out=[]; let ok=true;
 const chk=(name,cond,info='')=>{ ok=ok&&!!cond; out.push((cond?'ok   ':'ROT  ')+name+(info!==''?'  ('+info+')':'')); };
 const near=(a,b,tol)=>Number.isFinite(a) && Math.abs(a-b)<=tol;
 
-// Der Kern ist eine Kopie - sie darf nicht still auseinanderlaufen.
-// Das Original liegt seit der Aufteilung in die Werkzeugfamilie (docs/adr/0001)
-// in raum-kern.js; dessen Dateikopf steht vor "use strict" und zählt nicht mit.
-const src='raum-kern.js';
-const kern=existsSync(new URL('../'+src, import.meta.url)) ? read(src) : null;
-chk(`core byte-gleich zu ${src}`, kern!=null && '\n'+kern.slice(kern.indexOf('"use strict";'))===pick(html,'core'));
+// Der Kern dieser Seite ist eine EINGEFRORENE Kopie des Rechenkerns von vor der
+// Gewichtung nach sigma (raum-kern.js rechnet seither mit rowWt und festen
+// Winkeln). Die Einmess-Seite rechnet mit ungewichteten Residuen und ihrer
+// eigenen Standardabweichung von 0,5 mm; mit dem heutigen Kern stimmte ihre
+// Streuung nicht mehr (Abschnitt 5 unten faellt dann um den Faktor 10 durch).
+// Sie darf deshalb vom Kern abweichen, aber nicht still: der Stand ist per
+// Pruefsumme festgehalten. Wer den Block aendert, aendert die Summe bewusst mit.
+const KERN_SHA256='4e5ac682a41a30e3c4f0a84a131adeb33b078adebdb4cac96b51c1a92eead7cf';
+chk('core ist der eingefrorene Stand (Pruefsumme)', createHash('sha256').update(pick(html,'core'),'utf8').digest('hex')===KERN_SHA256);
 
 // Strecken einer beliebigen Viereck-Wahrheit, als Feldtexte.
 const dist=(P,a,b)=>Math.hypot(P[b].x-P[a].x, P[b].y-P[a].y);

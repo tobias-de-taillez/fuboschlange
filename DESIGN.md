@@ -515,5 +515,5 @@ Stellen, an denen die freigegebene Datei sich selbst widerspricht. Sie sind oben
 - **Schalter am Maß.** Gebaut ist an der Maßzeile der Karte ein Umschaltknopf „aus“ (gedrückt, solange das Maß abgeschaltet ist) statt des Schiebeschalters „Maß verwenden“; ein Schiebeschalter kommt im Werkzeug nirgends vor.
 - **Größen auf dem Blatt.** 15 px im Kopf und 14 px im Fuß für dieselbe Rolle.
 - **Planschrift in der Wandansicht** hat keinen Lichthof, die im Plan schon.
-- **Tastatur.** Öffnungen in der Wandansicht und die Wände im Lageplan sind nicht fokussierbar (Wände nur über ← →); die Raumzeile ist ein fokussierbares `div` ohne Rolle; der Stand ist ein `button`, der Blockelemente enthält.
+- **Tastatur.** Öffnungen im Bild der Wandansicht und die Wände im Lageplan sind nicht fokussierbar (Wände über ← →, Öffnungen über ihre Zeile im Panel); die Raumzeile ist ein fokussierbares `div` ohne Rolle; der Stand ist ein `button`, der Blockelemente enthält.
 - **Inline-Stile** an einzelnen Elementen im Markup und in den Vorlagen des Skripts (Feldbreiten, Einheit, Name auf dem Startbildschirm).

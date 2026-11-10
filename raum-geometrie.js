@@ -1081,6 +1081,24 @@ globalThis.solveOpening=function(shape, op, meas){
   return {ziel, x:fx, y:fy, verdacht,
           rows:obs.map((e,i)=>({m:e.m, achse:e.o.achse}))};
 };
+// Wird eine Wand kuerzer, als eine Oeffnung liegt: eine seitlich nur
+// geschaetzte (kein Mass von links oder rechts) rueckt in die Wand zurueck -
+// an den Rand, und liegt dort schon eine andere, buendig an die naechste freie
+// Kante. Aendert nichts; liefert die neue seitliche Lage oder null: liegt schon
+// in der Wand, ist seitlich eingemessen (dann nennt settleOpening den
+// Widerspruch), ist breiter als die Wand oder findet keinen Platz.
+globalThis.rueckInDieWand=function(shape, op, others, meas){
+  if((meas||[]).some(m=>m.op===op.id && m.on!==false && (m.edge==='left' || m.edge==='right'))) return null;
+  if(!(op.w<=shape.L+1e-6)) return null;
+  if(op.x>=-1e-6 && op.x+op.w<=shape.L+1e-6) return null;
+  const rest=(others||[]).filter(o=>o.id!==op.id);
+  const rand=Math.max(0, Math.min(shape.L-op.w, op.x));
+  const xs=[rand, 0, shape.L-op.w];
+  rest.forEach(b=>xs.push(b.x-op.w, b.x+b.w));
+  const frei=xs.sort((p,q)=>Math.abs(p-rand)-Math.abs(q-rand))
+    .map(x=>({...op, x})).find(k=>globalThis.openingPlaceable(shape, k, rest));
+  return frei ? frei.x : null;
+};
 // Gemessen schlaegt geschaetzt: eine eingemessene Oeffnung nimmt die Lage
 // ein, die ihre Masse ihr geben. Liegt dort eine, deren seitliche Lage nur
 // geschaetzt ist (kein Mass von links oder rechts - ein Hoehenmass allein

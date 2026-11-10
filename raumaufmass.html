@@ -290,6 +290,7 @@
     min-height:26px;padding:0 6px;margin:0 -6px;border-radius:4px;cursor:pointer;
     font-variant-numeric:tabular-nums}
   .wrow:hover{background:var(--hover)}
+  .wrow:focus-visible{outline-offset:-2px}
   .wrow .wk{font-weight:600}
   .wrow .wn{font-size:12px;color:var(--muted)}
   .wrow .wn.sus{color:var(--bad);font-weight:600}
@@ -343,6 +344,7 @@
   #wallops .orow{display:flex;gap:8px;align-items:center;min-height:26px;padding:0 6px;margin:0 -6px;
     border-radius:4px;cursor:pointer;font-variant-numeric:tabular-nums}
   #wallops .orow:hover{background:var(--hover)}
+  #wallops .orow:focus-visible{outline-offset:-2px}
   #wallops .orow.cur{background:var(--accent-bg)}
   #wallops .orow span:last-child{margin-left:auto;font-size:12px;color:var(--muted)}
   #wallops .orow span.ok{color:var(--good)}
@@ -549,6 +551,9 @@
   @media (max-width:1500px){ .tg[data-for~=kitchen] .tb kbd{display:none}
     /* sonst ragt "Analyse" bei 1440 px 13 px aus der Leiste */
     .tg[data-for~=kitchen] .tb.tog{padding-left:6px;padding-right:6px} }
+  /* Kleines Laptop-Fenster: die Leiste rückt zusammen, damit kein Knopf angeschnitten ist. */
+  @media (max-width:1180px){ .tg[data-for~=kitchen] .tb.tog{padding-left:3px;padding-right:3px;gap:3px}
+    .tg[data-for~=kitchen] .tsep{margin:0 2px} .kpg{padding:0 1px} #kPalette{gap:0} }
   .kpal{padding:0 1px;cursor:grab;touch-action:none;color:var(--ink2);min-height:0;height:28px}
   .kpal svg{width:27px;height:24px;display:block;fill:none;stroke:currentColor;stroke-width:1.3;stroke-linejoin:round;stroke-linecap:round}
   .kpal:hover{color:var(--ink)}
@@ -729,7 +734,9 @@
   .wrow .wn.todo{color:var(--muted)}
 
   /* ---------- Weiter ---------- */
-  #gosec{padding:6px 16px 16px}
+  /* Stand oben und Weiter unten bleiben stehen, wenn das Panel rollt. */
+  #gosec{padding:10px 16px 16px;position:sticky;bottom:0;background:var(--surface)}
+  body[data-tool=aufmass] #status{position:sticky;top:0;z-index:1;background:var(--surface)}
 
   /* ---------- Wände: die Karte der Wand liegt im Panel ---------- */
   #wallTitle{font-size:13px;font-weight:600;color:var(--ink)}
@@ -6995,8 +7002,6 @@ function crossingPairs(pts){
 }
 const wallsCross=pts=>crossingPairs(pts).length>0;
 
-// Grundriss-Werkzeug "Oeffnung setzen" (door|window|hole) und seine Vorschau.
-let planAdd=null, planGhost=null;
 // Zuletzt eingenordete Wand: bleibt beim Entwirren als Orientierung fix.
 // Hier oben deklariert, weil openRoom() sie zuruecksetzt und weiter oben
 // in der Datei steht (let ist bis zur Deklaration in der TDZ).
@@ -7165,6 +7170,18 @@ function recompute(){
   // Bis nichts mehr rueckt: macht eine spaetere Platz (kleiner geworden, Mass
   // geloescht), kommt eine frueher gepruefte erst im naechsten Durchgang auf
   // ihr Mass - sonst stuende sie daneben, und der Stand sagte "bestimmt".
+  // Wird eine Wand kuerzer, als eine Oeffnung liegt, rueckt eine seitlich nur
+  // geschaetzte in die Wand zurueck (an den Rand, sonst an die naechste freie
+  // Kante). Nur bei eindeutiger Form: vorher sind die Wandlaengen geraten.
+  // Eine seitlich eingemessene bleibt liegen, ihr Stand nennt den Widerspruch.
+  if(M.openings.length && M.fit && M.an && M.an.dof===0){
+    const P=M.fit.pts;
+    M.openings.forEach(o=>{
+      const sh=wallShape(P, M.hmeas, o.a, o.b);
+      const x=sh ? rueckInDieWand(sh, o, openingsOnWall(o.a,o.b), M.opmeas) : null;
+      if(x!=null) o.x=x;
+    });
+  }
   if(M.openings.length && M.opmeas.length && M.fit){
     const P=M.fit.pts;
     for(let lauf=0, rueckt=true; rueckt && lauf<=M.openings.length; lauf++){
@@ -7189,7 +7206,7 @@ function recompute(){
   // kosten. Bewusst ohne Debounce: serialize() ist bei den hier realistischen
   // Groessen unter einer Millisekunde. VOR dem Ableiten der Nachbarlagen -
   // die lesen den Speicher und braeuchten sonst den Stand von vorhin.
-  if(currentRoom){
+  if(currentRoom && !recompute.still){
     if(STORE.save(currentRoom, {data:JSON.parse(serialize()), area:polyAreaM2(), stand:standKurz()})){
       // Klappt es wieder, warnt der naechste Ausfall erneut - und die stehende
       // Warnung behauptet nichts Falsches mehr.
@@ -7247,6 +7264,21 @@ function lageHalten(F, P){
 }
 
 // ================= Raumbibliothek (Anbindung) =================
+
+// Derselbe Raum, in einem anderen Fenster geändert: dieses Fenster zöge sonst
+// mit seiner nächsten Änderung den alten Stand darüber. Solange es nicht das
+// bediente Fenster ist, lädt es den Raum deshalb still neu. Ohne zu speichern
+// (recompute.still): sonst weckten sich zwei Fenster gegenseitig.
+addEventListener('storage', e=>{
+  if(e.key!==null && e.key!=='raumaufmass.rooms') return;
+  if(!currentRoom || document.hasFocus()) return;
+  const r=STORE.load(currentRoom);
+  if(!r){ location.replace('raeume.html'); return; }          // dort gelöscht
+  if(JSON.stringify(r.data)===serialize()) return;
+  if(typeof kitchenResetSession==='function') kitchenResetSession();   // nichts Vorgemerktes über den neuen Stand schreiben
+  recompute.still=true;
+  try{ openRoom(currentRoom); } finally{ recompute.still=false; }
+});
 
 function speicherWarnung(){
   // Verzögert gerufen: hat inzwischen ein Speichern geklappt, entfällt sie.
@@ -7321,8 +7353,14 @@ function loadNeighbors(){
   building=buildingOrigins(alle);
   const selbst=building.origins[currentRoom];
   if(!selbst){ if(hoverRoom) hoverRoom=null; return; }   // freistehend
+  // Nur was mit diesem Raum zusammenhängt: jede andere Gruppe verbundener
+  // Räume (anderes Gebäude, anderes Geschoss) hat ihren eigenen Nullpunkt und
+  // läge sonst quer über dem Plan.
+  const VF=globalThis.HAUS_FACTORY && globalThis.HAUS_FACTORY.verbunden;
+  const gruppe=VF ? new Set(VF(alle).find(g=>g.includes(currentRoom))||[currentRoom]) : null;
   alle.forEach(r=>{
     if(r.id===currentRoom) return;
+    if(gruppe && !gruppe.has(r.id)) return;
     const o=building.origins[r.id];
     if(!o) return;
     const d=r.data||{};
@@ -8123,7 +8161,6 @@ function drawUnfolded(P, I, dpr){
 // Kaertchen stellt Art, Band und Richtung. Feinjustage (Groesse, Hoehe,
 // Einmessen) bleibt in der Wandansicht. Nur im eindeutig vermessenen Raum:
 // o.x sind Millimeter, auf einer blossen Skizze waere die Lage erfunden.
-const PLAN_ADD_W={door:985, window:1000, hole:600};
 const planMode=()=>M.mode==='draw'||M.mode==='measure';
 const planEditable=()=>planMode() && M.chain==null && formEindeutig();
 // Wand unter dem Zeiger ueber die GANZE Laenge (nearestWall laesst die Enden
@@ -8176,42 +8213,6 @@ function planOpDrag(e, g){
   o.x=m.x;
   setHintLive(`${OPEN_LABEL[o.kind]}: ${fmtM(o.x)} m ab Ecke ${o.a}`);
   render();
-}
-function setPlanAdd(kind){
-  if(kind && !formEindeutig()){
-    setHint('Öffnungen setzen geht, sobald der Grundriss eindeutig eingemessen ist.');
-    kind=null;
-  }
-  planAdd = planAdd===kind ? null : kind;
-  planGhost=null;
-  if(planAdd){ M.chain=null; M.openSel=null; }
-  document.querySelectorAll('#pAdd button').forEach(b=>b.setAttribute('aria-pressed', String(b.dataset.padd===planAdd)));
-  render();
-}
-function planAddAt(e){
-  const d=evDev(e), w=toWorld(d.x,d.y), hit=planWallAt(w.x,w.y);
-  if(!hit){ setHint('Auf eine Wand klicken, um die Öffnung dort zu setzen.'); return; }
-  const kind=planAdd;
-  planAdd=null; planGhost=null;
-  document.querySelectorAll('#pAdd button').forEach(b=>b.setAttribute('aria-pressed','false'));
-  const o=insertOpening(kind, hit.a, hit.b, hit.t);
-  if(o) setHint(`${OPEN_LABEL[kind]} in Wand ${hit.a}–${hit.b} gesetzt.`);
-  else render();
-}
-// Vorschau beim Werkzeug: wo die Oeffnung landen wuerde.
-function drawPlanGhost(P, I, dpr){
-  if(!planAdd || !planGhost) return;
-  const {a,b,t}=planGhost;
-  if(I[a]==null||I[b]==null) return;
-  const A=P[I[a]], B=P[I[b]], L=C.dist(A,B)||1;
-  const w=Math.min(PLAN_ADD_W[planAdd], L*0.9);
-  const x0=Math.max(0, Math.min(L-w, t-w/2));
-  const u={x:(B.x-A.x)/L, y:(B.y-A.y)/L};
-  const p=toScr({x:A.x+u.x*x0, y:A.y+u.y*x0}), q=toScr({x:A.x+u.x*(x0+w), y:A.y+u.y*(x0+w)});
-  ctx.save();
-  ctx.strokeStyle=INK.accent; ctx.globalAlpha=.55; ctx.lineWidth=8*dpr; ctx.lineCap='butt';
-  ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
-  ctx.restore();
 }
 // Gewaehlte Oeffnung im Plan: Akzent auf Luecke und Blatt.
 function drawPlanOpSel(P, I, dpr){
@@ -8307,12 +8308,6 @@ $('opplWall').onclick=()=>{ const o=opplSel(); if(o) openingToWallView(o); };
 // true = erledigt, die normale Hover-Logik (Ecken, Waende) laeuft nicht.
 function planHover(e){
   const d=evDev(e), w=toWorld(d.x,d.y);
-  if(planAdd && planEditable()){
-    const g=planWallAt(w.x,w.y);
-    planGhost=g; redraw();
-    cv.style.cursor=g?'copy':'crosshair';
-    return true;
-  }
   if(!planEditable() || hit(w.x,w.y)) return false;
   if(doorPluses.some(p=>Math.hypot(d.x-p.x, d.y-p.y)<=p.r+6*DPR())) return false;
   const op=planOpeningAt(w.x,w.y);
@@ -8528,7 +8523,6 @@ function drawCanvas(){
   drawWallMarks(P, I, dpr);
   drawPlanOpSel(P, I, dpr);
   drawOpeningsOnPlan(P, I, dpr);
-  drawPlanGhost(P, I, dpr);
   drawDoorPluses(P, I, dpr);
   drawQuer(P, I, dpr);
   // Hervorgehobenes Paar breit unterlegen - VOR Messungen und Vorschlaegen,
@@ -9114,7 +9108,9 @@ function renderWallPopup(){
   btn.className='thk'; btn.inputMode='numeric'; btn.setAttribute('aria-label','Wanddicke in Millimetern');
   btn.placeholder=String(THICK_DEFAULT); btn.value = t>0 ? String(t) : '';
   btn.onchange=()=>{
-    const neu=parseFloat(String(btn.value).replace(',','.'));
+    // Das Feld ist in Millimetern; eine angehängte Einheit (mm, cm, m) gilt für diese Eingabe.
+    const tm=/^\s*(\d+(?:[.,]\d+)?)\s*(mm|cm|m)?\s*$/i.exec(btn.value);
+    const neu=tm ? Math.round(parseFloat(tm[1].replace(',','.'))*({mm:1, cm:10, m:1000})[(tm[2]||'mm').toLowerCase()]*10)/10 : NaN;
     if(!isFinite(neu) || neu<20 || neu>1000){ sag('Wanddicke zwischen 20 und 1000 mm.'); btn.value = t>0 ? String(t) : ''; return; }
     snapshot();
     M.thick[k]=neu;
@@ -9348,12 +9344,6 @@ cv.addEventListener('pointerdown',e=>{
   // Touchpad zoegert man beim Zielen - dort riss es den Zug ab.
   const touch=e.pointerType!=='mouse';
   const d=evDev(e), w=toWorld(d.x,d.y);
-  // Werkzeug "Oeffnung setzen": der Klick gehoert der Wand, auch nahe einer
-  // Ecke. Gesetzt wird beim Loslassen; ein Zug verschiebt die Ansicht.
-  if(planAdd && planEditable()){
-    gesture={t:'planAdd',x0:e.clientX,y0:e.clientY,lx:e.clientX,ly:e.clientY,moved:false,wall:null,popOpen};
-    return;
-  }
   const h=hit(w.x,w.y);
   // Oeffnung im Plan: waehlen, ziehen verschiebt entlang der Wand. Ecken
   // gewinnen (sonst kaeme man an eine Ecke neben einer Tuer nicht heran).
@@ -9507,7 +9497,7 @@ cv.addEventListener('pointermove',e=>{
   }
   // Zug im Leeren - im Messen-Modus auch von einer Ecke aus, die sonst ein
   // toter Klick waere - verschiebt die Ansicht.
-  if((gesture.t==='bg' || gesture.t==='selpt' || gesture.t==='planAdd') && gesture.moved){
+  if((gesture.t==='bg' || gesture.t==='selpt') && gesture.moved){
     const dpr=DPR();
     viewPanBy((e.clientX-gesture.lx)*dpr, (e.clientY-gesture.ly)*dpr);
     gesture.lx=e.clientX; gesture.ly=e.clientY;
@@ -9527,10 +9517,6 @@ function endPointer(e){
   const g=gesture; gesture=null;
   if(!g){
     if(M.drag){ M.drag=null; M.dragMode=null; recompute(); }
-    return;
-  }
-  if(g.t==='planAdd'){
-    if(!g.moved && e.type!=='pointercancel') planAddAt(e); else render();
     return;
   }
   if(g.t==='planOp'){
@@ -9900,12 +9886,17 @@ function renderWallSection(){
         const n=M.opmeas.filter(m=>m.op===o.id && m.on!==false).length;
         const s=(n && shape) ? settleOpening(shape, o, list, M.opmeas) : null;
         const wid=!!s && (s.stoesst.length>0 || s.wand);
-        return `<div class="orow${o.id===M.openSel?' cur':''}" data-id="${escapeHtml(o.id)}">`
+        return `<div class="orow${o.id===M.openSel?' cur':''}" data-id="${escapeHtml(o.id)}" role="button" tabindex="0">`
           +`<span>${OPEN_LABEL[o.kind]}</span><span>${Math.round(o.w)} × ${Math.round(o.h)}</span>`
           +`<span class="${wid?'bad':n?'ok':''}">${wid ? 'Widerspruch' : n ? n+(n===1?' Maß':' Maße') : 'geschätzt'}</span></div>`;
       }).join('')
     : (waterOnWall().length ? '' : '<div class="none">Noch keine Öffnung an dieser Wand.</div>');
-  box.querySelectorAll('.orow[data-id]').forEach(r=>{ r.onclick=()=>{ M.openSel=r.dataset.id; M.waterSel=null; render(); }; });
+  box.querySelectorAll('.orow[data-id]').forEach(r=>{
+    r.onclick=()=>{ M.openSel=r.dataset.id; M.waterSel=null; render(); };
+    // Mit Tab erreichbar: Enter oder Leertaste wählt die Öffnung; der Fokus bleibt auf ihrer Zeile.
+    r.onkeydown=e=>{ if(e.key==='Enter' || e.key===' '){ e.preventDefault(); e.stopPropagation(); const id=r.dataset.id; r.onclick();
+      const z=[...$('wallops').querySelectorAll('.orow[data-id]')].find(x=>x.dataset.id===id); if(z) z.focus({preventScroll:true}); } };
+  });
   if(waterOnWall().length){ box.insertAdjacentHTML('beforeend', waterRows()); wireWaterRows(box); }
 }
 $('wPick').onchange=()=>{
@@ -10580,7 +10571,6 @@ const MODE_HINTS={
 // Zeichenzug oder ein Fliesen-Werkzeug erklaert sich selbst - und zwar
 // solange es aktiv ist, nicht nur vier Sekunden.
 function modeHint(){
-  if(planMode() && planAdd) return `${OPEN_LABEL[planAdd]} setzen: auf die Wand klicken · Esc bricht ab`;
   if(planMode() && M.openSel!=null && M.openings.some(o=>o.id===M.openSel))
     return 'Öffnung ziehen verschiebt sie entlang der Wand · Entf löscht · Esc hebt die Auswahl auf';
   if(M.mode==='draw' && M.chain!=null)
@@ -10636,8 +10626,6 @@ function setMode(mode){
   if(M.mode==='tiles' && mode!=='tiles'){ TS.sel.clear(); TS.tool='move'; TS.draft=null; TS.lines=[]; }
   M.mode=mode; M.sel=[];
   if(mode!=='draw') M.chain=null;
-  if(mode!=='draw' && mode!=='measure' && planAdd){ planAdd=null; planGhost=null;
-    document.querySelectorAll('#pAdd button').forEach(b=>b.setAttribute('aria-pressed','false')); }
   if(!$('entry').hidden && !(entryPair && mode==='measure')) closeEntry();
   if(wpopPair) closeWallPopup();
   hidePop();
@@ -10930,7 +10918,6 @@ addEventListener('keydown',e=>{
     if(OUT.on){ closeOut(); render(); return; }
     if(!$('entry').hidden){ closeEntry(); return; }   // auch Hoehe, Oeffnungslage, Querstrecke
     if(M.mode==='wall' && M.openSel!=null){ M.openSel=null; render(); return; }
-    if(planMode() && planAdd){ setPlanAdd(null); return; }
     if(planMode() && M.openSel!=null){ M.openSel=null; render(); return; }
     if(M.sel.length){ M.sel=[]; render(); return; }
     if(M.chain){ M.chain=null; render(); return; }
@@ -11532,7 +11519,7 @@ function renderPanel(){
       // die sonst keines hat (die sagt es oben schon selbst).
       const noteAus = cnt && e.off
         ? `<span class="wn">${note}${e.sus||e.fix||cnt>1||devHtml ? ' · ' : ''}${e.off} aus</span>` : note;
-      return `<div class="wrow${e&&e.sus?' worst':''}" data-a="${a2}" data-b="${b2}">`
+      return `<div class="wrow${e&&e.sus?' worst':''}" data-a="${a2}" data-b="${b2}" role="button" tabindex="0">`
         +`<span class="wk">${a2}\u2013${b2}</span>${noteAus}`
         +`<span class="wlen${!cnt?' approx':''}">${len}</span></div>`;
     };
@@ -11557,6 +11544,9 @@ function renderPanel(){
       row.onmouseenter=()=>{ M.highlight={a:row.dataset.a,b:row.dataset.b}; redraw(); };
       row.onmouseleave=()=>{ if(!entryPair && !wpopPair){ M.highlight=null; redraw(); } };
       row.onclick=()=>openWallPopup(row.dataset.a,row.dataset.b);
+      // Mit Tab erreichbar: Enter oder Leertaste öffnet die Karte der Strecke.
+      row.onfocus=row.onmouseenter; row.onblur=row.onmouseleave;
+      row.onkeydown=e=>{ if(e.key==='Enter' || e.key===' '){ e.preventDefault(); e.stopPropagation(); openWallPopup(row.dataset.a,row.dataset.b); } };
     });
   }
 
@@ -17920,6 +17910,16 @@ globalThis.selfChecks=function(){
                const echt=se(w3, f, [{...t, x:1515}, f, l], [mt, {id:'m2',op:'f',edge:'left',d:1000,sigma:5}]);
                return s.platz===null && s.stoesst[0]===t && s.eng===false && s.haengt===true
                    && echt.platz===null && echt.eng===false && echt.haengt===false; })());
+      chk('wand kuerzer: geschaetzte Oeffnung rueckt an den Rand, eingemessene bleibt, zu breite bleibt',
+        (()=>{ const rw=globalThis.rueckInDieWand, w24={L:2400, ha:2500, hb:2500, poly:[{x:0,y:0},{x:2400,y:0},{x:2400,y:2500},{x:0,y:2500}]};
+               const f={id:'f', x:3000, y:900, w:1000, h:1200}, t={id:'t', x:1500, y:0, w:900, h:2000};
+               return near(rw(w24, f, [f], []),1400,1e-9)
+                   && rw(w24, f, [f], [{id:'m',op:'f',edge:'left',d:3000,sigma:5}])===null
+                   && near(rw(w24, f, [f], [{id:'m',op:'f',edge:'bottom',d:900,sigma:5}]),1400,1e-9)
+                   && rw(w24, {...f, x:800}, [f], [])===null
+                   && rw(w24, {...f, w:2600}, [f], [])===null
+                   && near(rw(w24, f, [f, t], []),500,1e-9)
+                   && near(rw(w24, {...f, x:-300}, [f], []),0,1e-9); })());
       chk('ausweichen: ohne eigenes Lagemass bleibt alles, wie es ist',
         (()=>{ const s=se(shape, tuer, [tuer, fen], mf);
                return s.platz===null && !s.weicht.length && !s.stoesst.length && !s.wand; })());

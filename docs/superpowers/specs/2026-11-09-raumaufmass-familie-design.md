@@ -275,12 +275,19 @@ Umgesetzt in `raeume.html` (Startbildschirm), `raumaufmass.html` (Werkzeug) und 
 
 Der Stand ist zweimal im Browser abgenommen worden: einmal der Hauptweg, einmal aus sieben Blickwinkeln (Hauptweg, Zusammenspiel der Korrekturen, alte Daten und Rückweg, Fliesenplan und Küchenplaner, Diff, Upload-Paket, Tastatur). Jeder ernste Befund wurde unabhängig nachgestellt, bevor er behoben wurde; die Korrekturen sind danach noch einmal gegengeprüft.
 
+Nach der Abnahme der Live-Seite geschlossen:
+
+- **Öffnung an einer Wand, die nachträglich kürzer wird:** Eine seitlich nur geschätzte Öffnung rückt in die Wand zurück (an den Rand, sonst an die nächste freie Kante). Eine seitlich eingemessene bleibt liegen, ihr Stand nennt den Widerspruch.
+- **Nachbarn im Plan** sind nur noch die Räume, die mit dem offenen Raum über Wände zusammenhängen.
+- **Derselbe Raum in zwei Fenstern:** Das Fenster im Hintergrund lädt den Raum neu, sobald das andere ihn ändert; wird er dort gelöscht, geht es zum Startbildschirm.
+- **Tastatur:** Die Zeilen in „Alle Strecken“ und die Öffnungen einer Wand sind mit Tab erreichbar, Enter öffnet die Karte.
+- **Druck, andere Browser, Finger:** Der Druckweg ist nachgestellt (ein Druckauftrag, das Papierbild als PDF angesehen: drei Blätter A4). Der Hauptweg läuft in WebKit (der Engine von Safari) und Firefox und mit emulierten Fingertipps.
+
 Bekannt und offen geblieben, jeweils mit Umweg und ohne Datenverlust:
 
-- **Öffnung an einer Wand, die nachträglich kürzer wird:** Die Öffnung bleibt stehen, wo sie war, und kann neben der Wand liegen; das Blatt nennt dann eine negative Lage. Wie geschätzte Öffnungen mitrücken sollen, ist eine eigene Entscheidung.
-- **Räume anderer Gebäude** erscheinen im Plan als graue Nachbarn, wenn sie verankert sind; gezeichnet wird alles Verankerte, ohne Blick auf Gebäude und Geschoss.
-- **Zwei Fenster mit demselben Raum:** Das zuletzt bediente überschreibt das andere.
-- **Tastatur:** Wände und Diagonalen sind nur mit der Maus anwählbar; die Leertaste löst keine Knöpfe aus (sie verschiebt die Ansicht); Dialoge halten den Fokus nicht fest.
+- **Schritt 3 der Reihenfolge steht aus:** Fliesenplan und Küchenplaner sind nicht in eigene Dateien gezogen. Sie teilen sich mit dem Raumaufmaß das Bedien-Skript (Plan zeichnen, Treffer, Rückgängig, Speichern); eine eigene Datei je Werkzeug verlangt, dieses Skript in einen geteilten und einen Aufmaß-Teil zu zerlegen. Solange an der Küche in mehreren Zweigen gearbeitet wird, trüge jeder dieser Zweige den Umzug als Konflikt.
+- **Tastatur:** Die Karte der Ecke (Winkel festlegen) öffnet nur die Maus; die Leertaste löst keine Knöpfe aus (sie verschiebt die Ansicht, Enter löst aus); Dialoge halten den Fokus nicht fest.
 - **Nach einem Zurückrollen** auf das alte Werkzeug bleibt `raeume.html` erreichbar und zeigt veraltete Stände; die Einstellung „Maßhaltig zeichnen: aus“ überlebt den Rückweg nicht.
-- **Nicht geprüft:** der echte Druckdialog und das Papierbild, Safari und Firefox, Touch.
+- **Die Seite antwortet auch ohne https.** Umgeleitet wird nicht, weil der Browser-Speicher je Adresse gilt: Räume, die jemand unter http angelegt hat, wären nach einer Umleitung nicht mehr zu sehen.
+- **Nicht geprüft:** der Druckdialog des Betriebssystems mit einem echten Drucker, Safari selbst (nur seine Engine), echte Touch-Geräte, Zwei-Finger-Zoom.
 
