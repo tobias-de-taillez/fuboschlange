@@ -595,7 +595,8 @@ const ABLAEUFE={
       const bn=()=>p.evaluate(()=>({n:document.getElementById('kAbstBtn').getAttribute('aria-pressed'), l:document.getElementById('kRulerBtn').getAttribute('aria-pressed')}));
       const a0=await p.locator('#cv').screenshot();
       await p.keyboard.press('n'); await sleep(350); const an1=await bn(), a1=await p.locator('#cv').screenshot();
-      await p.click('#roommenuBtn'); await p.click('#kAbstBtn'); await sleep(300); const an2=await bn();
+      await p.click('#roommenuBtn'); await sleep(250);   // Abstände liegen im Menü › Ansicht
+      await p.click('#kAbstBtn'); await sleep(300); const an2=await bn();
       pruef('Abstände: Taste N zeichnet Maßlinien, der Menüpunkt schaltet sie wieder aus', an1.n==='true' && an2.n==='false' && await unterschied(p, a0, a1)>=0.0003, JSON.stringify([an1, an2, await unterschied(p, a0, a1)]));
       const kk=await kueche(p), box=await p.locator('#cv').boundingBox(), cx=box.x+box.width/2, cy=box.y+box.height/2;
       const r0=await p.locator('#cv').screenshot();
@@ -608,7 +609,8 @@ const ABLAEUFE={
           out.push(await p.evaluate(()=>{ const t=document.getElementById('tools'); return `${innerWidth}: ${t.scrollWidth}/${t.clientWidth}`; })); }
         await p.setViewportSize(vs); await sleep(300);
         pruef('Küchenleiste mit Abstände und Lineal passt bei 1180, 1280, 1440 und 1920 px', out.every(x=>{ const m=x.match(/(\d+)\/(\d+)$/); return +m[1]<=+m[2]; }), out.join(' · ')); }
-      await p.click('#roommenuBtn'); await p.click('#kRulerBtn'); await sleep(300); const l2=await bn();
+      await p.click('#roommenuBtn'); await sleep(250);   // Lineal liegt im Menü › Ansicht
+      await p.click('#kRulerBtn'); await sleep(300); const l2=await bn();
       pruef('Lineal: der Menüpunkt blendet es wieder aus', l2.l==='false', JSON.stringify(l2)); }
     // Offenes Menü: die Pfeile gehören dem Menü, nicht dem gewählten Teil
     await waehleTeil(p, insel.id); k=await kueche(p); const i0=await teilNr(p, insel.id);
