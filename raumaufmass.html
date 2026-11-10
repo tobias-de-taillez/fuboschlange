@@ -7278,10 +7278,15 @@ addEventListener('storage', e=>{
   if(!currentRoom || document.hasFocus()) return;
   const r=STORE.load(currentRoom);
   if(!r){ location.replace('raeume.html'); return; }          // dort gelöscht
+  // Umbenannt (der Name liegt neben den Daten): Kopfzeile und Titel nachziehen.
+  if(r.name!==currentRoomName){ currentRoomName=r.name; renderPanel(); }
   if(e.key!==null){
     const raum=v=>{ try{ const l=JSON.parse(v||'[]'); return Array.isArray(l) ? l.find(x=>x && x.id===currentRoom) : null; }catch(err){ return null; } };
+    // Auf ein Millionstel Millimeter gerundet: schon das bloße Öffnen im anderen
+    // Fenster schreibt die Ecken mit anderen letzten Stellen zurück.
+    const kern=x=>JSON.stringify(x.data, (k,v)=>typeof v==='number' ? Math.round(v*1e6)/1e6 : v);
     const vor=raum(e.oldValue), nach=raum(e.newValue);
-    if(vor && nach && JSON.stringify(vor.data)===JSON.stringify(nach.data)) return;
+    if(vor && nach && kern(vor)===kern(nach)) return;
   }
   if(JSON.stringify(r.data)===serialize()) return;
   if(typeof kitchenResetSession==='function') kitchenResetSession();   // nichts Vorgemerktes über den neuen Stand schreiben
@@ -9022,16 +9027,19 @@ function openWallPopup(a,b,mitte){
   $('wpopVal').focus({preventScroll:true});
   redraw();
 }
-// Aus der Liste mit der Tastatur geöffnet: nach dem Schließen steht der Fokus
-// wieder auf der Zeile, damit Tab dort weitergeht.
-let wpopZeile=null;
+// Aus der Liste mit der Tastatur geöffnet und mit Esc geschlossen: der Fokus
+// steht wieder auf der Zeile, damit Tab dort weitergeht. Nur nach Esc: schließt
+// ein Klick oder ein Schrittwechsel die Karte, bleibt der Fokus, wo er ist.
+let wpopZeile=null, escZuletzt=false;
+addEventListener('keydown', e=>{ escZuletzt=e.key==='Escape'; }, true);
+addEventListener('pointerdown', ()=>{ escZuletzt=false; }, true);
 function closeWallPopup(){
   const z=wpopZeile; wpopZeile=null;
   wpopPair=null;
   $('wpop').hidden=true;
   if(!entryPair) M.highlight=null;
   redraw();
-  if(z){ const r=[...$('wl').querySelectorAll('.wrow')].find(x=>x.dataset.a===z.a && x.dataset.b===z.b); if(r) r.focus({preventScroll:true}); }
+  if(z && escZuletzt){ const r=[...$('wl').querySelectorAll('.wrow')].find(x=>x.dataset.a===z.a && x.dataset.b===z.b); if(r) r.focus({preventScroll:true}); }
 }
 function placeWpop(){
   const box=$('wpop');
@@ -9917,8 +9925,8 @@ function renderWallSection(){
     : (waterOnWall().length ? '' : '<div class="none">Noch keine Öffnung an dieser Wand.</div>');
   box.querySelectorAll('.orow[data-id]').forEach(r=>{
     r.onclick=()=>{ M.openSel=r.dataset.id; M.waterSel=null; render(); };
-    // Mit Tab erreichbar: Enter oder Leertaste wählt die Öffnung; der Fokus bleibt auf ihrer Zeile.
-    r.onkeydown=e=>{ if(e.key==='Enter' || e.key===' '){ e.preventDefault(); e.stopPropagation(); const id=r.dataset.id; r.onclick();
+    // Mit Tab erreichbar: Enter wählt die Öffnung; der Fokus bleibt auf ihrer Zeile.
+    r.onkeydown=e=>{ if(e.key==='Enter'){ e.preventDefault(); e.stopPropagation(); const id=r.dataset.id; r.onclick();
       const z=[...$('wallops').querySelectorAll('.orow[data-id]')].find(x=>x.dataset.id===id); if(z) z.focus({preventScroll:true}); } };
   });
   if(waterOnWall().length){ box.insertAdjacentHTML('beforeend', waterRows()); wireWaterRows(box); }
@@ -10851,7 +10859,7 @@ function zoomCenter(f){ viewZoomAt(cv.width/2, cv.height/2, f); redraw(); }
 // gleichen Ecken), geht es in der Skizze weiter, und der Zug laeuft.
 // Wiederherstellen schliesst wieder und fuehrt wie der Klick nach Maße.
 function doUndo(){
-  const aus=OUT.on, fremd=fremdStand();
+  const aus=OUT.on;
   const zu=!!C.wallPolygonRing(M.pts, M.walls), ecken=M.pts.length, waende=M.walls.length;
   if(!undo()){ setHint('Nichts mehr rückgängig zu machen.'); return; }
   if(TOOL==='aufmass' && planMode() && zu && M.pts.length===ecken && M.walls.length===waende-1
@@ -10859,27 +10867,13 @@ function doUndo(){
     M.chain=zugEnde(); setMode('draw');
   }
   ausgabeNurGeschlossen(aus);
-  sagFremd(fremd, 'zurückgenommen', '⇧⌘Z stellt ihn wieder her');
 }
 function doRedo(){
-  const aus=OUT.on, fremd=fremdStand();
+  const aus=OUT.on;
   const offen=!C.wallPolygonRing(M.pts, M.walls), ecken=M.pts.length, waende=M.walls.length;
   if(!redo()){ setHint('Nichts wiederherzustellen.'); return; }
   if(TOOL==='aufmass' && M.mode==='draw' && offen && M.pts.length===ecken && M.walls.length===waende+1) finishIfClosed();
   ausgabeNurGeschlossen(aus);
-  sagFremd(fremd, 'wiederhergestellt', '⌘Z nimmt ihn zurück');
-}
-// Fliesenplan, Küchenplaner und Raumaufmaß teilen sich einen Rückgängig-Stapel.
-// Trifft ein Schritt im Raumaufmaß etwas, das hier nicht zu sehen ist (eine
-// Fliese, ein Küchenteil), sagt die Rückmeldung, wo er lag.
-function fremdStand(){
-  return TOOL==='aufmass' ? [JSON.stringify(M.tiles||null), JSON.stringify(M.kitchen||null)] : null;
-}
-function sagFremd(vor, was, weg){
-  if(!vor || TOOL!=='aufmass') return;
-  const nach=fremdStand();
-  const wo=vor[1]!==nach[1] ? 'Küchenplaner' : vor[0]!==nach[0] ? 'Fliesenplan' : null;
-  if(wo) sag(`Der Schritt lag im ${wo} und ist ${was} · ${weg}`);
 }
 // Öffnet Rückgängig oder Wiederherstellen den Raum, während die Ausgabe offen
 // ist, geht sie zu: ein Blatt gibt es erst vom geschlossenen Raum.
@@ -10939,10 +10933,6 @@ addEventListener('keydown',e=>{
   // und behaelt den Fokus. Nach einem Mausklick hat er ihn schon abgegeben
   // (change-Listener oben), dort verschiebt die Leertaste weiter.
   if(e.code==='Space' && t && t.tagName==='INPUT' && t.type==='checkbox'){ hakenTaste=t; return; }
-  // Leertaste auf einem Knopf, den man mit Tab erreicht hat (sichtbarer Fokus):
-  // er löst nativ aus. Nach einem Mausklick ist der Fokus nicht sichtbar, dort
-  // verschiebt die Leertaste weiter.
-  if(e.code==='Space' && t && t.tagName==='BUTTON' && t.matches(':focus-visible')) return;
   // Leertaste gehalten: Ziehen verschiebt. preventDefault, sonst loest ein
   // fokussierter Knopf beim Loslassen aus.
   if(e.code==='Space'){
@@ -11586,9 +11576,8 @@ function renderPanel(){
       row.onmouseenter=()=>{ M.highlight={a:row.dataset.a,b:row.dataset.b}; redraw(); };
       row.onmouseleave=()=>{ if(!entryPair && !wpopPair){ M.highlight=null; redraw(); } };
       row.onclick=()=>openWallPopup(row.dataset.a,row.dataset.b);
-      // Mit Tab erreichbar: Enter oder Leertaste öffnet die Karte der Strecke.
-      row.onfocus=row.onmouseenter; row.onblur=row.onmouseleave;
-      row.onkeydown=e=>{ if(e.key==='Enter' || e.key===' '){ e.preventDefault(); e.stopPropagation(); openWallPopup(row.dataset.a,row.dataset.b); wpopZeile={a:row.dataset.a, b:row.dataset.b}; } };
+      // Mit Tab erreichbar: Enter öffnet die Karte der Strecke (die Leertaste verschiebt wie überall die Ansicht).
+      row.onkeydown=e=>{ if(e.key==='Enter'){ e.preventDefault(); e.stopPropagation(); openWallPopup(row.dataset.a,row.dataset.b); wpopZeile={a:row.dataset.a, b:row.dataset.b}; } };
     });
   }
 
@@ -11829,8 +11818,10 @@ $('helpBtn').onclick=toggleHelp;
 document.addEventListener('focusin', e=>{
   const w=[$('helpwrap'), $('qrwrap'), $('keyswrap')].find(x=>x && !x.hidden);
   if(!w || w.contains(e.target) || (e.target.closest && e.target.closest('#mldwrap'))) return;
-  const ziel=w.querySelector('button, [href], input, select, [tabindex]');
-  if(ziel) ziel.focus({preventScroll:true});
+  const alle=[...w.querySelectorAll('button, [href], input, select, textarea, [tabindex]')].filter(x=>!x.disabled && x.offsetParent!==null);
+  if(!alle.length) return;
+  // Von vorn hinaus (⇧Tab auf dem ersten): weiter am Ende; sonst an den Anfang.
+  (e.relatedTarget===alle[0] ? alle[alle.length-1] : alle[0]).focus({preventScroll:true});
 });
 $('helpclose').onclick=closeHelp;
 $('helpwrap').addEventListener('pointerdown',e=>{ if(e.target===$('helpwrap')) closeHelp(); });
@@ -12057,10 +12048,10 @@ if(!currentRoom){
   // den Boot nicht toeten, sonst bleibt die Seite leer statt leerzustarten.
   try{
     let cur=STORE.currentId();
-    // Neuladen: der Raum dieses Fensters, nicht der zuletzt irgendwo geöffnete.
+    // Neuladen, Zurück und Vor: der Raum dieses Fensters, nicht der zuletzt irgendwo geöffnete.
     try{
       const nav=performance.getEntriesByType('navigation')[0], eigen=sessionStorage.getItem('raumaufmass.fenster');
-      if(nav && nav.type==='reload' && eigen && STORE.load(eigen)) cur=eigen;
+      if(nav && (nav.type==='reload' || nav.type==='back_forward') && eigen && STORE.load(eigen)) cur=eigen;
     }catch(e){}
     if(cur && STORE.load(cur)) openRoom(cur);
     else {

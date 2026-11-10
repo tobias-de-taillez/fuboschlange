@@ -280,14 +280,14 @@ Nach der Abnahme der Live-Seite geschlossen:
 - **Öffnung an einer Wand, die nachträglich kürzer wird:** Eine seitlich nur geschätzte Öffnung rückt in die Wand zurück (an den Rand, sonst an die nächste freie Kante). Eine seitlich eingemessene bleibt liegen, ihr Stand nennt den Widerspruch.
 - **Nachbarn im Plan** sind nur noch die Räume, die mit dem offenen Raum über Wände zusammenhängen.
 - **Derselbe Raum in zwei Fenstern:** Das Fenster im Hintergrund lädt den Raum neu, sobald das andere ihn ändert, und schreibt dabei nichts; wird er dort gelöscht, geht es zum Startbildschirm. Ein Neuladen bleibt beim Raum des Fensters.
-- **Tastatur:** Die Zeilen in „Alle Strecken“ und die Öffnungen einer Wand sind mit Tab erreichbar, Enter öffnet die Karte, nach dem Schließen steht der Fokus wieder auf der Zeile. Die Leertaste löst einen per Tab erreichten Knopf aus; ohne sichtbaren Fokus verschiebt sie weiter die Ansicht. Hilfe, QR-Code und Meldedialog halten den Fokus.
-- **Rückgängig über Werkzeuggrenzen:** Raumaufmaß, Fliesenplan und Küchenplaner teilen sich einen Stapel. Trifft Rückgängig im Raumaufmaß einen Schritt aus einem der beiden anderen, sagt die Rückmeldung, wo er lag.
+- **Tastatur:** Die Zeilen in „Alle Strecken“ und die Öffnungen einer Wand sind mit Tab erreichbar, Enter öffnet die Karte, nach dem Schließen steht der Fokus wieder auf der Zeile. Hilfe, QR-Code und Meldedialog halten den Fokus.
 - **Druck, andere Browser, Finger:** Der Druckweg ist nachgestellt (ein Druckauftrag, das Papierbild als PDF angesehen: drei Blätter A4). Der Hauptweg läuft in WebKit (der Engine von Safari) und Firefox und mit emulierten Fingertipps.
 
 Bekannt und offen geblieben, jeweils mit Umweg und ohne Datenverlust:
 
 - **Schritt 3 der Reihenfolge steht aus:** Fliesenplan und Küchenplaner sind nicht in eigene Dateien gezogen. Sie teilen sich mit dem Raumaufmaß das Bedien-Skript (Plan zeichnen, Treffer, Rückgängig, Speichern); eine eigene Datei je Werkzeug verlangt, dieses Skript in einen geteilten und einen Aufmaß-Teil zu zerlegen. Solange an der Küche in mehreren Zweigen gearbeitet wird, trüge jeder dieser Zweige den Umzug als Konflikt.
-- **Tastatur:** Die Karte der Ecke (Winkel festlegen) öffnet nur die Maus.
+- **Tastatur:** Die Karte der Ecke (Winkel festlegen) öffnet nur die Maus. Die Leertaste löst keine Knöpfe aus (sie verschiebt die Ansicht); Enter löst aus.
+- **Rückgängig über Werkzeuggrenzen:** Raumaufmaß, Fliesenplan und Küchenplaner teilen sich einen Stapel. Rückgängig im Raumaufmaß kann einen Schritt aus einem der beiden anderen zurücknehmen, ohne dass man es dort sieht; Wiederherstellen holt ihn zurück.
 - **Übernommener Raum ohne Stand:** Ein Raum aus Datei oder Link zeigt auf dem Startbildschirm Ecken und Maße statt Stand und Fläche, bis er einmal geöffnet wurde.
 - **Tippziele** sind für die Maus bemessen (22 bis 30 px); für Finger ist das knapp. Das Raumaufmaß ist für den Schreibtisch gebaut.
 - **Nach einem Zurückrollen** auf das alte Werkzeug bleibt `raeume.html` erreichbar und zeigt veraltete Stände; die Einstellung „Maßhaltig zeichnen: aus“ überlebt den Rückweg nicht.
