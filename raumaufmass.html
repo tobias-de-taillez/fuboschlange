@@ -2250,6 +2250,7 @@ function stepSwim(now){
 // über diese Anmeldung, ohne sie zu kennen. Der Schlüssel ist der Modus (M.mode):
 //   bereit()    darf der Raum so geöffnet werden?        absage: Text der Hinweiszeile, wenn nicht
 //   zeichne()   die Zeichenfläche                        panel(): Abschnitt im Panel; true = der Modus
+//   vorZeichnen() / nachZeichnen()  vor und nach dem Zeichnen (jede Anmeldung, nicht nur die des Modus)
 //   hinweis()   Standardtext der Hinweiszeile            wurde verlassen, die Seite rendert nicht weiter
 //   Jede Funktion ist freiwillig: wer eine nicht hat, wird dort übergangen.
 //   verlassen() beim Wechsel in einen anderen Modus
@@ -2270,6 +2271,28 @@ const werkzeug=modus=>WERKZEUGE[modus===undefined ? M.mode : modus]||null;
 const alleWerkzeuge=name=>{ for(const w of ALLE) if(w[name]) w[name](); };
 const werkFuerGeste=g=>(g && ALLE.find(w=>w.gesten && w.gesten.includes(g.t)))||null;
 
+// ================= Anmeldung des Raumaufmaßes =================
+// Das Raumaufmaß ist ein Werkzeug wie die anderen: die Seite ruft es über dieselbe Anmeldung.
+// Hier, vor dem Boot: schon der erste Raum und das erste Bild gehen durch sie.
+meldeAn(['draw','measure','wall'], {
+  vorZeichnen:aufmassVorZeichnen, zeichne:aufmassZeichne, nachZeichnen:aufmassNachZeichnen,
+  panel:aufmassPanel,
+  folgen:folgenAufmass,
+  neuerRaum(){
+    northWallPair=null;
+    closeEntry();
+    hidePop();
+    // Die Ausgabe zeigt den vorigen Raum: zurück in den Plan. (Über die Klasse
+    // gefragt, weil der Boot hier ankommt, bevor OUT angelegt ist.)
+    if(document.body.classList.contains('outmode')) closeOut();
+    $('wlbox').open=false; $('standMore').hidden=true;
+    hoverRoom=null;
+  },
+  vorNeuladen:()=>OUT.on,
+  // Stand das Fenster in der Ausgabe (Blatt als Vorschau daneben), bleibt es dort.
+  nachNeuladen(inAusgabe){ if(inAusgabe && raumGeschlossen()) openOut(); },
+});
+
 function render(){
   redraw();
   renderPanel();
@@ -2279,9 +2302,18 @@ function render(){
 // malte im Wände-Modus den Grundriss ueber die Wandansicht. Offene Eingaben
 // haengen an ihrer Strecke und wandern bei Zoom und Verschieben mit.
 function redraw(){
+  alleWerkzeuge('vorZeichnen');
+  const werk=werkzeug(); if(werk && werk.zeichne) werk.zeichne();
+  alleWerkzeuge('nachZeichnen');
+}
+// Das Zeichnen des Raumaufmaßes (Anmeldung am Ende des Blocks): Ziel unter dem Zeiger, Plan oder
+// Wandansicht, danach die Karten und Knöpfe, die dem Bild folgen.
+function aufmassVorZeichnen(){
   if(lastHover && (M.mode==='draw'||M.mode==='measure') && !gesture && !swim) hoverTarget=hoverAt(lastHover);
   else if(M.mode!=='draw' && M.mode!=='measure') hoverTarget=null;
-  if(M.mode==='wall') drawWallView(); else drawCanvas();
+}
+function aufmassZeichne(){ if(M.mode==='wall') drawWallView(); else drawCanvas(); }
+function aufmassNachZeichnen(){
   syncOppl();
   syncRotateBtn();
   if(entryPair) placeEntry();
@@ -2903,7 +2935,6 @@ function drawQuer(P, I, dpr){
 }
 
 function drawCanvas(){
-  const werk=werkzeug(); if(werk && werk.zeichne){ werk.zeichne(); return; }
   const dpr=DPR();
   sizeCanvas(dpr);
   // 0x0-Canvas (verstecktes oder noch nicht angeschlossenes Layout):
@@ -5820,12 +5851,20 @@ function attachTip(el, text){
   addEventListener('blur',weg);
 })();
 
+// Die Schale des Panels: Raumname, Titel, Rückgängig; den Rest malt jedes Werkzeug selbst (panel).
+// Die Werkzeuge laden NACH diesem Block - beim ersten Bild waehrend des Boots gibt es sie noch nicht.
 function renderPanel(){
+  $('roomname').textContent=currentRoomName;
+  document.title=(currentRoomName && currentRoomName!=='—' ? currentRoomName+' · ' : '')+(TOOLNAME[TOOL] || 'Raumaufmaß');
+  $('undo').disabled = !undoStack.length;
+  $('redo').disabled = !redoStack.length;
+  for(const werk of ALLE) if(werk.panel && werk.panel()) return;
+}
+// Das Panel des Raumaufmaßes (Anmeldung am Ende des Blocks).
+function aufmassPanel(){
   const [txt,cls]=statusText();
   $('statustxt').textContent=txt;
   $('status').className=cls;
-  $('roomname').textContent=currentRoomName;
-  document.title=(currentRoomName && currentRoomName!=='—' ? currentRoomName+' · ' : '')+(TOOLNAME[TOOL] || 'Raumaufmaß');
   // Der Wände-Tab bleibt gesperrt, solange der Grundriss nicht eindeutig
   // ist - vorher waeren Wandlaengen Skizzenpixel.
   // Gesperrte Reiter bleiben klickbar (aria-disabled): der Klick sagt, was
@@ -5833,9 +5872,6 @@ function renderPanel(){
   const wt=document.querySelector('#modes button[data-mode="wall"]');
   if(wt){ const ok=wallTabReady(); wt.setAttribute('aria-disabled', String(!ok));
     wt.title = ok ? 'Wände (3)' : M.an && !C.wallPolygonRing(M.pts, M.walls) ? 'Wände (3): erst, wenn der Raum geschlossen ist' : 'Wände (3): erst, wenn die Form eindeutig ist'; }
-  // Die Werkzeuge laden NACH diesem Block - beim ersten Bild waehrend des
-  // Boots gibt es sie noch nicht. Danach rendern sie ihren Teil selbst mit.
-  for(const werk of ALLE) if(werk.panel && werk.panel()) return;
   // Wie bei den Fliesen: faellt die Bedingung weg (Raumwechsel, Rueckgaengig),
   // verlaesst die App den Modus selbst, statt Skizzenmasse zu zeigen.
   if(M.mode==='wall' && !wallTabReady()){
@@ -5852,8 +5888,6 @@ function renderPanel(){
   renderOpeningPopup();
   renderOpeningMeasures();
   $('empty').style.display = M.pts.length ? 'none' : 'flex';
-  $('undo').disabled = !undoStack.length;
-  $('redo').disabled = !redoStack.length;
   renderWallSection();
 
   // Ergebniszahlen IMMER aus dem Ausgleich. viewPts() ist bei
@@ -6514,24 +6548,6 @@ addEventListener('DOMContentLoaded',()=>{
     setHintLive('Speichern auf diesem Gerät nicht möglich (privater Modus?). Räume als Datei oder Link sichern.');
   else if(recompute.quotaWarned)
     setHintLive('Speichern fehlgeschlagen (Speicher voll?). Raum als Datei oder Link sichern.');
-});
-// ================= Anmeldung des Raumaufmaßes =================
-// Das Raumaufmaß ist ein Werkzeug wie die anderen: die Seite ruft es über dieselbe Anmeldung.
-meldeAn(['draw','measure','wall'], {
-  folgen:folgenAufmass,
-  neuerRaum(){
-    northWallPair=null;
-    closeEntry();
-    hidePop();
-    // Die Ausgabe zeigt den vorigen Raum: zurück in den Plan. (Über die Klasse
-    // gefragt, weil der Boot hier ankommt, bevor OUT angelegt ist.)
-    if(document.body.classList.contains('outmode')) closeOut();
-    $('wlbox').open=false; $('standMore').hidden=true;
-    hoverRoom=null;
-  },
-  vorNeuladen:()=>OUT.on,
-  // Stand das Fenster in der Ausgabe (Blatt als Vorschau daneben), bleibt es dort.
-  nachNeuladen(inAusgabe){ if(inAusgabe && raumGeschlossen()) openOut(); },
 });
 </script>
 
