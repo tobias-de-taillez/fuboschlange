@@ -2260,6 +2260,8 @@ function stepSwim(now){
 //   vorRaumwechsel() Vorgemerktes noch in den alten Raum schreiben; neuerStand() Vorgemerktes verwerfen,
 //               weil ein anderer Raum oder Stand geladen wird
 //   key(e)      Taste behandelt (true)?                   entf(): Entf/⌫ löscht die Auswahl (true = getan)
+//   vorDruecken(e) true = der Modus hat das Drücken ganz übernommen; popOffen()/popSchliessen() ein Lösch-Popover;
+//   zeigerWeg() der Zeiger verlässt den Plan; ohneGeste() Loslassen ohne Geste; leer(e, g) Ende einer Geste im Leeren
 //   Zeiger: down(e) legt eine Geste an (true) oder lässt der Seite das Ziehen im Leeren; hover(e) ohne
 //   gedrückte Taste; move(e, g), up(e, g) und pinch(g) für Gesten, deren Typ g.t in gesten steht; tap(e)
 //   für einen Klick ohne Ziehen, wenn down keine Geste angelegt hat.
@@ -2277,6 +2279,9 @@ const werkFuerGeste=g=>(g && ALLE.find(w=>w.gesten && w.gesten.includes(g.t)))||
 meldeAn(['draw','measure','wall'], {
   vorZeichnen:aufmassVorZeichnen, zeichne:aufmassZeichne, nachZeichnen:aufmassNachZeichnen,
   panel:aufmassPanel,
+  vorDruecken:aufmassVorDruecken, down:aufmassDown, hover:aufmassHover, zeigerWeg:aufmassZeigerWeg, ohneGeste:aufmassOhneGeste,
+  gesten:['planOp','point','selpt'], move:aufmassMove, up:aufmassUp, leer:aufmassLeer,
+  popOffen:()=>!$('pop').hidden, popSchliessen:hidePop,
   folgen:folgenAufmass,
   neuerRaum(){
     northWallPair=null;
@@ -3799,7 +3804,7 @@ function startPan(e, mid){
   cv.setPointerCapture(e.pointerId);
   pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
   gesture={t:'pan',mid,x0:e.clientX,y0:e.clientY,lx:e.clientX,ly:e.clientY,moved:false};
-  hidePop();
+  alleWerkzeuge('popSchliessen');
   cv.style.cursor='grabbing';
 }
 
@@ -3813,68 +3818,21 @@ cv.addEventListener('pointerdown',e=>{
   // gehoert dem contextmenu-Handler. Strg+Klick ist auf dem Mac ein
   // Rechtsklick und meldet sich trotzdem als Taste 0.
   if(e.pointerType==='mouse' && (e.button!==0 || (IS_MAC && e.ctrlKey))){ lastPtrType='mouse'; return; }
-  // Wände-Modus: Oeffnungen und Kanten gehoeren dem Handler der Wandansicht
-  // (Capture, laeuft vorher). Hier bleibt nur: Ziehen ins Leere verschiebt
-  // die Wandansicht. Nichts faellt mehr in den Grundriss durch - dort
-  // entstanden frueher unsichtbare Ecken.
-  if(M.mode==='wall'){
-    hidePop();
-    if(wallDrag) return;
-    cv.setPointerCapture(e.pointerId);
-    pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
-    lastPtrType=e.pointerType;
-    const dd=evDev(e), ww=wToWall(dd.x,dd.y);
-    gesture={t:'bg',x0:e.clientX,y0:e.clientY,lx:e.clientX,ly:e.clientY,moved:false,wall:null,popOpen:false,
-             op:!!openingAt(ww.x,ww.y)};
-    return;
-  }
+  const werk=werkzeug();
+  if(werk && werk.vorDruecken && werk.vorDruecken(e)) return;
   cv.setPointerCapture(e.pointerId);
   pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
   lastPtrType=e.pointerType;
   // Ein Klick, der nur das offene Loesch-Popover wegdrueckt, darf nicht
   // nebenbei eine Ecke setzen oder eine Eingabe oeffnen.
-  const popOpen=!$('pop').hidden;
-  hidePop();
+  const popOpen=ALLE.some(w=>w.popOffen && w.popOffen());
+  alleWerkzeuge('popSchliessen');
   if(pointers.size===2){ startPinch(); return; }
   if(pointers.size>2 || pinch) return;
-  const werk=werkzeug();
   if(werk && werk.down){
-    if(!werk.down(e)) gesture={t:'bg',x0:e.clientX,y0:e.clientY,lx:e.clientX,ly:e.clientY,moved:false,wall:null,popOpen};
+    if(!werk.down(e, popOpen)) gesture={t:'bg',x0:e.clientX,y0:e.clientY,lx:e.clientX,ly:e.clientY,moved:false,wall:null,popOpen};
     return;
   }
-  // Langes Druecken loescht nur noch bei Finger und Stift. Mit Maus und
-  // Touchpad zoegert man beim Zielen - dort riss es den Zug ab.
-  const touch=e.pointerType!=='mouse';
-  const d=evDev(e), w=toWorld(d.x,d.y);
-  const h=hit(w.x,w.y);
-  // Oeffnung im Plan: waehlen, ziehen verschiebt entlang der Wand. Ecken
-  // gewinnen (sonst kaeme man an eine Ecke neben einer Tuer nicht heran).
-  // Das Plus hinter einer Tuer (Nachbarraum anlegen) liegt dicht an der
-  // Luecke und wird erst beim Loslassen ausgewertet - es gewinnt.
-  const aufPlus=doorPluses.some(p=>Math.hypot(d.x-p.x, d.y-p.y)<=p.r+6*DPR());
-  const op=(!h && !aufPlus && planEditable()) ? planOpeningAt(w.x,w.y) : null;
-  if(planMode() && M.openSel!=null && (!op || op.id!==M.openSel)) M.openSel=null;
-  if(op){
-    M.openSel=op.id;
-    const t=alongWall(op, w);
-    const fest=M.opmeas.some(m=>m.op===op.id && m.on!==false);
-    gesture={t:'planOp',id:op.id,gx:(t==null?0:t-op.x),fest,x0:e.clientX,y0:e.clientY,lx:e.clientX,ly:e.clientY,
-             moved:false,snap:serialize(),popOpen};
-    render();
-    return;
-  }
-  if(h){
-    if(M.mode==='draw'){
-      gesture={t:'point',id:h.id,x0:e.clientX,y0:e.clientY,lx:e.clientX,ly:e.clientY,
-               moved:false,snap:serialize(),popOpen};
-      M.drag=h.id; M.dragMode=null;
-    } else {
-      gesture={t:'selpt',id:h.id,x0:e.clientX,y0:e.clientY,lx:e.clientX,ly:e.clientY,moved:false,popOpen};
-    }
-    return;
-  }
-  const wall=nearestWall(w.x,w.y);
-  gesture={t:'bg',x0:e.clientX,y0:e.clientY,lx:e.clientX,ly:e.clientY,moved:false,wall,popOpen};
 });
 
 // Maus ueber dem Plan: Ziel fuer Entf merken; ein Nachbarraum schimmert
@@ -3910,21 +3868,12 @@ function updateHover(e){
   hoverRoom=id;
   redraw();
 }
-cv.addEventListener('pointerleave',()=>{
-  lastHover=null;
-  if(plusHover){ plusHover=false; refreshHint(); }
-  if(hoverRoom===null && !hoverTarget) return;
-  hoverRoom=null; hoverTarget=null;
-  if(!spaceHeld) cv.style.cursor='';
-  redraw();
-});
+cv.addEventListener('pointerleave',()=>alleWerkzeuge('zeigerWeg'));
 
 cv.addEventListener('pointermove',e=>{
   if(!pointers.has(e.pointerId)){
     if(spaceHeld){ cv.style.cursor='grab'; return; }
-    const werk=werkzeug(); if(werk && werk.hover){ werk.hover(e); return; }
-    if(e.pointerType==='mouse' && planMode() && planHover(e)) return;
-    if(e.pointerType==='mouse' && M.mode!=='wall' && !swim) updateHover(e);
+    const werk=werkzeug(); if(werk && werk.hover) werk.hover(e);
     return;
   }
   pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
@@ -3939,6 +3888,124 @@ cv.addEventListener('pointermove',e=>{
     redraw(); return;
   }
   const gw=werkFuerGeste(gesture); if(gw){ gw.move(e, gesture); return; }
+  // Zug im Leeren verschiebt die Ansicht.
+  if(gesture.t==='bg' && gesture.moved){
+    const dpr=DPR();
+    viewPanBy((e.clientX-gesture.lx)*dpr, (e.clientY-gesture.ly)*dpr);
+    gesture.lx=e.clientX; gesture.ly=e.clientY;
+    redraw();
+  }
+});
+
+function endPointer(e){
+  pointers.delete(e.pointerId);
+  cancelLongpress();
+  hintLive=false;                 // Live-Werte eines Zugs gelten nur waehrend des Zugs
+  if(pinch){
+    // Bleibt ein Finger liegen, soll daraus kein versehentlicher Tipp werden.
+    if(pointers.size<2){ pinch=null; gesture=null; }
+    return;
+  }
+  const g=gesture; gesture=null;
+  if(!g){ alleWerkzeuge('ohneGeste'); return; }
+  if(g.t==='pan'){
+    cv.style.cursor=spaceHeld?'grab':'';
+    // Doppelklick mit dem Mausrad passt die Ansicht ein (CAD-Konvention).
+    if(g.mid && !g.moved && e.type!=='pointercancel'){
+      if(e.timeStamp-lastMidTap<450){ lastMidTap=-1e9; fitActiveView(); }
+      else lastMidTap=e.timeStamp;
+    }
+    return;
+  }
+  const gw=werkFuerGeste(g); if(gw){ gw.up(e, g); return; }
+  const werk=werkzeug();
+  if(werk && werk.leer){ werk.leer(e, g); return; }
+  if(werk && werk.tap){
+    if(g.moved) render();
+    else if(e.type!=='pointercancel') werk.tap(e);
+    return;
+  }
+}
+cv.addEventListener('pointerup',endPointer);
+cv.addEventListener('pointercancel',endPointer);
+
+// Rechtsklick: Loeschen anbieten - fuer Ecke oder Wand im Plan, fuer die
+// Oeffnung in der Wandansicht. Auf dem Mac auch Zwei-Finger-Klick und
+// Strg+Klick; unter Windows die Rechtsklick-Zone des Touchpads.
+// Rechtsklick tut im Plan nichts mehr: gelöscht wird auf der Karte des
+// Objekts oder mit Entf (ein sichtbarer Weg, eine Taste).
+cv.addEventListener('contextmenu',e=>{ e.preventDefault(); });
+
+// ================= Zeiger im Raumaufmaß =================
+// Was die Zeigerführung oben dem Raumaufmaß überlässt (Anmeldung am Anfang des Blocks).
+// Zeigerführung der Wandansicht (Anmeldung vorDruecken): Öffnungen und Kanten gehören dem Handler der
+// Wandansicht (Capture, läuft vorher); true heißt: die Seite macht nichts weiter.
+  // Wände-Modus: Oeffnungen und Kanten gehoeren dem Handler der Wandansicht
+  // (Capture, laeuft vorher). Hier bleibt nur: Ziehen ins Leere verschiebt
+  // die Wandansicht. Nichts faellt mehr in den Grundriss durch - dort
+  // entstanden frueher unsichtbare Ecken.
+function aufmassVorDruecken(e){
+  if(M.mode!=='wall') return false;
+    hidePop();
+    if(wallDrag) return true;
+    cv.setPointerCapture(e.pointerId);
+    pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+    lastPtrType=e.pointerType;
+    const dd=evDev(e), ww=wToWall(dd.x,dd.y);
+    gesture={t:'bg',x0:e.clientX,y0:e.clientY,lx:e.clientX,ly:e.clientY,moved:false,wall:null,popOpen:false,
+             op:!!openingAt(ww.x,ww.y)};
+    return true;
+}
+function aufmassHover(e){
+  if(e.pointerType==='mouse' && planMode() && planHover(e)) return;
+  if(e.pointerType==='mouse' && M.mode!=='wall' && !swim) updateHover(e);
+}
+function aufmassZeigerWeg(){
+  lastHover=null;
+  if(plusHover){ plusHover=false; refreshHint(); }
+  if(hoverRoom===null && !hoverTarget) return;
+  hoverRoom=null; hoverTarget=null;
+  if(!spaceHeld) cv.style.cursor='';
+  redraw();
+}
+function aufmassOhneGeste(){ if(M.drag){ M.drag=null; M.dragMode=null; recompute(); } }
+function aufmassDown(e, popOpen){
+  // Langes Druecken loescht nur noch bei Finger und Stift. Mit Maus und
+  // Touchpad zoegert man beim Zielen - dort riss es den Zug ab.
+  const touch=e.pointerType!=='mouse';
+  const d=evDev(e), w=toWorld(d.x,d.y);
+  const h=hit(w.x,w.y);
+  // Oeffnung im Plan: waehlen, ziehen verschiebt entlang der Wand. Ecken
+  // gewinnen (sonst kaeme man an eine Ecke neben einer Tuer nicht heran).
+  // Das Plus hinter einer Tuer (Nachbarraum anlegen) liegt dicht an der
+  // Luecke und wird erst beim Loslassen ausgewertet - es gewinnt.
+  const aufPlus=doorPluses.some(p=>Math.hypot(d.x-p.x, d.y-p.y)<=p.r+6*DPR());
+  const op=(!h && !aufPlus && planEditable()) ? planOpeningAt(w.x,w.y) : null;
+  if(planMode() && M.openSel!=null && (!op || op.id!==M.openSel)) M.openSel=null;
+  if(op){
+    M.openSel=op.id;
+    const t=alongWall(op, w);
+    const fest=M.opmeas.some(m=>m.op===op.id && m.on!==false);
+    gesture={t:'planOp',id:op.id,gx:(t==null?0:t-op.x),fest,x0:e.clientX,y0:e.clientY,lx:e.clientX,ly:e.clientY,
+             moved:false,snap:serialize(),popOpen};
+    render();
+    return true;
+  }
+  if(h){
+    if(M.mode==='draw'){
+      gesture={t:'point',id:h.id,x0:e.clientX,y0:e.clientY,lx:e.clientX,ly:e.clientY,
+               moved:false,snap:serialize(),popOpen};
+      M.drag=h.id; M.dragMode=null;
+    } else {
+      gesture={t:'selpt',id:h.id,x0:e.clientX,y0:e.clientY,lx:e.clientX,ly:e.clientY,moved:false,popOpen};
+    }
+    return true;
+  }
+  const wall=nearestWall(w.x,w.y);
+  gesture={t:'bg',x0:e.clientX,y0:e.clientY,lx:e.clientX,ly:e.clientY,moved:false,wall,popOpen};
+  return true;
+}
+function aufmassMove(e, gesture){
   if(gesture.t==='planOp'){
     if(!gesture.moved) return;
     // Eingemessen liegt sie, wo ihr Mass sie hinlegt (wie in der Wandansicht).
@@ -3995,42 +4062,18 @@ cv.addEventListener('pointermove',e=>{
     render();
     return;
   }
-  // Zug im Leeren - im Messen-Modus auch von einer Ecke aus, die sonst ein
-  // toter Klick waere - verschiebt die Ansicht.
-  if((gesture.t==='bg' || gesture.t==='selpt') && gesture.moved){
+  // Von einer Ecke aus, die im Messen-Modus sonst ein toter Klick waere, verschiebt der Zug die Ansicht.
+  if(gesture.t==='selpt' && gesture.moved){
     const dpr=DPR();
     viewPanBy((e.clientX-gesture.lx)*dpr, (e.clientY-gesture.ly)*dpr);
     gesture.lx=e.clientX; gesture.ly=e.clientY;
     redraw();
   }
-});
-
-function endPointer(e){
-  pointers.delete(e.pointerId);
-  cancelLongpress();
-  hintLive=false;                 // Live-Werte eines Zugs gelten nur waehrend des Zugs
-  if(pinch){
-    // Bleibt ein Finger liegen, soll daraus kein versehentlicher Tipp werden.
-    if(pointers.size<2){ pinch=null; gesture=null; }
-    return;
-  }
-  const g=gesture; gesture=null;
-  if(!g){
-    if(M.drag){ M.drag=null; M.dragMode=null; recompute(); }
-    return;
-  }
+}
+function aufmassUp(e, g){
   if(g.t==='planOp'){
     hintLive=false;
     if(g.moved && !g.fest) recompute(); else render();
-    return;
-  }
-  if(g.t==='pan'){
-    cv.style.cursor=spaceHeld?'grab':'';
-    // Doppelklick mit dem Mausrad passt die Ansicht ein (CAD-Konvention).
-    if(g.mid && !g.moved && e.type!=='pointercancel'){
-      if(e.timeStamp-lastMidTap<450){ lastMidTap=-1e9; fitActiveView(); }
-      else lastMidTap=e.timeStamp;
-    }
     return;
   }
   if(g.t==='point'){
@@ -4043,13 +4086,9 @@ function endPointer(e){
     if(!g.moved && !g.popOpen) tapPointMeasure(g.id);
     return;
   }
-  const gw=werkFuerGeste(g); if(gw){ gw.up(e, g); return; }
-  const werk=werkzeug();
-  if(werk && werk.tap){
-    if(g.moved) render();
-    else if(e.type!=='pointercancel') werk.tap(e);
-    return;
-  }
+}
+// Das Ende einer Geste im Leeren (Typ 'bg'), im Raumaufmaß.
+function aufmassLeer(e, g){
   // Wände-Modus: ein Klick ins Leere hebt die Auswahl der Oeffnung auf.
   if(M.mode==='wall'){
     if(!g.moved && !g.op && e.type!=='pointercancel') M.openSel=null;
@@ -4090,15 +4129,6 @@ function endPointer(e){
   if(M.chain==null && g.wall){ openWallPopup(g.wall.a,g.wall.b); return; }
   addPoint(w);
 }
-cv.addEventListener('pointerup',endPointer);
-cv.addEventListener('pointercancel',endPointer);
-
-// Rechtsklick: Loeschen anbieten - fuer Ecke oder Wand im Plan, fuer die
-// Oeffnung in der Wandansicht. Auf dem Mac auch Zwei-Finger-Klick und
-// Strg+Klick; unter Windows die Rechtsklick-Zone des Touchpads.
-// Rechtsklick tut im Plan nichts mehr: gelöscht wird auf der Karte des
-// Objekts oder mit Entf (ein sichtbarer Weg, eine Taste).
-cv.addEventListener('contextmenu',e=>{ e.preventDefault(); });
 
 // ================= Rad, Touchpad, Pinch =================
 // Mausrad, Zwei-Finger-Wischen und Pinch kommen alle als wheel an, und kein
