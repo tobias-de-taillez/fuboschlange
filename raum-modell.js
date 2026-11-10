@@ -6,7 +6,8 @@
 // (raum-fliesen.js) und KITCHEN (raum-kueche.js): Fliesen- und Küchendaten
 // bleiben am Raum.
 // Erwartet vom Werkzeug, das diese Datei lädt (erst beim Aufruf, nicht beim
-// Laden): opMeasSeq, recompute, render, syncOrthoBtn, syncSnapfitBtn.
+// Laden): recompute, render. Optional (nur das Aufmaß hat sie): opMeasSeq,
+// syncOrthoBtn, syncSnapfitBtn.
 // Greift beim Aufruf auf raum-zeichnung.js zu: VIEW, userView.
 "use strict";
 // Kurzname für den Rechenkern (raum-kern.js).
@@ -139,7 +140,9 @@ function deserialize(o){
   M.opmeas=Array.isArray(o.opmeas) ? o.opmeas.map(x=>({...x})) : [];
   // Lagemass-IDs: Zaehler aus den Daten nachziehen, doppelte und unplausible
   // (Markup aus Datei oder Link, Zahlen) neu vergeben.
-  opMeasSeq=globalThis.normOpMeasIds(M.opmeas, typeof opMeasSeq==='number'?opMeasSeq:1);
+  // Der Zähler gehört dem Aufmaß; eine Seite ohne Lagemaße (Fliesenplan, Küchenplaner) hat ihn nicht.
+  const omSeq=globalThis.normOpMeasIds(M.opmeas, typeof opMeasSeq==='number'?opMeasSeq:1);
+  if(typeof opMeasSeq==='number') opMeasSeq=omSeq;
   // Wie die Oeffnungen optional: aeltere Raeume und Fremdimporte kennen
   // weder Dicke noch geteilte Wand.
   M.thick=(o.thick && typeof o.thick==='object') ? {...o.thick} : {};
@@ -177,7 +180,7 @@ function deserialize(o){
   // M.snapfit von aussen gesetzt wird - Raumwechsel, Import UND Rueckgaengig.
   // Am Aufrufer haengend log der Knopf nach einem Undo (nachgestellt: Modell
   // false, aria-pressed true).
-  syncSnapfitBtn();
+  if(typeof syncSnapfitBtn==='function') syncSnapfitBtn();
   if(typeof syncOrthoBtn==='function') syncOrthoBtn();
 }
 

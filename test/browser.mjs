@@ -570,8 +570,11 @@ const ABLAEUFE={
         const da=await p.evaluate(()=>({tool:TOOL, ecken:M.pts.length, raum:currentRoom}));
         if(da.tool!==soll || da.raum!==id){ pruef(`${wo}: öffnet im richtigen Werkzeug und Raum`, false, JSON.stringify(da)); await f.browser.close(); continue; }
         const r1=await gespeichert(p, id);
-        pruef(`${wo}: bloßes Öffnen verschiebt das gespeicherte Aufmaß höchstens 0,01 mm`, ptsAbstand(r1.data.pts, start.data.pts)<=0.01, ptsAbstand(r1.data.pts, start.data.pts).toExponential(2)+' mm');
-        pruef(`${wo}: der Stand ist gespeichert`, !!(r1.stand && r1.stand.text && r1.stand.text!=='—'), JSON.stringify(r1.stand));
+        pruef(`${wo}: bloßes Öffnen verschiebt das gespeicherte Aufmaß höchstens 0,001 mm`, ptsAbstand(r1.data.pts, start.data.pts)<=0.001, ptsAbstand(r1.data.pts, start.data.pts).toExponential(2)+' mm');
+        // Der Stand steht nach dem Öffnen im Speicher, und zwar der, den das Aufmaß dort errechnet (die Räume
+        // „roh“ kommen aus dem alten Werkzeug ohne Stand; ihr Zwilling ohne „-roh“ nennt den erwarteten).
+        const zwilling=name.replace(/-roh$/, ''), erwartet=(fall.info||{}).stand || ((zwilling!==name && JSON.parse(await readFile(path.join(ordner, zwilling+'.json'), 'utf8')).info||{}).stand);
+        pruef(`${wo}: der gespeicherte Stand ist der erwartete`, !!erwartet && !!r1.stand && r1.stand.text===erwartet, `${JSON.stringify(r1.stand && r1.stand.text)} gegen ${JSON.stringify(erwartet)}`);
         // Arbeiten: ein Teil setzen, zurück, vor
         if(soll==='fliesen'){
           if(!await p.locator('#tPalette .tpal').count()){ await p.evaluate(()=>{ document.getElementById('tSpecBox').open=true; }); await p.click('#tSetAdd'); await sleep(300); }
@@ -581,7 +584,7 @@ const ABLAEUFE={
         const r2=await gespeichert(p, id), teile=r=>JSON.stringify(soll==='kueche' ? r.data.kitchen : r.data.tiles);
         for(let i=0;i<3;i++){ await p.reload(); await sleep(1100); }
         const r3=await gespeichert(p, id);
-        pruef(`${wo}: nach Arbeiten und dreimal Neuladen höchstens 0,01 mm`, ptsAbstand(r3.data.pts, start.data.pts)<=0.01, ptsAbstand(r3.data.pts, start.data.pts).toExponential(2)+' mm');
+        pruef(`${wo}: nach Arbeiten und dreimal Neuladen höchstens 0,001 mm`, ptsAbstand(r3.data.pts, start.data.pts)<=0.001, ptsAbstand(r3.data.pts, start.data.pts).toExponential(2)+' mm');
         if(soll!=='aufmass') pruef(`${wo}: Teile nach Rückgängig und Wiederherstellen bleiben beim Neuladen`, teile(r2)===teile(r3));
         pruef(`${wo}: keine Fehler in der Konsole`, f.stoer.length===0, f.stoer.join(' | '));
         await f.browser.close();

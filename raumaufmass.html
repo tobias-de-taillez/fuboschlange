@@ -8476,8 +8476,6 @@ function tilesPrintHtml(){
   TS.printMaps={maps:ev.maps, K, T, ev};
   return html;
 }
-// Erstes Bild nach dem Boot: jetzt kennt renderPanel den Fliesen-Knopf.
-render();
 // ---------- Fliese einmessen ----------
 // Dialog am Fliesenset: Strecken der aktiven Variante eintragen, Werte mit ±
 // ansehen, uebernehmen. Rechnung in TILEMEAS; die Eingaben bleiben je
@@ -8652,6 +8650,9 @@ $('mApply').onclick=()=>{
 // und bleibt im Browser - sie gehoert nicht zum Raum und nicht zum Rueckgaengig.
 const RULER_STORE='raumaufmass-lineal', RULER_PX=34;
 TS.ruler={on:false, a:null, b:null, snap:null, room:undefined};
+// Erstes Bild nach dem Boot: jetzt kennt renderPanel den Fliesen-Knopf. Erst hier, nach TS.ruler:
+// stünde die Seite beim Laden im Fliesenplan, griffe das Bild sonst ins Leere.
+render();
 function rulerSave(){
   try{ const all=JSON.parse(localStorage.getItem(RULER_STORE)||'{}')||{};
        if(currentRoom && TS.ruler.a) all[currentRoom]={a:TS.ruler.a, b:TS.ruler.b};
