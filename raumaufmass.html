@@ -8230,7 +8230,9 @@ function drawPlanOpSel(P, I, dpr){
 // Wandansicht: von innen gesehen.
 function syncOppl(){
   const box=$('oppl');
-  const o=planMode() && M.openSel!=null ? M.openings.find(x=>x.id===M.openSel) : null;
+  // In der Ausgabe liegt nur das Blatt: dort keine Karte. (Über die Klasse
+  // gefragt, weil schon der Boot hier zeichnet, bevor OUT angelegt ist.)
+  const o=planMode() && !document.body.classList.contains('outmode') && M.openSel!=null ? M.openings.find(x=>x.id===M.openSel) : null;
   const r=o && openingWorld(viewPts(), o.a, o.b, o);
   if(!o || !r || gesture && gesture.t==='planOp' && gesture.moved){ box.hidden=true; return; }
   const fl=wallFlip(o.a,o.b);
@@ -11946,6 +11948,8 @@ function openOut(){
   if(TOOL!=='aufmass') return;
   if(!raumGeschlossen()){ sag('Die Ausgabe gibt es, sobald der Raum geschlossen ist.', $('outTab')); return; }
   closeEntry(); if(wpopPair) closeWallPopup(); hidePop();
+  // Auch die Karten der Ecke und der Öffnung: über dem Blatt liegt nichts.
+  closeCornerPop(); M.sel=[]; $('oppl').hidden=true;
   sag(null);
   OUT.on=true; document.body.classList.add('outmode');
   syncOutTab(); renderPanel();
@@ -13532,7 +13536,7 @@ function renderTilesPanel(){
     ? `<span>Einkauf</span><b class="main">${sqm(2*bigger*tileA)} <small>m² · ${2*bigger} Fliesen</small></b>
        <span></span><b><small>${buyL} L, ${buyR} R mit Recycling${spareL+spareR?`, ${spareL+spareR} übrig`:''}</small></b>
        <span>Verschnitt</span><b>${fmt2(wasteN*100)} <small>%</small></b>`
-    : `<span>Einkauf</span><b class="main">${sqm(s.placed*tileA)} <small>m² · ${s.placed} Fliesen</small></b>
+    : `<span>Einkauf</span><b class="main">${sqm(s.placed*tileA)} <small>m² · ${s.placed} ${s.placed===1 ? 'Fliese' : 'Fliesen'}</small></b>
        <span></span><b><small>${s.L.whole+s.L.cut} L, ${s.R.whole+s.R.cut} R, ohne Recycling (mit Recycling rechnet der Druck)</small></b>
        <span>Verschnitt</span><b>${fmt2(s.waste*100)} <small>%</small></b>`;
   $('tKey').innerHTML += `<span>Fugenmörtel</span><b>≈ ${kg} <small>kg</small></b>
@@ -13565,7 +13569,7 @@ function renderTilesPanel(){
   if(T.spec.set.length!==1 || T.spec.set[0]?.id!=='legacy' || T.spec.set[0]?.shape!=='chevron'){
     const kinds=T.spec.set.flatMap(TL.tileKinds), rows=kinds.map(k=>{const q=s[k]||{whole:0,cut:0}, stocks=nest?nest.stocks.filter(st=>st.kind===k).length:q.cut; return {k,q,buy:q.whole+stocks};});
     const buyArea=rows.reduce((a,r)=>a+r.buy*TL.tileArea(T.spec,r.k),0), buyCount=rows.reduce((a,r)=>a+r.buy,0);
-    $('tKey').innerHTML=`<span>Einkauf</span><b class="main">${sqm(buyArea/1e6)} <small>m² · ${buyCount} Fliesen</small></b><span>Verschnitt</span><b>${fmt2((buyArea?1-s.covered/buyArea:0)*100)} <small>%</small></b><span>Fugenmörtel</span><b>≈ ${kg} <small>kg</small></b><span>Belegt</span><b>${m2(s.covered)} <small>von ${m2(s.roomArea)} m²</small></b>`;
+    $('tKey').innerHTML=`<span>Einkauf</span><b class="main">${sqm(buyArea/1e6)} <small>m² · ${buyCount} ${buyCount===1 ? 'Fliese' : 'Fliesen'}</small></b><span>Verschnitt</span><b>${fmt2((buyArea?1-s.covered/buyArea:0)*100)} <small>%</small></b><span>Fugenmörtel</span><b>≈ ${kg} <small>kg</small></b><span>Belegt</span><b>${m2(s.covered)} <small>von ${m2(s.roomArea)} m²</small></b>`;
     $('tStats').innerHTML=`<table class="ttab tfull"><tr><th>Variante</th><th>ganz</th><th>Schnitt</th><th>Einkauf</th></tr>${rows.map(r=>`<tr><td>${escapeHtml(tileLabel(r.k))}<small> · ${TL.tileDef(T.spec,r.k).thick} mm</small></td><td>${r.q.whole}</td><td>${r.q.cut}</td><td>${r.buy}</td></tr>`).join('')}</table><div class="tnote">${nest?'Mit Recycling aus dem aktuellen Druck.':'Ohne Recycling; Schnittblätter berechnen die Wiederverwendung je Variante.'} Fugenvolumen mit der kleineren Dicke der angrenzenden Fliesen; ≈ 1,6 kg/l plus 10 %. Unterschiedliche Dicken erfordern einen Höhenausgleich.</div>`;
   }
   const bo=$('tOut');
