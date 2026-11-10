@@ -1545,7 +1545,7 @@ function rechneRaum(){
     if(soll!==M.snapfit){
       if(soll && lastDof.room===currentRoom && lastDof.dof>0 && !matchMedia('(prefers-reduced-motion:reduce)').matches)
         M.glide={from:M.pts.map(p=>({id:p.id,x:p.x,y:p.y})), t0:performance.now()};
-      M.snapfit=soll; syncSnapfitBtn();
+      M.snapfit=soll; if(typeof syncSnapfitBtn==='function') syncSnapfitBtn();
     }
     lastDof={room:currentRoom, dof:M.an.dof};
     if(M.snapfit){
@@ -2269,6 +2269,7 @@ function stepSwim(now){
 //   modusAbgelehnt(modus) true = der Wechsel wurde mit einer Rückmeldung abgelehnt; vorModus() vor jedem Wechsel;
 //   modusGewechselt(modus) danach; zoom/pan/einpassen(...) true = die Ansicht des Werkzeugs, nicht VIEW; aufgeklappt()
 //   hinweisBelegt() true = die Hinweiszeile zeigt gerade etwas Eigenes
+//   vorHistorie() vor einem Klick auf Rückgängig/Wiederherstellen, gibt eine Funktion für danach zurück; start() beim Boot
 //   hinweis()   Standardtext der Hinweiszeile            wurde verlassen, die Seite rendert nicht weiter
 //   Jede Funktion ist freiwillig: wer eine nicht hat, wird dort übergangen.
 //   verlassen() beim Wechsel in einen anderen Modus
@@ -2298,6 +2299,7 @@ const werkFuerGeste=g=>(g && ALLE.find(w=>w.gesten && w.gesten.includes(g.t)))||
 // Hier, vor dem Boot: schon der erste Raum und das erste Bild gehen durch sie.
 meldeAn(['draw','measure','wall'], {
   vorZeichnen:aufmassVorZeichnen, zeichne:aufmassZeichne, nachZeichnen:aufmassNachZeichnen,
+  vorHistorie:aufmassVorHistorie, start(){ syncSnapfitBtn(); syncOrthoBtn(); },
   modusAbgelehnt:aufmassModusAbgelehnt, vorModus:closeOut, modusGewechselt:aufmassModusGewechselt,
   panel:aufmassPanel, hinweis:aufmassHinweis, hinweisBelegt:()=>plusHover,
   vorDruecken:aufmassVorDruecken, down:aufmassDown, hover:aufmassHover, zeigerWeg:aufmassZeigerWeg, ohneGeste:aufmassOhneGeste,
@@ -5204,13 +5206,20 @@ document.querySelectorAll('#modes button[data-mode]').forEach(b=>{
 // Eingabe geht denselben Weg (e fehlt dann). Nach einem Zeigerklick (detail>0)
 // gibt der Knopf den Fokus ab; ohne geführte Eingabe behält ihn die Tastatur.
 function histKnopf(e, tun){
-  const offen=!$('entry').hidden, gefuehrt=offen && entryGuided && !!entryPair;
-  if(offen) closeEntry();
+  const danach=ALLE.map(w=>w.vorHistorie ? w.vorHistorie() : null);
   tun();
   if(e && e.detail && e.currentTarget) e.currentTarget.blur();
-  // Ohne Maß gibt es noch keinen Vorschlag: dann wie nach dem Schließen an der ersten Wand.
-  const s=M.sugg[0] || (!M.meas.length && M.walls.length ? {a:M.walls[0][0], b:M.walls[0][1]} : null);
-  if(gefuehrt && M.mode==='measure' && s) enterMeasurement(s.a, s.b, true);
+  danach.forEach(f=>{ if(f) f(); });
+}
+// Raumaufmaß (Anmeldung vorHistorie): die offene Eingabe schließen, danach ggf. die geführte Eingabe fortsetzen.
+function aufmassVorHistorie(){
+  const offen=!$('entry').hidden, gefuehrt=offen && entryGuided && !!entryPair;
+  if(offen) closeEntry();
+  return ()=>{
+    // Ohne Maß gibt es noch keinen Vorschlag: dann wie nach dem Schließen an der ersten Wand.
+    const s=M.sugg[0] || (!M.meas.length && M.walls.length ? {a:M.walls[0][0], b:M.walls[0][1]} : null);
+    if(gefuehrt && M.mode==='measure' && s) enterMeasurement(s.a, s.b, true);
+  };
 }
 $('undo').onclick=e=>histKnopf(e, doUndo);
 $('redo').onclick=e=>histKnopf(e, doRedo);
@@ -6410,7 +6419,7 @@ function setTool(tool, boot){
   const hash = tool==='fliesen' ? '#fliesen' : tool==='kueche' ? '#kueche' : '';
   if(location.hash!==hash && !/^#raum=/.test(location.hash))
     history.replaceState(null,'',location.pathname+location.search+hash);
-  closeOut();
+  alleWerkzeuge('vorModus');
   $('hint').textContent='';
   // Die Planfläche ist je Werkzeug eine andere (der Küchenplaner teilt sie mit
   // 3D): eine gemerkte Ansicht passte dort nicht mehr, also neu einpassen.
@@ -6619,8 +6628,7 @@ if(!currentRoom){
 }
 TOOL=toolFromHash(); document.body.dataset.tool=TOOL;
 setMode('draw');
-syncSnapfitBtn();
-syncOrthoBtn();
+alleWerkzeuge('start');
 recompute();
 // Fliesen und Küche laden nach diesem Block; erst danach steht fest, ob das
 // gewünschte Werkzeug den Raum schon öffnen kann.
