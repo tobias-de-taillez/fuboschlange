@@ -1714,7 +1714,7 @@ addEventListener('storage', e=>{
     if(vor && nach && kern(vor)===kern(nach)) return;
   }
   if(JSON.stringify(r.data)===serialize()) return;
-  if(typeof kitchenResetSession==='function') kitchenResetSession();   // nichts Vorgemerktes über den neuen Stand schreiben
+  alleWerkzeuge('neuerStand');   // nichts Vorgemerktes über den neuen Stand schreiben
   const inAusgabe=OUT.on;
   recompute.still=true;
   try{ openRoom(currentRoom); } finally{ recompute.still=false; }
@@ -1729,7 +1729,7 @@ function speicherWarnung(){
 function openRoom(id){
   // Gehaltene Pfeil-/Dreh-Taste: das Vorgemerkte noch in den ALTEN Raum schreiben (currentRoom zeigt auf ihn, M hält
   // seine Daten), und zwar vor dem Laden: öffnet man denselben Raum noch einmal, sieht auch er die Schritte.
-  if(typeof kitchenFlush==='function') kitchenFlush();
+  alleWerkzeuge('vorRaumwechsel');
   const r=STORE.load(id);
   if(!r) return;
   currentRoom=id;
@@ -1748,7 +1748,7 @@ function openRoom(id){
   // Der Undo-Stapel gehoert zum Raum: ein Undo nach dem Wechsel wuerde
   // sonst die Geometrie des vorigen Raums in DIESEN Raum speichern.
   undoStack.length=0; redoStack.length=0;
-  if(typeof kitchenResetSession==='function') kitchenResetSession();
+  alleWerkzeuge('neuerStand');
   // Offene Eingabe/Popover gehoeren zum alten Raum: ein OK nach dem
   // Wechsel wuerde eine Messung mit fremden Punkt-IDs in DIESEN Raum
   // druecken - recompute() wirft dann bei jedem Bild.
@@ -2259,6 +2259,9 @@ function stepSwim(now){
 //   zeichne()   die Zeichenfläche                        panel(): Abschnitt im Panel; true = der Modus
 //   hinweis()   Standardtext der Hinweiszeile            wurde verlassen, die Seite rendert nicht weiter
 //   verlassen() beim Wechsel in einen anderen Modus
+//   vorRaumwechsel() Vorgemerktes noch in den alten Raum schreiben; neuerStand() Vorgemerktes verwerfen,
+//               weil ein anderer Raum oder Stand geladen wird
+//   key(e)      Taste behandelt (true)?                   entf(): Entf/⌫ löscht die Auswahl (true = getan)
 //   Zeiger: down(e) legt eine Geste an (true) oder lässt der Seite das Ziehen im Leeren; hover(e) ohne
 //   gedrückte Taste; move(e, g), up(e, g) und pinch(g) für Gesten, deren Typ g.t in gesten steht; tap(e)
 //   für einen Klick ohne Ziehen, wenn down keine Geste angelegt hat.
@@ -2266,6 +2269,8 @@ function stepSwim(now){
 const WERKZEUGE={};
 function meldeAn(modus, werk){ WERKZEUGE[modus]=werk; }
 const werkzeug=modus=>WERKZEUGE[modus===undefined ? M.mode : modus]||null;
+// Ruft bei jedem angemeldeten Werkzeug die Funktion mit diesem Namen, wenn es sie hat.
+const alleWerkzeuge=name=>{ for(const w of Object.values(WERKZEUGE)) if(w[name]) w[name](); };
 const werkFuerGeste=g=>(g && Object.values(WERKZEUGE).find(w=>w.gesten && w.gesten.includes(g.t)))||null;
 
 function render(){
@@ -5335,7 +5340,7 @@ function deleteTarget(){
     const o=selectedOpening(); if(!o) return false;
     $('opDel').click(); return true;
   }
-  if(M.mode==='kitchen') return typeof kitchenDeleteSel==='function' && kitchenDeleteSel();
+  { const werk=werkzeug(); if(werk && werk.entf) return werk.entf(); }
   if(M.mode!=='draw' && M.mode!=='measure') return false;
   if(M.openSel!=null && M.openings.some(o=>o.id===M.openSel)){ $('opplDel').click(); return true; }
   const h=hoverTarget; if(!h) return false;
@@ -5398,8 +5403,7 @@ addEventListener('keydown',e=>{
     if(M.sel.length){ M.sel=[]; render(); return; }
     if(M.chain){ M.chain=null; render(); return; }
   }
-  if(M.mode==='tiles' && tilesKey(e)) return;
-  if(M.mode==='kitchen' && typeof kitchenKey==='function' && kitchenKey(e)) return;
+  { const werk=werkzeug(); if(werk && werk.key && werk.key(e)) return; }
   if(mod || e.altKey) return;
   if(e.key==='?' || k==='h'){ toggleHelp(); return; }
   // Ansicht: 0 oder ⇧1 passt ein, + und − zoomen um die Bildmitte.
@@ -8834,6 +8838,7 @@ meldeAn('tiles', {
     return false;
   },
   hinweis(){ const h=TILE_TOOL_HINTS[TS.tool]; return h && h(); },
+  key:tilesKey,
   down:tilesDown, hover:tilesHover, tap:tilesTap,
   gesten:['tiles'], move:tilesMove, up:tilesUp,
   // Beim Verlassen des Fliesen-Modus: Werkzeug zurueck, Auswahl weg.
@@ -8852,7 +8857,7 @@ if(globalThis.RAUM_UNVOLLSTAENDIG) throw new Error('Küchenplaner startet nicht:
 // ================= Küche: Bedienung =================
 // Hängt am ui-Block wie tiles-ui: M, VIEW, toScr/toWorld, snapshot,
 // STORE. Eigene Namen bleiben in der IIFE; nach außen gehen nur die
-// Einhängepunkte (kitchenDown … renderKitchenPanel), die ui per typeof ruft.
+// die Anmeldung (meldeAn am Ende), über die ui den Küchenplaner ruft.
 (()=>{
 const KX=globalThis.KITCHEN;
 const KS={ sel:null, hover:null, hl:null, flow:null, lastWall:null, palDrag:null, drag:false,
@@ -10614,6 +10619,13 @@ meldeAn('kitchen', {
   },
   hinweis:kitchenHint,
   verlassen:kitchenLeave,
+  // Vor dem Raumwechsel (currentRoom ist noch der alte Raum): Vorgemerktes Speichern ausführen.
+  vorRaumwechsel(){ nudgeSave.flush(); },
+  // Raumwechsel oder neuer Stand (M hält noch den alten): Vorgemerktes Speichern verwerfen statt hier zu schreiben,
+  // sonst landeten die alten Daten im neuen Raum.
+  neuerStand(){ nudgeSave.cancel(); disarmClear(); Object.assign(KS, KX.roomBound()); G3.camFor=''; },
+  key:kitchenKey,
+  entf(){ const it=selItem(); if(!it) return false; removeItem(it); return true; },
   down:kitchenDown, hover:kitchenHover, tap:kitchenTap,
   // 'kdim': die Maß-Eingabe ist offen, Ziehen und Loslassen tun nichts.
   gesten:['kitchen','kdim'],
@@ -10621,14 +10633,6 @@ meldeAn('kitchen', {
   up(e, g){ if(g.t==='kitchen') kitchenUp(e, g); },
   pinch(g){ if(g.t==='kitchen' && g.moved) kitchenUp(null, g); },
 });
-Object.assign(globalThis, { kitchenDown, kitchenMove, kitchenUp, kitchenTap, kitchenHover, kitchenKey,
-  drawKitchenView, renderKitchenPanel, kitchenLeave, k3dSchedule, kitchenHint, kitchenData,
-  kitchenDeleteSel:()=>{ const it=selItem(); if(!it) return false; removeItem(it); return true; },
-  // Vor dem Raumwechsel (openRoom, solange currentRoom noch der alte Raum ist): Vorgemerktes Speichern ausführen.
-  kitchenFlush:()=>{ nudgeSave.flush(); },
-  // Raumwechsel (openRoom ruft das, wenn currentRoom schon der neue Raum ist, M aber noch den alten hält):
-  // Vorgemerktes Speichern verwerfen statt hier zu schreiben, sonst landeten die alten Daten im neuen Raum.
-  kitchenResetSession:()=>{ nudgeSave.cancel(); disarmClear(); Object.assign(KS, KX.roomBound()); G3.camFor=''; } });
 })();
 </script>
 <script src="raum-checks.js"></script>
