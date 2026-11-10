@@ -2307,6 +2307,16 @@ $('tRuler').onclick=()=>rulerToggle();
 
 // Anmeldung bei der Seite (meldeAn im Block ui): so ruft sie den Fliesenplan, ohne ihn zu kennen.
 meldeAn('tiles', {
+  tasten:[
+  ['Fliesen',[
+    ['Drehen 15°, mit ⇧ 1°','Q  E'], ['L und R tauschen','F'],
+    ['Gehrung · Anschneiden · Verbinden','G · T · V'],
+    ['Fluchten · Wandfuge · Dehnungsfuge','A · W · J'], ['Fugencheck','K'],
+    ['Kopieren, unter dem Zeiger einfügen','⌘C  ⌘V'], ['Muster fortsetzen','⌘D'], ['Alle wählen','⌘A'],
+    ['Auswahl 1 mm schieben, mit ⇧ 10 mm','Pfeile'], ['Rahmenauswahl','⇧+Ziehen'],
+    ['Ohne Einrasten ziehen','⌥+Ziehen'], ['Auswahl löschen','Entf'],
+  ]]
+  ],
   bereit:tilesReady, absage:'Fliesen erst, wenn der Raum geschlossen und eingemessen ist.',
   zeichne:drawTilesView,
   panel(){

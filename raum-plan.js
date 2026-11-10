@@ -1214,9 +1214,10 @@ function renderPanel(){
 // ================= Tastenkuerzel =================
 // Eine Tabelle fuer die Uebersicht (?). Schreibweise mit ⌘/⌥/Entf, plat()
 // setzt sie fuer Windows um.
+// Die Tasten, die in jedem Werkzeug gelten. Jedes Werkzeug hängt seine eigenen an (Anmeldung: tastenVorn
+// vor, tasten nach diesen Gruppen).
 const KEYS=[
   ['Allgemein',[
-    ['Schritte: Skizze, Maße, Wände','1  2  3'], ['Ausgabe','4'],
     ['Rückgängig','⌘Z'], ['Wiederherstellen','⇧⌘Z'],
     ['Als Datei sichern','⌘S'],
     ['Abbrechen, Karte schließen','Esc'], ['Hilfe und Tasten','?'],
@@ -1226,34 +1227,10 @@ const KEYS=[
     ['Verschieben','Wischen · Leertaste+Ziehen · Mitteltaste · Pfeile'],
     ['Einpassen','0 · Mitteltaste doppelt'],
   ]],
-  ['Skizze und Maße',[
-    ['Ecke setzen, Wand oder Ecke öffnen','Klick'], ['Diagonale öffnen','zwei Ecken nacheinander'],
-    ['Ecke verschieben','Ziehen'],
-    ['Ecke oder Wand unter dem Zeiger löschen','Entf'],
-    ['Maß übernehmen, nächste Strecke','Enter'],
-  ]],
-  ['Wände',[
-    ['Vorherige, nächste Wand','←  →'],
-    ['Gewählte Öffnung löschen','Entf'],
-  ]],
-  ['Fliesen',[
-    ['Drehen 15°, mit ⇧ 1°','Q  E'], ['L und R tauschen','F'],
-    ['Gehrung · Anschneiden · Verbinden','G · T · V'],
-    ['Fluchten · Wandfuge · Dehnungsfuge','A · W · J'], ['Fugencheck','K'],
-    ['Kopieren, unter dem Zeiger einfügen','⌘C  ⌘V'], ['Muster fortsetzen','⌘D'], ['Alle wählen','⌘A'],
-    ['Auswahl 1 mm schieben, mit ⇧ 10 mm','Pfeile'], ['Rahmenauswahl','⇧+Ziehen'],
-    ['Ohne Einrasten ziehen','⌥+Ziehen'], ['Auswahl löschen','Entf'],
-  ]],
-  ['Küche',[
-    ['Teil setzen','Klick oder Ziehen aus der Leiste'], ['An der Wand schieben','Ziehen · ← →, mit ⇧ 10 cm'],
-    ['Ohne Einrasten ziehen','⌥+Ziehen'], ['Tisch, Insel drehen','Q  E'], ['Anschlag tauschen','F'],
-    ['Daneben duplizieren','⌘D'], ['Kopieren, unter dem Zeiger einfügen','⌘C  ⌘V'], ['Teil löschen','Entf'],
-    ['3D · Wege · Fronten offen','V · W · O'], ['3D drehen, verschieben, zoomen','Ziehen · Rechts-Ziehen · Rad'],
-  ]],
 ];
 // Gruppen als Bloecke in zwei Spalten - frueher lief die Liste im Zickzack.
 function renderKeys(){
-  $('keysbody').innerHTML='<h3>Tasten und Maus</h3>'+KEYS.map(([h,rows])=>`<section class="kgrp"><h4>${escapeHtml(h)}</h4>`
+  $('keysbody').innerHTML='<h3>Tasten und Maus</h3>'+[...ALLE.flatMap(w=>w.tastenVorn||[]), ...KEYS, ...ALLE.flatMap(w=>w.tasten||[])].map(([h,rows])=>`<section class="kgrp"><h4>${escapeHtml(h)}</h4>`
     +rows.map(([d,k])=>`<p><span>${escapeHtml(d)}</span><kbd>${escapeHtml(plat(k))}</kbd></p>`).join('')+'</section>').join('');
 }
 function closeKeys(){ const w=$('keyswrap'); if(w.hidden) return false; w.hidden=true; return true; }

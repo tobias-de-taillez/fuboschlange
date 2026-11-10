@@ -2,16 +2,16 @@
 // ein Mensch (echte Klicks und Tasten) und prüft, was die Node-Tests nicht
 // sehen: die Bedienung. Die 1018 Selbstchecks decken die Rechenkerne; dieser
 // Lauf deckt den Weg Skizze, Maße, Wände, Ausgabe, zwei Fenster, eine
-// unvollständig geladene Seite, den Fliesenplan und den Küchenplaner.
+// unvollständig geladene Seite, den Fliesenplan und den Küchenplaner (je eine eigene Seite) und den Wechsel
+// zwischen den Seiten (Ablauf seiten).
 //
 //   node test/browser.mjs                 alle Abläufe in Chromium
 //   node test/browser.mjs webkit          in WebKit (firefox ebenso)
 //   node test/browser.mjs chromium fenster  nur ein Ablauf
 //
-// Braucht Playwright, das NICHT zum Repo gehört (kein Build, keine
-// Abhängigkeiten): entweder im Suchpfad von Node, oder der Ordner, in dem es
-// liegt, in PLAYWRIGHT, z. B.
-//   npx playwright install chromium webkit firefox
+// Braucht Playwright (devDependency in package.json):
+//   npm install                   einmalig, danach  npx playwright install chromium webkit firefox
+// Sonst findet der Test es im Suchpfad von Node oder in dem Ordner, den die Variable PLAYWRIGHT nennt, z. B.
 //   PLAYWRIGHT=~/.npm/_npx/<hash>/node_modules node test/browser.mjs
 // Fehlt es, endet der Lauf mit 2 und sagt das. Der Test liefert die Seiten
 // selbst aus (eigener Port, leerer Speicher) und fasst keine andere Adresse an.

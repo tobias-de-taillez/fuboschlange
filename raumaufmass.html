@@ -522,7 +522,7 @@
         <dt>Weitergeben</dt><dd>Als Datei sichern, Link kopieren oder QR-Code zeigen. Räume liegen nur in diesem Browser; wichtige Aufmaße zusätzlich als Datei sichern.</dd>
       </dl>
 
-      <p class="hnote">Rückgängig gilt bis zum Wechsel des Raums.</p>
+      <p class="hnote">Rückgängig gilt bis zum Wechsel des Raums oder des Werkzeugs.</p>
     </div>
   </div>
 </div>
@@ -1178,6 +1178,21 @@ function stepSwim(now){
 // Das Raumaufmaß ist ein Werkzeug wie die anderen: die Seite ruft es über dieselbe Anmeldung.
 // Hier, vor dem Boot: schon der erste Raum und das erste Bild gehen durch sie.
 meldeAn(['draw','measure','wall'], {
+  tastenVorn:[['Schritte',[
+    ['Skizze, Maße, Wände','1  2  3'], ['Ausgabe','4'],
+  ]]],
+  tasten:[
+  ['Skizze und Maße',[
+    ['Ecke setzen, Wand oder Ecke öffnen','Klick'], ['Diagonale öffnen','zwei Ecken nacheinander'],
+    ['Ecke verschieben','Ziehen'],
+    ['Ecke oder Wand unter dem Zeiger löschen','Entf'],
+    ['Maß übernehmen, nächste Strecke','Enter'],
+  ]],
+  ['Wände',[
+    ['Vorherige, nächste Wand','←  →'],
+    ['Gewählte Öffnung löschen','Entf'],
+  ]]
+  ],
   vorZeichnen:aufmassVorZeichnen, zeichne:aufmassZeichne, nachZeichnen:aufmassNachZeichnen,
   vorHistorie:aufmassVorHistorie, start(){ syncSnapfitBtn(); syncOrthoBtn(); },
   modusAbgelehnt:aufmassModusAbgelehnt, vorModus:closeOut, modusGewechselt:aufmassModusGewechselt,

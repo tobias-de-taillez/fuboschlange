@@ -1755,6 +1755,14 @@ function kitchenHint(){
 
 // Anmeldung bei der Seite (meldeAn im Block ui): so ruft sie den Küchenplaner, ohne ihn zu kennen.
 meldeAn('kitchen', {
+  tasten:[
+  ['Küche',[
+    ['Teil setzen','Klick oder Ziehen aus der Leiste'], ['An der Wand schieben','Ziehen · ← →, mit ⇧ 10 cm'],
+    ['Ohne Einrasten ziehen','⌥+Ziehen'], ['Tisch, Insel drehen','Q  E'], ['Anschlag tauschen','F'],
+    ['Daneben duplizieren','⌘D'], ['Kopieren, unter dem Zeiger einfügen','⌘C  ⌘V'], ['Teil löschen','Entf'],
+    ['3D · Wege · Fronten offen','V · W · O'], ['3D drehen, verschieben, zoomen','Ziehen · Rechts-Ziehen · Rad'],
+  ]]
+  ],
   bereit:kitchenReady, absage:'Küche erst, wenn der Grundriss eindeutig eingemessen ist.',
   zeichne(){ drawKitchenView(); k3dSchedule(); },
   panel(){
