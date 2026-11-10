@@ -386,9 +386,11 @@
   #tSpecBox summary .ed{font-size:12px;color:var(--accent)}
   #tSpecBox[open] summary .ed{color:var(--muted)}
   #tSpecBox[open] summary{margin-bottom:10px}
-  .tgrid{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px}
-  .tgrid label{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--ink2)}
+  .tgrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px 12px}
+  .tgrid label{display:flex;align-items:center;gap:5px;min-width:0;font-size:12px;color:var(--ink2)}
   .tgrid label span{flex:1}
+  /* Küchenmaße: lange Namen (Hängeschrank, Plattentiefe) passen mit Feld und Einheit nicht zu zweit in eine Panelzeile. */
+  #kSpecGrid{grid-template-columns:minmax(0,1fr)}
   .tgrid input,.trow input{width:4.6em;padding:0 6px;height:26px;border:1px solid var(--line);border-radius:4px;
     background:#fff;text-align:right;font-variant-numeric:tabular-nums}
   .trow{display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin:4px 0}
@@ -695,6 +697,7 @@
   #geo .ph{display:none}
   #geo.in{animation:arrive .4s var(--ease)}
   @keyframes arrive{from{opacity:0;transform:translateY(5px)}}
+  body.tilesmode #standMore,body.kitchenmode #standMore{display:none}
   #standMore{padding:10px 16px 12px;border-bottom:1px solid var(--line);background:var(--canvas);font-size:12px}
   #standFacts{display:grid;grid-template-columns:1fr auto;gap:4px 12px;margin:0 0 10px}
   #standFacts dt{color:var(--ink2)}
@@ -10858,10 +10861,29 @@ function zoomCenter(f){ viewZoomAt(cv.width/2, cv.height/2, f); redraw(); }
 // schliessende Wand zurueck (Raum war zu, ist offen, eine Wand weniger bei
 // gleichen Ecken), geht es in der Skizze weiter, und der Zug laeuft.
 // Wiederherstellen schliesst wieder und fuehrt wie der Klick nach Maße.
+// Rückgängig und Wiederherstellen halten die Ansicht (restoreSnapshot). Ein
+// Spiegelschritt legt den Raum aber auf die andere Seite der Null: die
+// gehaltene Ansicht zeigte dann nur noch das leere Raster. Kippt bei gleichen
+// Ecken der Umlaufsinn, war der Schritt ein Spiegeln - dann die Ansicht
+// einpassen wie beim Spiegeln selbst (eingenordet: neu einnorden).
+function umlaufsinn(){
+  const P=C.wallPolygonRing(M.pts, M.walls) || M.pts;
+  let s=0;
+  for(let i=0,j=P.length-1;i<P.length;j=i++) s+=P[j].x*P[i].y-P[i].x*P[j].y;
+  return {s:Math.sign(s), ids:M.pts.map(p=>p.id).join(' ')};
+}
+function ansichtNachSpiegeln(vor){
+  const nach=umlaufsinn();
+  if(!vor.s || nach.s!==-vor.s || nach.ids!==vor.ids) return;
+  if(northWallPair) northWall(northWallPair.a, northWallPair.b, true);
+  else { userView=false; autofit(); render(); }
+}
 function doUndo(){
   const aus=OUT.on;
   const zu=!!C.wallPolygonRing(M.pts, M.walls), ecken=M.pts.length, waende=M.walls.length;
+  const sinn=umlaufsinn();
   if(!undo()){ setHint('Nichts mehr rückgängig zu machen.'); return; }
+  ansichtNachSpiegeln(sinn);
   if(TOOL==='aufmass' && planMode() && zu && M.pts.length===ecken && M.walls.length===waende-1
      && !C.wallPolygonRing(M.pts, M.walls)){
     M.chain=zugEnde(); setMode('draw');
@@ -10871,7 +10893,9 @@ function doUndo(){
 function doRedo(){
   const aus=OUT.on;
   const offen=!C.wallPolygonRing(M.pts, M.walls), ecken=M.pts.length, waende=M.walls.length;
+  const sinn=umlaufsinn();
   if(!redo()){ setHint('Nichts wiederherzustellen.'); return; }
+  ansichtNachSpiegeln(sinn);
   if(TOOL==='aufmass' && M.mode==='draw' && offen && M.pts.length===ecken && M.walls.length===waende+1) finishIfClosed();
   ausgabeNurGeschlossen(aus);
 }
@@ -12002,6 +12026,8 @@ function renderOut(){
     // im Rollbereich drückt der Browser die Blätter auf dessen Höhe zusammen.
     sh.innerHTML='<div class="bl-stapel">'+BLATT.html(BLATT.modell(), {mitMassliste:$('outList').checked})+'</div>';
   }
+  // raum-blatt.js kam nicht an: sagen, statt eine leere Fläche zu zeigen.
+  else sh.innerHTML='<p style="margin:48px auto;max-width:28em;text-align:center;color:var(--ink2)">Das Aufmaßblatt ist nicht geladen. Die Seite neu laden.</p>';
   const fl=tilesReady(), ku=typeof kitchenReady==='function' && kitchenReady();
   const nFl=M.tiles && M.tiles.items ? M.tiles.items.length : 0, nKu=M.kitchen && M.kitchen.items ? M.kitchen.items.length : 0;
   $('outTiles').disabled=!fl; $('outKitchen').disabled=!ku;
@@ -12012,7 +12038,7 @@ function renderOut(){
 $('outTab').onclick=()=>OUT.on ? null : openOut();
 $('outList').onchange=()=>renderOut();
 $('outPrint').onclick=()=>{
-  if(typeof BLATT==='undefined') return;
+  if(typeof BLATT==='undefined'){ sag('Das Aufmaßblatt ist nicht geladen. Seite neu laden.', $('outPrint')); return; }
   const r=BLATT.drucken({mitMassliste:$('outList').checked});
   if(r && r.fehler) sag(r.fehler, $('outPrint'));
 };

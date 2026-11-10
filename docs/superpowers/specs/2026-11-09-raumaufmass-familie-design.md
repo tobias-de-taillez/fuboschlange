@@ -269,7 +269,7 @@ Umgesetzt in `raeume.html` (Startbildschirm), `raumaufmass.html` (Werkzeug) und 
 - **Eine Rückmeldung ohne Ort** (Tastenkürzel, Menü) steht unten mittig im Plan. Startmeldungen und die Warnung „Speichern fehlgeschlagen“ bleiben stehen, bis die nächste Aktion etwas meldet.
 - **Maßeingabe.** Der ganze Text muss eine Zahl sein. Eine angehängte Einheit (m, cm, mm) gilt für diese eine Eingabe; in Millimetern ist ein einzelner Punkt oder ein Komma vor genau drei Ziffern ein Tausendertrenner. Über 100 m Länge oder 20 m Höhe nennt eine Rückmeldung den Verdacht.
 - **Der Raum bleibt liegen.** Ändert sich die Form nicht, behält der Raum seine Lage im Plan und im Speicher; nur ein Maß, das die Form ändert, bewegt ihn.
-- **Fehlt eine der geteilten Dateien**, startet das Werkzeug nicht und sagt es („Die Seite ist unvollständig geladen.“), statt mit einem leeren Raum zu beginnen.
+- **Fehlt eine der fünf Kerndateien** (Kern, Geometrie, Speicher, Modell, Zeichnung), startet das Werkzeug nicht und sagt es („Die Seite ist unvollständig geladen.“), statt mit einem leeren Raum zu beginnen. Fehlt eine der Zugaben (Blatt, Gebäude, Link und QR, Meldung), läuft es weiter; die Ausgabe sagt dann, dass das Aufmaßblatt nicht geladen ist.
 
 ### Abnahme vor dem Live-Gang
 
@@ -290,7 +290,9 @@ Bekannt und offen geblieben, jeweils mit Umweg und ohne Datenverlust:
 - **Rückgängig über Werkzeuggrenzen:** Raumaufmaß, Fliesenplan und Küchenplaner teilen sich einen Stapel. Rückgängig im Raumaufmaß kann einen Schritt aus einem der beiden anderen zurücknehmen, ohne dass man es dort sieht; Wiederherstellen holt ihn zurück.
 - **Übernommener Raum ohne Stand:** Ein Raum aus Datei oder Link zeigt auf dem Startbildschirm Ecken und Maße statt Stand und Fläche, bis er einmal geöffnet wurde.
 - **Tippziele** sind für die Maus bemessen (22 bis 30 px); für Finger ist das knapp. Das Raumaufmaß ist für den Schreibtisch gebaut.
-- **Nach einem Zurückrollen** auf das alte Werkzeug bleibt `raeume.html` erreichbar und zeigt veraltete Stände; die Einstellung „Maßhaltig zeichnen: aus“ überlebt den Rückweg nicht.
+- **Nach einem Zurückrollen** auf das alte Werkzeug bleibt `raeume.html` erreichbar und zeigt veraltete Stände; seine Knöpfe „Fliesenplan“ und „Küche“ führen dann in den Reiter Zeichnen. Die Einstellung „Maßhaltig zeichnen: aus“ überlebt den Rückweg nicht, und das alte Werkzeug verschiebt die gespeicherte Lage beim Öffnen wieder um Hundertstel Millimeter.
+- **Stand „Geprüft“** steht, sobald die Form eindeutig ist, mindestens ein Kontrollmaß vorliegt und nichts auffällt. Einzelne Maße können dann noch ohne Kontrolle sein; sie stehen in „Alle Strecken“ und in der Maßliste als ungeprüft, und die Vorschläge bieten weitere Kontrollmaße an.
+- **„Zum Raumaufmaß“** aus Fliesenplan oder Küchenplaner führt in den Schritt Maße, nicht zurück in die Ausgabe.
 - **Die Seite antwortet auch ohne https.** Umgeleitet wird nicht, weil der Browser-Speicher je Adresse gilt: Räume, die jemand unter http angelegt hat, wären nach einer Umleitung nicht mehr zu sehen.
 - **Nicht geprüft:** der Druckdialog des Betriebssystems mit einem echten Drucker, Safari selbst (nur seine Engine), echte Touch-Geräte, Zwei-Finger-Zoom.
 
