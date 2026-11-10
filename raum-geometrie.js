@@ -1104,19 +1104,43 @@ globalThis.settleOpening=function(shape, op, others, meas){
   const rest=(others||[]).filter(o=>o.id!==op.id);
   const imWeg=rest.filter(o=>globalThis.openingsOverlap(platz, o));
   const stoesst=imWeg.filter(o=>fest(o, true)), weicht=[];
+  // haengt: die Nachbarin im Weg ist eingemessen, liegt aber selbst nicht auf
+  // ihrem Mass (etwas haelt sie fest), und dort, wo ihr Mass sie hinlegt, waere
+  // sie nicht im Weg. Dann widersprechen sich die beiden Masse nicht.
+  const soll=o=>{ let z=so(shape, o, meas).ziel; z=so(shape, {...o, x:clamp(shape, z).x}, meas).ziel; return clamp(shape, z); };
+  const haengt=stoesst.length>0 && stoesst.every(o=>!globalThis.openingsOverlap(platz, soll(o)));
   let eng=false;
+  // Naechste freie Lage neben dem, was schon liegt: buendig an eine Kante.
+  const ruecke=(w, belegt)=>{
+    const xs=[0, shape.L-w.w];
+    belegt.forEach(b=>xs.push(b.x-w.w, b.x+b.w));
+    return xs.sort((p,q)=>Math.abs(p-w.x)-Math.abs(q-w.x))
+      .map(x=>({...w, x})).find(k=>globalThis.openingPlaceable(shape, k, belegt));
+  };
   if(!stoesst.length){
     const belegt=[platz, ...rest.filter(o=>!imWeg.includes(o))];
     for(const w of imWeg){
-      const xs=[0, shape.L-w.w];
-      belegt.forEach(b=>xs.push(b.x-w.w, b.x+b.w));
-      const frei=xs.sort((p,q)=>Math.abs(p-w.x)-Math.abs(q-w.x))
-        .map(x=>({...w, x})).find(k=>globalThis.openingPlaceable(shape, k, belegt));
+      const frei=ruecke(w, belegt);
       if(!frei){ stoesst.push(w); eng=true; break; }
       weicht.push({op:w, x:frei.x}); belegt.push(frei);
     }
+    // Fehlt der Platz nur, weil daneben eine andere geschaetzte liegt, rueckt
+    // die mit: zweiter Anlauf, in dem alle seitlich nur geschaetzten ruecken
+    // duerfen - erst die im Weg, dann die uebrigen, jede nur, wenn sie muss.
+    // Geht auch das nicht, bleibt es beim Ergebnis des ersten Anlaufs.
+    if(eng){
+      const liegt=[platz, ...rest.filter(o=>fest(o, true))], kette=[];
+      const lose=[...imWeg, ...rest.filter(o=>!imWeg.includes(o) && !fest(o, true))];
+      const geht=lose.every(w=>{
+        const frei=globalThis.openingPlaceable(shape, w, liegt) ? w : ruecke(w, liegt);
+        if(!frei) return false;
+        if(frei!==w) kette.push({op:w, x:frei.x});
+        liegt.push(frei); return true;
+      });
+      if(geht){ stoesst.length=0; weicht.length=0; weicht.push(...kette); eng=false; }
+    }
   }
-  return stoesst.length ? {platz:null, weicht:[], stoesst, wand, eng} : {platz, weicht, stoesst, wand, eng};
+  return stoesst.length ? {platz:null, weicht:[], stoesst, wand, eng, haengt} : {platz, weicht, stoesst, wand, eng, haengt};
 };
 
 // ================= Entwirren =================

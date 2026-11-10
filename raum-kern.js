@@ -596,7 +596,9 @@ function suggest(pts, walls, meas, angs){
       why='pruefbar';
       // Festgelegte Werte bleiben immer ungeprueft (w=null) - zaehlen sie
       // mit, kommt base nie auf 0 und jeder Vorschlag wirkt noetig.
-      const unchecked=a=>a.w.filter((x,i)=>x===null && !work[i].fix).length;
+      // a.w kann einen Eintrag mehr haben als work (das gedachte Mass des
+      // Kandidaten); bleibt es selbst unpruefbar, zaehlt es als ungeprueft.
+      const unchecked=a=>a.w.filter((x,i)=>x===null && !(work[i] && work[i].fix)).length;
       const base=unchecked(an);
       if(base===0) break;
       for(const c of cand.concat(repeats)){

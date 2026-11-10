@@ -16,7 +16,7 @@
     --canvas:#f5f3ed;   /* Zeichenflaeche */
     --ink:#24221d;
     --ink2:#4b473e;     /* Nebentext, gut lesbar */
-    --muted:#7c766a;
+    --muted:#6f6a5e;
     --line:#d8d3c6;
     --line2:#e8e4da;    /* Haarlinien innerhalb von Listen */
     --hover:#eeeae0;
@@ -739,7 +739,12 @@
   /* ---------- Ausgabe ---------- */
   #outsec{display:none;padding:0!important}
   body.outmode #panel > section:not(#outsec){display:none}
-  body.outmode #outsec{display:block}
+  /* Zwei IDs wie die Schrittregeln oben (body[data-mode=wall] #panel > section:not(#wallsec)),
+     sonst bleibt die Ausgabe aus dem Schritt Wände heraus leer. */
+  body.outmode #panel > section#outsec{display:block}
+  @media (prefers-reduced-motion:reduce){
+    *{animation:none!important;transition:none!important}
+  }
   body.outmode #gosec,body.outmode #wallwarn,body.outmode #nbwarn{display:none!important}
   .intent{padding:16px 16px 14px;border-bottom:1px solid var(--line2)}
   .intent h3{font-size:13px!important;font-weight:600;color:var(--ink)!important;margin-bottom:8px}
@@ -6075,8 +6080,45 @@ Object.assign(globalThis.KITCHEN, { snapIsland, islandTops, topsTouch, partsClas
 <script src="raum-zeichnung.js"></script>
 <script src="raum-blatt.js"></script>
 
+<script id="vollstaendig">
+// Das Werkzeug lädt geteilte Dateien nach. Kommt eine davon nicht an (abgerissene
+// Anfrage, Upload mitten im Laden), darf es nicht halb starten: der Boot hielte
+// den fehlenden Baustein für verbogene Raumdaten, legte still einen leeren Raum
+// an und machte ihn zum aktuellen. Dann startet es gar nicht und sagt es.
+// Geprüft wird je Datei, was sie als Letztes anlegt. Ohne diese fünf läuft
+// nichts; die übrigen (Meldung, QR und Link, Gebäude, Blatt) sind Zugaben.
+(function(){
+  const fehlt=[
+    ['raum-kern.js',      ()=>typeof CORE.labelPlacer==='function'],
+    ['raum-geometrie.js', ()=>typeof sharedWallFit==='function' && THICK_DEFAULT>0],
+    ['raum-speicher.js',  ()=>typeof STORE.create==='function'],
+    ['raum-modell.js',    ()=>Array.isArray(M.pts) && typeof polyAreaM2==='function'],
+    ['raum-zeichnung.js', ()=>typeof $==='function' && typeof drawFixAngles==='function'],
+  ].filter(([,da])=>{ try{ return !da(); }catch(e){ return true; } }).map(([name])=>name);
+  if(!fehlt.length) return;
+  globalThis.RAUM_UNVOLLSTAENDIG=fehlt;
+  const neu=(tag, text, stil)=>{ const e=document.createElement(tag); e.textContent=text; e.style.cssText=stil; return e; };
+  const decke=neu('div', '', 'position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:16px;background:var(--paper)');
+  const karte=neu('div', '', 'width:min(400px,100%);padding:14px 16px 16px;background:var(--surface);border:1px solid var(--line);border-radius:6px;box-shadow:0 4px 16px rgba(36,34,29,.14)');
+  karte.id='unvollstaendig';
+  karte.setAttribute('role','alert');
+  const knopf=neu('button', 'Neu laden', 'margin-top:12px');
+  knopf.className='primary';
+  knopf.onclick=()=>location.reload();
+  karte.append(
+    neu('b', 'Die Seite ist unvollständig geladen.', 'display:block;font-weight:600'),
+    neu('p', 'Lade sie neu. Gespeicherte Räume sind unverändert.', 'margin:4px 0 0;font-size:12px;color:var(--ink2)'),
+    neu('p', 'Nicht angekommen: '+fehlt.join(', '), 'margin:4px 0 0;font-size:12px;color:var(--muted);overflow-wrap:anywhere'),
+    knopf);
+  decke.append(karte);
+  document.body.append(decke);
+  knopf.focus();
+})();
+</script>
+
 <script id="ui">
 "use strict";
+if(globalThis.RAUM_UNVOLLSTAENDIG) throw new Error('Raumaufmaß startet nicht, unvollständig geladen: '+globalThis.RAUM_UNVOLLSTAENDIG.join(', '));
 // Ausgelagert in geteilte Dateien (docs/adr/0001-familie-mit-geteilten-js-dateien.md):
 //   raum-modell.js    C, M, wallKey, viewPts, fitPts, serialize, deserialize,
 //                     importProblem, Rückgängig-Stapel, nextId, currentRoom, polyAreaM2
@@ -6355,6 +6397,7 @@ function recompute(){
       // bliebe sonst auf Klick-Pixeln stehen, waehrend render/hit/autofit ab
       // hier M.fit.pts zeigen. Ziehen und Neuanlage schreiben aber immer in
       // M.pts - ohne Angleich liefen beide Arrays auseinander.
+      lageHalten(M.fit.pts, M.pts);
       M.fit.pts.forEach(fp=>{ const p=M.pts[I[fp.id]]; if(p){ p.x=fp.x; p.y=fp.y; } });
     } else {
       // Ausrichten aus: die FORM der Skizze bleibt unangetastet, aber die
@@ -6378,7 +6421,9 @@ function recompute(){
     // BEWUSST der Fit, nicht viewPts(): ob zwei Ecken einander sehen, ist eine
     // Frage an den echten Raum. Die Skizze darf verzerrt sein - dann schlaegt
     // sie Strecken vor, die es in Wirklichkeit nicht gibt.
-    ? C.suggest(M.fit?M.fit.pts:M.pts, M.walls, M.meas, M.angs) : [];
+    // Abgefangen: ein Fehler in den Vorschlaegen darf nie Speichern und
+    // Zeichnen mitnehmen (sonst ist ab da jede Aenderung beim Neuladen weg).
+    ? (()=>{ try{ return C.suggest(M.fit?M.fit.pts:M.pts, M.walls, M.meas, M.angs); }catch(e){ console.error(e); return []; } })() : [];
   // Einmal je Aenderung berechnet, von Tabelle UND Plan konsumiert - die
   // Indizes zaehlen ueber activeMeas, wie an.w selbst.
   M.suspects = M.an ? computeSuspects(M.an.w, BAARDA_W0, TIE_TOL) : new Set();
@@ -6416,13 +6461,19 @@ function recompute(){
   // kosten. Bewusst ohne Debounce: serialize() ist bei den hier realistischen
   // Groessen unter einer Millisekunde. VOR dem Ableiten der Nachbarlagen -
   // die lesen den Speicher und braeuchten sonst den Stand von vorhin.
-  if(currentRoom && !STORE.save(currentRoom, {data:JSON.parse(serialize()), area:polyAreaM2(), stand:standKurz()})
-     && !recompute.quotaWarned){
-    // Einmal warnen, nicht je Aenderung - aber nie still schlucken: sonst
-    // ist ein 30-Minuten-Aufmass beim Reload weg, ohne dass es je ein
-    // Anzeichen gab.
-    recompute.quotaWarned=true;
-    setHint('Speichern fehlgeschlagen (Speicher voll?). Raum als Datei oder Link sichern.');
+  if(currentRoom){
+    if(STORE.save(currentRoom, {data:JSON.parse(serialize()), area:polyAreaM2(), stand:standKurz()}))
+      recompute.quotaWarned=false;   // klappt es wieder, warnt der naechste Ausfall erneut
+    else if(!recompute.quotaWarned){
+      // Einmal je Ausfall warnen, nicht je Aenderung - aber nie still
+      // schlucken: sonst ist ein 30-Minuten-Aufmass beim Reload weg, ohne dass
+      // es je ein Anzeichen gab. Erst NACH der Rueckmeldung der ausloesenden
+      // Aktion (die setzt ihren Text gleich nach recompute() und ueberschriebe
+      // die Warnung) - und stehend, bis die naechste Aktion etwas meldet.
+      // Ist der Speicher von Anfang an gesperrt, sagt das die Startmeldung.
+      recompute.quotaWarned=true;
+      if(STORE.storageOk) setTimeout(speicherWarnung, 0);
+    }
   }
   // Je Aenderung, nicht je Bild: eine nachgemessene Wand verschiebt die
   // daran haengenden Raeume, und das soll man sofort sehen.
@@ -6442,8 +6493,32 @@ function recompute(){
   if(M.glide){ const lauf=()=>{ redraw(); if(M.glide) requestAnimationFrame(lauf); }; requestAnimationFrame(lauf); }
 }
 
+// Der Ausgleich eicht an der ersten Ecke und skaliert vorher um den Nullpunkt:
+// dieselbe Form kam bei jedem Durchgang (auch beim bloßen Öffnen) ein Stück
+// verschoben und gedreht zurück, und der Raum wanderte im Speicher. Hat sich
+// die Form nicht geändert, bleibt er deshalb liegen, wo er lag: F wird starr
+// (Schwerpunkt und Drehung) auf P gelegt. Ändert ein Maß die Form, bleibt es
+// bei der Lage des Ausgleichs.
+function lageHalten(F, P){
+  const I=C.idx(P), n=F.length;
+  if(n<2 || F.some(f=>I[f.id]==null)) return;
+  let fx=0, fy=0, px=0, py=0;
+  F.forEach(f=>{ const p=P[I[f.id]]; fx+=f.x; fy+=f.y; px+=p.x; py+=p.y; });
+  fx/=n; fy/=n; px/=n; py/=n;
+  let s=0, c=0;
+  F.forEach(f=>{ const p=P[I[f.id]], ax=f.x-fx, ay=f.y-fy, bx=p.x-px, by=p.y-py; c+=ax*bx+ay*by; s+=ax*by-ay*bx; });
+  const w=Math.atan2(s, c), co=Math.cos(w), si=Math.sin(w);
+  const neu=F.map(f=>{ const ax=f.x-fx, ay=f.y-fy; return {x:px+co*ax-si*ay, y:py+si*ax+co*ay}; });
+  // Mehr als ein Zwanzigstel Millimeter daneben: die Form ist eine andere.
+  if(F.some((f,i)=>{ const p=P[I[f.id]]; return Math.hypot(neu[i].x-p.x, neu[i].y-p.y)>0.05; })) return;
+  F.forEach((f,i)=>{ f.x=neu[i].x; f.y=neu[i].y; });
+}
+
 // ================= Raumbibliothek (Anbindung) =================
 
+function speicherWarnung(){
+  setHintLive('Speichern fehlgeschlagen (Speicher voll?). Raum als Datei oder Link sichern.');
+}
 function openRoom(id){
   const r=STORE.load(id);
   if(!r) return;
@@ -6463,6 +6538,9 @@ function openRoom(id){
   // druecken - recompute() wirft dann bei jedem Bild.
   closeEntry();
   hidePop();
+  // Die Ausgabe zeigt den vorigen Raum: zurück in den Plan. (Über die Klasse
+  // gefragt, weil der Boot hier ankommt, bevor OUT angelegt ist.)
+  if(document.body.classList.contains('outmode')) closeOut();
   $('wlbox').open=false; $('standMore').hidden=true;
   deserialize(r.data);
   userView=false;
@@ -6485,10 +6563,13 @@ function importAsNewRoom(name, dataObj){
   if(typeof data.idSeq!=='number')
     data.idSeq=data.pts.reduce((mx,p)=>Math.max(mx, idOrdinal(p.id)+1), 0);
   const id=STORE.create(name||'Importierter Raum');
-  STORE.save(id,{data});
+  // Voller oder gesperrter Speicher: es wurde nichts angelegt. Dann beim
+  // offenen Raum bleiben und das sagen, statt Erfolg zu melden.
+  if(!STORE.save(id,{data}) || !STORE.load(id)){ STORE.remove(id); return IMPORT_VOLL; }
   openRoom(id);
   return null;
 }
+const IMPORT_VOLL='Der Speicher dieses Browsers ist voll oder gesperrt.';
 
 // ================= Gebaeude: Nachbarraeume =================
 // Nur wenn der AKTIVE Raum selbst verankert ist, gibt es ein Gebaeude.
@@ -6657,6 +6738,10 @@ function createNeighborRoom(opId){
   // entsteht. Steht der noch einzeln, wird aus beiden ein Gebäude. Es heißt
   // wie ein auf dem Startbildschirm angelegtes, nicht wie der Raum.
   if(globalThis.HAUS){
+    // Erst die Erstbefüllung (Räume, die längst über Wände verbunden sind):
+    // legte neuesGebaeude den Schlüssel vorher an, liefe sie nie mehr.
+    const alle=STORE.allRooms();
+    HAUS.gliederung(alle, alle.map(r=>r.id));
     const ort=HAUS.ort(currentRoom);
     const geschoss=ort ? ort.geschoss.id : (HAUS.neuesGebaeude(currentRoom)||{}).geschoss;
     if(geschoss) HAUS.ordneZu(id, geschoss);
@@ -6910,8 +6995,10 @@ function swimTo(id){
   // drawCanvas passt sonst je Bild wieder auf den aktiven Raum ein.
   userView=true;
   hoverRoom=null; cv.style.cursor='';
+  // Bewegung reduzieren: ohne Fahrt ankommen (t0 liegt dann schon hinter der Fahrzeit).
+  const ruhig=matchMedia('(prefers-reduced-motion:reduce)').matches;
   swim={id, to:fitView(n.pts, VIEW.rot), T:n.T,
-        from:{s:VIEW.s, ox:VIEW.ox, oy:VIEW.oy}, t0:performance.now()};
+        from:{s:VIEW.s, ox:VIEW.ox, oy:VIEW.oy}, t0:performance.now()-(ruhig ? SWIM_MS : 0)};
   requestAnimationFrame(stepSwim);
   // Sicherung: im Hintergrund-Tab liefert der Browser keine Frames mehr
   // (browser-gesehen: document.hidden -> requestAnimationFrame schweigt).
@@ -7465,7 +7552,7 @@ $('opplDel').onclick=()=>{
   M.opmeas=M.opmeas.filter(m=>m.op!==o.id);
   M.openSel=null;
   recompute();
-  setHint(`${OPEN_LABEL[o.kind]} gelöscht · ⌘Z holt sie zurück`);
+  setHint(`${OPEN_LABEL[o.kind]} gelöscht · ⌘Z holt ${o.kind==='door' ? 'sie' : 'es'} zurück`);
 };
 // In die Wandansicht dieser Wand springen, Oeffnung bleibt gewaehlt.
 function openingToWallView(o){
@@ -8171,6 +8258,8 @@ let wpopPair=null;
 function openWallPopup(a,b,mitte){
   closeEntry();
   hidePop();
+  // Eine angefangene Zahl gehört zur vorigen Strecke und landet nicht bei dieser.
+  if(!wpopPair || wallKey(wpopPair.a,wpopPair.b)!==wallKey(a,b)){ $('wpopVal').value=''; $('wpopVal').classList.remove('bad'); $('wpopVal').style.borderColor=''; }
   wpopPair={a,b}; wpopMitte = mitte==null ? null : mitte;
   M.highlight={a,b};
   renderWallPopup();
@@ -8903,6 +8992,8 @@ const angOf=c=>M.angs.find(g=>g.c===c);
 function openCornerPop(id){
   const k=cornerOf(id);
   if(!k){ closeCornerPop(); return; }
+  // Eine Karte zur Zeit: die der Strecke geht zu.
+  if(wpopPair) closeWallPopup();
   cpopId=id;
   const P=fitPts(), g=angOf(id);
   const ist=C.idx(P)[k.a]!=null ? C.angleDeg(P, k) : null;
@@ -9541,7 +9632,7 @@ $('opDel').onclick=()=>{
   M.opmeas=M.opmeas.filter(m=>m.op!==o.id);
   M.openSel=null;
   recompute();
-  setHint(`${OPEN_LABEL[o.kind]} gelöscht · ⌘Z holt sie zurück`);
+  setHint(`${OPEN_LABEL[o.kind]} gelöscht · ⌘Z holt ${o.kind==='door' ? 'sie' : 'es'} zurück`);
 };
 $('opopX').onclick=()=>{ M.openSel=null; render(); };
 
@@ -9551,6 +9642,8 @@ $('opopX').onclick=()=>{ M.openSel=null; render(); };
 const EDGE_LABEL={left:'von links', right:'von rechts', bottom:'vom Boden', top:'von der Decke'};
 
 const OPEN_MIT={door:'der Tür', window:'dem Fenster', hole:'dem Loch'};
+// Die Nachbarin im Weg ist eingemessen, kommt aber selbst nicht auf ihr Maß.
+const OPEN_SELBST={door:'sie liegt selbst nicht auf ihrem Maß.', window:'es liegt selbst nicht auf seinem Maß.', hole:'es liegt selbst nicht auf seinem Maß.'};
 function applyOpeningFit(o){
   const shape=currentShape();
   if(!shape) return null;
@@ -9575,7 +9668,7 @@ function sagOpeningFit(s){
   if(!s) return;
   const b=s.stoesst[0], namen=s.weicht.map(w=>OPEN_LABEL[w.op.kind]);
   const txt = b ? `Stößt mit ${OPEN_MIT[b.kind]} zusammen: `
-        +(s.eng ? 'zum Ausweichen fehlt der Platz.' : 'beide Lagen sind eingemessen.')
+        +(s.eng ? 'zum Ausweichen fehlt der Platz.' : s.haengt ? OPEN_SELBST[b.kind] : 'beide Lagen sind eingemessen.')
     : namen.length ? `${namen.join(' und ')} ${namen.length>1?'sind':'ist'} ausgewichen, die seitliche Lage war nur geschätzt.`
     : s.wand ? 'Das Maß passt so nicht in die Wand.' : null;
   if(txt) setHint(txt);
@@ -9695,8 +9788,9 @@ cv.addEventListener('pointerdown',e=>{
   M.openSel=o.id;
   // Eine eingemessene Oeffnung liegt, wo ihr Mass sie hinlegt: Ziehen liesse
   // sie nur zurueckspringen (und kostete einen leeren Rueckgaengig-Schritt).
+  // Gesagt wird das erst beim Ziehen, nicht beim bloßen Anklicken.
   if(M.opmeas.some(m=>m.op===o.id && m.on!==false)){
-    setHint('Lage ist eingemessen. Maß im Panel ändern oder löschen, dann ziehen.');
+    wallDrag={id:o.id, fest:true, x0:e.clientX, y0:e.clientY, moved:false};
     render(); return;
   }
   wallDrag={id:o.id, gx:w.x-o.x, gy:w.y-o.y, snap:serialize(), x0:e.clientX, y0:e.clientY, moved:false};
@@ -9719,7 +9813,9 @@ addEventListener('pointermove',e=>{
   if(!wallDrag.moved){
     if(Math.hypot(e.clientX-wallDrag.x0, e.clientY-wallDrag.y0)<=TAP_SLOP) return;
     wallDrag.moved=true;
+    if(wallDrag.fest) setHint('Lage ist eingemessen. Maß im Panel ändern oder löschen, dann ziehen.');
   }
+  if(wallDrag.fest) return;
   const shape=currentShape();
   const o=M.openings.find(x=>x.id===wallDrag.id);
   if(!shape||!o) return;
@@ -9732,7 +9828,7 @@ addEventListener('pointermove',e=>{
   render();
 });
 addEventListener('pointerup',()=>{
-  if(wallDrag){ const m=wallDrag.moved; wallDrag=null; if(m) recompute(); }
+  if(wallDrag){ const m=wallDrag.moved && !wallDrag.fest; wallDrag=null; if(m) recompute(); }
 });
 
 const MODE_HINTS={
@@ -9825,8 +9921,23 @@ document.querySelectorAll('#modes button[data-mode]').forEach(b=>{
   b.onclick=()=>setMode(b.dataset.mode);
 });
 
-$('undo').onclick=doUndo;
-$('redo').onclick=doRedo;
+// Per Knopf: der Klick nimmt dem Eingabefeld den Fokus und lässt ihn auf dem
+// Knopf - die nächste Zahl verpuffte, und Enter löste den Knopf noch einmal aus.
+// Wie ⌘Z im Feld schließt der Knopf deshalb die offene Eingabe; lief die
+// geführte Eingabe, geht sie beim ersten Vorschlag weiter. Nach einem
+// Zeigerklick (detail>0) gibt der Knopf den Fokus ab; mit der Tastatur
+// ausgelöst behält er ihn, damit man wiederholen kann.
+function histKnopf(e, tun){
+  const offen=!$('entry').hidden, gefuehrt=offen && entryGuided && !!entryPair;
+  if(offen) closeEntry();
+  tun();
+  if(e && e.detail && e.currentTarget) e.currentTarget.blur();
+  // Ohne Maß gibt es noch keinen Vorschlag: dann wie nach dem Schließen an der ersten Wand.
+  const s=M.sugg[0] || (!M.meas.length && M.walls.length ? {a:M.walls[0][0], b:M.walls[0][1]} : null);
+  if(gefuehrt && M.mode==='measure' && s) enterMeasurement(s.a, s.b, true);
+}
+$('undo').onclick=e=>histKnopf(e, doUndo);
+$('redo').onclick=e=>histKnopf(e, doRedo);
 $('fitview').onclick=fitActiveView;
 
 // Drehen ist reine ANSICHTSSACHE, wie das Einnorden: die Koordinaten bleiben,
@@ -9950,7 +10061,8 @@ addEventListener('pointerdown',e=>{
   if(!$('roommenu').hidden && !e.target.closest('#histctl')) openRoomMenu(false);
 },true);
 $('roommenu').addEventListener('keydown',e=>{
-  const items=[...$('roommenu').querySelectorAll('button')];
+  // Nur sichtbare Punkte: ein versteckter nähme den Fokus nicht an, und die Pfeile blieben davor hängen.
+  const items=[...$('roommenu').querySelectorAll('button')].filter(b=>b.offsetParent!==null);
   const i=items.indexOf(document.activeElement);
   if(e.key==='ArrowDown'||e.key==='ArrowUp'){
     e.preventDefault(); e.stopPropagation();
@@ -9967,9 +10079,13 @@ $('roommenu').addEventListener('keydown',e=>{
 // waren frueher alle Kuerzel tot.
 const isText=t=>!!t && ((t.tagName==='INPUT' && !['checkbox','radio','button','range','color','file'].includes(t.type))
   || t.tagName==='TEXTAREA' || t.isContentEditable);
-// Auswahllisten und Checkboxen geben den Fokus nach der Wahl ab.
+// Auswahllisten und Checkboxen geben den Fokus nach der Wahl ab - ausser
+// der Haken wurde mit der Leertaste geschaltet (hakenTaste, siehe keydown).
+let hakenTaste=null;
 document.addEventListener('change',e=>{
   const t=e.target;
+  if(t && t===hakenTaste){ hakenTaste=null; return; }
+  hakenTaste=null;
   if(t && (t.tagName==='SELECT' || (t.tagName==='INPUT' && t.type==='checkbox'))) t.blur();
 });
 function zoomCenter(f){ viewZoomAt(cv.width/2, cv.height/2, f); redraw(); }
@@ -9985,11 +10101,20 @@ function doUndo(){
      && !C.wallPolygonRing(M.pts, M.walls)){
     M.chain=zugEnde(); setMode('draw');
   }
+  ausgabeNurGeschlossen();
 }
 function doRedo(){
   const offen=!C.wallPolygonRing(M.pts, M.walls), ecken=M.pts.length, waende=M.walls.length;
   if(!redo()){ setHint('Nichts wiederherzustellen.'); return; }
   if(TOOL==='aufmass' && M.mode==='draw' && offen && M.pts.length===ecken && M.walls.length===waende+1) finishIfClosed();
+  ausgabeNurGeschlossen();
+}
+// Öffnet Rückgängig oder Wiederherstellen den Raum, während die Ausgabe offen
+// ist, geht sie zu: ein Blatt gibt es erst vom geschlossenen Raum.
+function ausgabeNurGeschlossen(){
+  if(!OUT.on || raumGeschlossen()) return;
+  closeOut(); renderPanel(); redraw();
+  sag('Raum ist offen. Die Ausgabe gibt es, sobald er geschlossen ist.', $('outTab'));
 }
 // Entf/⌫: loescht, was unter dem Zeiger liegt (Ecke vor Wand), in der
 // Wandansicht die gewaehlte Oeffnung. Ohne Rueckfrage - Rueckgaengig holt
@@ -10037,6 +10162,10 @@ addEventListener('keydown',e=>{
   if(t && t.tagName==='SELECT' && !['Escape','Delete','Backspace'].includes(e.key)) return;
   // Leertaste im Menue: der Eintrag loest nativ aus.
   if(e.code==='Space' && t && t.closest && t.closest('#roommenu')) return;
+  // Leertaste auf einem Haken, den man mit Tab erreicht hat: er schaltet nativ
+  // und behaelt den Fokus. Nach einem Mausklick hat er ihn schon abgegeben
+  // (change-Listener oben), dort verschiebt die Leertaste weiter.
+  if(e.code==='Space' && t && t.tagName==='INPUT' && t.type==='checkbox'){ hakenTaste=t; return; }
   // Leertaste gehalten: Ziehen verschiebt. preventDefault, sonst loest ein
   // fokussierter Knopf beim Loslassen aus.
   if(e.code==='Space'){
@@ -10122,7 +10251,7 @@ async function exportRoomAsFile(id){
   const payload=roomFilePayload(id);
   if(!payload) return;
   const json=JSON.stringify(payload,null,2);
-  const fname=`${slug(payload.name)}-${new Date().toISOString().slice(0,10)}.json`;
+  const fname=`${slug(payload.name)}-${datumLokal()}.json`;
   // Am Schreibtisch direkt in die Downloads - das System-Teilen-Fenster
   // (macOS, Windows) waere ein Umweg.
   const a=document.createElement('a');
@@ -10141,7 +10270,7 @@ $('dxfsave').onclick=()=>{
   // Der Waechter in wallLayout exportiert lieber nichts als verdrehte Waende.
   if(r.fehler.length){ setHint('DXF nicht exportiert: '+r.fehler.join('; ')+'.'); return; }
   const dxf=r.dxf;
-  const fname=`${slug(currentRoomName)}-${new Date().toISOString().slice(0,10)}.dxf`;
+  const fname=`${slug(currentRoomName)}-${datumLokal()}.dxf`;
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([dxf],{type:'application/dxf'}));
   a.download=fname;
@@ -10158,7 +10287,7 @@ $('stepsave').onclick=()=>{
   const S=r.solids.map(solidPrepare);
   if(!S.every(s=>s.dicht && s.eben && s.vol>0)){ setHint('STEP-Export: ein Wandkörper ist nicht geschlossen. Bitte Öffnungen prüfen.'); return; }
   const step=stepFile(S, currentRoomName);
-  const fname=`${slug(currentRoomName)}-${new Date().toISOString().slice(0,10)}.step`;
+  const fname=`${slug(currentRoomName)}-${datumLokal()}.step`;
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([step],{type:'application/step'}));
   a.download=fname;
@@ -10176,7 +10305,8 @@ $('filepick').onchange=async()=>{
   const name=(o && typeof o.name==='string' && o.name.trim()) ? o.name.trim()
     : f.name.replace(/\.json$/i,'');
   const err=importAsNewRoom(name, o);
-  if(err) sag('Die Datei hat nicht die erwartete Form: '+err);
+  if(err===IMPORT_VOLL) sag(`„${name}“ ließ sich nicht speichern. ${err}`);
+  else if(err) sag('Die Datei hat nicht die erwartete Form: '+err);
   else setHint(`„${name}“ importiert und als eigener Raum gespeichert.`);
 };
 
@@ -10237,9 +10367,25 @@ let unit='m';
 try{ const u=localStorage.getItem('raumaufmass.unit'); if(UNITS[u]) unit=u; }catch{}
 // Zahl in der aktuellen Einheit -> Millimeter. Liefert NaN wie parseFloat;
 // alle Aufrufer pruefen mit isFinite, das war vorher schon so.
-const parseLen=s=>parseFloat(String(s).replace(',','.'))*UNITS[unit].f;
+// Der ganze Text muss eine Zahl sein: was parseFloat hinter der ersten Zahl
+// still verwarf ("4500 mm" bei Einheit m, "3m50", "4 500", "1/2"), gilt nicht
+// mehr als Mass, das Feld wird rot. Eine angehaengte Einheit (m, cm, mm) gilt
+// fuer diese eine Eingabe. Tausenderpunkte vor einem Komma ("1.234,5") fallen
+// weg; in mm ist ein einzelnes Trennzeichen vor genau drei Ziffern ("4.500",
+// "4,000") ebenfalls ein Tausendertrenner - Tausendstel Millimeter misst niemand.
+const parseLen=s=>{
+  const m=/^\s*(\d{1,3}(?:\.\d{3})+,\d*|\d+[.,]?\d*|[.,]\d+)\s*(mm|cm|m)?\s*$/i.exec(String(s));
+  if(!m) return NaN;
+  const u=m[2] ? m[2].toLowerCase() : unit;
+  let z=m[1];
+  if(/^\d{1,3}(?:\.\d{3})+,/.test(z)) z=z.replace(/\./g,'');
+  else if(u==='mm' && /^\d{1,3}[.,]\d{3}$/.test(z)) z=z.replace(/[.,]/,'');
+  return parseFloat(z.replace(',','.'))*UNITS[u].f;
+};
 // Millimeter -> Zahl OHNE Kuerzel, fuer Eingabefelder, deren Inhalt wieder
 // durch parseLen laeuft.
+// Datum für Dateinamen in Ortszeit: toISOString() ist UTC und trüge kurz nach Mitternacht den Vortag.
+const datumLokal=()=>{ const d=new Date(), z=n=>String(n).padStart(2,'0'); return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate()); };
 const fmtLen=mm=>(mm/UNITS[unit].f).toFixed(UNITS[unit].dez).replace('.',',');
 // Millimeter -> Zahl MIT Kuerzel, fuer Anzeigen. Geschuetztes Leerzeichen,
 // damit "3,077 m" nicht umbricht.
@@ -10250,7 +10396,8 @@ const fmtLenU=mm=>fmtLen(mm)+' '+unit;
 // Keine Rückfrage mehr: das Maß gilt sofort, eine Rückmeldung am Ort nennt
 // den Verdacht, und Rückgängig nimmt es zurück.
 const zuKurzFrage=(mm,was,grenze)=>{
-  if(!(unit==='mm' || mm>=grenze)) setTimeout(()=>sag(`${fmtLenU(mm)} ist sehr ${was}. Falls anders gemeint: ⌘Z nimmt es zurück.`), 0);
+  if(mm>(was==='niedrig' ? 20000 : 100000)) setTimeout(()=>sag(`${fmtLenU(mm)} ist sehr ${was==='niedrig' ? 'hoch' : 'lang'}. Falls anders gemeint: ⌘Z nimmt es zurück.`), 0);
+  else if(!(unit==='mm' ? mm>=10 : mm>=grenze)) setTimeout(()=>sag(`${fmtLenU(mm)} ist sehr ${was}. Falls anders gemeint: ⌘Z nimmt es zurück.`), 0);
   return true;
 };
 function setUnit(u){
@@ -10307,6 +10454,13 @@ function worstResidualRatio(){
 // Klartext statt Geodaesie: die Statuszeile beantwortet "wie weit bin ich,
 // was fehlt, stimmt etwas nicht" - die Fachbegriffe (Redundanz, w, sigma)
 // wohnen in der Detailansicht der Tabelle.
+// Was der nächste Klick in der Skizze tut. Das Ziel des Zugs ist meist die
+// erste Ecke; ist es eine andere (Zug an anderer Stelle aufgenommen), steht ihr Name da.
+function zugSatz(){
+  const z=zugZiel();
+  if(z!=null) return 'Ein Klick auf '+(z===M.pts[0].id ? 'die erste' : z)+' schließt den Raum.';
+  return M.chain!=null ? 'Ein Klick setzt die nächste Ecke.' : 'Ein Klick auf eine Ecke zeichnet dort weiter.';
+}
 function statusText(){
   // Fortschritt ist neutral ('prog'). Gelb nur fuer "fertig, aber
   // ungeprueft" und auffaellige Streuung, Rot nur fuer echte Widersprueche -
@@ -10320,8 +10474,7 @@ function statusText(){
       // er ihn an einer Ecke auf. Ausserhalb der Skizze zeichnet kein Klick.
       const n=M.pts.length+' Ecken. ';
       if(M.mode!=='draw') return [n+'Raum ist offen.','skizze'];
-      if(zugZiel()!=null) return [n+'Ein Klick auf die erste schließt den Raum.','skizze'];
-      return [n+(M.chain!=null ? 'Ein Klick setzt die nächste Ecke.' : 'Ein Klick auf eine Ecke zeichnet dort weiter.'),'skizze'];
+      return [n+zugSatz(),'skizze'];
     }
     return ['Raum geschlossen, noch kein Maß.','prog'];
   }
@@ -10351,7 +10504,9 @@ function statusText(){
     const lose=M.pts.filter(p=>n[p.id]!==2);
     const paar=lose.length===2 && lose.every(p=>n[p.id]===1)
       && !M.walls.some(w=>w.includes(lose[0].id) && w.includes(lose[1].id));
-    offen=['Raum ist offen. In der Skizze '+(paar
+    // Läuft in der Skizze ein Zug (Nachbarraum mit geerbtem Maß), gilt der Skizzen-Satz.
+    offen=M.mode==='draw' && M.chain!=null ? [M.pts.length+' Ecken. '+zugSatz(),'skizze']
+      : ['Raum ist offen. In der Skizze '+(paar
       ? 'schließt ihn ein Klick auf '+lose[0].id+', dann auf '+lose[1].id+'.'
       : 'braucht jede Ecke zwei Wände.'),'skizze'];
   }
@@ -10376,7 +10531,9 @@ function statusText(){
     // wie gezeichnet, die Diagonale wie zuerst gemessen.
     const act=C.activeMeas(M.meas), sm=act[[...M.suspects][0]], sk=wallKey(sm.a,sm.b);
     const sw=M.walls.find(([a,b])=>wallKey(a,b)===sk), sd=act.find(m=>wallKey(m.a,m.b)===sk);
-    return [`Ein Maß passt nicht: ${sw ? 'Wand '+sw[0]+'–'+sw[1] : 'Diagonale '+sd.a+'–'+sd.b}. Nachmessen, abschalten oder löschen.`,'bad'];
+    // Ist etwas festgelegt (Winkel, exaktes Maß), kann auch das der Fehler sein.
+    const fest=M.angs.length || act.some(m=>m.fix);
+    return [`Ein Maß passt nicht: ${sw ? 'Wand '+sw[0]+'–'+sw[1] : 'Diagonale '+sd.a+'–'+sd.b}. Nachmessen, abschalten oder löschen${fest ? ', oder das Festgelegte prüfen' : ''}.`,'bad'];
   }
   return offen || [`Geprüft ± ${txtS} mm`,'good'];
 }
@@ -10487,7 +10644,9 @@ function renderPanel(){
   // Wie bei den Fliesen: faellt die Bedingung weg (Raumwechsel, Rueckgaengig),
   // verlaesst die App den Modus selbst, statt Skizzenmasse zu zeigen.
   if(M.mode==='wall' && !wallTabReady()){
-    setMode(M.walls.length?'measure':'draw');
+    // Wie setTool: offen und ohne Maß gehört der Raum in die Skizze -
+    // setMode('measure') lehnt dort ab, und die Wandansicht bliebe stehen.
+    setMode((C.wallPolygonRing(M.pts, M.walls) || M.meas.length) ? 'measure' : 'draw');
     setHint(formEindeutig() ? 'Wandansicht verlassen: der Raum ist offen.' : 'Wandansicht verlassen: die Form ist nicht mehr eindeutig.');
     return;
   }
@@ -10881,7 +11040,9 @@ $('keyswrap').addEventListener('pointerdown',e=>{ if(e.target===$('keyswrap')) c
 function toggleHelp(){ const w=$('helpwrap');
   // Ein Nachschlage-Dialog: die Tastenliste steht unter dem Ablauf.
   if(w.hidden){ renderKeys(); if($('keysbody').parentNode!==$('helpbody')) $('helpbody').appendChild($('keysbody')); }
-  w.hidden=!w.hidden; }
+  w.hidden=!w.hidden;
+  // Fokus in den Dialog: sonst rollen Pfeile und Bild-Tasten nichts.
+  if(!w.hidden){ const b=$('helpbox'); b.tabIndex=-1; b.style.outline='none'; b.focus({preventScroll:true}); } }
 function closeHelp(){ const w=$('helpwrap'); if(w.hidden) return false; w.hidden=true; return true; }
 $('helpBtn').onclick=toggleHelp;
 $('helpclose').onclick=closeHelp;
@@ -10957,7 +11118,9 @@ function sag(txt, anker, bleibt){
   // Über der offenen Karte; fehlt dort der Platz, darunter.
   const anKarte=()=>{ x=box.left+box.width/2; y=box.top-8-h; if(y<plan.top+4) y=box.bottom+8; };
   // Am Anker: darunter; fehlt dort der Platz, darüber. Nie auf ihm.
-  if(r && r.width){ x=r.left+r.width/2; y=r.bottom+10; if(y+h>innerHeight-8) y=r.top-10-h; }
+  // Sitzt der Anker in der offenen Karte, läge die Meldung auf ihr: dann an die Karte.
+  if(r && r.width && offen && offen.contains(anker)) anKarte();
+  else if(r && r.width){ x=r.left+r.width/2; y=r.bottom+10; if(y+h>innerHeight-8) y=r.top-10-h; }
   else {
     if(box && (imBox || !nah)) anKarte();
     // Am Zeiger nur im Plan: ein Klick im Panel oder in der Leiste ist kein Ort im Plan.
@@ -11086,7 +11249,8 @@ function importFromHash(){
   if(!shared) return null;
   history.replaceState(null,'',location.pathname+location.search);
   const err=importAsNewRoom(shared.name, shared.data);
-  return err ? 'Geteilter Link ungültig: '+err
+  return err===IMPORT_VOLL ? 'Der Raum aus dem Link ließ sich nicht speichern. '+err
+       : err ? 'Geteilter Link ungültig: '+err
              : 'Geteilter Raum importiert und als eigener Raum gespeichert.';
 }
 const bootMsg=importFromHash();
@@ -11119,13 +11283,18 @@ syncOrthoBtn();
 recompute();
 // Fliesen und Küche laden nach diesem Block; erst danach steht fest, ob das
 // gewünschte Werkzeug den Raum schon öffnen kann.
-addEventListener('DOMContentLoaded',()=>setTool(TOOL, true));
 // setHintLive statt setHint: Boot-Meldungen duerfen nicht nach vier
 // Sekunden verschwinden, bevor ueberhaupt jemand hingesehen hat - sie
-// stehen, bis die erste Aktion den Modus-Hinweis zurueckholt.
-if(bootMsg) setHintLive(bootMsg);
-if(!STORE.storageOk)
-  setHintLive('Speichern auf diesem Gerät nicht möglich (privater Modus?). Räume als Datei oder Link sichern.');
+// stehen, bis die erste Aktion etwas meldet. Erst NACH setTool: der
+// Werkzeugwechsel raeumt jede Rueckmeldung weg (setMode).
+addEventListener('DOMContentLoaded',()=>{
+  setTool(TOOL, true);
+  if(bootMsg) setHintLive(bootMsg);
+  if(!STORE.storageOk)
+    setHintLive('Speichern auf diesem Gerät nicht möglich (privater Modus?). Räume als Datei oder Link sichern.');
+  else if(recompute.quotaWarned)
+    setHintLive('Speichern fehlgeschlagen (Speicher voll?). Raum als Datei oder Link sichern.');
+});
 </script>
 
 <script id="tiles-ui">
@@ -16868,6 +17037,21 @@ globalThis.selfChecks=function(){
         (()=>{ const s=se(shape, fen, [fen], [{id:'m1',op:'f',edge:'left',d:3500,sigma:5}]);
                const knapp=se(shape, fen, [fen], [{id:'m1',op:'f',edge:'left',d:3002,sigma:5}]);
                return near(s.platz.x,3000,1e-9) && s.wand===true && knapp.wand===false && near(knapp.platz.x,3000,1e-9); })());
+      chk('ausweichen: fehlt der Platz nur wegen einer zweiten geschaetzten, rueckt die mit',
+        (()=>{ const w3={L:3000, ha:2500, hb:2500, poly:[{x:0,y:0},{x:3000,y:0},{x:3000,y:2500},{x:0,y:2500}]};
+               const t={id:'t', x:1008, y:0, w:985, h:1985}, f={id:'f', x:0, y:900, w:1000, h:1200}, l={id:'l', x:2100, y:1200, w:600, h:600};
+               const s=se(w3, t, [t, f, l], [{id:'m1',op:'t',edge:'left',d:815,sigma:5}]);
+               const fx=s.weicht.find(k=>k.op===f), lx=s.weicht.find(k=>k.op===l);
+               return !!s.platz && near(s.platz.x,815,1e-9) && !s.stoesst.length && !s.eng && s.weicht.length===2
+                   && !!fx && near(fx.x,1800,1e-9) && !!lx && near(lx.x,215,1e-9) && f.x===0 && l.x===2100; })());
+      chk('ausweichen: Nachbarin eingemessen, aber selbst nicht auf ihrem Mass -> kein Widerspruch der beiden Masse',
+        (()=>{ const w3={L:3000, ha:2500, hb:2500, poly:[{x:0,y:0},{x:3000,y:0},{x:3000,y:2500},{x:0,y:2500}]};
+               const t={id:'t', x:1008, y:0, w:985, h:1985}, f={id:'f', x:0, y:900, w:1000, h:1200}, l={id:'l', x:2100, y:1200, w:600, h:600};
+               const mt={id:'m1',op:'t',edge:'left',d:1515,sigma:5};
+               const s=se(w3, f, [t, f, l], [mt, {id:'m2',op:'f',edge:'left',d:300,sigma:5}]);
+               const echt=se(w3, f, [{...t, x:1515}, f, l], [mt, {id:'m2',op:'f',edge:'left',d:1000,sigma:5}]);
+               return s.platz===null && s.stoesst[0]===t && s.eng===false && s.haengt===true
+                   && echt.platz===null && echt.eng===false && echt.haengt===false; })());
       chk('ausweichen: ohne eigenes Lagemass bleibt alles, wie es ist',
         (()=>{ const s=se(shape, tuer, [tuer, fen], mf);
                return s.platz===null && !s.weicht.length && !s.stoesst.length && !s.wand; })());

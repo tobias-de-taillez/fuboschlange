@@ -194,7 +194,9 @@ function importProblem(o){
   const ids=new Set();
   for(const p of o.pts){
     if(!p || typeof p!=='object') return 'pts enthält einen Eintrag ohne Objektform.';
-    if(typeof p.id!=='string' || !p.id) return 'pts enthält eine Ecke ohne gültige id.';
+    // Die id landet in Listen, Attributen und Meldungen: nur Buchstaben, Ziffern
+    // und _ . : - (wie bei den Öffnungen). Markup aus Datei oder Link fällt hier.
+    if(typeof p.id!=='string' || !/^[\p{L}\p{N}_.:-]{1,24}$/u.test(p.id)) return 'pts enthält eine Ecke ohne gültige id.';
     if(!Number.isFinite(p.x) || !Number.isFinite(p.y))
       return `Ecke ${p.id}: x/y müssen endliche Zahlen sein.`;
     if(ids.has(p.id)) return `Ecke ${p.id} kommt mehrfach vor.`;
