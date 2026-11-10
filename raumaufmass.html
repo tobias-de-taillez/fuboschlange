@@ -1499,7 +1499,14 @@ let TOOL='aufmass';
 // Freiheitsgrade beim vorigen Rechnen: daran erkennt recompute den Moment,
 // in dem die Form eindeutig WIRD (und nur dann gleitet der Plan).
 let lastDof={room:null, dof:Infinity};
-function recompute(){
+// recompute in vier Teilen, immer in dieser Reihenfolge (docs/superpowers/plans/2026-11-10-familie-schritt-3.md):
+//   Rechnen   Ausgleich, Maßhaltig von selbst, Lage halten, Öffnungen an ihre Maße setzen
+//   Bewerten  Vorschläge, Verdächtige, Streuung - daraus entsteht der Stand
+//   Sichern   in den Speicher, mit Fläche und Stand
+//   Folgen    Nachbarlagen, offene Eingaben und Karten schließen, zeichnen
+// Rechnen, Bewerten und Sichern gehören jedem Werkzeug, das einen Raum öffnet (die Maße im
+// Speicher dürfen sich dabei nicht ändern); nur die Folgen sind Sache des Aufmaßes.
+function recomputeRechnen(){
   const hadFit=!!M.fit;
   // Ecke der Küchen-Bezugsecken gelöscht: freie Teile im noch alten Fit auf
   // eine verbleibende Wand umrechnen, sie bleiben, wo sie stehen. Hier nur
@@ -1557,18 +1564,6 @@ function recompute(){
   // Millimeter (scaleSketch) - eine gemerkte Nutzer-Ansicht zeigte dann ins
   // Leere. Neue Szene, neue Einpassung.
   if(!hadFit && M.fit) userView=false;
-  // Einmal je Aenderung, nicht je Bild: suggest() ruft intern analyze() je
-  // Kandidat auf, im Zug waere das ein Ruckeln.
-  M.sugg = (M.an && M.pts.length>=3)
-    // BEWUSST der Fit, nicht viewPts(): ob zwei Ecken einander sehen, ist eine
-    // Frage an den echten Raum. Die Skizze darf verzerrt sein - dann schlaegt
-    // sie Strecken vor, die es in Wirklichkeit nicht gibt.
-    // Abgefangen: ein Fehler in den Vorschlaegen darf nie Speichern und
-    // Zeichnen mitnehmen (sonst ist ab da jede Aenderung beim Neuladen weg).
-    ? (()=>{ try{ return C.suggest(M.fit?M.fit.pts:M.pts, M.walls, M.meas, M.angs); }catch(e){ console.error(e); return []; } })() : [];
-  // Einmal je Aenderung berechnet, von Tabelle UND Plan konsumiert - die
-  // Indizes zaehlen ueber activeMeas, wie an.w selbst.
-  M.suspects = M.an ? computeSuspects(M.an.w, BAARDA_W0, TIE_TOL) : new Set();
   // Eingemessene Oeffnungen an ihre Messungen ziehen - auch beim LADEN,
   // sonst zeigt die App eine Lage, die den eigenen Messwerten
   // widerspricht (browser-gesehen: 1220 gespeichert, 1200 gemessen).
@@ -1606,11 +1601,27 @@ function recompute(){
       });
     }
   }
+}
+function recomputeBewerten(){
+  // Einmal je Aenderung, nicht je Bild: suggest() ruft intern analyze() je
+  // Kandidat auf, im Zug waere das ein Ruckeln.
+  M.sugg = (M.an && M.pts.length>=3)
+    // BEWUSST der Fit, nicht viewPts(): ob zwei Ecken einander sehen, ist eine
+    // Frage an den echten Raum. Die Skizze darf verzerrt sein - dann schlaegt
+    // sie Strecken vor, die es in Wirklichkeit nicht gibt.
+    // Abgefangen: ein Fehler in den Vorschlaegen darf nie Speichern und
+    // Zeichnen mitnehmen (sonst ist ab da jede Aenderung beim Neuladen weg).
+    ? (()=>{ try{ return C.suggest(M.fit?M.fit.pts:M.pts, M.walls, M.meas, M.angs); }catch(e){ console.error(e); return []; } })() : [];
+  // Einmal je Aenderung berechnet, von Tabelle UND Plan konsumiert - die
+  // Indizes zaehlen ueber activeMeas, wie an.w selbst.
+  M.suspects = M.an ? computeSuspects(M.an.w, BAARDA_W0, TIE_TOL) : new Set();
   // Streuung auffaellig, aber kein EINZELNER Schuldiger isolierbar (leer =
   // alle unter der Schwelle, >1 = Gleichstand): dann helfen nur
   // Wiederholungen. Genau ein Verdaechtiger braucht keine Eingrenzung.
   M.narrow = (netFails() && M.suspects.size!==1)
     ? narrowCandidates(C.activeMeas(M.meas), M.an.v, C.SUGGEST_CHECK_MAX) : [];
+}
+function recomputeSichern(){
   // Ein Aufmass dauert leicht eine halbe Stunde. Ein Reload darf es nicht
   // kosten. Bewusst ohne Debounce: serialize() ist bei den hier realistischen
   // Groessen unter einer Millisekunde. VOR dem Ableiten der Nachbarlagen -
@@ -1633,6 +1644,8 @@ function recompute(){
       if(STORE.storageOk) setTimeout(speicherWarnung, 0);
     }
   }
+}
+function recomputeFolgen(){
   // Je Aenderung, nicht je Bild: eine nachgemessene Wand verschiebt die
   // daran haengenden Raeume, und das soll man sofort sehen.
   loadNeighbors();
@@ -1649,6 +1662,12 @@ function recompute(){
   if(wpopPair && !(gibt(wpopPair.a)&&gibt(wpopPair.b))){ wpopPair=null; $('wpop').hidden=true; }
   render();
   if(M.glide){ const lauf=()=>{ redraw(); if(M.glide) requestAnimationFrame(lauf); }; requestAnimationFrame(lauf); }
+}
+function recompute(){
+  recomputeRechnen();
+  recomputeBewerten();
+  recomputeSichern();
+  recomputeFolgen();
 }
 
 // Der Ausgleich eicht an der ersten Ecke und skaliert vorher um den Nullpunkt:
