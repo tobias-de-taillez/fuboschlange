@@ -111,6 +111,11 @@ skripte_von() {
   LC_ALL=C grep -oE "<script[^>]*[[:space:]]src=[\"'][^\"']*[\"']" "$1" \
     | LC_ALL=C sed -E "s/^.*src=[\"']//; s/[\"']\$//" | sort -u || true
 }
+# Skripte, die eine Seite zur Laufzeit nachlädt (s.src='raum-checks.js': die Selbstchecks nur mit ?test).
+nachgeladen_von() {
+  LC_ALL=C grep -oE "\.src[[:space:]]*=[[:space:]]*[\"'][a-z0-9-]+\.js[\"']" "$1" \
+    | LC_ALL=C sed -E "s/^.*=[[:space:]]*[\"']//; s/[\"']\$//" | sort -u || true
+}
 # Stylesheets, die eine Seite per <link rel="stylesheet" href="…"> lädt.
 stile_von() {
   LC_ALL=C grep -oE "<link[^>]*[[:space:]]href=[\"'][^\"']*[\"']" "$1" \
@@ -145,7 +150,7 @@ while [ "$i" -lt "${#DATEIEN[@]}" ]; do
       [ -n "$s" ] || continue
       [[ "$s" =~ ^[a-z0-9-]+\.js$ ]] || abbruch "Unerwartetes Skript in $f: $s (erwartet: Datei neben der Seite, nur a-z, 0-9, Bindestrich)."
       aufnehmen "$s" "$f"
-    done < <(skripte_von "$OUT/$f")
+    done < <({ skripte_von "$OUT/$f"; nachgeladen_von "$OUT/$f"; } | sort -u)
     while IFS= read -r s; do
       [ -n "$s" ] || continue
       [[ "$s" =~ ^[a-z0-9-]+\.css$ ]] || abbruch "Unerwartetes Stylesheet in $f: $s (erwartet: Datei neben der Seite, nur a-z, 0-9, Bindestrich)."
