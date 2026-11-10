@@ -1372,17 +1372,9 @@ $('tJCheck').onclick=()=>{
 $('tAlign').onclick=()=>setTileTool(TS.tool==='align'?'move':'align');
 $('tUncut').onclick=tilesUncut;
 $('tTrim').onclick=tilesTrim;
-// Doppelt bestaetigen: erster Klick schaerft den Knopf (rot, 4 s), erst der
-// zweite entfernt.
-let clearArmed=null;
+// Sofort und umkehrbar: Rückgängig (⌘Z) holt die Fliesen zurück.
 $('tClear').onclick=()=>{
-  const T=tilesData(), b=$('tClear'); if(!T.items.length) return;
-  if(!clearArmed){
-    b.textContent=`Wirklich alle ${T.items.length} entfernen?`; b.classList.add('arm');
-    clearArmed=setTimeout(()=>{ clearArmed=null; b.textContent='Alle Fliesen entfernen'; b.classList.remove('arm'); },4000);
-    return;
-  }
-  clearTimeout(clearArmed); clearArmed=null; b.textContent='Alle Fliesen entfernen'; b.classList.remove('arm');
+  const T=tilesData(); if(!T.items.length) return;
   snapshot(); T.items=[]; TS.sel.clear(); TS.vec=null; TS.dup=null; tilesSave();
   setHint('Alle Fliesen entfernt. Rückgängig (⌘Z) holt sie zurück.');
 };
@@ -1390,12 +1382,23 @@ $('tJC').onclick=()=>setTileTool(TS.tool==='joint'?'move':'joint');
 $('tNums').onchange=()=>{ TS.showNums=$('tNums').checked; render(); };
 $('tPrint').onclick=()=>tilesPrint();
 
+// Zwei Schritte: erst das Fliesenset (TS.step 'set'), dann Legen ('legen'). Ohne Fliesen im Raum beginnt man beim Set;
+// „Weiter: Fliesen legen“ und „ändern“ am Set wechseln. Im Schritt Set liegt nur das Set im Panel.
+$('tSpecBox').addEventListener('toggle', ()=>{
+  const neu=$('tSpecBox').open ? 'set' : 'legen';
+  if(TS.step!==neu){ TS.step=neu; render(); }
+});
+$('tNext').onclick=()=>{ TS.step='legen'; render(); };
 function renderTilesPanel(){
   const on=M.mode==='tiles';
   $('tilesec').hidden=!on;
   document.body.classList.toggle('tilesmode', on);
   if(!on) return;
   const K=tilesCtx(), T=tilesData();
+  if(!TS.step || TS.stepRoom!==currentRoom){ TS.step=T.items.length ? 'legen' : 'set'; TS.stepRoom=currentRoom; }
+  document.body.classList.toggle('tilestep-set', TS.step==='set');
+  if($('tSpecBox').open!==(TS.step==='set')) $('tSpecBox').open=TS.step==='set';
+  $('tResBox').hidden=!T.items.length;
   renderTileSet();
   $('tRuler').setAttribute('aria-pressed', String(TS.ruler.on));
   const def=activeTileDef();
@@ -1433,6 +1436,8 @@ function renderTilesPanel(){
   }
   // Breite neuer Dehnungsfugen gilt nur fuer das Werkzeug J.
   $('tXWRow').hidden = TS.tool!=='joint';
+  // Fugen: der Abschnitt steht nur, wenn es Fugen gibt oder das Werkzeug dafür dran ist.
+  $('tFugBox').hidden=!(T.joints.length || (T.wallJoints||[]).length || TS.tool==='joint' || TS.tool==='walljoint' || TS.jcheck);
   // Fugenliste nur neu bauen, wenn sich die Fugen aendern - sonst verliert
   // ein Eingabefeld bei jedem Bild den Fokus.
   const jk=JSON.stringify([T.joints, T.wallJoints]);
@@ -1440,7 +1445,7 @@ function renderTilesPanel(){
     TS.jointKey=jk;
     const L=$('tJList'); L.innerHTML='';
     if(!T.joints.length && !(T.wallJoints||[]).length)
-      L.innerHTML=plat('<small>Noch keine. Dehnungsfuge (J) oder Wandfuge (W) über die Leiste oben.</small>');
+      L.innerHTML=plat('<small>Noch keine.</small>');
     T.joints.forEach((j,i)=>{
       const row=document.createElement('div'); row.className='jrow';
       const len=Math.hypot(j.b.x-j.a.x, j.b.y-j.a.y);
@@ -2328,7 +2333,7 @@ meldeAn('tiles', {
     renderTilesPanel();
     return false;
   },
-  hinweis(){ const h=TILE_TOOL_HINTS[TS.tool]; return h ? h() : 'Fliese aus der Leiste ziehen · ⇧+Ziehen: Rahmen · Q/E drehen · ⌘D Muster fortsetzen'; },
+  hinweis(){ const h=TILE_TOOL_HINTS[TS.tool]; return h ? h() : ' '; },
   key:tilesKey,
   down:tilesDown, hover:tilesHover, tap:tilesTap,
   gesten:['tiles'], move:tilesMove, up:tilesUp,

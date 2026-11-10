@@ -90,10 +90,13 @@
   #tPrintRow{display:grid;gap:8px;margin-top:12px}
   #tPrintRow button{width:100%}
   #tPrintRow label{font-size:12px;color:var(--ink2);display:flex;align-items:center;gap:5px}
-  #tEnd{display:flex;gap:6px;justify-content:flex-end}
-  #tEnd button{border:0;background:none;color:var(--muted);font-size:12px;min-height:24px;padding:0 6px}
-  #tEnd button:hover{color:var(--ink);background:var(--hover)}
-  #tClear.arm{background:var(--bad)!important;color:#fff!important}
+  /* Zwei Schritte: erst das Fliesenset (Schritt „set“), dann Legen. Im ersten Schritt gibt es nur das Set und „Weiter“. */
+  #tNextRow{padding:12px 14px;border-bottom:1px solid var(--line);display:none}
+  body.tilesmode.tilestep-set #tNextRow{display:block}
+  body.tilesmode.tilestep-set #tPalette,
+  body.tilesmode.tilestep-set #tSelBox,body.tilesmode.tilestep-set #tFugBox,body.tilesmode.tilestep-set #tResBox{display:none}
+  #tNext,#tPrint{width:100%}
+  #tPrintRow{display:flex;flex-direction:column;gap:8px}
 
 #tPalette{display:flex;gap:5px;flex-wrap:wrap} #tPalette svg,#tSetList svg{width:42px;height:30px;display:block}
   #tSetList{display:grid;gap:6px;margin:10px 0} .tile-set-row{display:flex;gap:6px;align-items:center} .tile-set-row>button:first-child{flex:1;display:flex;align-items:center;gap:8px;text-align:left} .tile-set-row button[aria-pressed=true]{border-color:var(--accent);background:#fff1df} .tile-set-row small{display:block;color:var(--ink2)} #tPalette button{min-width:48px;padding:5px 8px} #tShape,#tNewShape{max-width:100%;padding:6px} #tName{min-width:0}
@@ -110,12 +113,6 @@
     <div id="tools">
       <div class="tg" data-for="tiles">
         <div id="tPalette" aria-label="Fliesenset dieses Raums"></div>
-        <i class="tsep"></i>
-        <button id="tAlign" class="tb tool" aria-pressed="false" title="Fluchten: erst Kante der Fliese, die sich bewegt, dann die Bezugskante">Fluchten <kbd>A</kbd></button>
-        <button id="tJC" class="tb tool" aria-pressed="false" title="Dehnungsfuge: Anfang und Ende auf Wand oder Ecke klicken">Dehnungsfuge <kbd>J</kbd></button>
-        <i class="tsep"></i>
-        <button id="tJCheck" class="tb tog" aria-pressed="false" title="Fugen markieren, die von der eingestellten Breite abweichen, dazu unbelegte Stellen und Fugenversatz">Fugencheck <kbd>K</kbd></button>
-        <button id="tRuler" class="tb tog" aria-pressed="false" title="Lineal einblenden: verschieben, an den Enden strecken und drehen, rastet an Fliesen und Wänden (⌘/Strg frei)">Lineal <kbd>L</kbd></button>
       </div>
     </div>
     <div id="histctl">
@@ -125,6 +122,13 @@
         <svg viewBox="0 0 16 16"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/></svg>
       </button>
       <div id="roommenu" class="menu" role="menu" hidden>
+        <h4>Werkzeug</h4>
+        <button id="tAlign" role="menuitemcheckbox" aria-pressed="false">Fluchten<kbd>A</kbd></button>
+        <button id="tJC" role="menuitemcheckbox" aria-pressed="false">Dehnungsfuge<kbd>J</kbd></button>
+        <button id="tJCheck" role="menuitemcheckbox" aria-pressed="false">Fugencheck<kbd>K</kbd></button>
+        <button id="tRuler" role="menuitemcheckbox" aria-pressed="false">Lineal<kbd>L</kbd></button>
+        <button id="tClear" class="danger" role="menuitem">Alle Fliesen entfernen</button>
+        <hr>
         <h4>Weitergeben</h4>
         <button id="filesave" role="menuitem">Als Datei sichern<kbd data-k="⌘S"></kbd></button>
         <button id="sharelink" role="menuitem">Link kopieren</button>
@@ -164,16 +168,17 @@
             <label><span>Randfuge</span><input id="tE" inputmode="decimal"> mm</label>
             <label><span>Stärke</span><input id="tT" inputmode="decimal"> mm</label>
           </div>
-          <div class="trow tmeas"><button id="tMeasure" title="Maße der gewählten Variante aus Strecken ermitteln: Kanten, Diagonalen, Breite – kein Winkel nötig">Fliese einmessen…</button><span class="tnote">nur Strecken, kein Winkel</span></div>
+          <div class="trow tmeas"><button id="tMeasure">Fliese einmessen…</button><span class="tnote">nur Strecken, kein Winkel</span></div>
           <label class="tnote"><input type="checkbox" id="tSame">Chevron L und R aus einer Charge: Reste dürfen zwischen L und R wechseln</label>
         </details>
+        <div id="tNextRow"><button id="tNext" class="primary">Weiter: Fliesen legen</button></div>
         <div id="tSelBox" hidden>
           <h3><span id="tSelInfo"></span></h3>
           <div class="trow">
-            <button id="tMiter" class="tool" title="Zwei überlappende Fliesen auf Gehrung schneiden">Gehrung <kbd>G</kbd></button>
-            <button id="tTrim" title="Fliesen, die die Auswahl überlappen, an ihr abschneiden (mit Fuge)">Anschneiden <kbd>T</kbd></button>
-            <button id="tUncut" title="Schnitte und Ausklinkungen der Auswahl entfernen">Schnitt entfernen</button>
-            <button id="tDel" title="Auswahl löschen (Entf)">Löschen <kbd data-k="Entf"></kbd></button>
+            <button id="tMiter" class="tool">Gehrung <kbd>G</kbd></button>
+            <button id="tTrim">Anschneiden <kbd>T</kbd></button>
+            <button id="tUncut">Schnitt entfernen</button>
+            <button id="tDel">Löschen <kbd data-k="Entf"></kbd></button>
           </div>
         </div>
         <div id="tFugBox">
@@ -188,12 +193,11 @@
           <div id="tKey"></div>
           <details id="tDetails"><summary>Stückliste im Einzelnen</summary><div id="tStats"></div></details>
           <div id="tPrintRow">
-            <button id="tPrint" title="Plan, Verlegemuster und je Rohfliese ein Schnittblatt (A4, als PDF sicherbar)">Plan und Schnittblätter drucken</button>
+            <button id="tPrint" class="primary">Plan und Schnittblätter drucken</button>
             <label><input type="checkbox" id="tNums" checked>Schnittnummern aus dem letzten Druck im Plan zeigen</label>
           </div>
         </div>
-        <div id="tEnd"><button id="tClear" title="Zweimal klicken: der erste Klick fragt nach">Alle Fliesen entfernen</button></div>
-      </section>
+              </section>
       <input id="filepick" type="file" accept=".json,application/json" hidden>
       <!-- Wandauswahl der alten Leiste. Unsichtbar: gewählt wird im Lageplan und mit den Pfeiltasten;
            renderWallBar füllt die Liste weiter, weil die Reihenfolge der Wände daran hängt. -->
@@ -236,25 +240,16 @@
       </dl>
 
       <h3>Fliesenplan</h3>
-      <p>Verlegt werden Parallelogramm-Fliesen als L und R (Chevron). Rechts stehen die Maße: Breite, Länge, Winkel, Fuge, Randfuge (Abstand zur Wand; die Schnittlinie liegt in ihrer Mitte, sie nimmt die Wandtoleranz auf) und Stärke. Fliesen aus der Leiste in den Plan ziehen oder klicken; Ziehen rastet an Kanten anderer Fliesen ein (⌥ ohne Einrasten).</p>
+      <p>Zwei Schritte: erst das Fliesenset, dann Legen. Piktogramm klicken oder in den Plan ziehen; die Fliese rastet an Wand und Nachbarn. Wo ein Werkzeug dran ist, steht es in der Zeile unter dem Plan.</p>
       <dl>
-        <dt>Fliesenpiktogramme</dt><dd>Fliesenset je Raum konfigurieren: Hexagon, Chevron, Viereck oder Dreieck mit eigenen Maßen und Dicken. Piktogramm klicken oder in den Plan ziehen. F tauscht Chevron L und R, Q/E dreht. ⌘D setzt das Muster fort.</dd>
-        <dt>Fluchten (A)</dt><dd>Erst die Kante der Fliese, die sich bewegt, dann die Bezugskante. Mit ⇧ rechtwinklig statt fluchtend.</dd>
-        <dt>Dehnungsfuge (J)</dt><dd>Anfang und Ende auf Wand oder Ecke klicken. Schneidet durch bestehende Fliesen; Breite unter „Breite neuer Dehnungsfugen“.</dd>
-        <dt>Wandfuge (W)</dt><dd>Markiert die Fuge an einer Wand mit eigener Breite und Toleranz, statt der globalen Randfuge.</dd>
-        <dt>Fugencheck (K)</dt><dd>Markiert Fugen, die von der eingestellten Breite abweichen, unbelegte Stellen und Fugenversatz. Vor dem Drucken einschalten.</dd>
-        <dt>Gehrung (G)</dt><dd>Bei genau zwei überlappenden Fliesen: Schnittlinie mit zwei Punkten setzen, Enter nimmt die Diagonale automatisch.</dd>
-        <dt>Anschneiden (T)</dt><dd>Fliesen, die die Auswahl überlappen, an ihr abschneiden, mit Fuge. An Wänden passt sich der Schnitt der Wand an; an Ecken entsteht eine Ausklinkung statt zwei Teilen.</dd>
-        <dt>Verbinden (V)</dt><dd>Führt Stücke, die aus einer Fliese stammen, wieder zu einer zusammen.</dd>
-        <dt>Schnitt entfernen</dt><dd>Nimmt Schnitte und Ausklinkungen der Auswahl zurück.</dd>
-        <dt>Lineal (L)</dt><dd>Halbdurchsichtiges Lineal mit mm-/cm-Teilung über dem Plan. Körper ziehen verschiebt, ein Ende ziehen streckt und dreht um das andere Ende, mit ⇧ nur drehen. Rastet an Ecken und Kanten von Fliesen und Wänden und im rechten Winkel dazu; ⌘/Strg hält frei.</dd>
-        <dt>Fliese einmessen</dt><dd>Im Fliesenset: Maße der gewählten Variante nur aus Strecken ermitteln (Kanten, Diagonalen, rechtwinklige Breite), für jede Form. Zeigt die Werte mit Genauigkeit, die echte Form der Fliese und welche Messung nicht passt.</dd>
-        <dt>L und R aus einer Charge</dt><dd>An: Reste dürfen zwischen L und R wechseln (gleiche Glasur). Aus: L-Reste nur für L, R-Reste nur für R, weil Spiegeln nicht geht.</dd>
-        <dt>Material</dt><dd>Zählt ganze und geschnittene Fliesen. Mit Recycling werden Schnittstücke auf möglichst wenige Rohfliesen verteilt, aber nur, wenn sie im Raum höchstens 1,5 m auseinander liegen. Die Zahl mit Recycling stammt aus dem letzten Druck.</dd>
-        <dt>Drucken</dt><dd>Plan, Verlegemuster und je Rohfliese ein Schnittblatt mit nummerierten Stücken (A4, im Druckdialog „Als PDF sichern“, Skalierung 100 %). Die Nummern erscheinen danach auch im Plan.</dd>
-        <dt>Alle Fliesen entfernen</dt><dd>Zweimal klicken; ⌘Z holt sie zurück.</dd>
+        <dt>Fliesenset</dt><dd>Form, Maße, Fuge und Randfuge je Raum, bei Chevron L und R (F tauscht). „Fliese einmessen“ ermittelt die Maße aus Strecken.</dd>
+        <dt>Drehen, Verschieben</dt><dd>Q und E drehen um 15°, mit ⇧ um 1°. Pfeile schieben um 1 mm, mit ⇧ um 10 mm. Mit ⌘ oder Strg rasten Fliesen nicht ein.</dd>
+        <dt>Anschneiden (T), Gehrung (G), Verbinden (V)</dt><dd>Am Auswahl-Block der gewählten Fliese. „Schnitt entfernen“ nimmt Schnitte zurück.</dd>
+        <dt>Fluchten (A), Dehnungsfuge (J), Wandfuge (W)</dt><dd>Menü › Werkzeug, oder die Taste. Die Zeile unter dem Plan sagt, was der nächste Klick tut.</dd>
+        <dt>Fugencheck (K), Lineal (L)</dt><dd>Menü › Werkzeug. Der Fugencheck markiert abweichende Fugen, unbelegte Stellen und Fugenversatz; vor dem Drucken einschalten.</dd>
+        <dt>Material, Drucken</dt><dd>Einkauf, Verschnitt und Stückliste stehen im Panel. „Plan und Schnittblätter drucken“ gibt Plan, Verlegemuster und je Rohfliese ein Blatt (A4, „Als PDF sichern“, 100 %).</dd>
+        <dt>Alle Fliesen entfernen</dt><dd>Menü › Werkzeug, sofort; ⌘Z holt sie zurück.</dd>
       </dl>
-
 
       <p class="hnote">Rückgängig gilt bis zum Wechsel des Raums oder des Werkzeugs.</p>
     </div>

@@ -308,6 +308,8 @@ const ABLAEUFE={
     await p.keyboard.press('4'); await sleep(400);
     pruef('Ausgabe (Taste 4) nennt den Fliesenplan „noch nicht begonnen“', await p.evaluate(()=>OUT.on && !document.getElementById('outTiles').disabled) && await txt('outTilesNote')==='noch nicht begonnen', await txt('outTilesNote'));
     await p.click('#outTiles'); await sleep(1500);
+    pruef('der Fliesenplan beginnt beim Fliesenset: es steht offen, „Weiter: Fliesen legen“ ist die Hauptaktion, die Leiste ist noch leer', await p.evaluate(()=>document.getElementById('tSpecBox').open && getComputedStyle(document.getElementById('tNext')).display!=='none' && document.getElementById('tNext').classList.contains('primary') && [...document.querySelectorAll('#tPalette button')].every(b=>b.getBoundingClientRect().width===0) && document.getElementById('tResBox').getBoundingClientRect().height===0));
+    await p.click('#tNext'); await sleep(500);
     const leiste=await p.evaluate(()=>[...document.querySelectorAll('#tPalette button')].filter(b=>b.getBoundingClientRect().width>0).map(b=>b.getAttribute('aria-label')));
     pruef('„Öffnen“ führt in den Fliesenplan, die Leiste bietet Chevron L, R und das Paar', await p.evaluate(()=>TOOL==='fliesen' && document.title.includes('Fliesenplan') && !document.getElementById('tilesec').hidden) && /fliesenplan\.html$/.test(p.url()) && leiste.join('|')==='Chevron L legen|Chevron R legen|Chevron als Paar legen', leiste.join('|'));
     // Setzen: Klick legt in die Bildmitte, Ziehen dorthin, wo man loslässt
@@ -378,6 +380,7 @@ const ABLAEUFE={
     await p.click('#mApply'); await sleep(350);
     const feld=await p.evaluate(()=>({zu:!document.getElementById('measDlg').open, b:document.getElementById('tW').value, l:document.getElementById('tL').value, a:document.getElementById('tA').value}));
     pruef('„Maße übernehmen“ schließt den Dialog und trägt 120 × 600 mm und den Winkel 49,97° ins Fliesenset ein', feld.zu && zahl(feld.b)===120 && zahl(feld.l)===600 && feld.a==='49,97' && /eingemessene Maße übernommen/.test(await txt('hint')), `${feld.b} × ${feld.l}, ${feld.a}°`);
+    await p.click('#tNext'); await sleep(400);
     // Stückliste und Einkauf
     const einkauf=(await txt('tKey')).replace(/\s+/g, ' ');
     pruef('Einkauf nennt 0,14 m² in 2 Fliesen, 1 L und 1 R, im Raum von 9,00 m²', /Einkauf\s*0,14 m² · 2 Fliesen/.test(einkauf) && /1 L, 1 R, ohne Recycling/.test(einkauf) && /Belegt\s*0,14 von 9,00 m²/.test(einkauf), einkauf.slice(0, 90));
@@ -670,6 +673,7 @@ const ABLAEUFE={
         pruef(`${wo}: der gespeicherte Stand ist der erwartete`, !!erwartet && !!r1.stand && r1.stand.text===erwartet, `${JSON.stringify(r1.stand && r1.stand.text)} gegen ${JSON.stringify(erwartet)}`);
         // Arbeiten: ein Teil setzen, zurück, vor
         if(soll==='fliesen'){
+          if(await p.locator('#tNext').isVisible()) { await p.click('#tNext'); await sleep(300); }
           if(!await p.locator('#tPalette .tpal').count()){ await p.evaluate(()=>{ document.getElementById('tSpecBox').open=true; }); await p.click('#tSetAdd'); await sleep(300); }
           await p.locator('#tPalette .tpal').first().click(); await sleep(450);
         } else if(soll==='kueche'){ await p.locator('#kPalette button').first().click(); await sleep(450); }
