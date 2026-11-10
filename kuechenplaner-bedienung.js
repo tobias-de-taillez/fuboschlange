@@ -12,7 +12,7 @@ const KX=globalThis.KITCHEN;
 const KS={ sel:null, hover:null, hl:null, flow:null, lastWall:null, palDrag:null, drag:false,
   show3d:lsGet('raumaufmass.k3d','1')==='1', paths:lsGet('raumaufmass.kwege','1')==='1', open:false,
   ana:lsGet('raumaufmass.kana','0')==='1', heat:true, anaMode:'week', ref:null, kid:false, anaKey:'', sw:null, swKey:'', swT:0,
-  abst:lsGet('raumaufmass.kabst','0')==='1', ctxKey:'', ctx:null, flowKey:'', flowRes:null, suggKey:'', sugg:null, selKey:'', clearArmed:null, clip:null, ptr:null };
+  abst:lsGet('raumaufmass.kabst','0')==='1', ctxKey:'', ctx:null, flowKey:'', flowRes:null, suggKey:'', sugg:null, selKey:'', clip:null, ptr:null };
 function lsGet(k,d){ try{ const v=localStorage.getItem(k); return v==null?d:v; }catch(e){ return d; } }
 function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
 function kitchenData(){ if(!M.kitchen) M.kitchen=KX.normKitchen(null); return M.kitchen; }
@@ -1216,7 +1216,9 @@ function renderCorner(c){
 }
 function renderChecks(c){
   const F=c.F, nb=F.filter(f=>f.lvl==='bad').length, nw=F.filter(f=>f.lvl==='warn').length;
-  $('kCheckCount').textContent = [nb?`${nb} geht nicht`:'', nw?`${nw} Hinweis${nw>1?'e':''}`:''].filter(Boolean).join(' · ');
+  $('kCheckCount').textContent = [nb?`${nb} geht nicht`:'', nw?`${nw} Hinweis${nw>1?'e':''}`:''].filter(Boolean).join(' · ') || (c.K.items.length ? 'nichts stößt an' : '');
+  $('kCheckBox').dataset.lvl = nb ? 'bad' : nw ? 'warn' : 'ok';
+  $('kCheckBox').hidden = !c.K.items.length;
   const key=KX.checksKey(F, KS.sel);          // mit ids und Abhilfe: die Handler unten schließen F ein
   if($('kChecks').dataset.key===key) return;
   $('kChecks').dataset.key=key;
@@ -1254,7 +1256,6 @@ function renderWays(c){
     });
     h+=`</div>`;
   });
-  h+=`<p class="tnote">Je Ablauf: wie oft pro Woche × Weg. Häufigkeiten sind eine Annahme für 4 Personen; aussagekräftig ist der Vergleich vorher/nachher. Wege um Schränke, Insel und Tisch, mit 30 cm Abstand für den Körper.</p>`;
   box.innerHTML=h;
   box.querySelectorAll('.kflow').forEach(b=>b.onclick=()=>{ KS.flow = KS.flow===b.dataset.flow ? null : b.dataset.flow; if(!KS.paths){ KS.paths=true; lsSet('raumaufmass.kwege','1'); syncToggles(); } render(); });
   if($('kEntry')) $('kEntry').onchange=()=>{ snapshot(); c.K.spec.entry=$('kEntry').value; kitchenSave(); };
@@ -1288,7 +1289,7 @@ function renderWays(c){
     const stay=[...O.kept.map(x=>x.c), ...O.dropped];
     if(O.same || !O.better) hs+=`<p class="tnote">${O.kept.length ? 'Optimal eingeräumt, soweit die Schränke es zulassen.' : 'Optimal eingeräumt – keine Einteilung hat kürzere Wege.'}${dup}</p>`;
     else hs+=`<div class="ksugghead"><b>Optimal einräumen</b><button id="kOpt" class="primary">Einräumen</button></div>`
-      +`<p class="tnote">Jeder Inhalt dorthin, wo die Wege aller Abläufe zusammen am kürzesten sind.${gain} Gerechnet, nicht geschätzt: dieselbe Küche ergibt immer dieselbe Einteilung. Besteck und Messer in Schubladen, Töpfe unten, Müll und Putzmittel an der Spüle, Seltenes in die schlechter greifbaren Fächer.${dup}</p>`
+      +`<p class="tnote">Jeder Inhalt dorthin, wo die Wege aller Abläufe zusammen am kürzesten sind.${gain}${dup}</p>`
       +`<details class="kopt"><summary>Einteilung ansehen</summary><ul>${lines}</ul></details>`;
     if(O.violations.length) hs+=`<p class="tnote">Gegen die Regeln eingeräumt: ${viol}.${stay.length ? ` Bleibt, wo es ist, weil kein passender Platz frei ist: ${stay.map(lbl).join(' · ')}. Weitere Schränke setzen.` : ''}</p>`;
     const fresh=O.unplaced.filter(k=>!O.dropped.includes(k));
@@ -1533,20 +1534,12 @@ function renderKitchenPanel(){
   renderSel(c); renderCorner(c); renderChecks(c); renderWays(c); renderStock(c); renderAna(c);
   $('kClear').hidden=!c.K.items.length;
 }
-// Scharf geschaltetes „Alle entfernen“ zurücknehmen: Uhr und Beschriftung (für den Raumwechsel).
-function disarmClear(){
-  if(!KS.clearArmed) return;
-  clearTimeout(KS.clearArmed); KS.clearArmed=null;
-  const b=$('kClear'); b.textContent='Alle Küchenteile entfernen'; b.classList.remove('arm');
-}
 function kitchenLeave(){ KS.sel=null; KS.drag=false; document.body.classList.remove('k3d'); document.body.classList.remove('kana'); }
 $('k3dBtn').onclick=toggle3d; $('kWayBtn').onclick=togglePaths; $('kOpenBtn').onclick=toggleOpen; $('kAnaBtn').onclick=toggleAna; $('kAbstBtn').onclick=toggleGaps; $('kRulerBtn').onclick=()=>rulerToggle();
 $('kSelX').onclick=()=>{ KS.sel=null; render(); };
+// Sofort und umkehrbar: ⌘Z holt die Küche zurück.
 $('kClear').onclick=()=>{
-  const K=kitchenData(), b=$('kClear'); if(!K.items.length) return;
-  if(!KS.clearArmed){ b.textContent=`Wirklich alle ${K.items.length} entfernen?`; b.classList.add('arm');
-    KS.clearArmed=setTimeout(()=>{ KS.clearArmed=null; b.textContent='Alle Küchenteile entfernen'; b.classList.remove('arm'); },4000); return; }
-  clearTimeout(KS.clearArmed); KS.clearArmed=null; b.textContent='Alle Küchenteile entfernen'; b.classList.remove('arm');
+  const K=kitchenData(); if(!K.items.length) return;
   snapshot(); K.items=[]; KS.sel=null; kitchenSave(); setHint('Küche geleert. ⌘Z holt alles zurück.');
 };
 
@@ -1958,9 +1951,9 @@ function drawRuler(c, dpr){
 // Hinweis je Zustand (modeHint liest KITCHEN_HINT)
 function kitchenHint(){
   const it=selItem();
-  if(it) return it.a ? `${nm(it)}: ziehen schiebt an der Wand (⌥ ohne Einrasten) · ←/→ 1 cm, ⇧ 10 cm${hasHinge(it)?' · F Anschlag':''} · ⌘D daneben · ⌘C/⌘V kopieren · Entf löscht`
-                     : `${nm(it)}: ziehen verschiebt · Q/E dreht 15° · Pfeile 1 cm · ⌘C/⌘V kopieren · Entf löscht`;
-  return 'Schrank aus der Leiste ziehen oder klicken · V 3D · W Wege · O Fronten offen · N Abstände · L Lineal · A Analyse';
+  if(it) return it.a ? `${nm(it)}: ziehen oder ←/→ schiebt · ⌘D daneben · Entf löscht`
+                     : `${nm(it)}: ziehen verschiebt · Q/E dreht · Entf löscht`;
+  return ' ';
 }
 
 // Anmeldung bei der Seite (meldeAn im Block ui): so ruft sie den Küchenplaner, ohne ihn zu kennen.
@@ -1990,7 +1983,7 @@ meldeAn('kitchen', {
   vorRaumwechsel(){ nudgeSave.flush(); },
   // Raumwechsel oder neuer Stand (M hält noch den alten): Vorgemerktes Speichern verwerfen statt hier zu schreiben,
   // sonst landeten die alten Daten im neuen Raum.
-  neuerStand(){ nudgeSave.cancel(); disarmClear(); Object.assign(KS, KX.roomBound()); G3.camFor=''; },
+  neuerStand(){ nudgeSave.cancel(); Object.assign(KS, KX.roomBound()); G3.camFor=''; },
   key:kitchenKey,
   entf(){ const it=selItem(); if(!it) return false; removeItem(it); return true; },
   down:kitchenDown, hover:kitchenHover, tap:kitchenTap,

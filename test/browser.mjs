@@ -499,12 +499,14 @@ const ABLAEUFE={
     const wege=()=>p.evaluate(()=>({b:document.getElementById('kWayBtn').getAttribute('aria-pressed'), box:document.getElementById('kWayBox').getBoundingClientRect().height>0, n:document.querySelectorAll('#kWays [data-flow]').length, sum:document.getElementById('kWaySum').textContent, txt:document.getElementById('kWays').innerText.replace(/\n+/g,' | ').slice(0,200)}));
     const w0=await wege(); await p.click('#kWayBtn'); await sleep(400); const w1=await wege(), pl1=await p.locator('#cv').screenshot();
     await p.keyboard.press('w'); await sleep(400); const w2=await wege(), imPlan=await unterschied(p, pl1, await p.locator('#cv').screenshot());
-    await p.click('#kAnaBtn'); await sleep(900);
+    await p.click('#roommenuBtn'); await sleep(250); await p.click('#kAnaBtn'); await sleep(900);   // Wege-Analyse liegt im Menü
     const ana=await p.evaluate(()=>{ const a=document.getElementById('kAna'), r=a.getBoundingClientRect(); return {b:document.getElementById('kAnaBtn').getAttribute('aria-pressed'), w:r.width, h:r.height, txt:a.innerText.replace(/\n+/g,' | ').slice(0,300), knoepfe:a.querySelectorAll('button').length, c3:document.getElementById('cv3d').getBoundingClientRect().width}; });
     await p.keyboard.press('a'); await sleep(600);
     const ana2=await p.evaluate(()=>({b:document.getElementById('kAnaBtn').getAttribute('aria-pressed'), w:document.getElementById('kAna').getBoundingClientRect().width, c3:document.getElementById('cv3d').getBoundingClientRect().width}));
     await p.click('#kStockBox summary'); await sleep(300);
     const st=await p.evaluate(()=>({offen:document.getElementById('kStockBox').open, zeilen:document.querySelectorAll('#kStock tr').length, txt:document.getElementById('kStock').innerText.replace(/\s*\n+\s*/g,' | ').slice(0,400)}));
+    pruef('die Prüfung steht als eine Zeile mit Punkt und Zahl im Panel, die Meldungen liegen dahinter', await p.evaluate(()=>{ const d=document.getElementById('kCheckBox'); return !d.open && d.dataset.lvl==='bad' && /geht nicht/.test(document.getElementById('kCheckCount').textContent) && !document.getElementById('kChecks').checkVisibility(); }));
+    await p.click('#kCheckBox > summary'); await sleep(300);
     const pr=await p.evaluate(()=>({n:document.querySelectorAll('#kChecks .kfind').length, cnt:document.getElementById('kCheckCount').textContent, html:document.getElementById('kChecks').innerHTML.slice(0,600), txt:document.getElementById('kChecks').innerText.replace(/\s*\n+\s*/g,' | ').slice(0,400)}));
     pruef('„Wege“ schaltet die Wege im Plan und die Übersicht im Panel aus, Taste W wieder ein', w0.b==='true' && w0.box && w1.b==='false' && !w1.box && w2.b==='true' && w2.box && w2.n>=5 && /Abläufen/.test(w2.sum) && imPlan>=0.0001, JSON.stringify([w1.box, w2.box, w2.n, w2.sum])+`, Plan zu ${(imPlan*100).toFixed(2)} % anders`);
     pruef('„Analyse“ zeigt die Wege-Analyse statt 3D, Taste A holt 3D zurück', ana.b==='true' && ana.w>300 && ana.c3===0 && /Abläufe im Vergleich/.test(ana.txt) && ana.knoepfe>=3 && ana2.b==='false' && ana2.w===0 && ana2.c3>300, JSON.stringify([ana.w, ana.c3, ana.knoepfe, ana2]));

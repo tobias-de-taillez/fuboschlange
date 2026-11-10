@@ -25,7 +25,7 @@
   body.kitchenmode.kana #cv3d, body.kitchenmode.kana #k3dMsg{display:none}
   /* In der Analyse rechts nur, was sie braucht: Auswahl (Inhalte) und Prüfung (Gang, Dreieck).
      Küchenmaße, Stückliste und "Alle entfernen" gehören zum Planen (M-20261109-160341-3d3671). */
-  body.kitchenmode.kana #kSpecBox, body.kitchenmode.kana #kStockBox, body.kitchenmode.kana #kEnd{display:none}
+  body.kitchenmode.kana #kSpecBox, body.kitchenmode.kana #kStockBox{display:none}
   #kAna h4{margin:16px 0 6px;font-size:12px;font-weight:600;color:var(--ink2);display:flex;align-items:baseline;gap:8px}
   #kAna h4 small{font-weight:400;color:var(--muted)}
   #kAna h4 .seg{margin-left:auto}
@@ -163,7 +163,15 @@
   #kStockBox summary{cursor:pointer;font-size:12px;font-weight:600;color:var(--ink2)}
   #kStock table{width:100%;border-collapse:collapse;font-size:12px;margin-top:6px}
   #kStock td{padding:2px 0;border-bottom:1px solid var(--line2)} #kStock td+td{text-align:right;font-variant-numeric:tabular-nums}
-  #kClear.arm{background:var(--bad)!important;color:#fff!important}
+  /* Prüfung: eine Zeile mit Punkt und Zahl; die Meldungen liegen dahinter, bis man sie aufklappt. */
+  #kCheckBox{padding:2px 0 10px;border-bottom:1px solid var(--line)}
+  #kCheckBox summary{display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;font-size:13px;font-weight:600}
+  #kCheckBox summary::-webkit-details-marker{display:none}
+  #kCheckBox summary i{flex:none;width:8px;height:8px;border-radius:50%;background:var(--good)}
+  #kCheckBox[data-lvl=bad] summary i{background:var(--bad)}
+  #kCheckBox[data-lvl=warn] summary i{background:var(--warn-dot)}
+  #kCheckBox summary small{font-weight:400;color:var(--muted);font-size:12px}
+  #kCheckBox[open] #kChecks{margin-top:8px}
 </style>
 
 
@@ -178,12 +186,8 @@
       <div class="tg" data-for="kitchen">
         <div id="kPalette" aria-label="Küchenteile"></div>
         <i class="tsep"></i>
-        <button id="k3dBtn" class="tb tog" aria-pressed="false" title="3D-Ansicht neben dem Plan (V)">3D <kbd>V</kbd></button>
-        <button id="kWayBtn" class="tb tog" aria-pressed="false" title="Laufwege der Abläufe im Plan zeigen (W)">Wege <kbd>W</kbd></button>
-        <button id="kOpenBtn" class="tb tog" aria-pressed="false" title="Alle Türen, Auszüge und Gerätetüren offen zeigen (O)">Offen <kbd>O</kbd></button>
-        <button id="kAbstBtn" class="tb tog" aria-pressed="false" title="Abstände nach NKBA einzeichnen: Gänge, Arbeitsdreieck, Platz hinter Tisch und Tresen; rot und gelb, wo es eng wird, mit Grund (N)">Abstände <kbd>N</kbd></button>
-        <button id="kRulerBtn" class="tb tog" aria-pressed="false" title="Lineal einblenden: verschieben, an den Enden strecken und drehen, rastet an Wänden und Küchenteilen (⌘/Strg frei)">Lineal <kbd>L</kbd></button>
-        <button id="kAnaBtn" class="tb tog" aria-pressed="false" title="Wege-Analyse statt 3D: Heatmap im Plan, Abläufe im Vergleich, was fehlt, Verschieben und Optimieren, zu zweit kochen (A)">Analyse <kbd>A</kbd></button>
+        <button id="k3dBtn" class="tb tog" aria-pressed="false">3D <kbd>V</kbd></button>
+        <button id="kWayBtn" class="tb tog" aria-pressed="false">Wege <kbd>W</kbd></button>
       </div>
     </div>
     <div id="histctl">
@@ -193,6 +197,14 @@
         <svg viewBox="0 0 16 16"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/></svg>
       </button>
       <div id="roommenu" class="menu" role="menu" hidden>
+        <h4>Ansicht</h4>
+        <button id="kOpenBtn" role="menuitemcheckbox" aria-pressed="false">Fronten offen<kbd>O</kbd></button>
+        <button id="kAbstBtn" role="menuitemcheckbox" aria-pressed="false">Abstände<kbd>N</kbd></button>
+        <button id="kRulerBtn" role="menuitemcheckbox" aria-pressed="false">Lineal<kbd>L</kbd></button>
+        <button id="kAnaBtn" role="menuitemcheckbox" aria-pressed="false">Wege-Analyse<kbd>A</kbd></button>
+        <hr>
+        <button id="kClear" class="danger" role="menuitem">Alle Küchenteile entfernen</button>
+        <hr>
         <h4>Weitergeben</h4>
         <button id="filesave" role="menuitem">Als Datei sichern<kbd data-k="⌘S"></kbd></button>
         <button id="sharelink" role="menuitem">Link kopieren</button>
@@ -222,11 +234,11 @@
       <section id="kitchensec" hidden>
         <p id="kEmpty"></p>
         <div id="kSelBox" hidden>
-          <h3><span id="kSelInfo"></span><button id="kSelX" aria-label="Auswahl aufheben" title="Auswahl aufheben (Esc)">✕</button></h3>
+          <h3><span id="kSelInfo"></span><button id="kSelX" aria-label="Auswahl aufheben" aria-label="Auswahl aufheben">✕</button></h3>
           <div id="kCorner" hidden></div>
           <div id="kSelBody"></div>
         </div>
-        <div id="kCheckBox"><h3>Prüfung <small id="kCheckCount"></small></h3><div id="kChecks"></div></div>
+        <details id="kCheckBox"><summary><i></i>Prüfung <small id="kCheckCount"></small></summary><div id="kChecks"></div></details>
         <div id="kWayBox"><h3>Wege <small id="kWaySum"></small></h3><div id="kWays"></div><div id="kSugg"></div></div>
         <!-- Meldung M-20261109-160341-3d3671: einmal eingestellt, selten geaendert - daher unten bei der Stueckliste statt ueber der Auswahl -->
         <details id="kSpecBox">
@@ -236,7 +248,6 @@
           <div class="trow"><button id="kSpecReset">Standard</button></div>
         </details>
         <details id="kStockBox"><summary>Stückliste</summary><div id="kStock"></div></details>
-        <div id="kEnd"><button id="kClear" title="Zweimal klicken: der erste Klick fragt nach">Alle Küchenteile entfernen</button></div>
       </section>
       <input id="filepick" type="file" accept=".json,application/json" hidden>
       <!-- Wandauswahl der alten Leiste. Unsichtbar: gewählt wird im Lageplan und mit den Pfeiltasten;
@@ -283,14 +294,14 @@
       <h3>Küchenplaner</h3>
       <p>Erst verfügbar, wenn der Grundriss eindeutig ist. Teile aus der Leiste oben auf eine Wand ziehen oder anklicken, geordnet nach Kalt (Kühl-, Gefrierschrank), Warm (Herd, Backofen im Hochschrank, Mikrowelle, Dunstabzug), Nass (Spüle, Spülmaschine), Stauraum (Schrank, Eckschrank, Insel) und Möbel (Tisch). Ob ein Schrank unten steht, hängt oder hoch ist, wählt man danach rechts unter „Bauart“; die Spülmaschine geht auch hoch eingebaut (Hüfthöhe, mit Fächern darunter und darüber für Vorräte, Geschirr usw.), der Herd auch ohne Backofen (nur Kochfeld, darunter Schubladen). Sie rasten an Ecken (mit 5 cm Passblende), Nachbarn, Türen und mittig unter Fenstern ein; ein Klick setzt das Teil neben das gewählte, einen Hängeschrank darüber. Die Arbeitsplatte entsteht von selbst, auf der Insel samt Tresen-Überstand; Lücken bis 15 cm werden Passleisten. Die Lage steht im Panel als Zahl (ab Ecke … mm), die Maßkette im Plan. Die Standardmaße passen meist; rechts stellt man Breite, Front, Anschlag, Gerät und Inhalt ein, unter „Maße frei“ alles Übrige.</p>
       <dl>
-        <dt>Prüfung</dt><dd>Meldet, was nicht geht (rot): Überlappungen, Schrank vor Tür oder Fenster, Fensterflügel gegen Armatur, Gerätetür gegen Insel, Zimmertür gegen Schrank oder Insel (im Plan bleibt die Tür am ersten Teil stehen, mit Winkel im Befund), Front in der Ecke verdeckt, Decke zu niedrig. Und Richtwerte (gelb): Schlauchweg von Spülmaschine und Festwasser-Kühlschrank zum Wasseranschluss (Raumaufmaß, Schritt Wände), Gänge 1200 mm, Stuhlraum am Tisch, Abstellflächen, Spülmaschine neben der Spüle, Arbeitsdreieck. Ein Klick wählt das Teil; wo es eine eindeutige Abhilfe gibt (Vorfensterarmatur, Anschlag tauschen, Als Eckschrank, Als Dunstabzug), steht ein Knopf daneben.</dd>
+        <dt>Prüfung</dt><dd>Eine Zeile im Panel nennt, wie viel nicht geht; aufgeklappt stehen die Meldungen. Gemeldet wird, was nicht geht (rot): Überlappungen, Schrank vor Tür oder Fenster, Fensterflügel gegen Armatur, Gerätetür gegen Insel, Zimmertür gegen Schrank oder Insel (im Plan bleibt die Tür am ersten Teil stehen, mit Winkel im Befund), Front in der Ecke verdeckt, Decke zu niedrig. Und Richtwerte (gelb): Schlauchweg von Spülmaschine und Festwasser-Kühlschrank zum Wasseranschluss (Raumaufmaß, Schritt Wände), Gänge 1200 mm, Stuhlraum am Tisch, Abstellflächen, Spülmaschine neben der Spüle, Arbeitsdreieck. Ein Klick wählt das Teil; wo es eine eindeutige Abhilfe gibt (Vorfensterarmatur, Anschlag tauschen, Als Eckschrank, Als Dunstabzug), steht ein Knopf daneben.</dd>
         <dt>Maße und Abstände</dt><dd>Am gewählten Wandteil läuft die Maßkette bis zur Wand, die man an den Enden vor sich hat, bei Insel und Tisch zu allen vier Seiten. Ein Klick auf einen gestrichelt umrandeten Abstand öffnet ein Feld: Wert eintragen, Enter verschiebt das Teil (an der Wand den ganzen Block daneben).</dd>
         <dt>Insel und Tisch</dt><dd>Drehen per Schieber im Panel (rastet an 0/45/90° und an schiefen Wänden ein, mit ⌥ frei) oder mit Q/E. Eine Insel, deren Stirnseite man an eine Wand zieht, dockt bündig an; ihre Auszüge gehen dann parallel zur Wand auf. Zieht man eine Insel an eine andere, rastet sie bündig ein (gleiche Drehung oder quer dazu, an den Enden oder mittig, ⌥ frei); gleich hohe Inseln bekommen dann eine durchgehende Platte, auch über Eck. „Tresen“ lässt die Platte hinten überstehen (NKBA: 38 cm bei 91 cm Höhe, 61 cm je Hocker). Die Tischplätze ergeben sich aus Länge und Breite (60 cm je Platz, Stirnseite ab 60 cm Breite), Seiten ohne Stuhlraum bleiben frei.</dd>
-        <dt>Abstände (N)</dt><dd>Zeichnet die NKBA-Abstände in den Plan: den Gang vor jeder Zeile und Insel an seiner engsten Stelle, das Arbeitsdreieck mit Schenkeln und Summe, den Platz hinter Tisch und Tresen. Grün reicht, gelb liegt unter der Empfehlung, rot unter dem Mindestmaß; bei gelb und rot steht der Grund am Schild. Dieselben Werte wie die Prüfung, nur im Bild.</dd>
-        <dt>Lineal (L)</dt><dd>Halbdurchsichtiges Lineal mit mm-/cm-Teilung über dem Plan. Körper ziehen verschiebt, ein Ende ziehen streckt und dreht um das andere Ende, mit ⇧ nur drehen. Rastet an Ecken und Kanten von Wänden und Küchenteilen und im rechten Winkel dazu; ⌘/Strg hält frei.</dd>
-        <dt>Offen (O)</dt><dd>Zeigt im Plan alle Schwenkbereiche und in 3D alle Türen, Auszüge und Gerätetüren offen, dazu offene Fensterflügel.</dd>
+        <dt>Abstände (N)</dt><dd>Menü › Ansicht, oder die Taste. Zeichnet die NKBA-Abstände in den Plan: den Gang vor jeder Zeile und Insel an seiner engsten Stelle, das Arbeitsdreieck mit Schenkeln und Summe, den Platz hinter Tisch und Tresen. Grün reicht, gelb liegt unter der Empfehlung, rot unter dem Mindestmaß; bei gelb und rot steht der Grund am Schild. Dieselben Werte wie die Prüfung, nur im Bild.</dd>
+        <dt>Lineal (L)</dt><dd>Menü › Ansicht, oder die Taste. Halbdurchsichtiges Lineal mit mm-/cm-Teilung über dem Plan. Körper ziehen verschiebt, ein Ende ziehen streckt und dreht um das andere Ende, mit ⇧ nur drehen. Rastet an Ecken und Kanten von Wänden und Küchenteilen und im rechten Winkel dazu; ⌘/Strg hält frei.</dd>
+        <dt>Fronten offen (O)</dt><dd>Menü › Ansicht, oder die Taste. Zeigt im Plan alle Schwenkbereiche und in 3D alle Türen, Auszüge und Gerätetüren offen, dazu offene Fensterflügel.</dd>
         <dt>Inhalt und Wege (W)</dt><dd>Je Schrank wählen, was darin liegt (Besteck, Teller, Gläser …). Daraus rechnet das Programm die Laufwege typischer Abläufe: Einkauf einräumen, Müll, Kochen, Snack zubereiten, Servieren, Tisch decken, Abräumen in die Spülmaschine, Spülmaschine ausräumen, Kaffee und Getränke. Ein Klick auf einen Ablauf zeichnet ihn ein. Der Eingang ist im Plan grün markiert; ein Klick auf eine andere Tür macht sie zum Eingang. „Optimal einräumen“ verteilt alle Inhalte so, dass die Wege zusammen am kürzesten sind – exakt gerechnet, dieselbe Küche ergibt immer dieselbe Einteilung; doppelt Eingeräumtes bleibt stehen. „Umsortieren“ schlägt einzelne Umzüge vor (Besteck und Messer nur in Schubladen, Müll bleibt an der Spüle). Ein Ablauf zählt erst, wenn alle seine Stationen da sind; die Häufigkeiten sind eine Annahme für vier Personen.</dd>
-        <dt>Analyse (A)</dt><dd>Statt 3D rechts eine eigene Ansicht für die Wege. Oben die Summe in km/Jahr; „Referenz merken“ hält den Stand fest, danach zeigen Summe und Balken den Unterschied. „Abläufe im Vergleich“ stellt die Abläufe als Balken gegeneinander, je Jahr (Häufigkeit × Weg) oder je Durchgang: so sieht man, ob eine Aufteilung z. B. das Einräumen bevorzugt und das Kochen lang macht. Überfahren zeigt den Weg im Plan, Klick hält ihn. „Was steht wo“ zeigt je Station und Inhalt, welcher Ablauf ihn braucht und wo er liegt; Fehlendes ist rot. Im Plan liegt eine Heatmap: je dunkler, desto öfter läuft man dort. Ist ein Teil gewählt, zeigt „Verschieben und vergleichen“ die km/Jahr für jede Lage, an der es Platz hat (Insel und Tisch längs und quer); Klick in die Kurve setzt es dorthin, „Dorthin setzen“ nimmt das Optimum. Gerechnet in festen Schritten, gleiche Küche ergibt immer dasselbe Optimum; Lagen, die einen Weg versperren oder einen neuen Befund in der Prüfung bringen, zählen nicht (in der Kurve als Ring). In voller Zeile wird Tauschen mit gleich breiten Teilen vorgeschlagen. „Personen 2/3“: Gang nach NKBA mind. 1219 mm in der Prüfung und eine Liste, wo sich zwei gleichzeitige Abläufe begegnen (im Plan gelb). „Kind im Weg“ stellt ein Kind an den meistbelaufenen Punkt und rechnet alle Wege neu.</dd>
+        <dt>Wege-Analyse (A)</dt><dd>Menü › Ansicht. Statt 3D rechts eine eigene Ansicht für die Wege. Oben die Summe in km/Jahr; „Referenz merken“ hält den Stand fest, danach zeigen Summe und Balken den Unterschied. „Abläufe im Vergleich“ stellt die Abläufe als Balken gegeneinander, je Jahr (Häufigkeit × Weg) oder je Durchgang: so sieht man, ob eine Aufteilung z. B. das Einräumen bevorzugt und das Kochen lang macht. Überfahren zeigt den Weg im Plan, Klick hält ihn. „Was steht wo“ zeigt je Station und Inhalt, welcher Ablauf ihn braucht und wo er liegt; Fehlendes ist rot. Im Plan liegt eine Heatmap: je dunkler, desto öfter läuft man dort. Ist ein Teil gewählt, zeigt „Verschieben und vergleichen“ die km/Jahr für jede Lage, an der es Platz hat (Insel und Tisch längs und quer); Klick in die Kurve setzt es dorthin, „Dorthin setzen“ nimmt das Optimum. Gerechnet in festen Schritten, gleiche Küche ergibt immer dasselbe Optimum; Lagen, die einen Weg versperren oder einen neuen Befund in der Prüfung bringen, zählen nicht (in der Kurve als Ring). In voller Zeile wird Tauschen mit gleich breiten Teilen vorgeschlagen. „Personen 2/3“: Gang nach NKBA mind. 1219 mm in der Prüfung und eine Liste, wo sich zwei gleichzeitige Abläufe begegnen (im Plan gelb). „Kind im Weg“ stellt ein Kind an den meistbelaufenen Punkt und rechnet alle Wege neu.</dd>
         <dt>3D (V)</dt><dd>Ansicht neben dem Plan. Ziehen dreht, Rechts- oder ⇧-Ziehen verschiebt, Rad zoomt, Doppelklick setzt zurück. Wände, vor denen man steht, werden ausgeblendet.</dd>
       </dl>
 
