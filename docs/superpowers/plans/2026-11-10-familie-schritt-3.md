@@ -35,7 +35,7 @@ Am 10.11.2026 gebaut und gemessen, außerhalb des Repos: eine Probeseite mit der
 
 - **Ohne `ui` wirft die Seite beim Laden** (`render is not defined`), kein Raum, keine Handler.
 - **Mit einer geschnittenen Naht läuft sie.** 43 Einträge genügen: 163 Zeilen wörtlich aus `ui`, 49 Zeilen Ersatz. Damit lädt die Probeseite einen Raum, zeichnet den Plan, setzt und verschiebt eine Fliese, nimmt zurück, stellt wieder her und speichert, ohne Konsolenfehler.
-- **Im Vergleich mit `raumaufmass.html#fliesen` ist sie gleich:** `M.tiles`, `serialize()`, der Speicherstand, die Ansicht und die Zeichenfläche stimmen in allen sieben Schritten überein (0 von 927.360 Bildpunkten verschieden). Rad, Leertaste-Ziehen, Einpassen, Lineal und Einmess-Dialog verhalten sich gleich.
+- **Beim exakten Rechteck ist sie im Vergleich mit `raumaufmass.html#fliesen` gleich:** `M.tiles`, `serialize()`, der Speicherstand, die Ansicht und die Zeichenfläche stimmen in allen sieben Schritten überein (0 von 927.360 Bildpunkten verschieden). **Mit echten Räumen gilt das nicht, siehe „Härtetest“ unten.**
 - **Sichtbar fehlt nur Schale, die in `ui` verdrahtet ist:** Menü, Tooltip, Raum umbenennen, Hilfe, Melde-Knopf.
 
 Die Naht, wie der laufende Code sie zeigt:
@@ -50,9 +50,35 @@ Drei Kopplungen hat nur der laufende Code gezeigt:
 2. Rückgängig und Wiederherstellen speichern ausschließlich über `recompute()` (`restoreSnapshot` in `raum-modell.js`). `recompute` trägt drei Aufgaben in einer Funktion: Form rechnen, sichern, Aufmaß-Folgen.
 3. `raum-modell.js` erwartet beim Laden eines Raums `opMeasSeq` und `syncSnapfitBtn` vom Werkzeug, ohne zu prüfen, ob es sie gibt.
 
-Nicht gemessen: Räume mit ungenauen Maßen, der 90°-Ausgleich, Küche, Nachbarräume, Touch, Drucken, zweites Fenster, WebKit und Firefox. Die Probe ist ein Messaufbau, keine Seite zum Ausliefern.
+Die Probe ist ein Messaufbau, keine Seite zum Ausliefern. Was der erste Aufbau nicht gemessen hatte, steht im Härtetest und im Messaufbau für die Küche.
 
-Was das für den Aufwand heißt: Die Naht ist schmaler, als die Zählung über `render` vermuten ließ. Rund 210 Zeilen Plan-Skript tragen die Fliesen-Bedienung. Der Aufwand liegt im Zerschneiden von sieben Funktionen (`recompute`, `render`/`renderPanel`, `drawCanvas`, die Zeiger-Handler, der Tasten-Handler, `openRoom`, Boot), nicht in der Menge.
+Was das für den Aufwand heißt: Die Naht ist schmaler, als die Zählung über `render` vermuten ließ, aber nicht so schmal wie im ersten Aufbau (212 Zeilen); der Härtetest hat sie auf 293 Zeilen wachsen lassen. Der Aufwand liegt im Zerschneiden von sieben Funktionen (`recompute`, `render`/`renderPanel`, `drawCanvas`, die Zeiger-Handler, der Tasten-Handler, `openRoom`, Boot), nicht in der Menge.
+
+### Härtetest: dieselbe Probeseite mit echten Räumen
+
+Am 10.11.2026, ebenfalls außerhalb des Repos: die Probeseite gegen `raumaufmass.html#fliesen` in neun Fällen und je drei Browsern (Chromium, WebKit, Firefox), mit derselben Folge aus echten Klicks und Tasten (laden, Fliese setzen, verschieben, drehen, Rückgängig per Taste und Knopf, Wiederherstellen, neu laden, dreimal neu laden). Fälle: L-Raum mit Messfehlern, derselbe mit „Rechte Winkel annehmen“, „Maßhaltig zeichnen: aus“, Raum mit Küchenteilen, Raum mit Nachbarraum, ein Raum aus dem alten Werkzeug ohne gespeicherten Stand (zwei „roh“-Fälle), großer Raum aus einer Datei, Wintergarten mit Schräge.
+
+- **Die 212-Zeilen-Naht ist in keinem der neun Fälle gleich, in allen drei Browsern, und sie beschädigt das gespeicherte Aufmaß.** Schon das bloße Öffnen verschiebt `data.pts` um 0,01 bis 1,33 mm, jedes Rückgängig, Wiederherstellen und Neuladen noch einmal (großer Raum: 9,3 mm nach der Folge und dreimal Neuladen). Das echte Werkzeug bleibt bei höchstens 0,0003 mm.
+- **Ursache ist genau das im ersten Aufbau offen gelassene Risiko:** Ohne `lageHalten` und den Rückschrieb der Skizze speichert `serialize()` den rohen Ausgleich, `M.pts` bleibt stehen, und jeder Rechengang dreht und schiebt die Form. Dasselbe hatte das Aufmaß vor `lageHalten` selbst.
+- **Mit „Rechte Winkel annehmen“ wirft die Probe schon beim Laden** (`ORTHO_TOL is not defined`): Der Messaufbau hatte die falsche Zeile (1289, leer, statt 1288).
+- **Alte Räume ohne gespeicherten Stand** migriert das echte Werkzeug beim Öffnen (Maßhaltig an, Handskizze weg, Stand geschrieben). Die Probe tut das nicht und schreibt als Stand „—“.
+- **Nachgeliefert in drei Stufen:** Stufe 2 (Maßhaltig von selbst, `lageHalten`, Rückschrieb, `scaleSketch`; +50 Zeilen) bringt `data.pts` auf höchstens 3e-9 mm. Stufe 3 (Öffnungen setzen, zweiter Rechengang beim Boot; +31 Zeilen) macht sieben Fälle in allen drei Browsern in allen neun Schritten bitgleich (`M.tiles`, `serialize()`, Speicher, Ansicht, Bildpunkte). Stufe 4 (`statusText` mit allem, was er braucht; +128 Zeilen) macht alle 27 Kombinationen gleich.
+- **Die Naht wächst damit von 212 auf 293 Zeilen** (246 wörtlich, 47 Ersatz), mit neu bewertetem Stand auf 421 Zeilen. Chromium, WebKit und Firefox verhalten sich durchweg gleich; kein Fall ist nur in einem Browser ungleich.
+- **Nebenbefund am echten Werkzeug:** Auch `raumaufmass.html` schreibt beim ersten Wiederöffnen eines frisch importierten Raums `pts` um bis zu 1,7e-5 mm und im Nachbar-Fall die Öffnungslagen neu; danach bleibt es bei 1e-12 mm. `lageHalten` hält die Lage, nicht die letzte Stelle.
+
+Folgen für den Plan: Der **Rechenteil von `recompute` gehört als Ganzes** ins geteilte Plan-Skript (Maßhaltig von selbst, `lageHalten`, Rückschrieb, `scaleSketch`, Öffnungen setzen, zweiter Rechengang beim Boot), nicht nur der Aufruf des Ausgleichs. „Aufmaß-Folgen“ sind nur Vorschläge, Verdächtige, Nachbarlagen und offene Eingaben. Ein Folgewerkzeug darf **keinen Stand schreiben, wenn keiner gespeichert ist**. Und: Eine eigene Fliesen- oder Küchenseite, die den Raum beim Öffnen anders rechnet als das Aufmaß, verschiebt dessen Maße. Das ist Datenverlust, kein Schönheitsfehler.
+
+### Messaufbau für die Küche
+
+Ebenfalls am 10.11.2026: `kitchen-ui` samt 3D ohne `ui`, in Chromium, gegen `raumaufmass.html#kueche` mit derselben Folge (30 Schritte: Teile setzen, ziehen, Pfeiltasten auch gehalten, drehen, ⌘D, Entf, Rückgängig, Wandmaß im Plan, Breite im Panel, 3D aus/an, Wege, Analyse, neu laden).
+
+- **Die Naht ist für Küche und Fliesen dieselbe.** 186 der 212 Zeilen der Fliesen-Naht sind für beide textgleich, 26 rufen das jeweilige Werkzeug. Die Küche braucht darüber hinaus sechs wörtliche Zeilen (die Geste `kdim`, ui 3989, und `distToSeg`, fünf Zeilen, nötig bei mehr als einer Tür) und 15 Zeilen Schale (Rückgängig-Knöpfe sperren, Fläche und Umfang unter dem Stand). Mit diesen ist die Küchen-Probe in allen 30 Schritten gleich dem Werkzeug (Modell, Speicher, Panel, Plan und 3D-Fläche bildgleich).
+- **Ein gemeinsames Plan-Skript trägt beide Werkzeuge:** 228 Zeilen (166 wörtlich, 62 Ersatz), kein Name eines Werkzeugs im Code, Anmeldung mit 16 Einträgen für die Küche und 15 für die Fliesen. Küche 30 von 30 Schritten gleich, Fliesen 7 von 7 (einzige Abweichung: das Tastenzeichen ⌫ am Löschen-Knopf fehlt, weil `ui` Zeile 6268 es beschriftet).
+- **Die Einhängepunkte `kitchenFlush`, `kitchenResetSession`, `kitchenLeave` und `KITCHEN.cornerDeleted` wurden in der Folge nie gerufen.** `KITCHEN.anchorFrame` kam 19-mal, immer aus `kitchenSave` in `kitchen-ui` selbst. Der Haken „Raum wechselt“ gehört trotzdem in die Anmeldung der Küche (zweites Fenster, Raumwechsel sind nicht gemessen).
+- **Schale, die dem ersten Fliesen-Aufbau fehlte und die sein Vergleich nicht sah:** Fläche und Umfang unter dem Stand (`#geo`), Rückgängig-Knöpfe nie gesperrt, das Tastenzeichen ⌫. Dazu im Werkzeug nur: Menü, Hilfe, Tooltip, Umbenennen, Melde-Knopf; Pfeiltasten ohne gewähltes Teil verschieben dort die Ansicht (aus dem Code gelesen).
+- **Grenzen:** Nur Chromium, nur das exakte Rechteck. Nach dem Härtetest gilt für die Küche dieselbe Einschränkung wie für die Fliesen: Die 30/30 sagen nichts über echte Räume, solange der Rechenteil von `recompute` fehlt. Nicht gemessen: Zweites Fenster und Raumwechsel, Touch, Eckschrank, Insel-Andocken, ⌘C/⌘V, Anschlag, Fronten offen, Küchenmaße.
+
+Nachgerechnet: Die Gegenleser beider Messungen sind am Fable-Limit gescheitert. Ich habe die Kernzahlen selbst aus den gespeicherten Rohdaten neu berechnet, nicht neu gemessen: Der Versatz von `data.pts` je Fall und Browser (Probe gegen Werkzeug) stimmt mit den Angaben des Härtetests überein, und die Küchen-Folge mit dem gemeinsamen Plan-Skript ist in `M.kitchen`, `serialize()` und Stand in 30 von 30 Schritten gleich der des Werkzeugs. Die Messordner liegen außerhalb des Repos.
 
 ## Drei Entwürfe, drei Kritiken
 
@@ -70,14 +96,16 @@ Gemeinsamer Befund: Eigene Seiten kosten sechs bis zehn Arbeitstage und sind ohn
 4. **Der Browser-Test** `test/browser.mjs` braucht Playwright, das nicht zum Repo gehört (er sucht es im Suchpfad von Node oder über die Variable `PLAYWRIGHT`). Soll es eine feste Entwicklungs-Abhängigkeit werden? Seine Grenzen: Er liest das Modell und die Texte der Oberfläche, die Zeichenfläche nur an wenigen Stellen; ein reiner Zeichenfehler im Fliesenplan fiele ihm nicht auf.
 5. **Selbstchecks:** weiter an jeder Auslieferung (418 kB) oder nur bei `?test` nachladen.
 6. **Dateinamen:** `raum-*.js` lädt jedes Werkzeug, `<werkzeug>-*.js` gehört einem allein. Ein späteres Umbenennen trifft jeden offenen Zweig noch einmal.
+7. **Stand auf den Folgewerkzeugen:** weitertragen und keinen Stand schreiben, wenn keiner gespeichert ist (293 Zeilen Naht), oder wie im Aufmaß neu bewerten (421 Zeilen).
+8. **Darf eine Fliesen- oder Küchenseite alte Räume migrieren** (Maßhaltig an, Handskizze weg), wie es das Aufmaß beim ersten Öffnen tut, oder sie unverändert lassen? Beides ist machbar; wer es offen lässt, bekommt je nach geöffneter Seite einen anderen gespeicherten Raum.
 
 ## Empfohlene Folge für den Rest
 
-Getan sind der Messaufbau und das Netz (`test/browser.mjs` mit Abläufen für Fliesenplan und Küchenplaner). Es bleibt:
+Getan sind die beiden Messaufbauten, der Härtetest und das Netz (`test/browser.mjs` mit Abläufen für Fliesenplan und Küchenplaner). Es bleibt:
 
-1. Die Entscheidungen oben. Neu dazu aus dem Messaufbau: Der Stand wird auf den Folgewerkzeugen weitergetragen, nicht neu bewertet.
-2. `recompute` in Rechnen, Sichern und Aufmaß-Folgen zerlegen, als eigener Schritt und ohne Verhaltensänderung, weil Rückgängig nur darüber speichert.
-3. `raum-modell.js` gegen ein Werkzeug ohne `opMeasSeq` und `syncSnapfitBtn` absichern; das `render()` beim Laden von `tiles-ui` hinter `TS.ruler` setzen.
-4. `ui` in der einen Seite auftrennen: ein Plan-Skript, bei dem sich jedes Werkzeug anmeldet (zeichnen, Panel, Hinweis, fünf Zeiger-Einstiege, Tasten, bereit). Der Boot läuft danach, nicht davor. Jeder Zwischenstand läuft und kann live gehen.
-5. Den Vergleich des Messaufbaus mit einem ungenau gemessenen Raum, mit 90°-Ausgleich und Küche wiederholen, auch in WebKit und Firefox.
+1. Die Entscheidungen oben, vor allem 7 und 8 (Stand, Migration alter Räume).
+2. **Den Härtetest als festen Test ins Repo holen.** Die neun Fälle (Raum-Datensätze aus `faelle/*.json`, Folge, Vergleich von `data.pts` im Speicher auf 1e-6 mm, `serialize()`, Bild) sind der Prüfstand für jeden Schnitt durch `recompute`. Ohne ihn fällt eine Verschiebung des Aufmaßes erst bei einem Menschen auf.
+3. `recompute` zerlegen, als eigener Schritt und ohne Verhaltensänderung: **Rechnen** enthält den ganzen Rechenteil (Maßhaltig von selbst, `lageHalten`, Rückschrieb, `scaleSketch`, Öffnungen setzen), **Sichern** ist `STORE.save` mit dem Stand, **Aufmaß-Folgen** sind Vorschläge, Verdächtige, Nachbarlagen und offene Eingaben. Rückgängig speichert nur darüber.
+4. `raum-modell.js` gegen ein Werkzeug ohne `opMeasSeq` und `syncSnapfitBtn` absichern; das `render()` beim Laden von `tiles-ui` hinter `TS.ruler` setzen; `ORTHO_TOL` und die übrigen Konstanten mit der Zeile benennen, nicht mit der Nummer.
+5. `ui` in der einen Seite auftrennen: ein Plan-Skript, bei dem sich jedes Werkzeug anmeldet (zeichnen, Panel, Hinweis, fünf Zeiger-Einstiege, Tasten, bereit, dazu für die Küche „Gesten, die das Werkzeug selbst zu Ende führt“ und „Raum wechselt“). Der Boot gehört in die Anmeldung und läuft danach, nicht davor. Jeder Zwischenstand läuft und kann live gehen; nach jedem der Härtetest und `test/browser.mjs` in drei Browsern.
 6. Erst dann die Seiten schneiden und umschalten; alte Adressen `raumaufmass.html#fliesen` und `#kueche` leiten weiter.
