@@ -1662,7 +1662,7 @@ function folgenAufmass(){
 function recompute(){
   rechneRaum();
   sichereRaum();
-  folgenAufmass();
+  alleWerkzeuge('folgen');
   render();
   if(M.glide){ const lauf=()=>{ redraw(); if(M.glide) requestAnimationFrame(lauf); }; requestAnimationFrame(lauf); }
 }
@@ -1715,11 +1715,10 @@ addEventListener('storage', e=>{
   }
   if(JSON.stringify(r.data)===serialize()) return;
   alleWerkzeuge('neuerStand');   // nichts Vorgemerktes über den neuen Stand schreiben
-  const inAusgabe=OUT.on;
+  const zustand=ALLE.map(w=>w.vorNeuladen ? w.vorNeuladen() : undefined);
   recompute.still=true;
   try{ openRoom(currentRoom); } finally{ recompute.still=false; }
-  // Stand das Fenster in der Ausgabe (Blatt als Vorschau daneben), bleibt es dort.
-  if(inAusgabe && raumGeschlossen()) openOut();
+  ALLE.forEach((w,i)=>{ if(w.nachNeuladen) w.nachNeuladen(zustand[i]); });
 });
 
 function speicherWarnung(){
@@ -1744,7 +1743,7 @@ function openRoom(id){
   // Einnordung gehoert zum Raum, nicht zur Sitzung: sonst haengt die
   // Ansicht des naechsten Raums an einer Wand, die es dort nicht gibt
   // (browser-gesehen: schraeges Raster im frisch geoeffneten Raum).
-  VIEW.rot=0; northWallPair=null;
+  VIEW.rot=0;
   // Der Undo-Stapel gehoert zum Raum: ein Undo nach dem Wechsel wuerde
   // sonst die Geometrie des vorigen Raums in DIESEN Raum speichern.
   undoStack.length=0; redoStack.length=0;
@@ -1752,15 +1751,9 @@ function openRoom(id){
   // Offene Eingabe/Popover gehoeren zum alten Raum: ein OK nach dem
   // Wechsel wuerde eine Messung mit fremden Punkt-IDs in DIESEN Raum
   // druecken - recompute() wirft dann bei jedem Bild.
-  closeEntry();
-  hidePop();
-  // Die Ausgabe zeigt den vorigen Raum: zurück in den Plan. (Über die Klasse
-  // gefragt, weil der Boot hier ankommt, bevor OUT angelegt ist.)
-  if(document.body.classList.contains('outmode')) closeOut();
-  $('wlbox').open=false; $('standMore').hidden=true;
+  alleWerkzeuge('neuerRaum');
   deserialize(r.data);
   userView=false;
-  hoverRoom=null;
   recompute();     // sichert, leitet die Nachbarlagen ab und zeichnet
 }
 function newRoom(name){
@@ -2258,7 +2251,11 @@ function stepSwim(now){
 //   bereit()    darf der Raum so geöffnet werden?        absage: Text der Hinweiszeile, wenn nicht
 //   zeichne()   die Zeichenfläche                        panel(): Abschnitt im Panel; true = der Modus
 //   hinweis()   Standardtext der Hinweiszeile            wurde verlassen, die Seite rendert nicht weiter
+//   Jede Funktion ist freiwillig: wer eine nicht hat, wird dort übergangen.
 //   verlassen() beim Wechsel in einen anderen Modus
+//   folgen()    was aus einer Änderung folgt (nach dem Sichern, vor dem Zeichnen)
+//   neuerRaum() ein anderer Raum wird geladen: offene Eingaben und Karten gehören dem alten
+//   vorNeuladen() / nachNeuladen(zustand)  ein anderes Fenster hat den Raum geändert: Zustand merken, danach wiederherstellen
 //   vorRaumwechsel() Vorgemerktes noch in den alten Raum schreiben; neuerStand() Vorgemerktes verwerfen,
 //               weil ein anderer Raum oder Stand geladen wird
 //   key(e)      Taste behandelt (true)?                   entf(): Entf/⌫ löscht die Auswahl (true = getan)
@@ -2266,12 +2263,12 @@ function stepSwim(now){
 //   gedrückte Taste; move(e, g), up(e, g) und pinch(g) für Gesten, deren Typ g.t in gesten steht; tap(e)
 //   für einen Klick ohne Ziehen, wenn down keine Geste angelegt hat.
 // Die Anmeldung selbst steht beim Werkzeug; die Seite lädt es nach diesem Block.
-const WERKZEUGE={};
-function meldeAn(modus, werk){ WERKZEUGE[modus]=werk; }
+const WERKZEUGE={}, ALLE=[];       // Modus -> Anmeldung; alle Anmeldungen in der Reihenfolge der Anmeldung
+function meldeAn(modi, werk){ for(const m of [].concat(modi)) WERKZEUGE[m]=werk; ALLE.push(werk); }
 const werkzeug=modus=>WERKZEUGE[modus===undefined ? M.mode : modus]||null;
 // Ruft bei jedem angemeldeten Werkzeug die Funktion mit diesem Namen, wenn es sie hat.
-const alleWerkzeuge=name=>{ for(const w of Object.values(WERKZEUGE)) if(w[name]) w[name](); };
-const werkFuerGeste=g=>(g && Object.values(WERKZEUGE).find(w=>w.gesten && w.gesten.includes(g.t)))||null;
+const alleWerkzeuge=name=>{ for(const w of ALLE) if(w[name]) w[name](); };
+const werkFuerGeste=g=>(g && ALLE.find(w=>w.gesten && w.gesten.includes(g.t)))||null;
 
 function render(){
   redraw();
@@ -2906,7 +2903,7 @@ function drawQuer(P, I, dpr){
 }
 
 function drawCanvas(){
-  const werk=werkzeug(); if(werk){ werk.zeichne(); return; }
+  const werk=werkzeug(); if(werk && werk.zeichne){ werk.zeichne(); return; }
   const dpr=DPR();
   sizeCanvas(dpr);
   // 0x0-Canvas (verstecktes oder noch nicht angeschlossenes Layout):
@@ -3810,7 +3807,7 @@ cv.addEventListener('pointerdown',e=>{
   if(pointers.size===2){ startPinch(); return; }
   if(pointers.size>2 || pinch) return;
   const werk=werkzeug();
-  if(werk){
+  if(werk && werk.down){
     if(!werk.down(e)) gesture={t:'bg',x0:e.clientX,y0:e.clientY,lx:e.clientX,ly:e.clientY,moved:false,wall:null,popOpen};
     return;
   }
@@ -3894,7 +3891,7 @@ cv.addEventListener('pointerleave',()=>{
 cv.addEventListener('pointermove',e=>{
   if(!pointers.has(e.pointerId)){
     if(spaceHeld){ cv.style.cursor='grab'; return; }
-    const werk=werkzeug(); if(werk){ werk.hover(e); return; }
+    const werk=werkzeug(); if(werk && werk.hover){ werk.hover(e); return; }
     if(e.pointerType==='mouse' && planMode() && planHover(e)) return;
     if(e.pointerType==='mouse' && M.mode!=='wall' && !swim) updateHover(e);
     return;
@@ -4017,7 +4014,7 @@ function endPointer(e){
   }
   const gw=werkFuerGeste(g); if(gw){ gw.up(e, g); return; }
   const werk=werkzeug();
-  if(werk){
+  if(werk && werk.tap){
     if(g.moved) render();
     else if(e.type!=='pointercancel') werk.tap(e);
     return;
@@ -5080,7 +5077,7 @@ function setMode(mode){
   sag(null);
   closeOut();
   const ziel=werkzeug(mode);
-  if(ziel && !ziel.bereit()){ setHint(ziel.absage); return; }
+  if(ziel && ziel.bereit && !ziel.bereit()){ setHint(ziel.absage); return; }
   // Beim Verlassen eines Werkzeugs: aufräumen (Fliesen: Werkzeug zurück, Auswahl weg).
   const alt=werkzeug();
   if(alt && mode!==M.mode && alt.verlassen) alt.verlassen();
@@ -5838,7 +5835,7 @@ function renderPanel(){
     wt.title = ok ? 'Wände (3)' : M.an && !C.wallPolygonRing(M.pts, M.walls) ? 'Wände (3): erst, wenn der Raum geschlossen ist' : 'Wände (3): erst, wenn die Form eindeutig ist'; }
   // Die Werkzeuge laden NACH diesem Block - beim ersten Bild waehrend des
   // Boots gibt es sie noch nicht. Danach rendern sie ihren Teil selbst mit.
-  for(const werk of Object.values(WERKZEUGE)) if(werk.panel && werk.panel()) return;
+  for(const werk of ALLE) if(werk.panel && werk.panel()) return;
   // Wie bei den Fliesen: faellt die Bedingung weg (Raumwechsel, Rueckgaengig),
   // verlaesst die App den Modus selbst, statt Skizzenmasse zu zeigen.
   if(M.mode==='wall' && !wallTabReady()){
@@ -6517,6 +6514,24 @@ addEventListener('DOMContentLoaded',()=>{
     setHintLive('Speichern auf diesem Gerät nicht möglich (privater Modus?). Räume als Datei oder Link sichern.');
   else if(recompute.quotaWarned)
     setHintLive('Speichern fehlgeschlagen (Speicher voll?). Raum als Datei oder Link sichern.');
+});
+// ================= Anmeldung des Raumaufmaßes =================
+// Das Raumaufmaß ist ein Werkzeug wie die anderen: die Seite ruft es über dieselbe Anmeldung.
+meldeAn(['draw','measure','wall'], {
+  folgen:folgenAufmass,
+  neuerRaum(){
+    northWallPair=null;
+    closeEntry();
+    hidePop();
+    // Die Ausgabe zeigt den vorigen Raum: zurück in den Plan. (Über die Klasse
+    // gefragt, weil der Boot hier ankommt, bevor OUT angelegt ist.)
+    if(document.body.classList.contains('outmode')) closeOut();
+    $('wlbox').open=false; $('standMore').hidden=true;
+    hoverRoom=null;
+  },
+  vorNeuladen:()=>OUT.on,
+  // Stand das Fenster in der Ausgabe (Blatt als Vorschau daneben), bleibt es dort.
+  nachNeuladen(inAusgabe){ if(inAusgabe && raumGeschlossen()) openOut(); },
 });
 </script>
 

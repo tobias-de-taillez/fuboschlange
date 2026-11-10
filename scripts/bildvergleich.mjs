@@ -135,16 +135,29 @@ async function diff(a, b){   // Bildpunkte, die sich unterscheiden (PNG-Bytes de
 await mkdir(AUS,{recursive:true});
 let abweichung=0, schritte=0;
 const LAEUFE=[['voll',{width:1440,height:900}],['ausreisser',{width:1440,height:900}],['skizze',{width:1440,height:900}],['voll',{width:1000,height:700}]];
+// Zeitabhängiges Zeichnen (frisch gemessene Strecken blenden aus) kann einen Lauf verschieben: ein Lauf mit
+// Abweichung wird einmal wiederholt, gemeldet wird nur, was in beiden Versuchen abweicht.
+const vergleiche=async (variante, vp)=>{
+  const alt=await lauf('alt', SEITEN_ALT, variante, vp), neu=await lauf('neu', SEITEN_NEU, variante, vp);
+  const diffs=[];
+  alt.bilder.forEach((a,i)=>{ const b=neu.bilder[i]; if(!(a.cv===b.cv && a.shot===b.shot)) diffs.push({i, a, b}); });
+  return {alt, neu, diffs};
+};
 for(const [variante, vp] of LAEUFE){
   const kopf=`${variante} ${vp.width}x${vp.height}`;
-  const alt=await lauf('alt', SEITEN_ALT, variante, vp), neu=await lauf('neu', SEITEN_NEU, variante, vp);
-  for(const f of alt.fehl) console.log(`  (alt, ${kopf}) Fehler: ${f}`);
-  for(const f of neu.fehl) console.log(`  (neu, ${kopf}) Fehler: ${f}`);
-  if(alt.fehl.length!==neu.fehl.length) abweichung++;
-  alt.bilder.forEach((a,i)=>{ /* gleiche Schrittfolge */ });
-  for(let i=0;i<alt.bilder.length;i++){
-    const a=alt.bilder[i], b=neu.bilder[i]; schritte++;
-    if(a.cv===b.cv && a.shot===b.shot) continue;
+  let r=await vergleiche(variante, vp);
+  if(r.diffs.length){
+    const zweit=await vergleiche(variante, vp);
+    const nochmal=new Set(zweit.diffs.map(d=>d.i));
+    const echt=r.diffs.filter(d=>nochmal.has(d.i));
+    if(echt.length<r.diffs.length) console.log(`  (${kopf}: ${r.diffs.length-echt.length} Abweichung(en) beim zweiten Versuch verschwunden, zählen nicht)`);
+    r={alt:zweit.alt, neu:zweit.neu, diffs:zweit.diffs.filter(d=>echt.some(e=>e.i===d.i))};
+  }
+  for(const f of r.alt.fehl) console.log(`  (alt, ${kopf}) Fehler: ${f}`);
+  for(const f of r.neu.fehl) console.log(`  (neu, ${kopf}) Fehler: ${f}`);
+  if(r.alt.fehl.length!==r.neu.fehl.length) abweichung++;
+  schritte+=r.alt.bilder.length;
+  for(const {i, a, b} of r.diffs){
     abweichung++;
     const stamm=path.join(AUS, `${variante}-${vp.width}-${String(i).padStart(2,'0')}-${a.name}`);
     await writeFile(stamm+'-alt.png', a.png); await writeFile(stamm+'-neu.png', b.png);
