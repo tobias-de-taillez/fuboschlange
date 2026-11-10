@@ -410,7 +410,7 @@ function importAsNewRoom(name, dataObj){
   if(problem) return problem;
   // Fremddateien ohne idSeq: aus den Punkt-IDs zurueckrechnen, sonst erbt
   // deserialize() den Zaehler des vorigen Raums und vergibt Duplikat-IDs.
-  const data={...dataObj};
+  const data=globalThis.stripCopiedDoorLinks({...dataObj});
   if(typeof data.idSeq!=='number')
     data.idSeq=data.pts.reduce((mx,p)=>Math.max(mx, idOrdinal(p.id)+1), 0);
   const id=STORE.create(name||'Importierter Raum');

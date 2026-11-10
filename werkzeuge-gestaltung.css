@@ -47,6 +47,7 @@ body[data-tool="kueche"] .tog[aria-pressed="true"]::before { background:var(--in
 #kitchensec .kdim.ro input { background:transparent; }
 #kitchensec .kflowgrp>b { color:var(--ink2)!important; font-weight:600; }
 #kitchensec .kflowgrp>b i { display:inline-block; width:7px; height:7px; margin:0 7px 1px 0; border-radius:50%; }
+#kitchensec .kflow:disabled { opacity:1; color:var(--muted); }
 #kitchensec .kflow[aria-pressed="true"], #kitchensec .kfind[aria-current="true"] { background:var(--press); }
 #kitchensec #kWayBox, #kitchensec #kSelBox { padding-bottom:14px; border-bottom:1px solid var(--line2); }
 #kitchensec #kSpecBox, #kitchensec #kStockBox { padding:12px 0; margin:0; border-bottom:1px solid var(--line2); }

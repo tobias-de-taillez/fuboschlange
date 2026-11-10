@@ -4,6 +4,12 @@
 // Unverändert aus dem früheren Block "store" von raumaufmass.html.
 // Braucht: raum-fremd.js (LZString).
 "use strict";
+// A room imported as a new copy must not claim a reciprocal connection that
+// still belongs to the original room in this or another browser.
+globalThis.stripCopiedDoorLinks=function(data){
+  if(!data || !data.shared || typeof data.shared!=='object') return data;
+  return {...data,shared:Object.fromEntries(Object.entries(data.shared).filter(([,v])=>!v || !v.manuell))};
+};
 // Raumbibliothek. DOM-frei und mit injiziertem Storage: genau dadurch in
 // Node testbar (test/run.mjs), wo es kein localStorage gibt. Alle Eintraege
 // leben unter zwei Schluesseln - raumaufmass.rooms (Array) und

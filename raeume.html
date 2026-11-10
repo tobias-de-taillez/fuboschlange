@@ -440,7 +440,7 @@ globalThis.RAUMZEILE=(function(){
   function uebernimm(name, dataObj){
     const problem=importProblem(dataObj);
     if(problem) return {fehler:problem};
-    const data={...dataObj};
+    const data=globalThis.stripCopiedDoorLinks({...dataObj});
     // Fremddateien ohne idSeq: aus den Ecken-ids zurückrechnen, sonst vergibt
     // das Raumaufmaß später doppelte ids.
     if(typeof data.idSeq!=='number')

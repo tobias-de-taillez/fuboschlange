@@ -250,7 +250,13 @@ const ABLAEUFE={
     await p.goto(BASE+'/raumaufmass.html'); await sleep(800);
     const ids=await p.evaluate(data=>{
       const a=STORE.create('Küche'), b=STORE.create('Flur'), c=STORE.create('Dach');
-      for(const id of [a,b,c]) STORE.save(id,{data:structuredClone(data)});
+      for(const id of [a,b,c]){
+        const d=structuredClone(data);
+        if(id===b){ for(const q of d.pts) { q.x*=1.2; q.y*=1.2; }
+          if(d.sketch) for(const q of d.sketch) { q.x*=1.2; q.y*=1.2; }
+          for(const m of d.meas) m.d*=1.2; for(const o of d.openings) o.x*=1.2; }
+        STORE.save(id,{data:d});
+      }
       HAUS.gliederung(STORE.allRooms()); const h=HAUS.neuesGebaeude(a,'Haus');
       HAUS.ordneZu(b,h.geschoss); HAUS.neuesGeschoss(h.gebaeude,c,'Obergeschoss');
       openRoom(a); setMode('wall'); M.wallSel={a:'F',b:'A'}; M.openSel='o1'; render();
@@ -261,9 +267,19 @@ const ABLAEUFE={
     await p.getByRole('button',{name:'Türen verbinden'}).click(); await sleep(300);
     let state=await p.evaluate(({a,b})=>({a:STORE.load(a).data.shared['A|F'], b:STORE.load(b).data.shared['A|F'], neighbors:neighbors.map(n=>n.id)}),ids);
     pruef('Verbinden schreibt beide Türseiten und stellt den Nachbarraum dar', state.a?.room===ids.b && state.b?.room===ids.a && state.a?.tuer.op==='o1' && state.b?.tuer.op==='o1' && state.neighbors.includes(ids.b),JSON.stringify(state));
+    pruef('Unterschiedlich lange Wände sind bei gemeinsamer Tür kein Widerspruch',
+      await p.evaluate(()=>M.nbchecks.length>0 && !M.nbchecks[0].probleme.some(t=>/Unterschied|versetzt/.test(t))));
+    const gaps=await p.evaluate(()=>{ const P=M.fit.pts, i=C.idx(P), a=P[i.F],b=P[i.A]; return wallGaps('F','A',C.dist(a,b),a,b); });
+    pruef('Beide Türseiten schneiden dieselbe Öffnung in die Wand, auch bei verschiedenen Wandlängen',
+      gaps.length===2 && Math.abs(gaps[0][0]-gaps[1][0])<1 && Math.abs(gaps[0][1]-gaps[1][1])<1, JSON.stringify(gaps));
     await p.click('#opDel'); await sleep(150);
     pruef('Eine verbundene Tür kann nicht versehentlich einseitig gelöscht werden',
-      await p.evaluate(()=>M.openings.some(o=>o.id==='o1') && /zuerst die Türverbindung lösen/.test(document.getElementById('hint').textContent)));
+      await p.evaluate(()=>M.openings.some(o=>o.id==='o1') && /zuerst die Türverbindung lösen/.test(document.getElementById('toast').textContent)));
+    const copied=await p.evaluate(({a,b})=>{ const data=STORE.load(a).data, err=importAsNewRoom('Kopie',data), copy=STORE.load(currentRoom);
+      const result={err,copy:copy.data.shared['A|F'],a:STORE.load(a).data.shared['A|F']?.room,b:STORE.load(b).data.shared['A|F']?.room};
+      openRoom(a); setMode('wall'); M.wallSel={a:'F',b:'A'}; M.openSel='o1'; render(); return result; },ids);
+    pruef('Import als Kopie übernimmt keine fremde Türverbindung und lässt das Originalpaar intakt',
+      !copied.err && !copied.copy && copied.a===ids.b && copied.b===ids.a,JSON.stringify(copied));
     await p.reload(); await sleep(800);
     await p.evaluate(()=>{ setMode('wall'); M.wallSel={a:'F',b:'A'}; M.openSel='o1'; render(); });
     pruef('Verbindung bleibt beim Neuladen sichtbar',await p.locator('#opConnection').innerText().then(s=>s.includes('Flur')));

@@ -963,10 +963,12 @@ function sharedChecks(){
     if(!f) return;
     const t=M.thick[k]>0 ? M.thick[k] : THICK_DEFAULT;
     const probleme=[];
-    if(Math.abs(f.laengeD)>NB_WARN_MM)
+    // A manually paired door is the common anchor, not the wall endpoints.
+    // The rooms may extend different distances past it on either side.
+    if(!sh.manuell && Math.abs(f.laengeD)>NB_WARN_MM)
       probleme.push(`hier ${fmtM(f.laengeHier)} m, in „${n.name}“ `
         +`${fmtM(f.laengeDort)} m (${Math.round(Math.abs(f.laengeD))} mm Unterschied)`);
-    if(f.versatz>NB_WARN_MM)
+    if(!sh.manuell && f.versatz>NB_WARN_MM)
       probleme.push(`die Wände stehen ${Math.round(f.versatz)} mm gegeneinander versetzt`);
     if(f.winkel>NB_WARN_DEG)
       probleme.push(`die Räume stehen ${fmtGrad(f.winkel)}° schief zueinander`);
@@ -1750,6 +1752,17 @@ function wallGaps(a, b, L, iA, iB){
       n.openings.forEach(o=>{
         if(wallKey(o.a,o.b)!==wallKey(sh.wall[0],sh.wall[1])) return;
         if(I[o.a]==null) return;
+        if(sh.manuell){
+          // The two wall segments can start at different corners. Project
+          // the actual opening in this room's coordinates, not its offset
+          // from the other room's corner.
+          const g=openingWorld(n.pts,o.a,o.b,o);
+          if(!g) return;
+          const u={x:(iB.x-iA.x)/L,y:(iB.y-iA.y)/L};
+          const pos=p=>(p.x-iA.x)*u.x+(p.y-iA.y)*u.y;
+          const x=pos(g.P), y=pos(g.Q); out.push([Math.min(x,y),Math.max(x,y)]);
+          return;
+        }
         // Laeuft die Wand drueben andersherum? Entscheidet der Vergleich
         // zweier Abstaende, keine Toleranz: der Anfangspunkt der fremden
         // Wand liegt naeher an genau einer unserer beiden Ecken.
@@ -3494,7 +3507,7 @@ function renderDoorConnection(o){
     .flatMap(r=>(Array.isArray(r.data?.openings)?r.data.openings:[])
       .filter(d=>d.kind==='door' && !(r.data.shared||{})[wallKey(d.a,d.b)])
       .map(d=>({room:r,door:d})));
-  row('p','Diese Tür mit einer Tür im selben Geschoss verbinden. Die bisherigen Rückgängig-Schritte werden dabei geleert; die Verbindung lässt sich hier wieder lösen.');
+  row('p','Diese Tür mit einer Tür im selben Geschoss verbinden. Die bisherigen Rückgängig-Schritte werden dabei geleert; die Verbindung lässt sich hier wieder lösen. Beim Import einer einzelnen Raumdatei muss sie neu gesetzt werden.');
   if(!choices.length){ row('p','Keine freie Tür in einem anderen Raum dieses Geschosses gefunden.'); return; }
   const label=row('label','Tür im anderen Raum '), sel=document.createElement('select');
   sel.setAttribute('aria-label','Tür im anderen Raum'); label.appendChild(sel);

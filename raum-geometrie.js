@@ -1762,9 +1762,20 @@ globalThis.schlussFehler=function(rooms, b){
     if(!f) return null;
     const t=(ra.data.thick||{})[s.wand] || (rb.data.thick||{})[s.gegenwand]
           || globalThis.THICK_DEFAULT;
+    let versatz=f.versatz;
+    const sa=(ra.data.shared||{})[s.wand], sb=(rb.data.shared||{})[s.gegenwand];
+    if(sa && sa.manuell && sb && sb.manuell){
+      const da=(ra.data.openings||[]).find(o=>o.id===sa.tuer?.op), db=(rb.data.openings||[]).find(o=>o.id===sb.tuer?.op);
+      const ga=da && globalThis.openingWorld(ra.data.pts,da.a,da.b,da), gb=db && globalThis.openingWorld(rb.data.pts,db.a,db.b,db);
+      if(ga && gb){
+        const ma={x:(ga.P.x+ga.Q.x)/2,y:(ga.P.y+ga.Q.y)/2};
+        const mb=globalThis.applyRoomTransform(T,{x:(gb.P.x+gb.Q.x)/2,y:(gb.P.y+gb.Q.y)/2});
+        versatz=Math.abs((mb.x-ma.x)*ga.u.x+(mb.y-ma.y)*ga.u.y);
+      }
+    }
     return {a:s.a, b:s.b, wand:s.wand, gegenwand:s.gegenwand,
             dicke:f.dicke, soll:t, klaffen:f.dicke-t,
-            winkel:f.winkel, versatz:f.versatz,
+            winkel:f.winkel, versatz,
             ring:globalThis.ringPfad(b.kanten, s.a, s.b) || [s.a, s.b]};
   }).filter(Boolean);
 };
