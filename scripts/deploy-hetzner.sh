@@ -12,11 +12,14 @@
 #       Mit --probe-url <Adresse> zusätzlich: Prüfung per HTTP gegen einen
 #       lokalen Server, der diesen Ordner ausliefert.
 #
-# Rückweg auf den Stand, der bis zum Familien-Umbau live war (Tag live-vor-familie,
-# die eine Datei aus 5d6d409, im Probelauf Byte für Byte gleich der ausgelieferten):
-#   scripts/deploy-hetzner.sh live-vor-familie
-# Lädt genau diesen Stand (raumaufmass.html wieder als index.html); neuere Dateien bleiben liegen und werden genannt.
-# Der Tag vor-familie-umbau zeigt auf main vor dem Umbau (geteilte JS-Dateien, altes Aussehen); der war nie live.
+# Rückweg auf den Stand, der bis zum Familien-Umbau live war (Tag
+# live-vor-familie-kueche = 402f883: altes Aussehen, geteilte JS-Dateien, die
+# Rest-Fixes der Küche; im Probelauf Byte für Byte gleich der ausgelieferten Seite):
+#   scripts/deploy-hetzner.sh live-vor-familie-kueche
+# Lädt genau diesen Stand (raumaufmass.html wieder als index.html); neuere Dateien
+# (raeume.html, raum-haus.js, raum-blatt.js, raum-meldung.js) bleiben liegen und werden genannt.
+# Ältere Tags: live-vor-familie (5d6d409, die eine Datei vor den Küchen-Fixes),
+# vor-familie-umbau (510d02f, main vor dem Umbau; war nie live).
 #
 # Die Seite ist eine Werkzeugfamilie aus mehreren HTML-Dateien und geteilten
 # JS-Dateien (docs/adr/0001-familie-mit-geteilten-js-dateien.md):
