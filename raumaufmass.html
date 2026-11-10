@@ -1499,7 +1499,10 @@ let TOOL='aufmass';
 // Freiheitsgrade beim vorigen Rechnen: daran erkennt recompute den Moment,
 // in dem die Form eindeutig WIRD (und nur dann gleitet der Plan).
 let lastDof={room:null, dof:Infinity};
-function recompute(){
+// Die Form des Raums rechnen: Winkel, Ausgleich, Vorschläge, Verdächtige, Öffnungen.
+// Kennt weder Panel noch Zeichenfläche (bis auf den Schalter für „Ausrichten“
+// und die Gleitanimation); Rückgängig und alle Werkzeuge der Familie gehen darüber.
+function rechneRaum(){
   const hadFit=!!M.fit;
   // Ecke der Küchen-Bezugsecken gelöscht: freie Teile im noch alten Fit auf
   // eine verbleibende Wand umrechnen, sie bleiben, wo sie stehen. Hier nur
@@ -1507,10 +1510,6 @@ function recompute(){
   const KF=M.kitchen && M.kitchen.frame;
   if(KF && !(M.pts.some(p=>p.id===KF.a) && M.pts.some(p=>p.id===KF.b)))
     globalThis.KITCHEN.anchorFrame(M.kitchen, M.pts, M.walls, M.fit && M.fit.pts);
-  // Ein Hover-Highlight stammt immer aus einer Panel-Zeile, und die wird
-  // gleich neu gebaut - ihr mouseleave feuert dann nie. Nur die offene
-  // Masseingabe haelt ihr Highlight selbst (enterMeasurement setzt es neu).
-  if(!entryPair) M.highlight=null;
   // Ein festgelegter Winkel gehoert zu einer Ecke aus genau zwei Waenden.
   // Kommt eine dritte Wand dazu, faellt eine weg oder wird die Wand geteilt,
   // gilt er nicht mehr - und liesse sich im Ecken-Popup auch nicht mehr
@@ -1611,6 +1610,10 @@ function recompute(){
   // Wiederholungen. Genau ein Verdaechtiger braucht keine Eingrenzung.
   M.narrow = (netFails() && M.suspects.size!==1)
     ? narrowCandidates(C.activeMeas(M.meas), M.an.v, C.SUGGEST_CHECK_MAX) : [];
+}
+// Den Raum sichern. Vor folgenAufmass: die Nachbarlagen lesen den Speicher.
+// recompute.still und recompute.quotaWarned bleiben Merker der Funktion recompute.
+function sichereRaum(){
   // Ein Aufmass dauert leicht eine halbe Stunde. Ein Reload darf es nicht
   // kosten. Bewusst ohne Debounce: serialize() ist bei den hier realistischen
   // Groessen unter einer Millisekunde. VOR dem Ableiten der Nachbarlagen -
@@ -1633,6 +1636,14 @@ function recompute(){
       if(STORE.storageOk) setTimeout(speicherWarnung, 0);
     }
   }
+}
+// Was nur das Raumaufmaß aus einer Änderung folgen lässt: Nachbarlagen, Vorschläge,
+// Eingaben und Popovers, deren Ecke es nicht mehr gibt.
+function folgenAufmass(){
+  // Ein Hover-Highlight stammt immer aus einer Panel-Zeile, und die wird
+  // gleich neu gebaut - ihr mouseleave feuert dann nie. Nur die offene
+  // Masseingabe haelt ihr Highlight selbst (enterMeasurement setzt es neu).
+  if(!entryPair) M.highlight=null;
   // Je Aenderung, nicht je Bild: eine nachgemessene Wand verschiebt die
   // daran haengenden Raeume, und das soll man sofort sehen.
   loadNeighbors();
@@ -1647,6 +1658,11 @@ function recompute(){
     $('entry').hidden=true; M.highlight=null;
   }
   if(wpopPair && !(gibt(wpopPair.a)&&gibt(wpopPair.b))){ wpopPair=null; $('wpop').hidden=true; }
+}
+function recompute(){
+  rechneRaum();
+  sichereRaum();
+  folgenAufmass();
   render();
   if(M.glide){ const lauf=()=>{ redraw(); if(M.glide) requestAnimationFrame(lauf); }; requestAnimationFrame(lauf); }
 }
