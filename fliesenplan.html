@@ -158,9 +158,9 @@
           <summary><b>Fliesenset</b><span id="tSpecSum"></span><span class="ed">ändern</span></summary>
           <div id="tSetList"></div>
           <div class="trow"><select id="tNewShape" aria-label="Neue Fliesenform"><option value="hexagon">Hexagon</option><option value="chevron">Chevron</option><option value="rectangle">Viereck</option><option value="triangle">Dreieck</option></select><button id="tSetAdd">Fliese hinzufügen</button></div>
-          <p class="tnote">Varianten auswählen und unten bearbeiten. Hexagon und Dreieck haben gleich lange Seiten; Breite und Höhe sind gekoppelt. Beim Hexagon wird die Breite über die Spitzen gemessen, beim Dreieck entlang der Grundseite. Bei Chevron bezeichnet Länge die Längskante.</p>
+          <details class="tshapehelp"><summary>Hinweise zu den Fliesenformen</summary><p class="tnote">Varianten auswählen und unten bearbeiten. Hexagon und Dreieck haben gleich lange Seiten; Breite und Höhe sind gekoppelt. Beim Hexagon wird die Breite über die Spitzen gemessen, beim Dreieck entlang der Grundseite. Bei Chevron bezeichnet Länge die Längskante.</p></details>
           <div class="tgrid">
-            <label><span>Name</span><input id="tName" maxlength="60"></label>
+            <label class="tile-name"><span>Name</span><input id="tName" maxlength="60"></label>
             <label><span>Form</span><select id="tShape"><option value="hexagon">Hexagon</option><option value="chevron">Chevron</option><option value="rectangle">Viereck</option><option value="triangle">Dreieck</option></select></label>
             <label><span>Breite</span><input id="tW" inputmode="decimal"> mm</label>
             <label><span>Länge</span><input id="tL" inputmode="decimal"> mm</label>

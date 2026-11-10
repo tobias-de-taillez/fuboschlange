@@ -9,6 +9,11 @@ const make=(offset,door)=>({pts:[{id:'A',x:0,y:0},{id:'B',x:4000,y:0},{id:'C',x:
   openings:[{id:door,kind:'door',a:'A',b:'B',x:offset,w:860,h:2000}],shared:{},thick:{}});
 S.save(a,{data:make(500,'o1')}); S.save(b,{data:make(1500,'o2')});
 const source=S.load(a).data, before=m.get('raumaufmass.rooms');
+const write=storage.setItem;
+storage.setItem=()=>{ throw new Error('storage full'); };
+assert.equal(S.linkDoors(a,source,'o1',b,'o2',175).ok,false);
+assert.equal(m.get('raumaufmass.rooms'),before,'failed storage write changes neither room');
+storage.setItem=write;
 assert.equal(S.linkDoors(a,source,'o1',b,'missing',175).ok,false);
 assert.equal(m.get('raumaufmass.rooms'),before,'failed connection does not change either room');
 assert.equal(S.linkDoors(a,source,'o1',b,'o2',175).ok,true);

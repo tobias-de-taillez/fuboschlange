@@ -3478,6 +3478,7 @@ function renderDoorConnection(o){
     const r=STORE.load(sh.room);
     row('p', `Wand verbunden mit „${r ? r.name : 'fehlender Raum'}“${sh.tuer && sh.tuer.op===o.id?' über diese Tür':''}.`);
     if(sh.manuell && sh.tuer && sh.tuer.op===o.id){
+      row('p','Beim Lösen werden die bisherigen Rückgängig-Schritte dieses Raums geleert.');
       const b=row('button','Verbindung lösen'); b.type='button';
       b.onclick=()=>{ const result=STORE.unlinkDoors(currentRoom,JSON.parse(serialize()),k);
         if(!result.ok){ setHint(result.reason); return; }
@@ -3501,9 +3502,10 @@ function renderDoorConnection(o){
     opt.textContent=`${c.room.name} · Wand ${c.door.a}–${c.door.b} · ${Math.round(c.door.w)} mm · ab ${c.door.a} ${Math.round(c.door.x)} mm`; sel.appendChild(opt); });
   const info=row('p','');
   const show=()=>{ const c=choices[+sel.value], t=M.thick[k] || c.room.data.thick?.[wallKey(c.door.a,c.door.b)] || THICK_DEFAULT;
-    const delta=Math.abs(o.w-c.door.w);
-    info.textContent=`Wanddicke ${Math.round(t)} mm${M.thick[k]?'':' (angenommen)'}. Die Türmitten werden aufeinander ausgerichtet.`
-      +(delta>1?` Die eingetragenen Türbreiten unterscheiden sich um ${Math.round(delta)} mm; bitte prüfen.`:''); };
+    const delta=Math.abs(o.w-c.door.w), otherT=c.room.data.thick?.[wallKey(c.door.a,c.door.b)];
+    info.textContent=`Wanddicke ${Math.round(t)} mm${M.thick[k] || otherT?'':' (angenommen)'}. Die Türmitten werden aufeinander ausgerichtet.`
+      +(delta>1?` Die eingetragenen Türbreiten unterscheiden sich um ${Math.round(delta)} mm; bitte prüfen.`:'')
+      +(M.thick[k] && otherT && Math.abs(M.thick[k]-otherT)>1?` Im anderen Raum stehen ${Math.round(otherT)} mm; für die Verbindung werden ${Math.round(t)} mm übernommen.`:''); };
   sel.onchange=show; show();
   const b=row('button','Türen verbinden'); b.type='button';
   b.onclick=()=>{ const c=choices[+sel.value], t=M.thick[k] || c.room.data.thick?.[wallKey(c.door.a,c.door.b)] || THICK_DEFAULT;

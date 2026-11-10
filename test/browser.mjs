@@ -261,6 +261,9 @@ const ABLAEUFE={
     await p.getByRole('button',{name:'Türen verbinden'}).click(); await sleep(300);
     let state=await p.evaluate(({a,b})=>({a:STORE.load(a).data.shared['A|F'], b:STORE.load(b).data.shared['A|F'], neighbors:neighbors.map(n=>n.id)}),ids);
     pruef('Verbinden schreibt beide Türseiten und stellt den Nachbarraum dar', state.a?.room===ids.b && state.b?.room===ids.a && state.a?.tuer.op==='o1' && state.b?.tuer.op==='o1' && state.neighbors.includes(ids.b),JSON.stringify(state));
+    await p.click('#opDel'); await sleep(150);
+    pruef('Eine verbundene Tür kann nicht versehentlich einseitig gelöscht werden',
+      await p.evaluate(()=>M.openings.some(o=>o.id==='o1') && /zuerst die Türverbindung lösen/.test(document.getElementById('hint').textContent)));
     await p.reload(); await sleep(800);
     await p.evaluate(()=>{ setMode('wall'); M.wallSel={a:'F',b:'A'}; M.openSel='o1'; render(); });
     pruef('Verbindung bleibt beim Neuladen sichtbar',await p.locator('#opConnection').innerText().then(s=>s.includes('Flur')));

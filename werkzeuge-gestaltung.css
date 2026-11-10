@@ -34,6 +34,11 @@ body[data-tool="kueche"] .tog[aria-pressed="true"]::before { background:var(--in
 #tSetList .tile-set-row button { border:0; border-radius:0; background:transparent; min-height:38px; }
 #tSetList .tile-set-row button:hover { background:var(--hover); }
 #tSetList .tile-set-row>button:first-child[aria-pressed="true"] { background:var(--press); color:var(--ink); }
+#tSpecBox .tile-name { grid-column:1 / -1; }
+#tSpecBox .tile-name input { flex:1; width:auto; }
+#tSpecBox .tshapehelp { margin:8px 0; font-size:12px; color:var(--ink2); }
+#tSpecBox .tshapehelp summary { cursor:pointer; }
+#tSpecBox .tshapehelp p { margin:6px 0 10px; }
 #tDetails summary, #kStockBox summary { color:var(--ink2); }
 #kitchensec .kchips button { border-radius:4px; }
 #kitchensec #kCorner { border:0; border-top:1px solid var(--line2); border-bottom:1px solid var(--line2); border-radius:0; padding:8px 0; }
