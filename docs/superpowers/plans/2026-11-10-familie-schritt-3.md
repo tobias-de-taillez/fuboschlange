@@ -71,6 +71,15 @@ Gemeinsamer Befund: Eigene Seiten kosten sechs bis zehn Arbeitstage und sind ohn
 5. **Selbstchecks:** weiter an jeder Auslieferung (418 kB) oder nur bei `?test` nachladen.
 6. **Dateinamen:** `raum-*.js` lädt jedes Werkzeug, `<werkzeug>-*.js` gehört einem allein. Ein späteres Umbenennen trifft jeden offenen Zweig noch einmal.
 
+## Entschieden am 10.11.2026 (Tobias)
+
+1. **Geltung:** Das Ziel gilt für den Text der Datei. `raumaufmass.html` enthält weder Bedienung noch Markup noch CSS von Fliesenplan und Küchenplaner; die Rechenkerne (`raum-fliesen.js`, `raum-kueche.js`, `fliesenplan-einmessen.js`) lädt das Aufmaß weiter, weil Fliesen- und Küchendaten am Raum bleiben.
+2. **Seitenwechsel:** (a) Der Rückgängig-Stapel liegt nur im Arbeitsspeicher (60 Schritte, `raum-modell.js`) und wird schon beim Raumwechsel geleert. Jede Seite beginnt deshalb mit leerem Stapel; Rückgängig gilt für die Sitzung im jeweiligen Werkzeug. Das ändert, was das Papier zum gemeinsamen Stapel sagt, und wird dort nachgeführt. (b) Nach dem Wechsel ist der Raum eingepasst, nichts ausgewählt; die Ansicht wird nicht mitgetragen. (c) Der Wechsel ersetzt den Verlaufseintrag (`location.replace`), Zurück führt wie heute zur Raumliste. Der Raum des Fensters reist über `sessionStorage` `raumaufmass.fenster` mit, zwei Fenster bleiben getrennt.
+3. **Schale:** (a) Das gemeinsame CSS wird die Datei `raum-schale.css` (Nachtrag zum ADR 0001, Deploy-Skript liest `<link rel="stylesheet">`, `vercel.json`, Vollständigkeitsprüfung). (b) Der Hilfe-Dialog ist Schale, die Einträge liefert jedes Werkzeug selbst.
+4. **Browser-Test:** Playwright bleibt extern (`PLAYWRIGHT=<Ordner>`), kein `package.json`.
+5. **Selbstchecks:** `raum-checks.js` lädt nur bei `?test` nach. `test/browser.mjs` ruft die Seite dafür mit `?test` auf.
+6. **Namen:** Bestehende Dateien bleiben. Neu: `raum-plan.js` und `raum-schale.css` (geteilt), `fliesenplan-bedienung.js` und `kuechenplaner-bedienung.js` (je einem Werkzeug); Seiten `fliesenplan.html`, `kuechenplaner.html`.
+
 ## Empfohlene Folge für den Rest
 
 Getan sind der Messaufbau und das Netz (`test/browser.mjs` mit Abläufen für Fliesenplan und Küchenplaner). Es bleibt:
